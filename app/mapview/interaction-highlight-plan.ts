@@ -8,10 +8,6 @@ import {
     type FeatureInspectionTarget
 } from "../shared/tile-feature-id";
 
-/** Terminal scopes which a rendered subset can satisfy without another fetch. */
-export type LocalInteractionScope =
-    "feature" | "attribute" | "relation" | "group";
-
 /** One visible inspection target with the tile id required by exact-root requests. */
 export type InteractionHighlightTarget = TileFeatureId & {tileId: number};
 
@@ -29,39 +25,6 @@ interface ResolvedInteractionTarget extends InteractionHighlightTarget {
 /** Stable exact-target identity shared by local-overlay planning. */
 export function interactionTargetKey(feature: TileFeatureId): string {
     return `${feature.mapTileKey}\n${feature.featureId}`;
-}
-
-/** Stable target identity qualified by one concrete terminal channel scope. */
-export function interactionScopeTargetKey(
-    scope: string,
-    feature: TileFeatureId
-): string {
-    return `${scope}\n${interactionTargetKey(feature)}`;
-}
-
-/**
- * Returns whether an already rendered local target satisfies the requested
- * terminal scope. A child-row target never substitutes for its host feature.
- */
-export function localInteractionSatisfiesScope(
-    scope: string,
-    feature: TileFeatureId,
-    localTargets: ReadonlySet<string>
-): boolean {
-    if (!localTargets.has(interactionScopeTargetKey(scope, feature))) {
-        return false;
-    }
-    const targetScope = parseFeatureInspectionTarget(feature.featureId).scope;
-    if (scope === "attribute") {
-        return targetScope === "attribute";
-    }
-    if (scope === "relation") {
-        return targetScope === "relation";
-    }
-    if (scope === "feature") {
-        return targetScope === "feature";
-    }
-    return true;
 }
 
 /** Joins a planner expression with an exact-target restriction. */
@@ -104,17 +67,47 @@ function relationEntryRestriction(
     )} and $relationIndex == ${target.inspectionTarget.relationIndex})`;
 }
 
-/** Restricts one cloned channel to the targets which are not locally rendered. */
+/** Selects targets whose semantic scope can be consumed by one filter channel. */
+function channelTargets(
+    channel: FilterChannelDefinition,
+    targets: readonly ResolvedInteractionTarget[]
+): ResolvedInteractionTarget[] {
+    if (channel.scope === "feature") {
+        return targets.filter(target =>
+            target.inspectionTarget.scope === "feature");
+    }
+    if (channel.scope === "attribute") {
+        return targets.filter(target =>
+            target.inspectionTarget.scope === "attribute");
+    }
+    if (channel.scope === "relation") {
+        return targets.filter(target =>
+            target.inspectionTarget.scope === "feature" ||
+            target.inspectionTarget.scope === "relation");
+    }
+    return [...targets];
+}
+
+/**
+ * Reports whether authored geometry exists for the exact target scope.
+ *
+ * Relation channels on a bare feature are additive topology presentation and
+ * therefore do not replace the local host-feature interaction effect.
+ */
+export function hasAuthoredInteractionHighlight(
+    plan: StyleFilterPlan,
+    feature: InteractionHighlightTarget
+): boolean {
+    const scope = parseFeatureInspectionTarget(feature.featureId).scope;
+    return plan.channels.some(channel => channel.scope === scope);
+}
+
+/** Restricts one cloned channel to the exact compatible semantic targets. */
 function restrictChannel(
     channel: FilterChannelDefinition,
-    targets: readonly ResolvedInteractionTarget[],
-    localTargets: ReadonlySet<string>
+    targets: readonly ResolvedInteractionTarget[]
 ): boolean {
-    const scopedTargets = channel.scope === "attribute"
-        ? targets.filter(target => target.inspectionTarget.scope === "attribute")
-        : targets;
-    const remoteTargets = scopedTargets.filter(target =>
-        !localInteractionSatisfiesScope(channel.scope, target, localTargets));
+    const remoteTargets = channelTargets(channel, targets);
     if (!remoteTargets.length) {
         return false;
     }
@@ -169,14 +162,12 @@ function restrictChannel(
 /**
  * Produces the remote half of a hybrid highlight presentation.
  *
- * Local shader overlays are represented by `localTargets`; the returned plan
- * contains only terminal channels which still require exact-root mapget work.
- * The input style plan is never mutated.
+ * The returned plan contains only channels compatible with the requested
+ * semantic targets. The input style plan is never mutated.
  */
 export function planRemoteInteractionHighlight(
     rawPlan: StyleFilterPlan,
-    features: readonly InteractionHighlightTarget[],
-    localTargets: ReadonlySet<string>
+    features: readonly InteractionHighlightTarget[]
 ): RemoteInteractionHighlightPlan | null {
     const targets: ResolvedInteractionTarget[] = features.map(feature => ({
         ...feature,
@@ -184,7 +175,7 @@ export function planRemoteInteractionHighlight(
     }));
     const plan = structuredClone(rawPlan);
     plan.channels = plan.channels.filter(channel =>
-        restrictChannel(channel, targets, localTargets));
+        restrictChannel(channel, targets));
     if (!plan.channels.length) {
         return null;
     }

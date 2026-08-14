@@ -203,6 +203,19 @@ struct TileSubsetLayer
         uint32_t entryOrdinal,
         uint32_t endpointRole) const;
 
+    /**
+     * Find compact renderer rows which resolve to one persisted interaction target.
+     *
+     * The optional indices are `-1` when the target addresses a whole feature
+     * or omits a validity suffix. The browser intersects these source rows
+     * with the rows actually emitted by the active style.
+     */
+    NativeJsValue findPickReferences(
+        std::string const& featureId,
+        std::string const& scope,
+        int64_t entryIndex,
+        int64_t validityIndex) const;
+
     /** Return a compact JSON representation for diagnostics and tests. */
     std::string toJson() const;
 

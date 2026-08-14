@@ -4,9 +4,6 @@ export const MAX_LOW_FI_TILE_THRESHOLD = 4096;
 export const AUTO_TILE_SUBSET_RENDER_WORKER_COUNT = 0;
 export const MIN_TILE_SUBSET_RENDER_WORKER_COUNT = 0;
 export const MAX_TILE_SUBSET_RENDER_WORKER_COUNT = 32;
-export const DEFAULT_RENDER_BLOCK_VERTEX_LIMIT = 16 * 1024;
-export const MIN_RENDER_BLOCK_VERTEX_LIMIT = 256;
-export const MAX_RENDER_BLOCK_VERTEX_LIMIT = 1024 * 1024;
 
 /** Clamp one low-fi tile threshold to the supported integer preference range. */
 export function clampLowFiTileThreshold(
@@ -36,24 +33,6 @@ export function clampTileSubsetRenderWorkerCount(
         MAX_TILE_SUBSET_RENDER_WORKER_COUNT,
         Math.max(
             MIN_TILE_SUBSET_RENDER_WORKER_COUNT,
-            Math.trunc(numeric)
-        )
-    );
-}
-
-/** Clamp the aggregate geometry-vertex budget used by Morton render blocks. */
-export function clampRenderBlockVertexLimit(
-    value: unknown,
-    fallback = DEFAULT_RENDER_BLOCK_VERTEX_LIMIT
-): number {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) {
-        return fallback;
-    }
-    return Math.min(
-        MAX_RENDER_BLOCK_VERTEX_LIMIT,
-        Math.max(
-            MIN_RENDER_BLOCK_VERTEX_LIMIT,
             Math.trunc(numeric)
         )
     );

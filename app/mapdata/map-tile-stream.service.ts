@@ -2,7 +2,6 @@ import {Injectable, NgZone} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
 import {MapInfoService} from "./map-info.service";
 import {
-    assertMapTileStreamProtocolVersion,
     MapTileRequestStatus,
     MapTileStreamClient,
     type MapTileStreamFilterStatusPayload,
@@ -126,7 +125,6 @@ export class MapTileStreamService {
     }
 
     async initialize(): Promise<void> {
-        assertMapTileStreamProtocolVersion();
         this.tileStream = new MapTileStreamClient(
             "/interactive",
             this.mapInfo.tileLayerParser

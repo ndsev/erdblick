@@ -115,6 +115,24 @@ describe("DeckInteractionOutlineService", () => {
         expect(second).toEqual([2, 0, 0, 255]);
     });
 
+    it("refreshes the stripe anchor of an existing group", () => {
+        const service = new DeckInteractionOutlineService(
+            new DeckLayerRegistry(null));
+        service.identityColor("hover", "feature-a", effect, 10);
+
+        service.configureGroup("hover", effect, 12, [11, 48, 3]);
+
+        expect((service as unknown as {
+            groups: Map<string, {
+                order: number;
+                stripeAnchor: [number, number, number] | null;
+            }>;
+        }).groups.get("hover")).toMatchObject({
+            order: 12,
+            stripeAnchor: [11, 48, 3]
+        });
+    });
+
     it("recognizes only the hidden mask layer namespace", () => {
         expect(isDeckInteractionMaskLayer(
             "builtin/interaction-mask/group/source")).toBe(true);

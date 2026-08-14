@@ -1,6 +1,9 @@
 import {describe, expect, it, vi} from "vitest";
 import {coreLib} from "../integrations/wasm";
-import {ViewVisualizationState} from "./view.visualization.model";
+import {
+    lineSimplificationToleranceMeters,
+    ViewVisualizationState
+} from "./view.visualization.model";
 
 describe("ViewVisualizationState", () => {
     it("selects stylesheet fidelity from the configured tile threshold", () => {
@@ -75,6 +78,37 @@ describe("ViewVisualizationState", () => {
         expect(new ViewVisualizationState().getTileRenderPolicy(1)).toEqual({
             targetFidelity: "low"
         });
+    });
+
+    it("quantizes sub-pixel line simplification without camera-motion churn", () => {
+        expect(lineSimplificationToleranceMeters(null)).toBe(0);
+        expect(lineSimplificationToleranceMeters(0.1)).toBe(0);
+        expect(lineSimplificationToleranceMeters(14)).toBe(4);
+        expect(lineSimplificationToleranceMeters(18)).toBe(4);
+        expect(lineSimplificationToleranceMeters(24)).toBe(8);
+
+        const state = new ViewVisualizationState();
+        const getTileIds = vi.spyOn(coreLib as any, "getTileIds")
+            .mockReturnValue([7]);
+        const getCanonicalCount = vi.spyOn(
+            coreLib as any,
+            "getNumTileIdsForCanonicalCamera"
+        ).mockReturnValue(1);
+        try {
+            state.metersPerPixel = 14;
+            state.recalculateTileIds(512, [6], 1000);
+            const version = state.coverageVersion;
+            state.metersPerPixel = 18;
+            state.recalculateTileIds(512, [6], 1000);
+            expect(state.coverageVersion).toBe(version);
+            state.metersPerPixel = 24;
+            state.recalculateTileIds(512, [6], 1000);
+            expect(state.coverageVersion).toBe(version + 1);
+            expect(state.lineSimplificationToleranceMeters).toBe(8);
+        } finally {
+            getTileIds.mockRestore();
+            getCanonicalCount.mockRestore();
+        }
     });
 
 });

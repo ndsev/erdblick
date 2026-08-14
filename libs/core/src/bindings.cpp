@@ -8,6 +8,7 @@
 #include <cxxabi.h>
 #include <algorithm>
 #include <optional>
+#include <glm/trigonometric.hpp>
 
 #include <sanitizer/lsan_interface.h>
 #include <sanitizer/asan_interface.h>
@@ -178,7 +179,7 @@ bool isFiniteViewport(Viewport const& viewport)
 Viewport canonicalViewportForAltitude(double altitudeMeters)
 {
     const auto safeAltitude = std::max(1.0, altitudeMeters);
-    const auto visibleHeightMeters = 2.0 * safeAltitude * std::tan(CANONICAL_CAMERA_VERTICAL_FOV_RADIANS * 0.5);
+    const auto visibleHeightMeters = 2.0 * safeAltitude * glm::tan(CANONICAL_CAMERA_VERTICAL_FOV_RADIANS * 0.5);
     const auto visibleWidthMeters = visibleHeightMeters * CANONICAL_CAMERA_ASPECT_RATIO;
     const auto heightDegrees = std::min(
         WEB_MERCATOR_MAX_LATITUDE * 2.0,
@@ -769,6 +770,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("entryRange", &TileSubsetLayer::entryRange)
         .function("valueSummaries", &TileSubsetLayer::valueSummaries)
         .function("resolvePick", &TileSubsetLayer::resolvePick)
+        .function("findPickReferences", &TileSubsetLayer::findPickReferences)
         .function("toJson", &TileSubsetLayer::toJson)
         .function("copyDiagnostics", &TileSubsetLayer::copyDiagnostics);
 
@@ -795,20 +797,48 @@ EMSCRIPTEN_BINDINGS(erdblick)
             "setCoordinateOrigin",
             &TileSubsetLayerRenderer::setCoordinateOrigin)
         .function(
-            "addTileSubsetLayer",
+            "setLineSimplificationTolerance",
+            &TileSubsetLayerRenderer::setLineSimplificationTolerance)
+        .function(
+            "configureGpuPacket",
+            &TileSubsetLayerRenderer::configureGpuPacket)
+        .function(
+            "addGpuIconResource",
+            &TileSubsetLayerRenderer::addGpuIconResource)
+        .function(
+            "addTileSubsetContribution",
             std::function<void(
                 TileSubsetLayerRenderer&,
-                TileSubsetLayer const&)>(
-                [](TileSubsetLayerRenderer& self, TileSubsetLayer const& tile)
+                TileSubsetLayer const&,
+                uint32_t,
+                uint32_t,
+                uint32_t,
+                uint32_t,
+                uint32_t)>(
+                [](TileSubsetLayerRenderer& self,
+                   TileSubsetLayer const& tile,
+                   uint32_t contributionKeyLow,
+                   uint32_t contributionKeyHigh,
+                   uint32_t contributionRevision,
+                   uint32_t contributionSlot,
+                   uint32_t contributionActivationToken)
                 {
-                    self.addTileSubsetLayer(tile);
+                    self.addTileSubsetContribution(
+                        tile,
+                        contributionKeyLow,
+                        contributionKeyHigh,
+                        contributionRevision,
+                        contributionSlot,
+                        contributionActivationToken);
                 }))
         .function("run", &TileSubsetLayerRenderer::run)
-        .function("abiVersion", &TileSubsetLayerRenderer::abiVersion)
-        .function("renderResult", &TileSubsetLayerRenderer::renderResult)
         .function(
-            "runtimeStyleIssues",
-            &TileSubsetLayerRenderer::runtimeStyleIssues)
+            "resetForNextTile",
+            &TileSubsetLayerRenderer::resetForNextTile)
+        .function(
+            "renderBridgeResult",
+            &TileSubsetLayerRenderer::renderBridgeResult)
+        .function("renderPackets", &TileSubsetLayerRenderer::renderPackets)
         .function("vertexCount", &TileSubsetLayerRenderer::vertexCount);
 
     ////////// TileLayerMetadata
@@ -902,7 +932,6 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// Get tile id with vertical/horizontal offset
     em::function("getTileNeighbor", &getTileNeighbor);
-
     ////////// Get a test tile/style
     em::function("generateTestTile", &generateTestTile);
     em::function("generateTestStyle", &generateTestStyle);

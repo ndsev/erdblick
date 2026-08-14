@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "erdblick/gpu-render-packet.h"
+#include "erdblick/gpu-render-records.h"
 #include "erdblick/subset-renderer.h"
 #include "mapget/model/info.h"
 #include "mapget/model/stringpool.h"
@@ -7,12 +9,368 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
+#include <cstring>
+#include <string>
+#include <vector>
 
 using namespace erdblick;
 
 namespace
 {
+
+template<typename T>
+T readPacketScalar(std::span<std::byte const> bytes, size_t offset)
+{
+    REQUIRE(offset + sizeof(T) <= bytes.size());
+    std::array<std::byte, sizeof(T)> raw{};
+    std::memcpy(raw.data(), bytes.data() + offset, raw.size());
+    if constexpr (std::endian::native == std::endian::big) {
+        std::reverse(raw.begin(), raw.end());
+    }
+    return std::bit_cast<T>(raw);
+}
+
+/** Install one test subset using valid deterministic scene ownership metadata. */
+void installSubset(
+    TileSubsetLayerRenderer& renderer,
+    TileSubsetLayer const& subset)
+{
+    renderer.addTileSubsetContribution(subset, 1U, 0U, 0U, 0U, 1U);
+}
+
+/** Read renderer assertions from the production packet rather than a shadow buffer. */
+class RendererPacketView
+{
+public:
+    struct Stream {
+        GpuPrimitiveKind kind;
+        uint16_t flags = 0U;
+        uint32_t stride = 0U;
+        uint32_t count = 0U;
+        uint32_t dataOffset = 0U;
+        std::array<uint8_t, 4> glowColor{};
+        float glowRadius = 0.0F;
+        uint32_t renderOrder = 0U;
+    };
+
+    struct Path {
+        std::vector<mapget::Point> points;
+        std::vector<float> lateralOffsetsPx;
+        std::vector<std::array<float, 2>> lateralOffsetVectorsPx;
+        float scaleThreshold = 0.0F;
+    };
+
+    struct Arrow {
+        std::array<float, 2> lateralOffsetVectorPx{};
+        float lateralOffsetPx = 0.0F;
+        float scaleThreshold = 0.0F;
+        uint32_t flags = 0U;
+    };
+
+    struct Pick {
+        uint32_t contributionIndex = 0U;
+        uint32_t localPickIndex = 0U;
+        uint32_t channelOrdinal = 0U;
+        uint32_t entryOrdinal = 0U;
+        uint32_t endpointRole = 0U;
+    };
+
+    struct Issue {
+        std::string property;
+        std::string expression;
+    };
+
+    /** Validate and retain one renderer packet for typed record inspection. */
+    explicit RendererPacketView(TileSubsetLayerRenderer const& renderer)
+        : bytes_(renderer.renderPacketBytes())
+    {
+        static_cast<void>(GpuRenderPacketCodec::validate(bytes_));
+    }
+
+    /** Return the packet's contribution descriptor count. */
+    [[nodiscard]] uint32_t contributionCount() const
+    {
+        return read<uint32_t>(84U);
+    }
+
+    /** Return all streams using one primitive program. */
+    [[nodiscard]] std::vector<Stream> streams(GpuPrimitiveKind kind) const
+    {
+        auto const table = read<uint32_t>(72U);
+        auto const count = read<uint32_t>(76U);
+        std::vector<Stream> result;
+        for (uint32_t index = 0U; index < count; ++index) {
+            auto const descriptor = table + index * 48U;
+            if (read<uint16_t>(descriptor) != static_cast<uint16_t>(kind)) {
+                continue;
+            }
+            Stream stream{
+                .kind = kind,
+                .flags = read<uint16_t>(descriptor + 2U),
+                .stride = read<uint32_t>(descriptor + 12U),
+                .count = read<uint32_t>(descriptor + 16U),
+                .dataOffset = read<uint32_t>(descriptor + 20U),
+                .glowColor = {
+                    read<uint8_t>(descriptor + 28U),
+                    read<uint8_t>(descriptor + 29U),
+                    read<uint8_t>(descriptor + 30U),
+                    read<uint8_t>(descriptor + 31U),
+                },
+                .glowRadius = read<float>(descriptor + 32U),
+                .renderOrder = read<uint32_t>(descriptor + 40U),
+            };
+            result.push_back(stream);
+        }
+        return result;
+    }
+
+    /** Reconstruct logical paths from segment start/end flags. */
+    [[nodiscard]] std::vector<Path> paths() const
+    {
+        std::vector<Path> result;
+        for (auto const& stream : streams(GpuPrimitiveKind::PathSegment)) {
+            auto const compact =
+                (stream.flags & static_cast<uint16_t>(
+                    GpuMaterialFlag::CompactPath)) != 0U;
+            auto const simple =
+                (stream.flags & static_cast<uint16_t>(
+                    GpuMaterialFlag::SimplePath)) != 0U;
+            Path current;
+            for (uint32_t index = 0U; index < stream.count; ++index) {
+                auto const record = stream.dataOffset + index * stream.stride;
+                auto const flags = read<uint32_t>(
+                    record + (simple ? 48U : compact ? 72U : 140U));
+                auto const starts = (flags & static_cast<uint32_t>(
+                    GpuPathRecordFlag::StartCap)) != 0U;
+                auto const ends = (flags & static_cast<uint32_t>(
+                    GpuPathRecordFlag::EndCap)) != 0U;
+                if (starts) {
+                    REQUIRE(current.points.empty());
+                    current.scaleThreshold = compact || simple
+                        ? 0.0F
+                        : read<float>(record + 108U);
+                    current.points.push_back(point(record + (simple ? 0U : 12U)));
+                    current.lateralOffsetVectorsPx.push_back(compact || simple
+                        ? std::array<float, 2>{}
+                        : vector(record + 56U));
+                    current.lateralOffsetsPx.push_back(compact || simple
+                        ? 0.0F
+                        : read<float>(record + 84U));
+                }
+                REQUIRE_FALSE(current.points.empty());
+                current.points.push_back(point(record + (simple ? 12U : 24U)));
+                current.lateralOffsetVectorsPx.push_back(compact || simple
+                    ? std::array<float, 2>{}
+                    : vector(record + 64U));
+                current.lateralOffsetsPx.push_back(compact || simple
+                    ? 0.0F
+                    : read<float>(record + 88U));
+                if (!compact && !simple) {
+                    REQUIRE(read<float>(record + 108U) ==
+                        current.scaleThreshold);
+                }
+                if (ends) {
+                    result.push_back(std::move(current));
+                    current = {};
+                }
+            }
+            REQUIRE(current.points.empty());
+        }
+        return result;
+    }
+
+    /** Decode screen-space arrow offset state from every arrow instance. */
+    [[nodiscard]] std::vector<Arrow> arrows() const
+    {
+        std::vector<Arrow> result;
+        for (auto const& stream : streams(GpuPrimitiveKind::Arrow)) {
+            for (uint32_t index = 0U; index < stream.count; ++index) {
+                auto const record = stream.dataOffset + index * stream.stride;
+                result.push_back({
+                    .lateralOffsetVectorPx = vector(record + 24U),
+                    .lateralOffsetPx = read<float>(record + 32U),
+                    .scaleThreshold = read<float>(record + 40U),
+                    .flags = read<uint32_t>(record + 64U),
+                });
+            }
+        }
+        return result;
+    }
+
+    /** Decode contribution ownership and compact source rows from pick records. */
+    [[nodiscard]] std::vector<Pick> picks() const
+    {
+        auto const table = read<uint32_t>(96U);
+        auto const count = read<uint32_t>(100U);
+        std::vector<Pick> result;
+        result.reserve(count);
+        for (uint32_t index = 0U; index < count; ++index) {
+            auto const record = table + index * 24U;
+            result.push_back({
+                .contributionIndex = read<uint32_t>(record),
+                .localPickIndex = read<uint32_t>(record + 4U),
+                .channelOrdinal = read<uint32_t>(record + 8U),
+                .entryOrdinal = read<uint32_t>(record + 12U),
+                .endpointRole = read<uint32_t>(record + 16U),
+            });
+        }
+        return result;
+    }
+
+    /** Decode all label texts from the packet's logical label table. */
+    [[nodiscard]] std::vector<std::string> labelTexts() const
+    {
+        auto const table = read<uint32_t>(112U);
+        auto const count = read<uint32_t>(116U);
+        std::vector<std::string> result;
+        result.reserve(count);
+        for (uint32_t index = 0U; index < count; ++index) {
+            auto const record = table + index * 120U;
+            result.push_back(string(
+                read<uint32_t>(record + 32U),
+                read<uint32_t>(record + 36U)));
+        }
+        return result;
+    }
+
+    /** Decode parsed font sizes from every logical label. */
+    [[nodiscard]] std::vector<float> labelSizes() const
+    {
+        auto const table = read<uint32_t>(112U);
+        auto const count = read<uint32_t>(116U);
+        std::vector<float> result;
+        result.reserve(count);
+        for (uint32_t index = 0U; index < count; ++index) {
+            result.push_back(read<float>(table + index * 120U + 48U));
+        }
+        return result;
+    }
+
+    /** Decode parsed font families from every logical label. */
+    [[nodiscard]] std::vector<std::string> labelFontFamilies() const
+    {
+        auto const table = read<uint32_t>(112U);
+        auto const count = read<uint32_t>(116U);
+        std::vector<std::string> result;
+        result.reserve(count);
+        for (uint32_t index = 0U; index < count; ++index) {
+            auto const record = table + index * 120U;
+            result.push_back(string(
+                read<uint32_t>(record + 40U),
+                read<uint32_t>(record + 44U)));
+        }
+        return result;
+    }
+
+    /** Decode layer-wide CSS font weights from every logical label. */
+    [[nodiscard]] std::vector<uint32_t> labelFontWeights() const
+    {
+        auto const table = read<uint32_t>(112U);
+        auto const count = read<uint32_t>(116U);
+        std::vector<uint32_t> result;
+        result.reserve(count);
+        for (uint32_t index = 0U; index < count; ++index) {
+            result.push_back(read<uint32_t>(table + index * 120U + 112U));
+        }
+        return result;
+    }
+
+    /** Decode horizontal and vertical TextLayer anchor codes for every label. */
+    [[nodiscard]] std::vector<std::pair<int32_t, int32_t>> labelOrigins() const
+    {
+        auto const table = read<uint32_t>(112U);
+        auto const count = read<uint32_t>(116U);
+        std::vector<std::pair<int32_t, int32_t>> result;
+        result.reserve(count);
+        for (uint32_t index = 0U; index < count; ++index) {
+            auto const record = table + index * 120U;
+            result.emplace_back(
+                read<int32_t>(record + 100U),
+                read<int32_t>(record + 104U));
+        }
+        return result;
+    }
+
+    /** Decode the exact float64 authored orders owned by one contribution. */
+    [[nodiscard]] std::vector<double> zIndices(
+        uint32_t contributionIndex) const
+    {
+        auto const contributionTable = read<uint32_t>(80U);
+        REQUIRE(contributionIndex < read<uint32_t>(84U));
+        auto const descriptor = contributionTable + contributionIndex * 56U;
+        auto const first = read<uint32_t>(descriptor + 44U);
+        auto const count = read<uint32_t>(descriptor + 48U);
+        auto const table = read<uint32_t>(152U);
+        REQUIRE(first <= read<uint32_t>(156U));
+        REQUIRE(count <= read<uint32_t>(156U) - first);
+        std::vector<double> result;
+        result.reserve(count);
+        for (uint32_t index = 0U; index < count; ++index) {
+            result.push_back(read<double>(table + (first + index) * 8U));
+        }
+        return result;
+    }
+
+    /** Decode style issue identity fields from the packet. */
+    [[nodiscard]] std::vector<Issue> issues() const
+    {
+        auto const table = read<uint32_t>(144U);
+        auto const count = read<uint32_t>(148U);
+        std::vector<Issue> result;
+        result.reserve(count);
+        for (uint32_t index = 0U; index < count; ++index) {
+            auto const record = table + index * 40U;
+            result.push_back({
+                .property = string(
+                    read<uint32_t>(record + 16U),
+                    read<uint32_t>(record + 20U)),
+                .expression = string(
+                    read<uint32_t>(record + 24U),
+                    read<uint32_t>(record + 28U)),
+            });
+        }
+        return result;
+    }
+
+    /** Read one scalar from the packet's explicit little-endian ABI. */
+    template<typename T>
+    [[nodiscard]] T read(size_t offset) const
+    {
+        return readPacketScalar<T>(bytes_, offset);
+    }
+
+private:
+    [[nodiscard]] mapget::Point point(size_t offset) const
+    {
+        return {
+            read<float>(offset),
+            read<float>(offset + 4U),
+            read<float>(offset + 8U),
+        };
+    }
+
+    [[nodiscard]] std::array<float, 2> vector(size_t offset) const
+    {
+        return {read<float>(offset), read<float>(offset + 4U)};
+    }
+
+    [[nodiscard]] std::string string(uint32_t offset, uint32_t length) const
+    {
+        auto const table = read<uint32_t>(120U);
+        auto const bytes = read<uint32_t>(124U);
+        REQUIRE(offset <= bytes);
+        REQUIRE(length <= bytes - offset);
+        auto const begin = reinterpret_cast<char const*>(
+            bytes_.data() + table + offset);
+        return {begin, length};
+    }
+
+    std::vector<std::byte> bytes_;
+};
 
 std::shared_ptr<mapget::LayerInfo> rendererLayerInfo()
 {
@@ -44,6 +402,24 @@ mapget::model_ptr<mapget::GeometryCollection> lineGeometry(
     geometry->setName(name);
     geometry->append({11.0, 48.0, 0.0});
     geometry->append({11.001, 48.001, 0.0});
+    collection->addGeometry(geometry);
+    return collection;
+}
+
+mapget::model_ptr<mapget::GeometryCollection> lineGeometryWithPoints(
+    mapget::TileSubsetLayer& layer,
+    std::string_view name,
+    std::span<mapget::Point const> points)
+{
+    auto collection = layer.newGeometryCollection(1, true);
+    auto geometry = layer.newGeometry(
+        mapget::GeomType::Line,
+        static_cast<uint32_t>(points.size()),
+        true);
+    geometry->setName(name);
+    for (auto const& point : points) {
+        geometry->append(point);
+    }
     collection->addGeometry(geometry);
     return collection;
 }
@@ -126,43 +502,260 @@ rules:
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
         static_cast<int>(FeatureStyleRule::AnyFidelity));
-    renderer.addTileSubsetLayer(TileSubsetLayer(subset));
+    installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
-    auto result = renderer.renderResult();
-    REQUIRE(renderer.abiVersion() == 5);
+    RendererPacketView packet(renderer);
     REQUIRE(renderer.vertexCount() == 2);
-    REQUIRE(result["pathWorld"]["positions"].size() == 6);
-    REQUIRE(result["pathWorld"]["colors"] == "AP8A/wD/AP8=");
-    REQUIRE(result["pathWorld"]["widths"][0] == 6.0);
-    REQUIRE(result["pathWorld"]["zIndices"] ==
-        nlohmann::json::array({17.0}));
-    REQUIRE(result["pathWorld"]["glowColors"] == "ECAwgA==");
-    REQUIRE(result["pathWorld"]["glowRadii"] ==
-        nlohmann::json::array({5.0}));
-    REQUIRE(result["pathWorld"]["featureAddresses"][0] == 0);
-    REQUIRE(result["pickRefs"] == nlohmann::json::array({0, 0, 0, 0}));
-    REQUIRE(result["pickResults"][0]["subsetOrdinal"] == 0);
-    REQUIRE(result["pickResults"][0]["featureId"] == "Road.7");
-    REQUIRE(renderer.runtimeStyleIssues().empty());
+    auto const pathStreams = packet.streams(GpuPrimitiveKind::PathSegment);
+    REQUIRE(pathStreams.size() == 1);
+    auto const& pathStream = pathStreams.front();
+    REQUIRE(pathStream.count == 1);
+    REQUIRE(pathStream.glowColor == std::array<uint8_t, 4>{16, 32, 48, 128});
+    REQUIRE(pathStream.glowRadius == 5.0F);
+    REQUIRE((pathStream.flags & static_cast<uint16_t>(
+        GpuMaterialFlag::SimplePath)) != 0U);
+    auto const record = pathStream.dataOffset;
+    REQUIRE(packet.read<float>(record + 24U) == 6.0F);
+    REQUIRE(packet.read<uint32_t>(record + 36U) == 0U);
+    REQUIRE(packet.zIndices(0U) == std::vector<double>{17.0});
+    REQUIRE(packet.read<uint8_t>(record + 32U) == 0U);
+    REQUIRE(packet.read<uint8_t>(record + 33U) == 255U);
+    REQUIRE(packet.read<uint8_t>(record + 34U) == 0U);
+    REQUIRE(packet.read<uint8_t>(record + 35U) == 255U);
+    auto const picks = packet.picks();
+    REQUIRE(picks.size() == 1);
+    REQUIRE(picks[0].contributionIndex == 0U);
+    REQUIRE(picks[0].localPickIndex == 0U);
+    REQUIRE(picks[0].channelOrdinal == 0U);
+    REQUIRE(picks[0].entryOrdinal == 0U);
+    REQUIRE(picks[0].endpointRole == 0U);
+    REQUIRE(packet.issues().empty());
 
-    TileSubsetLayerRenderer blockRenderer(
+    TileSubsetLayer pickLayer(subset);
+    auto const references = pickLayer.findPickReferences(
+        "Road.7", "feature", -1, -1);
+    REQUIRE(references == nlohmann::json::array({{
+        {"channelOrdinal", 0U},
+        {"entryOrdinal", 0U},
+        {"endpointRole", 0U},
+    }}));
+    auto const resolved = pickLayer.resolvePick(0U, 0U, 0U);
+    REQUIRE(resolved["featureId"] == "Road.7");
+
+    TileSubsetLayerRenderer duplicateRenderer(
         0,
         "z13/d1/p0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
         static_cast<int>(FeatureStyleRule::AnyFidelity));
-    blockRenderer.addTileSubsetLayer(TileSubsetLayer(subset));
-    blockRenderer.addTileSubsetLayer(TileSubsetLayer(subset));
-    blockRenderer.run();
-    auto blockResult = blockRenderer.renderResult();
-    REQUIRE(blockResult["pathWorld"]["featureAddresses"].size() == 2);
-    REQUIRE(blockResult["pathWorld"]["featureAddresses"][0] == 0);
-    REQUIRE(blockResult["pathWorld"]["featureAddresses"][1] == 1);
-    REQUIRE(blockResult["pickResults"][0]["subsetOrdinal"] == 0);
-    REQUIRE(blockResult["pickResults"][1]["subsetOrdinal"] == 1);
-    REQUIRE(blockResult["subsetVertexCounts"] ==
-        nlohmann::json::array({2, 2}));
+    installSubset(duplicateRenderer, TileSubsetLayer(subset));
+    REQUIRE_THROWS_AS(
+        installSubset(duplicateRenderer, TileSubsetLayer(subset)),
+        std::logic_error);
+}
+
+TEST_CASE(
+    "TileSubsetLayerRenderer fuses compatible bundled line strokes",
+    "[erdblick.subset-renderer][performance]")
+{
+    auto info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>(
+        "SubsetRendererBundledRulesPool");
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        mapget::TileId::fromWgs84(11.0, 48.0, 13),
+        "SubsetRendererBundledRulesPool",
+        "TestMap",
+        info,
+        strings,
+        "roads",
+        1);
+    subset->setGeometryAnchor({11.0, 48.0, 0.0});
+    auto channel = subset->newChannel(
+        "style-rules:0,1",
+        mapget::Scope::Feature,
+        1U << static_cast<uint8_t>(mapget::GeomType::Line),
+        "centerline");
+    channel->newFeatureEntry(
+        subset->newFeatureId("Road", {{"roadId", int64_t{7}}}),
+        lineGeometry(*subset, "centerline"),
+        {});
+
+    auto style = rendererStyle(R"yaml(
+name: BundledRules
+version: 2
+rules:
+  - type: Road
+    geometry: line
+    geometry-name: centerline
+    color: "#000000"
+    opacity: 0.94
+    width: 6
+    z-index: 3
+  - type: Road
+    geometry: line
+    geometry-name: centerline
+    color: "#ffffff"
+    width: 3
+    z-index: 3
+)yaml");
+    REQUIRE(style.isValid());
+
+    TileSubsetLayerRenderer renderer(
+        0,
+        "Features:TestMap:Road:0",
+        style,
+        static_cast<int>(FeatureStyleRule::NoHighlight),
+        static_cast<int>(FeatureStyleRule::AnyFidelity));
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+
+    RendererPacketView packet(renderer);
+    REQUIRE(renderer.vertexCount() == 2);
+    auto const pathStreams = packet.streams(GpuPrimitiveKind::PathSegment);
+    REQUIRE(pathStreams.size() == 1);
+    auto const& pathStream = pathStreams.front();
+    REQUIRE(pathStream.count == 1U);
+    REQUIRE(pathStream.stride == kGpuDualSimplePathSegmentRecordBytes);
+    REQUIRE((pathStream.flags & static_cast<uint16_t>(
+        GpuMaterialFlag::SimplePath)) != 0U);
+    REQUIRE((pathStream.flags & static_cast<uint16_t>(
+        GpuMaterialFlag::DualStrokePath)) != 0U);
+    REQUIRE(packet.read<float>(pathStream.dataOffset + 24U) == 6.0F);
+    REQUIRE(packet.read<float>(pathStream.dataOffset + 52U) == 3.0F);
+    REQUIRE(packet.read<uint8_t>(pathStream.dataOffset + 32U) == 0U);
+    REQUIRE(packet.read<uint8_t>(pathStream.dataOffset + 35U) == 240U);
+    REQUIRE(packet.read<uint8_t>(pathStream.dataOffset + 56U) == 255U);
+    REQUIRE(packet.picks().size() == 1);
+    REQUIRE(packet.picks()[0].channelOrdinal == 0U);
+    REQUIRE(packet.picks()[0].entryOrdinal == 0U);
+    REQUIRE(packet.picks()[0].endpointRole == 0U);
+
+    auto splitStyle = rendererStyle(R"yaml(
+name: OrderedCasingRules
+version: 2
+rules:
+  - type: Road
+    geometry: line
+    geometry-name: centerline
+    color: "#000000"
+    width: 6
+    z-index: 3
+  - type: Road
+    geometry: line
+    geometry-name: centerline
+    color: "#ffffff"
+    width: 3
+    z-index: 4
+)yaml");
+    REQUIRE(splitStyle.isValid());
+
+    TileSubsetLayerRenderer splitRenderer(
+        0,
+        "Features:TestMap:Road:0",
+        splitStyle,
+        static_cast<int>(FeatureStyleRule::NoHighlight),
+        static_cast<int>(FeatureStyleRule::AnyFidelity));
+    installSubset(splitRenderer, TileSubsetLayer(subset));
+    splitRenderer.run();
+
+    RendererPacketView splitPacket(splitRenderer);
+    auto const splitStreams =
+        splitPacket.streams(GpuPrimitiveKind::PathSegment);
+    REQUIRE(splitStreams.size() == 2U);
+    REQUIRE(std::ranges::none_of(
+        splitStreams,
+        [](RendererPacketView::Stream const& stream) {
+            return (stream.flags & static_cast<uint16_t>(
+                GpuMaterialFlag::DualStrokePath)) != 0U;
+        }));
+    REQUIRE(splitPacket.zIndices(0U) == std::vector<double>{3.0, 4.0});
+}
+
+TEST_CASE(
+    "TileSubsetLayerRenderer simplifies only undecorated paths",
+    "[erdblick.subset-renderer][performance]")
+{
+    auto info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>(
+        "SubsetRendererSimplificationPool");
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        mapget::TileId::fromWgs84(11.0, 48.0, 13),
+        "SubsetRendererSimplificationPool",
+        "TestMap",
+        info,
+        strings,
+        "roads",
+        1);
+    subset->setGeometryAnchor({11.0, 48.0, 0.0});
+    std::array<mapget::Point, 5> const points{{
+        {11.0, 48.0, 0.0},
+        {11.0001, 48.00001, 0.0},
+        {11.0002, 48.0, 0.0},
+        {11.0003, 48.00001, 0.0},
+        {11.0004, 48.0, 0.0},
+    }};
+    auto const featureId = subset->newFeatureId(
+        "Road",
+        {{"roadId", int64_t{7}}});
+    for (uint32_t ruleIndex = 0U; ruleIndex < 3U; ++ruleIndex) {
+        auto channel = subset->newChannel(
+            "style-rule:" + std::to_string(ruleIndex),
+            mapget::Scope::Feature,
+            1U << static_cast<uint8_t>(mapget::GeomType::Line),
+            "centerline");
+        channel->newFeatureEntry(
+            featureId,
+            lineGeometryWithPoints(*subset, "centerline", points),
+            {});
+    }
+
+    auto style = rendererStyle(R"yaml(
+name: Simplification
+version: 2
+rules:
+  - type: Road
+    geometry: line
+    geometry-name: centerline
+    color: "#ff0000"
+    width: 2
+  - type: Road
+    geometry: line
+    geometry-name: centerline
+    color: "#00ff00"
+    width: 2
+    dashed: true
+  - type: Road
+    geometry: line
+    geometry-name: centerline
+    color: "#0000ff"
+    width: 2
+    arrow: forward
+)yaml");
+    REQUIRE(style.isValid());
+
+    TileSubsetLayerRenderer renderer(
+        0,
+        "Features:TestMap:Road:0",
+        style,
+        static_cast<int>(FeatureStyleRule::NoHighlight),
+        static_cast<int>(FeatureStyleRule::AnyFidelity));
+    renderer.setCoordinateOrigin(11.0, 48.0, 0.0);
+    renderer.setLineSimplificationTolerance(5.0);
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+
+    auto const streams = RendererPacketView(renderer).streams(
+        GpuPrimitiveKind::PathSegment);
+    REQUIRE(streams.size() == 3U);
+    std::vector<uint32_t> recordCounts;
+    std::ranges::transform(
+        streams,
+        std::back_inserter(recordCounts),
+        &RendererPacketView::Stream::count);
+    std::ranges::sort(recordCounts);
+    REQUIRE(recordCounts == std::vector<uint32_t>{1U, 4U, 4U});
+    REQUIRE(renderer.vertexCount() == 15U);
 }
 
 TEST_CASE(
@@ -213,11 +806,12 @@ rules:
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
         static_cast<int>(FeatureStyleRule::AnyFidelity));
-    renderer.addTileSubsetLayer(TileSubsetLayer(subset));
+    installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
     REQUIRE(renderer.vertexCount() == 0);
-    REQUIRE(renderer.renderResult()["pathWorld"]["positions"].empty());
+    REQUIRE(RendererPacketView(renderer).streams(
+        GpuPrimitiveKind::PathSegment).empty());
 }
 
 TEST_CASE(
@@ -315,13 +909,19 @@ rules:
       geometry-name: centerline
       opacity: 0
       billboard: true
+      label-font: "800 7px Helvetica Neue"
       label-text-expression: endpointLabel
+      label-horizontal-origin: LEFT
+      label-vertical-origin: ABOVE
     relation-target-style:
       geometry: line
       geometry-name: centerline
       opacity: 0
       billboard: true
+      label-font: "800 7px Helvetica Neue"
       label-text-expression: endpointLabel
+      label-horizontal-origin: LEFT
+      label-vertical-origin: ABOVE
 )yaml");
     REQUIRE(style.isValid());
 
@@ -331,14 +931,21 @@ rules:
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
         static_cast<int>(FeatureStyleRule::AnyFidelity));
-    renderer.addTileSubsetLayer(TileSubsetLayer(subset));
+    installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
-    auto const labels = renderer.renderResult()["labelBillboard"];
+    auto const packet = RendererPacketView(renderer);
+    auto const labels = packet.labelTexts();
     REQUIRE(labels.size() == 3);
-    REQUIRE(labels[0]["text"] == "1");
-    REQUIRE(labels[1]["text"] == "2");
-    REQUIRE(labels[2]["text"] == "3");
+    REQUIRE(labels[0] == "1");
+    REQUIRE(labels[1] == "2");
+    REQUIRE(labels[2] == "3");
+    REQUIRE(packet.labelSizes() == std::vector<float>(3U, 7.0F));
+    REQUIRE(packet.labelFontFamilies() ==
+        std::vector<std::string>(3U, "Helvetica Neue"));
+    REQUIRE(packet.labelFontWeights() == std::vector<uint32_t>(3U, 800U));
+    REQUIRE(packet.labelOrigins() ==
+        std::vector<std::pair<int32_t, int32_t>>(3U, {-1, 1}));
 }
 
 TEST_CASE(
@@ -409,16 +1016,17 @@ rules:
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
         static_cast<int>(FeatureStyleRule::AnyFidelity));
-    renderer.addTileSubsetLayer(TileSubsetLayer(subset));
+    installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
-    auto result = renderer.renderResult();
-    auto const& positions = result["pathWorld"]["positions"];
-    REQUIRE(positions.size() == 12);
-    REQUIRE(positions[2] == 0.0);
-    REQUIRE(positions[5] == 0.0);
-    REQUIRE(positions[8] == 5.0);
-    REQUIRE(positions[11] == 5.0);
+    auto const paths = RendererPacketView(renderer).paths();
+    REQUIRE(paths.size() == 2);
+    REQUIRE(paths[0].points.size() == 2);
+    REQUIRE(paths[1].points.size() == 2);
+    REQUIRE(paths[0].points.front().z == 0.0);
+    REQUIRE(paths[0].points.back().z == 0.0);
+    REQUIRE(paths[1].points.front().z == 5.0);
+    REQUIRE(paths[1].points.back().z == 5.0);
 }
 
 TEST_CASE(
@@ -512,30 +1120,25 @@ rules:
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
         static_cast<int>(FeatureStyleRule::AnyFidelity));
-    renderer.addTileSubsetLayer(TileSubsetLayer(subset));
+    installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
-    auto const result = renderer.renderResult();
-    auto const& starts = result["pathWorld"]["startIndices"];
-    auto const& positions = result["pathWorld"]["positions"];
-    REQUIRE(starts.size() == 3);
-    REQUIRE(starts[0] == 0);
-    REQUIRE(starts[1].get<size_t>() > 2);
-    REQUIRE(starts[2].get<size_t>() > starts[1].get<size_t>() + 2);
+    auto const paths = RendererPacketView(renderer).paths();
+    REQUIRE(paths.size() == 2);
+    REQUIRE(paths[0].points.size() > 2);
+    REQUIRE(paths[1].points.size() > 2);
     // The shared east/west link is traversed in opposite directions.  A
     // positive authored offset is relative to each transition's visible
     // traversal, so the two occurrences occupy opposite physical sides.  The
     // later transition still reserves the next lane for the shared leg.
     auto rightmostY = [&](size_t pathIndex) {
-        auto const begin = starts[pathIndex].get<size_t>();
-        auto const end = starts[pathIndex + 1].get<size_t>();
-        auto rightmostX = positions[begin * 3].get<double>();
-        auto y = positions[begin * 3 + 1].get<double>();
-        for (auto pointIndex = begin + 1; pointIndex < end; ++pointIndex) {
-            auto const x = positions[pointIndex * 3].get<double>();
-            if (x > rightmostX) {
-                rightmostX = x;
-                y = positions[pointIndex * 3 + 1].get<double>();
+        auto const& points = paths[pathIndex].points;
+        auto rightmostX = points.front().x;
+        auto y = points.front().y;
+        for (auto const& point : points) {
+            if (point.x > rightmostX) {
+                rightmostX = point.x;
+                y = point.y;
             }
         }
         return y;
@@ -580,10 +1183,11 @@ TEST_CASE(
 name: RuleMismatch
 version: 2
 rules:
-  - type: Lane
-    geometry: line
-    geometry-name: centerline
-    color: "#ffffff"
+  - first-of:
+      - type: Lane
+        geometry: line
+        geometry-name: centerline
+        color: "#ffffff"
 )yaml");
     REQUIRE(style.isValid());
 
@@ -593,14 +1197,14 @@ rules:
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
         static_cast<int>(FeatureStyleRule::AnyFidelity));
-    renderer.addTileSubsetLayer(TileSubsetLayer(subset));
+    installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
     REQUIRE(renderer.vertexCount() == 0);
-    auto issues = renderer.runtimeStyleIssues();
+    auto const issues = RendererPacketView(renderer).issues();
     REQUIRE(issues.size() == 1);
-    REQUIRE(issues[0]["property"] == "rule-match");
-    REQUIRE(issues[0]["expression"] == "Road");
+    REQUIRE(issues[0].property == "rule-match");
+    REQUIRE(issues[0].expression == "Road");
 }
 
 TEST_CASE(
@@ -757,18 +1361,16 @@ rules:
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
         static_cast<int>(FeatureStyleRule::AnyFidelity));
-    renderer.addTileSubsetLayer(TileSubsetLayer(subset));
+    installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
-    auto const result = renderer.renderResult();
-    auto const& starts = result["transitionPathWorld"]["startIndices"];
-    auto const& offsets =
-        result["transitionPathWorld"]["lateralOffsetsPx"];
-    REQUIRE(starts.size() == 6);
+    RendererPacketView packet(renderer);
+    auto const paths = packet.paths();
+    REQUIRE(paths.size() == 5);
     auto pathStartOffset = [&](size_t pathIndex) {
-        return offsets[starts[pathIndex].get<size_t>()].get<float>();
+        return paths[pathIndex].lateralOffsetsPx.front();
     };
     auto pathEndOffset = [&](size_t pathIndex) {
-        return offsets[starts[pathIndex + 1].get<size_t>() - 1].get<float>();
+        return paths[pathIndex].lateralOffsetsPx.back();
     };
     // The first two maneuvers are right turns. Their common incoming road's
     // physical right-side stack advances independently of either outgoing
@@ -787,92 +1389,81 @@ rules:
     // legs while the magnitudes reflect the two distinct stack depths.
     REQUIRE(pathStartOffset(3) == -4.0f);
     REQUIRE(pathEndOffset(3) == -6.0f);
-    auto const& scaleThresholds =
-        result["transitionPathWorld"]["lateralOffsetScaleThresholds"];
-    REQUIRE(scaleThresholds.size() == 5);
     // One host/rule uses one path-wide factor, including its U-turn. The
     // compact U-turn's correctly wound vector arc does not independently
     // reduce the lateral stack distance.
-    auto const ordinaryScaleThreshold = scaleThresholds[0].get<float>();
+    auto const ordinaryScaleThreshold = paths[0].scaleThreshold;
     REQUIRE(ordinaryScaleThreshold > 0.0f);
-    REQUIRE(scaleThresholds[1].get<float>() == ordinaryScaleThreshold);
-    REQUIRE(scaleThresholds[2].get<float>() == ordinaryScaleThreshold);
-    auto const uTurnScaleThreshold = scaleThresholds[3].get<float>();
+    REQUIRE(paths[1].scaleThreshold == ordinaryScaleThreshold);
+    REQUIRE(paths[2].scaleThreshold == ordinaryScaleThreshold);
+    auto const uTurnScaleThreshold = paths[3].scaleThreshold;
     REQUIRE(uTurnScaleThreshold == ordinaryScaleThreshold);
     // A nearly reversing transition between different roads remains an
     // ordinary turn. It therefore contributes a real motion-derived safety
     // threshold instead of being misclassified as the compact U-turn above.
-    auto const hairpinScaleThreshold = scaleThresholds[4].get<float>();
+    auto const hairpinScaleThreshold = paths[4].scaleThreshold;
     REQUIRE(hairpinScaleThreshold > 0.0f);
     REQUIRE(hairpinScaleThreshold < ordinaryScaleThreshold);
-    auto const& positions = result["transitionPathWorld"]["positions"];
-    auto const uTurnStart = starts[3].get<size_t>();
-    auto const uTurnEnd = starts[4].get<size_t>();
-    auto const uTurnBaseY = positions[uTurnStart * 3 + 1].get<double>();
+    auto const& uTurn = paths[3];
+    auto const uTurnBaseY = uTurn.points.front().y;
     auto maxUturnLateralDeparture = 0.0;
-    for (auto pointIndex = uTurnStart + 1;
-         pointIndex < uTurnEnd;
-         ++pointIndex)
-    {
+    for (auto const& point : uTurn.points) {
         maxUturnLateralDeparture = std::max(
             maxUturnLateralDeparture,
-            std::abs(
-                positions[pointIndex * 3 + 1].get<double>() -
-                uTurnBaseY));
+            std::abs(point.y - uTurnBaseY));
     }
     // Pixel-offset U-turns keep the undisplaced bridge on the source road.
     // The screen-space vector stream below owns the visible hairpin. Mixing a
     // second world-space side loop into it creates zoom-dependent loops.
     REQUIRE(maxUturnLateralDeparture < 1.0e-5);
-    auto const& offsetVectors =
-        result["transitionPathWorld"]["lateralOffsetVectorsPx"];
-    REQUIRE(offsetVectors.size() == positions.size() / 3 * 2);
-    auto vectorAt = [&](size_t pointIndex) {
+    auto vectorAt = [&](size_t pathIndex, size_t pointIndex) {
+        auto const& value = paths[pathIndex]
+            .lateralOffsetVectorsPx[pointIndex];
         return std::pair{
-            offsetVectors[pointIndex * 2].get<float>(),
-            offsetVectors[pointIndex * 2 + 1].get<float>(),
+            value[0],
+            value[1],
         };
     };
     // The first right turn starts south of its eastbound incoming road and
     // ends west of its southbound outgoing road.
-    REQUIRE(vectorAt(starts[0].get<size_t>()) ==
+    REQUIRE(vectorAt(0, 0) ==
         std::pair{0.0f, -2.0f});
-    REQUIRE(vectorAt(starts[1].get<size_t>() - 1) ==
+    REQUIRE(vectorAt(0, paths[0].points.size() - 1U) ==
         std::pair{-2.0f, 0.0f});
     // The bridge rotates its screen-space road normal without shrinking the
     // authored lane radius. Component-wise interpolation would collapse a
     // right-angle lane below either endpoint and drive a U-turn through zero.
-    auto vectorMagnitude = [&](size_t pointIndex) {
-        auto const [x, y] = vectorAt(pointIndex);
+    auto vectorMagnitude = [&](size_t pathIndex, size_t pointIndex) {
+        auto const [x, y] = vectorAt(pathIndex, pointIndex);
         return std::hypot(x, y);
     };
-    for (size_t pathIndex = 0; pathIndex + 1 < starts.size(); ++pathIndex) {
-        auto const begin = starts[pathIndex].get<size_t>();
-        auto const end = starts[pathIndex + 1].get<size_t>();
+    for (size_t pathIndex = 0; pathIndex < paths.size(); ++pathIndex) {
         auto const minimumMagnitude = std::min(
             std::abs(pathStartOffset(pathIndex)),
             std::abs(pathEndOffset(pathIndex)));
         auto const maximumMagnitude = std::max(
             std::abs(pathStartOffset(pathIndex)),
             std::abs(pathEndOffset(pathIndex)));
-        for (auto pointIndex = begin; pointIndex < end; ++pointIndex) {
-            REQUIRE(vectorMagnitude(pointIndex) >=
+        for (size_t pointIndex = 0;
+             pointIndex < paths[pathIndex].points.size();
+             ++pointIndex) {
+            REQUIRE(vectorMagnitude(pathIndex, pointIndex) >=
                 minimumMagnitude - 1.0e-4f);
-            REQUIRE(vectorMagnitude(pointIndex) <=
+            REQUIRE(vectorMagnitude(pathIndex, pointIndex) <=
                 maximumMagnitude + 1.0e-4f);
         }
     }
     // The U-turn bridge rotates between the two independently stacked sides
     // rather than deriving an offset from its projected curve radius.
-    REQUIRE(vectorAt(uTurnStart) == std::pair{0.0f, 4.0f});
-    REQUIRE(vectorAt(uTurnEnd - 1) == std::pair{0.0f, -6.0f});
+    REQUIRE(vectorAt(3, 0) == std::pair{0.0f, 4.0f});
+    REQUIRE(vectorAt(3, uTurn.points.size() - 1U) ==
+        std::pair{0.0f, -6.0f});
     auto maximumUturnForwardOffset = 0.0f;
     auto minimumUturnForwardOffset = 0.0f;
-    for (auto pointIndex = uTurnStart;
-         pointIndex < uTurnEnd;
-         ++pointIndex)
-    {
-        auto const [x, unusedY] = vectorAt(pointIndex);
+    for (size_t pointIndex = 0;
+         pointIndex < uTurn.points.size();
+         ++pointIndex) {
+        auto const [x, unusedY] = vectorAt(3, pointIndex);
         static_cast<void>(unusedY);
         maximumUturnForwardOffset = std::max(
             maximumUturnForwardOffset,
@@ -885,30 +1476,21 @@ rules:
     // opposite winding bows backward and creates the inverted terminal hook.
     REQUIRE(maximumUturnForwardOffset > 3.0f);
     REQUIRE(minimumUturnForwardOffset >= -1.0e-4f);
-    auto const& arrowOffsets =
-        result["arrowWorld"]["lateralOffsetsPx"];
-    REQUIRE(arrowOffsets.size() == 15);
-    for (auto const& value : arrowOffsets) {
-        REQUIRE(value.get<float>() == 0.0f);
-    }
-    auto const& arrowVectors =
-        result["arrowWorld"]["lateralOffsetVectorsPx"];
-    REQUIRE(arrowVectors.size() == 30);
+    auto const arrows = packet.arrows();
+    REQUIRE(arrows.size() == 5);
     auto arrowTipVector = [&](size_t pathIndex) {
-        auto const tipVertex = pathIndex * 3 + 1;
         return std::pair{
-            arrowVectors[tipVertex * 2].get<float>(),
-            arrowVectors[tipVertex * 2 + 1].get<float>(),
+            arrows[pathIndex].lateralOffsetVectorPx[0],
+            arrows[pathIndex].lateralOffsetVectorPx[1],
         };
     };
     REQUIRE(arrowTipVector(0) == std::pair{-2.0f, 0.0f});
     REQUIRE(arrowTipVector(3) == std::pair{0.0f, -6.0f});
-    auto const& arrowScaleThresholds =
-        result["arrowWorld"]["lateralOffsetScaleThresholds"];
-    REQUIRE(arrowScaleThresholds.size() == 5);
     for (size_t pathIndex = 0; pathIndex < 5; ++pathIndex) {
-        REQUIRE(arrowScaleThresholds[pathIndex].get<float>() ==
-            scaleThresholds[pathIndex].get<float>());
+        REQUIRE(arrows[pathIndex].scaleThreshold ==
+            paths[pathIndex].scaleThreshold);
+        REQUIRE((arrows[pathIndex].flags & static_cast<uint32_t>(
+            GpuArrowRecordFlag::VariableOffset)) != 0U);
     }
 }
 
@@ -960,11 +1542,11 @@ rules:
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
         static_cast<int>(FeatureStyleRule::HighFidelity));
-    renderer.addTileSubsetLayer(TileSubsetLayer(subset));
+    installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
     REQUIRE(renderer.vertexCount() == 0);
-    REQUIRE(renderer.runtimeStyleIssues().empty());
+    REQUIRE(RendererPacketView(renderer).issues().empty());
 }
 
 TEST_CASE(

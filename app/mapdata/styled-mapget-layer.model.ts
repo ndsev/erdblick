@@ -6,6 +6,7 @@ import type {
 } from "../../build/libs/core/erdblick-core";
 import {coreLib} from "../integrations/wasm";
 import type {ErdblickStyle} from "../styledata/style.service";
+import {sipHash64Hex} from "../styledata/hash";
 import type {MapgetLayer} from "./mapget-layer.model";
 import type {MapInfoService} from "./map-info.service";
 import type {MapTileStreamService} from "./map-tile-stream.service";
@@ -51,7 +52,7 @@ export interface StyleFilterPlan {
 
 export type StyledMapgetLayerEvent =
     | {type: "tile-ready"; state: FilterTileState}
-    | {type: "tile-removed"; state: FilterTileState}
+    | {type: "tiles-removed"; states: readonly FilterTileState[]}
     | {type: "generation"; generation: number}
     | {type: "status"; status: MapTileStreamFilterStatusPayload}
     | {type: "error"; message: string};
@@ -64,6 +65,7 @@ export type StyledMapgetLayerEvent =
  */
 export class StyledMapgetLayer {
     readonly ownerId: string;
+    readonly renderStyleKey: string;
     readonly events = new Subject<StyledMapgetLayerEvent>();
     readonly tileStates = new Map<number, FilterTileState>();
     readonly filterPlan: StyleFilterPlan;
@@ -78,6 +80,7 @@ export class StyledMapgetLayer {
     private readonly tileStatePresentationRefs =
         new Map<FilterTileState, number>();
 
+    /** Create one filter subscription whose deliveries are owned by this presentation. */
     constructor(
         readonly identity: StyledMapgetLayerIdentity,
         readonly mapgetLayer: MapgetLayer,
@@ -96,6 +99,10 @@ export class StyledMapgetLayer {
             identity.presentationKind,
             identity.presentationInstanceId
         ].map(value => encodeURIComponent(String(value))).join("/");
+        this.renderStyleKey = [
+            style.sourceRef.sourceHash ?? sipHash64Hex(style.source),
+            style.source.length
+        ].join(":");
         this.options = {...options};
         this.filterPlan = filterPlan
             ? structuredClone(filterPlan)
@@ -136,6 +143,7 @@ export class StyledMapgetLayer {
         return this.coverageVersionValue;
     }
 
+    /** Replace exact tile demand while retaining ready values through transport handover. */
     setCoverage(
         tileIds: readonly number[],
         priorityTileIds: readonly number[] = [],
@@ -155,18 +163,22 @@ export class StyledMapgetLayer {
             return;
         }
         const demanded = new Set(orderedTileIds);
+        const removedStates: FilterTileState[] = [];
         for (const [tileId, state] of this.tileStates) {
             if (demanded.has(tileId)) {
                 continue;
             }
             this.tileStates.delete(tileId);
-            this.events.next({type: "tile-removed", state});
+            removedStates.push(state);
             if (this.filterRef.suspended &&
                 !this.tileStatePresentationRefs.has(state)) {
                 state.dispose();
             } else {
                 this.retiredTileStates.set(tileId, state);
             }
+        }
+        if (removedStates.length) {
+            this.events.next({type: "tiles-removed", states: removedStates});
         }
         this.coverage = nextCoverage;
         this.coverageVersionValue += 1;
@@ -212,6 +224,7 @@ export class StyledMapgetLayer {
         }
     }
 
+    /** Restart filtering only when resolved style bindings materially change. */
     setOptions(options: Record<string, boolean | number | string>): void {
         this.assertLive();
         const normalized = {...options};
@@ -265,8 +278,7 @@ export class StyledMapgetLayer {
     }
 
     /**
-     * Pins immutable subset bytes while a spatial presentation block still
-     * overlaps current coverage.
+     * Pins immutable subset bytes while an in-flight visualization owns them.
      */
     retainTileState(state: FilterTileState): void {
         this.assertLive();
@@ -290,14 +302,18 @@ export class StyledMapgetLayer {
         this.tileStatePresentationRefs.set(state, count - 1);
     }
 
+    /** Release transport ownership and every retained current or retired tile value. */
     dispose(): void {
         if (this.disposed) {
             return;
         }
         this.disposed = true;
         this.filterRef.release();
-        for (const state of this.tileStates.values()) {
-            this.events.next({type: "tile-removed", state});
+        const removedStates = [...this.tileStates.values()];
+        if (removedStates.length) {
+            this.events.next({type: "tiles-removed", states: removedStates});
+        }
+        for (const state of removedStates) {
             state.dispose();
         }
         this.tileStates.clear();
@@ -309,6 +325,7 @@ export class StyledMapgetLayer {
         this.events.complete();
     }
 
+    /** Ask WASM to translate style semantics into server-side filter channels. */
     private plan(
         style: FeatureLayerStyle,
         highlightMode: HighlightMode,
@@ -323,6 +340,7 @@ export class StyledMapgetLayer {
         ) as StyleFilterPlan;
     }
 
+    /** Materialize the immutable filter definition from the validated plan. */
     private filterDefinition(): FilterSubscriptionDefinition {
         return {
             mapId: this.mapgetLayer.mapId,
@@ -335,6 +353,7 @@ export class StyledMapgetLayer {
         };
     }
 
+    /** Install a delivery only when its generation and tile are still demanded. */
     private acceptTile(delivery: TileSubsetDelivery): void {
         if (this.disposed || delivery.generation !== this.generation) {
             return;
@@ -347,6 +366,7 @@ export class StyledMapgetLayer {
         this.events.next({type: "tile-ready", state});
     }
 
+    /** Forward backend completion and convert status errors into tile failures. */
     private acceptStatus(status: MapTileStreamFilterStatusPayload): void {
         this.latestStatus = status;
         this.events.next({type: "status", status});
@@ -355,6 +375,7 @@ export class StyledMapgetLayer {
         }
     }
 
+    /** Mark all current outputs failed without discarding their last ready bytes. */
     private acceptError(message: string): void {
         for (const state of this.tileStates.values()) {
             state.fail(this.generation, message);
@@ -373,6 +394,7 @@ export class StyledMapgetLayer {
         }
     }
 
+    /** Fail fast when stale reconciliation code touches a retired owner. */
     private assertLive(): void {
         if (this.disposed) {
             throw new Error(`StyledMapgetLayer '${this.ownerId}' is disposed.`);

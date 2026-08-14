@@ -803,7 +803,7 @@ export class MapLayerTree {
             if (layer.type == "SourceData") {
                 return false;
             }
-            return layer.viewConfig[viewIndex].visible;
+            return layer.viewConfig[viewIndex]?.visible ?? false;
         }
         return false;
     }

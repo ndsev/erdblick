@@ -73,7 +73,8 @@ export class MapViewStateService {
     setViewport(
         viewIndex: number,
         viewport: Viewport,
-        canonicalCameraAltitudeMeters?: number
+        canonicalCameraAltitudeMeters?: number,
+        metersPerPixel?: number
     ) {
         const maxIndex = this.viewVisualizationState.length - 1;
         if (viewIndex > maxIndex) {
@@ -85,6 +86,9 @@ export class MapViewStateService {
         if (Number.isFinite(canonicalCameraAltitudeMeters)) {
             state.canonicalCameraAltitudeMeters =
                 Number(canonicalCameraAltitudeMeters);
+        }
+        if (Number.isFinite(metersPerPixel)) {
+            state.metersPerPixel = Number(metersPerPixel);
         }
         this.requestViewRecalculation(ViewRecalculationReason.Viewport);
     }

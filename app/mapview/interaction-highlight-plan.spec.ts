@@ -4,8 +4,7 @@ import type {FilterChannelDefinition} from
 import type {StyleFilterPlan} from
     "../mapdata/styled-mapget-layer.model";
 import {
-    interactionScopeTargetKey,
-    localInteractionSatisfiesScope,
+    hasAuthoredInteractionHighlight,
     planRemoteInteractionHighlight,
     type InteractionHighlightTarget
 } from "./interaction-highlight-plan";
@@ -44,8 +43,7 @@ describe("remote interaction highlight planning", () => {
     it("does not activate attribute channels for a bare feature target", () => {
         const result = planRemoteInteractionHighlight(
             plan(channel("feature"), channel("attribute")),
-            [target("Road.7")],
-            new Set()
+            [target("Road.7")]
         );
 
         expect(result?.plan.channels.map(item => item.scope))
@@ -62,8 +60,7 @@ describe("remote interaction highlight planning", () => {
 
         const result = planRemoteInteractionHighlight(
             rawPlan,
-            [target("Road.7:attribute#2:validity#1")],
-            new Set()
+            [target("Road.7:attribute#2:validity#1")]
         );
 
         expect(result?.plan.channels[0]).toMatchObject({
@@ -77,25 +74,23 @@ describe("remote interaction highlight planning", () => {
         });
     });
 
-    it("drops only terminal scopes already satisfied by a local overlay", () => {
+    it("does not add a host-feature channel to an attribute highlight", () => {
         const feature = target("Road.7:attribute#2");
-        const localTargets = new Set([
-            interactionScopeTargetKey("attribute", feature)
-        ]);
-
         const result = planRemoteInteractionHighlight(
             plan(channel("feature"), channel("attribute")),
-            [feature],
-            localTargets
+            [feature]
         );
 
         expect(result?.plan.channels.map(item => item.scope))
-            .toEqual(["feature"]);
-        expect(localInteractionSatisfiesScope(
-            "feature",
-            feature,
-            new Set([interactionScopeTargetKey("feature", feature)]))
-        ).toBe(false);
+            .toEqual(["attribute"]);
+        expect(hasAuthoredInteractionHighlight(
+            plan(channel("attribute")),
+            feature
+        )).toBe(true);
+        expect(hasAuthoredInteractionHighlight(
+            plan(channel("feature")),
+            feature
+        )).toBe(false);
     });
 
     it("restricts an explicitly selected relation and emits exact roots", () => {
@@ -103,8 +98,7 @@ describe("remote interaction highlight planning", () => {
             plan(channel("relation", {
                 relation: {recursive: true, mergeTwoway: true}
             })),
-            [target("Intersection.1:relation#3", 91)],
-            new Set()
+            [target("Intersection.1:relation#3", 91)]
         );
 
         expect(result?.plan.channels[0].entryFilter).toBe(
@@ -125,8 +119,7 @@ describe("remote interaction highlight planning", () => {
             [
                 target("Intersection.1", 91),
                 target("Intersection.2:relation#3", 92)
-            ],
-            new Set()
+            ]
         );
 
         expect(result?.plan.channels[0].entryFilter).toBe("isTopology");

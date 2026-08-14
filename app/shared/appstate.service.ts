@@ -46,25 +46,19 @@ import {
 } from "./url-state-codec";
 import type {UrlV2MapTileKeyFactory} from "./url-state-codec";
 import {
-    clampRenderBlockVertexLimit,
     clampLowFiTileThreshold,
     clampTileSubsetRenderWorkerCount,
-    DEFAULT_LOW_FI_TILE_THRESHOLD,
-    DEFAULT_RENDER_BLOCK_VERTEX_LIMIT
+    DEFAULT_LOW_FI_TILE_THRESHOLD
 } from "./tile-render-policy";
 
 export {
     AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
-    clampRenderBlockVertexLimit,
     clampLowFiTileThreshold,
     clampTileSubsetRenderWorkerCount,
     DEFAULT_LOW_FI_TILE_THRESHOLD,
-    DEFAULT_RENDER_BLOCK_VERTEX_LIMIT,
-    MAX_RENDER_BLOCK_VERTEX_LIMIT,
     MAX_LOW_FI_TILE_THRESHOLD,
     MAX_TILE_SUBSET_RENDER_WORKER_COUNT,
     MIN_LOW_FI_TILE_THRESHOLD,
-    MIN_RENDER_BLOCK_VERTEX_LIMIT,
     MIN_TILE_SUBSET_RENDER_WORKER_COUNT
 } from "./tile-render-policy";
 
@@ -720,38 +714,6 @@ export class AppStateService implements OnDestroy {
         schema: z.coerce.number().int(),
         toStorage: value => clampTileSubsetRenderWorkerCount(value),
         fromStorage: value => clampTileSubsetRenderWorkerCount(value)
-    });
-
-    readonly debugRenderBlocksState = this.createState<boolean>({
-        name: 'debugRenderBlocks',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly deferPresentationDuringInteractionState = this.createState<boolean>({
-        name: 'deferPresentationDuringInteraction',
-        defaultValue: true,
-        schema: Boolish
-    });
-
-    readonly renderBufferArenaEnabledState = this.createState<boolean>({
-        name: 'renderBufferArenaEnabled',
-        defaultValue: true,
-        schema: Boolish
-    });
-
-    readonly renderBlockVertexLimitState = this.createState<number>({
-        name: 'renderBlockVertexLimit',
-        defaultValue: DEFAULT_RENDER_BLOCK_VERTEX_LIMIT,
-        schema: z.coerce.number().int(),
-        toStorage: value => clampRenderBlockVertexLimit(
-            value,
-            DEFAULT_RENDER_BLOCK_VERTEX_LIMIT
-        ),
-        fromStorage: value => clampRenderBlockVertexLimit(
-            value,
-            DEFAULT_RENDER_BLOCK_VERTEX_LIMIT
-        )
     });
 
     readonly tilePullCompressionEnabledState = this.createState<boolean>({
@@ -2292,33 +2254,6 @@ export class AppStateService implements OnDestroy {
             clampTileSubsetRenderWorkerCount(val)
         );
     }
-    get debugRenderBlocks() {return this.debugRenderBlocksState.getValue();}
-    set debugRenderBlocks(val: boolean) {
-        this.debugRenderBlocksState.next(!!val);
-    }
-    get deferPresentationDuringInteraction() {
-        return this.deferPresentationDuringInteractionState.getValue();
-    }
-    set deferPresentationDuringInteraction(val: boolean) {
-        this.deferPresentationDuringInteractionState.next(!!val);
-    }
-    get renderBufferArenaEnabled() {
-        return this.renderBufferArenaEnabledState.getValue();
-    }
-    set renderBufferArenaEnabled(val: boolean) {
-        this.renderBufferArenaEnabledState.next(!!val);
-    }
-    get renderBlockVertexLimit() {
-        return this.renderBlockVertexLimitState.getValue();
-    }
-    set renderBlockVertexLimit(val: number) {
-        this.renderBlockVertexLimitState.next(
-            clampRenderBlockVertexLimit(
-                val,
-                DEFAULT_RENDER_BLOCK_VERTEX_LIMIT
-            )
-        );
-    }
     get tilePullCompressionEnabled() {return this.tilePullCompressionEnabledState.getValue();}
     set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);};
     get mapZoomStep() {return this.mapZoomStepState.getValue();}
@@ -3094,6 +3029,7 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Append a newly docked surface after existing siblings in the same tab. */
     private nextSurfaceDockOrder(dockTab: string): number {
         const orders = Object.values(this.dialogLayoutsState.getValue())
             .filter(layout => (layout.docked ?? false) && layout.dockTab === dockTab)

@@ -1,24 +1,17 @@
-import {COORDINATE_SYSTEM} from "@deck.gl/core";
-import {
-    PathLayer,
-    TextLayer
-} from "@deck.gl/layers";
 import {Matrix4} from "@math.gl/core";
 import type {Device} from "@luma.gl/core";
-import {PackedTileId} from "@ndsev/ndslive-math";
 import type {FilterTileState} from "../../mapdata/filter-tile-state.model";
 import type {StyledMapgetLayer} from "../../mapdata/styled-mapget-layer.model";
 import type {TileFeatureId} from "../../shared/appstate.service";
-import {formatFeatureInspectionTarget} from "../../shared/tile-feature-id";
+import {
+    formatFeatureInspectionTarget,
+    parseFeatureInspectionTarget
+} from "../../shared/tile-feature-id";
 import {sipHash64Hex} from "../../styledata/hash";
 import {SceneMode} from "../../integrations/geo";
-import {coreLib} from "../../integrations/wasm";
+import {coreLib, uint8ArrayToWasm} from "../../integrations/wasm";
 import type {IRenderSceneHandle} from "../render-view.model";
-import {
-    DeckLayerRegistry,
-    makeDeckLayerKey
-} from "./deck-layer-registry";
-import {DeckRenderBufferArena} from "./deck-render-buffer-arena";
+import {DeckLayerRegistry} from "./deck-layer-registry";
 import {StaleSubsetRenderError, TileSubsetLayerRenderService} from
     "./tile-subset-layer-render.service";
 import type {
@@ -30,203 +23,174 @@ import {
     deckSubsetInteractionProps,
     type SubsetPickResolver as PickResolver
 } from "./deck-subset-picking";
-import {DeckInteractionOutlineService} from
-    "./deck-interaction-outline.service";
 import {
-    TileSubsetVectorPresentation,
-    type DeckLabelData
-} from "./tile-subset-vector-presentation";
-import {TileSubsetGltfPresentation} from "./tile-subset-gltf-presentation";
+    TileSubsetGltfPresentation,
+    type TileSubsetGltfSource
+} from "./tile-subset-gltf-presentation";
 import {
-    TileSubsetInteractionPresentation,
-    type TileSubsetInteractionOverlay,
-    type TileSubsetInteractionScope
-} from "./tile-subset-interaction-presentation";
+    type TileSubsetInteractionOverlay
+} from "./tile-subset-interaction.model";
+import {
+    GpuScene,
+    type GpuSceneApplyResult,
+    type GpuScenePickReference,
+    type GpuSceneRenderReservation
+} from "./gpu-scene";
+import {
+    GpuResourceKind,
+    type GpuResourceRequestView,
+    type GpuRuntimeIssueView
+} from "./gpu-render-packet";
+import type {ErdblickVectorLayer} from "./erdblick-vector.layer";
+import type {GpuTextLayerHost} from "./gpu-text-layer.host";
+import type {GpuSceneMaskController} from "./gpu-scene-mask.controller";
+import {gpuIconAtlasService} from "./gpu-icon-atlas.service";
 
 export type {TileSubsetInteractionOverlay} from
-    "./tile-subset-interaction-presentation";
+    "./tile-subset-interaction.model";
 
 interface DeckScene {
     layerRegistry?: DeckLayerRegistry;
-    renderBufferArena?: DeckRenderBufferArena;
-    interactionOutlineService?: DeckInteractionOutlineService;
     sceneMode?: SceneMode;
     device?: Device | null;
+    gpuScene?: GpuScene | null;
+    gpuVectorLayers?: readonly ErdblickVectorLayer[];
+    gpuTextLayerHost?: GpuTextLayerHost | null;
+    gpuMaskController?: GpuSceneMaskController | null;
 }
 
-interface DebugBlockPath {
-    path: Array<[number, number, number]>;
+interface GpuPickSubset {
+    resolvePick(
+        channelOrdinal: number,
+        entryOrdinal: number,
+        endpointRole: number
+    ): TileSubsetPickResult | undefined;
+    findPickReferences(
+        featureId: string,
+        scope: string,
+        entryIndex: number,
+        validityIndex: number
+    ): GpuScenePickReference[];
+    delete(): void;
 }
 
-interface DebugBlockLabel {
-    position: [number, number, number];
-    text: string;
-}
-
-const UNSELECTABLE = 0xffffffff;
 const FLAT_2D_MODEL_MATRIX = new Matrix4().scale([1, 1, 0]);
-const NO_DEPTH_PARAMETERS = {
-    depthTest: false,
-    depthMask: false
-} as any;
+const UNSELECTABLE = 0xffffffff;
 /**
- * One logical Deck visualization for one pre-render Morton block of directly
- * owned TileSubsetLayers.
+ * One logical Deck visualization for one independently owned TileSubsetLayer.
  *
  * Workers resolve compact pick identities while they own the exact parsed
  * subset. The main thread retains only raw immutable bytes and render output.
  */
 export class TileSubsetLayerVisualization {
     readonly visualizationId: string;
-    private readonly layerKeys = new Set<string>();
-    private readonly vectorPresentation: TileSubsetVectorPresentation;
     private readonly gltfPresentation: TileSubsetGltfPresentation;
-    private readonly interactionPresentation:
-        TileSubsetInteractionPresentation;
-    private readonly styleCacheKey: string;
-    private pickResults: TileSubsetPickResult[] = [];
+    private readonly contributionIdentities = new Set<string>();
+    private interactionOverlays: readonly TileSubsetInteractionOverlay[] = [];
+    private gltfPickResults: TileSubsetPickResult[] = [];
+    private interactionGltf: TileSubsetGltfSource | null = null;
     private renderedSignature = "";
     private requestedSignature = "";
     private disposed = false;
     private sceneHandle: IRenderSceneHandle | null = null;
     private sceneRevision = 0;
-    private fidelityValue: number;
-    private debugBlockVisualization = false;
+    private readonly fidelityValue: number;
+    private readonly lineSimplificationToleranceMeters: number;
     private readonly reportedRuntimeIssueIds = new Set<string>();
+    private readonly pendingIconUris = new Set<string>();
+    private readonly failedIconUris = new Set<string>();
+    private pickSubset: GpuPickSubset | null = null;
+    private pickSubsetValueVersion = -1;
 
+    /** Retain one immutable tile subset and its stable scene contribution identity. */
     constructor(
         readonly owner: StyledMapgetLayer,
-        readonly states: readonly FilterTileState[],
-        readonly blockKey: string,
-        private readonly blockOrigin: [number, number, number],
+        readonly state: FilterTileState,
+        readonly renderKey: string,
+        private readonly coordinateOrigin: [number, number, number],
         private readonly renderService: TileSubsetLayerRenderService,
         private readonly styleValidationReports: StyleValidationReportService,
         fidelityValue: number,
-        readonly viewIndex: number = owner.identity.viewIndex
+        lineSimplificationToleranceMeters: number,
+        readonly viewIndex: number,
+        private readonly requestRerender: (
+            visualization: TileSubsetLayerVisualization
+        ) => void
     ) {
-        if (!states.length) {
-            throw new Error("A subset block visualization needs at least one tile.");
-        }
         this.visualizationId = [
             owner.ownerId,
             `view-${viewIndex}`,
-            encodeURIComponent(blockKey)
+            encodeURIComponent(renderKey)
         ].join("/");
-        this.styleCacheKey = [
-            sipHash64Hex(owner.style.source),
-            owner.style.source.length
-        ].join(":");
-        this.vectorPresentation = new TileSubsetVectorPresentation({
-            visualizationId: this.visualizationId,
-            ownerId: owner.ownerId,
-            presentationKind: owner.identity.presentationKind,
-            styleOrder: owner.styleOrder,
-            viewIndex,
-            blockKey
-        });
         this.gltfPresentation = new TileSubsetGltfPresentation(
             owner,
-            states[0],
-            blockKey,
-            states.length
+            state
         );
-        this.interactionPresentation =
-            new TileSubsetInteractionPresentation(
-                {
-                    visualizationId: this.visualizationId,
-                    ownerId: owner.ownerId,
-                    presentationKind: owner.identity.presentationKind,
-                    styleOrder: owner.styleOrder,
-                    viewIndex
-                },
-                this.gltfPresentation,
-                address => this.resolvePick(address),
-                address => this.interactionScope(address)
-            );
         this.fidelityValue = fidelityValue;
-        for (const state of states) {
-            owner.retainTileState(state);
-        }
-    }
-
-    setFidelity(fidelityValue: number): void {
-        if (this.fidelityValue === fidelityValue) {
-            return;
-        }
-        this.fidelityValue = fidelityValue;
-        this.requestedSignature = "";
-        if (this.sceneHandle) {
-            this.render(this.sceneHandle).catch(error =>
-                console.error("Failed to switch subset visualization fidelity.", error)
-            );
-        }
-    }
-
-    containsTile(tileId: number): boolean {
-        return this.states.some(state => state.tileId === tileId);
+        this.lineSimplificationToleranceMeters =
+            lineSimplificationToleranceMeters;
+        this.contributionIdentities.add(this.contributionIdentity(state));
+        owner.retainTileState(state);
     }
 
     /** Reports whether an exact feature/validity/relation/group pick is retained locally. */
     hasLocalInteractionTarget(
-        target: TileFeatureId,
-        scope?: TileSubsetInteractionScope
+        target: TileFeatureId
     ): boolean {
-        return this.interactionPresentation.hasLocalTarget(target, scope);
+        const scene = this.sceneHandle
+            ? this.gpuScene(this.sceneHandle)
+            : null;
+        return scene?.hasInteractionTarget(
+            this.contributionIdentities,
+            target
+        ) ?? false;
     }
 
-    /** Replaces this block's view-owned local interaction overlay definitions. */
+    /** Replaces this visualization's view-owned local interaction overlay definitions. */
     setInteractionOverlays(
         overlays: readonly TileSubsetInteractionOverlay[]
     ): void {
-        this.interactionPresentation.setOverlays(overlays);
+        this.interactionOverlays = overlays;
+        if (!this.sceneHandle) {
+            return;
+        }
+        this.maskController(this.sceneHandle)?.setOverlays(
+            this.visualizationId,
+            this.contributionIdentities,
+            this.coordinateOrigin,
+            overlays
+        );
+        const registry = this.registry(this.sceneHandle);
+        if (registry) {
+            this.refreshGltfInteractions(registry);
+        }
     }
 
-    hasSameStates(
-        states: readonly FilterTileState[],
-        fidelityValue: number
+    /** Test whether reconciliation can preserve this exact visualization owner. */
+    hasSameState(
+        state: FilterTileState,
+        fidelityValue: number,
+        lineSimplificationToleranceMeters: number
     ): boolean {
         return this.fidelityValue === fidelityValue &&
-            states.length === this.states.length &&
-            states.every((state, index) => state === this.states[index]);
+            this.lineSimplificationToleranceMeters ===
+                lineSimplificationToleranceMeters &&
+            state === this.state;
     }
 
-    private get primaryState(): FilterTileState {
-        return this.states[0];
-    }
-
+    /** Require a complete immutable subset before consuming worker credit. */
     private isReadyForRender(): boolean {
-        return this.states.every(
-            state => state.status === "ready" && !!state.subsetBlob
-        );
+        return this.state.status === "ready" && !!this.state.subsetBlob;
     }
 
     /** True once every current immutable input version is installed in Deck. */
     isCurrentPresentationInstalled(): boolean {
         return this.renderedSignature.length > 0 &&
-            this.states.every(state =>
-                state.status === "ready" &&
-                state.renderedValueVersion === state.valueVersion
-            );
+            this.state.status === "ready" &&
+            this.state.renderedValueVersion === this.state.valueVersion;
     }
 
-    /** Toggles the main-thread-only render-block boundary overlay. */
-    setDebugBlockVisualization(
-        enabled: boolean,
-        sceneHandle: IRenderSceneHandle | null = this.sceneHandle
-    ): void {
-        this.debugBlockVisualization = enabled;
-        if (!sceneHandle || this.disposed) {
-            return;
-        }
-        const registry = this.registry(sceneHandle);
-        if (!registry) {
-            return;
-        }
-        const desired = new Set(this.layerKeys);
-        this.applyDebugBlockVisualization(registry, desired);
-        this.reconcile(registry, desired);
-    }
-
+    /** Render one tile in WASM and publish all packet fragments as one scene revision. */
     async render(sceneHandle: IRenderSceneHandle): Promise<boolean> {
         if (this.sceneHandle && this.sceneHandle !== sceneHandle) {
             this.sceneRevision += 1;
@@ -235,9 +199,8 @@ export class TileSubsetLayerVisualization {
         if (this.disposed || !this.isReadyForRender()) {
             return false;
         }
-        const primaryState = this.primaryState;
         const dataSourceInfoBlob =
-            this.owner.mapInfo.getRenderDataSourceInfoBlob(primaryState.mapId);
+            this.owner.mapInfo.getRenderDataSourceInfoBlob(this.state.mapId);
         if (!dataSourceInfoBlob) {
             return false;
         }
@@ -245,95 +208,133 @@ export class TileSubsetLayerVisualization {
         // namespace which differs from the catalog datasource's namespace.
         // The worker must decode the subset against the namespace serialized in
         // that exact value, not the MapgetLayer catalog entry.
-        const stringPoolId = primaryState.stringPoolId;
-        if (this.states.some(state => state.stringPoolId !== stringPoolId)) {
-            throw new Error(
-                `Subset block '${this.blockKey}' spans multiple string-pool namespaces.`
-            );
-        }
+        const stringPoolId = this.state.stringPoolId;
         const fieldDictBlob = this.owner.mapInfo.getFieldDictBlob(
             stringPoolId
         );
         if (!fieldDictBlob) {
             return false;
         }
-        const renderOrigin =
-            this.arena(sceneHandle)?.coordinateOrigin(this.blockOrigin) ??
-            this.blockOrigin;
+        const scene = this.gpuScene(sceneHandle);
+        if (!scene) {
+            return false;
+        }
+        const renderOrigin = this.coordinateOrigin;
         const signature = [
-            ...this.states.map(state =>
-                `${state.mapTileKey}:${state.valueVersion}`
-            ),
+            `${this.state.mapTileKey}:${this.state.valueVersion}`,
             this.fidelityValue,
+            this.lineSimplificationToleranceMeters,
             this.owner.style.id,
-            this.styleCacheKey,
+            this.owner.renderStyleKey,
+            this.owner.styleOrder,
             ...renderOrigin,
-            this.sceneRevision
+            this.sceneRevision,
+            gpuIconAtlasService.catalogVersion
         ].join("|");
         if (signature === this.renderedSignature || signature === this.requestedSignature) {
             return true;
         }
         this.requestedSignature = signature;
-        const valueVersions = this.states.map(
-            state => state.valueVersion
-        );
+        const valueVersion = this.state.valueVersion;
         const sceneRevision = this.sceneRevision;
         const startedAt = performance.now();
+        const reservation = scene.prepareRender(
+            `${this.viewIndex}:${this.renderKey}`,
+            renderOrigin,
+            [{
+                identity: this.contributionIdentity(this.state),
+                mapTileKey: this.state.mapTileKey,
+                styleOrder: this.owner.styleOrder,
+                resolvePick: reference =>
+                    this.resolveGpuPick(reference),
+                findPickReferences: targetFeatureId =>
+                    this.findGpuPickReferences(targetFeatureId)
+            }]
+        );
+        const contribution = reservation.contributions[0];
+        const admitted = {result: null as GpuSceneApplyResult | null};
         try {
             const result = await this.renderService.render({
                 visualizationId: this.visualizationId,
                 renderSignature: signature,
                 viewIndex: this.viewIndex,
-                blockKey: this.blockKey,
-                mapTileKeys: this.states.map(state => state.mapTileKey),
-                tileIds: this.states.map(state => state.tileId),
+                renderKey: this.renderKey,
+                mapTileKey: this.state.mapTileKey,
+                tileId: this.state.tileId,
                 coordinateOrigin: renderOrigin,
-                mapId: primaryState.mapId,
+                sceneGeneration: reservation.sceneGeneration,
+                packetSequence: reservation.packetSequence,
+                iconCatalogVersion: gpuIconAtlasService.catalogVersion,
+                originSlot: reservation.origin.slot,
+                originKeyLow: Number(reservation.origin.key & 0xffffffffn),
+                originKeyHigh: Number(
+                    (reservation.origin.key >> 32n) & 0xffffffffn
+                ),
+                contribution: {
+                    keyLow: Number(contribution.key & 0xffffffffn),
+                    keyHigh: Number((contribution.key >> 32n) & 0xffffffffn),
+                    revision: contribution.revision,
+                    slot: contribution.slot,
+                    activationToken: contribution.activationToken
+                },
+                mapId: this.state.mapId,
                 catalogRevision: this.owner.mapInfo.sourceCatalogRevision ?? 0,
                 dataSourceInfoBlob,
                 stringPoolId,
                 fieldDictBlob,
-                subsetBlobs: this.states.map(
-                    state => state.subsetBlob!
-                ),
-                inputGeometryVertexCount: this.states.reduce(
-                    (sum, state) =>
-                        sum + state.geometryVertexCount,
-                    0
-                ),
-                styleKey: this.styleCacheKey,
+                subsetBlob: this.state.subsetBlob!,
+                inputGeometryVertexCount: this.state.geometryVertexCount,
+                styleKey: this.owner.renderStyleKey,
                 styleSource: this.owner.style.source,
                 highlightModeValue: this.owner.highlightMode.value,
-                fidelityValue: this.fidelityValue
-            });
-            if (this.disposed ||
-                signature !== this.requestedSignature ||
-                this.sceneHandle !== sceneHandle ||
-                this.sceneRevision !== sceneRevision ||
-                this.states.some(
-                    (state, index) =>
-                        state.valueVersion !== valueVersions[index]
+                fidelityValue: this.fidelityValue,
+                lineSimplificationToleranceMeters:
+                    this.lineSimplificationToleranceMeters
+            }, packet => {
+                if (!this.isRenderCurrent(
+                    sceneHandle,
+                    scene,
+                    reservation,
+                    signature,
+                    sceneRevision,
+                    valueVersion
                 )) {
-                return false;
-            }
-            if (!await this.applyResult(
+                    throw new StaleSubsetRenderError();
+                }
+                admitted.result = scene.applyPacket(
+                    packet,
+                    reservation
+                );
+            });
+            if (!admitted.result || !this.isRenderCurrent(
                 sceneHandle,
-                result,
+                scene,
+                reservation,
                 signature,
-                sceneRevision
+                sceneRevision,
+                valueVersion
             )) {
                 return false;
             }
-            this.pickResults = result.pickResults ?? [];
-            this.interactionPresentation.refreshPickTargets();
+            const runtimeIssues = await this.applyResult(
+                sceneHandle,
+                result,
+                signature,
+                sceneRevision,
+                reservation,
+                admitted.result
+            );
+            if (!runtimeIssues) {
+                return false;
+            }
             this.renderedSignature = signature;
             this.requestedSignature = "";
             this.installRenderStats(
                 result,
-                valueVersions,
+                valueVersion,
                 performance.now() - startedAt
             );
-            this.recordRuntimeStyleIssues(result);
+            this.recordRuntimeStyleIssues(runtimeIssues);
             return true;
         } catch (error) {
             if (error instanceof StaleSubsetRenderError) {
@@ -341,18 +342,37 @@ export class TileSubsetLayerVisualization {
             }
             this.requestedSignature = "";
             throw error;
+        } finally {
+            scene.finishRender(reservation);
         }
+    }
+
+    /** Verify that a completed worker packet still targets the active tile revision. */
+    private isRenderCurrent(
+        sceneHandle: IRenderSceneHandle,
+        scene: GpuScene,
+        reservation: GpuSceneRenderReservation,
+        signature: string,
+        sceneRevision: number,
+        valueVersion: number
+    ): boolean {
+        return !this.disposed &&
+            signature === this.requestedSignature &&
+            this.sceneHandle === sceneHandle &&
+            this.sceneRevision === sceneRevision &&
+            scene.accepts(reservation) &&
+            this.state.valueVersion === valueVersion;
     }
 
     /** Expands compact worker diagnostics into the application's canonical style-issue stream. */
     private recordRuntimeStyleIssues(
-        result: TileSubsetLayerRenderBuffers
+        issues: readonly GpuRuntimeIssueView[]
     ): void {
-        for (const issue of result.styleIssues) {
+        for (const issue of issues) {
             const id = [
                 "subset-runtime",
-                sipHash64Hex(this.owner.style.source),
-                this.blockKey,
+                this.owner.renderStyleKey,
+                this.renderKey,
                 issue.ruleIndex,
                 issue.property,
                 sipHash64Hex(issue.expression),
@@ -377,107 +397,190 @@ export class TileSubsetLayerVisualization {
                 property: issue.property,
                 expression: issue.expression,
                 runtimeContext: {
-                    mapName: this.primaryState.mapId,
+                    mapName: this.state.mapId,
                     layerName: this.owner.mapgetLayer.layerId,
-                    tileKey: this.blockKey,
+                    tileKey: this.renderKey,
                     renderPath: "worker"
                 }
             });
         }
     }
 
+    /** Publish native and client timings only after the matching revision is visible. */
     private installRenderStats(
         result: TileSubsetLayerRenderBuffers,
-        valueVersions: readonly number[],
+        valueVersion: number,
         clientWallMs: number
     ): void {
-        const counts = result.subsetVertexCounts;
-        const totalVertices = [...counts].reduce(
-            (sum, count) => sum + count,
-            0
-        );
-        const count = Math.max(1, this.states.length);
-        for (let index = 0; index < this.states.length; ++index) {
-            const state = this.states[index];
-            const vertexCount = Number(counts[index] ?? 0);
-            const weight = totalVertices > 0
-                ? vertexCount / totalVertices
-                : 1 / count;
-            const deserializeMs = Number(
-                result.timings.deserializeMsBySubset[index] ??
-                result.timings.deserializeMs / count
-            );
-            const renderMs = result.timings.renderMs * weight;
-            state.renderedValueVersion = valueVersions[index];
-            state.renderStats = {
-                subsetBytes: state.subsetBlob?.byteLength ?? 0,
-                deserializeMs,
-                renderMs,
-                totalMs: deserializeMs + renderMs,
-                clientWallMs,
-                vertexCount
-            };
-        }
+        this.state.renderedValueVersion = valueVersion;
+        this.state.renderStats = {
+            subsetBytes: this.state.subsetBlob?.byteLength ?? 0,
+            deserializeMs: result.timings.deserializeMs,
+            runMs: result.timings.runMs,
+            packetMs: result.timings.packetMs,
+            bridgeMs: result.timings.bridgeMs,
+            renderMs: result.timings.renderMs,
+            totalMs: result.timings.deserializeMs + result.timings.renderMs,
+            clientWallMs,
+            vertexCount: result.vertexCount
+        };
     }
 
-    reattach(sceneHandle: IRenderSceneHandle): Promise<boolean> {
+    /** Rebind to a recreated GPU scene without bypassing controller backpressure. */
+    reattach(sceneHandle: IRenderSceneHandle): void {
         if (this.sceneHandle !== sceneHandle) {
             this.sceneRevision += 1;
         }
         this.sceneHandle = sceneHandle;
         this.renderedSignature = "";
         this.requestedSignature = "";
-        return this.render(sceneHandle);
     }
 
-    destroy(sceneHandle: IRenderSceneHandle | null = this.sceneHandle): void {
-        if (this.disposed) {
+    /** Remove one stable contribution identity and refresh every shared scene host it affects. */
+    static retireContribution(
+        sceneHandle: IRenderSceneHandle | null,
+        identity: string
+    ): void {
+        this.retireContributions(sceneHandle, [identity]);
+    }
+
+    /** Remove many persistent vector owners with one scene-host refresh. */
+    static retireContributions(
+        sceneHandle: IRenderSceneHandle | null,
+        identities: Iterable<string>
+    ): void {
+        if (!sceneHandle) {
             return;
         }
-        this.disposed = true;
-        this.renderService.cancel(this.visualizationId);
-        const registry = sceneHandle ? this.registry(sceneHandle) : null;
-        if (registry) {
-            for (const key of this.layerKeys) {
-                registry.remove(key);
-            }
+        const scene = (sceneHandle.scene as DeckScene | undefined)
+            ?.gpuScene ?? null;
+        const labelsChanged = scene?.removeContributions(identities) ?? false;
+        for (const layer of (sceneHandle.scene as DeckScene | undefined)
+            ?.gpuVectorLayers ?? []) {
+            layer.sceneChanged();
         }
-        this.layerKeys.clear();
-        this.interactionPresentation.destroy();
-        this.vectorPresentation.destroy();
-        this.gltfPresentation.destroy(registry);
-        for (const state of this.states) {
-            this.owner.releaseTileState(state);
+        if (labelsChanged) {
+            (sceneHandle.scene as DeckScene | undefined)
+                ?.gpuTextLayerHost?.sceneChanged();
         }
-        this.pickResults = [];
-        this.sceneHandle = null;
     }
 
+    /** Permanently retire many independent tile owners as one GPU mutation. */
+    static destroyMany(
+        visualizations: readonly TileSubsetLayerVisualization[],
+        sceneHandle: IRenderSceneHandle | null
+    ): void {
+        const retiredIdentities: string[] = [];
+        for (const visualization of visualizations) {
+            visualization.dispose(
+                sceneHandle,
+                false,
+                identity => retiredIdentities.push(identity)
+            );
+        }
+        this.retireContributions(sceneHandle, retiredIdentities);
+    }
+
+    /**
+     * Destroy this tile owner, optionally transferring its stable GPU identity
+     * to the pending successor which will replace the same tile atomically.
+     */
+    destroy(
+        sceneHandle: IRenderSceneHandle | null = this.sceneHandle,
+        preserveContribution = false
+    ): string | null {
+        return this.dispose(
+            sceneHandle,
+            preserveContribution,
+            identity => TileSubsetLayerVisualization.retireContribution(
+                sceneHandle,
+                identity
+            )
+        );
+    }
+
+    /** Release local ownership while delegating persistent-scene retirement. */
+    private dispose(
+        sceneHandle: IRenderSceneHandle | null,
+        preserveContribution: boolean,
+        retireContribution: (identity: string) => void
+    ): string | null {
+        if (this.disposed) {
+            return null;
+        }
+        this.disposed = true;
+        const preservedIdentity = preserveContribution && sceneHandle
+            ? this.contributionIdentity(this.state)
+            : null;
+        this.renderService.cancel(this.visualizationId);
+        const registry = sceneHandle ? this.registry(sceneHandle) : null;
+        if (sceneHandle) {
+            this.maskController(sceneHandle)?.removeOwner(this.visualizationId);
+        }
+        this.gltfPresentation.destroy(registry);
+        this.interactionGltf = null;
+        if (sceneHandle) {
+            const identity = this.contributionIdentity(this.state);
+            if (identity !== preservedIdentity) {
+                retireContribution(identity);
+            }
+        }
+        this.owner.releaseTileState(this.state);
+        this.contributionIdentities.clear();
+        this.interactionOverlays = [];
+        this.gltfPickResults = [];
+        this.pickSubset?.delete();
+        this.pickSubset = null;
+        this.pickSubsetValueVersion = -1;
+        this.pendingIconUris.clear();
+        this.failedIconUris.clear();
+        this.sceneHandle = null;
+        return preservedIdentity;
+    }
+
+    /** Refresh stable scene hosts and install the temporary GLTF bridge atomically. */
     private async applyResult(
         sceneHandle: IRenderSceneHandle,
         result: TileSubsetLayerRenderBuffers,
         signature: string,
-        sceneRevision: number
-    ): Promise<boolean> {
+        sceneRevision: number,
+        reservation: GpuSceneRenderReservation,
+        applied: GpuSceneApplyResult
+    ): Promise<readonly GpuRuntimeIssueView[] | null> {
         const registry = this.registry(sceneHandle);
         if (!registry) {
-            return false;
+            return null;
         }
-        const desired = new Set<string>();
-        this.applyDebugBlockVisualization(registry, desired);
-        const origin = this.coordinateOrigin(result.coordinateOrigin);
+        const scene = this.gpuScene(sceneHandle);
+        if (!scene || !scene.accepts(reservation)) {
+            return null;
+        }
+        this.requestMissingIcons(applied.resourceRequests);
+        for (const layer of this.vectorLayers(sceneHandle)) {
+            layer.sceneChanged();
+        }
+        if (applied.labelsChanged) {
+            this.textLayerHost(sceneHandle)?.sceneChanged();
+        }
+        const maskController = this.maskController(sceneHandle);
+        maskController?.setOverlays(
+            this.visualizationId,
+            this.contributionIdentities,
+            this.coordinateOrigin,
+            this.interactionOverlays
+        );
+        maskController?.sceneChanged();
+
+        const origin = this.parseCoordinateOrigin(
+            result.bridge.coordinateOrigin
+        );
         if (!origin) {
-            this.interactionPresentation.clear(
-                registry,
-                this.outlineService(sceneHandle)
-            );
-            this.vectorPresentation.clear();
             this.gltfPresentation.clear(registry);
-            this.reconcile(registry, desired);
-            return true;
+            this.interactionGltf = null;
+            return applied.issues;
         }
         const preparedGltf = await this.gltfPresentation.prepare(
-            result,
+            result.bridge,
             (sceneHandle.scene as DeckScene | undefined)?.device ?? null
         );
         if (this.disposed ||
@@ -485,7 +588,7 @@ export class TileSubsetLayerVisualization {
             this.sceneHandle !== sceneHandle ||
             this.sceneRevision !== sceneRevision) {
             this.gltfPresentation.discard(preparedGltf);
-            return false;
+            return null;
         }
         const modelMatrix = this.modelMatrix(sceneHandle);
         const interaction = deckSubsetInteractionProps(
@@ -494,180 +597,159 @@ export class TileSubsetLayerVisualization {
             coreLib.HighlightMode.NO_HIGHLIGHT.value,
             (sceneHandle.scene as DeckScene | undefined)?.sceneMode
         );
+        this.gltfPickResults = result.bridge.pickResults ?? [];
         const pickResolver: PickResolver = pickIndex => this.resolvePick(pickIndex);
-        const vectorSource = this.vectorPresentation.install({
+        this.interactionGltf = this.gltfPresentation.install(
             registry,
-            arena: this.arena(sceneHandle),
-            result,
-            origin,
-            modelMatrix,
-            interaction,
-            pickResolver
-        });
-        const interactionGltf = this.gltfPresentation.install(
-            registry,
-            result,
+            result.bridge,
             origin,
             modelMatrix,
             pickResolver,
             interaction,
             preparedGltf
         );
-        this.interactionPresentation.installSource(
-            {...vectorSource, gltf: interactionGltf},
-            registry,
-            this.outlineService(sceneHandle)
-        );
-        this.reconcile(registry, desired);
-        return true;
+        this.refreshGltfInteractions(registry);
+        return applied.issues;
     }
 
-    /** Adds one labeled WGS84 rectangle for the actual rendered block. */
-    private applyDebugBlockVisualization(
-        registry: DeckLayerRegistry,
-        desired: Set<string>
+    /** Load unresolved packet icons once, then rerender against the advanced catalog. */
+    private requestMissingIcons(
+        requests: readonly GpuResourceRequestView[]
     ): void {
-        const pathKey = this.key("debug-block", false, false);
-        const labelKey = this.key("debug-block-label", false, true);
-        desired.delete(pathKey);
-        desired.delete(labelKey);
-        if (!this.debugBlockVisualization) {
-            return;
+        for (const request of requests) {
+            const uri = request.uri.trim();
+            if (request.resourceKind !== GpuResourceKind.Icon || !uri ||
+                this.pendingIconUris.has(uri) || this.failedIconUris.has(uri)) {
+                continue;
+            }
+            this.pendingIconUris.add(uri);
+            gpuIconAtlasService.ensureResource(uri).then(loaded => {
+                this.pendingIconUris.delete(uri);
+                if (!loaded) {
+                    this.failedIconUris.add(uri);
+                    return;
+                }
+                if (this.disposed || !this.sceneHandle) {
+                    return;
+                }
+                this.requestedSignature = "";
+                this.requestRerender(this);
+            });
         }
-        const bounds = this.debugBlockBounds();
-        if (!bounds) {
-            return;
-        }
-        const color = this.debugBlockColor(this.states.length);
-        registry.upsert(pathKey, new PathLayer<DebugBlockPath>({
-            id: pathKey,
-            data: [{path: bounds.path}],
-            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-            getPath: datum => datum.path,
-            getColor: color,
-            getWidth: 3,
-            widthUnits: "pixels",
-            capRounded: false,
-            jointRounded: false,
-            pickable: false,
-            parameters: NO_DEPTH_PARAMETERS
-        }), 10_000 + this.owner.styleOrder);
-        desired.add(pathKey);
-
-        const geometryVertices = this.states.reduce(
-            (sum, state) => sum + state.geometryVertexCount,
-            0
-        );
-        const label: DebugBlockLabel = {
-            position: bounds.center,
-            text: `${this.states.length} tile${this.states.length === 1 ? "" : "s"} / ` +
-                `${geometryVertices.toLocaleString()} v`
-        };
-        registry.upsert(labelKey, new TextLayer<DebugBlockLabel>({
-            id: labelKey,
-            data: [label],
-            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-            getPosition: datum => datum.position,
-            getText: datum => datum.text,
-            getColor: color,
-            getSize: 13,
-            getPixelOffset: () => [
-                0,
-                (this.debugLabelLane() - 2) * 14
-            ],
-            billboard: true,
-            pickable: false,
-            parameters: NO_DEPTH_PARAMETERS
-        }), 10_001 + this.owner.styleOrder);
-        desired.add(labelKey);
     }
 
-    private debugBlockBounds(): {
-        path: Array<[number, number, number]>;
-        center: [number, number, number];
-    } | null {
-        let west = Number.POSITIVE_INFINITY;
-        let south = Number.POSITIVE_INFINITY;
-        let east = Number.NEGATIVE_INFINITY;
-        let north = Number.NEGATIVE_INFINITY;
-        for (const state of this.states) {
-            const tile = new PackedTileId(state.tileId);
-            const [x, y] = tile.southWestCorner();
-            const size = tile.size();
-            west = Math.min(west, x * 360 / 2 ** 32);
-            south = Math.min(south, y * 180 / 2 ** 31);
-            east = Math.max(east, (x + size) * 360 / 2 ** 32);
-            north = Math.max(north, (y + size) * 180 / 2 ** 31);
+    /** Rebuild only the small GLTF tint bridge for active semantic overlays. */
+    private refreshGltfInteractions(registry: DeckLayerRegistry): void {
+        const source = this.interactionGltf;
+        const desired = new Set<string>();
+        if (source) {
+            for (const overlay of this.interactionOverlays) {
+                const targets = new Set(overlay.targets.map(target =>
+                    `${target.mapTileKey}\u0000${target.featureId}`
+                ));
+                const token = this.gltfPresentation.installInteraction(
+                    registry,
+                    source,
+                    overlay,
+                    address => this.resolvePick(address).some(target =>
+                        targets.has(
+                            `${target.mapTileKey}\u0000${target.featureId}`
+                        )
+                    )
+                );
+                if (token) {
+                    desired.add(token);
+                }
+            }
         }
-        if (![west, south, east, north].every(Number.isFinite)) {
-            return null;
-        }
-        return {
-            path: [
-                [west, south, 0],
-                [east, south, 0],
-                [east, north, 0],
-                [west, north, 0],
-                [west, south, 0]
-            ],
-            center: [
-                (west + east) / 2,
-                (south + north) / 2,
-                0
-            ]
-        };
+        this.gltfPresentation.reconcileInteractions(registry, desired);
     }
 
-    private debugBlockColor(
-        tileCount: number
-    ): [number, number, number, number] {
-        if (tileCount >= 16) {
-            return [255, 60, 200, 255];
-        }
-        if (tileCount >= 8) {
-            return [255, 150, 40, 255];
-        }
-        if (tileCount >= 4) {
-            return [60, 230, 100, 255];
-        }
-        if (tileCount >= 2) {
-            return [40, 180, 255, 255];
-        }
-        return [230, 230, 230, 255];
-    }
-
-    /** Spreads coincident labels from multiple styled layers into five lanes. */
-    private debugLabelLane(): number {
-        let hash = 0;
-        const identity = [
-            this.owner.mapgetLayer.layerId,
-            this.owner.style.id
-        ].join("/");
-        for (let index = 0; index < identity.length; ++index) {
-            hash = ((hash * 31) + identity.charCodeAt(index)) >>> 0;
-        }
-        return hash % 5;
-    }
-
+    /** Resolve GLTF-local pick addresses through the singleton worker bridge. */
     private resolvePick(pickIndex: number): TileFeatureId[] {
         if (!Number.isInteger(pickIndex) ||
             pickIndex < 0 ||
             pickIndex === UNSELECTABLE) {
             return [];
         }
-        const result = this.pickResults[pickIndex];
-        if (!result?.featureId) {
+        const result = this.gltfPickResults[pickIndex];
+        const featureIds = this.featureIdsForPickResult(result);
+        if (featureIds === undefined) {
             return [];
         }
-        const state = this.states[result.subsetOrdinal];
-        if (!state) {
-            return [];
-        }
-        if (result.memberFeatureIds?.length) {
-            return [...new Set(result.memberFeatureIds)].map(featureId => ({
-                mapTileKey: state.mapTileKey,
+        return (typeof featureIds === "string" ? [featureIds] : featureIds)
+            .map(featureId => ({
+                mapTileKey: this.state.mapTileKey,
                 featureId
             }));
+    }
+
+    /** Resolve one compact GPU tuple only after Deck reports an actual interaction. */
+    private resolveGpuPick(
+        reference: GpuScenePickReference
+    ): string | readonly string[] | undefined {
+        const subset = this.gpuPickSubset();
+        return subset
+            ? this.featureIdsForPickResult(subset.resolvePick(
+                reference.channelOrdinal,
+                reference.entryOrdinal,
+                reference.endpointRole
+            ))
+            : undefined;
+    }
+
+    /** Locate packet tuples for one restored semantic target without scanning strings. */
+    private findGpuPickReferences(
+        targetFeatureId: string
+    ): readonly GpuScenePickReference[] {
+        const subset = this.gpuPickSubset();
+        if (!subset) {
+            return [];
+        }
+        const target = parseFeatureInspectionTarget(targetFeatureId);
+        const entryIndex = target.scope === "attribute"
+            ? target.attributeIndex
+            : target.scope === "relation"
+                ? target.relationIndex
+                : -1;
+        return subset.findPickReferences(
+            target.baseFeatureId,
+            target.scope,
+            entryIndex,
+            target.scope === "feature"
+                ? -1
+                : target.validityIndex ?? -1
+        );
+    }
+
+    /** Lazily parse and retain only an interacted immutable subset revision. */
+    private gpuPickSubset(): GpuPickSubset | null {
+        if (this.pickSubsetValueVersion === this.state.valueVersion) {
+            return this.pickSubset;
+        }
+        this.pickSubset?.delete();
+        this.pickSubset = null;
+        this.pickSubsetValueVersion = this.state.valueVersion;
+        const blob = this.state.subsetBlob;
+        if (!blob) {
+            return null;
+        }
+        this.pickSubset = uint8ArrayToWasm(
+            data => this.owner.mapInfo.tileLayerParser.readTileSubsetLayer(data),
+            blob
+        ) as unknown as GpuPickSubset | null;
+        return this.pickSubset;
+    }
+
+    /** Convert one native subset result into the canonical inspection target grammar. */
+    private featureIdsForPickResult(
+        result: TileSubsetPickResult | undefined
+    ): string | readonly string[] | undefined {
+        if (!result?.featureId) {
+            return undefined;
+        }
+        if (result.memberFeatureIds?.length) {
+            return [...new Set(result.memberFeatureIds)];
         }
         let featureId = result.featureId;
         const attributeIndex = result.attributeIndex;
@@ -694,75 +776,62 @@ export class TileSubsetLayerVisualization {
                 relationIndex
             });
         }
-        return [{mapTileKey: state.mapTileKey, featureId}];
+        return featureId;
     }
 
-    private interactionScope(
-        address: number
-    ): TileSubsetInteractionScope {
-        const result = this.pickResults[address];
-        if (result?.memberFeatureIds?.length) {
-            return "group";
-        }
-        if (Number.isInteger(result?.attributeIndex)) {
-            return "attribute";
-        }
-        if (result?.relationSourceFeatureId &&
-            Number.isInteger(result.relationIndex)) {
-            return "relation";
-        }
-        return "feature";
-    }
-
-    private key(kind: string, depthTest: boolean, billboard?: boolean): string {
-        return makeDeckLayerKey({
-            tileKey: this.blockKey,
-            styleId: this.owner.ownerId,
-            hoverMode: this.owner.identity.presentationKind,
-            kind,
-            variant: `${billboard ? "billboard" : "world"}-${depthTest ? "depth" : "overlay"}`
-        });
-    }
-
-    private reconcile(registry: DeckLayerRegistry, desired: Set<string>): void {
-        for (const key of this.layerKeys) {
-            if (!desired.has(key)) {
-                registry.remove(key);
-            }
-        }
-        this.layerKeys.clear();
-        for (const key of desired) {
-            this.layerKeys.add(key);
-        }
-    }
-
+    /** Read the Deck registry without coupling the generic scene handle interface to Deck. */
     private registry(sceneHandle: IRenderSceneHandle): DeckLayerRegistry | null {
         return (sceneHandle.scene as DeckScene | undefined)?.layerRegistry ?? null;
     }
 
-    private arena(sceneHandle: IRenderSceneHandle): DeckRenderBufferArena | null {
-        return (sceneHandle.scene as DeckScene | undefined)?.renderBufferArena ?? null;
+    /** Resolve the persistent scene owned by the current Deck view generation. */
+    private gpuScene(sceneHandle: IRenderSceneHandle): GpuScene | null {
+        return (sceneHandle.scene as DeckScene | undefined)?.gpuScene ?? null;
     }
 
-    private outlineService(
+    /** Resolve both fixed vector pass shells associated with the current scene. */
+    private vectorLayers(
         sceneHandle: IRenderSceneHandle
-    ): DeckInteractionOutlineService | null {
-        return (sceneHandle.scene as DeckScene | undefined)
-            ?.interactionOutlineService ?? null;
+    ): readonly ErdblickVectorLayer[] {
+        return (sceneHandle.scene as DeckScene | undefined)?.gpuVectorLayers ?? [];
     }
 
-    private coordinateOrigin(raw: Float64Array): [number, number, number] | null {
+    /** Resolve the single bounded-snapshot TextLayer host for the current scene. */
+    private textLayerHost(
+        sceneHandle: IRenderSceneHandle
+    ): GpuTextLayerHost | null {
+        return (sceneHandle.scene as DeckScene | undefined)?.gpuTextLayerHost ?? null;
+    }
+
+    /** Resolve the shared semantic mask/glow controller for this view. */
+    private maskController(
+        sceneHandle: IRenderSceneHandle
+    ): GpuSceneMaskController | null {
+        return (sceneHandle.scene as DeckScene | undefined)
+            ?.gpuMaskController ?? null;
+    }
+
+    /** Validate the native GLTF bridge origin before constructing a model matrix. */
+    private parseCoordinateOrigin(
+        raw: Float64Array
+    ): [number, number, number] | null {
         return raw.length >= 3 ? [raw[0], raw[1], raw[2]] : null;
     }
 
+    /** Reuse the view's double-precision origin transform, including 2D flattening. */
     private modelMatrix(sceneHandle: IRenderSceneHandle): Matrix4 | null {
         return (sceneHandle.scene as DeckScene | undefined)?.sceneMode === SceneMode.SCENE2D
             ? FLAT_2D_MODEL_MATRIX
             : null;
     }
 
-    private parameters(depthTest: boolean): any {
-        return depthTest ? {} : NO_DEPTH_PARAMETERS;
+    /** Stable semantic owner key independent of the worker batch which carries it. */
+    private contributionIdentity(state: FilterTileState): string {
+        return [
+            this.owner.ownerId,
+            `view-${this.viewIndex}`,
+            state.mapTileKey
+        ].join("\u0000");
     }
 
 }

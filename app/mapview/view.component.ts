@@ -210,6 +210,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private hoverSubscription?: Subscription;
     private firstPersonViewActiveSubscription?: Subscription;
     private firstPersonViewRequestSubscription?: Subscription;
+    private rendererContextLostSubscription?: Subscription;
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
     private deckAntialiasingEnabled = true;
@@ -418,6 +419,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      */
     private async createViewerForMode(is2D: boolean, setupGeneration: number): Promise<IRenderView | undefined> {
         this.cancelRectangleSelection();
+        this.rendererContextLostSubscription?.unsubscribe();
+        this.rendererContextLostSubscription = undefined;
         this.hoverSubscription?.unsubscribe();
         this.hoverSubscription = undefined;
         this.lastHoverResult = undefined;
@@ -447,9 +450,14 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
         await this.ngZone.runOutsideAngular(() => mapView.setup());
         if (setupGeneration !== this.viewerSetupGeneration) {
-            await this.ngZone.runOutsideAngular(() => mapView.destroy({clearTileVisualizations: false}));
+            await this.ngZone.runOutsideAngular(() => mapView.destroy());
             return undefined;
         }
+        this.rendererContextLostSubscription = mapView.contextLost.subscribe(() => {
+            if (setupGeneration === this.viewerSetupGeneration) {
+                this.initializeViewer(this.is2DMode);
+            }
+        });
         this.mapView = mapView;
         this.layerController?.attachScene(mapView.getSceneHandle());
         this.viewerInitError = "";
@@ -477,6 +485,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.firstPersonViewActiveSubscription?.unsubscribe();
         this.firstPersonViewRequestSubscription?.unsubscribe();
         this.cacheResetSubscription?.unsubscribe();
+        this.rendererContextLostSubscription?.unsubscribe();
         this.subscriptions.splice(0).forEach(subscription =>
             subscription.unsubscribe());
         this.cancelRectangleSelection();

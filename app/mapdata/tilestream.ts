@@ -21,31 +21,10 @@ export const MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE = 8;
 export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
 export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-context";
 export const MAP_TILE_STREAM_FILTER_STATUS_TYPE = "mapget.filter.status";
-// These framing constants must be importable before the asynchronous WASM
-// module exists (notably by protocol tests). Runtime initialization verifies
-// them against mapget's authoritative compiled version.
-export const MAP_TILE_STREAM_PROTOCOL_MAJOR = 3;
-export const MAP_TILE_STREAM_PROTOCOL_MINOR = 1;
 const TARGET_TILE_REQUEST_CHUNK_BYTES = 1024 * 1024;
 const MAX_TILE_REQUEST_MESSAGE_BYTES = 9 * 1024 * 1024;
 const MAX_SPARSE_RENEWAL_TILES_PER_ENTRY = 512;
 const MAX_SPARSE_RENEWAL_TILES_PER_ENVELOPE = 2048;
-
-/** Fail fast if the TypeScript framing constants drift from mapget's ABI. */
-export function assertMapTileStreamProtocolVersion(): void {
-    const actualMajor =
-        coreLib.tileLayerStreamProtocolMajor();
-    const actualMinor =
-        coreLib.tileLayerStreamProtocolMinor();
-    if (actualMajor !== MAP_TILE_STREAM_PROTOCOL_MAJOR ||
-        actualMinor !== MAP_TILE_STREAM_PROTOCOL_MINOR) {
-        throw new Error(
-            `Tile-stream protocol build mismatch: TypeScript expects ` +
-            `${MAP_TILE_STREAM_PROTOCOL_MAJOR}.${MAP_TILE_STREAM_PROTOCOL_MINOR}, ` +
-            `but WASM exports ${actualMajor}.${actualMinor}.`
-        );
-    }
-}
 
 export interface MapTileStreamStatusRequest {
     index: number;
@@ -184,6 +163,7 @@ export class MapTileStreamClient {
     private connecting: Promise<void> | null = null;
     private readonly decoder = new TextDecoder();
     private readonly encoder = new TextEncoder();
+    private readonly protocolVersion: {major: number; minor: number};
     public parser: TileLayerParser;
     private lastRequestPromise: Promise<void> | null = null;
     private awaitingCompletion: boolean = false;
@@ -255,6 +235,13 @@ export class MapTileStreamClient {
         this.activeStreamPath = path;
         this.ownsParser = !parser;
         this.parser = parser ?? new coreLib.TileLayerParser();
+        // The parser and framing version come from the same mapget build in
+        // WASM. Keeping a second TypeScript version inevitably drifts during
+        // dependency upgrades and cannot describe what this client can parse.
+        this.protocolVersion = {
+            major: coreLib.tileLayerStreamProtocolMajor(),
+            minor: coreLib.tileLayerStreamProtocolMinor()
+        };
     }
 
     /** Registers the callback that receives feature payload frames without the transport header. */
@@ -1175,8 +1162,8 @@ export class MapTileStreamClient {
 
     /** Returns whether a VTLV frame can be parsed by this frontend build. */
     private isCompatibleProtocol(version: {major: number; minor: number}): boolean {
-        return version.major === MAP_TILE_STREAM_PROTOCOL_MAJOR
-            && version.minor === MAP_TILE_STREAM_PROTOCOL_MINOR;
+        return version.major === this.protocolVersion.major
+            && version.minor === this.protocolVersion.minor;
     }
 
     /** Reports one protocol mismatch and stops the active transport because following frame parsing is unsafe. */
@@ -1185,16 +1172,13 @@ export class MapTileStreamClient {
             this.protocolMismatchReported = true;
             this.onProtocolMismatch?.({
                 actual: version,
-                expected: {
-                    major: MAP_TILE_STREAM_PROTOCOL_MAJOR,
-                    minor: MAP_TILE_STREAM_PROTOCOL_MINOR
-                }
+                expected: this.protocolVersion
             });
         }
         this.stopPullLoops();
         this.rejectCompletion(new Error(
             `Unsupported mapget tile-stream protocol ${version.major}.${version.minor}.${version.patch}; `
-            + `expected ${MAP_TILE_STREAM_PROTOCOL_MAJOR}.${MAP_TILE_STREAM_PROTOCOL_MINOR}.x.`));
+            + `expected ${this.protocolVersion.major}.${this.protocolVersion.minor}.x.`));
         this.close(1002, "unsupported mapget tile-stream protocol");
     }
 

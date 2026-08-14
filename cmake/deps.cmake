@@ -53,6 +53,18 @@ if (NOT TARGET mapget-model)
   endif()
 endif()
 
+if (NOT TARGET mapbox-earcut)
+  CPMAddPackage(
+    NAME mapbox-earcut-source
+    GITHUB_REPOSITORY mapbox/earcut.hpp
+    GIT_TAG v2.2.4
+    DOWNLOAD_ONLY YES)
+  add_library(mapbox-earcut INTERFACE)
+  target_include_directories(
+    mapbox-earcut
+    INTERFACE "${mapbox-earcut-source_SOURCE_DIR}/include")
+endif()
+
 if (NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten" AND NOT TARGET Catch2::Catch2WithMain)
   CPMAddPackage(
     URI "gh:catchorg/Catch2@3.3.2"

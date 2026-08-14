@@ -154,7 +154,10 @@ rules:
     REQUIRE(feature.featureFilter_->find("speed > 20") != std::string::npos);
     REQUIRE(feature.featureFilter_->find("toll") != std::string::npos);
     REQUIRE(feature.entryFields_.empty());
-    REQUIRE(feature.featureFields_.size() == 6);
+    REQUIRE(feature.featureFields_.size() == 5);
+    REQUIRE(std::ranges::none_of(
+        feature.featureFields_,
+        [](auto const& field) { return field == "any(enabled)"; }));
     REQUIRE(std::ranges::any_of(
         feature.featureFields_,
         [](auto const& field) { return field == "drawOrder"; }));
@@ -206,6 +209,40 @@ rules:
     REQUIRE_FALSE(plan.valid);
     REQUIRE(plan.channels.empty());
     REQUIRE(plan.issues.size() == 1);
+}
+
+TEST_CASE(
+    "Style filter planning shares equivalent feature geometry channels",
+    "[erdblick.style-plan]")
+{
+    auto parsed = style(R"yaml(
+name: SharedFeatureGeometry
+version: 2
+rules:
+  - type: Road
+    geometry: line
+    geometry-name: centerline
+    filter: enabled
+    color-expression: casingColor
+  - type: Road
+    geometry: line
+    geometry-name: centerline
+    filter: enabled
+    color-expression: fillColor
+)yaml");
+    REQUIRE(parsed.isValid());
+
+    auto plan = planStyleFilter(
+        parsed,
+        *plannerLayerInfo(),
+        FeatureStyleRule::NoHighlight,
+        FeatureStyleRule::AnyFidelity);
+
+    REQUIRE(plan.valid);
+    REQUIRE(plan.channels.size() == 1);
+    REQUIRE(plan.channels[0].channelId_ == "style-rules:0,1");
+    REQUIRE(plan.channels[0].featureFields_ ==
+        std::vector<std::string>{"casingColor", "fillColor"});
 }
 
 TEST_CASE(

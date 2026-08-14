@@ -1,8 +1,44 @@
+import {Subject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 import {FilterTileState} from "./filter-tile-state.model";
 import {StyledMapgetLayer} from "./styled-mapget-layer.model";
 
 describe("StyledMapgetLayer presentation refs", () => {
+    it("publishes one removal event for a complete coverage delta", () => {
+        const layer = Object.create(StyledMapgetLayer.prototype) as any;
+        const first = new FilterTileState(
+            "map", "layer", 41, "map/layer/41", 1
+        );
+        const second = new FilterTileState(
+            "map", "layer", 42, "map/layer/42", 1
+        );
+        layer.disposed = false;
+        layer.coverage = {tileIds: [41, 42]};
+        layer.coverageVersionValue = 0;
+        layer.tileStates = new Map([[41, first], [42, second]]);
+        layer.retiredTileStates = new Map();
+        layer.tileStatePresentationRefs = new Map();
+        layer.events = new Subject();
+        layer.filterRef = {
+            generation: 1,
+            suspended: false,
+            setCoverage: vi.fn()
+        };
+        const events: unknown[] = [];
+        layer.events.subscribe((event: unknown) => events.push(event));
+
+        layer.setCoverage([]);
+
+        expect(events).toEqual([{
+            type: "tiles-removed",
+            states: [first, second]
+        }]);
+        expect(layer.retiredTileStates).toEqual(new Map([
+            [41, first],
+            [42, second]
+        ]));
+    });
+
     it("keeps a retired subset until the final presentation ref is released", () => {
         const layer = Object.create(StyledMapgetLayer.prototype) as any;
         layer.disposed = false;

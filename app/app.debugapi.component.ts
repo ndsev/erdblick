@@ -1,6 +1,8 @@
 import {coreLib, ErdblickCore_} from "./integrations/wasm";
+import {Cartographic} from "./integrations/geo";
 import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
 import {
+    type DeckPresentationDebugSnapshot,
     TileSubsetLayerRenderService,
     type TileSubsetLayerRenderDebugSnapshot
 } from "./mapview/deck/tile-subset-layer-render.service";
@@ -11,7 +13,9 @@ export interface DebugWindow extends Window {
     ebDebug: ErdblickDebugApi;
 }
 
+/** Stable browser-console facade for renderer, camera, and transport diagnostics. */
 export class ErdblickDebugApi {
+    /** Bind supported debug operations without exposing service internals directly. */
     constructor(
         private readonly tileStream: MapTileStreamService,
         private readonly subsetRenderer: TileSubsetLayerRenderService,
@@ -19,6 +23,7 @@ export class ErdblickDebugApi {
     ) {
     }
 
+    /** Apply one serialized camera state after validating its logical view index. */
     setCamera(viewIndex: number, cameraInfoStr: string): void {
         if (viewIndex >= this.stateService.numViews) {
             console.error(
@@ -31,9 +36,10 @@ export class ErdblickDebugApi {
             return;
         }
         const cameraInfo = JSON.parse(cameraInfoStr);
+        const [longitude, latitude, height] = cameraInfo.position;
         this.stateService.setView(
             viewIndex,
-            cameraInfo.position,
+            Cartographic.fromRadians(longitude, latitude, height),
             {
                 heading: cameraInfo.orientation.heading,
                 pitch: cameraInfo.orientation.pitch,
@@ -42,6 +48,7 @@ export class ErdblickDebugApi {
         );
     }
 
+    /** Serialize one logical view's camera in the format accepted by `setCamera`. */
     getCamera(viewIndex: number): string | undefined {
         if (viewIndex >= this.stateService.numViews) {
             console.error(
@@ -59,14 +66,27 @@ export class ErdblickDebugApi {
         return JSON.stringify({position, orientation});
     }
 
+    /** Expose the initialized core module for deliberate low-level investigations. */
     coreLib(): ErdblickCore_ {
         return coreLib;
     }
 
+    /** Return worker-credit, packet-admission, and render-timing diagnostics. */
     subsetRenderQueue(): TileSubsetLayerRenderDebugSnapshot {
         return this.subsetRenderer.debugSnapshot();
     }
 
+    /** Returns persistent GPU allocation and draw-cardinality diagnostics. */
+    subsetRenderPresentation(): DeckPresentationDebugSnapshot {
+        return this.subsetRenderer.currentDeckPresentationDiagnostics();
+    }
+
+    /** Returns the worst recent per-view p90 Deck frame interval. */
+    subsetRenderFrameTimeMs(): number {
+        return this.subsetRenderer.currentFrameTimeMs();
+    }
+
+    /** Construct a canonical feature-layer key through the authoritative WASM API. */
     mapTileKey(
         mapId: string,
         layerId: string,

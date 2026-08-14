@@ -1955,6 +1955,32 @@ all-of:
     REQUIRE(matches[1]->isDashed());
 }
 
+TEST_CASE("FeatureStyleRulePreservesLiteralAndRegexTypeMatching", "[erdblick.style]")
+{
+    FeatureStyleRule literal(YAML::Load(R"(
+type: Road
+geometry: [line]
+)"), 0);
+    REQUIRE(literal.maybeMatchesType("Road"));
+    REQUIRE_FALSE(literal.maybeMatchesType("RoadSurface"));
+
+    FeatureStyleRule alternatives(YAML::Load(R"(
+type: Road|Lane
+geometry: [line]
+)"), 0);
+    REQUIRE(alternatives.maybeMatchesType("Road"));
+    REQUIRE(alternatives.maybeMatchesType("Lane"));
+    REQUIRE_FALSE(alternatives.maybeMatchesType("RoadSurface"));
+
+    FeatureStyleRule wildcard(YAML::Load(R"(
+type: Road.*
+geometry: [line]
+)"), 0);
+    REQUIRE(wildcard.maybeMatchesType("Road"));
+    REQUIRE(wildcard.maybeMatchesType("RoadSurface"));
+    REQUIRE_FALSE(wildcard.maybeMatchesType("Lane"));
+}
+
 TEST_CASE("FeatureStyleRuleNestedBranchesMatchInOrder", "[erdblick.style]")
 {
     auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42.0, 11.0, 13));

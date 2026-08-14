@@ -2655,15 +2655,20 @@ export class FeatureSearchService {
             this.progress.next(session);
             return;
         }
-        if (event.type === "tile-removed") {
+        if (event.type === "tiles-removed") {
+            const removedTileKeys = new Set(
+                event.states.map(state => state.mapTileKey)
+            );
             this.subsetIngestionLoop.cancel(task =>
                 task.presentationKey === presentation.key &&
-                task.sourceTileKey === event.state.mapTileKey
+                removedTileKeys.has(task.sourceTileKey)
             );
-            this.removeServerSearchResultTile({
-                searchId: session.id,
-                sourceTileKey: event.state.mapTileKey
-            });
+            for (const sourceTileKey of removedTileKeys) {
+                this.removeServerSearchResultTile({
+                    searchId: session.id,
+                    sourceTileKey
+                });
+            }
             this.applySearchCoverageSnapshot(session.id);
             return;
         }

@@ -115,6 +115,21 @@ describe("HoverDetailService", () => {
         expect(filterRefs[0].release).toHaveBeenCalledOnce();
     });
 
+    it("does not rescan unchanged viewport coverage on unrelated reconciliations", () => {
+        const {service, filterRefs, mapgetLayer} = createHarness([
+            {expression: "typeId", customExpression: false}
+        ]);
+        const tileIds = [545379780];
+        const priorityTileIds = [545379780];
+        const coverage = [{mapgetLayer, tileIds, priorityTileIds}];
+
+        service.reconcileView(0, coverage);
+        service.reconcileView(0, coverage);
+
+        expect(filterRefs[0].setCoverage).toHaveBeenCalledOnce();
+        service.ngOnDestroy();
+    });
+
     it("disables labels and releases projections without deleting their field configuration", () => {
         const {service, state, tileStream, filterRefs, mapgetLayer} =
             createHarness([

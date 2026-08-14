@@ -1,16 +1,41 @@
-/** Immutable worker input for one Morton-aligned subset block render pass. */
+/** Scene-owned identity assigned to one subset before worker rendering starts. */
+export interface TileSubsetGpuContribution {
+    keyLow: number;
+    keyHigh: number;
+    revision: number;
+    slot: number;
+    activationToken: number;
+}
+
+/** Immutable atlas metadata installed in a worker when the catalog advances. */
+export interface TileSubsetGpuIconCatalogEntry {
+    uri: string;
+    atlasPage: number;
+    uv: [number, number, number, number];
+    pixelSize: [number, number];
+}
+
+/** Immutable worker input for one bounded subset packet render pass. */
 export interface TileSubsetLayerRenderTask {
     type: "TileSubsetLayerRenderTask";
     taskId: string;
     visualizationId: string;
     renderSignature: string;
     viewIndex: number;
-    blockKey: string;
-    /** Output tile identities in the same order as `subsetBlobs`. */
-    mapTileKeys: string[];
-    tileIds: number[];
-    /** Common WGS84 origin of the selected presentation block. */
+    renderKey: string;
+    mapTileKey: string;
+    tileId: number;
+    /** Common WGS84 origin assigned by the persistent scene. */
     coordinateOrigin: [number, number, number];
+    sceneGeneration: number;
+    packetSequence: number;
+    iconCatalogVersion: number;
+    /** Present only when this worker has not seen the catalog version yet. */
+    iconCatalogEntries?: TileSubsetGpuIconCatalogEntry[];
+    originSlot: number;
+    originKeyLow: number;
+    originKeyHigh: number;
+    contribution: TileSubsetGpuContribution;
     mapId: string;
     catalogRevision: number;
     /** Present only when this worker has not seen the catalog revision yet. */
@@ -18,14 +43,16 @@ export interface TileSubsetLayerRenderTask {
     stringPoolId: string;
     /** Present only when this worker needs a newer dictionary snapshot. */
     fieldDictBlob?: Uint8Array;
-    subsetBlobs: Uint8Array[];
-    /** Exact number of geometry vertices stored across the input subsets. */
+    subsetBlob: Uint8Array;
+    /** Exact number of geometry vertices stored in the input subset. */
     inputGeometryVertexCount: number;
     styleKey: string;
     /** Present only when this worker has not compiled the style yet. */
     styleSource?: string;
     highlightModeValue: number;
     fidelityValue: number;
+    /** World-space RDP tolerance selected from the current view's pixel scale. */
+    lineSimplificationToleranceMeters: number;
 }
 
 /** Handshake sent after the worker module and WASM runtime are ready. */
@@ -33,66 +60,22 @@ export interface TileSubsetLayerRenderWorkerReady {
     type: "TileSubsetLayerRenderWorkerReady";
 }
 
+/** One-time worker initialization request. */
 export interface TileSubsetLayerRenderWorkerInit {
     type: "TileSubsetLayerRenderWorkerInit";
 }
 
+/** Worker-side timing breakdown retained for diagnostics and tile statistics. */
 export interface TileSubsetLayerRenderTimings {
     deserializeMs: number;
-    deserializeMsBySubset: number[];
+    runMs: number;
+    packetMs: number;
+    bridgeMs: number;
     renderMs: number;
     totalMs: number;
 }
 
-export interface TileSubsetPointBuffers {
-    positions: Float32Array;
-    colors: Uint8Array;
-    radii: Float32Array;
-    /** One authored ordinal z-index per point; NaN means unspecified. */
-    zIndices: Float64Array;
-    depthTests: Uint8Array;
-    featureAddresses: Uint32Array;
-    glowColors: Uint8Array;
-    glowRadii: Float32Array;
-}
-
-export interface TileSubsetSurfaceBuffers {
-    positions: Float32Array;
-    startIndices: Uint32Array;
-    holeIndices: Uint32Array;
-    holeIndexStarts: Uint32Array;
-    colors: Uint8Array;
-    /** One authored ordinal z-index per surface; NaN means unspecified. */
-    zIndices: Float64Array;
-    depthTests: Uint8Array;
-    featureAddresses: Uint32Array;
-    glowColors: Uint8Array;
-    glowRadii: Float32Array;
-}
-
-export interface TileSubsetPathBuffers {
-    positions: Float32Array;
-    startIndices: Uint32Array;
-    colors: Uint8Array;
-    widths: Float32Array;
-    /** Absolute screen-space lateral displacement for every path vertex. */
-    lateralOffsetsPx: Float32Array;
-    /**
-     * Transition-only local XY displacement vectors in absolute screen pixels.
-     * Ordinary path buffers leave this empty and use Deck's stock offset path.
-     */
-    lateralOffsetVectorsPx: Float32Array;
-    /** One adaptive metres-per-pixel displacement threshold per path. */
-    lateralOffsetScaleThresholds: Float32Array;
-    /** One authored ordinal z-index per path; NaN means unspecified. */
-    zIndices: Float64Array;
-    depthTests: Uint8Array;
-    featureAddresses: Uint32Array;
-    glowColors: Uint8Array;
-    glowRadii: Float32Array;
-    dashArrays?: Float32Array;
-}
-
+/** GLTF node material retained until GLTF rendering moves into persistent stores. */
 export interface TileSubsetGltfBuffers {
     nodeIndices: Uint32Array;
     colors: Uint8Array;
@@ -100,6 +83,7 @@ export interface TileSubsetGltfBuffers {
     featureAddresses: Uint32Array;
 }
 
+/** Low-cost GLTF AABB triangles used only by the existing GLTF pick bridge. */
 export interface TileSubsetGltfPickProxyBuffers {
     positions: Float32Array;
     startIndices: Uint32Array;
@@ -107,34 +91,8 @@ export interface TileSubsetGltfPickProxyBuffers {
     featureAddresses: Uint32Array;
 }
 
-export interface TileSubsetLabelDatum {
-    featureAddress: number;
-    position: {x: number; y: number; z: number};
-    text: string;
-    fillColor: [number, number, number, number];
-    backgroundColor?: [number, number, number, number];
-    outlineColor: [number, number, number, number];
-    outlineWidth: number;
-    scale: number;
-    pixelOffset?: [number, number];
-    billboard: boolean;
-    depthTest?: boolean;
-    /** Raw authored ordinal z-index, omitted when the style does not set one. */
-    zIndex?: number;
-}
-
-/** Compact native runtime issue expanded into a full validation issue on the main thread. */
-export interface TileSubsetRuntimeStyleIssue {
-    property: string;
-    expression: string;
-    message: string;
-    ruleIndex: number;
-    occurrenceCount: number;
-}
-
-/** Pick identity resolved while the worker still owns the exact parsed subset. */
+/** Pick identity retained only for the temporary GLTF bridge. */
 export interface TileSubsetPickResult {
-    subsetOrdinal: number;
     featureId?: string;
     attributeIndex?: number;
     hasValidity?: boolean;
@@ -145,32 +103,25 @@ export interface TileSubsetPickResult {
     memberFeatureIds?: string[];
 }
 
-/** Native renderer output, still independent of any concrete Deck device. */
-export interface TileSubsetLayerRenderBuffers {
-    pointWorld: TileSubsetPointBuffers;
-    pointBillboard: TileSubsetPointBuffers;
-    labelWorld: TileSubsetLabelDatum[];
-    labelBillboard: TileSubsetLabelDatum[];
-    surface: TileSubsetSurfaceBuffers;
-    pathWorld: TileSubsetPathBuffers;
-    pathBillboard: TileSubsetPathBuffers;
-    transitionPathWorld: TileSubsetPathBuffers;
-    transitionPathBillboard: TileSubsetPathBuffers;
-    arrowWorld: TileSubsetPathBuffers;
-    arrowBillboard: TileSubsetPathBuffers;
+/** Small browser-owned payload that cannot yet be expressed as GPU records. */
+export interface TileSubsetRenderBridge {
     gltfNodes: TileSubsetGltfBuffers;
     gltfPickProxies: TileSubsetGltfPickProxyBuffers;
     coordinateOrigin: Float64Array;
-    pickRefs: Uint32Array;
     pickResults: TileSubsetPickResult[];
-    subsetVertexCounts: Uint32Array;
     glbAttachmentName?: string;
+}
+
+/** Direct worker result: bounded packet fragments plus the temporary GLTF bridge. */
+export interface TileSubsetLayerRenderBuffers {
+    packets: Uint8Array[];
+    bridge: TileSubsetRenderBridge;
     vertexCount: number;
-    styleIssues: TileSubsetRuntimeStyleIssue[];
     timings: TileSubsetLayerRenderTimings;
 }
 
-export interface TileSubsetLayerRenderResult extends TileSubsetLayerRenderBuffers {
+/** Tagged worker result used to match a response to the bounded service queue. */
+export interface TileSubsetLayerRenderResult extends Partial<TileSubsetLayerRenderBuffers> {
     type: "TileSubsetLayerRenderResult";
     taskId: string;
     visualizationId: string;

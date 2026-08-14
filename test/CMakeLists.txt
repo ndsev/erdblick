@@ -34,7 +34,9 @@ target_link_libraries(test.erdblick-style-plan
 catch_discover_tests(test.erdblick-style-plan)
 
 add_executable(test.erdblick-subset-renderer
-  test-subset-renderer.cpp)
+  test-subset-renderer.cpp
+  test-gpu-render-packet.cpp
+  test-gpu-render-records.cpp)
 
 target_link_libraries(test.erdblick-subset-renderer
   PUBLIC

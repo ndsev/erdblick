@@ -7,11 +7,13 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <sstream>
 
 #include <glm/common.hpp>
 #include <glm/exponential.hpp>
+#include <glm/geometric.hpp>
 #include <glm/trigonometric.hpp>
 
 namespace erdblick
@@ -25,11 +27,6 @@ constexpr double kDegToRad = kPi / 180.0;
 constexpr double kMercatorTileSize = 512.0;
 constexpr double kFallbackEarthRadiusMeters = 6378137.0;
 constexpr double kEarthCircumferenceMeters = 40.03e6;
-constexpr double kArrowHeadLengthMinMeters = 2.0;
-constexpr double kArrowHeadLengthMaxMeters = 24.0;
-constexpr double kArrowHeadLengthFraction = 0.35;
-constexpr double kArrowHeadWidthFraction = 0.55;
-constexpr double kArrowSegmentEpsilonMeters = 1e-6;
 constexpr double kTransitionFilletMeters = 6.0;
 constexpr double kTransitionUTurnTrimMeters = 0.9;
 constexpr size_t kTransitionFilletSamples = 8;
@@ -210,26 +207,36 @@ bool hasLocalOffset(glm::dvec3 const& offset)
     return offset.x != 0.0 || offset.y != 0.0 || offset.z != 0.0;
 }
 
-std::optional<uint32_t> channelRuleIndex(std::string_view channelId)
+std::vector<uint32_t> channelRuleIndices(std::string_view channelId)
 {
     auto const separator = channelId.rfind(':');
     if (separator == std::string_view::npos ||
         separator + 1 >= channelId.size())
     {
-        return std::nullopt;
+        return {};
     }
-    uint32_t value = 0;
-    auto const suffix = channelId.substr(separator + 1);
-    auto parsed = std::from_chars(
-        suffix.data(),
-        suffix.data() + suffix.size(),
-        value);
-    if (parsed.ec != std::errc{} ||
-        parsed.ptr != suffix.data() + suffix.size())
-    {
-        return std::nullopt;
+    std::vector<uint32_t> result;
+    auto suffix = channelId.substr(separator + 1);
+    while (!suffix.empty()) {
+        auto const comma = suffix.find(',');
+        auto const token = suffix.substr(0, comma);
+        uint32_t value = 0;
+        auto parsed = std::from_chars(
+            token.data(),
+            token.data() + token.size(),
+            value);
+        if (parsed.ec != std::errc{} ||
+            parsed.ptr != token.data() + token.size())
+        {
+            return {};
+        }
+        result.push_back(value);
+        if (comma == std::string_view::npos) {
+            break;
+        }
+        suffix.remove_prefix(comma + 1U);
     }
-    return value;
+    return result;
 }
 
 bool fidelityMatches(
@@ -311,18 +318,89 @@ mapget::Point offsetAabbOrigin(
     return shifted.points_.empty() ? origin : shifted.points_.front();
 }
 
-JsValue rgbaBytes(glm::fvec4 const& color)
+int32_t labelOriginCode(std::string_view origin)
 {
-    auto toByte = [](float value) {
-        return static_cast<uint8_t>(std::round(
-            std::clamp(value, 0.0f, 1.0f) * 255.0f));
-    };
-    return JsValue::List({
-        JsValue(toByte(color.r)),
-        JsValue(toByte(color.g)),
-        JsValue(toByte(color.b)),
-        JsValue(toByte(color.a)),
-    });
+    if (origin == "LEFT" || origin == "TOP" || origin == "BELOW") {
+        return -1;
+    }
+    if (origin == "RIGHT" || origin == "BOTTOM" || origin == "ABOVE") {
+        return 1;
+    }
+    if (origin == "BASELINE") {
+        return 2;
+    }
+    return 0;
+}
+
+/** Parsed layer-wide TextLayer font properties from the compact CSS shorthand. */
+struct ParsedLabelFont {
+    float size = 14.0F;
+    std::string family;
+    uint32_t weight = 400U;
+};
+
+/** Extract the pixel size, family, and nearest numeric/bold weight token. */
+ParsedLabelFont parseLabelFont(std::string const& font)
+{
+    ParsedLabelFont result{.family = font};
+    auto const pixels = font.find("px");
+    if (pixels != std::string::npos) {
+        auto const separator = pixels == 0U
+            ? std::string::npos
+            : font.find_last_of(" \t", pixels - 1U);
+        auto const begin = separator == std::string::npos
+            ? 0U
+            : separator + 1U;
+        if (begin < pixels) {
+            float parsedSize = result.size;
+            auto const parsed = std::from_chars(
+                font.data() + begin,
+                font.data() + pixels,
+                parsedSize);
+            if (parsed.ec == std::errc{} &&
+                parsed.ptr == font.data() + pixels &&
+                std::isfinite(parsedSize) && parsedSize > 0.0F)
+            {
+                result.size = parsedSize;
+            }
+        }
+        auto const familyBegin = font.find_first_not_of(" \t", pixels + 2U);
+        result.family = familyBegin == std::string::npos
+            ? std::string{"Helvetica"}
+            : font.substr(familyBegin);
+        if (separator != std::string::npos) {
+            auto const weightEnd = font.find_last_not_of(" \t", separator);
+            if (weightEnd != std::string::npos) {
+                auto const weightSeparator = weightEnd == 0U
+                    ? std::string::npos
+                    : font.find_last_of(" \t", weightEnd - 1U);
+                auto const weightBegin = weightSeparator == std::string::npos
+                    ? 0U
+                    : weightSeparator + 1U;
+                auto const token = std::string_view(font).substr(
+                    weightBegin,
+                    weightEnd - weightBegin + 1U);
+                uint32_t parsedWeight = result.weight;
+                auto const parsed = std::from_chars(
+                    token.data(),
+                    token.data() + token.size(),
+                    parsedWeight);
+                if (parsed.ec == std::errc{} &&
+                    parsed.ptr == token.data() + token.size() &&
+                    parsedWeight > 0U && parsedWeight <= 1000U)
+                {
+                    result.weight = parsedWeight;
+                }
+                else if (token == "bold") {
+                    result.weight = 700U;
+                }
+                else if (token == "normal") {
+                    result.weight = 400U;
+                }
+            }
+        }
+    }
+    return result;
 }
 
 double mercatorWorldX(double longitudeDeg)
@@ -341,20 +419,26 @@ double mercatorWorldY(double latitudeDeg)
 
 bool distanceScalesAt(
     double latitudeDeg,
+    double& latitudeCosine,
+    double& latitudeTangent,
     double& unitsPerMeter,
     double& unitsPerMeter2)
 {
     auto const latitudeRad = latitudeDeg * kDegToRad;
-    auto const latitudeCos = std::cos(latitudeRad);
-    if (!std::isfinite(latitudeCos) || std::abs(latitudeCos) < 1e-12) {
+    latitudeCosine = glm::cos(latitudeRad);
+    latitudeTangent = glm::tan(latitudeRad);
+    if (!std::isfinite(latitudeCosine) ||
+        !std::isfinite(latitudeTangent) ||
+        std::abs(latitudeCosine) < 1e-12)
+    {
         return false;
     }
     auto const worldSize = kMercatorTileSize;
-    auto const latCosine = std::abs(latitudeCos);
+    auto const latCosine = std::abs(latitudeCosine);
     unitsPerMeter =
         worldSize / kEarthCircumferenceMeters / latCosine;
     unitsPerMeter2 =
-        unitsPerMeter * std::tan(latitudeRad) /
+        unitsPerMeter * latitudeTangent /
         kFallbackEarthRadiusMeters;
     return std::isfinite(unitsPerMeter) &&
         std::isfinite(unitsPerMeter2) &&
@@ -368,66 +452,6 @@ double resolvedZIndex(
 {
     return rule.zIndex(evalFun).value_or(
         std::numeric_limits<double>::quiet_NaN());
-}
-
-JsValue pointBuffersToJs(
-    TileSubsetLayerRenderer::PointBuffers const& buffers)
-{
-    return JsValue::Dict({
-        {"positions", JsValue::Float32Array(buffers.positions)},
-        {"colors", JsValue::Uint8Array(buffers.colors)},
-        {"radii", JsValue::Float32Array(buffers.radii)},
-        {"zIndices", JsValue::Float64Array(buffers.zIndices)},
-        {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
-        {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
-        {"glowColors", JsValue::Uint8Array(buffers.glowColors)},
-        {"glowRadii", JsValue::Float32Array(buffers.glowRadii)},
-    });
-}
-
-JsValue surfaceBuffersToJs(
-    TileSubsetLayerRenderer::SurfaceBuffers const& buffers)
-{
-    return JsValue::Dict({
-        {"positions", JsValue::Float32Array(buffers.positions)},
-        {"startIndices", JsValue::Uint32Array(buffers.startIndices)},
-        {"holeIndices", JsValue::Uint32Array(buffers.holeIndices)},
-        {"holeIndexStarts", JsValue::Uint32Array(buffers.holeIndexStarts)},
-        {"colors", JsValue::Uint8Array(buffers.colors)},
-        {"zIndices", JsValue::Float64Array(buffers.zIndices)},
-        {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
-        {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
-        {"glowColors", JsValue::Uint8Array(buffers.glowColors)},
-        {"glowRadii", JsValue::Float32Array(buffers.glowRadii)},
-    });
-}
-
-JsValue pathBuffersToJs(
-    TileSubsetLayerRenderer::PathBuffers const& buffers,
-    bool includeDashArrays)
-{
-    auto result = JsValue::Dict({
-        {"positions", JsValue::Float32Array(buffers.positions)},
-        {"startIndices", JsValue::Uint32Array(buffers.startIndices)},
-        {"colors", JsValue::Uint8Array(buffers.colors)},
-        {"widths", JsValue::Float32Array(buffers.widths)},
-        {"lateralOffsetsPx", JsValue::Float32Array(buffers.lateralOffsetsPx)},
-        {"lateralOffsetVectorsPx",
-         JsValue::Float32Array(buffers.lateralOffsetVectorsPx)},
-        {"lateralOffsetScaleThresholds",
-         JsValue::Float32Array(buffers.lateralOffsetScaleThresholds)},
-        {"zIndices", JsValue::Float64Array(buffers.zIndices)},
-        {"depthTests", JsValue::Uint8Array(buffers.depthTests)},
-        {"featureAddresses", JsValue::Uint32Array(buffers.featureAddresses)},
-        {"glowColors", JsValue::Uint8Array(buffers.glowColors)},
-        {"glowRadii", JsValue::Float32Array(buffers.glowRadii)},
-    });
-    if (includeDashArrays) {
-        result.set(
-            "dashArrays",
-            JsValue::Float32Array(buffers.dashArrays));
-    }
-    return result;
 }
 
 JsValue gltfBuffersToJs(
@@ -457,14 +481,50 @@ JsValue gltfPickProxyBuffersToJs(
 size_t TileSubsetLayerRenderer::PickRefHash::operator()(
     PickRef const& value) const noexcept
 {
-    auto result = std::hash<uint32_t>{}(value.subsetOrdinal);
-    result ^= std::hash<uint32_t>{}(value.channelOrdinal) +
-        0x9e3779b9U + (result << 6U) + (result >> 2U);
+    auto result = std::hash<uint32_t>{}(value.channelOrdinal);
     result ^= std::hash<uint32_t>{}(value.entryOrdinal) +
         0x9e3779b9U + (result << 6U) + (result >> 2U);
     result ^= std::hash<uint32_t>{}(value.endpointRole) +
         0x9e3779b9U + (result << 6U) + (result >> 2U);
     return result;
+}
+
+void TileSubsetLayerRenderer::ProjectedGeometryCache::reset()
+{
+    for (size_t index = 0; index < activeCount; ++index) {
+        entries[index].points.clear();
+    }
+    activeCount = 0;
+}
+
+TileSubsetLayerRenderer::ProjectedGeometryCacheEntry*
+TileSubsetLayerRenderer::ProjectedGeometryCache::find(
+    simfil::ModelNodeAddress address,
+    bool simplified)
+{
+    auto const active = std::span(entries).first(activeCount);
+    auto const found = std::ranges::find(
+        active,
+        std::pair{address, simplified},
+        [](ProjectedGeometryCacheEntry const& entry) {
+            return std::pair{entry.address, entry.simplified};
+        });
+    return found == active.end() ? nullptr : &*found;
+}
+
+TileSubsetLayerRenderer::ProjectedGeometryCacheEntry&
+TileSubsetLayerRenderer::ProjectedGeometryCache::append(
+    simfil::ModelNodeAddress address,
+    bool simplified)
+{
+    if (activeCount == entries.size()) {
+        entries.emplace_back();
+    }
+    auto& entry = entries[activeCount++];
+    entry.address = address;
+    entry.simplified = simplified;
+    entry.points.clear();
+    return entry;
 }
 
 TileSubsetLayerRenderer::TileSubsetLayerRenderer(
@@ -486,22 +546,63 @@ TileSubsetLayerRenderer::TileSubsetLayerRenderer(
               ? static_cast<FeatureStyleRule::Fidelity>(fidelity)
               : FeatureStyleRule::AnyFidelity)
 {
-    buffers_.surfaces.startIndices.push_back(0);
-    buffers_.surfaces.holeIndexStarts.push_back(0);
-    buffers_.pathWorld.startIndices.push_back(0);
-    buffers_.pathBillboard.startIndices.push_back(0);
-    buffers_.transitionPathWorld.startIndices.push_back(0);
-    buffers_.transitionPathBillboard.startIndices.push_back(0);
-    buffers_.arrowWorld.startIndices.push_back(0);
-    buffers_.arrowBillboard.startIndices.push_back(0);
-    buffers_.gltfPickProxies.startIndices.push_back(0);
+    bridgeBuffers_.gltfPickProxies.startIndices.push_back(0);
 }
 
 TileSubsetLayerRenderer::~TileSubsetLayerRenderer() = default;
 
-uint32_t TileSubsetLayerRenderer::abiVersion() const
+void TileSubsetLayerRenderer::resetForNextTile()
 {
-    return 5U;
+    subset_.reset();
+    gpuContributionContext_ = {};
+    bridgeBuffers_.gltfNodes.nodeIndices.clear();
+    bridgeBuffers_.gltfNodes.colors.clear();
+    bridgeBuffers_.gltfNodes.depthTests.clear();
+    bridgeBuffers_.gltfNodes.featureAddresses.clear();
+    bridgeBuffers_.gltfPickProxies.positions.clear();
+    bridgeBuffers_.gltfPickProxies.startIndices.clear();
+    bridgeBuffers_.gltfPickProxies.startIndices.push_back(0U);
+    bridgeBuffers_.gltfPickProxies.nodeIndices.clear();
+    bridgeBuffers_.gltfPickProxies.featureAddresses.clear();
+    gpuPacketBuilder_.reset();
+    projectedPointsScratch_.clear();
+    wgsPathScratch_.clear();
+    simplifiedPathScratch_.clear();
+    pathSimplificationKeepScratch_.clear();
+    pathSimplificationRangeScratch_.clear();
+    featureGeometriesScratch_.clear();
+    featureProjectionCacheScratch_.reset();
+    vertexCount_ = 0U;
+    bridgePickResults_.clear();
+    pickRefs_.clear();
+    pickIndices_.clear();
+    runtimeIssues_.clear();
+    runtimeIssueIndices_.clear();
+    renderedRelationEndpointParts_.clear();
+    renderedRelationEndpointLabels_.clear();
+    relationEndpointLabelIdentity_.reset();
+    featureOffsetSlotsByRule_.clear();
+    attributeOffsetSlotsByFeature_.clear();
+    attributeOffsetSlotsBySegment_.clear();
+    attributeOffsetSlotsByTransitionLeg_.clear();
+    transitionOffsetScaleGroups_.clear();
+    gpuIconResources_.clear();
+    hasCoordinateOriginWgs_ = false;
+    coordinateOriginWgs_ = {0.0, 0.0, 0.0};
+    coordinateOriginWorldX_ = 0.0;
+    coordinateOriginWorldY_ = 0.0;
+    coordinateOriginCosine_ = 1.0;
+    coordinateOriginTangent_ = 0.0;
+    coordinateUnitsPerMeter_ = 0.0;
+    coordinateUnitsPerMeter2_ = 0.0;
+    coordinateScalesValid_ = false;
+    gpuSceneGeneration_ = 0U;
+    gpuPacketSequence_ = 0U;
+    gpuIconCatalogVersion_ = 0U;
+    gpuOriginSlot_ = 0U;
+    gpuOriginKey_ = 0U;
+    lineSimplificationToleranceMeters_ = 0.0;
+    hasRun_ = false;
 }
 
 void TileSubsetLayerRenderer::setCoordinateOrigin(
@@ -515,75 +616,178 @@ void TileSubsetLayerRenderer::setCoordinateOrigin(
         altitude,
     };
     hasCoordinateOriginWgs_ = true;
+    coordinateOriginWorldX_ = mercatorWorldX(longitude);
+    coordinateOriginWorldY_ = mercatorWorldY(latitude);
+    coordinateScalesValid_ = distanceScalesAt(
+        latitude,
+        coordinateOriginCosine_,
+        coordinateOriginTangent_,
+        coordinateUnitsPerMeter_,
+        coordinateUnitsPerMeter2_);
 }
 
-void TileSubsetLayerRenderer::addTileSubsetLayer(
-    TileSubsetLayer const& subset)
+void TileSubsetLayerRenderer::setLineSimplificationTolerance(
+    double toleranceMeters)
 {
-    if (subset.model_) {
-        subsets_.push_back(subset.model_);
-        if (!hasCoordinateOriginWgs_) {
-            coordinateOriginWgs_ = subset.model_->geometryAnchor();
-            coordinateOriginWgs_.z = 0.0;
-            hasCoordinateOriginWgs_ = true;
-        }
+    lineSimplificationToleranceMeters_ =
+        std::isfinite(toleranceMeters)
+        ? std::max(0.0, toleranceMeters)
+        : 0.0;
+}
+
+void TileSubsetLayerRenderer::configureGpuPacket(
+    uint32_t sceneGeneration,
+    uint32_t packetSequence,
+    uint32_t iconCatalogVersion,
+    uint32_t originSlot,
+    uint32_t originKeyLow,
+    uint32_t originKeyHigh)
+{
+    gpuSceneGeneration_ = sceneGeneration;
+    gpuPacketSequence_ = packetSequence;
+    gpuIconCatalogVersion_ = iconCatalogVersion;
+    gpuOriginSlot_ = originSlot;
+    gpuOriginKey_ = static_cast<uint64_t>(originKeyLow) |
+        (static_cast<uint64_t>(originKeyHigh) << 32U);
+}
+
+void TileSubsetLayerRenderer::addGpuIconResource(
+    std::string const& uri,
+    uint32_t atlasPage,
+    float u0,
+    float v0,
+    float u1,
+    float v1,
+    float pixelWidth,
+    float pixelHeight)
+{
+    if (uri.empty() ||
+        !std::isfinite(u0) || !std::isfinite(v0) ||
+        !std::isfinite(u1) || !std::isfinite(v1) ||
+        !std::isfinite(pixelWidth) || !std::isfinite(pixelHeight) ||
+        u0 < 0.0F || v0 < 0.0F || u1 < u0 || v1 < v0 ||
+        u1 > 1.0F || v1 > 1.0F ||
+        pixelWidth <= 0.0F || pixelHeight <= 0.0F)
+    {
+        throw std::invalid_argument("Invalid GPU icon catalog entry.");
+    }
+    gpuIconResources_.insert_or_assign(uri, GpuIconResource{
+        .atlasPage = atlasPage,
+        .uv = {u0, v0, u1, v1},
+        .pixelSize = {pixelWidth, pixelHeight},
+    });
+}
+
+void TileSubsetLayerRenderer::addTileSubsetContribution(
+    TileSubsetLayer const& subset,
+    uint32_t contributionKeyLow,
+    uint32_t contributionKeyHigh,
+    uint32_t contributionRevision,
+    uint32_t contributionSlot,
+    uint32_t contributionActivationToken)
+{
+    if (!subset.model_) {
+        throw std::invalid_argument("Cannot render an empty tile subset.");
+    }
+    if (subset_) {
+        throw std::logic_error(
+            "TileSubsetLayerRenderer accepts exactly one tile subset.");
+    }
+    subset_ = subset.model_;
+    gpuContributionContext_ = {
+        .key = static_cast<uint64_t>(contributionKeyLow) |
+            (static_cast<uint64_t>(contributionKeyHigh) << 32U),
+        .revision = contributionRevision,
+        .slot = contributionSlot,
+        .activationToken = contributionActivationToken,
+    };
+    if (!hasCoordinateOriginWgs_) {
+        coordinateOriginWgs_ = subset_->geometryAnchor();
+        coordinateOriginWgs_.z = 0.0;
+        hasCoordinateOriginWgs_ = true;
+        coordinateOriginWorldX_ = mercatorWorldX(coordinateOriginWgs_.x);
+        coordinateOriginWorldY_ = mercatorWorldY(coordinateOriginWgs_.y);
+        coordinateScalesValid_ = distanceScalesAt(
+            coordinateOriginWgs_.y,
+            coordinateOriginCosine_,
+            coordinateOriginTangent_,
+            coordinateUnitsPerMeter_,
+            coordinateUnitsPerMeter2_);
     }
 }
 
-FeatureStyleRule const* TileSubsetLayerRenderer::ruleForChannel(
+std::vector<FeatureStyleRule const*> TileSubsetLayerRenderer::rulesForChannel(
     std::string const& channelId) const
 {
-    auto const sourceIndex = channelRuleIndex(channelId);
-    if (!sourceIndex) {
-        return nullptr;
-    }
-    for (auto const& rule : style_.rules()) {
-        if (rule.index() == *sourceIndex &&
-            rule.mode() == highlightMode_ &&
-            fidelityMatches(fidelity_, rule.fidelity()))
-        {
-            return &rule;
+    std::vector<FeatureStyleRule const*> result;
+    for (auto const sourceIndex : channelRuleIndices(channelId)) {
+        for (auto const& rule : style_.rules()) {
+            if (rule.index() == sourceIndex &&
+                rule.mode() == highlightMode_ &&
+                fidelityMatches(fidelity_, rule.fidelity()))
+            {
+                result.push_back(&rule);
+                break;
+            }
         }
     }
-    return nullptr;
+    return result;
 }
 
-TileSubsetLayerRenderer::ChannelBinding
+TileSubsetLayerRenderer::ChannelBinding const&
 TileSubsetLayerRenderer::bindingFor(
     mapget::model_ptr<mapget::TileSubsetChannel> const& channel)
 {
-    ChannelBinding binding;
     if (!channel) {
-        return binding;
+        throw std::invalid_argument(
+            "Cannot bind an empty subset channel.");
     }
-    binding.rule = ruleForChannel(channel->channelId());
-    binding.featureFields = channel->featureFields();
-    binding.entryFields = channel->entryFields();
-    if (!binding.rule) {
-        // Search presentations append one result-list channel that deliberately
-        // has no top-level render rule. It is consumed by TypeScript only.
-        if (channel->channelId().starts_with("search-results:")) {
+    auto const channelId = channel->channelId();
+    auto [found, inserted] = channelBindings_.try_emplace(channelId);
+    auto& binding = found->second;
+    if (inserted) {
+        binding.rules = rulesForChannel(channelId);
+        binding.hasBranches = std::ranges::any_of(
+            binding.rules,
+            [](FeatureStyleRule const* rule) {
+                return rule &&
+                    rule->branchMode() != FeatureStyleRule::BranchMode::None;
+            });
+        binding.fuseWithNext.assign(binding.rules.size(), uint8_t{0U});
+        if (!binding.hasBranches) {
+            for (size_t index = 1U; index < binding.rules.size(); ++index) {
+                binding.fuseWithNext[index - 1U] =
+                    canFuseFeatureRulePair(
+                        *binding.rules[index - 1U],
+                        *binding.rules[index])
+                    ? uint8_t{1U}
+                    : uint8_t{0U};
+            }
+        }
+        binding.featureFields.expressions = channel->featureFields();
+        binding.entryFields.expressions = channel->entryFields();
+    }
+    if (binding.rules.empty()) {
+        // Search result-list channels are consumed by TypeScript and intentionally
+        // have no authored rendering rule.
+        if (channelId.starts_with("search-results:")) {
             return binding;
         }
-        auto const sourceIndex =
-            channelRuleIndex(channel->channelId());
-        auto const sourceRule =
-            sourceIndex
-                ? std::ranges::find_if(
-                      style_.rules(),
-                      [sourceIndex](FeatureStyleRule const& rule) {
-                          return rule.index() == *sourceIndex;
-                      })
-                : style_.rules().end();
+        auto const sourceIndices = channelRuleIndices(channelId);
+        auto const hasInactiveSourceRule = std::ranges::any_of(
+            style_.rules(),
+            [&](FeatureStyleRule const& rule) {
+                return std::ranges::find(sourceIndices, rule.index()) !=
+                        sourceIndices.end() &&
+                    rule.mode() == highlightMode_;
+            });
         // A bundle planned with AnyFidelity intentionally contains both
         // fidelity variants so the view can switch without a refetch.
         // Skipping the inactive variant is therefore not a style error.
-        if (sourceRule == style_.rules().end() ||
-            sourceRule->mode() != highlightMode_)
-        {
+        if (!hasInactiveSourceRule) {
             recordRuntimeIssue(
                 "channelId",
-                channel->channelId(),
+                channelId,
                 "No active top-level style rule matches this subset channel.",
                 0);
         }
@@ -593,31 +797,49 @@ TileSubsetLayerRenderer::bindingFor(
 
 void TileSubsetLayerRenderer::run()
 {
-    subsetVertexCounts_.clear();
-    currentSubsetOrdinal_ = 0;
-    for (auto const& subset : subsets_) {
-        auto const vertexCountBefore = vertexCount_;
-        if (!subset) {
-            subsetVertexCounts_.push_back(0);
-            ++currentSubsetOrdinal_;
-            continue;
-        }
-        // These counters historically belonged to one per-tile renderer.
-        // A presentation block must not let one subset's offset slots or
-        // relation endpoint addresses affect another model pool.
-        featureOffsetSlotsByRule_.clear();
-        attributeOffsetSlotsByFeature_.clear();
-        attributeOffsetSlotsBySegment_.clear();
-        attributeOffsetSlotsByTransitionLeg_.clear();
-        renderedRelationEndpointParts_.clear();
-        renderedRelationEndpointLabels_.clear();
-        relationEndpointLabelIdentity_.reset();
-        uint32_t channelOrdinal = 0;
-        subset->forEachChannel(
+    if (hasRun_) {
+        throw std::logic_error(
+            "TileSubsetLayerRenderer is a one-shot packet producer.");
+    }
+    if (!subset_) {
+        throw std::logic_error(
+            "TileSubsetLayerRenderer requires exactly one tile subset.");
+    }
+    hasRun_ = true;
+    gpuPacketBuilder_.reset();
+    gpuPacketBuilder_.configure(
+        gpuSceneGeneration_,
+        gpuPacketSequence_,
+        gpuIconCatalogVersion_,
+        GpuPacketOrigin{
+            .slot = gpuOriginSlot_,
+            .key = gpuOriginKey_,
+            .longitude = coordinateOriginWgs_.x,
+            .latitude = coordinateOriginWgs_.y,
+            .altitude = coordinateOriginWgs_.z,
+        });
+    size_t terminalEntryCount = 0;
+    subset_->forEachChannel(
+        [&](mapget::model_ptr<mapget::TileSubsetChannel> const& channel) {
+            if (!channel) {
+                return true;
+            }
+            terminalEntryCount += channel->entryCount();
+            return true;
+        });
+    pickRefs_.reserve(terminalEntryCount);
+    pickIndices_.reserve(terminalEntryCount);
+    gpuPacketBuilder_.beginContribution(
+        gpuContributionContext_.key,
+        gpuContributionContext_.revision,
+        gpuContributionContext_.slot,
+        gpuContributionContext_.activationToken);
+    uint32_t channelOrdinal = 0;
+    subset_->forEachChannel(
             [&](mapget::model_ptr<mapget::TileSubsetChannel> const& channel) {
                 auto const currentChannelOrdinal = channelOrdinal++;
-                auto const binding = bindingFor(channel);
-                if (!binding.rule) {
+                auto const& binding = bindingFor(channel);
+                if (binding.rules.empty()) {
                     return true;
                 }
                 uint32_t entryOrdinal = 0;
@@ -669,60 +891,142 @@ void TileSubsetLayerRenderer::run()
                 }
                 return true;
             });
-        subsetVertexCounts_.push_back(
-            vertexCount_ - vertexCountBefore);
-        ++currentSubsetOrdinal_;
+    gpuPacketBuilder_.endContribution();
+    for (uint32_t index = 0U; index < pickRefs_.size(); ++index) {
+        auto const& pick = pickRefs_[index];
+        gpuPacketBuilder_.appendPick({
+            .contributionIndex = 0U,
+            .localPickIndex = index,
+            .channelOrdinal = pick.channelOrdinal,
+            .entryOrdinal = pick.entryOrdinal,
+            .endpointRole = pick.endpointRole,
+        });
+    }
+    for (auto const& issue : runtimeIssues_) {
+        gpuPacketBuilder_.appendRuntimeIssue({
+            .contributionIndex = 0U,
+            .ruleIndex = issue.ruleIndex,
+            .occurrenceCount = issue.occurrenceCount,
+            .property = issue.property,
+            .expression = issue.expression,
+            .message = issue.message,
+        });
     }
 }
 
 BoundEvalFun TileSubsetLayerRenderer::makeEvalFun(
-    std::vector<std::string> const& fields,
-    mapget::model_ptr<mapget::Array> const& values)
+    ProjectedFields const& fields,
+    mapget::model_ptr<mapget::Array> const& values,
+    ProjectedEvalState& state)
 {
-    return BoundEvalFun{
-        [this, &fields, values](std::string const& expression) {
-            auto const projectedExpression =
-                expandStyleExpressionForFilter(expression);
-            auto const found = std::find(
-                fields.begin(),
-                fields.end(),
-                projectedExpression);
-            if (found == fields.end()) {
-                recordRuntimeIssue(
-                    "projection",
-                    expression,
-                    "Style expression was not projected by its subset channel.",
-                    0);
-                return simfil::Value::undef();
+    state = {
+        .renderer = this,
+        .fields = &fields,
+        .values = values,
+    };
+    BoundEvalFun result;
+    result.context_ = &state;
+    result.evalRef_ = [](void* context, std::string const& expression) {
+            auto& state = *static_cast<ProjectedEvalState*>(context);
+            auto& fields = *state.fields;
+            auto const foundBinding = std::ranges::find(
+                fields.bindings,
+                &expression,
+                [](auto const& binding) {
+                    return binding.first;
+                });
+            uint32_t index = std::numeric_limits<uint32_t>::max();
+            if (foundBinding != fields.bindings.end()) {
+                index = foundBinding->second;
             }
-            auto const index = static_cast<uint32_t>(
-                std::distance(fields.begin(), found));
-            if (!values || index >= values->size()) {
-                recordRuntimeIssue(
+            else {
+                auto const projectedExpression =
+                    expandStyleExpressionForFilter(expression);
+                auto const found = std::find(
+                    fields.expressions.begin(),
+                    fields.expressions.end(),
+                    projectedExpression);
+                if (found == fields.expressions.end()) {
+                    state.renderer->recordRuntimeIssue(
+                        "projection",
+                        expression,
+                        "Style expression was not projected by its subset channel.",
+                        0);
+                    return simfil::Value::undef();
+                }
+                index = static_cast<uint32_t>(
+                    std::distance(fields.expressions.begin(), found));
+                fields.bindings.emplace_back(&expression, index);
+            }
+            if (index == state.lastIndex) {
+                return state.lastValue;
+            }
+            if (!state.values || index >= state.values->size()) {
+                state.renderer->recordRuntimeIssue(
                     "projection",
                     expression,
                     "Projected value array does not match its channel schema.",
                     0);
-                return simfil::Value::undef();
+                state.lastIndex = index;
+                state.lastValue = simfil::Value::undef();
+                return state.lastValue;
             }
-            auto node = values->at(index);
-            return node
+            auto node = state.values->at(index);
+            state.lastIndex = index;
+            state.lastValue = node
                 ? simfil::Value::field(*node)
                 : simfil::Value::undef();
-        },
-        [this](
+            return state.lastValue;
+        };
+    result.reportIssueRef_ = [](
+            void* context,
             std::string const& property,
             std::string const& expression,
             std::string const& message,
             uint32_t ruleIndex)
         {
-            recordRuntimeIssue(
+            static_cast<ProjectedEvalState*>(context)->renderer->recordRuntimeIssue(
                 property,
                 expression,
                 message,
                 ruleIndex);
-        },
-    };
+        };
+    return result;
+}
+
+bool TileSubsetLayerRenderer::forEachAdmittedRule(
+    FeatureStyleRule const& rule,
+    FeatureStyleRule::MatchContext const& context,
+    BoundEvalFun const& entryEvalFun,
+    std::function<void(FeatureStyleRule const&)> const& callback,
+    BoundEvalFun const* featureEvalFun) const
+{
+    if (rule.branchMode() == FeatureStyleRule::BranchMode::None) {
+        callback(rule);
+        return true;
+    }
+    if (rule.branchMode() == FeatureStyleRule::BranchMode::FirstOf) {
+        for (auto const& child : rule.subRules()) {
+            if (child.forEachMatchingRule(
+                    context,
+                    entryEvalFun,
+                    callback,
+                    featureEvalFun))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    bool matched = false;
+    for (auto const& child : rule.subRules()) {
+        matched = child.forEachMatchingRule(
+            context,
+            entryEvalFun,
+            callback,
+            featureEvalFun) || matched;
+    }
+    return matched;
 }
 
 void TileSubsetLayerRenderer::renderFeature(
@@ -731,44 +1035,258 @@ void TileSubsetLayerRenderer::renderFeature(
     ChannelBinding const& binding,
     mapget::model_ptr<mapget::FeatureEntry> const& entry)
 {
-    if (!entry || !entry->featureId() || !binding.rule) {
+    if (!entry || binding.rules.empty()) {
         return;
     }
-    auto eval = makeEvalFun(binding.featureFields, entry->values());
-    FeatureStyleRule::MatchContext context{
-        .featureType = entry->featureId()->typeId(),
-    };
-    auto const matched = binding.rule->forEachMatchingRule(
-        context,
-        eval,
-        [&](FeatureStyleRule const& rule) {
-            auto const pick = pickIndex(
-                channelOrdinal,
-                entryOrdinal,
-                0,
-                rule.selectable(),
-                pickResult(entry));
-            auto const slot =
-                featureOffsetSlotsByRule_[rule.renderIndex()];
-            if (renderGeometryCollection(
-                    entry->geometry(),
-                    rule,
-                    eval,
-                    pick,
-                    rule.offset() +
-                        rule.offsetIncrement() *
-                            static_cast<double>(slot)))
-            {
-                ++featureOffsetSlotsByRule_[rule.renderIndex()];
-            }
-        });
-    if (!matched) {
-        recordRuntimeIssue(
-            "rule-match",
-            std::string(context.featureType),
-            "A server-admitted feature entry matched no concrete leaf of its top-level style rule.",
-            binding.rule->index());
+    auto const geometry = entry->geometry();
+    if (!geometry) {
+        return;
     }
+    ProjectedEvalState evalState;
+    auto eval = makeEvalFun(
+        binding.featureFields,
+        binding.featureFields.expressions.empty()
+            ? mapget::model_ptr<mapget::Array>{}
+            : entry->values(),
+        evalState);
+    auto const needsFeatureType = binding.hasBranches;
+    auto featureId = needsFeatureType
+        ? entry->featureId()
+        : mapget::model_ptr<mapget::FeatureId>{};
+    if (needsFeatureType && !featureId) {
+        return;
+    }
+    FeatureStyleRule::MatchContext context{
+        .featureType = featureId
+            ? featureId->typeId()
+            : std::string_view{},
+    };
+    featureGeometriesScratch_.clear();
+    if (geometry) {
+        geometry->forEachGeometry(
+            [&](mapget::model_ptr<mapget::Geometry> const& item) {
+                if (item) {
+                    featureGeometriesScratch_.push_back({
+                        .geometry = item,
+                        .type = item->geomType(),
+                        .name = geometryName(item),
+                    });
+                }
+                return true;
+            });
+    }
+    featureProjectionCacheScratch_.reset();
+    std::optional<uint32_t> selectablePick;
+    auto const* rules = &binding.rules;
+    auto const* fuseWithNext = &binding.fuseWithNext;
+    if (binding.hasBranches) {
+        featureRulesScratch_.clear();
+        for (auto const* topLevelRule : binding.rules) {
+            if (topLevelRule->branchMode() == FeatureStyleRule::BranchMode::None) {
+                featureRulesScratch_.push_back(topLevelRule);
+                continue;
+            }
+            auto const matched = forEachAdmittedRule(
+                *topLevelRule,
+                context,
+                eval,
+                [&](FeatureStyleRule const& rule) {
+                    featureRulesScratch_.push_back(&rule);
+                });
+            if (!matched) {
+                recordRuntimeIssue(
+                    "rule-match",
+                    std::string(context.featureType),
+                    "A server-admitted feature entry matched no concrete leaf of its top-level style rule.",
+                    topLevelRule->index());
+            }
+        }
+        rules = &featureRulesScratch_;
+        fuseWithNext = nullptr;
+    }
+    for (size_t index = 0U; index < rules->size();) {
+        auto const canFuse = index + 1U < rules->size() &&
+            (fuseWithNext
+                ? (*fuseWithNext)[index] != 0U
+                : canFuseFeatureRulePair(
+                    *(*rules)[index],
+                    *(*rules)[index + 1U]));
+        if (canFuse &&
+            renderFeatureRulePair(
+                geometry,
+                featureGeometriesScratch_,
+                *(*rules)[index],
+                *(*rules)[index + 1U],
+                eval,
+                selectablePick,
+                channelOrdinal,
+                entryOrdinal))
+        {
+            index += 2U;
+            continue;
+        }
+        renderFeatureRule(
+            entry,
+            geometry,
+            featureGeometriesScratch_,
+            *(*rules)[index],
+            eval,
+            featureId,
+            selectablePick,
+            channelOrdinal,
+            entryOrdinal);
+        ++index;
+    }
+}
+
+void TileSubsetLayerRenderer::renderFeatureRule(
+    mapget::model_ptr<mapget::FeatureEntry> const& entry,
+    mapget::model_ptr<mapget::GeometryCollection> const& geometry,
+    std::vector<ResolvedFeatureGeometry> const& geometries,
+    FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun,
+    mapget::model_ptr<mapget::FeatureId>& featureId,
+    std::optional<uint32_t>& selectablePick,
+    uint32_t channelOrdinal,
+    uint32_t entryOrdinal)
+{
+    if (rule.selectable() && !selectablePick) {
+        selectablePick = featurePickIndex(
+            channelOrdinal,
+            entryOrdinal,
+            true);
+    }
+    auto const pick = rule.selectable()
+        ? *selectablePick
+        : kUnselectable;
+    auto const increment = rule.offsetIncrement();
+    auto const stacked = hasLocalOffset(increment);
+    auto const slot = stacked
+        ? featureOffsetSlotsByRule_[rule.renderIndex()]
+        : 0U;
+    auto const gltfCount = bridgeBuffers_.gltfNodes.nodeIndices.size();
+    if (renderGeometryCollection(
+            geometry,
+            rule,
+            evalFun,
+            pick,
+            rule.offset() + increment * static_cast<double>(slot),
+            &featureProjectionCacheScratch_,
+            &geometries) && stacked)
+    {
+        ++featureOffsetSlotsByRule_[rule.renderIndex()];
+    }
+    if (pick != kUnselectable &&
+        bridgeBuffers_.gltfNodes.nodeIndices.size() > gltfCount &&
+        !bridgePickResults_.contains(pick))
+    {
+        if (!featureId) {
+            featureId = entry->featureId();
+        }
+        if (!featureId) {
+            return;
+        }
+        bridgePickResults_[pick].featureId = featureId->toString();
+    }
+}
+
+bool TileSubsetLayerRenderer::renderFeatureRulePair(
+    mapget::model_ptr<mapget::GeometryCollection> const& geometry,
+    std::vector<ResolvedFeatureGeometry> const& geometries,
+    FeatureStyleRule const& outerRule,
+    FeatureStyleRule const& innerRule,
+    BoundEvalFun const& evalFun,
+    std::optional<uint32_t>& selectablePick,
+    uint32_t channelOrdinal,
+    uint32_t entryOrdinal)
+{
+    auto const outerColor = outerRule.color(evalFun);
+    auto const innerColor = innerRule.color(evalFun);
+    auto const outerWidth = outerRule.width(evalFun);
+    auto const innerWidth = innerRule.width(evalFun);
+    if (!outerColor || !innerColor || innerWidth <= 0.0F ||
+        outerWidth <= innerWidth)
+    {
+        return false;
+    }
+    auto const outerZIndex = resolvedZIndex(outerRule, evalFun);
+    auto const innerZIndex = resolvedZIndex(innerRule, evalFun);
+    if (outerZIndex != innerZIndex &&
+        !(std::isnan(outerZIndex) && std::isnan(innerZIndex)))
+    {
+        return false;
+    }
+    if (innerRule.selectable() && !selectablePick) {
+        selectablePick = featurePickIndex(
+            channelOrdinal,
+            entryOrdinal,
+            true);
+    }
+    auto const pick = innerRule.selectable()
+        ? *selectablePick
+        : kUnselectable;
+    auto const resolvedStyle = ResolvedGeometryStyle{
+        .color = *outerColor,
+        .zIndex = innerZIndex,
+        .pathWidth = outerWidth,
+        .pathArrow = FeatureStyleRule::NoArrow,
+        .pathOverlay = GpuPathOverlay{
+            .width = innerWidth,
+            .color = {
+                toColorByte(innerColor->r),
+                toColorByte(innerColor->g),
+                toColorByte(innerColor->b),
+                toColorByte(innerColor->a),
+            },
+        },
+    };
+    static_cast<void>(renderGeometryCollection(
+        geometry,
+        innerRule,
+        evalFun,
+        pick,
+        innerRule.offset(),
+        &featureProjectionCacheScratch_,
+        &geometries,
+        &resolvedStyle));
+    return true;
+}
+
+bool TileSubsetLayerRenderer::canFuseFeatureRulePair(
+    FeatureStyleRule const& outerRule,
+    FeatureStyleRule const& innerRule)
+{
+    constexpr auto kLineMask = uint32_t{1U} <<
+        static_cast<std::underlying_type_t<mapget::GeomType>>(
+            mapget::GeomType::Line);
+    auto sameOffset = [](glm::dvec3 const& left, glm::dvec3 const& right) {
+        return left.x == right.x && left.y == right.y && left.z == right.z;
+    };
+    auto zeroOffset = [](glm::dvec3 const& value) {
+        return value.x == 0.0 && value.y == 0.0 && value.z == 0.0;
+    };
+    if (outerRule.geometryTypesMask() != kLineMask ||
+        innerRule.geometryTypesMask() != kLineMask ||
+        outerRule.geometryName() != innerRule.geometryName() ||
+        outerRule.hasLabel() || innerRule.hasLabel() ||
+        outerRule.isDashed() || innerRule.isDashed() ||
+        outerRule.glow() || innerRule.glow() ||
+        outerRule.flat() != innerRule.flat() ||
+        outerRule.billboard() != innerRule.billboard() ||
+        outerRule.depthTest() != innerRule.depthTest() ||
+        outerRule.lateralOffsetUnit() != innerRule.lateralOffsetUnit() ||
+        innerRule.lateralOffsetUnit() !=
+            FeatureStyleRule::LateralOffsetUnit::Meter ||
+        !sameOffset(outerRule.offset(), innerRule.offset()) ||
+        !zeroOffset(outerRule.offsetIncrement()) ||
+        !zeroOffset(innerRule.offsetIncrement()) ||
+        (outerRule.selectable() && !innerRule.selectable()) ||
+        outerRule.constantArrow() != FeatureStyleRule::NoArrow ||
+        innerRule.constantArrow() != FeatureStyleRule::NoArrow)
+    {
+        return false;
+    }
+    return true;
 }
 
 void TileSubsetLayerRenderer::renderAttribute(
@@ -777,17 +1295,29 @@ void TileSubsetLayerRenderer::renderAttribute(
     ChannelBinding const& binding,
     mapget::model_ptr<mapget::AttributeValidityEntry> const& entry)
 {
-    if (!entry || !entry->featureId() || !binding.rule) {
+    if (!entry || binding.rules.empty()) {
         return;
     }
-    auto hostEval =
-        makeEvalFun(binding.featureFields, entry->hostValues());
-    auto entryEval =
-        makeEvalFun(binding.entryFields, entry->values());
+    auto const& topLevelRule = *binding.rules.front();
+    auto const featureId = entry->featureId();
+    if (!featureId) {
+        return;
+    }
+    ProjectedEvalState hostEvalState;
+    ProjectedEvalState entryEvalState;
+    auto hostEval = makeEvalFun(
+        binding.featureFields,
+        entry->hostValues(),
+        hostEvalState);
+    auto entryEval = makeEvalFun(
+        binding.entryFields,
+        entry->values(),
+        entryEvalState);
     auto const attributeName = entry->attributeName();
     auto const attributeLayer = entry->attributeLayer();
+    auto const featureIdString = featureId->toString();
     FeatureStyleRule::MatchContext context{
-        .featureType = entry->featureId()->typeId(),
+        .featureType = featureId->typeId(),
         .attributeName = attributeName
             ? std::optional<std::string_view>{*attributeName}
             : std::nullopt,
@@ -796,7 +1326,8 @@ void TileSubsetLayerRenderer::renderAttribute(
             : std::nullopt,
         .hasValidity = entry->hasValidity(),
     };
-    binding.rule->forEachMatchingRule(
+    forEachAdmittedRule(
+        topLevelRule,
         context,
         entryEval,
         [&](FeatureStyleRule const& rule) {
@@ -805,10 +1336,10 @@ void TileSubsetLayerRenderer::renderAttribute(
                 entryOrdinal,
                 0,
                 rule.selectable(),
-                pickResult(entry));
+                [&] { return pickResult(entry, featureIdString); });
             auto const slotKey =
                 std::to_string(channelOrdinal) + ":" +
-                entry->featureId()->toString() + ":" +
+                featureIdString + ":" +
                 std::to_string(rule.renderIndex());
             auto& slot =
                 attributeOffsetSlotsByFeature_[slotKey];
@@ -885,14 +1416,24 @@ void TileSubsetLayerRenderer::renderGroup(
     ChannelBinding const& binding,
     mapget::model_ptr<mapget::GroupEntry> const& entry)
 {
-    if (!entry || !entry->representativeFeatureId() || !binding.rule) {
+    if (!entry || binding.rules.empty()) {
         return;
     }
-    auto eval = makeEvalFun(binding.entryFields, entry->values());
+    auto const& topLevelRule = *binding.rules.front();
+    auto const representativeFeatureId = entry->representativeFeatureId();
+    if (!representativeFeatureId) {
+        return;
+    }
+    ProjectedEvalState evalState;
+    auto eval = makeEvalFun(
+        binding.entryFields,
+        entry->values(),
+        evalState);
     FeatureStyleRule::MatchContext context{
-        .featureType = entry->representativeFeatureId()->typeId(),
+        .featureType = representativeFeatureId->typeId(),
     };
-    auto const matched = binding.rule->forEachMatchingRule(
+    auto const matched = forEachAdmittedRule(
+        topLevelRule,
         context,
         eval,
         [&](FeatureStyleRule const& rule) {
@@ -901,19 +1442,24 @@ void TileSubsetLayerRenderer::renderGroup(
                 entryOrdinal,
                 0,
                 rule.selectable(),
-                pickResult(entry));
-            auto const slot =
-                featureOffsetSlotsByRule_[rule.renderIndex()];
+                [&] { return pickResult(entry, representativeFeatureId); });
+            auto const increment = rule.offsetIncrement();
+            auto const stacked = hasLocalOffset(increment);
+            auto const slot = stacked
+                ? featureOffsetSlotsByRule_[rule.renderIndex()]
+                : 0U;
             if (renderGeometryCollection(
                     entry->geometry(),
                     rule,
                     eval,
                     pick,
                     rule.offset() +
-                        rule.offsetIncrement() *
+                        increment *
                             static_cast<double>(slot)))
             {
-                ++featureOffsetSlotsByRule_[rule.renderIndex()];
+                if (stacked) {
+                    ++featureOffsetSlotsByRule_[rule.renderIndex()];
+                }
             }
         });
     if (!matched) {
@@ -921,7 +1467,7 @@ void TileSubsetLayerRenderer::renderGroup(
             "rule-match",
             std::string(context.featureType),
             "A server-admitted group entry matched no concrete leaf of its top-level style rule.",
-            binding.rule->index());
+            topLevelRule.index());
     }
 }
 
@@ -931,21 +1477,34 @@ void TileSubsetLayerRenderer::renderRelation(
     ChannelBinding const& binding,
     mapget::model_ptr<mapget::RelationEntry> const& entry)
 {
-    if (!entry || !entry->source() || !entry->target() ||
-        !entry->source()->featureId() || !entry->target()->featureId() ||
-        !binding.rule)
-    {
+    if (!entry || binding.rules.empty()) {
+        return;
+    }
+    auto const& topLevelRule = *binding.rules.front();
+    auto const source = entry->source();
+    auto const target = entry->target();
+    auto const sourceFeatureId = source
+        ? source->featureId()
+        : mapget::model_ptr<mapget::FeatureId>{};
+    auto const targetFeatureId = target
+        ? target->featureId()
+        : mapget::model_ptr<mapget::FeatureId>{};
+    if (!source || !target || !sourceFeatureId || !targetFeatureId) {
         return;
     }
 
-    auto relationEval =
-        makeEvalFun(binding.entryFields, entry->values());
+    ProjectedEvalState relationEvalState;
+    auto relationEval = makeEvalFun(
+        binding.entryFields,
+        entry->values(),
+        relationEvalState);
     auto const relationName = entry->name();
     FeatureStyleRule::MatchContext relationContext{
-        .featureType = entry->source()->featureId()->typeId(),
+        .featureType = sourceFeatureId->typeId(),
         .relationName = relationName,
     };
-    binding.rule->forEachMatchingRule(
+    forEachAdmittedRule(
+        topLevelRule,
         relationContext,
         relationEval,
         [&](FeatureStyleRule const& rule) {
@@ -954,7 +1513,13 @@ void TileSubsetLayerRenderer::renderRelation(
                 entryOrdinal,
                 0,
                 rule.selectable(),
-                pickResult(entry, 0));
+                [&] {
+                    return pickResult(
+                        entry,
+                        sourceFeatureId,
+                        targetFeatureId,
+                        0);
+                });
             renderRelationLine(
                 entry->sourceGeometry(),
                 entry->targetGeometry(),
@@ -964,28 +1529,37 @@ void TileSubsetLayerRenderer::renderRelation(
 
             auto renderEndpoint =
                 [&](mapget::model_ptr<mapget::FeatureEntry> const& endpoint,
+                    mapget::model_ptr<mapget::FeatureId> const& endpointFeatureId,
                     mapget::model_ptr<mapget::GeometryCollection> const& geometry,
                     std::shared_ptr<FeatureStyleRule> const& endpointStyle,
                     uint32_t endpointRole)
             {
-                if (!endpoint || !endpoint->featureId() || !geometry ||
-                    !endpointStyle)
+                if (!endpoint || !endpointFeatureId || !geometry || !endpointStyle)
                 {
                     return;
                 }
-                auto endpointEval =
-                    makeEvalFun(binding.featureFields, endpoint->values());
+                ProjectedEvalState endpointEvalState;
+                auto endpointEval = makeEvalFun(
+                    binding.featureFields,
+                    endpoint->values(),
+                    endpointEvalState);
                 FeatureStyleRule::MatchContext endpointContext{
-                    .featureType = endpoint->featureId()->typeId(),
+                    .featureType = endpointFeatureId->typeId(),
+                };
+                std::optional<std::string> endpointFeatureIdString;
+                auto getEndpointFeatureIdString = [&]() -> std::string const& {
+                    if (!endpointFeatureIdString) {
+                        endpointFeatureIdString = endpointFeatureId->toString();
+                    }
+                    return *endpointFeatureIdString;
                 };
                 endpointStyle->forEachMatchingRule(
                     endpointContext,
                     endpointEval,
                     [&](FeatureStyleRule const& endpointRule) {
                         std::ostringstream key;
-                        key << currentSubsetOrdinal_ << ':'
-                            << endpoint->featureId()->mapId() << ':'
-                            << endpoint->featureId()->toString() << ':'
+                        key << endpointFeatureId->mapId() << ':'
+                            << getEndpointFeatureIdString() << ':'
                             << endpointRule.renderIndex();
                         if (!renderedRelationEndpointParts_
                                  .insert(key.str())
@@ -998,12 +1572,18 @@ void TileSubsetLayerRenderer::renderRelation(
                             entryOrdinal,
                             endpointRole,
                             endpointRule.selectable(),
-                            pickResult(entry, endpointRole));
+                            [&] {
+                                return pickResult(
+                                    entry,
+                                    sourceFeatureId,
+                                    targetFeatureId,
+                                    endpointRole);
+                            });
                         auto const previousLabelIdentity =
                             relationEndpointLabelIdentity_;
                         relationEndpointLabelIdentity_ =
-                            endpoint->featureId()->mapId() + "\n" +
-                            endpoint->featureId()->toString();
+                            endpointFeatureId->mapId() + "\n" +
+                            getEndpointFeatureIdString();
                         renderGeometryCollection(
                             geometry,
                             endpointRule,
@@ -1016,12 +1596,14 @@ void TileSubsetLayerRenderer::renderRelation(
             };
 
             renderEndpoint(
-                entry->source(),
+                source,
+                sourceFeatureId,
                 entry->sourceGeometry(),
                 rule.relationSourceStyle(),
                 1);
             renderEndpoint(
-                entry->target(),
+                target,
+                targetFeatureId,
                 entry->targetGeometry(),
                 rule.relationTargetStyle(),
                 2);
@@ -1033,27 +1615,42 @@ bool TileSubsetLayerRenderer::renderGeometryCollection(
     FeatureStyleRule const& rule,
     BoundEvalFun const& evalFun,
     uint32_t pick,
-    glm::dvec3 const& offset)
+    glm::dvec3 const& offset,
+    ProjectedGeometryCache* projectionCache,
+    std::vector<ResolvedFeatureGeometry> const*
+        resolvedGeometries,
+    ResolvedGeometryStyle const* resolvedStyle)
 {
     bool rendered = false;
     std::optional<mapget::Point> labelPosition;
-    if (!collection) {
+    if (!collection && !resolvedGeometries) {
         return rendered;
     }
-    collection->forEachGeometry(
-        [&](mapget::model_ptr<mapget::Geometry> const& geometry) {
+    auto renderOne =
+        [&](mapget::model_ptr<mapget::Geometry> const& geometry,
+            std::optional<mapget::GeomType> resolvedType,
+            std::optional<std::string_view> resolvedName) {
+            if (!geometry) {
+                return true;
+            }
+            auto const type = resolvedType
+                ? *resolvedType
+                : geometry->geomType();
             auto const renderedGeometry = renderGeometry(
                 geometry,
                 rule,
                 evalFun,
                 pick,
                 offset,
-                false);
-            if (renderedGeometry && !labelPosition && rule.hasLabel() &&
-                geometry)
+                false,
+                projectionCache,
+                resolvedType,
+                resolvedName,
+                resolvedStyle);
+            if (renderedGeometry && !labelPosition && rule.hasLabel())
             {
                 auto presentationOffset = offset;
-                if (geometry->geomType() == mapget::GeomType::Line &&
+                if (type == mapget::GeomType::Line &&
                     rule.lateralOffsetUnit() ==
                         FeatureStyleRule::LateralOffsetUnit::Pixel)
                 {
@@ -1070,7 +1667,21 @@ bool TileSubsetLayerRenderer::renderGeometryCollection(
             }
             rendered = renderedGeometry || rendered;
             return true;
-        });
+    };
+    if (resolvedGeometries) {
+        for (auto const& resolved : *resolvedGeometries) {
+            renderOne(
+                resolved.geometry,
+                resolved.type,
+                resolved.name);
+        }
+    }
+    else {
+        collection->forEachGeometry(
+            [&](mapget::model_ptr<mapget::Geometry> const& geometry) {
+                return renderOne(geometry, std::nullopt, std::nullopt);
+            });
+    }
     if (rendered && labelPosition && rule.hasLabel()) {
         auto text = rule.labelText(evalFun);
         if (!text.empty()) {
@@ -1078,7 +1689,9 @@ bool TileSubsetLayerRenderer::renderGeometryCollection(
                 *labelPosition,
                 text,
                 rule,
-                resolvedZIndex(rule, evalFun),
+                resolvedStyle
+                    ? resolvedStyle->zIndex
+                    : resolvedZIndex(rule, evalFun),
                 pick);
         }
     }
@@ -1091,13 +1704,19 @@ bool TileSubsetLayerRenderer::renderGeometry(
     BoundEvalFun const& evalFun,
     uint32_t pick,
     glm::dvec3 const& offset,
-    bool renderLabel)
+    bool renderLabel,
+    ProjectedGeometryCache* projectionCache,
+    std::optional<mapget::GeomType> resolvedType,
+    std::optional<std::string_view> resolvedName,
+    ResolvedGeometryStyle const* resolvedStyle)
 {
     if (!geometry) {
         return false;
     }
-    auto const name = geometryName(geometry);
-    auto const type = geometry->geomType();
+    auto const name = resolvedType ? resolvedName : geometryName(geometry);
+    auto const type = resolvedType
+        ? *resolvedType
+        : geometry->geomType();
     auto const supportsOwnType = rule.supports(type, name);
     auto const gltfAsAabb =
         type == mapget::GeomType::GltfNodeIndex &&
@@ -1106,11 +1725,32 @@ bool TileSubsetLayerRenderer::renderGeometry(
         return false;
     }
 
-    auto color = rule.color(evalFun);
+    auto color = resolvedStyle
+        ? std::optional<glm::fvec4>{resolvedStyle->color}
+        : rule.color(evalFun);
     if (!color) {
         return false;
     }
-    auto const zIndex = resolvedZIndex(rule, evalFun);
+    auto const zIndex = resolvedStyle
+        ? resolvedStyle->zIndex
+        : resolvedZIndex(rule, evalFun);
+    auto const pathWidth = type == mapget::GeomType::Line
+        ? std::max(
+            0.0F,
+            resolvedStyle
+                ? resolvedStyle->pathWidth
+                : rule.width(evalFun))
+        : 0.0F;
+    auto const pathArrow = type == mapget::GeomType::Line
+        ? resolvedStyle
+            ? resolvedStyle->pathArrow
+            : rule.arrow(evalFun)
+        : FeatureStyleRule::NoArrow;
+    if (type == mapget::GeomType::Line && pathWidth <= 0.0F &&
+        !rule.hasLabel())
+    {
+        return false;
+    }
 
     if (type == mapget::GeomType::GltfNodeIndex) {
         if (supportsOwnType) {
@@ -1152,54 +1792,130 @@ bool TileSubsetLayerRenderer::renderGeometry(
     if (pixelLateralOffset) {
         presentationOffset.x = 0.0;
     }
-    auto transformed = applyPresentationTransform(
-        geometry->toSelfContained(),
-        rule,
-        presentationOffset);
-    std::vector<mapget::Point> projected;
-    projected.reserve(transformed.points_.size());
-    for (auto const& point : transformed.points_) {
-        projected.push_back(projectWgsPoint(point));
+    auto const simplifyBeforeProjection =
+        type == mapget::GeomType::Line &&
+        lineSimplificationToleranceMeters_ > 0.0 &&
+        !pixelLateralOffset &&
+        !rule.isDashed() &&
+        pathArrow == FeatureStyleRule::NoArrow;
+    mapget::SelfContainedGeometry transformed;
+    auto const needsTransform = rule.flat() || hasLocalOffset(presentationOffset);
+    std::vector<mapget::Point> const* projected = nullptr;
+    if (needsTransform || type == mapget::GeomType::Polygon) {
+        transformed = applyPresentationTransform(
+            geometry->toSelfContained(),
+            rule,
+            presentationOffset);
+        if (simplifyBeforeProjection) {
+            projectPathPoints(
+                transformed.points_,
+                true,
+                projectedPointsScratch_);
+        }
+        else {
+            projectedPointsScratch_.clear();
+            projectedPointsScratch_.reserve(transformed.points_.size());
+            for (auto const& point : transformed.points_) {
+                projectedPointsScratch_.push_back(projectWgsPoint(point));
+            }
+        }
+        projected = &projectedPointsScratch_;
+    }
+    else if (projectionCache) {
+        auto* found = projectionCache->find(
+            geometry->addr(),
+            simplifyBeforeProjection);
+        if (!found) {
+            found = &projectionCache->append(
+                geometry->addr(),
+                simplifyBeforeProjection);
+            wgsPathScratch_.clear();
+            geometry->forEachPoint([&](mapget::Point&& point) {
+                wgsPathScratch_.push_back(std::move(point));
+                return true;
+            });
+            projectPathPoints(
+                wgsPathScratch_,
+                simplifyBeforeProjection,
+                found->points);
+        }
+        projected = &found->points;
+    }
+    else {
+        wgsPathScratch_.clear();
+        geometry->forEachPoint([&](mapget::Point&& point) {
+            wgsPathScratch_.push_back(std::move(point));
+            return true;
+        });
+        projectPathPoints(
+            wgsPathScratch_,
+            simplifyBeforeProjection,
+            projectedPointsScratch_);
+        projected = &projectedPointsScratch_;
     }
 
     switch (type) {
     case mapget::GeomType::Points:
-        for (auto const& point : projected) {
-            appendPoint(
-                point,
-                rule,
-                evalFun,
-                *color,
-                zIndex,
-                pick);
+        if (rule.hasIconUrl()) {
+            auto const uri = rule.iconUrl(evalFun);
+            for (auto const& point : *projected) {
+                appendIcon(
+                    point,
+                    uri,
+                    rule,
+                    evalFun,
+                    *color,
+                    zIndex,
+                    pick);
+            }
+        }
+        else {
+            for (auto const& point : *projected) {
+                appendPoint(
+                    point,
+                    rule,
+                    evalFun,
+                    *color,
+                    zIndex,
+                    pick);
+            }
         }
         break;
     case mapget::GeomType::Line:
         if (pixelLateralOffset) {
             appendPath(
-                projected,
+                *projected,
                 rule,
-                evalFun,
                 *color,
                 zIndex,
                 pick,
+                pathWidth,
+                pathArrow,
                 std::vector<float>(
-                    projected.size(),
+                    projected->size(),
                     static_cast<float>(offset.x)));
         }
         else {
             appendPath(
-                projected,
+                *projected,
                 rule,
-                evalFun,
                 *color,
                 zIndex,
-                pick);
+                pick,
+                pathWidth,
+                pathArrow,
+                {},
+                {},
+                0.0F,
+                simplifyBeforeProjection,
+                resolvedStyle
+                    ? resolvedStyle->pathOverlay
+                    : std::nullopt);
         }
         break;
     case mapget::GeomType::Polygon:
         appendSurface(
-            projected,
+            *projected,
             transformed.polygonRingStarts_,
             rule,
             *color,
@@ -1207,25 +1923,28 @@ bool TileSubsetLayerRenderer::renderGeometry(
             pick);
         break;
     case mapget::GeomType::Mesh:
-        appendMesh(projected, rule, *color, zIndex, pick);
+        appendMesh(*projected, rule, *color, zIndex, pick);
         break;
     case mapget::GeomType::AABB:
     case mapget::GeomType::GltfNodeIndex:
         break;
     }
 
-    if (renderLabel && rule.hasLabel() && !transformed.points_.empty()) {
+    if (renderLabel && rule.hasLabel() && !projected->empty()) {
         auto text = rule.labelText(evalFun);
         if (!text.empty()) {
+        auto labelPoint = transformed.points_.empty()
+                ? (*projected)[projected->size() / 2U]
+                : projectWgsPoint(geometryCenter(transformed));
             appendLabel(
-                projectWgsPoint(geometryCenter(transformed)),
+                labelPoint,
                 text,
                 rule,
                 zIndex,
                 pick);
         }
     }
-    return !projected.empty();
+    return !projected->empty();
 }
 
 bool TileSubsetLayerRenderer::renderTransitionLine(
@@ -1258,6 +1977,7 @@ bool TileSubsetLayerRenderer::renderTransitionLine(
     if (!color || width <= 0.0f) {
         return false;
     }
+    auto const arrow = rule.arrow(evalFun);
     auto const zIndex = resolvedZIndex(rule, evalFun);
 
     std::vector<mapget::Point> incomingWgs(
@@ -1472,7 +2192,7 @@ bool TileSubsetLayerRenderer::renderTransitionLine(
     auto const offsetUnitDot =
         static_cast<double>(fromOffsetUnit.x) * toOffsetUnit.x +
         static_cast<double>(fromOffsetUnit.y) * toOffsetUnit.y;
-    auto offsetRotation = std::atan2(offsetUnitCross, offsetUnitDot);
+    auto offsetRotation = glm::atan(offsetUnitCross, offsetUnitDot);
     if (uTurn) {
         // The offset-vector arc itself forms the visible compact hairpin. It
         // must initially advance with the incoming road and finish with the
@@ -1510,8 +2230,8 @@ bool TileSubsetLayerRenderer::renderTransitionLine(
             (std::abs(static_cast<double>(toLateralOffsetPx)) -
              std::abs(static_cast<double>(fromLateralOffsetPx))) * progress;
         auto const angle = offsetRotation * progress;
-        auto const cosine = std::cos(angle);
-        auto const sine = std::sin(angle);
+        auto const cosine = glm::cos(angle);
+        auto const sine = glm::sin(angle);
         return glm::fvec2{
             static_cast<float>(
                 (fromOffsetUnit.x * cosine -
@@ -1724,67 +2444,26 @@ bool TileSubsetLayerRenderer::renderTransitionLine(
         }
         lateralOffsetScaleThreshold = static_cast<float>(
             scaleGroup->scaleThresholdMetersPerPixel);
-        auto thresholdBuffer = [&](TransitionOffsetBuffer buffer)
-            -> PathBuffers& {
-            switch (buffer) {
-            case TransitionOffsetBuffer::PathWorld:
-                return buffers_.transitionPathWorld;
-            case TransitionOffsetBuffer::PathBillboard:
-                return buffers_.transitionPathBillboard;
-            case TransitionOffsetBuffer::ArrowWorld:
-                return buffers_.arrowWorld;
-            case TransitionOffsetBuffer::ArrowBillboard:
-                return buffers_.arrowBillboard;
-            }
-            return buffers_.transitionPathWorld;
-        };
-        for (auto const& slot : scaleGroup->slots) {
-            auto& thresholds = thresholdBuffer(slot.buffer)
-                .lateralOffsetScaleThresholds;
-            if (slot.index < thresholds.size()) {
-                thresholds[slot.index] = lateralOffsetScaleThreshold;
-            }
+        for (auto const& handle : scaleGroup->gpuHandles) {
+            gpuPacketBuilder_.updateAdaptiveOffsetThreshold(
+                handle,
+                lateralOffsetScaleThreshold);
         }
     }
 
-    auto const billboard = rule.billboard().value_or(false);
-    auto& transitionBuffers = billboard
-        ? buffers_.transitionPathBillboard
-        : buffers_.transitionPathWorld;
-    auto& arrowBuffers = billboard
-        ? buffers_.arrowBillboard
-        : buffers_.arrowWorld;
-    auto const transitionThresholdIndex =
-        transitionBuffers.lateralOffsetScaleThresholds.size();
-    auto const firstArrowThresholdIndex =
-        arrowBuffers.lateralOffsetScaleThresholds.size();
-    appendPath(
+    auto const gpuHandle = appendPath(
         path,
         rule,
-        evalFun,
         *color,
         zIndex,
         pick,
+        width,
+        arrow,
         lateralOffsetsPx,
         lateralOffsetVectorsPx,
         lateralOffsetScaleThreshold);
     if (scaleGroup) {
-        scaleGroup->slots.push_back({
-            billboard
-                ? TransitionOffsetBuffer::PathBillboard
-                : TransitionOffsetBuffer::PathWorld,
-            transitionThresholdIndex,
-        });
-        for (auto index = firstArrowThresholdIndex;
-             index < arrowBuffers.lateralOffsetScaleThresholds.size();
-             ++index) {
-            scaleGroup->slots.push_back({
-                billboard
-                    ? TransitionOffsetBuffer::ArrowBillboard
-                    : TransitionOffsetBuffer::ArrowWorld,
-                index,
-            });
-        }
+        scaleGroup->gpuHandles.push_back(gpuHandle);
     }
     attributeOffsetSlotsByTransitionLeg_[fromKey] = fromSlot + 1U;
     if (toKey != fromKey) {
@@ -1826,6 +2505,7 @@ bool TileSubsetLayerRenderer::renderSegmentStackedLine(
     if (!color || width <= 0.0f) {
         return false;
     }
+    auto const arrow = rule.arrow(evalFun);
     auto const zIndex = resolvedZIndex(rule, evalFun);
 
     auto pointKey = [](mapget::Point const& point) {
@@ -1900,10 +2580,11 @@ bool TileSubsetLayerRenderer::renderSegmentStackedLine(
     appendPath(
         projected,
         rule,
-        evalFun,
         *color,
         zIndex,
         pick,
+        width,
+        arrow,
         lateralOffsetsPx);
     for (auto const& key : occupiedSegments) {
         attributeOffsetSlotsBySegment_[key] = slot + 1U;
@@ -1945,8 +2626,9 @@ void TileSubsetLayerRenderer::renderRelationLine(
         targetCenter->z + rule.relationLineHeightOffset(),
     };
     auto color = rule.color(evalFun);
-    if (color && rule.width(evalFun) > 0.0f &&
-        rule.supports(mapget::GeomType::Line))
+    auto const width = rule.width(evalFun);
+    auto const arrow = rule.arrow(evalFun);
+    if (color && width > 0.0f && rule.supports(mapget::GeomType::Line))
     {
         auto line = applyPresentationTransform(
             mapget::SelfContainedGeometry{
@@ -1963,10 +2645,11 @@ void TileSubsetLayerRenderer::renderRelationLine(
         appendPath(
             projected,
             rule,
-            evalFun,
             *color,
             resolvedZIndex(rule, evalFun),
-            pick);
+            pick,
+            width,
+            arrow);
     }
 
     auto marker = rule.relationLineEndMarkerStyle();
@@ -1981,7 +2664,10 @@ void TileSubsetLayerRenderer::renderRelationLine(
         evalFun,
         [&](FeatureStyleRule const& markerRule) {
             auto markerColor = markerRule.color(evalFun);
+            auto const markerWidth = markerRule.width(evalFun);
+            auto const markerArrow = markerRule.arrow(evalFun);
             if (!markerColor ||
+                markerWidth <= 0.0F ||
                 !markerRule.supports(mapget::GeomType::Line))
             {
                 return;
@@ -2009,10 +2695,11 @@ void TileSubsetLayerRenderer::renderRelationLine(
                 appendPath(
                     projected,
                     markerRule,
-                    evalFun,
                     *markerColor,
                     resolvedZIndex(markerRule, evalFun),
-                    pick);
+                    pick,
+                    markerWidth,
+                    markerArrow);
             }
         });
 }
@@ -2022,13 +2709,12 @@ uint32_t TileSubsetLayerRenderer::pickIndex(
     uint32_t entryOrdinal,
     uint32_t endpointRole,
     bool selectable,
-    PickResult result)
+    std::function<PickResult()> const& resultFactory)
 {
     if (!selectable) {
         return kUnselectable;
     }
     PickRef key{
-        currentSubsetOrdinal_,
         channelOrdinal,
         entryOrdinal,
         endpointRole,
@@ -2039,35 +2725,35 @@ uint32_t TileSubsetLayerRenderer::pickIndex(
         return found->second;
     }
     auto const index = static_cast<uint32_t>(pickRefs_.size());
-    result.subsetOrdinal = currentSubsetOrdinal_;
+    bridgePickResults_.emplace(index, resultFactory());
     pickRefs_.push_back(key);
-    pickResults_.push_back(std::move(result));
     pickIndices_.emplace(key, index);
+    return index;
+}
+
+uint32_t TileSubsetLayerRenderer::featurePickIndex(
+    uint32_t channelOrdinal,
+    uint32_t entryOrdinal,
+    bool selectable)
+{
+    if (!selectable) {
+        return kUnselectable;
+    }
+    auto const index = static_cast<uint32_t>(pickRefs_.size());
+    pickRefs_.push_back({channelOrdinal, entryOrdinal, 0U});
     return index;
 }
 
 TileSubsetLayerRenderer::PickResult
 TileSubsetLayerRenderer::pickResult(
-    mapget::model_ptr<mapget::FeatureEntry> const& entry)
-{
-    PickResult result;
-    if (entry && entry->featureId()) {
-        result.featureId = entry->featureId()->toString();
-    }
-    return result;
-}
-
-TileSubsetLayerRenderer::PickResult
-TileSubsetLayerRenderer::pickResult(
-    mapget::model_ptr<mapget::AttributeValidityEntry> const& entry)
+    mapget::model_ptr<mapget::AttributeValidityEntry> const& entry,
+    std::string const& featureId)
 {
     PickResult result;
     if (!entry) {
         return result;
     }
-    if (entry->featureId()) {
-        result.featureId = entry->featureId()->toString();
-    }
+    result.featureId = featureId;
     result.attributeIndex = entry->attributeIndex();
     result.hasValidity = entry->hasValidity();
     result.validityIndex = entry->validityIndex();
@@ -2076,18 +2762,21 @@ TileSubsetLayerRenderer::pickResult(
 
 TileSubsetLayerRenderer::PickResult
 TileSubsetLayerRenderer::pickResult(
-    mapget::model_ptr<mapget::GroupEntry> const& entry)
+    mapget::model_ptr<mapget::GroupEntry> const& entry,
+    mapget::model_ptr<mapget::FeatureId> const& representativeFeatureId)
 {
     PickResult result;
     if (!entry) {
         return result;
     }
-    if (entry->representativeFeatureId()) {
-        result.featureId =
-            entry->representativeFeatureId()->toString();
+    if (representativeFeatureId) {
+        result.featureId = representativeFeatureId->toString();
     }
     auto members = entry->memberFeatureIds();
-    if (!members) {
+    // A singleton group is semantically identical to its representative.
+    // Omitting the duplicate member avoids resolving and formatting the same
+    // FeatureId twice for the overwhelmingly common point-grid case.
+    if (!members || members->size() <= 1U) {
         return result;
     }
     result.memberFeatureIds.reserve(members->size());
@@ -2107,22 +2796,22 @@ TileSubsetLayerRenderer::pickResult(
 TileSubsetLayerRenderer::PickResult
 TileSubsetLayerRenderer::pickResult(
     mapget::model_ptr<mapget::RelationEntry> const& entry,
+    mapget::model_ptr<mapget::FeatureId> const& sourceFeatureId,
+    mapget::model_ptr<mapget::FeatureId> const& targetFeatureId,
     uint32_t endpointRole)
 {
     PickResult result;
     if (!entry) {
         return result;
     }
-    auto endpoint =
-        endpointRole == 2 ? entry->target() : entry->source();
-    if (endpoint && endpoint->featureId()) {
-        result.featureId =
-            endpoint->featureId()->toString();
+    auto const& endpointFeatureId = endpointRole == 2
+        ? targetFeatureId
+        : sourceFeatureId;
+    if (endpointFeatureId) {
+        result.featureId = endpointFeatureId->toString();
     }
-    auto source = entry->source();
-    if (source && source->featureId()) {
-        result.relationSourceFeatureId =
-            source->featureId()->toString();
+    if (sourceFeatureId) {
+        result.relationSourceFeatureId = sourceFeatureId->toString();
     }
     result.relationId = entry->relationId();
     if (!result.relationSourceFeatureId.empty()) {
@@ -2183,32 +2872,59 @@ void TileSubsetLayerRenderer::appendPoint(
     double zIndex,
     uint32_t pick)
 {
-    auto& buffers = rule.billboard().value_or(false)
-        ? buffers_.pointBillboard
-        : buffers_.pointWorld;
-    buffers.positions.insert(
-        buffers.positions.end(),
-        {
-            static_cast<float>(point.x),
-            static_cast<float>(point.y),
-            static_cast<float>(point.z),
+    auto const radius = std::max(
+        0.0f,
+        rule.width(evalFun) * 0.5f);
+    gpuPacketBuilder_.appendPoint(
+        GpuPointRecordData{
+            .position = point,
+            .radius = radius,
+            .style = gpuRecordStyle(rule, color, zIndex, pick),
+        },
+        rule.billboard().value_or(false),
+        rule.depthTest());
+    ++vertexCount_;
+}
+
+void TileSubsetLayerRenderer::appendIcon(
+    mapget::Point const& point,
+    std::string const& uri,
+    FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun,
+    glm::fvec4 const& color,
+    double zIndex,
+    uint32_t pick)
+{
+    if (uri.empty()) {
+        return;
+    }
+    auto const resource = gpuIconResources_.find(uri);
+    if (resource == gpuIconResources_.end()) {
+        gpuPacketBuilder_.appendResourceRequest({
+            .resourceKind = static_cast<uint32_t>(GpuResourceKind::Icon),
+            .uri = uri,
         });
-    buffers.colors.insert(
-        buffers.colors.end(),
-        {
-            toColorByte(color.r),
-            toColorByte(color.g),
-            toColorByte(color.b),
-            toColorByte(color.a),
-        });
-    buffers.radii.push_back(
-        std::max(
-            0.0f,
-            rule.width(evalFun) * 0.5f));
-    buffers.zIndices.push_back(zIndex);
-    buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
-    buffers.featureAddresses.push_back(pick);
-    appendGlow(rule, buffers.glowColors, buffers.glowRadii);
+        return;
+    }
+    auto const scale = std::max(0.0F, rule.width(evalFun));
+    if (scale <= 0.0F) {
+        return;
+    }
+    gpuPacketBuilder_.appendIcon(
+        GpuIconRecordData{
+            .position = point,
+            .pixelSize = {
+                resource->second.pixelSize[0] * scale,
+                resource->second.pixelSize[1] * scale,
+            },
+            .pixelOffset = {0.0F, 0.0F},
+            .uv = resource->second.uv,
+            .atlasPage = resource->second.atlasPage,
+            .flags = 0U,
+            .style = gpuRecordStyle(rule, color, zIndex, pick),
+        },
+        rule.billboard().value_or(true),
+        rule.depthTest());
     ++vertexCount_;
 }
 
@@ -2223,40 +2939,11 @@ void TileSubsetLayerRenderer::appendSurface(
     if (points.size() < 3) {
         return;
     }
-    auto& buffers = buffers_.surfaces;
-    auto const startVertex =
-        static_cast<uint32_t>(buffers.positions.size() / 3);
-    for (auto const& point : points) {
-        buffers.positions.insert(
-            buffers.positions.end(),
-            {
-                static_cast<float>(point.x),
-                static_cast<float>(point.y),
-                static_cast<float>(point.z),
-            });
-        buffers.colors.insert(
-            buffers.colors.end(),
-            {
-                toColorByte(color.r),
-                toColorByte(color.g),
-                toColorByte(color.b),
-                toColorByte(color.a),
-            });
-    }
-    for (size_t index = 1; index < ringStarts.size(); ++index) {
-        if (ringStarts[index] < points.size()) {
-            buffers.holeIndices.push_back(
-                startVertex + ringStarts[index]);
-        }
-    }
-    buffers.holeIndexStarts.push_back(
-        static_cast<uint32_t>(buffers.holeIndices.size()));
-    buffers.zIndices.push_back(zIndex);
-    buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
-    buffers.featureAddresses.push_back(pick);
-    appendGlow(rule, buffers.glowColors, buffers.glowRadii);
-    buffers.startIndices.push_back(
-        static_cast<uint32_t>(buffers.positions.size() / 3));
+    gpuPacketBuilder_.appendSurface(
+        points,
+        ringStarts,
+        gpuRecordStyle(rule, color, zIndex, pick),
+        rule.depthTest());
     vertexCount_ += static_cast<uint32_t>(points.size());
 }
 
@@ -2278,225 +2965,173 @@ void TileSubsetLayerRenderer::appendMesh(
     }
 }
 
-void TileSubsetLayerRenderer::appendPath(
+GpuPathRecordHandle TileSubsetLayerRenderer::appendPath(
     std::vector<mapget::Point> const& points,
     FeatureStyleRule const& rule,
-    BoundEvalFun const& evalFun,
     glm::fvec4 const& color,
     double zIndex,
     uint32_t pick,
+    float width,
+    FeatureStyleRule::Arrow arrow,
     std::span<float const> lateralOffsetsPx,
     std::span<glm::fvec2 const> lateralOffsetVectorsPx,
-    float lateralOffsetScaleThreshold)
+    float lateralOffsetScaleThreshold,
+    bool simplificationApplied,
+    std::optional<GpuPathOverlay> pathOverlay)
 {
-    auto const width =
-        std::max(0.0f, rule.width(evalFun));
+    width = std::max(0.0F, width);
     if (points.size() < 2 || width <= 0.0f) {
-        return;
+        return {};
     }
     auto const hasOffsetVectors =
         lateralOffsetVectorsPx.size() >= points.size();
-    auto& buffers = hasOffsetVectors
-        ? (rule.billboard().value_or(false)
-            ? buffers_.transitionPathBillboard
-            : buffers_.transitionPathWorld)
-        : (rule.billboard().value_or(false)
-            ? buffers_.pathBillboard
-            : buffers_.pathWorld);
     auto const dashed = rule.isDashed();
     auto const dashLength =
         static_cast<float>(std::max(1, rule.dashLength()));
-    for (size_t pointIndex = 0; pointIndex < points.size(); ++pointIndex) {
-        auto const& point = points[pointIndex];
-        buffers.positions.insert(
-            buffers.positions.end(),
-            {
-                static_cast<float>(point.x),
-                static_cast<float>(point.y),
-                static_cast<float>(point.z),
-            });
-        buffers.colors.insert(
-            buffers.colors.end(),
-            {
-                toColorByte(color.r),
-                toColorByte(color.g),
-                toColorByte(color.b),
-                toColorByte(color.a),
-            });
-        buffers.widths.push_back(width);
-        buffers.lateralOffsetsPx.push_back(
-            pointIndex < lateralOffsetsPx.size()
-                ? lateralOffsetsPx[pointIndex]
-                : 0.0f);
-        if (hasOffsetVectors) {
-            buffers.lateralOffsetVectorsPx.push_back(
-                lateralOffsetVectorsPx[pointIndex].x);
-            buffers.lateralOffsetVectorsPx.push_back(
-                lateralOffsetVectorsPx[pointIndex].y);
-        }
-        buffers.dashArrays.push_back(dashed ? dashLength : 1.0f);
-        buffers.dashArrays.push_back(dashed ? dashLength : 0.0f);
+    auto renderedPoints = std::span<mapget::Point const>{points};
+    if (!simplificationApplied &&
+        lineSimplificationToleranceMeters_ > 0.0 &&
+        lateralOffsetsPx.empty() &&
+        lateralOffsetVectorsPx.empty() &&
+        !dashed &&
+        arrow == FeatureStyleRule::NoArrow)
+    {
+        renderedPoints = simplifyPath(points);
     }
-    buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
-    buffers.featureAddresses.push_back(pick);
-    buffers.lateralOffsetScaleThresholds.push_back(
-        hasOffsetVectors
-            ? std::max(0.0f, lateralOffsetScaleThreshold)
-            : 0.0f);
-    buffers.zIndices.push_back(zIndex);
-    appendGlow(rule, buffers.glowColors, buffers.glowRadii);
-    buffers.startIndices.push_back(
-        static_cast<uint32_t>(buffers.positions.size() / 3));
-    vertexCount_ += static_cast<uint32_t>(points.size());
-
-    auto const arrow = rule.arrow(evalFun);
-    auto endpointOffsetVector = [&](size_t begin,
-                                    size_t end,
-                                    size_t offsetIndex,
-                                    float lateralOffsetPx) {
-        if (hasOffsetVectors) {
-            return lateralOffsetVectorsPx[offsetIndex];
-        }
-        auto const dx = points[end].x - points[begin].x;
-        auto const dy = points[end].y - points[begin].y;
-        auto const length = std::hypot(dx, dy);
-        return length > kArrowSegmentEpsilonMeters
-            ? glm::fvec2{
-                static_cast<float>(dy / length) * lateralOffsetPx,
-                static_cast<float>(-dx / length) * lateralOffsetPx}
-            : glm::fvec2{};
-    };
+    auto const gpuHandle = gpuPacketBuilder_.appendPath(
+        GpuPathRecordData{
+            .points = renderedPoints,
+            .lateralOffsetsPx = lateralOffsetsPx,
+            .lateralOffsetVectorsPx = lateralOffsetVectorsPx,
+            .width = width,
+            .dashLength = dashed ? dashLength : 1.0F,
+            .dashGap = dashed ? dashLength : 0.0F,
+            .lateralOffsetScaleThreshold = hasOffsetVectors
+                ? std::max(0.0F, lateralOffsetScaleThreshold)
+                : 0.0F,
+            .forwardArrow =
+                arrow == FeatureStyleRule::ForwardArrow ||
+                arrow == FeatureStyleRule::DoubleArrow,
+            .backwardArrow =
+                arrow == FeatureStyleRule::BackwardArrow ||
+                arrow == FeatureStyleRule::DoubleArrow,
+            .overlay = std::move(pathOverlay),
+            .style = gpuRecordStyle(rule, color, zIndex, pick),
+        },
+        rule.billboard().value_or(false),
+        rule.depthTest());
+    vertexCount_ += static_cast<uint32_t>(renderedPoints.size());
     if (arrow == FeatureStyleRule::ForwardArrow ||
-        arrow == FeatureStyleRule::DoubleArrow)
-    {
-        appendArrowHead(
-            points.back(),
-            points[points.size() - 2],
-            rule,
-            width,
-            color,
-            zIndex,
-            pick,
-            endpointOffsetVector(
-                points.size() - 2,
-                points.size() - 1,
-                points.size() - 1,
-                lateralOffsetsPx.size() >= points.size()
-                    ? lateralOffsetsPx.back()
-                    : 0.0f),
-            lateralOffsetScaleThreshold);
+        arrow == FeatureStyleRule::BackwardArrow) {
+        vertexCount_ += 3U;
     }
-    if (arrow == FeatureStyleRule::BackwardArrow ||
-        arrow == FeatureStyleRule::DoubleArrow)
-    {
-        appendArrowHead(
-            points.front(),
-            points[1],
-            rule,
-            width,
-            color,
-            zIndex,
-            pick,
-            endpointOffsetVector(
-                0,
-                1,
-                0,
-                !lateralOffsetsPx.empty()
-                    ? lateralOffsetsPx.front()
-                    : 0.0f),
-            lateralOffsetScaleThreshold);
+    else if (arrow == FeatureStyleRule::DoubleArrow) {
+        vertexCount_ += 6U;
+    }
+    return gpuHandle;
+}
+
+void TileSubsetLayerRenderer::projectPathPoints(
+    std::span<mapget::Point const> points,
+    bool simplify,
+    std::vector<mapget::Point>& projected)
+{
+    auto retained = points;
+    if (simplify && points.size() > 2U) {
+        retained = simplifyPath(points, true);
+    }
+    projected.clear();
+    projected.reserve(retained.size());
+    for (auto const& point : retained) {
+        projected.push_back(projectWgsPoint(point));
     }
 }
 
-void TileSubsetLayerRenderer::appendArrowHead(
-    mapget::Point const& tip,
-    mapget::Point const& previous,
-    FeatureStyleRule const& rule,
-    float width,
-    glm::fvec4 const& color,
-    double zIndex,
-    uint32_t pick,
-    glm::fvec2 lateralOffsetVectorPx,
-    float lateralOffsetScaleThreshold)
+std::span<mapget::Point const> TileSubsetLayerRenderer::simplifyPath(
+    std::span<mapget::Point const> points,
+    bool wgs84Coordinates)
 {
-    auto const dx = tip.x - previous.x;
-    auto const dy = tip.y - previous.y;
-    auto const dz = tip.z - previous.z;
-    auto const length = std::sqrt(dx * dx + dy * dy + dz * dz);
-    if (length <= kArrowSegmentEpsilonMeters) {
-        return;
+    if (points.size() <= 2U) {
+        return points;
     }
-    auto const dirX = dx / length;
-    auto const dirY = dy / length;
-    auto const dirZ = dz / length;
-    auto perpX = -dirY;
-    auto perpY = dirX;
-    auto perpLength = std::sqrt(perpX * perpX + perpY * perpY);
-    if (perpLength <= kArrowSegmentEpsilonMeters) {
-        perpX = 1.0;
-        perpY = 0.0;
-        perpLength = 1.0;
-    }
-    perpX /= perpLength;
-    perpY /= perpLength;
-    auto const headLength = std::clamp(
-        length * kArrowHeadLengthFraction,
-        kArrowHeadLengthMinMeters,
-        kArrowHeadLengthMaxMeters);
-    auto const halfWidth =
-        headLength * kArrowHeadWidthFraction;
-    auto const base = mapget::Point{
-        tip.x - dirX * headLength,
-        tip.y - dirY * headLength,
-        tip.z - dirZ * headLength,
-    };
-    auto const left = mapget::Point{
-        base.x + perpX * halfWidth,
-        base.y + perpY * halfWidth,
-        base.z,
-    };
-    auto const right = mapget::Point{
-        base.x - perpX * halfWidth,
-        base.y - perpY * halfWidth,
-        base.z,
-    };
+    auto const toleranceSquared =
+        lineSimplificationToleranceMeters_ *
+        lineSimplificationToleranceMeters_;
+    pathSimplificationKeepScratch_.assign(points.size(), uint8_t{0U});
+    pathSimplificationKeepScratch_.front() = 1U;
+    pathSimplificationKeepScratch_.back() = 1U;
+    pathSimplificationRangeScratch_.clear();
+    pathSimplificationRangeScratch_.push_back(0U);
+    pathSimplificationRangeScratch_.push_back(
+        static_cast<uint32_t>(points.size() - 1U));
 
-    auto& buffers = rule.billboard().value_or(false)
-        ? buffers_.arrowBillboard
-        : buffers_.arrowWorld;
-    for (auto const& point : {left, tip, right}) {
-        buffers.positions.insert(
-            buffers.positions.end(),
-            {
-                static_cast<float>(point.x),
-                static_cast<float>(point.y),
-                static_cast<float>(point.z),
-            });
-        buffers.colors.insert(
-            buffers.colors.end(),
-            {
-                toColorByte(color.r),
-                toColorByte(color.g),
-                toColorByte(color.b),
-                toColorByte(color.a),
-            });
-        buffers.widths.push_back(
-            std::max(1.0f, width));
-        buffers.lateralOffsetsPx.push_back(0.0f);
-        buffers.lateralOffsetVectorsPx.push_back(
-            lateralOffsetVectorPx.x);
-        buffers.lateralOffsetVectorsPx.push_back(
-            lateralOffsetVectorPx.y);
+    auto asVector = [&](mapget::Point const& point) {
+        if (!wgs84Coordinates) {
+            return glm::dvec3{point.x, point.y, point.z};
+        }
+        auto longitudeDelta = point.x - coordinateOriginWgs_.x;
+        if (longitudeDelta > 180.0) {
+            longitudeDelta -= 360.0;
+        }
+        else if (longitudeDelta < -180.0) {
+            longitudeDelta += 360.0;
+        }
+        return glm::dvec3{
+            glm::radians(longitudeDelta) *
+                kFallbackEarthRadiusMeters * coordinateOriginCosine_,
+            glm::radians(point.y - coordinateOriginWgs_.y) *
+                kFallbackEarthRadiusMeters,
+            point.z - coordinateOriginWgs_.z,
+        };
+    };
+    while (!pathSimplificationRangeScratch_.empty()) {
+        auto const end = pathSimplificationRangeScratch_.back();
+        pathSimplificationRangeScratch_.pop_back();
+        auto const begin = pathSimplificationRangeScratch_.back();
+        pathSimplificationRangeScratch_.pop_back();
+        if (end <= begin + 1U) {
+            continue;
+        }
+        auto const startPoint = asVector(points[begin]);
+        auto const endPoint = asVector(points[end]);
+        auto const segment = endPoint - startPoint;
+        auto const segmentLengthSquared = glm::dot(segment, segment);
+        auto maximumDistanceSquared = 0.0;
+        auto maximumIndex = begin;
+        for (auto index = begin + 1U; index < end; ++index) {
+            auto const point = asVector(points[index]);
+            auto const amount = segmentLengthSquared > 0.0
+                ? glm::clamp(
+                    glm::dot(point - startPoint, segment) /
+                        segmentLengthSquared,
+                    0.0,
+                    1.0)
+                : 0.0;
+            auto const delta = point - (startPoint + amount * segment);
+            auto const distanceSquared = glm::dot(delta, delta);
+            if (distanceSquared > maximumDistanceSquared) {
+                maximumDistanceSquared = distanceSquared;
+                maximumIndex = index;
+            }
+        }
+        if (maximumDistanceSquared <= toleranceSquared) {
+            continue;
+        }
+        pathSimplificationKeepScratch_[maximumIndex] = 1U;
+        pathSimplificationRangeScratch_.push_back(begin);
+        pathSimplificationRangeScratch_.push_back(maximumIndex);
+        pathSimplificationRangeScratch_.push_back(maximumIndex);
+        pathSimplificationRangeScratch_.push_back(end);
     }
-    buffers.depthTests.push_back(rule.depthTest() ? 1U : 0U);
-    buffers.featureAddresses.push_back(pick);
-    buffers.lateralOffsetScaleThresholds.push_back(
-        std::max(0.0f, lateralOffsetScaleThreshold));
-    buffers.zIndices.push_back(zIndex);
-    appendGlow(rule, buffers.glowColors, buffers.glowRadii);
-    buffers.startIndices.push_back(
-        static_cast<uint32_t>(buffers.positions.size() / 3));
-    vertexCount_ += 3;
+
+    simplifiedPathScratch_.clear();
+    simplifiedPathScratch_.reserve(points.size());
+    for (size_t index = 0U; index < points.size(); ++index) {
+        if (pathSimplificationKeepScratch_[index] != 0U) {
+            simplifiedPathScratch_.push_back(points[index]);
+        }
+    }
+    return simplifiedPathScratch_;
 }
 
 void TileSubsetLayerRenderer::appendAabb(
@@ -2582,7 +3217,7 @@ void TileSubsetLayerRenderer::appendGltf(
         return;
     }
 
-    auto& buffers = buffers_.gltfNodes;
+    auto& buffers = bridgeBuffers_.gltfNodes;
     buffers.nodeIndices.push_back(geometry->gltfNodeIndex());
     buffers.colors.insert(
         buffers.colors.end(),
@@ -2618,7 +3253,7 @@ void TileSubsetLayerRenderer::appendGltf(
         {0, 2, 6}, {0, 6, 4},
         {1, 5, 7}, {1, 7, 3},
     }};
-    auto& proxies = buffers_.gltfPickProxies;
+    auto& proxies = bridgeBuffers_.gltfPickProxies;
     for (auto const& triangle : triangles) {
         for (auto const index : triangle) {
             auto const& point = projected[index];
@@ -2651,53 +3286,56 @@ void TileSubsetLayerRenderer::appendLabel(
             return;
         }
     }
-    auto fillColor = rule.labelColor();
-    fillColor.a *= rule.labelOpacity();
-    auto outlineColor = rule.labelOutlineColor();
-    outlineColor.a *= rule.labelOpacity();
-    auto params = JsValue::Dict({
-        {"featureAddress", JsValue(pick)},
-        {"position", JsValue::Dict({
-            {"x", JsValue(point.x)},
-            {"y", JsValue(point.y)},
-            {"z", JsValue(point.z)},
-        })},
-        {"text", JsValue(text)},
-        {"fillColor", rgbaBytes(fillColor)},
-        {"outlineColor", rgbaBytes(outlineColor)},
-        {"outlineWidth", JsValue(rule.labelOutlineWidth())},
-        {"scale", JsValue(rule.labelScale())},
-        {"billboard", JsValue(rule.billboard().value_or(true))},
-        {"depthTest", JsValue(rule.depthTest())},
-    });
-    if (std::isfinite(zIndex)) {
-        params.set("zIndex", JsValue(zIndex));
+    auto const absolutePosition = unprojectLocalPoint(point);
+    auto const font = parseLabelFont(rule.labelFont());
+    auto labelFlags = static_cast<uint32_t>(GpuLabelFlag::None);
+    if (rule.billboard().value_or(true)) {
+        labelFlags |= static_cast<uint32_t>(GpuLabelFlag::Billboard);
+    }
+    if (rule.depthTest()) {
+        labelFlags |= static_cast<uint32_t>(GpuLabelFlag::DepthTest);
     }
     if (rule.showBackground()) {
-        auto backgroundColor = rule.labelBackgroundColor();
-        backgroundColor.a *= rule.labelOpacity();
-        params.set(
-            "backgroundColor",
-            rgbaBytes(backgroundColor));
-        params.set(
-            "backgroundPadding",
-            JsValue::List({
-                JsValue(rule.labelBackgroundPadding().first),
-                JsValue(rule.labelBackgroundPadding().second),
-            }));
+        labelFlags |= static_cast<uint32_t>(GpuLabelFlag::Background);
     }
-    if (auto const& offset = rule.labelPixelOffset()) {
-        params.set(
-            "pixelOffset",
-            JsValue::List({
-                JsValue(offset->first),
-                JsValue(offset->second),
-            }));
-    }
-    (rule.billboard().value_or(true)
-         ? buffers_.labelBillboard
-         : buffers_.labelWorld)
-        .push_back(params);
+    auto const pixelOffset = rule.labelPixelOffset().value_or(
+        std::pair<float, float>{0.0F, 0.0F});
+    auto const backgroundPadding = rule.labelBackgroundPadding();
+    auto colorBytes = [](glm::fvec4 const& value) {
+        return std::array<uint8_t, 4>{
+            toColorByte(value.r),
+            toColorByte(value.g),
+            toColorByte(value.b),
+            toColorByte(value.a),
+        };
+    };
+    gpuPacketBuilder_.appendLabel({
+        .localPickIndex = gpuPickIndex(pick),
+        .positionWgs84 = {
+            absolutePosition.x,
+            absolutePosition.y,
+            absolutePosition.z,
+        },
+        .text = text,
+        .fontFamily = font.family,
+        .size = font.size * rule.labelScale(),
+        .pixelOffset = {pixelOffset.first, pixelOffset.second},
+        .angle = 0.0F,
+        .zIndex = std::isfinite(zIndex) ? zIndex : 0.0,
+        .color = colorBytes(rule.labelColor()),
+        .outlineColor = colorBytes(rule.labelOutlineColor()),
+        .backgroundColor = colorBytes(rule.labelBackgroundColor()),
+        .outlineWidth = rule.labelOutlineWidth(),
+        .backgroundPadding = {
+            static_cast<float>(backgroundPadding.first),
+            static_cast<float>(backgroundPadding.second),
+        },
+        .flags = labelFlags,
+        .horizontalOrigin = labelOriginCode(rule.labelHorizontalOrigin()),
+        .verticalOrigin = labelOriginCode(rule.labelVerticalOrigin()),
+        .renderOrder = rule.renderIndex(),
+        .fontWeight = font.weight,
+    });
     ++vertexCount_;
 }
 
@@ -2705,20 +3343,12 @@ mapget::Point TileSubsetLayerRenderer::projectWgsPoint(
     mapget::Point const& wgsPoint) const
 {
     if (!hasCoordinateOriginWgs_) {
-        coordinateOriginWgs_ = {
+        const_cast<TileSubsetLayerRenderer*>(this)->setCoordinateOrigin(
             wgsPoint.x,
             wgsPoint.y,
-            0.0,
-        };
-        hasCoordinateOriginWgs_ = true;
+            0.0);
     }
-    double unitsPerMeter = 0.0;
-    double unitsPerMeter2 = 0.0;
-    if (!distanceScalesAt(
-            coordinateOriginWgs_.y,
-            unitsPerMeter,
-            unitsPerMeter2))
-    {
+    if (!coordinateScalesValid_) {
         auto const lat0 = glm::radians(coordinateOriginWgs_.y);
         return {
             glm::radians(wgsPoint.x - coordinateOriginWgs_.x) *
@@ -2728,22 +3358,106 @@ mapget::Point TileSubsetLayerRenderer::projectWgsPoint(
             wgsPoint.z - coordinateOriginWgs_.z,
         };
     }
-    auto const deltaX =
-        mercatorWorldX(wgsPoint.x) -
-        mercatorWorldX(coordinateOriginWgs_.x);
-    auto const deltaY =
-        mercatorWorldY(wgsPoint.y) -
-        mercatorWorldY(coordinateOriginWgs_.y);
-    auto const yMeters = deltaY / unitsPerMeter;
-    auto const xDenominator =
-        unitsPerMeter + unitsPerMeter2 * yMeters;
+    auto const latitudeDelta =
+        (wgsPoint.y - coordinateOriginWgs_.y) * kDegToRad;
+    auto const latitudeDelta2 = latitudeDelta * latitudeDelta;
+    auto const tangent2 =
+        coordinateOriginTangent_ * coordinateOriginTangent_;
+    // A level-13 tile spans less than 0.001 radians. Expanding Mercator Y
+    // around the tile center avoids one tan/log pair per vertex while the
+    // omitted fourth-order term remains far below float packet precision.
+    auto const metersPerRadian =
+        kEarthCircumferenceMeters / (2.0 * kPi);
+    auto const yMeters = metersPerRadian * (
+        latitudeDelta +
+        0.5 * coordinateOriginTangent_ * latitudeDelta2 +
+        ((1.0 + 2.0 * tangent2) / 6.0) *
+            latitudeDelta2 * latitudeDelta);
+    auto const xScaleCorrection = 1.0 +
+        coordinateOriginTangent_ * yMeters /
+            kFallbackEarthRadiusMeters;
+    auto const longitudeDelta =
+        (wgsPoint.x - coordinateOriginWgs_.x) * kDegToRad;
     return {
-        std::abs(xDenominator) < 1e-12
+        std::abs(xScaleCorrection) < 1e-12
             ? 0.0
-            : deltaX / xDenominator,
+            : metersPerRadian * coordinateOriginCosine_ *
+                longitudeDelta / xScaleCorrection,
         yMeters,
         wgsPoint.z - coordinateOriginWgs_.z,
     };
+}
+
+mapget::Point TileSubsetLayerRenderer::unprojectLocalPoint(
+    mapget::Point const& localPoint) const
+{
+    if (!coordinateScalesValid_) {
+        auto const latitude0 = glm::radians(coordinateOriginWgs_.y);
+        return {
+            coordinateOriginWgs_.x + glm::degrees(
+                localPoint.x /
+                (glm::cos(latitude0) * kFallbackEarthRadiusMeters)),
+            coordinateOriginWgs_.y + glm::degrees(
+                localPoint.y / kFallbackEarthRadiusMeters),
+            coordinateOriginWgs_.z + localPoint.z,
+        };
+    }
+    auto const worldY = coordinateOriginWorldY_ +
+        localPoint.y * coordinateUnitsPerMeter_;
+    auto const mercatorTerm =
+        worldY * (2.0 * kPi / kMercatorTileSize) - kPi;
+    auto const latitudeRadians =
+        2.0 * glm::atan(glm::exp(mercatorTerm)) - kPi * 0.5;
+    auto const xScale = coordinateUnitsPerMeter_ +
+        coordinateUnitsPerMeter2_ * localPoint.y;
+    auto const worldX = coordinateOriginWorldX_ +
+        localPoint.x * xScale;
+    auto const longitudeRadians =
+        worldX * (2.0 * kPi / kMercatorTileSize) - kPi;
+    return {
+        glm::degrees(longitudeRadians),
+        glm::degrees(latitudeRadians),
+        coordinateOriginWgs_.z + localPoint.z,
+    };
+}
+
+uint32_t TileSubsetLayerRenderer::gpuPickIndex(
+    uint32_t legacyPickIndex) const
+{
+    return legacyPickIndex == kUnselectable
+        ? kGpuUnselectable
+        : legacyPickIndex;
+}
+
+GpuRecordStyle TileSubsetLayerRenderer::gpuRecordStyle(
+    FeatureStyleRule const& rule,
+    glm::fvec4 const& color,
+    double zIndex,
+    uint32_t legacyPickIndex) const
+{
+    GpuRecordStyle result{
+        .color = {
+            toColorByte(color.r),
+            toColorByte(color.g),
+            toColorByte(color.b),
+            toColorByte(color.a),
+        },
+        .zIndex = zIndex,
+        .localPickIndex = gpuPickIndex(legacyPickIndex),
+        .renderOrder = rule.renderIndex(),
+    };
+    if (auto const& glow = rule.glow();
+        glow && glow->radius > 0.0F && glow->opacity > 0.0F)
+    {
+        result.glowColor = {
+            toColorByte(glow->color.r),
+            toColorByte(glow->color.g),
+            toColorByte(glow->color.b),
+            toColorByte(glow->color.a * glow->opacity),
+        };
+        result.glowRadius = glow->radius;
+    }
+    return result;
 }
 
 JsValue TileSubsetLayerRenderer::coordinateOriginToJs() const
@@ -2757,27 +3471,17 @@ JsValue TileSubsetLayerRenderer::coordinateOriginToJs() const
     return JsValue::Float64Array(origin);
 }
 
-JsValue TileSubsetLayerRenderer::pickRefsToJs() const
-{
-    std::vector<uint32_t> flattened;
-    flattened.reserve(pickRefs_.size() * 4);
-    for (auto const& pick : pickRefs_) {
-        flattened.push_back(pick.subsetOrdinal);
-        flattened.push_back(pick.channelOrdinal);
-        flattened.push_back(pick.entryOrdinal);
-        flattened.push_back(pick.endpointRole);
-    }
-    return JsValue::Uint32Array(flattened);
-}
-
 JsValue TileSubsetLayerRenderer::pickResultsToJs() const
 {
     auto results = JsValue::List();
-    for (auto const& pick : pickResults_) {
+    for (uint32_t index = 0U; index < pickRefs_.size(); ++index) {
         auto item = JsValue::Dict();
-        item.set(
-            "subsetOrdinal",
-            JsValue(pick.subsetOrdinal));
+        auto const found = bridgePickResults_.find(index);
+        if (found == bridgePickResults_.end()) {
+            results.push(item);
+            continue;
+        }
+        auto const& pick = found->second;
         if (!pick.featureId.empty()) {
             item.set("featureId", JsValue(pick.featureId));
         }
@@ -2819,101 +3523,54 @@ JsValue TileSubsetLayerRenderer::pickResultsToJs() const
     return results;
 }
 
-JsValue TileSubsetLayerRenderer::subsetVertexCountsToJs() const
-{
-    return JsValue::Uint32Array(subsetVertexCounts_);
-}
-
 uint8_t TileSubsetLayerRenderer::toColorByte(float value)
 {
-    return static_cast<uint8_t>(std::round(
-        std::clamp(value, 0.0f, 1.0f) * 255.0f));
+    return static_cast<uint8_t>(
+        std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
 }
 
-void TileSubsetLayerRenderer::appendGlow(
-    FeatureStyleRule const& rule,
-    std::vector<uint8_t>& colors,
-    std::vector<float>& radii)
+NativeJsValue TileSubsetLayerRenderer::renderBridgeResult() const
 {
-    auto const& glow = rule.glow();
-    if (!glow || glow->radius <= 0.0f || glow->opacity <= 0.0f) {
-        colors.insert(colors.end(), {0U, 0U, 0U, 0U});
-        radii.push_back(0.0f);
-        return;
-    }
-    colors.insert(colors.end(), {
-        toColorByte(glow->color.r),
-        toColorByte(glow->color.g),
-        toColorByte(glow->color.b),
-        toColorByte(glow->color.a * glow->opacity),
-    });
-    radii.push_back(std::max(0.0f, glow->radius));
-}
-
-JsValue TileSubsetLayerRenderer::geometryBuffersToJs(
-    GeometryBuffers const& buffers)
-{
-    auto labelWorld = JsValue::List();
-    for (auto const& label : buffers.labelWorld) {
-        labelWorld.push(label);
-    }
-    auto labelBillboard = JsValue::List();
-    for (auto const& label : buffers.labelBillboard) {
-        labelBillboard.push(label);
-    }
-    return JsValue::Dict({
-        {"pointWorld", pointBuffersToJs(buffers.pointWorld)},
-        {"pointBillboard", pointBuffersToJs(buffers.pointBillboard)},
-        {"labelWorld", labelWorld},
-        {"labelBillboard", labelBillboard},
-        {"surface", surfaceBuffersToJs(buffers.surfaces)},
-        {"pathWorld", pathBuffersToJs(buffers.pathWorld, true)},
-        {"pathBillboard", pathBuffersToJs(buffers.pathBillboard, true)},
-        {"transitionPathWorld",
-         pathBuffersToJs(buffers.transitionPathWorld, true)},
-        {"transitionPathBillboard",
-         pathBuffersToJs(buffers.transitionPathBillboard, true)},
-        {"arrowWorld", pathBuffersToJs(buffers.arrowWorld, false)},
-        {"arrowBillboard", pathBuffersToJs(buffers.arrowBillboard, false)},
-        {"gltfNodes", gltfBuffersToJs(buffers.gltfNodes)},
+    auto const hasGltfBridge =
+        !bridgeBuffers_.gltfNodes.nodeIndices.empty() ||
+        !bridgeBuffers_.gltfPickProxies.featureAddresses.empty();
+    auto result = JsValue::Dict({
+        {"gltfNodes", gltfBuffersToJs(bridgeBuffers_.gltfNodes)},
         {"gltfPickProxies",
-         gltfPickProxyBuffersToJs(buffers.gltfPickProxies)},
+         gltfPickProxyBuffersToJs(bridgeBuffers_.gltfPickProxies)},
+        {"coordinateOrigin", coordinateOriginToJs()},
+        {"pickResults", hasGltfBridge ? pickResultsToJs() : JsValue::List()},
     });
-}
-
-NativeJsValue TileSubsetLayerRenderer::renderResult() const
-{
-    auto result = geometryBuffersToJs(buffers_);
-    result.set("coordinateOrigin", coordinateOriginToJs());
-    result.set("pickRefs", pickRefsToJs());
-    result.set("pickResults", pickResultsToJs());
-    result.set(
-        "subsetVertexCounts",
-        subsetVertexCountsToJs());
-    if (!subsets_.empty() && subsets_.front() &&
-        subsets_.front()->glbAttachmentName())
+    if (subset_ && subset_->glbAttachmentName())
     {
         result.set(
             "glbAttachmentName",
-            JsValue(*subsets_.front()->glbAttachmentName()));
+            JsValue(*subset_->glbAttachmentName()));
     }
     return *result;
 }
 
-NativeJsValue TileSubsetLayerRenderer::runtimeStyleIssues() const
+NativeJsValue TileSubsetLayerRenderer::renderPackets() const
 {
     auto result = JsValue::List();
-    for (auto const& issue : runtimeIssues_) {
-        result.push(JsValue::Dict({
-            {"property", JsValue(issue.property)},
-            {"expression", JsValue(issue.expression)},
-            {"message", JsValue(issue.message)},
-            {"ruleIndex", JsValue(issue.ruleIndex)},
-            {"occurrenceCount",
-             JsValue(static_cast<double>(issue.occurrenceCount))},
+    for (auto const& packet : renderPacketFragmentsBytes()) {
+        result.push(JsValue::Uint8Array(std::span<uint8_t const>{
+            reinterpret_cast<uint8_t const*>(packet.data()),
+            packet.size(),
         }));
     }
     return *result;
+}
+
+std::vector<std::byte> TileSubsetLayerRenderer::renderPacketBytes() const
+{
+    return gpuPacketBuilder_.build();
+}
+
+std::vector<std::vector<std::byte>>
+TileSubsetLayerRenderer::renderPacketFragmentsBytes() const
+{
+    return gpuPacketBuilder_.buildFragments();
 }
 
 uint32_t TileSubsetLayerRenderer::vertexCount() const

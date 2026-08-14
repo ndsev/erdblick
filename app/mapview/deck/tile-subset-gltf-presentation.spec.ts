@@ -5,7 +5,7 @@ import {coreLib} from "../../integrations/wasm";
 import {TileSubsetGltfPresentation} from
     "./tile-subset-gltf-presentation";
 
-function fixture(blockTileCount = 1) {
+function fixture() {
     const attachmentRef: any = {
         state: "pending",
         ready: Promise.resolve({
@@ -70,8 +70,6 @@ function fixture(blockTileCount = 1) {
     const presentation = new TileSubsetGltfPresentation(
         owner as any,
         state as any,
-        "block",
-        blockTileCount,
         assetStore as any
     );
     return {
@@ -118,14 +116,6 @@ describe("TileSubsetGltfPresentation", () => {
         presentation.discard(prepared);
         expect(assetRef.release).toHaveBeenCalledOnce();
         expect(attachmentRef.release).toHaveBeenCalledOnce();
-    });
-
-    it("keeps attachment-bearing presentations in singleton blocks", async () => {
-        const {owner, result, presentation} = fixture(4);
-
-        await expect(presentation.prepare(result as any, {} as any))
-            .rejects.toThrow("must remain a singleton");
-        expect(owner.retainAttachment).not.toHaveBeenCalled();
     });
 
     it("releases an in-flight attachment when its presentation is destroyed", async () => {

@@ -39,8 +39,8 @@ export class HoverDetailService implements OnDestroy {
     private readonly subscriptions = new Subscription();
     private readonly desiredCoverageByView = new Map<number, Array<{
         mapgetLayer: MapgetLayer;
-        tileIds: number[];
-        priorityTileIds: number[];
+        tileIds: readonly number[];
+        priorityTileIds: readonly number[];
     }>>();
     private readonly layers = new Map<string, {
         layer: StyledMapgetLayer;
@@ -88,10 +88,19 @@ export class HoverDetailService implements OnDestroy {
             priorityTileIds: readonly number[];
         }>
     ): void {
+        const previous = this.desiredCoverageByView.get(viewIndex);
+        if (previous?.length === coverage.length &&
+            previous.every((entry, index) =>
+                entry.mapgetLayer === coverage[index].mapgetLayer &&
+                entry.tileIds === coverage[index].tileIds &&
+                entry.priorityTileIds ===
+                    coverage[index].priorityTileIds)) {
+            return;
+        }
         this.desiredCoverageByView.set(viewIndex, coverage.map(entry => ({
             mapgetLayer: entry.mapgetLayer,
-            tileIds: [...entry.tileIds],
-            priorityTileIds: [...entry.priorityTileIds]
+            tileIds: entry.tileIds,
+            priorityTileIds: entry.priorityTileIds
         })));
         this.reconcileLayersForView(viewIndex);
     }
@@ -269,7 +278,17 @@ export class HoverDetailService implements OnDestroy {
         layer: StyledMapgetLayer,
         event: StyledMapgetLayerEvent
     ): void {
-        if (event.type !== "tile-ready" && event.type !== "tile-removed") {
+        if (event.type === "tiles-removed") {
+            for (const state of event.states) {
+                this.decodedTiles.delete(this.decodedTileKey(
+                    layer,
+                    state.tileId
+                ));
+            }
+            this.valuesChanged.next(null);
+            return;
+        }
+        if (event.type !== "tile-ready") {
             return;
         }
         this.decodedTiles.delete(this.decodedTileKey(layer, event.state.tileId));

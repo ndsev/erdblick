@@ -1,5 +1,5 @@
 import {Injectable, NgZone, OnDestroy} from "@angular/core";
-import {auditTime, BehaviorSubject, interval, Subscription} from "rxjs";
+import {BehaviorSubject, interval, Subscription} from "rxjs";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {
     TileSubsetLayerRenderService
@@ -33,8 +33,6 @@ import {
 } from "../styledata/style-validation-report.service";
 import type {StyleValidationIssue} from "../styledata/style-validation.model";
 
-const UPDATE_EVENT_DEBOUNCE_MS = 250;
-
 /**
  * Current-generation diagnostics assembled from live StyledMapgetLayers.
  *
@@ -58,7 +56,9 @@ export class DiagnosticsDatasource implements OnDestroy {
     private readonly errorTileKeys = new Set<string>();
     private readonly loggedStyleIssueIds = new Set<string>();
     private lastBackendConnected = this.mapService.isTileStreamConnected();
+    private diagnosticsRefreshPending = false;
 
+    /** Subscribe to low-frequency diagnostics sources while keeping timers outside Angular. */
     constructor(
         private readonly mapService: MapTileStreamService,
         private readonly renderService: TileSubsetLayerRenderService,
@@ -70,16 +70,18 @@ export class DiagnosticsDatasource implements OnDestroy {
     ) {
         this.patchConsoleLogging();
         let wasPaused = this.mapService.tilePipelinePaused;
-        const timerSubscriptions = this.ngZone.runOutsideAngular(() => [
+        const backgroundSubscriptions = this.ngZone.runOutsideAngular(() => [
             interval(SNAPSHOT_INTERVAL_MS).subscribe(() =>
                 this.refreshSnapshot()
             ),
             interval(PERF_INTERVAL_MS).subscribe(() =>
                 this.refreshPerfStatsIfVisible()),
-            interval(LOG_INTERVAL_MS).subscribe(() => this.refreshLogs())
+            interval(LOG_INTERVAL_MS).subscribe(() => this.refreshLogs()),
+            this.viewDiagnostics.cameraInteracting$.subscribe(interacting =>
+                this.flushDeferredDiagnostics(interacting))
         ]);
         this.subscriptions.push(
-            ...timerSubscriptions,
+            ...backgroundSubscriptions,
             this.mapService.tilePipelinePaused$.subscribe(paused => {
                 if (wasPaused && !paused) {
                     this.refreshSnapshot();
@@ -87,13 +89,6 @@ export class DiagnosticsDatasource implements OnDestroy {
                 }
                 wasPaused = paused;
             }),
-            this.viewDiagnostics.changed
-                .pipe(auditTime(UPDATE_EVENT_DEBOUNCE_MS))
-                .subscribe(() => {
-                    this.refreshSnapshot();
-                    this.refreshPerfStatsIfVisible();
-                    this.refreshLogs();
-                }),
             this.viewDiagnostics.tileError.subscribe(error =>
                 this.appendTileError(error)
             ),
@@ -107,17 +102,21 @@ export class DiagnosticsDatasource implements OnDestroy {
 
     /** Publishes progress only when the pipeline is live. */
     private refreshSnapshot(): void {
-        if (!this.mapService.tilePipelinePaused) {
+        if (!this.deferDiagnosticsRefresh() &&
+            !this.mapService.tilePipelinePaused) {
             this.snapshot$.next(this.buildSnapshot());
         }
     }
 
+    /** Stop every timer and event subscription owned by this dialog datasource. */
     ngOnDestroy(): void {
         this.subscriptions.forEach(subscription => subscription.unsubscribe());
     }
 
+    /** Rebuild aggregate CPU, transport, Deck, and persistent-scene counters. */
     refreshPerfStats(): void {
-        if (!this.mapService.tilePipelinePaused) {
+        if (!this.deferDiagnosticsRefresh() &&
+            !this.mapService.tilePipelinePaused) {
             const stats = buildAggregatedPerfStats(
                 this.viewDiagnostics.currentTiles(),
                 PEAK_TILE_LIMIT
@@ -156,50 +155,83 @@ export class DiagnosticsDatasource implements OnDestroy {
                 "count"
             );
             addLiveStat(
-                ["Rendering", "Buffer Arena", "Compatibility Groups"],
-                presentation.groups,
+                ["Rendering", "GPU Scene", "Materials"],
+                presentation.materials,
                 "count"
             );
             addLiveStat(
-                ["Rendering", "Buffer Arena", "Active Pages"],
-                presentation.pages,
+                ["Rendering", "GPU Scene", "Active Contributions"],
+                presentation.activeContributions,
                 "count"
             );
             addLiveStat(
-                ["Rendering", "Buffer Arena", "Reusable Empty Pages"],
-                presentation.reusablePages,
+                ["Rendering", "GPU Scene", "Active Origins"],
+                presentation.activeOrigins,
                 "count"
             );
             addLiveStat(
-                ["Rendering", "Buffer Arena", "Block Contributions"],
-                presentation.contributions,
+                ["Rendering", "GPU Scene", "Labels"],
+                presentation.labels,
                 "count"
             );
             addLiveStat(
-                ["Rendering", "Buffer Arena", "Vertices Used"],
-                presentation.usedVertices,
+                ["Rendering", "GPU Scene", "Picking High Water"],
+                presentation.pickingHighWater,
                 "count"
             );
             addLiveStat(
-                ["Rendering", "Buffer Arena", "Vertex Capacity"],
-                presentation.capacityVertices,
+                ["Rendering", "GPU Scene", "Picking Fragmentation"],
+                presentation.pickingFragmentation,
                 "count"
             );
             addLiveStat(
-                ["Rendering", "Buffer Arena", "Page Fill"],
-                presentation.capacityVertices > 0
-                    ? presentation.usedVertices /
-                        presentation.capacityVertices * 100
+                ["Rendering", "GPU Scene", "Z-Index Values"],
+                presentation.zIndexHighWater,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "GPU Scene", "Z-Index Lookup Update"],
+                presentation.maxZIndexUpdateMs,
+                "ms"
+            );
+            addLiveStat(
+                ["Rendering", "GPU Scene", "Primitive Stores"],
+                presentation.stores,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "GPU Scene", "Allocated Buffers"],
+                presentation.allocatedBytes / (1024 * 1024),
+                "MiB"
+            );
+            addLiveStat(
+                ["Rendering", "GPU Scene", "Uploaded Data"],
+                presentation.uploadedBytes / (1024 * 1024),
+                "MiB"
+            );
+            addLiveStat(
+                ["Rendering", "GPU Scene", "Upload Operations"],
+                presentation.uploadCount,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "GPU Scene", "Buffer Growths"],
+                presentation.growthCount,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "GPU Scene", "Record Fill"],
+                presentation.capacityRecords > 0
+                    ? (presentation.highWaterRecords -
+                        presentation.fragmentedRecords) /
+                        presentation.capacityRecords * 100
                     : 0,
                 "%"
             );
             addLiveStat(
-                ["Rendering", "Buffer Arena", "Blocks per Page"],
-                presentation.pages > 0
-                    ? presentation.contributions / presentation.pages
-                    : 0,
-                "count",
-                presentation.maxContributionsPerPage
+                ["Rendering", "GPU Scene", "Record Fragmentation"],
+                presentation.fragmentedRecords,
+                "count"
             );
             // The polling timer deliberately runs outside Angular. Re-enter
             // only for the single observable publication so an open
@@ -208,6 +240,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         }
     }
 
+    /** Avoid expensive aggregation while the performance dialog is closed. */
     refreshPerfStatsIfVisible(): void {
         if (this.appStateService.isDialogOpen(
             DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
@@ -216,7 +249,11 @@ export class DiagnosticsDatasource implements OnDestroy {
         }
     }
 
+    /** Emit backend connectivity transitions without duplicating steady state. */
     refreshLogs(): void {
+        if (this.deferDiagnosticsRefresh()) {
+            return;
+        }
         const now = Date.now();
         const connected = this.mapService.isTileStreamConnected();
         const entries: LogEntry[] = [];
@@ -233,6 +270,27 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.appendLogEntries(entries);
     }
 
+    /** Remember refresh demand instead of publishing Angular-bound state mid-navigation. */
+    private deferDiagnosticsRefresh(): boolean {
+        if (!this.viewDiagnostics.cameraInteracting) {
+            return false;
+        }
+        this.diagnosticsRefreshPending = true;
+        return true;
+    }
+
+    /** Publish one consolidated diagnostics update after every camera becomes idle. */
+    private flushDeferredDiagnostics(interacting: boolean): void {
+        if (interacting || !this.diagnosticsRefreshPending) {
+            return;
+        }
+        this.diagnosticsRefreshPending = false;
+        this.refreshSnapshot();
+        this.refreshPerfStatsIfVisible();
+        this.refreshLogs();
+    }
+
+    /** Assemble current-generation progress without retaining historical tile state. */
     private buildSnapshot(): DiagnosticsSnapshot {
         const summary = this.viewDiagnostics.currentSummary();
         const expected = summary.expected;
@@ -284,6 +342,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         };
     }
 
+    /** Log each presentation/tile failure once for the current datasource lifetime. */
     private appendTileError(error: SubsetDiagnosticsError): void {
         const key = `${error.ownerId}|${error.mapTileKey}`;
         if (this.errorTileKeys.has(key)) {
@@ -303,6 +362,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         }]);
     }
 
+    /** Convert newly observed validation issues into deduplicated diagnostic logs. */
     private appendStyleValidationLogs(issues: StyleValidationIssue[]): void {
         const entries: LogEntry[] = [];
         for (const issue of issues) {
@@ -337,6 +397,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.appendLogEntries(entries);
     }
 
+    /** Append bounded logs while preserving chronological order. */
     private appendLogEntries(entries: LogEntry[]): void {
         if (entries.length) {
             this.logs$.next(
@@ -345,6 +406,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         }
     }
 
+    /** Install one process-wide console tap while routing entries to the live instance. */
     private patchConsoleLogging(): void {
         DiagnosticsDatasource.consoleLogHandler = (level, args) => {
             this.appendLogEntries([{
@@ -378,6 +440,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         }
     }
 
+    /** Serialize arbitrary console arguments without letting cycles break diagnostics. */
     private stringifyLogPart(value: unknown): string {
         if (value instanceof Error) {
             return value.stack ?? value.message;

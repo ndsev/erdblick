@@ -1095,6 +1095,144 @@ NativeJsValue TileSubsetLayer::resolvePick(
     return *result;
 }
 
+NativeJsValue TileSubsetLayer::findPickReferences(
+    std::string const& featureId,
+    std::string const& scope,
+    int64_t entryIndex,
+    int64_t validityIndex) const
+{
+    auto result = JsValue::List();
+    auto append = [&](uint32_t channelOrdinal,
+                      uint32_t entryOrdinal,
+                      uint32_t endpointRole) {
+        result.push(JsValue::Dict({
+            {"channelOrdinal", JsValue(channelOrdinal)},
+            {"entryOrdinal", JsValue(entryOrdinal)},
+            {"endpointRole", JsValue(endpointRole)},
+        }));
+    };
+    auto matches = [&](mapget::model_ptr<mapget::FeatureId> const& candidate) {
+        return candidate && candidate->toString() == featureId;
+    };
+
+    uint32_t channelOrdinal = 0U;
+    model_->forEachChannel(
+        [&](mapget::model_ptr<mapget::TileSubsetChannel> const& channel) {
+            auto const currentChannel = channelOrdinal++;
+            if (!channel) {
+                return true;
+            }
+            uint32_t entryOrdinal = 0U;
+            switch (channel->scope()) {
+            case mapget::Scope::Feature:
+                if (scope == "feature") {
+                    channel->forEachFeatureEntry(
+                        [&](mapget::model_ptr<mapget::FeatureEntry> const& entry) {
+                            auto const currentEntry = entryOrdinal++;
+                            if (matches(entry->featureId())) {
+                                append(currentChannel, currentEntry, 0U);
+                            }
+                            return true;
+                        });
+                }
+                break;
+            case mapget::Scope::Attribute:
+                if (scope == "attribute") {
+                    channel->forEachAttributeValidityEntry(
+                        [&](mapget::model_ptr<mapget::AttributeValidityEntry> const& entry) {
+                            auto const currentEntry = entryOrdinal++;
+                            auto const attributeIndex = entry->attributeIndex();
+                            auto const validityMatches = validityIndex < 0
+                                ? !entry->hasValidity()
+                                : entry->hasValidity() &&
+                                    entry->validityIndex() ==
+                                        static_cast<uint32_t>(validityIndex);
+                            if (matches(entry->featureId()) &&
+                                attributeIndex && entryIndex >= 0 &&
+                                *attributeIndex ==
+                                    static_cast<uint32_t>(entryIndex) &&
+                                validityMatches)
+                            {
+                                append(currentChannel, currentEntry, 0U);
+                            }
+                            return true;
+                        });
+                }
+                break;
+            case mapget::Scope::Relation:
+                channel->forEachRelationEntry(
+                    [&](mapget::model_ptr<mapget::RelationEntry> const& entry) {
+                        auto const currentEntry = entryOrdinal++;
+                        auto source = entry->source();
+                        auto target = entry->target();
+                        auto sourceId = source
+                            ? source->featureId()
+                            : mapget::model_ptr<mapget::FeatureId>{};
+                        auto targetId = target
+                            ? target->featureId()
+                            : mapget::model_ptr<mapget::FeatureId>{};
+                        auto const sourceString = sourceId
+                            ? sourceId->toString()
+                            : std::string{};
+                        auto const relationIndex = sourceString.empty()
+                            ? std::optional<uint32_t>{}
+                            : relationIndexForSource(
+                                entry->relationId(), sourceString);
+                        if (scope == "relation" && entryIndex >= 0 &&
+                            sourceString == featureId && relationIndex &&
+                            *relationIndex == static_cast<uint32_t>(entryIndex))
+                        {
+                            append(currentChannel, currentEntry, 0U);
+                            append(currentChannel, currentEntry, 1U);
+                            append(currentChannel, currentEntry, 2U);
+                        }
+                        else if (scope == "feature" && !relationIndex) {
+                            if (matches(sourceId)) {
+                                append(currentChannel, currentEntry, 0U);
+                                append(currentChannel, currentEntry, 1U);
+                            }
+                            if (matches(targetId)) {
+                                append(currentChannel, currentEntry, 2U);
+                            }
+                        }
+                        return true;
+                    });
+                break;
+            case mapget::Scope::Group:
+                if (scope == "feature") {
+                    channel->forEachGroupEntry(
+                        [&](mapget::model_ptr<mapget::GroupEntry> const& entry) {
+                            auto const currentEntry = entryOrdinal++;
+                            auto members = entry->memberFeatureIds();
+                            bool matched = false;
+                            if (members && members->size() > 1U) {
+                                for (uint32_t index = 0U;
+                                     index < members->size() && !matched;
+                                     ++index)
+                                {
+                                    auto node = members->at(index);
+                                    matched = matches(node
+                                        ? model_->resolve<mapget::FeatureId>(*node)
+                                        : mapget::model_ptr<mapget::FeatureId>{});
+                                }
+                            }
+                            else {
+                                matched = matches(
+                                    entry->representativeFeatureId());
+                            }
+                            if (matched) {
+                                append(currentChannel, currentEntry, 0U);
+                            }
+                            return true;
+                        });
+                }
+                break;
+            }
+            return true;
+        });
+    return *result;
+}
+
 std::string TileSubsetLayer::toJson() const
 {
     return model_->toJson().dump(2);

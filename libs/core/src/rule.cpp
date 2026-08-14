@@ -10,6 +10,38 @@
 namespace erdblick
 {
 
+simfil::Value BoundEvalFun::evaluate(std::string const& expression) const
+{
+    if (evalRef_) {
+        return evalRef_(context_, expression);
+    }
+    return eval_ ? eval_(expression) : simfil::Value::undef();
+}
+
+void BoundEvalFun::reportIssue(
+    std::string const& property,
+    std::string const& expression,
+    std::string const& message,
+    uint32_t ruleIndex) const
+{
+    if (reportIssueRef_) {
+        reportIssueRef_(
+            context_,
+            property,
+            expression,
+            message,
+            ruleIndex);
+    }
+    else if (reportIssue_) {
+        reportIssue_(property, expression, message, ruleIndex);
+    }
+}
+
+bool BoundEvalFun::hasIssueReporter() const
+{
+    return reportIssueRef_ || static_cast<bool>(reportIssue_);
+}
+
 namespace
 {
 /** Parse the YAML arrow keyword into the enum used by rendering code. */
@@ -54,6 +86,13 @@ std::optional<mapget::GeomType> parseGeometryEnum(std::string const& enumStr) {
 
     std::cout << "Unsupported geometry type: " << enumStr << std::endl;
     return {};
+}
+
+/** Detect patterns whose regex semantics are exactly a literal string comparison. */
+bool isLiteralRegex(std::string_view pattern)
+{
+    constexpr std::string_view metaCharacters = R"(.^$|()[]{}*+?\)";
+    return pattern.find_first_of(metaCharacters) == std::string_view::npos;
 }
 
 /** Parse a typed YAML scalar without stringifying numeric/category keys. */
@@ -120,6 +159,83 @@ std::optional<double> numericColorScaleKey(
     }
     return std::nullopt;
 }
+
+/** Build an allocation-bounded direct lookup when every category is integral. */
+template<typename Stop, typename Result, typename Project>
+std::optional<FeatureStyleRule::DenseIntegerScale<Result>>
+denseIntegerScale(std::vector<Stop> const& stops, Project project)
+{
+    constexpr uint64_t kMaximumDenseSpan = 1024U;
+    auto integerKey = [](FeatureStyleRule::ColorScaleStop::Key const& key)
+        -> std::optional<int64_t> {
+        if (auto const integer = std::get_if<int64_t>(&key)) {
+            return *integer;
+        }
+        auto const number = std::get_if<double>(&key);
+        constexpr double kInt64UpperExclusive = 9223372036854775808.0;
+        if (!number || !std::isfinite(*number) ||
+            std::trunc(*number) != *number ||
+            *number < static_cast<double>(
+                std::numeric_limits<int64_t>::min()) ||
+            *number >= kInt64UpperExclusive)
+        {
+            return std::nullopt;
+        }
+        return static_cast<int64_t>(*number);
+    };
+    if (stops.empty()) {
+        return std::nullopt;
+    }
+    int64_t minimum = std::numeric_limits<int64_t>::max();
+    int64_t maximum = std::numeric_limits<int64_t>::min();
+    for (auto const& stop : stops) {
+        auto const key = integerKey(stop.key);
+        if (!key) {
+            return std::nullopt;
+        }
+        minimum = std::min(minimum, *key);
+        maximum = std::max(maximum, *key);
+    }
+    auto const span = static_cast<uint64_t>(maximum) -
+        static_cast<uint64_t>(minimum) + 1U;
+    if (span > kMaximumDenseSpan) {
+        return std::nullopt;
+    }
+    FeatureStyleRule::DenseIntegerScale<Result> result{
+        .minimum = minimum,
+        .values = std::vector<std::optional<Result>>(
+            static_cast<size_t>(span)),
+    };
+    for (auto const& stop : stops) {
+        auto const key = *integerKey(stop.key);
+        auto const index = static_cast<size_t>(
+            key - minimum);
+        if (!result.values[index]) {
+            result.values[index] = project(stop);
+        }
+    }
+    return result;
+}
+
+/** Return an integral SIMFIL number without constructing a scale-key variant. */
+std::optional<int64_t> integerScaleKey(simfil::Value const& value)
+{
+    if (value.isa(simfil::ValueType::Int)) {
+        return value.as<simfil::ValueType::Int>();
+    }
+    if (!value.isa(simfil::ValueType::Float)) {
+        return std::nullopt;
+    }
+    auto const number = value.as<simfil::ValueType::Float>();
+    constexpr double kInt64UpperExclusive = 9223372036854775808.0;
+    if (!std::isfinite(number) || std::trunc(number) != number ||
+        number < static_cast<double>(std::numeric_limits<int64_t>::min()) ||
+        number >= kInt64UpperExclusive)
+    {
+        return std::nullopt;
+    }
+    return static_cast<int64_t>(number);
+}
 }
 
 FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml, uint32_t index) : index_(index)
@@ -131,6 +247,7 @@ FeatureStyleRule::FeatureStyleRule(const FeatureStyleRule& other, bool resetNonI
 {
     *this = other;
     if (resetNonInheritableAttrs) {
+        exactType_.reset();
         type_.reset();
         filter_.clear();
         branchMode_ = BranchMode::None;
@@ -211,7 +328,15 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["type"].IsDefined()) {
         // Parse a feature type regular expression, e.g. `Lane|Boundary`
-        type_ = yaml["type"].as<std::string>();
+        auto pattern = yaml["type"].as<std::string>();
+        exactType_.reset();
+        type_.reset();
+        if (isLiteralRegex(pattern)) {
+            exactType_ = std::move(pattern);
+        }
+        else {
+            type_ = pattern;
+        }
     }
     if (yaml["filter"].IsDefined()) {
         // Parse a simfil filter expression, e.g. `properties.functionalRoadClass == 4`
@@ -240,10 +365,21 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             : ColorScale::Mode::Linear;
         scale.expression = scaleYaml["expression"].as<std::string>();
         for (auto const& stopYaml : scaleYaml["stops"]) {
+            auto key = parseColorScaleKey(stopYaml[0]);
             scale.stops.push_back(ColorScaleStop{
-                parseColorScaleKey(stopYaml[0]),
+                key,
                 Color(stopYaml[1].as<std::string>()).toFVec4(),
+                numericColorScaleKey(key),
             });
+        }
+        if (scale.mode == ColorScale::Mode::Categorical) {
+            scale.denseIntegerStops = denseIntegerScale<
+                ColorScaleStop,
+                glm::fvec4>(
+                    scale.stops,
+                    [](ColorScaleStop const& stop) {
+                        return stop.color;
+                    });
         }
         if (scaleYaml["fallback"].IsDefined()) {
             scale.fallback = Color(scaleYaml["fallback"].as<std::string>()).toFVec4();
@@ -270,10 +406,21 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         scale.expression =
             scaleYaml["expression"].as<std::string>();
         for (auto const& stopYaml : scaleYaml["stops"]) {
+            auto key = parseColorScaleKey(stopYaml[0]);
             scale.stops.push_back(WidthScaleStop{
-                parseColorScaleKey(stopYaml[0]),
+                key,
                 stopYaml[1].as<float>(),
+                numericColorScaleKey(key),
             });
+        }
+        if (scale.mode == ColorScale::Mode::Categorical) {
+            scale.denseIntegerStops = denseIntegerScale<
+                WidthScaleStop,
+                float>(
+                    scale.stops,
+                    [](WidthScaleStop const& stop) {
+                        return stop.width;
+                    });
         }
         if (scaleYaml["fallback"].IsDefined()) {
             scale.fallback =
@@ -558,7 +705,12 @@ bool FeatureStyleRule::forEachMatchingRule(
     std::function<void(FeatureStyleRule const&)> const& callback,
     BoundEvalFun const* featureEvalFun) const
 {
-    if (type_) {
+    if (exactType_) {
+        if (context.featureType != *exactType_) {
+            return false;
+        }
+    }
+    else if (type_) {
         if (!std::regex_match(
                 context.featureType.begin(),
                 context.featureType.end(),
@@ -608,7 +760,7 @@ bool FeatureStyleRule::forEachMatchingRule(
         if (expression.empty()) {
             return true;
         }
-        auto value = evalFun.eval_(expression);
+        auto value = evalFun.evaluate(expression);
         if (value.isa(simfil::ValueType::Undef) ||
             value.isa(simfil::ValueType::Null))
         {
@@ -692,7 +844,12 @@ void FeatureStyleRule::assignRenderRuleIndices(uint32_t& nextRenderRuleIndex)
 
 bool FeatureStyleRule::maybeMatchesType(std::string_view typeId) const
 {
-    if (type_) {
+    if (exactType_) {
+        if (typeId != *exactType_) {
+            return false;
+        }
+    }
+    else if (type_) {
         if (!std::regex_match(typeId.begin(), typeId.end(), *type_)) {
             return false;
         }
@@ -817,21 +974,39 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
             color.a *= color_.a;
             return color;
         };
-        auto const value = colorScaleKey(evalFun.eval_(colorScale_->expression));
+        auto const evaluated = evalFun.evaluate(colorScale_->expression);
+        if (colorScale_->mode == ColorScale::Mode::Categorical &&
+            colorScale_->denseIntegerStops)
+        {
+            auto const key = integerScaleKey(evaluated);
+            if (!key || *key < colorScale_->denseIntegerStops->minimum) {
+                return fallback();
+            }
+            auto const index = static_cast<uint64_t>(*key) -
+                static_cast<uint64_t>(
+                    colorScale_->denseIntegerStops->minimum);
+            if (index >= colorScale_->denseIntegerStops->values.size() ||
+                !colorScale_->denseIntegerStops->values[
+                    static_cast<size_t>(index)])
+            {
+                return fallback();
+            }
+            auto color = *colorScale_->denseIntegerStops->values[
+                static_cast<size_t>(index)];
+            color.a *= color_.a;
+            return color;
+        }
+        auto const value = colorScaleKey(evaluated);
         if (!value) {
             return fallback();
         }
         if (colorScale_->mode == ColorScale::Mode::Categorical) {
-            auto equal = [](auto const& left, auto const& right) {
-                auto leftNumber = numericColorScaleKey(left);
-                auto rightNumber = numericColorScaleKey(right);
-                if (leftNumber && rightNumber) {
-                    return *leftNumber == *rightNumber;
-                }
-                return left == right;
-            };
+            auto const valueNumber = numericColorScaleKey(*value);
             for (auto const& stop : colorScale_->stops) {
-                if (equal(*value, stop.key)) {
+                auto const equal = valueNumber
+                    ? stop.numericKey && *valueNumber == *stop.numericKey
+                    : !stop.numericKey && *value == stop.key;
+                if (equal) {
                     auto color = stop.color;
                     color.a *= color_.a;
                     return color;
@@ -844,8 +1019,8 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
         if (!input || colorScale_->stops.empty()) {
             return fallback();
         }
-        auto first = numericColorScaleKey(colorScale_->stops.front().key);
-        auto last = numericColorScaleKey(colorScale_->stops.back().key);
+        auto const first = colorScale_->stops.front().numericKey;
+        auto const last = colorScale_->stops.back().numericKey;
         if (!first || !last) {
             return fallback();
         }
@@ -860,8 +1035,8 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
             return color;
         }
         for (size_t index = 1; index < colorScale_->stops.size(); ++index) {
-            auto lower = numericColorScaleKey(colorScale_->stops[index - 1].key);
-            auto upper = numericColorScaleKey(colorScale_->stops[index].key);
+            auto const lower = colorScale_->stops[index - 1].numericKey;
+            auto const upper = colorScale_->stops[index].numericKey;
             if (!lower || !upper || *input > *upper) {
                 continue;
             }
@@ -876,7 +1051,7 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
         return fallback();
     }
     if (!colorExpression_.empty()) {
-        auto colorVal = evalFun.eval_(colorExpression_);
+        auto colorVal = evalFun.evaluate(colorExpression_);
         if (colorVal.isa(simfil::ValueType::Int)) {
             auto colorInt = colorVal.as<simfil::ValueType::Int>();
             auto a = static_cast<float>(colorInt & 0xff) / 255.;
@@ -894,8 +1069,8 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
         }
         else
         {
-            if (evalFun.reportIssue_) {
-                evalFun.reportIssue_(
+            if (evalFun.hasIssueReporter()) {
+                evalFun.reportIssue(
                     "color-expression",
                     colorExpression_,
                     "Color expression returned an unsupported value: " + colorVal.toString(),
@@ -930,9 +1105,27 @@ float FeatureStyleRule::width(BoundEvalFun const& evalFun) const
     }
     auto const fallback =
         widthScale_->fallback.value_or(width_);
-    auto const value =
-        colorScaleKey(
-            evalFun.eval_(widthScale_->expression));
+    auto const evaluated = evalFun.evaluate(widthScale_->expression);
+    if (widthScale_->mode == ColorScale::Mode::Categorical &&
+        widthScale_->denseIntegerStops)
+    {
+        auto const key = integerScaleKey(evaluated);
+        if (!key || *key < widthScale_->denseIntegerStops->minimum) {
+            return fallback;
+        }
+        auto const index = static_cast<uint64_t>(*key) -
+            static_cast<uint64_t>(
+                widthScale_->denseIntegerStops->minimum);
+        if (index >= widthScale_->denseIntegerStops->values.size() ||
+            !widthScale_->denseIntegerStops->values[
+                static_cast<size_t>(index)])
+        {
+            return fallback;
+        }
+        return *widthScale_->denseIntegerStops->values[
+            static_cast<size_t>(index)];
+    }
+    auto const value = colorScaleKey(evaluated);
     if (!value) {
         return fallback;
     }
@@ -940,16 +1133,12 @@ float FeatureStyleRule::width(BoundEvalFun const& evalFun) const
     if (widthScale_->mode ==
         ColorScale::Mode::Categorical)
     {
-        auto equal = [](auto const& left, auto const& right) {
-            auto leftNumber = numericColorScaleKey(left);
-            auto rightNumber = numericColorScaleKey(right);
-            if (leftNumber && rightNumber) {
-                return *leftNumber == *rightNumber;
-            }
-            return left == right;
-        };
+        auto const valueNumber = numericColorScaleKey(*value);
         for (auto const& stop : widthScale_->stops) {
-            if (equal(*value, stop.key)) {
+            auto const equal = valueNumber
+                ? stop.numericKey && *valueNumber == *stop.numericKey
+                : !stop.numericKey && *value == stop.key;
+            if (equal) {
                 return stop.width;
             }
         }
@@ -960,12 +1149,8 @@ float FeatureStyleRule::width(BoundEvalFun const& evalFun) const
     if (!input || widthScale_->stops.empty()) {
         return fallback;
     }
-    auto first =
-        numericColorScaleKey(
-            widthScale_->stops.front().key);
-    auto last =
-        numericColorScaleKey(
-            widthScale_->stops.back().key);
+    auto const first = widthScale_->stops.front().numericKey;
+    auto const last = widthScale_->stops.back().numericKey;
     if (!first || !last) {
         return fallback;
     }
@@ -981,10 +1166,8 @@ float FeatureStyleRule::width(BoundEvalFun const& evalFun) const
          index < widthScale_->stops.size();
          ++index)
     {
-        auto lower = numericColorScaleKey(
-            widthScale_->stops[index - 1].key);
-        auto upper = numericColorScaleKey(
-            widthScale_->stops[index].key);
+        auto const lower = widthScale_->stops[index - 1].numericKey;
+        auto const upper = widthScale_->stops[index].numericKey;
         if (!lower || !upper || *input > *upper) {
             continue;
         }
@@ -1011,7 +1194,7 @@ std::optional<double> FeatureStyleRule::zIndex(
         return zIndex_;
     }
 
-    auto const value = evalFun.eval_(zIndexExpression_);
+    auto const value = evalFun.evaluate(zIndexExpression_);
     if (value.isa(simfil::ValueType::Undef) ||
         value.isa(simfil::ValueType::Null))
     {
@@ -1029,8 +1212,8 @@ std::optional<double> FeatureStyleRule::zIndex(
         return *number;
     }
 
-    if (evalFun.reportIssue_) {
-        evalFun.reportIssue_(
+    if (evalFun.hasIssueReporter()) {
+        evalFun.reportIssue(
             "z-index-expression",
             zIndexExpression_,
             "Expression must evaluate to a finite number; using the literal z-index fallback if configured.",
@@ -1072,15 +1255,15 @@ int FeatureStyleRule::dashPattern() const
 FeatureStyleRule::Arrow FeatureStyleRule::arrow(BoundEvalFun const& evalFun) const
 {
     if (!arrowExpression_.empty()) {
-        auto arrowVal = evalFun.eval_(arrowExpression_);
+        auto arrowVal = evalFun.evaluate(arrowExpression_);
         if (arrowVal.isa(simfil::ValueType::String)) {
             auto arrowStr = arrowVal.as<simfil::ValueType::String>();
             if (auto arrowMode = parseArrowMode(arrowStr))
                 return *arrowMode;
         }
 
-        if (evalFun.reportIssue_) {
-            evalFun.reportIssue_(
+        if (evalFun.hasIssueReporter()) {
+            evalFun.reportIssue(
                 "arrow-expression",
                 arrowExpression_,
                 "Arrow expression returned an unsupported value: " + arrowVal.toString(),
@@ -1090,6 +1273,13 @@ FeatureStyleRule::Arrow FeatureStyleRule::arrow(BoundEvalFun const& evalFun) con
                   << ": " << arrowVal.toString() << std::endl;
     }
     return arrow_;
+}
+
+std::optional<FeatureStyleRule::Arrow> FeatureStyleRule::constantArrow() const
+{
+    return arrowExpression_.empty()
+        ? std::optional<Arrow>{arrow_}
+        : std::nullopt;
 }
 
 glm::fvec4 const& FeatureStyleRule::outlineColor() const
@@ -1236,7 +1426,7 @@ std::string const& FeatureStyleRule::labelTextExpression() const
 std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
 {
     if (!labelTextExpression_.empty()) {
-        auto resultVal = evalFun.eval_(labelTextExpression_);
+        auto resultVal = evalFun.evaluate(labelTextExpression_);
         auto resultText = resultVal.toString();
         if (!resultText.empty()) {
             return resultText;
@@ -1293,12 +1483,12 @@ bool FeatureStyleRule::hasIconUrl() const
 std::string FeatureStyleRule::iconUrl(BoundEvalFun const& evalFun) const
 {
     if (!iconUrlExpression_.empty()) {
-        auto iconUrlVal = evalFun.eval_(iconUrlExpression_);
+        auto iconUrlVal = evalFun.evaluate(iconUrlExpression_);
         if (iconUrlVal.isa(simfil::ValueType::String)) {
             return iconUrlVal.as<simfil::ValueType::String>();
         }
-        if (evalFun.reportIssue_) {
-            evalFun.reportIssue_(
+        if (evalFun.hasIssueReporter()) {
+            evalFun.reportIssue(
                 "icon-url-expression",
                 iconUrlExpression_,
                 "Icon URL expression returned an unsupported value: " + iconUrlVal.toString(),

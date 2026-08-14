@@ -288,7 +288,7 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('normalizes persisted subset-render tuning preferences', () => {
+    it('normalizes the persisted subset-render worker preference', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(
             routerStub as unknown as Router,
@@ -296,16 +296,10 @@ describe('AppStateService', () => {
         );
 
         expect(service.tileSubsetRenderWorkerCount).toBe(0);
-        expect(service.renderBlockVertexLimit).toBe(16_384);
-        expect(service.debugRenderBlocks).toBe(false);
 
         service.tileSubsetRenderWorkerCount = 999;
-        service.renderBlockVertexLimit = 1;
-        service.debugRenderBlocks = true;
 
         expect(service.tileSubsetRenderWorkerCount).toBe(32);
-        expect(service.renderBlockVertexLimit).toBe(256);
-        expect(service.debugRenderBlocks).toBe(true);
         service.ngOnDestroy();
         routerStub.events.complete();
     });

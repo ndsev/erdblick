@@ -16,24 +16,15 @@ import {
     ViewRecalculationReason
 } from "./map-view-state.service";
 import {
-    TileSubsetLayerRenderService,
-    type TileSubsetLayerRenderPolicyChange
+    TileSubsetLayerRenderService
 } from "./deck/tile-subset-layer-render.service";
-import type {
-    DeckRenderBufferArenaDebugSnapshot
-} from "./deck/deck-render-buffer-arena";
 import {
     TileSubsetLayerVisualization,
     type TileSubsetInteractionOverlay
 } from "./deck/tile-subset-layer.visualization";
 import {resolveDeckInteractionEffect} from
     "./deck/deck-interaction-effect";
-import {
-    fitsMortonPresentationVertexBudget,
-    MORTON_AGGREGATE_BLOCK_BIT_COUNTS,
-    mortonBlockBatch,
-    type MortonBlockBatch
-} from "./deck/morton-presentation-block";
+import {tileCoordinateOrigin} from "./deck/tile-coordinate-origin";
 import type {FeatureSearchService} from "../search/feature.search.service";
 import type {
     InspectionSelectionService
@@ -47,7 +38,7 @@ import {
     tileFeatureInteractionTargetsEqual
 } from "../shared/tile-feature-id";
 import {
-    interactionScopeTargetKey,
+    hasAuthoredInteractionHighlight,
     interactionTargetKey,
     planRemoteInteractionHighlight
 } from "./interaction-highlight-plan";
@@ -60,6 +51,7 @@ import type {
 import type {RuleFidelity} from "../../build/libs/core/erdblick-core";
 import type {HoverDetailService} from "../mapdata/hover-detail.service";
 import {NgZone} from "@angular/core";
+import type {GpuSceneSnapshot} from "./deck/gpu-scene";
 
 export type ViewTileOccupancy = "unknown" | "empty" | "non-empty" | "error";
 
@@ -68,10 +60,11 @@ interface OwnedStyledLayer {
     subscription: Subscription;
     visualizations: Map<string, TileSubsetLayerVisualization>;
     visualizationKeyByTileId: Map<number, string>;
-    pendingBlockTiles: Map<number, {
+    pendingTiles: Map<number, {
         state: FilterTileState;
         fidelity: number;
-        queuedAt: number;
+        lineSimplificationToleranceMeters: number;
+        preservedContributionIdentity: string | null;
     }>;
     disposeLayer: boolean;
     replacementSlot: string | null;
@@ -83,9 +76,6 @@ interface RetiringRegularLayer {
     owned: OwnedStyledLayer;
 }
 
-const BLOCK_ASSEMBLY_CADENCE_MS = 16;
-const BLOCK_ASSEMBLY_MAX_WAIT_MS = 3 * BLOCK_ASSEMBLY_CADENCE_MS;
-
 /**
  * View-local owner which reconciles catalog, style, and viewport state.
  *
@@ -93,7 +83,6 @@ const BLOCK_ASSEMBLY_MAX_WAIT_MS = 3 * BLOCK_ASSEMBLY_CADENCE_MS;
  * and logical visualizations remain alive for the logical view lifetime.
  */
 export class ViewLayerController {
-    readonly changed = new Subject<void>();
     readonly occupancyChanged = new Subject<void>();
     private readonly subscriptions: Subscription[] = [];
     private readonly styledLayers = new Map<string, OwnedStyledLayer>();
@@ -103,10 +92,21 @@ export class ViewLayerController {
     private disposed = false;
     private reconcileQueued = false;
     private fullReconcileRequired = true;
+    private interactionReconcileRequired = true;
     private lastViewportPresentationSignature = "";
-    private blockAssemblyTimer: ReturnType<typeof setTimeout> | null = null;
+    private lastInteractionViewportSignature = "";
+    private localInteractionOverlaysByLayer =
+        new Map<string, readonly TileSubsetInteractionOverlay[]>();
+    private readonly regularCoverageByLayer = new WeakMap<
+        StyledMapgetLayer,
+        {tileIds: readonly number[]; priorityTileIds: readonly number[]}
+    >();
+    private pendingDispatchQueued = false;
+    private readonly pendingVisualizationRenders =
+        new Set<TileSubsetLayerVisualization>();
     private readonly unregisterDiagnostics: () => void;
 
+    /** Bind one logical view to catalog, style, search, inspection, and worker state. */
     constructor(
         readonly viewIndex: number,
         private readonly mapInfo: MapInfoService,
@@ -152,37 +152,33 @@ export class ViewLayerController {
                 this.scheduleReconcile()
             ),
             this.renderService.capacityChanged.subscribe(() =>
-                this.scheduleBlockAssembly()
-            ),
-            this.renderService.policyChanged.subscribe(change =>
-                this.ngZone.runOutsideAngular(() =>
-                    this.handleRenderPolicyChange(change))
+                this.schedulePendingTiles()
             )
         );
         this.scheduleReconcile();
     }
 
+    /** Attach a fresh renderer generation and replay every retained contribution. */
     attachScene(sceneHandle: IRenderSceneHandle): void {
         this.ngZone.runOutsideAngular(() => {
             this.sceneHandle = sceneHandle;
             for (const owned of this.styledLayers.values()) {
                 for (const visualization of owned.visualizations.values()) {
-                    visualization.reattach(sceneHandle).catch(error =>
-                        console.error("Failed to reattach a subset visualization.", error)
-                    );
+                    visualization.reattach(sceneHandle);
+                    this.queueVisualizationRender(visualization);
                 }
             }
             for (const {owned} of this.retiringRegularLayers.values()) {
                 for (const visualization of owned.visualizations.values()) {
-                    visualization.reattach(sceneHandle).catch(error =>
-                        console.error("Failed to reattach a retiring subset visualization.", error)
-                    );
+                    visualization.reattach(sceneHandle);
+                    this.queueVisualizationRender(visualization);
                 }
             }
-            this.scheduleBlockAssembly();
+            this.schedulePendingTiles();
         });
     }
 
+    /** Stop publishing into a renderer generation that is being destroyed. */
     detachScene(): void {
         this.sceneHandle = null;
     }
@@ -233,16 +229,24 @@ export class ViewLayerController {
         );
     }
 
-    /** Bridges the view-owned Deck scene and arena counters into global diagnostics. */
-    recordDeckPresentationDiagnostics(
-        layers: number,
-        arena: DeckRenderBufferArenaDebugSnapshot
+    /** Let diagnostics defer Angular publications while this view's camera moves. */
+    setCameraInteracting(active: boolean): void {
+        this.diagnostics.setViewInteracting(this.viewIndex, active);
+    }
+
+    /** Exposes view-owned Deck counters to diagnostics without sampling every frame. */
+    setDeckPresentationDiagnosticsProvider(
+        provider: () => {layers: number; scene: GpuSceneSnapshot}
     ): void {
-        this.renderService.recordDeckPresentationDiagnostics(
+        this.renderService.setDeckPresentationDiagnosticsProvider(
             this.viewIndex,
-            layers,
-            arena
+            provider
         );
+    }
+
+    /** Removes a Deck diagnostics provider when its renderer generation ends. */
+    clearDeckPresentationDiagnostics(): void {
+        this.renderService.clearDeckPresentationDiagnostics(this.viewIndex);
     }
 
     /** Current regular-presentation styled layers, for diagnostics and grid aggregation. */
@@ -311,15 +315,12 @@ export class ViewLayerController {
         return "unknown";
     }
 
+    /** Release every logical layer, worker request, diagnostic hook, and subscription. */
     dispose(): void {
         if (this.disposed) {
             return;
         }
         this.disposed = true;
-        if (this.blockAssemblyTimer !== null) {
-            clearTimeout(this.blockAssemblyTimer);
-            this.blockAssemblyTimer = null;
-        }
         this.subscriptions.splice(0).forEach(subscription => subscription.unsubscribe());
         for (const owned of this.styledLayers.values()) {
             this.destroyOwnedLayer(owned);
@@ -329,21 +330,24 @@ export class ViewLayerController {
             this.destroyOwnedLayer(owned);
         }
         this.retiringRegularLayers.clear();
+        this.pendingVisualizationRenders.clear();
+        this.localInteractionOverlaysByLayer.clear();
         this.hoverDetails.clearView(this.viewIndex);
         this.renderService.clearDeckFrameTime(this.viewIndex);
         this.renderService.clearDeckPresentationDiagnostics(this.viewIndex);
         this.unregisterDiagnostics();
         this.sceneHandle = null;
-        this.changed.complete();
         this.occupancyChanged.complete();
     }
 
+    /** Coalesce demand changes outside Angular into one microtask reconciliation. */
     private scheduleReconcile(fullReconcile = true): void {
         this.ngZone.runOutsideAngular(() => {
             if (this.disposed) {
                 return;
             }
             this.fullReconcileRequired ||= fullReconcile;
+            this.interactionReconcileRequired ||= fullReconcile;
             if (this.reconcileQueued) {
                 return;
             }
@@ -405,21 +409,22 @@ export class ViewLayerController {
         return parts.join("|");
     }
 
+    /** Reconcile desired regular/search/interaction owners without rebuilding the view. */
     private reconcile(): void {
         const desired = new Map<string, {
             mapgetLayer: MapgetLayer;
             style: ErdblickStyle;
             styleOrder: number;
-            tileIds: number[];
-            priorityTileIds: number[];
+            tileIds: readonly number[];
+            priorityTileIds: readonly number[];
             options: Record<string, boolean | number | string>;
             plannedFidelity: RuleFidelity;
             replacementSlot: string;
         }>();
         const hoverDetailCoverage: Array<{
             mapgetLayer: MapgetLayer;
-            tileIds: number[];
-            priorityTileIds: number[];
+            tileIds: readonly number[];
+            priorityTileIds: readonly number[];
         }> = [];
         const orderedStyles = [...this.styleService.styles.values()]
             .filter(style => style.visible);
@@ -443,7 +448,6 @@ export class ViewLayerController {
                     coreLib.RuleFidelity.HIGH.value
                     ? coreLib.RuleFidelity.HIGH
                     : coreLib.RuleFidelity.LOW;
-            const hoverDetailTileIds = new Set(visibleTileIds);
             for (let styleOrder = 0; styleOrder < orderedStyles.length; ++styleOrder) {
                 const style = orderedStyles[styleOrder];
                 if (!style.featureLayerStyle.hasLayerAffinity(mapgetLayer.layerId)) {
@@ -460,14 +464,12 @@ export class ViewLayerController {
                     mapgetLayer.layerId,
                     style.id
                 ) ?? {};
-                const tileIds = this.expandGroupCoverage(visibleTileIds, style, mapgetLayer);
-                tileIds.forEach(tileId => hoverDetailTileIds.add(tileId));
                 desired.set(key, {
                     mapgetLayer,
                     style,
                     styleOrder,
-                    tileIds,
-                    priorityTileIds: [...visibleTileIds],
+                    tileIds: visibleTileIds,
+                    priorityTileIds: visibleTileIds,
                     options,
                     plannedFidelity,
                     replacementSlot: this.regularReplacementSlot(
@@ -478,8 +480,8 @@ export class ViewLayerController {
             }
             hoverDetailCoverage.push({
                 mapgetLayer,
-                tileIds: [...hoverDetailTileIds],
-                priorityTileIds: [...visibleTileIds]
+                tileIds: visibleTileIds,
+                priorityTileIds: visibleTileIds
             });
         }
         this.hoverDetails.reconcileView(this.viewIndex, hoverDetailCoverage);
@@ -561,7 +563,7 @@ export class ViewLayerController {
                         subscription: this.subscribeToStyledLayer(layer),
                         visualizations: new Map(),
                         visualizationKeyByTileId: new Map(),
-                        pendingBlockTiles: new Map(),
+                        pendingTiles: new Map(),
                         disposeLayer: true,
                         replacementSlot: next.replacementSlot,
                         replacementTileIds:
@@ -577,7 +579,11 @@ export class ViewLayerController {
             owned.replacementTileIds =
                 new Set(next.priorityTileIds);
             owned.layer.setOptions(next.options);
-            owned.layer.setCoverage(next.tileIds, next.priorityTileIds);
+            this.setRegularCoverage(
+                owned.layer,
+                next.tileIds,
+                next.priorityTileIds
+            );
             this.reconcileOwnedVisualizations(owned);
             this.releaseRegularFallbackWhenReady(owned);
         }
@@ -593,8 +599,16 @@ export class ViewLayerController {
             this.destroyOwnedLayer(fallback.owned);
         }
         this.reconcileSearchLayers(orderedStyles.length);
-        this.reconcileHighlightLayers(orderedStyles);
-        this.changed.next();
+        const interactionViewportSignature =
+            this.interactionViewportSignature();
+        if (this.interactionReconcileRequired ||
+            interactionViewportSignature !==
+                this.lastInteractionViewportSignature) {
+            this.interactionReconcileRequired = false;
+            this.reconcileHighlightLayers(orderedStyles);
+            this.lastInteractionViewportSignature =
+                interactionViewportSignature;
+        }
         this.occupancyChanged.next();
         this.diagnostics.notifyChanged();
     }
@@ -607,6 +621,7 @@ export class ViewLayerController {
         );
     }
 
+    /** Turn immutable filter events into singleton visualization lifecycle changes. */
     private handleStyledLayerEvent(
         layer: StyledMapgetLayer,
         event: StyledMapgetLayerEvent
@@ -616,16 +631,14 @@ export class ViewLayerController {
             return;
         }
         if (event.type === "tile-ready") {
-            this.reconcileReadyBlockTile(owned, event.state);
+            this.reconcileReadyTile(owned, event.state);
             this.occupancyChanged.next();
-            this.changed.next();
             this.diagnostics.notifyChanged();
             return;
         }
-        if (event.type === "tile-removed") {
-            this.removeBlockTile(owned, event.state.tileId);
+        if (event.type === "tiles-removed") {
+            this.removeTileVisualizations(owned, event.states);
             this.occupancyChanged.next();
-            this.changed.next();
             this.diagnostics.notifyChanged();
             return;
         }
@@ -635,17 +648,16 @@ export class ViewLayerController {
         }
         if (event.type === "error") {
             this.occupancyChanged.next();
-            this.changed.next();
             this.diagnostics.notifyLayerErrors(this.viewIndex, layer);
             return;
         }
         if (event.type === "status") {
             this.occupancyChanged.next();
-            this.changed.next();
             this.diagnostics.notifyChanged();
         }
     }
 
+    /** Retire one filter owner and every GPU/GLTF contribution it controls. */
     private destroyOwnedLayer(owned: OwnedStyledLayer): void {
         owned.subscription.unsubscribe();
         this.clearOwnedVisualizations(owned);
@@ -656,12 +668,15 @@ export class ViewLayerController {
 
     /** Releases every render and attachment resource while retaining the transport owner. */
     private clearOwnedVisualizations(owned: OwnedStyledLayer): void {
+        for (const tileId of [...owned.pendingTiles.keys()]) {
+            this.discardPendingTile(owned, tileId);
+        }
         for (const visualization of owned.visualizations.values()) {
+            this.pendingVisualizationRenders.delete(visualization);
             visualization.destroy(this.sceneHandle);
         }
         owned.visualizations.clear();
         owned.visualizationKeyByTileId.clear();
-        owned.pendingBlockTiles.clear();
     }
 
     /** Keeps one fully rendered regular owner as the visual replacement fallback. */
@@ -700,6 +715,7 @@ export class ViewLayerController {
         this.destroyOwnedLayer(fallback.owned);
     }
 
+    /** Require every demanded successor tile to be visibly installed before handover. */
     private regularReplacementIsReady(
         owned: OwnedStyledLayer
     ): boolean {
@@ -724,46 +740,14 @@ export class ViewLayerController {
         return true;
     }
 
-    /** Applies live worker, block-budget, and block-overlay preferences. */
-    private handleRenderPolicyChange(
-        change: TileSubsetLayerRenderPolicyChange
-    ): void {
-        if (change === "debug-blocks") {
-            const enabled =
-                this.renderService.debugRenderBlocksEnabled();
-            for (const owned of this.allOwnedStyledLayers()) {
-                for (const visualization of owned.visualizations.values()) {
-                    visualization.setDebugBlockVisualization(
-                        enabled,
-                        this.sceneHandle
-                    );
-                }
-            }
-            return;
-        }
-        if (change === "block-vertex-limit") {
-            for (const owned of this.styledLayers.values()) {
-                for (const key of [...owned.visualizations.keys()]) {
-                    this.dissolveBlockVisualization(owned, key, true);
-                }
-            }
-        }
-        this.scheduleBlockAssembly();
-    }
-
-    private *allOwnedStyledLayers(): Iterable<OwnedStyledLayer> {
-        yield* this.styledLayers.values();
-        for (const {owned} of this.retiringRegularLayers.values()) {
-            yield owned;
-        }
-    }
-
+    /** Resolve the view's contextual fidelity preference for one tile. */
     private fidelityFor(tileId: number): number {
         return this.viewState.prefersHighFidelityForTile(this.viewIndex, tileId)
             ? coreLib.RuleFidelity.HIGH.value
             : coreLib.RuleFidelity.LOW.value;
     }
 
+    /** Build the immutable transport-owner key for one regular style incarnation. */
     private regularKey(
         mapgetLayer: MapgetLayer,
         style: ErdblickStyle,
@@ -777,6 +761,7 @@ export class ViewLayerController {
         ].join("/");
     }
 
+    /** Build the stable handover slot shared by successive style incarnations. */
     private regularReplacementSlot(
         mapgetLayer: MapgetLayer,
         style: ErdblickStyle
@@ -823,7 +808,7 @@ export class ViewLayerController {
                     subscription: this.subscribeToStyledLayer(layer),
                     visualizations: new Map(),
                     visualizationKeyByTileId: new Map(),
-                    pendingBlockTiles: new Map(),
+                    pendingTiles: new Map(),
                     disposeLayer: false,
                     replacementSlot: null,
                     replacementTileIds: new Set()
@@ -835,6 +820,7 @@ export class ViewLayerController {
         });
     }
 
+    /** Keep each service-owned search presentation independently addressable. */
     private searchKey(layer: StyledMapgetLayer): string {
         return `search/${layer.ownerId}`;
     }
@@ -885,8 +871,8 @@ export class ViewLayerController {
             roots: Array<{tileId: number; featureId: string}>;
             styleOrder: number;
         }>();
-        const localOverlays = new Map<
-            TileSubsetLayerVisualization,
+        const localOverlaysByLayer = new Map<
+            string,
             Map<string, TileSubsetInteractionOverlay>
         >();
 
@@ -930,8 +916,6 @@ export class ViewLayerController {
             }
 
             for (const {mapgetLayer, features} of byLayer.values()) {
-                const localVisualizations =
-                    this.localInteractionVisualizations(mapgetLayer);
                 for (let styleIndex = 0;
                      styleIndex < orderedStyles.length;
                      ++styleIndex) {
@@ -952,11 +936,35 @@ export class ViewLayerController {
                     if (group.color) {
                         options["selectableFeatureHighlightColor"] = group.color;
                     }
+                    const remoteAllowed = group.kind !== "hover" ||
+                        this.inspection.remoteHoverHighlightAllowed;
+                    let rawPlan: StyleFilterPlan | null = null;
+                    let remotePlan: ReturnType<
+                        typeof planRemoteInteractionHighlight
+                    > = null;
+                    if (remoteAllowed &&
+                        style.featureLayerStyle.supportsHighlightMode(
+                            group.mode
+                        )) {
+                        const candidate = this.mapInfo.planStyleFilter(
+                            style.featureLayerStyle,
+                            mapgetLayer.mapId,
+                            mapgetLayer.layerId,
+                            group.mode.value,
+                            coreLib.RuleFidelity.ANY.value
+                        ) as StyleFilterPlan;
+                        if (candidate.valid && candidate.channels.length) {
+                            rawPlan = candidate;
+                            remotePlan = planRemoteInteractionHighlight(
+                                candidate,
+                                features
+                            );
+                        }
+                    }
                     const effect = resolveDeckInteractionEffect(
                         style.featureLayerStyle,
                         group.mode,
                         options);
-                    const localScopedTargets = new Set<string>();
                     if (effect) {
                         const overlayId = [
                             group.kind,
@@ -965,81 +973,45 @@ export class ViewLayerController {
                             this.styleVersion(style),
                             sipHash64Hex(JSON.stringify(options))
                         ].join(":");
+                        let byId = localOverlaysByLayer.get(mapgetLayer.key);
+                        if (!byId) {
+                            byId = new Map();
+                            localOverlaysByLayer.set(mapgetLayer.key, byId);
+                        }
                         for (const feature of features) {
-                            for (const visualization of localVisualizations) {
-                                if (!visualization.hasLocalInteractionTarget(feature)) {
-                                    continue;
-                                }
-                                for (const scope of [
-                                    "feature",
-                                    "attribute",
-                                    "relation",
-                                    "group"
-                                ] as const) {
-                                    if (visualization.hasLocalInteractionTarget(
-                                        feature,
-                                        scope)) {
-                                        localScopedTargets.add(
-                                            interactionScopeTargetKey(
-                                                scope,
-                                                feature));
-                                    }
-                                }
-                                let byId = localOverlays.get(visualization);
-                                if (!byId) {
-                                    byId = new Map();
-                                    localOverlays.set(visualization, byId);
-                                }
-                                const existing = byId.get(overlayId);
-                                if (existing) {
-                                    if (!existing.targets.some(target =>
-                                        interactionTargetKey(target) ===
-                                            interactionTargetKey(feature))) {
-                                        byId.set(overlayId, {
-                                            ...existing,
-                                            targets: [...existing.targets, feature]
-                                        });
-                                    }
-                                }
-                                else {
+                            // Routine map/search hover always stays local. For
+                            // selection and inspection hover, authored rules
+                            // own exact attribute/relation geometry; the local
+                            // compositor remains the fallback for scopes that
+                            // have no matching authored channel.
+                            if (rawPlan && hasAuthoredInteractionHighlight(
+                                rawPlan,
+                                feature
+                            )) {
+                                continue;
+                            }
+                            const existing = byId.get(overlayId);
+                            if (existing) {
+                                if (!existing.targets.some(target =>
+                                    interactionTargetKey(target) ===
+                                        interactionTargetKey(feature))) {
                                     byId.set(overlayId, {
-                                        id: overlayId,
-                                        targets: [feature],
-                                        effect,
-                                        order: styleIndex +
-                                            (group.kind === "hover" ? 3_000 : 2_000)
+                                        ...existing,
+                                        targets: [...existing.targets, feature]
                                     });
                                 }
                             }
+                            else {
+                                byId.set(overlayId, {
+                                    id: overlayId,
+                                    targets: [feature],
+                                    effect,
+                                    order: styleIndex +
+                                        (group.kind === "hover" ? 3_000 : 2_000)
+                                });
+                            }
                         }
                     }
-                    if (!style.featureLayerStyle.supportsHighlightMode(
-                        group.mode
-                    )) {
-                        continue;
-                    }
-                    // Map and search-result hover stays entirely within the
-                    // already rendered local overlays. Inspection rows opt in
-                    // when an authored attribute/validity rule needs filtering.
-                    if (group.kind === "hover" &&
-                        !this.inspection.remoteHoverHighlightAllowed) {
-                        continue;
-                    }
-                    const rawPlan = this.mapInfo.planStyleFilter(
-                        style.featureLayerStyle,
-                        mapgetLayer.mapId,
-                        mapgetLayer.layerId,
-                        group.mode.value,
-                        coreLib.RuleFidelity.ANY.value
-                    ) as StyleFilterPlan;
-                    if (!rawPlan.valid || !rawPlan.channels.length) {
-                        continue;
-                    }
-                    const remotePlan = planRemoteInteractionHighlight(
-                        rawPlan,
-                        features,
-                        localScopedTargets
-                    );
                     if (!remotePlan) {
                         continue;
                     }
@@ -1119,7 +1091,7 @@ export class ViewLayerController {
                         subscription: this.subscribeToStyledLayer(layer),
                         visualizations: new Map(),
                         visualizationKeyByTileId: new Map(),
-                        pendingBlockTiles: new Map(),
+                        pendingTiles: new Map(),
                         disposeLayer: true,
                         replacementSlot: null,
                         replacementTileIds: new Set()
@@ -1139,13 +1111,36 @@ export class ViewLayerController {
             this.reconcileOwnedVisualizations(owned);
         }
 
+        this.localInteractionOverlaysByLayer = new Map(
+            [...localOverlaysByLayer].map(([layerKey, overlays]) => [
+                layerKey,
+                [...overlays.values()]
+            ])
+        );
         for (const visualization of this.localInteractionVisualizations()) {
-            visualization.setInteractionOverlays(
-                [...(localOverlays.get(visualization)?.values() ?? [])]
-            );
+            this.applyLocalInteractionOverlays(visualization);
         }
     }
 
+    /** Apply retained semantic overlays only to targets present in one rendered contribution. */
+    private applyLocalInteractionOverlays(
+        visualization: TileSubsetLayerVisualization
+    ): void {
+        const kind = visualization.owner.identity.presentationKind;
+        if (kind !== "regular" && kind !== "search") {
+            return;
+        }
+        const overlays = this.localInteractionOverlaysByLayer.get(
+            visualization.owner.mapgetLayer.key
+        ) ?? [];
+        visualization.setInteractionOverlays(overlays.flatMap(overlay => {
+            const targets = overlay.targets.filter(target =>
+                visualization.hasLocalInteractionTarget(target));
+            return targets.length ? [{...overlay, targets}] : [];
+        }));
+    }
+
+    /** Collect regular/search contributions eligible for request-free local masks. */
     private localInteractionVisualizations(
         mapgetLayer?: MapgetLayer
     ): TileSubsetLayerVisualization[] {
@@ -1169,6 +1164,7 @@ export class ViewLayerController {
         return [...result];
     }
 
+    /** Decode a semantic target through the authoritative WASM MapTileKey parser. */
     private parseFeatureTileId(feature: TileFeatureId): {
         mapId: string;
         layerId: string;
@@ -1186,352 +1182,332 @@ export class ViewLayerController {
         }
     }
 
-    /** Reconciles values which may have arrived before this view subscribed. */
-    private reconcileOwnedVisualizations(owned: OwnedStyledLayer): void {
-        for (const [key, visualization] of [...owned.visualizations]) {
-            const retained = visualization.states.some(state =>
-                owned.layer.tileStates.get(state.tileId) === state &&
-                this.presentationStillDemanded(owned.layer, state)
-            );
-            const fidelities = visualization.states.map(state =>
-                this.presentationFidelity(owned.layer, state)
-            );
-            const sameFidelity = fidelities.every(
-                fidelity => fidelity === fidelities[0]
-            ) && visualization.hasSameStates(
-                visualization.states,
-                fidelities[0]
-            );
-            const terminalIncomplete =
-                visualization.states.some(state => state.status === "error") &&
-                visualization.states.every(state => state.status !== "pending");
-            if (!retained ||
-                !sameFidelity ||
-                terminalIncomplete ||
-                !this.fitsBlockVertexBudget(visualization.states)) {
-                this.dissolveBlockVisualization(owned, key, true);
+    /** Track only viewport-derived state that changes target eligibility. */
+    private interactionViewportSignature(): string {
+        const layers = new Map<string, {mapId: string; layerId: string}>();
+        const features = [
+            ...this.inspection.selectionIdsTopic.getValue()
+                .flatMap(panel => panel.features),
+            ...this.inspection.hoverIdsTopic.getValue()
+        ];
+        for (const feature of features) {
+            const parsed = this.parseFeatureTileId(feature);
+            if (!parsed) {
                 continue;
             }
-            if (visualization.states.every(
-                state => state.status === "ready" && !!state.subsetBlob
-            )) {
-                this.renderBlockVisualization(visualization);
+            layers.set(`${parsed.mapId}\n${parsed.layerId}`, parsed);
+        }
+        return [...layers.values()]
+            .sort((left, right) =>
+                left.mapId.localeCompare(right.mapId) ||
+                left.layerId.localeCompare(right.layerId))
+            .map(({mapId, layerId}) => {
+                const visible = this.mapInfo.maps.getMapLayerVisibility(
+                    this.viewIndex,
+                    mapId,
+                    layerId
+                );
+                return [
+                    mapId,
+                    layerId,
+                    visible ? 1 : 0,
+                    visible
+                        ? this.viewState.getEffectiveMapLayerLevel(
+                            this.viewIndex,
+                            mapId,
+                            layerId
+                        )
+                        : -1
+                ].join(":");
+            })
+            .join("|");
+    }
+
+    /** Reconcile one independently owned visualization for every demanded tile. */
+    private reconcileOwnedVisualizations(owned: OwnedStyledLayer): void {
+        for (const [key, visualization] of [...owned.visualizations]) {
+            const state = visualization.state;
+            const retained =
+                owned.layer.tileStates.get(state.tileId) === state &&
+                this.presentationStillDemanded(owned.layer, state);
+            const fidelity = this.presentationFidelity(owned.layer, state);
+            const lineSimplificationToleranceMeters =
+                this.lineSimplificationToleranceMeters();
+            const terminalIncomplete = state.status === "error";
+            if (!retained || terminalIncomplete ||
+                !visualization.hasSameState(
+                    state,
+                    fidelity,
+                    lineSimplificationToleranceMeters
+                )) {
+                this.replaceVisualization(owned, key, true);
+                continue;
+            }
+            if (state.status === "ready" && state.subsetBlob &&
+                !visualization.isCurrentPresentationInstalled()) {
+                this.queueVisualizationRender(visualization);
             }
         }
 
         for (const state of owned.layer.tileStates.values()) {
             if (this.shouldVisualize(owned.layer, state) &&
                 !owned.visualizationKeyByTileId.has(state.tileId)) {
-                this.enqueueBlockTile(owned, state);
+                this.enqueueTile(owned, state);
             }
         }
 
-        for (const [tileId, pending] of [...owned.pendingBlockTiles]) {
+        for (const [tileId, pending] of [...owned.pendingTiles]) {
             if (owned.layer.tileStates.get(tileId) !== pending.state ||
                 !this.shouldVisualize(owned.layer, pending.state)) {
-                owned.pendingBlockTiles.delete(tileId);
+                this.discardPendingTile(owned, tileId);
             }
         }
-        this.scheduleBlockAssembly();
+        this.schedulePendingTiles();
     }
 
-    private reconcileReadyBlockTile(
+    /** Re-render a changed ready tile or reserve its first worker credit. */
+    private reconcileReadyTile(
         owned: OwnedStyledLayer,
         state: FilterTileState
     ): void {
         if (!this.shouldVisualize(owned.layer, state)) {
             return;
         }
-        const existingKey =
-            owned.visualizationKeyByTileId.get(state.tileId);
-        if (existingKey) {
-            const visualization = owned.visualizations.get(existingKey);
-            if (visualization &&
-                !this.fitsBlockVertexBudget(visualization.states)) {
-                this.dissolveBlockVisualization(
-                    owned,
-                    existingKey,
-                    true
-                );
-                return;
-            }
-            if (visualization?.states.every(
-                member => member.status === "ready" && !!member.subsetBlob
-            )) {
-                this.renderBlockVisualization(visualization);
-            }
+        const existingKey = owned.visualizationKeyByTileId.get(state.tileId);
+        if (!existingKey) {
+            this.enqueueTile(owned, state);
             return;
         }
-        this.enqueueBlockTile(owned, state);
+        const visualization = owned.visualizations.get(existingKey);
+        if (!visualization) {
+            owned.visualizationKeyByTileId.delete(state.tileId);
+            this.enqueueTile(owned, state);
+            return;
+        }
+        const fidelity = this.presentationFidelity(owned.layer, state);
+        if (!visualization.hasSameState(
+            state,
+            fidelity,
+            this.lineSimplificationToleranceMeters()
+        )) {
+            this.replaceVisualization(owned, existingKey, true);
+            return;
+        }
+        this.queueVisualizationRender(visualization);
     }
 
-    private enqueueBlockTile(
+    /** Add or replace one pending tile without constructing a render batch. */
+    private enqueueTile(
         owned: OwnedStyledLayer,
-        state: FilterTileState
+        state: FilterTileState,
+        preservedContributionIdentity: string | null = null
     ): void {
-        const existing = owned.pendingBlockTiles.get(state.tileId);
-        owned.pendingBlockTiles.set(state.tileId, {
+        const previous = owned.pendingTiles.get(state.tileId);
+        owned.pendingTiles.set(state.tileId, {
             state,
             fidelity: this.presentationFidelity(owned.layer, state),
-            queuedAt: existing?.queuedAt ?? performance.now()
+            lineSimplificationToleranceMeters:
+                this.lineSimplificationToleranceMeters(),
+            preservedContributionIdentity:
+                preservedContributionIdentity ??
+                previous?.preservedContributionIdentity ??
+                null
         });
-        this.scheduleBlockAssembly();
+        this.schedulePendingTiles();
     }
 
-    private scheduleBlockAssembly(): void {
-        this.ngZone.runOutsideAngular(() => {
-            if (this.disposed || this.blockAssemblyTimer !== null) {
-                return;
-            }
-            const hasPending = [...this.styledLayers.values()].some(
-                owned => owned.pendingBlockTiles.size > 0
-            );
-            if (!hasPending) {
-                return;
-            }
-            this.blockAssemblyTimer = setTimeout(() => {
-                this.blockAssemblyTimer = null;
-                let madeProgress = true;
-                while (madeProgress &&
-                    this.renderService.availableWorkerSlots() > 0) {
-                    madeProgress = false;
-                    for (const owned of this.styledLayers.values()) {
-                        if (this.renderService.availableWorkerSlots() <= 0) {
-                            break;
-                        }
-                        madeProgress =
-                            this.assembleOnePendingBlock(owned) || madeProgress;
-                    }
-                }
-                if (this.sceneHandle &&
-                    this.renderService.availableWorkerSlots() > 0 &&
-                    [...this.styledLayers.values()].some(
-                        owned => owned.pendingBlockTiles.size > 0
-                    )) {
-                    this.scheduleBlockAssembly();
-                }
-            }, BLOCK_ASSEMBLY_CADENCE_MS);
-        });
-    }
-
-    private assembleOnePendingBlock(owned: OwnedStyledLayer): boolean {
-        if (!this.sceneHandle ||
-            !owned.pendingBlockTiles.size ||
-            this.renderService.availableWorkerSlots() <= 0) {
-            return false;
-        }
-        let selection: {
-            block: MortonBlockBatch;
-            members: Array<{
-                state: FilterTileState;
-                fidelity: number;
-                queuedAt: number;
-            }>;
-        } | null = null;
-        for (const anchor of owned.pendingBlockTiles.values()) {
-            selection = this.largestAvailableBlock(owned, anchor);
-            if (selection) {
-                break;
-            }
-        }
-        if (!selection) {
-            return false;
-        }
-        const fidelity = selection.members[0].fidelity;
-        for (const member of selection.members) {
-            owned.pendingBlockTiles.delete(member.state.tileId);
-        }
-        const visualizationKey =
-            `${selection.block.key}/f${fidelity}`;
-        const states = selection.members.map(member => member.state);
-        const visualization = new TileSubsetLayerVisualization(
-            owned.layer,
-            states,
-            visualizationKey,
-            selection.block.origin,
-            this.renderService,
-            this.styleValidationReports,
-            fidelity,
-            this.viewIndex
-        );
-        visualization.setDebugBlockVisualization(
-            this.renderService.debugRenderBlocksEnabled(),
-            this.sceneHandle
-        );
-        owned.visualizations.set(visualizationKey, visualization);
-        for (const state of states) {
-            owned.visualizationKeyByTileId.set(
-                state.tileId,
-                visualizationKey
-            );
-        }
-        this.renderBlockVisualization(visualization);
-        return true;
-    }
-
-    private largestAvailableBlock(
-        owned: OwnedStyledLayer,
-        anchor: {
-            state: FilterTileState;
-            fidelity: number;
-            queuedAt: number;
-        }
-    ): {
-        block: MortonBlockBatch;
-        members: Array<{
-            state: FilterTileState;
-            fidelity: number;
-            queuedAt: number;
-        }>;
-    } | null {
-        if (owned.layer.identity.presentationKind === "regular" &&
-            !anchor.state.glbAttachmentName) {
-            for (const suffixBitCount of
-                MORTON_AGGREGATE_BLOCK_BIT_COUNTS) {
-                const block = mortonBlockBatch(
-                    anchor.state.tileId,
-                    suffixBitCount
-                );
-                const states = block.tileIds.map(
-                    tileId => owned.layer.tileStates.get(tileId)
-                );
-                const isCompleteCoverageBlock = states.every(
-                    (state): state is FilterTileState =>
-                        !!state &&
-                        state.status !== "error" &&
-                        this.presentationStillDemanded(owned.layer, state) &&
-                        this.presentationFidelity(owned.layer, state) ===
-                            anchor.fidelity
-                );
-                if (!isCompleteCoverageBlock) {
-                    continue;
-                }
-                if (!fitsMortonPresentationVertexBudget(
-                    states.map(state => state.status === "ready"
-                        ? state.geometryVertexCount
-                        : 0),
-                    this.renderService.blockVertexLimit()
-                )) {
-                    continue;
-                }
-                if (states.some(
-                    state => state.status !== "ready" || !state.subsetBlob
-                )) {
-                    // Give adjacent completions a short batching window, then
-                    // prefer visible progress over an indefinitely perfect
-                    // coverage block.
-                    if (performance.now() - anchor.queuedAt <
-                        BLOCK_ASSEMBLY_MAX_WAIT_MS) {
-                        return null;
-                    }
-                    break;
-                }
-                if (states.some(state => state.glbAttachmentName)) {
-                    continue;
-                }
-                const members = states.map(
-                    state => owned.pendingBlockTiles.get(state.tileId)
-                );
-                if (members.every(
-                    (member): member is typeof anchor =>
-                        !!member &&
-                        member.fidelity === anchor.fidelity &&
-                        member.state.stringPoolId ===
-                            anchor.state.stringPoolId
-                )) {
-                    return {block, members};
-                }
-            }
-        }
-        if (!anchor.state.glbAttachmentName) {
-            for (const suffixBitCount of
-                MORTON_AGGREGATE_BLOCK_BIT_COUNTS) {
-                const block = mortonBlockBatch(
-                    anchor.state.tileId,
-                    suffixBitCount
-                );
-                const members = block.tileIds.map(
-                    tileId => owned.pendingBlockTiles.get(tileId)
-                );
-                if (members.every(
-                    (member): member is typeof anchor =>
-                        !!member &&
-                        member.fidelity === anchor.fidelity &&
-                        member.state.stringPoolId ===
-                            anchor.state.stringPoolId &&
-                        !member.state.glbAttachmentName
-                ) && fitsMortonPresentationVertexBudget(
-                    members.map(member =>
-                        member?.state.geometryVertexCount ?? 0
-                    ),
-                    this.renderService.blockVertexLimit()
-                )) {
-                    return {block, members};
-                }
-            }
-        }
-        return {
-            block: mortonBlockBatch(anchor.state.tileId, 0),
-            members: [anchor]
-        };
-    }
-
-    private fitsBlockVertexBudget(
-        states: readonly FilterTileState[]
-    ): boolean {
-        return fitsMortonPresentationVertexBudget(
-            states.map(state => state.geometryVertexCount),
-            this.renderService.blockVertexLimit()
-        );
-    }
-
-    private removeBlockTile(
+    /** Drop one pending successor and retire any installed contribution it inherited. */
+    private discardPendingTile(
         owned: OwnedStyledLayer,
         tileId: number
     ): void {
-        owned.pendingBlockTiles.delete(tileId);
+        const pending = owned.pendingTiles.get(tileId);
+        if (!pending) {
+            return;
+        }
+        owned.pendingTiles.delete(tileId);
+        if (pending.preservedContributionIdentity) {
+            TileSubsetLayerVisualization.retireContribution(
+                this.sceneHandle,
+                pending.preservedContributionIdentity
+            );
+        }
+    }
+
+    /** Coalesce dispatch notifications while preserving worker-credit backpressure. */
+    private schedulePendingTiles(): void {
+        this.ngZone.runOutsideAngular(() => {
+            if (this.disposed || this.pendingDispatchQueued) {
+                return;
+            }
+            this.pendingDispatchQueued = true;
+            queueMicrotask(() => {
+                this.pendingDispatchQueued = false;
+                if (!this.disposed) {
+                    this.drainPendingTiles();
+                }
+            });
+        });
+    }
+
+    /** Dispatch changed and newly visible singleton tiles under one worker budget. */
+    private drainPendingTiles(): void {
+        if (!this.sceneHandle) {
+            return;
+        }
+        while (this.renderService.availableWorkerSlots() > 0) {
+            const rerender = this.pendingVisualizationRenders.values()
+                .next().value as TileSubsetLayerVisualization | undefined;
+            if (rerender) {
+                this.pendingVisualizationRenders.delete(rerender);
+                this.startVisualizationRender(rerender);
+                continue;
+            }
+            let dispatched = false;
+            for (const owned of this.styledLayers.values()) {
+                if (this.renderService.availableWorkerSlots() <= 0) {
+                    return;
+                }
+                if (this.dispatchOnePendingTile(owned)) {
+                    dispatched = true;
+                    break;
+                }
+            }
+            if (!dispatched) {
+                return;
+            }
+        }
+    }
+
+    /** Turn one current pending tile into an independently replaceable scene owner. */
+    private dispatchOnePendingTile(owned: OwnedStyledLayer): boolean {
+        if (!this.sceneHandle) {
+            return false;
+        }
+        for (const [tileId, pending] of owned.pendingTiles) {
+            if (owned.layer.tileStates.get(tileId) !== pending.state ||
+                !this.shouldVisualize(owned.layer, pending.state) ||
+                owned.visualizationKeyByTileId.has(tileId)) {
+                this.discardPendingTile(owned, tileId);
+                continue;
+            }
+            // The new visualization takes responsibility for the stable
+            // contribution identity retained by its predecessor.
+            owned.pendingTiles.delete(tileId);
+            const visualizationKey = [
+                `tile-${tileId}`,
+                `f${pending.fidelity}`,
+                `s${pending.lineSimplificationToleranceMeters}`
+            ].join("/");
+            const visualization = new TileSubsetLayerVisualization(
+                owned.layer,
+                pending.state,
+                visualizationKey,
+                tileCoordinateOrigin(tileId),
+                this.renderService,
+                this.styleValidationReports,
+                pending.fidelity,
+                pending.lineSimplificationToleranceMeters,
+                this.viewIndex,
+                item => this.queueVisualizationRender(item)
+            );
+            owned.visualizations.set(visualizationKey, visualization);
+            owned.visualizationKeyByTileId.set(tileId, visualizationKey);
+            this.startVisualizationRender(visualization);
+            return true;
+        }
+        return false;
+    }
+
+    /** Remove one tile and its exact GPU contribution without touching siblings. */
+    private removeTileVisualization(
+        owned: OwnedStyledLayer,
+        tileId: number
+    ): void {
+        this.discardPendingTile(owned, tileId);
         const key = owned.visualizationKeyByTileId.get(tileId);
         if (!key) {
             return;
         }
+        owned.visualizationKeyByTileId.delete(tileId);
         const visualization = owned.visualizations.get(key);
-        if (visualization?.states.some(state =>
-            owned.layer.tileStates.get(state.tileId) === state &&
-            this.presentationStillDemanded(owned.layer, state)
-        )) {
+        if (!visualization) {
             return;
         }
-        this.dissolveBlockVisualization(owned, key, true);
+        owned.visualizations.delete(key);
+        this.pendingVisualizationRenders.delete(visualization);
+        visualization.destroy(this.sceneHandle);
     }
 
-    private dissolveBlockVisualization(
+    /** Remove one coverage delta as a single scene and diagnostics transaction. */
+    private removeTileVisualizations(
+        owned: OwnedStyledLayer,
+        states: readonly FilterTileState[]
+    ): void {
+        const visualizations: TileSubsetLayerVisualization[] = [];
+        for (const state of states) {
+            this.discardPendingTile(owned, state.tileId);
+            const key = owned.visualizationKeyByTileId.get(state.tileId);
+            if (!key) {
+                continue;
+            }
+            owned.visualizationKeyByTileId.delete(state.tileId);
+            const visualization = owned.visualizations.get(key);
+            if (!visualization) {
+                continue;
+            }
+            owned.visualizations.delete(key);
+            this.pendingVisualizationRenders.delete(visualization);
+            visualizations.push(visualization);
+        }
+        TileSubsetLayerVisualization.destroyMany(
+            visualizations,
+            this.sceneHandle
+        );
+    }
+
+    /** Replace one tile owner while retaining its installed contribution until admission. */
+    private replaceVisualization(
         owned: OwnedStyledLayer,
         key: string,
-        requeueRemaining: boolean
+        requeue: boolean
     ): void {
         const visualization = owned.visualizations.get(key);
         if (!visualization) {
             return;
         }
         owned.visualizations.delete(key);
-        for (const state of visualization.states) {
-            if (owned.visualizationKeyByTileId.get(state.tileId) === key) {
-                owned.visualizationKeyByTileId.delete(state.tileId);
-            }
+        this.pendingVisualizationRenders.delete(visualization);
+        const state = visualization.state;
+        if (state && owned.visualizationKeyByTileId.get(state.tileId) === key) {
+            owned.visualizationKeyByTileId.delete(state.tileId);
         }
-        visualization.destroy(this.sceneHandle);
-        if (!requeueRemaining) {
-            return;
-        }
-        for (const state of visualization.states) {
-            if (owned.layer.tileStates.get(state.tileId) === state &&
-                this.shouldVisualize(owned.layer, state)) {
-                this.enqueueBlockTile(owned, state);
-            }
+        const preserve = requeue && !!state &&
+            owned.layer.tileStates.get(state.tileId) === state &&
+            this.shouldVisualize(owned.layer, state);
+        const preservedContributionIdentity = visualization.destroy(
+            this.sceneHandle,
+            preserve
+        );
+        if (preserve && state) {
+            this.enqueueTile(
+                owned,
+                state,
+                preservedContributionIdentity
+            );
         }
     }
 
-    private renderBlockVisualization(
+    /** Coalesce one visualization's desired revision behind global worker credit. */
+    private queueVisualizationRender(
+        visualization: TileSubsetLayerVisualization
+    ): void {
+        this.pendingVisualizationRenders.add(visualization);
+        this.schedulePendingTiles();
+    }
+
+    /** Start one credited immutable worker render and publish state on admission. */
+    private startVisualizationRender(
         visualization: TileSubsetLayerVisualization
     ): void {
         if (!this.sceneHandle) {
@@ -1539,27 +1515,24 @@ export class ViewLayerController {
         }
         visualization.render(this.sceneHandle)
             .then(rendered => {
-                if (rendered) {
-                    const owned = [...this.styledLayers.values()].find(
-                        candidate =>
-                            candidate.layer === visualization.owner
-                    );
-                    if (owned) {
-                        this.releaseRegularFallbackWhenReady(owned);
-                    }
-                    if (this.inspection.hoverIdsTopic.getValue().length ||
-                        this.inspection.selectionIdsTopic.getValue().some(
-                            panel => panel.features.length)) {
-                        this.scheduleReconcile(false);
-                    }
-                    this.diagnostics.notifyChanged();
+                if (!rendered) {
+                    return;
                 }
+                const owned = [...this.styledLayers.values()].find(
+                    candidate => candidate.layer === visualization.owner
+                );
+                if (owned) {
+                    this.releaseRegularFallbackWhenReady(owned);
+                }
+                this.applyLocalInteractionOverlays(visualization);
+                this.diagnostics.notifyChanged();
             })
             .catch(error =>
-                console.error("TileSubsetLayer block visualization failed.", error)
+                console.error("TileSubsetLayer visualization failed.", error)
             );
     }
 
+    /** Resolve the fixed worker fidelity used by one presentation owner. */
     private presentationFidelity(
         layer: StyledMapgetLayer,
         state: FilterTileState
@@ -1575,6 +1548,13 @@ export class ViewLayerController {
         return this.fidelityFor(state.tileId);
     }
 
+    /** Return the view's quantized line LOD without coupling it to tile state. */
+    private lineSimplificationToleranceMeters(): number {
+        return this.viewState.viewStateFor(this.viewIndex)
+            ?.lineSimplificationToleranceMeters ?? 0;
+    }
+
+    /** Test whether diagnostics may retain a tile after asynchronous state changes. */
     private presentationStillDemanded(
         layer: StyledMapgetLayer,
         state: FilterTileState
@@ -1593,6 +1573,7 @@ export class ViewLayerController {
         );
     }
 
+    /** Gate scene ownership on ready data and search-density policy. */
     private shouldVisualize(
         layer: StyledMapgetLayer,
         state: FilterTileState
@@ -1610,42 +1591,18 @@ export class ViewLayerController {
         );
     }
 
-    /**
-     * Point-grid output owners can sit just outside the viewport. The initial
-     * point-grid contract has a one-tile halo, so request one deterministic
-     * neighbor ring only when the planned stylesheet contains grouping.
-     */
-    private expandGroupCoverage(
-        visibleTileIds: readonly number[],
-        style: ErdblickStyle,
-        mapgetLayer: MapgetLayer
-    ): number[] {
-        const plan = this.mapInfo.planStyleFilter(
-            style.featureLayerStyle,
-            mapgetLayer.mapId,
-            mapgetLayer.layerId,
-            coreLib.HighlightMode.NO_HIGHLIGHT.value,
-            coreLib.RuleFidelity.ANY.value
-        ) as {channels?: Array<{group?: unknown}>};
-        if (!plan.channels?.some(channel => channel.group)) {
-            return [...visibleTileIds];
+    /** Avoid rescanning unchanged large coverage arrays on non-viewport reconciliations. */
+    private setRegularCoverage(
+        layer: StyledMapgetLayer,
+        tileIds: readonly number[],
+        priorityTileIds: readonly number[]
+    ): void {
+        const previous = this.regularCoverageByLayer.get(layer);
+        if (previous?.tileIds === tileIds &&
+            previous.priorityTileIds === priorityTileIds) {
+            return;
         }
-        const result = [...visibleTileIds];
-        const seen = new Set(result);
-        for (const tileId of visibleTileIds) {
-            for (let y = -1; y <= 1; ++y) {
-                for (let x = -1; x <= 1; ++x) {
-                    if (x === 0 && y === 0) {
-                        continue;
-                    }
-                    const neighbor = Number(coreLib.getTileNeighbor(tileId, x, y));
-                    if (!seen.has(neighbor)) {
-                        seen.add(neighbor);
-                        result.push(neighbor);
-                    }
-                }
-            }
-        }
-        return result;
+        layer.setCoverage(tileIds, priorityTileIds);
+        this.regularCoverageByLayer.set(layer, {tileIds, priorityTileIds});
     }
 }

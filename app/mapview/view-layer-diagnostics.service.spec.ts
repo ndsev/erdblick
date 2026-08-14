@@ -114,4 +114,29 @@ describe("ViewLayerDiagnosticsService", () => {
 
         expect(observed).toEqual(["broken subset"]);
     });
+
+    it("publishes only aggregate camera interaction transitions", () => {
+        const service = new ViewLayerDiagnosticsService();
+        const observed: boolean[] = [];
+        service.cameraInteracting$.subscribe(value => observed.push(value));
+
+        service.setViewInteracting(0, true);
+        service.setViewInteracting(1, true);
+        service.setViewInteracting(0, false);
+        service.setViewInteracting(1, false);
+
+        expect(observed).toEqual([false, true, false]);
+        expect(service.cameraInteracting).toBe(false);
+    });
+
+    it("clears camera interaction when its registered view is removed", () => {
+        const service = new ViewLayerDiagnosticsService();
+        const unregister = service.register(3, () => []);
+        service.setViewInteracting(3, true);
+
+        unregister();
+
+        expect(service.cameraInteracting).toBe(false);
+        expect(service.cameraInteracting$.getValue()).toBe(false);
+    });
 });

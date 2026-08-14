@@ -1,5 +1,5 @@
 import {Injectable} from "@angular/core";
-import {Subject} from "rxjs";
+import {BehaviorSubject, Subject} from "rxjs";
 import type {StyledMapgetLayer} from "../mapdata/styled-mapget-layer.model";
 import type {PresentationKind} from "../mapdata/styled-mapget-layer.model";
 import type {FilterTileState} from "../mapdata/filter-tile-state.model";
@@ -57,12 +57,14 @@ interface DiagnosticsProvider {
  */
 @Injectable({providedIn: "root"})
 export class ViewLayerDiagnosticsService {
-    readonly changed = new Subject<void>();
     readonly tileError = new Subject<SubsetDiagnosticsError>();
+    readonly cameraInteracting$ = new BehaviorSubject(false);
     private readonly providers = new Map<number, DiagnosticsProvider>();
+    private readonly interactingViews = new Set<number>();
     private cachedTiles: SubsetDiagnosticsTile[] | null = null;
     private cachedSummary: ViewLayerDiagnosticsSummary | null = null;
 
+    /** Register one live view's presentation providers and return its teardown callback. */
     register(
         viewIndex: number,
         provider: StyledLayerProvider,
@@ -71,19 +73,40 @@ export class ViewLayerDiagnosticsService {
         const registration = {layers: provider, presentationDemanded};
         this.providers.set(viewIndex, registration);
         this.invalidate();
-        this.changed.next();
         return () => {
             if (this.providers.get(viewIndex) === registration) {
                 this.providers.delete(viewIndex);
+                if (this.interactingViews.delete(viewIndex) &&
+                    this.interactingViews.size === 0) {
+                    this.cameraInteracting$.next(false);
+                }
                 this.invalidate();
-                this.changed.next();
             }
         };
     }
 
+    /** Publish only aggregate camera-interaction transitions across live views. */
+    setViewInteracting(viewIndex: number, active: boolean): void {
+        const wasInteracting = this.interactingViews.size > 0;
+        if (active) {
+            this.interactingViews.add(viewIndex);
+        }
+        else {
+            this.interactingViews.delete(viewIndex);
+        }
+        const isInteracting = this.interactingViews.size > 0;
+        if (isInteracting !== wasInteracting) {
+            this.cameraInteracting$.next(isInteracting);
+        }
+    }
+
+    get cameraInteracting(): boolean {
+        return this.interactingViews.size > 0;
+    }
+
+    /** Invalidate lazily polled aggregate state without publishing into Angular. */
     notifyChanged(): void {
         this.invalidate();
-        this.changed.next();
     }
 
     /** Invalidates aggregate state and forwards a layer's terminal failures. */
@@ -106,7 +129,6 @@ export class ViewLayerDiagnosticsService {
                 message: state.error
             });
         }
-        this.changed.next();
     }
 
     /**
@@ -219,6 +241,9 @@ export class ViewLayerDiagnosticsService {
                     }
                     const wasmStatKeys: Record<string, string> = {
                         deserializeMs: "Deserialize#ms",
+                        runMs: "Run#ms",
+                        packetMs: "Packet#ms",
+                        bridgeMs: "Bridge#ms",
                         renderMs: "Render#ms",
                         totalMs: "Total#ms",
                         clientWallMs: "Client-Wall#ms",

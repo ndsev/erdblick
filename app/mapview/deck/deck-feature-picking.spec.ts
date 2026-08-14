@@ -200,6 +200,25 @@ describe("Deck rendered-feature picking", () => {
         });
     });
 
+    it("uses the configured drill-pick radius for hover", () => {
+        const view = createView() as any;
+        const hovered = {mapTileKey: "map/tile", featureId: "hovered"};
+        view.deckCanvasPointerInside = true;
+        view.stateService = {drillPickRadius: 6};
+        view.inspectionSelection = {setHoveredFeatures: vi.fn()};
+        view.drillPickFeatures = vi.fn(() => ({featureIds: [hovered]}));
+
+        view.processHoverPick({x: 12, y: 24});
+
+        expect(view.drillPickFeatures).toHaveBeenCalledWith(
+            {x: 12, y: 24},
+            6,
+            10
+        );
+        expect(view.inspectionSelection.setHoveredFeatures)
+            .toHaveBeenCalledWith([hovered]);
+    });
+
     it("snaps a thick picked path ribbon to its base XYZ centerline", () => {
         const view = createView();
         const origin: [number, number, number] = [11, 48, 100];

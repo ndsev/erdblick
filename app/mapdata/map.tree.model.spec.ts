@@ -159,6 +159,18 @@ describe('datasource catalog tree helpers', () => {
 });
 
 describe("map tree presentation filtering", () => {
+    it("treats a removed split-view index as not visible", () => {
+        const fixture = filterTreeFixture();
+        const tree = Object.create(MapLayerTree.prototype) as any;
+        tree.mapsForMapIds = new Map([[fixture.mapNode.id, fixture.mapNode]]);
+
+        expect(tree.getMapLayerVisibility(
+            2,
+            fixture.mapNode.id,
+            fixture.roads.id
+        )).toBe(false);
+    });
+
     it("returns the canonical tree for an empty query", () => {
         const fixture = filterTreeFixture();
         const result = filterMapTreeNodes(fixture.nodes, "   ");

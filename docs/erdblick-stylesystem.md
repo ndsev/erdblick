@@ -295,6 +295,16 @@ the sparse `DRAWING_ORDER`, then adds a bounded fractional tie-breaker for
 family and physical source-list order. Styles can therefore consume the value
 directly; the original flexible Attribute remains available for inspection.
 
+NDS.Live Display2D conversion likewise exposes
+`properties.effectiveRenderOrder`. It starts with the type-specific default
+from `Display2DLayerMetadata`, then applies `DRAWING_ORDER` and `Z_LEVEL`.
+When one DisplayLine has different effective orders along its length, the
+converter emits disjoint `DisplayRenderOrder/EFFECTIVE_RENDER_ORDER`
+attributes with validity geometry instead of publishing one misleading
+feature-wide value. Such ranges are styled with `scope: attribute` and
+`attribute-validity-geom: required`; lines with a uniform order use the direct
+feature property.
+
 Omitting both fields leaves Deck's stock depth behavior untouched. Use the Z
 component of `offset` only for a real geometric displacement; do not use it to
 resolve z-fighting. The initial implementation covers points, paths, arrows,

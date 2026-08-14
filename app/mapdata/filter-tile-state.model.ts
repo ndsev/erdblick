@@ -23,8 +23,8 @@ export interface TileSubsetIssue {
  *
  * It owns the exact immutable subset bytes used for rendering. Replacements
  * are atomic; a previous ready value may remain visible while a generation is
- * pending. A presentation block may retain a removed value until its final
- * constituent tile leaves the requested coverage.
+ * pending. An in-flight visualization may retain a removed value until its
+ * replacement is admitted or the render task is cancelled.
  */
 export class FilterTileState {
     status: FilterTileStatus = "pending";
@@ -48,6 +48,7 @@ export class FilterTileState {
     receivedAt = 0;
     renderStats: Record<string, number> = {};
 
+    /** Create one pending output-tile identity for a filter generation. */
     constructor(
         readonly mapId: string,
         readonly layerId: string,
@@ -58,12 +59,14 @@ export class FilterTileState {
         this.pendingGeneration = generation;
     }
 
+    /** Retain the previous ready value while marking a newer generation pending. */
     markPending(generation: number): void {
         this.pendingGeneration = generation;
         this.status = "pending";
         this.error = null;
     }
 
+    /** Atomically replace immutable subset bytes after strict identity validation. */
     install(delivery: TileSubsetDelivery): void {
         if (delivery.mapId !== this.mapId ||
             delivery.layerId !== this.layerId ||
@@ -109,6 +112,7 @@ export class FilterTileState {
         this.receivedAt = delivery.receivedAt;
     }
 
+    /** Record only failures belonging to the currently pending generation. */
     fail(generation: number, message: string): void {
         if (generation !== this.pendingGeneration) {
             return;
@@ -117,6 +121,7 @@ export class FilterTileState {
         this.error = message;
     }
 
+    /** Drop all potentially large immutable payloads while preserving identity fields. */
     dispose(): void {
         this.subsetBlob = null;
         this.stringPoolId = "";

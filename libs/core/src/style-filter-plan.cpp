@@ -287,12 +287,15 @@ void appendExpression(
 void collectFeatureTree(
     FeatureStyleRule const& rule,
     ExpressionCollection& result,
-    bool group)
+    bool group,
+    bool serverGatedRoot = false)
 {
     for (auto const& [property, expression] :
          rule.expressionUses())
     {
-        if (property == "attribute-filter") {
+        if (property == "attribute-filter" ||
+            (serverGatedRoot && property == "filter"))
+        {
             continue;
         }
         appendExpression(
@@ -434,6 +437,56 @@ void addIssue(
         StyleFilterPlanIssue{
             rule.index(),
             std::move(message)});
+}
+
+bool canShareFeatureChannel(
+    mapget::FeatureLayerFilterChannel const& left,
+    mapget::FeatureLayerFilterChannel const& right)
+{
+    return left.scope_ == mapget::FeatureLayerFilterScope::Feature &&
+        right.scope_ == mapget::FeatureLayerFilterScope::Feature &&
+        !left.group_ && !right.group_ &&
+        !left.relation_ && !right.relation_ &&
+        left.rewrite_ == right.rewrite_ &&
+        left.featureTypes_ == right.featureTypes_ &&
+        left.featureFilter_ == right.featureFilter_ &&
+        left.entryFilter_ == right.entryFilter_ &&
+        left.geometryTypes_ == right.geometryTypes_ &&
+        left.geometryName_ == right.geometryName_;
+}
+
+void appendUniqueFields(
+    std::vector<std::string>& target,
+    std::vector<std::string> const& source)
+{
+    for (auto const& field : source) {
+        if (std::ranges::find(target, field) == target.end()) {
+            target.push_back(field);
+        }
+    }
+}
+
+void appendChannel(
+    StyleFilterPlan& plan,
+    mapget::FeatureLayerFilterChannel channel,
+    uint32_t ruleIndex)
+{
+    auto const shared = std::ranges::find_if(
+        plan.channels,
+        [&](mapget::FeatureLayerFilterChannel const& candidate) {
+            return canShareFeatureChannel(candidate, channel);
+        });
+    if (shared == plan.channels.end()) {
+        plan.channels.push_back(std::move(channel));
+        return;
+    }
+    if (shared->channelId_.starts_with("style-rule:")) {
+        shared->channelId_.replace(0, std::string_view("style-rule:").size(),
+                                   "style-rules:");
+    }
+    shared->channelId_ += "," + std::to_string(ruleIndex);
+    appendUniqueFields(shared->featureFields_, channel.featureFields_);
+    appendUniqueFields(shared->entryFields_, channel.entryFields_);
 }
 
 std::string scopeName(mapget::FeatureLayerFilterScope scope)
@@ -757,7 +810,8 @@ StyleFilterPlan planStyleFilter(
             collectFeatureTree(
                 rule,
                 expressions,
-                false);
+                false,
+                true);
             channel.scope_ =
                 mapget::FeatureLayerFilterScope::Feature;
             channel.geometryTypes_ =
@@ -780,7 +834,7 @@ StyleFilterPlan planStyleFilter(
             continue;
         }
 
-        plan.channels.push_back(std::move(channel));
+        appendChannel(plan, std::move(channel), rule.index());
     }
 
     return plan;

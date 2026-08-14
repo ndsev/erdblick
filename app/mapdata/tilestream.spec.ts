@@ -1,8 +1,7 @@
 import {describe, expect, it, vi} from 'vitest';
+import {coreLib} from '../integrations/wasm';
 import {
     MAP_TILE_STREAM_HEADER_SIZE,
-    MAP_TILE_STREAM_PROTOCOL_MAJOR,
-    MAP_TILE_STREAM_PROTOCOL_MINOR,
     MAP_TILE_STREAM_TYPE_FIELDS,
     MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT,
     MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE,
@@ -11,10 +10,16 @@ import {
     MapTileStreamClient
 } from './tilestream';
 
+function currentProtocolVersion() {
+    return {
+        major: coreLib.tileLayerStreamProtocolMajor(),
+        minor: coreLib.tileLayerStreamProtocolMinor(),
+        patch: 0
+    };
+}
+
 function jsonFrame(type: number, payload: object, version = {
-    major: MAP_TILE_STREAM_PROTOCOL_MAJOR,
-    minor: MAP_TILE_STREAM_PROTOCOL_MINOR,
-    patch: 0
+    ...currentProtocolVersion()
 }): Uint8Array {
     const payloadBytes = new TextEncoder().encode(JSON.stringify(payload));
     const frame = new Uint8Array(MAP_TILE_STREAM_HEADER_SIZE + payloadBytes.length);
@@ -554,8 +559,8 @@ describe('MapTileStreamClient', () => {
             expect(mismatch).toEqual({
                 actual: {major: 1, minor: 9, patch: 0},
                 expected: {
-                    major: MAP_TILE_STREAM_PROTOCOL_MAJOR,
-                    minor: MAP_TILE_STREAM_PROTOCOL_MINOR
+                    major: currentProtocolVersion().major,
+                    minor: currentProtocolVersion().minor
                 }
             });
             expect(statusReceived).toBe(false);

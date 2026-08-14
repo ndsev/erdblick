@@ -359,8 +359,14 @@ void main(void) {
       * interactionOutline.tintColor.a
       * interactionOutline.opacity
     : 0.0;
-  float haloAlpha = interactionOutline.hasHalo > 0.5
+  // Exterior style glows carry a blurred coverage field. Preserve that
+  // Gaussian profile instead of crushing it into a nearly opaque band.
+  // Semantic interaction halos retain their stronger boundary response.
+  float haloSignal = interactionOutline.hasInteriorHalo > 0.5
     ? smoothstep(0.001, 0.24, softHaloBoundary)
+    : clamp(softHaloBoundary * 2.0, 0.0, 1.0);
+  float haloAlpha = interactionOutline.hasHalo > 0.5
+    ? haloSignal
       * (1.0 - smoothstep(0.0, 0.85, borderSignal))
       * interactionOutline.haloColor.a
       * interactionOutline.haloOpacity
@@ -473,6 +479,7 @@ export function deckInteractionStripeOrigin(
 class DeckInteractionOutlineLayer extends Layer<Required<OutlineLayerProps>> {
     static override layerName = "DeckInteractionOutlineLayer";
 
+    /** Create one raw fullscreen model without Deck's ordinary object attributes. */
     override initializeState(): void {
         // This fullscreen layer owns its model inputs directly. Deck's default
         // instanced picking attribute has no matching ClipSpace attribute.
@@ -502,15 +509,18 @@ class DeckInteractionOutlineLayer extends Layer<Required<OutlineLayerProps>> {
         // The outline shader inputs are installed immediately before draw().
     }
 
+    /** Release the fullscreen model when its semantic material group disappears. */
     override finalizeState(): void {
         (this.state as unknown as OutlineLayerState).model?.destroy();
     }
 
+    /** Expose the raw model so Deck can schedule the fullscreen pass. */
     override getModels(): ClipSpace[] {
         const model = (this.state as unknown as OutlineLayerState).model;
         return model ? [model] : [];
     }
 
+    /** Composite identity/blur textures using the group's current style uniforms. */
     override draw({renderPass}: {renderPass: unknown}): void {
         const model = (this.state as unknown as OutlineLayerState).model;
         const input = this.props.service.screenInput(this.props.groupId);
@@ -544,8 +554,10 @@ export class DeckInteractionOutlineService implements Effect {
     private blurModel: ClipSpace | null = null;
     private readonly groups = new Map<string, OutlineGroup>();
 
+    /** Bind all generated mask and screen layers to one view registry. */
     constructor(private readonly layerRegistry: DeckLayerRegistry) {}
 
+    /** Allocate shared render passes and blur model after Deck provides a device. */
     setup(context: EffectContext): void {
         this.context = context;
         this.maskPass = new LayersPass(context.device, {
@@ -589,6 +601,20 @@ export class DeckInteractionOutlineService implements Effect {
         ];
     }
 
+    /** Refresh one group's visual material, order, and world stripe anchor. */
+    configureGroup(
+        groupId: string,
+        effect: DeckInteractionEffect,
+        order: number,
+        stripeAnchor: [number, number, number]
+    ): void {
+        const group = this.ensureGroup(groupId, effect, order);
+        group.stripeAnchor = [...stripeAnchor];
+        if (group.maskLayerKeys.size > 0) {
+            this.upsertScreenLayer(groupId, order);
+        }
+    }
+
     /** Inserts or replaces one hidden vector-mask layer in a material group. */
     upsertMask(
         groupId: string,
@@ -599,18 +625,11 @@ export class DeckInteractionOutlineService implements Effect {
         buildLayer: (layerId: string) => Layer
     ): void {
         const group = this.ensureGroup(groupId, effect, order);
-        group.stripeAnchor ??= [...stripeAnchor];
+        group.stripeAnchor = [...stripeAnchor];
         const layerKey = maskLayerKey(groupId, sourceId);
         group.maskLayerKeys.set(sourceId, layerKey);
         this.layerRegistry.upsert(layerKey, buildLayer(layerKey), -100_000);
-
-        const screenKey = screenLayerKey(groupId);
-        this.layerRegistry.upsert(screenKey, new DeckInteractionOutlineLayer({
-            id: screenKey,
-            groupId,
-            service: this,
-            pickable: false
-        }), order);
+        this.upsertScreenLayer(groupId, order);
     }
 
     /** Removes one visualization's mask and releases the whole group once it becomes empty. */
@@ -673,9 +692,8 @@ export class DeckInteractionOutlineService implements Effect {
                 ...common,
                 target: group.identityFramebuffer,
                 pass: "interaction-outline-identity",
-                isPicking: true,
+                isPicking: false,
                 shaderModuleProps: {
-                    picking: {isActive: true},
                     lighting: {enabled: false}
                 }
             });
@@ -707,6 +725,7 @@ export class DeckInteractionOutlineService implements Effect {
         };
     }
 
+    /** Destroy every framebuffer, pass, model, and generated registry entry. */
     cleanup(): void {
         for (const [groupId, group] of this.groups) {
             this.destroyGroup(groupId, group);
@@ -719,6 +738,7 @@ export class DeckInteractionOutlineService implements Effect {
         this.context = null;
     }
 
+    /** Resolve or create one bounded material group and update its authored effect. */
     private ensureGroup(
         groupId: string,
         effect: DeckInteractionEffect,
@@ -747,6 +767,18 @@ export class DeckInteractionOutlineService implements Effect {
         return group;
     }
 
+    /** Publish the fullscreen compositor at the group's current authored order. */
+    private upsertScreenLayer(groupId: string, order: number): void {
+        const screenKey = screenLayerKey(groupId);
+        this.layerRegistry.upsert(screenKey, new DeckInteractionOutlineLayer({
+            id: screenKey,
+            groupId,
+            service: this,
+            pickable: false
+        }), order);
+    }
+
+    /** Lazily allocate and resize full-resolution identity and blur targets. */
     private ensureFramebuffers(
         groupId: string,
         group: OutlineGroup,
@@ -846,6 +878,7 @@ export class DeckInteractionOutlineService implements Effect {
         this.context.device.submit();
     }
 
+    /** Execute one fullscreen extraction or separable Gaussian pass. */
     private renderBlurPass(
         source: Texture,
         target: Framebuffer,
@@ -874,6 +907,7 @@ export class DeckInteractionOutlineService implements Effect {
         pass.end();
     }
 
+    /** Release all render targets belonging to a no-longer-demanded group. */
     private destroyGroup(groupId: string, group: OutlineGroup): void {
         destroyFramebuffer(group.identityFramebuffer);
         destroyFramebuffer(group.blurTemporaryFramebuffer);
@@ -885,6 +919,7 @@ export class DeckInteractionOutlineService implements Effect {
     }
 }
 
+/** Create one outline target with optional linear filtering and no depth buffer. */
 function createOutlineFramebuffer(
     context: EffectContext,
     id: string,
@@ -906,10 +941,12 @@ function createOutlineFramebuffer(
         id: `interaction-outline-${id}`,
         width: 1,
         height: 1,
-        colorAttachments: [texture]
+        colorAttachments: [texture],
+        depthStencilAttachment: linear ? null : "depth24plus"
     });
 }
 
+/** Bound edge anti-aliasing so pathological styles cannot explode blur cost. */
 function interactionEdgeBlurRadius(effect: DeckInteractionEffect): number {
     return Math.max(1, Math.min(
         MAX_BLUR_RADIUS_PX,
@@ -917,6 +954,7 @@ function interactionEdgeBlurRadius(effect: DeckInteractionEffect): number {
     ));
 }
 
+/** Bound authored halo spread to the compositor's fixed kernel budget. */
 function interactionHaloBlurRadius(effect: DeckInteractionEffect): number {
     return Math.max(1, Math.min(
         MAX_BLUR_RADIUS_PX,
@@ -924,6 +962,7 @@ function interactionHaloBlurRadius(effect: DeckInteractionEffect): number {
     ));
 }
 
+/** Destroy both an owned color texture and its framebuffer wrapper. */
 function destroyFramebuffer(framebuffer: Framebuffer | null): void {
     if (!framebuffer) {
         return;
@@ -932,14 +971,17 @@ function destroyFramebuffer(framebuffer: Framebuffer | null): void {
     framebuffer.destroy();
 }
 
+/** Build a collision-safe registry key for one mask source. */
 function maskLayerKey(groupId: string, sourceId: string): string {
     return `${MASK_LAYER_PREFIX}${encodeURIComponent(groupId)}/${encodeURIComponent(sourceId)}`;
 }
 
+/** Build the stable registry key for one group's fullscreen compositor. */
 function screenLayerKey(groupId: string): string {
     return `${SCREEN_LAYER_PREFIX}${encodeURIComponent(groupId)}`;
 }
 
+/** Convert optional byte RGBA into shader-ready normalized channels. */
 function normalizedColor(color: DeckRgba | undefined): NormalizedColor {
     if (!color) {
         return [0, 0, 0, 0];
@@ -952,6 +994,7 @@ function normalizedColor(color: DeckRgba | undefined): NormalizedColor {
     ];
 }
 
+/** Clamp one scalar without importing a heavier math helper. */
 function clamp(value: number, minimum: number, maximum: number): number {
     return Math.max(minimum, Math.min(maximum, value));
 }

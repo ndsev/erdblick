@@ -26,11 +26,11 @@ import {
     type DeckSubsetInteractionProps,
     type SubsetPickResolver
 } from "./deck-subset-picking";
-import {MAX_TILE_SUBSET_RENDER_VERTICES} from "./tile-subset-render-data";
-import type {TileSubsetLayerRenderBuffers} from
+import type {TileSubsetRenderBridge} from
     "./tile-subset-layer-render.worker.protocol";
 
 const UNSELECTABLE = 0xffffffff;
+const MAX_TILE_SUBSET_RENDER_VERTICES = 20_000_000;
 
 /** A parsed attachment retained while it is still awaiting atomic installation. */
 export interface PreparedTileSubsetGltf {
@@ -82,30 +82,23 @@ export class TileSubsetGltfPresentation {
         {key: string; sourceId: string}
     >();
 
+    /** Own attachment and shared-layer references for one tile contribution. */
     constructor(
         private readonly owner: StyledMapgetLayer,
         private readonly state: FilterTileState,
-        private readonly blockKey: string,
-        private readonly blockTileCount: number,
         private readonly assetStore: TileSubsetGltfAssetStore =
             deckTileGltfAssetStore
     ) {}
 
     /** Fetches and parses the separately transferred GLB without publishing it. */
     async prepare(
-        result: TileSubsetLayerRenderBuffers,
+        result: TileSubsetRenderBridge,
         device: Device | null
     ): Promise<PreparedTileSubsetGltf | null> {
         const attachmentName = result.glbAttachmentName?.trim() ?? "";
         if (!attachmentName || !result.gltfNodes.nodeIndices.length || !device) {
             return null;
         }
-        if (this.blockTileCount !== 1) {
-            throw new Error(
-                `GLB-backed subset block '${this.blockKey}' must remain a singleton.`
-            );
-        }
-
         const attachmentRef = this.owner.retainAttachment(
             this.state,
             attachmentName
@@ -163,7 +156,7 @@ export class TileSubsetGltfPresentation {
     /** Atomically replaces the base node and pick-proxy contributions. */
     install(
         registry: DeckLayerRegistry,
-        result: TileSubsetLayerRenderBuffers,
+        result: TileSubsetRenderBridge,
         origin: [number, number, number],
         modelMatrix: Matrix4 | null,
         pickResolver: SubsetPickResolver,
@@ -376,6 +369,7 @@ export class TileSubsetGltfPresentation {
         this.releaseActive();
     }
 
+    /** Permanently retire this owner and every attachment/shared contribution. */
     destroy(registry: DeckLayerRegistry | null): void {
         this.clear(registry);
     }
@@ -391,6 +385,7 @@ export class TileSubsetGltfPresentation {
         );
     }
 
+    /** Remove the ordinary GLTF node contribution only when it was published. */
     private removeBaseSource(registry: DeckLayerRegistry): void {
         if (!this.baseSourceActive) {
             return;
@@ -399,6 +394,7 @@ export class TileSubsetGltfPresentation {
         this.baseSourceActive = false;
     }
 
+    /** Remove the invisible GLTF pick proxy only when it was published. */
     private removePickSource(registry: DeckLayerRegistry): void {
         if (!this.pickSourceActive) {
             return;
@@ -407,6 +403,7 @@ export class TileSubsetGltfPresentation {
         this.pickSourceActive = false;
     }
 
+    /** Release parsed-asset and tile-attachment references for the active revision. */
     private releaseActive(): void {
         if (!this.active) {
             return;
@@ -416,6 +413,7 @@ export class TileSubsetGltfPresentation {
         this.active = null;
     }
 
+    /** Merge one owner into the tile-shared GLTF layer without per-style layer growth. */
     private upsertSharedGltf(
         registry: DeckLayerRegistry,
         key: string,
@@ -463,8 +461,9 @@ export class TileSubsetGltfPresentation {
         );
     }
 
+    /** Validate and materialize the bounded temporary GLTF triangle-pick bridge. */
     private pickProxyData(
-        result: TileSubsetLayerRenderBuffers
+        result: TileSubsetRenderBridge
     ): DeckGltfPickProxyDatum[] {
         const raw = result.gltfPickProxies;
         if (raw.startIndices.length < 2 || raw.startIndices[0] !== 0) {

@@ -4,6 +4,8 @@ project(erdblick-core)
 set(ERDBLICK_SOURCE_FILES
   include/erdblick/visualization.h
   include/erdblick/subset-renderer.h
+  include/erdblick/gpu-render-packet.h
+  include/erdblick/gpu-render-records.h
   include/erdblick/style.h
   include/erdblick/style-validation.h
   include/erdblick/style-filter-plan.h
@@ -22,6 +24,8 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/geo/point-conversion.h
 
   src/subset-renderer.cpp
+  src/gpu-render-packet.cpp
+  src/gpu-render-records.cpp
   src/style.cpp
   src/style-validation.cpp
   src/style-filter-plan.cpp
@@ -102,5 +106,6 @@ target_include_directories(erdblick-core
 target_link_libraries(erdblick-core
   PUBLIC
     glm
+    mapbox-earcut
     mapget-model
     yaml-cpp)

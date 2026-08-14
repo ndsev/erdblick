@@ -1,26 +1,32 @@
 import {Injectable, Optional} from "@angular/core";
 import {skip, Subject} from "rxjs";
 import {AppStateService} from "../../shared/appstate.service";
-import {
-    AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
-    DEFAULT_RENDER_BLOCK_VERTEX_LIMIT
-} from "../../shared/tile-render-policy";
+import {AUTO_TILE_SUBSET_RENDER_WORKER_COUNT} from
+    "../../shared/tile-render-policy";
 import type {
     TileSubsetLayerRenderBuffers,
     TileSubsetLayerRenderResult,
     TileSubsetLayerRenderTask,
+    TileSubsetGpuContribution,
     TileSubsetLayerRenderWorkerOutbound
 } from "./tile-subset-layer-render.worker.protocol";
 import type {
-    DeckRenderBufferArenaDebugSnapshot
-} from "./deck-render-buffer-arena";
+    GpuSceneSnapshot
+} from "./gpu-scene";
+import {gpuIconAtlasService} from "./gpu-icon-atlas.service";
+import {
+    GPU_RENDER_PACKET_MAX_BYTES,
+    GPU_RENDER_PACKET_MAX_FRAGMENTS
+} from "./gpu-render-packet";
 
 const AUTO_WORKER_MIN = 2;
 const AUTO_WORKER_FALLBACK_CPU_COUNT = 4;
 const WORKER_CAP = 32;
-const RESULT_WAVE_MAX_WAIT_MS = 200;
-const RESULT_WAVE_WORKER_MULTIPLIER = 2;
+const MAX_ADMISSION_PACKETS_PER_FRAME = 16;
+const MAX_ADMISSION_BYTES_PER_FRAME = 4 * 1024 * 1024;
+const MAX_ADMISSION_TIME_MS = 4;
 
+/** Choose a bounded worker count that leaves half the logical CPUs for the UI. */
 export function getTileSubsetLayerRenderAutoWorkerCount(): number {
     const rawCpuCount = Number(
         globalThis.navigator?.hardwareConcurrency ?? AUTO_WORKER_FALLBACK_CPU_COUNT
@@ -43,32 +49,38 @@ export function resolveTileSubsetLayerRenderWorkerCount(
         : Math.max(1, Math.min(WORKER_CAP, Math.trunc(configuredWorkerCount)));
 }
 
-export type TileSubsetLayerRenderPolicyChange =
-    "workers" | "debug-blocks" | "block-vertex-limit";
-
 export interface TileSubsetLayerRenderRequest {
     visualizationId: string;
     renderSignature: string;
     viewIndex: number;
-    blockKey: string;
-    mapTileKeys: string[];
-    tileIds: number[];
+    renderKey: string;
+    mapTileKey: string;
+    tileId: number;
     coordinateOrigin: [number, number, number];
+    sceneGeneration: number;
+    packetSequence: number;
+    iconCatalogVersion: number;
+    originSlot: number;
+    originKeyLow: number;
+    originKeyHigh: number;
+    contribution: TileSubsetGpuContribution;
     mapId: string;
     catalogRevision: number;
     dataSourceInfoBlob: Uint8Array;
     stringPoolId: string;
     fieldDictBlob: Uint8Array;
-    subsetBlobs: Uint8Array[];
+    subsetBlob: Uint8Array;
     inputGeometryVertexCount: number;
     styleKey: string;
     styleSource: string;
     highlightModeValue: number;
     fidelityValue: number;
+    lineSimplificationToleranceMeters: number;
 }
 
 interface PendingRender {
     task: TileSubsetLayerRenderTask;
+    admit: (packet: Uint8Array) => void;
     resolve: (value: TileSubsetLayerRenderBuffers) => void;
     reject: (reason?: unknown) => void;
     queuedAt: number;
@@ -76,9 +88,12 @@ interface PendingRender {
 }
 
 interface ReadyRender {
+    workerIndex: number;
     pending: PendingRender;
     buffers: TileSubsetLayerRenderBuffers;
-    completedAt: number;
+    nativeMs: number;
+    roundTripMs: number;
+    nextPacketIndex: number;
 }
 
 export interface TileSubsetLayerRenderDebugSnapshot {
@@ -91,21 +106,16 @@ export interface TileSubsetLayerRenderDebugSnapshot {
     inFlightTiles: number;
     ready: number;
     readyTiles: number;
+    readyPacketBytes: number;
+    maxReadyPacketBytes: number;
     completed: number;
     completedTiles: number;
-    released: number;
-    releaseBatches: number;
     failed: number;
     stale: number;
-    latestBlockTiles: number;
-    maxBlockTiles: number;
     queuedGeometryVertices: number;
     inFlightGeometryVertices: number;
-    readyGeometryVertices: number;
-    latestBlockGeometryVertices: number;
-    maxBlockGeometryVertices: number;
-    maxAggregateGeometryVertices: number;
-    blockSizeHistogram: Record<string, number>;
+    latestGeometryVertices: number;
+    maxGeometryVertices: number;
     latestRoundTripMs: number;
     latestNativeMs: number;
     averageRoundTripMs: number;
@@ -115,17 +125,33 @@ export interface TileSubsetLayerRenderDebugSnapshot {
     maxNativeMs: number;
     oldestQueuedMs: number;
     oldestInFlightMs: number;
-    oldestReadyMs: number;
 }
 
-/** Aggregate of the live per-view Deck scene and buffer-arena counters. */
-export interface DeckPresentationDebugSnapshot
-    extends DeckRenderBufferArenaDebugSnapshot {
+/** Aggregate of the live persistent GPU scenes across all views. */
+export interface DeckPresentationDebugSnapshot {
     views: number;
     layers: number;
+    materials: number;
+    activeContributions: number;
+    activeOrigins: number;
+    pickingHighWater: number;
+    pickingFragmentation: number;
+    zIndexHighWater: number;
+    maxZIndexUpdateMs: number;
+    labels: number;
+    stores: number;
+    capacityRecords: number;
+    highWaterRecords: number;
+    fragmentedRecords: number;
+    allocatedBytes: number;
+    uploadedBytes: number;
+    uploadCount: number;
+    growthCount: number;
 }
 
+/** Signals expected supersession without reporting a renderer failure to users. */
 export class StaleSubsetRenderError extends Error {
+    /** Describe the single benign cancellation condition shared by all callers. */
     constructor() {
         super("A newer render input replaced this TileSubsetLayer render.");
     }
@@ -141,32 +167,28 @@ export class StaleSubsetRenderError extends Error {
 export class TileSubsetLayerRenderService {
     /** Fires after worker progress may have made another render slot available. */
     readonly capacityChanged = new Subject<void>();
-    /** Fires when a live render/block presentation preference changes. */
-    readonly policyChanged = new Subject<TileSubsetLayerRenderPolicyChange>();
-    private readonly workers: Worker[] = [];
+    private readonly workers: Array<Worker | null> = [];
     private readonly idleWorkers: number[] = [];
     private readonly runningTaskIdByWorker: Array<string | null> = [];
     private readonly catalogKeysByWorker: Array<Set<string>> = [];
     private readonly fieldDictSizesByWorker:
         Array<Map<string, number>> = [];
     private readonly styleKeysByWorker: Array<Set<string>> = [];
+    private readonly iconCatalogVersionByWorker: number[] = [];
     private readonly queue: PendingRender[] = [];
     private readonly inFlight = new Map<string, PendingRender>();
     private readonly ready: ReadyRender[] = [];
-    private readyReleaseTimer: ReturnType<typeof setTimeout> | null = null;
     private readonly latestSignatureByVisualization = new Map<string, string>();
     private initialization: Promise<void> = Promise.resolve();
     private nextTaskId = 0;
     private latestNativeRenderMs = 0;
     private readonly deckFrameIntervalsMsByView = new Map<number, number[]>();
-    private readonly deckPresentationByView = new Map<number, {
+    private readonly deckPresentationByView = new Map<number, () => {
         layers: number;
-        arena: DeckRenderBufferArenaDebugSnapshot;
+        scene: GpuSceneSnapshot;
     }>();
     private completedTaskCount = 0;
     private completedTileCount = 0;
-    private releasedTaskCount = 0;
-    private releaseBatchCount = 0;
     private failedTaskCount = 0;
     private staleTaskCount = 0;
     private totalRoundTripMs = 0;
@@ -174,13 +196,12 @@ export class TileSubsetLayerRenderService {
     private latestRoundTripMs = 0;
     private maxRoundTripMs = 0;
     private maxNativeMs = 0;
-    private latestBlockTiles = 0;
-    private maxBlockTiles = 0;
-    private latestBlockGeometryVertices = 0;
-    private maxBlockGeometryVertices = 0;
-    private maxAggregateGeometryVertices = 0;
-    private readonly completedBlocksByTileCount = new Map<number, number>();
+    private maxReadyPacketBytes = 0;
+    private admissionFrame: number | null = null;
+    private latestGeometryVertices = 0;
+    private maxGeometryVertices = 0;
 
+    /** Track runtime worker-count changes when application state is available. */
     constructor(
         @Optional()
         private readonly appState: AppStateService | null = null
@@ -189,7 +210,6 @@ export class TileSubsetLayerRenderService {
             return;
         }
         appState.tileSubsetRenderWorkerCountState.pipe(skip(1)).subscribe(() => {
-            this.policyChanged.next("workers");
             this.ensureWorkers()
                 .then(() => {
                     this.capacityChanged.next();
@@ -199,14 +219,9 @@ export class TileSubsetLayerRenderService {
                     console.error("Could not resize subset render workers.", error)
                 );
         });
-        appState.debugRenderBlocksState.pipe(skip(1)).subscribe(() =>
-            this.policyChanged.next("debug-blocks")
-        );
-        appState.renderBlockVertexLimitState.pipe(skip(1)).subscribe(() =>
-            this.policyChanged.next("block-vertex-limit")
-        );
     }
 
+    /** Return the currently configured worker-credit ceiling. */
     activeWorkerCount(): number {
         return resolveTileSubsetLayerRenderWorkerCount(
             this.appState?.tileSubsetRenderWorkerCount ??
@@ -214,20 +229,12 @@ export class TileSubsetLayerRenderService {
         );
     }
 
-    blockVertexLimit(): number {
-        return this.appState?.renderBlockVertexLimit ??
-            DEFAULT_RENDER_BLOCK_VERTEX_LIMIT;
-    }
-
-    debugRenderBlocksEnabled(): boolean {
-        return this.appState?.debugRenderBlocks ?? false;
-    }
-
+    /** Count jobs which have worker credit, including queued and executing work. */
     visualizationQueueLength(): number {
-        return this.queue.length + this.inFlight.size + this.ready.length;
+        return this.queue.length + this.inFlight.size;
     }
 
-    /** Number of block renders which can be accepted without building a hidden queue. */
+    /** Number of tile renders accepted without building a hidden queue. */
     availableWorkerSlots(): number {
         return Math.max(
             0,
@@ -237,6 +244,7 @@ export class TileSubsetLayerRenderService {
         );
     }
 
+    /** Return the worst per-view rolling p90 frame interval used by diagnostics. */
     currentFrameTimeMs(): number {
         return Math.max(
             0,
@@ -268,16 +276,12 @@ export class TileSubsetLayerRenderService {
         this.deckFrameIntervalsMsByView.delete(viewIndex);
     }
 
-    /** Records the latest stable Deck layer and consolidation counters for one view. */
-    recordDeckPresentationDiagnostics(
+    /** Registers an on-demand scene snapshot provider for one live Deck view. */
+    setDeckPresentationDiagnosticsProvider(
         viewIndex: number,
-        layers: number,
-        arena: DeckRenderBufferArenaDebugSnapshot
+        provider: () => {layers: number; scene: GpuSceneSnapshot}
     ): void {
-        this.deckPresentationByView.set(viewIndex, {
-            layers: Math.max(0, Math.trunc(layers)),
-            arena: {...arena}
-        });
+        this.deckPresentationByView.set(viewIndex, provider);
     }
 
     /** Removes presentation counters when their logical view is destroyed. */
@@ -285,35 +289,57 @@ export class TileSubsetLayerRenderService {
         this.deckPresentationByView.delete(viewIndex);
     }
 
-    /** Sums additive counters and retains the largest packed page across all views. */
+    /** Sum per-view scene and store counters without inspecting GPU memory. */
     currentDeckPresentationDiagnostics(): DeckPresentationDebugSnapshot {
         const result: DeckPresentationDebugSnapshot = {
             views: this.deckPresentationByView.size,
             layers: 0,
-            groups: 0,
-            pages: 0,
-            reusablePages: 0,
-            contributions: 0,
-            usedVertices: 0,
-            capacityVertices: 0,
-            maxContributionsPerPage: 0
+            materials: 0,
+            activeContributions: 0,
+            activeOrigins: 0,
+            pickingHighWater: 0,
+            pickingFragmentation: 0,
+            zIndexHighWater: 0,
+            maxZIndexUpdateMs: 0,
+            labels: 0,
+            stores: 0,
+            capacityRecords: 0,
+            highWaterRecords: 0,
+            fragmentedRecords: 0,
+            allocatedBytes: 0,
+            uploadedBytes: 0,
+            uploadCount: 0,
+            growthCount: 0
         };
-        for (const {layers, arena} of this.deckPresentationByView.values()) {
+        for (const provider of this.deckPresentationByView.values()) {
+            const {layers, scene} = provider();
             result.layers += layers;
-            result.groups += arena.groups;
-            result.pages += arena.pages;
-            result.reusablePages += arena.reusablePages;
-            result.contributions += arena.contributions;
-            result.usedVertices += arena.usedVertices;
-            result.capacityVertices += arena.capacityVertices;
-            result.maxContributionsPerPage = Math.max(
-                result.maxContributionsPerPage,
-                arena.maxContributionsPerPage
+            result.materials += scene.materialCount;
+            result.activeContributions += scene.activeContributionCount;
+            result.activeOrigins += scene.activeOriginCount;
+            result.pickingHighWater += scene.pickingHighWater;
+            result.pickingFragmentation += scene.pickingFragmentation;
+            result.zIndexHighWater += scene.zIndexHighWater;
+            result.maxZIndexUpdateMs = Math.max(
+                result.maxZIndexUpdateMs,
+                scene.zIndexUpdateMs
             );
+            result.labels += scene.labels;
+            result.stores += scene.stores.length;
+            for (const store of scene.stores) {
+                result.capacityRecords += store.capacityRecords;
+                result.highWaterRecords += store.highWaterRecords;
+                result.fragmentedRecords += store.fragmentedRecords;
+                result.allocatedBytes += store.allocatedBytes;
+                result.uploadedBytes += store.uploadedBytes;
+                result.uploadCount += store.uploadCount;
+                result.growthCount += store.growthCount;
+            }
         }
         return result;
     }
 
+    /** Capture queue, worker, packet, and timing state for diagnostics. */
     debugSnapshot(): TileSubsetLayerRenderDebugSnapshot {
         const now = performance.now();
         const dispatched = [...this.inFlight.values()]
@@ -326,28 +352,23 @@ export class TileSubsetLayerRenderService {
                 index => index < this.activeWorkerCount()
             ).length,
             queued: this.queue.length,
-            queuedTiles: this.queue.reduce(
-                (sum, pending) => sum + pending.task.tileIds.length,
-                0
-            ),
+            queuedTiles: this.queue.length,
             inFlight: this.inFlight.size,
-            inFlightTiles: [...this.inFlight.values()].reduce(
-                (sum, pending) => sum + pending.task.tileIds.length,
-                0
-            ),
+            inFlightTiles: this.inFlight.size,
             ready: this.ready.length,
-            readyTiles: this.ready.reduce(
-                (sum, item) => sum + item.pending.task.tileIds.length,
+            readyTiles: this.ready.length,
+            readyPacketBytes: this.ready.reduce(
+                (sum, item) => sum + item.buffers.packets
+                    .slice(item.nextPacketIndex)
+                    .reduce((packetSum, packet) =>
+                        packetSum + packet.byteLength, 0),
                 0
             ),
+            maxReadyPacketBytes: this.maxReadyPacketBytes,
             completed: this.completedTaskCount,
             completedTiles: this.completedTileCount,
-            released: this.releasedTaskCount,
-            releaseBatches: this.releaseBatchCount,
             failed: this.failedTaskCount,
             stale: this.staleTaskCount,
-            latestBlockTiles: this.latestBlockTiles,
-            maxBlockTiles: this.maxBlockTiles,
             queuedGeometryVertices: this.queue.reduce(
                 (sum, pending) =>
                     sum + pending.task.inputGeometryVertexCount,
@@ -358,22 +379,8 @@ export class TileSubsetLayerRenderService {
                     sum + pending.task.inputGeometryVertexCount,
                 0
             ),
-            readyGeometryVertices: this.ready.reduce(
-                (sum, item) =>
-                    sum + item.pending.task.inputGeometryVertexCount,
-                0
-            ),
-            latestBlockGeometryVertices:
-                this.latestBlockGeometryVertices,
-            maxBlockGeometryVertices:
-                this.maxBlockGeometryVertices,
-            maxAggregateGeometryVertices:
-                this.maxAggregateGeometryVertices,
-            blockSizeHistogram: Object.fromEntries(
-                [...this.completedBlocksByTileCount.entries()]
-                    .sort(([left], [right]) => left - right)
-                    .map(([size, count]) => [String(size), count])
-            ),
+            latestGeometryVertices: this.latestGeometryVertices,
+            maxGeometryVertices: this.maxGeometryVertices,
             latestRoundTripMs: this.latestRoundTripMs,
             latestNativeMs: this.latestNativeRenderMs,
             averageRoundTripMs: this.completedTaskCount
@@ -392,14 +399,18 @@ export class TileSubsetLayerRenderService {
                 : 0,
             oldestInFlightMs: dispatched.length
                 ? now - Math.min(...dispatched)
-                : 0,
-            oldestReadyMs: this.ready.length
-                ? now - Math.min(...this.ready.map(item => item.completedAt))
                 : 0
         };
     }
 
-    render(request: TileSubsetLayerRenderRequest): Promise<TileSubsetLayerRenderBuffers> {
+    /**
+     * Render one tile and install its vector packet through the frame-budgeted
+     * admission callback before resolving the result promise.
+     */
+    render(
+        request: TileSubsetLayerRenderRequest,
+        admit: (packet: Uint8Array) => void = () => undefined
+    ): Promise<TileSubsetLayerRenderBuffers> {
         this.latestSignatureByVisualization.set(
             request.visualizationId,
             request.renderSignature
@@ -413,19 +424,22 @@ export class TileSubsetLayerRenderService {
         return new Promise<TileSubsetLayerRenderBuffers>((resolve, reject) => {
             this.queue.push({
                 task,
+                admit,
                 resolve,
                 reject,
                 queuedAt: performance.now()
             });
-            this.pump().catch(reject);
+            this.pump().catch(error => this.rejectQueuedTask(task.taskId, error));
         });
     }
 
+    /** Cancel queued work and stale any in-flight result for one visualization. */
     cancel(visualizationId: string): void {
         this.latestSignatureByVisualization.delete(visualizationId);
         this.dropReplacedQueuedJobs(visualizationId, true);
     }
 
+    /** Reject obsolete queued revisions without disturbing unrelated tile jobs. */
     private dropReplacedQueuedJobs(visualizationId: string, cancelAll = false): void {
         for (let index = this.queue.length - 1; index >= 0; --index) {
             const pending = this.queue[index];
@@ -440,25 +454,9 @@ export class TileSubsetLayerRenderService {
             this.staleTaskCount += 1;
             pending.reject(new StaleSubsetRenderError());
         }
-        for (let index = this.ready.length - 1; index >= 0; --index) {
-            const item = this.ready[index];
-            if (item.pending.task.visualizationId !== visualizationId) {
-                continue;
-            }
-            if (!cancelAll && item.pending.task.renderSignature ===
-                this.latestSignatureByVisualization.get(visualizationId)) {
-                continue;
-            }
-            this.ready.splice(index, 1);
-            this.staleTaskCount += 1;
-            item.pending.reject(new StaleSubsetRenderError());
-        }
-        if (!this.ready.length && this.readyReleaseTimer !== null) {
-            clearTimeout(this.readyReleaseTimer);
-            this.readyReleaseTimer = null;
-        }
     }
 
+    /** Dispatch singleton tile jobs while worker and caller credits remain. */
     private async pump(): Promise<void> {
         await this.ensureWorkers();
         const activeLimit = this.activeWorkerCount();
@@ -496,9 +494,14 @@ export class TileSubsetLayerRenderService {
                 fieldDictSize;
             const needsStyle =
                 !knownStyles.has(pending.task.styleKey);
-            const subsetBlobs = pending.task.subsetBlobs.map(
-                subsetBlob => subsetBlob.slice()
-            );
+            const needsIconCatalog =
+                this.iconCatalogVersionByWorker[workerIndex] !==
+                pending.task.iconCatalogVersion;
+            // Keep the retained tile bytes usable for style changes and
+            // context recovery. Structured clone performs the unavoidable
+            // worker copy natively; an explicit JS slice here only added a
+            // second geometry-sized allocation on the interaction thread.
+            const subsetBlob = pending.task.subsetBlob;
             const dataSourceInfoBlob = needsCatalog
                 ? pending.task.dataSourceInfoBlob?.slice()
                 : undefined;
@@ -510,98 +513,118 @@ export class TileSubsetLayerRenderService {
                 : undefined;
             const outbound: TileSubsetLayerRenderTask = {
                 ...pending.task,
-                subsetBlobs,
+                subsetBlob,
                 dataSourceInfoBlob,
                 fieldDictBlob,
-                styleSource
+                styleSource,
+                iconCatalogEntries: needsIconCatalog
+                    ? gpuIconAtlasService.catalogEntries().map(entry => ({
+                        uri: entry.uri,
+                        atlasPage: entry.atlasPage,
+                        uv: entry.uv,
+                        pixelSize: entry.pixelSize
+                    }))
+                    : undefined
             };
-            const transferables: ArrayBuffer[] = subsetBlobs.map(
-                subsetBlob => subsetBlob.buffer
-            );
+            const transferables: ArrayBuffer[] = [];
             if (dataSourceInfoBlob) {
                 transferables.push(dataSourceInfoBlob.buffer);
             }
             if (fieldDictBlob) {
                 transferables.push(fieldDictBlob.buffer);
             }
-            this.workers[workerIndex].postMessage(
-                outbound,
-                transferables
-            );
-            if (needsCatalog) {
-                knownCatalogs.add(catalogKey);
-            }
-            if (needsFieldDict) {
-                knownFieldDicts.set(
-                    fieldDictKey,
-                    fieldDictSize
+            const worker = this.workers[workerIndex];
+            if (!worker) {
+                this.failDispatch(
+                    workerIndex,
+                    pending,
+                    new Error("Subset render worker is unavailable.")
                 );
+                continue;
             }
-            if (needsStyle) {
-                knownStyles.add(pending.task.styleKey);
+            try {
+                worker.postMessage(outbound, transferables);
+            } catch (error) {
+                this.failDispatch(workerIndex, pending, error);
             }
         }
     }
 
+    /** Test whether a result still belongs to the latest visualization revision. */
     private isCurrent(task: TileSubsetLayerRenderTask): boolean {
         return this.latestSignatureByVisualization.get(task.visualizationId) ===
             task.renderSignature;
     }
 
+    /** Lazily grow the initialized worker prefix to the configured count. */
     private ensureWorkers(): Promise<void> {
         const targetCount = this.activeWorkerCount();
-        if (this.workers.length < targetCount) {
-            this.initialization = this.initialization.then(
-                () => this.initializeWorkers(targetCount)
-            );
+        if (Array.from(
+            {length: targetCount},
+            (_, index) => this.workers[index]
+        ).some(worker => !worker)) {
+            this.initialization = this.initialization
+                .catch(() => undefined)
+                .then(() => this.initializeWorkers(targetCount));
         }
         return this.initialization;
     }
 
+    /** Initialize missing workers concurrently while preserving stable indices. */
     private async initializeWorkers(targetCount: number): Promise<void> {
-        const startIndex = this.workers.length;
-        if (startIndex >= targetCount) {
-            return;
+        const missing = Array.from(
+            {length: targetCount},
+            (_, index) => index
+        ).filter(index => !this.workers[index]);
+        await Promise.all(missing.map(index => this.initializeWorker(index)));
+    }
+
+    /** Creates one worker and publishes it only after its WASM handshake succeeds. */
+    private async initializeWorker(index: number): Promise<void> {
+        const worker = new Worker(
+            new URL("./tile-subset-layer-render.worker", import.meta.url),
+            {type: "module"}
+        );
+        try {
+            await new Promise<void>((resolve, reject) => {
+                const timeout = setTimeout(
+                    () => reject(new Error(
+                        "Timed out initializing a subset render worker."
+                    )),
+                    10_000
+                );
+                const onMessage = (
+                    event: MessageEvent<TileSubsetLayerRenderWorkerOutbound>
+                ) => {
+                    if (event.data.type !== "TileSubsetLayerRenderWorkerReady") {
+                        return;
+                    }
+                    clearTimeout(timeout);
+                    worker.removeEventListener("message", onMessage);
+                    worker.removeEventListener("error", onError);
+                    resolve();
+                };
+                const onError = (error: ErrorEvent) => {
+                    clearTimeout(timeout);
+                    worker.removeEventListener("message", onMessage);
+                    reject(error);
+                };
+                worker.addEventListener("message", onMessage);
+                worker.addEventListener("error", onError, {once: true});
+                worker.postMessage({type: "TileSubsetLayerRenderWorkerInit"});
+            });
+        } catch (error) {
+            worker.terminate();
+            throw error;
         }
-        await Promise.all(Array.from(
-            {length: targetCount - startIndex},
-            async (_, offset) => {
-                const index = startIndex + offset;
-                const worker = new Worker(
-                    new URL("./tile-subset-layer-render.worker", import.meta.url),
-                    {type: "module"}
-                );
-                await new Promise<void>((resolve, reject) => {
-                    const timeout = setTimeout(
-                        () => reject(new Error("Timed out initializing a subset render worker.")),
-                        10_000
-                    );
-                    const onMessage = (event: MessageEvent<TileSubsetLayerRenderWorkerOutbound>) => {
-                        if (event.data.type !== "TileSubsetLayerRenderWorkerReady") {
-                            return;
-                        }
-                        clearTimeout(timeout);
-                        worker.removeEventListener("message", onMessage);
-                        resolve();
-                    };
-                    worker.addEventListener("message", onMessage);
-                    worker.addEventListener("error", error => reject(error), {once: true});
-                    worker.postMessage({type: "TileSubsetLayerRenderWorkerInit"});
-                });
-                worker.onmessage = event => this.handleResult(
-                    index,
-                    event.data as TileSubsetLayerRenderResult
-                );
-                worker.onerror = event => this.handleWorkerError(index, event);
-                this.workers[index] = worker;
-                this.runningTaskIdByWorker[index] = null;
-                this.catalogKeysByWorker[index] = new Set<string>();
-                this.fieldDictSizesByWorker[index] =
-                    new Map<string, number>();
-                this.styleKeysByWorker[index] = new Set<string>();
-                this.idleWorkers.push(index);
-            }
-        ));
+        worker.onmessage = event => this.handleResult(
+            index,
+            event.data as TileSubsetLayerRenderResult
+        );
+        worker.onerror = event => this.handleWorkerError(index, event);
+        this.workers[index] = worker;
+        this.resetWorkerState(index);
+        this.idleWorkers.push(index);
     }
 
     /** Takes one idle worker which is inside the current active prefix. */
@@ -615,144 +638,289 @@ export class TileSubsetLayerRenderService {
         return this.idleWorkers.splice(idleIndex, 1)[0];
     }
 
+    /** Validate a worker response and queue its fragments for scene admission. */
     private handleResult(workerIndex: number, result: TileSubsetLayerRenderResult): void {
-        const pending = this.inFlight.get(result.taskId);
-        this.inFlight.delete(result.taskId);
-        this.runningTaskIdByWorker[workerIndex] = null;
-        this.idleWorkers.push(workerIndex);
-        if (pending) {
-            const nativeMs = Number(result.timings?.totalMs ?? 0);
-            const roundTripMs = pending.dispatchedAt === undefined
-                ? nativeMs
-                : performance.now() - pending.dispatchedAt;
-            this.latestRoundTripMs = roundTripMs;
-            this.maxRoundTripMs = Math.max(this.maxRoundTripMs, roundTripMs);
-            this.maxNativeMs = Math.max(this.maxNativeMs, nativeMs);
-            if (!this.isCurrent(pending.task)) {
-                this.staleTaskCount += 1;
-                pending.reject(new StaleSubsetRenderError());
-            } else if (result.error) {
-                this.failedTaskCount += 1;
-                pending.reject(new Error(result.error));
-            } else {
-                const {
-                    type: _type,
-                    taskId: _taskId,
-                    visualizationId: _visualizationId,
-                    renderSignature: _renderSignature,
-                    error: _error,
-                    ...buffers
-                } = result;
-                this.latestNativeRenderMs = Number.isFinite(buffers.timings.totalMs)
-                    ? buffers.timings.totalMs
-                    : 0;
-                const blockTiles = Math.max(1, pending.task.tileIds.length);
-                this.completedTaskCount += 1;
-                this.completedTileCount += blockTiles;
-                this.totalRoundTripMs += roundTripMs;
-                this.totalNativeMs += nativeMs;
-                this.latestBlockTiles = blockTiles;
-                this.maxBlockTiles = Math.max(this.maxBlockTiles, blockTiles);
-                const geometryVertices =
-                    pending.task.inputGeometryVertexCount;
-                this.latestBlockGeometryVertices = geometryVertices;
-                this.maxBlockGeometryVertices = Math.max(
-                    this.maxBlockGeometryVertices,
-                    geometryVertices
-                );
-                if (blockTiles > 1) {
-                    this.maxAggregateGeometryVertices = Math.max(
-                        this.maxAggregateGeometryVertices,
-                        geometryVertices
-                    );
-                }
-                this.completedBlocksByTileCount.set(
-                    blockTiles,
-                    (this.completedBlocksByTileCount.get(blockTiles) ?? 0) + 1
-                );
-                this.enqueueReadyResult(pending, buffers);
-            }
+        const runningTaskId = this.runningTaskIdByWorker[workerIndex];
+        if (!runningTaskId) {
+            return;
         }
-        this.pump()
-            .then(() => this.capacityChanged.next())
-            .catch(error => console.error("Subset render queue failed.", error));
+        const pending = this.inFlight.get(runningTaskId);
+        if (!pending) {
+            this.releaseWorker(workerIndex, runningTaskId);
+            return;
+        }
+        if (result.type !== "TileSubsetLayerRenderResult" ||
+            result.taskId !== runningTaskId ||
+            result.visualizationId !== pending.task.visualizationId ||
+            result.renderSignature !== pending.task.renderSignature) {
+            this.failedTaskCount += 1;
+            pending.reject(new Error(
+                "Subset render worker returned a result for a different task."
+            ));
+            this.releaseWorker(workerIndex, runningTaskId);
+            return;
+        }
+        const nativeMs = Number(result.timings?.totalMs ?? 0);
+        const roundTripMs = pending.dispatchedAt === undefined
+            ? nativeMs
+            : performance.now() - pending.dispatchedAt;
+        this.latestRoundTripMs = roundTripMs;
+        this.maxRoundTripMs = Math.max(this.maxRoundTripMs, roundTripMs);
+        this.maxNativeMs = Math.max(this.maxNativeMs, nativeMs);
+        if (!this.isCurrent(pending.task)) {
+            this.staleTaskCount += 1;
+            pending.reject(new StaleSubsetRenderError());
+            this.releaseWorker(workerIndex, pending.task.taskId);
+            return;
+        }
+        if (result.error) {
+            this.failedTaskCount += 1;
+            pending.reject(new Error(result.error));
+            this.releaseWorker(workerIndex, pending.task.taskId);
+            return;
+        }
+        if (!result.packets || !result.packets.length ||
+            result.packets.length > GPU_RENDER_PACKET_MAX_FRAGMENTS ||
+            result.packets.some(packet =>
+                !(packet instanceof Uint8Array) ||
+                packet.byteLength === 0 ||
+                packet.byteLength > GPU_RENDER_PACKET_MAX_BYTES
+            ) ||
+            !result.bridge || !result.timings ||
+            result.vertexCount === undefined) {
+            this.failedTaskCount += 1;
+            pending.reject(new Error(
+                "Subset render worker returned an incomplete GPU packet."
+            ));
+            this.releaseWorker(workerIndex, pending.task.taskId);
+            return;
+        }
+        this.recordWorkerCaches(workerIndex, pending.task);
+        this.ready.push({
+            workerIndex,
+            pending,
+            buffers: {
+                packets: result.packets,
+                bridge: result.bridge,
+                vertexCount: result.vertexCount,
+                timings: result.timings
+            },
+            nativeMs,
+            roundTripMs,
+            nextPacketIndex: 0
+        });
+        this.maxReadyPacketBytes = Math.max(
+            this.maxReadyPacketBytes,
+            this.ready.reduce(
+                (sum, item) => sum + item.buffers.packets.reduce(
+                    (packetSum, packet) => packetSum + packet.byteLength,
+                    0
+                ),
+                0
+            )
+        );
+        this.scheduleAdmission();
     }
 
     /**
-     * Releases the first worker wave immediately, then coalesces at most two
-     * worker waves for a short bounded interval. Resolving a wave in one task
-     * lets all visualization microtasks update the Deck registry before its
-     * next RAF commit without delaying worker admission.
+     * Admit a byte- and time-bounded batch of completed packets per browser
+     * frame. The callback performs the real scene upload, so elapsed time is
+     * the actual installation cost rather than the cost of resolving promises.
      */
-    private enqueueReadyResult(
-        pending: PendingRender,
-        buffers: TileSubsetLayerRenderBuffers
-    ): void {
-        this.ready.push({
-            pending,
-            buffers,
-            completedAt: performance.now()
-        });
-        const firstProgressiveWave =
-            this.releasedTaskCount === 0 &&
-            this.inFlight.size === 0;
-        const boundedWaveIsFull =
-            this.ready.length >=
-            this.activeWorkerCount() *
-                RESULT_WAVE_WORKER_MULTIPLIER;
-        if (firstProgressiveWave || boundedWaveIsFull) {
-            this.releaseReadyWave();
+    private scheduleAdmission(): void {
+        if (this.admissionFrame !== null || !this.ready.length) {
             return;
         }
-        if (this.readyReleaseTimer === null) {
-            this.readyReleaseTimer = setTimeout(
-                () => this.releaseReadyWave(),
-                RESULT_WAVE_MAX_WAIT_MS
-            );
-        }
+        this.admissionFrame = requestAnimationFrame(() => {
+            this.admissionFrame = null;
+            const startedAt = performance.now();
+            let admittedPackets = 0;
+            let admittedBytes = 0;
+            while (this.ready.length &&
+                admittedPackets < MAX_ADMISSION_PACKETS_PER_FRAME) {
+                const next = this.ready[0];
+                const packet = next.buffers.packets[next.nextPacketIndex];
+                const packetBytes = packet.byteLength;
+                if (admittedPackets > 0 &&
+                    admittedBytes + packetBytes >
+                        MAX_ADMISSION_BYTES_PER_FRAME) {
+                    break;
+                }
+                this.ready.shift();
+                const complete = this.admit(next, packet);
+                if (!complete) {
+                    this.ready.push(next);
+                }
+                admittedPackets += 1;
+                admittedBytes += packetBytes;
+                if (performance.now() - startedAt >= MAX_ADMISSION_TIME_MS) {
+                    break;
+                }
+            }
+            this.scheduleAdmission();
+        });
     }
 
-    /** Releases one bounded progressive wave and reopens worker admission. */
-    private releaseReadyWave(): void {
-        if (this.readyReleaseTimer !== null) {
-            clearTimeout(this.readyReleaseTimer);
-            this.readyReleaseTimer = null;
+    /** Admit one fragment and resolve only after the complete revision is staged. */
+    private admit(ready: ReadyRender, packet: Uint8Array): boolean {
+        const {pending, buffers, nativeMs, roundTripMs, workerIndex} = ready;
+        if (!this.isCurrent(pending.task)) {
+            this.staleTaskCount += 1;
+            pending.reject(new StaleSubsetRenderError());
+            this.releaseWorker(workerIndex, pending.task.taskId);
+            return true;
         }
-        if (!this.ready.length) {
-            return;
-        }
-        const wave = this.ready.splice(0);
-        let released = 0;
-        for (const item of wave) {
-            if (!this.isCurrent(item.pending.task)) {
+        try {
+            pending.admit(packet);
+        } catch (error) {
+            if (error instanceof StaleSubsetRenderError) {
                 this.staleTaskCount += 1;
-                item.pending.reject(new StaleSubsetRenderError());
-                continue;
+            } else {
+                this.failedTaskCount += 1;
             }
-            item.pending.resolve(item.buffers);
-            released += 1;
+            pending.reject(error);
+            this.releaseWorker(workerIndex, pending.task.taskId);
+            return true;
         }
-        if (released > 0) {
-            this.releasedTaskCount += released;
-            this.releaseBatchCount += 1;
+        ready.nextPacketIndex += 1;
+        if (ready.nextPacketIndex < buffers.packets.length) {
+            return false;
+        }
+        this.latestNativeRenderMs = Number.isFinite(buffers.timings.totalMs)
+            ? buffers.timings.totalMs
+            : 0;
+        this.completedTaskCount += 1;
+        this.completedTileCount += 1;
+        this.totalRoundTripMs += roundTripMs;
+        this.totalNativeMs += nativeMs;
+        const geometryVertices = pending.task.inputGeometryVertexCount;
+        this.latestGeometryVertices = geometryVertices;
+        this.maxGeometryVertices = Math.max(
+            this.maxGeometryVertices,
+            geometryVertices
+        );
+        pending.resolve(buffers);
+        this.releaseWorker(workerIndex, pending.task.taskId);
+        return true;
+    }
+
+    /** Release one worker only after its transferred packet is admitted or rejected. */
+    private releaseWorker(workerIndex: number, taskId: string): void {
+        this.inFlight.delete(taskId);
+        this.runningTaskIdByWorker[workerIndex] = null;
+        if (this.workers[workerIndex]) {
+            this.idleWorkers.push(workerIndex);
         }
         this.pump()
             .then(() => this.capacityChanged.next())
             .catch(error => console.error("Subset render queue failed.", error));
     }
 
+    /** Retire a failed worker, reject its task, and recreate the slot on demand. */
     private handleWorkerError(workerIndex: number, event: ErrorEvent): void {
+        const worker = this.workers[workerIndex];
+        if (!worker) {
+            return;
+        }
+        worker.onmessage = null;
+        worker.onerror = null;
+        worker.terminate();
+        this.workers[workerIndex] = null;
+        this.removeIdleWorker(workerIndex);
         const taskId = this.runningTaskIdByWorker[workerIndex];
         this.runningTaskIdByWorker[workerIndex] = null;
         const pending = taskId ? this.inFlight.get(taskId) : undefined;
+        const failure = new Error(
+            event.message || "Subset render worker failed."
+        );
         if (pending) {
             this.inFlight.delete(pending.task.taskId);
             this.failedTaskCount += 1;
-            pending.reject(new Error(event.message || "Subset render worker failed."));
+            pending.reject(failure);
         }
-        this.idleWorkers.push(workerIndex);
-        this.pump()
+        for (let index = this.ready.length - 1; index >= 0; --index) {
+            const ready = this.ready[index];
+            if (ready.workerIndex !== workerIndex) {
+                continue;
+            }
+            this.ready.splice(index, 1);
+            this.inFlight.delete(ready.pending.task.taskId);
+            if (ready.pending !== pending) {
+                this.failedTaskCount += 1;
+                ready.pending.reject(failure);
+            }
+        }
+        this.resetWorkerState(workerIndex);
+        this.initialization = this.initialization
+            .catch(() => undefined)
+            .then(() => this.initializeWorker(workerIndex));
+        this.initialization.then(() => this.pump())
             .then(() => this.capacityChanged.next())
-            .catch(error => console.error("Subset render queue failed.", error));
+            .catch(error => console.error(
+                "Could not replace subset render worker.",
+                error
+            ));
+    }
+
+    /** Commits cache knowledge only after a worker returned a complete packet. */
+    private recordWorkerCaches(
+        workerIndex: number,
+        task: TileSubsetLayerRenderTask
+    ): void {
+        const catalogKey = `${task.catalogRevision}:${task.mapId}`;
+        this.catalogKeysByWorker[workerIndex].add(catalogKey);
+        this.fieldDictSizesByWorker[workerIndex].set(
+            `${catalogKey}:${task.stringPoolId}`,
+            task.fieldDictBlob?.byteLength ?? 0
+        );
+        this.styleKeysByWorker[workerIndex].add(task.styleKey);
+        this.iconCatalogVersionByWorker[workerIndex] = task.iconCatalogVersion;
+    }
+
+    /** Rejects a synchronous dispatch failure and immediately returns its credit. */
+    private failDispatch(
+        workerIndex: number,
+        pending: PendingRender,
+        reason: unknown
+    ): void {
+        this.inFlight.delete(pending.task.taskId);
+        this.runningTaskIdByWorker[workerIndex] = null;
+        this.failedTaskCount += 1;
+        pending.reject(reason instanceof Error ? reason : new Error(String(reason)));
+        if (this.workers[workerIndex]) {
+            this.idleWorkers.push(workerIndex);
+        }
+    }
+
+    /** Rejects one task whose worker initialization failed before dispatch. */
+    private rejectQueuedTask(taskId: string, reason: unknown): void {
+        const index = this.queue.findIndex(
+            pending => pending.task.taskId === taskId
+        );
+        if (index < 0) {
+            return;
+        }
+        const [pending] = this.queue.splice(index, 1);
+        this.failedTaskCount += 1;
+        pending.reject(reason instanceof Error ? reason : new Error(String(reason)));
+        this.capacityChanged.next();
+    }
+
+    /** Clears all state which describes the private memory of one worker. */
+    private resetWorkerState(workerIndex: number): void {
+        this.runningTaskIdByWorker[workerIndex] = null;
+        this.catalogKeysByWorker[workerIndex] = new Set<string>();
+        this.fieldDictSizesByWorker[workerIndex] = new Map<string, number>();
+        this.styleKeysByWorker[workerIndex] = new Set<string>();
+        this.iconCatalogVersionByWorker[workerIndex] = -1;
+    }
+
+    /** Removes every stale idle credit for a worker being replaced. */
+    private removeIdleWorker(workerIndex: number): void {
+        for (let index = this.idleWorkers.length - 1; index >= 0; --index) {
+            if (this.idleWorkers[index] === workerIndex) {
+                this.idleWorkers.splice(index, 1);
+            }
+        }
     }
 }

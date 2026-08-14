@@ -19,14 +19,10 @@ import {
     MIN_DRILL_PICK_RADIUS,
     AppStateService,
     DEFAULT_LOW_FI_TILE_THRESHOLD,
-    DEFAULT_RENDER_BLOCK_VERTEX_LIMIT,
-    MAX_RENDER_BLOCK_VERTEX_LIMIT,
     MAX_TILE_SUBSET_RENDER_WORKER_COUNT,
     MAX_LOW_FI_TILE_THRESHOLD,
-    MIN_RENDER_BLOCK_VERTEX_LIMIT,
     MIN_LOW_FI_TILE_THRESHOLD,
     AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
-    clampRenderBlockVertexLimit,
     clampTileSubsetRenderWorkerCount,
     clampLowFiTileThreshold,
     type HoverLabelFieldConfig
@@ -408,61 +404,6 @@ import type {
                                           [disabled]="!renderWorkerCountChanged"></p-button>
                             </div>
                         </div>
-                        <div class="slider-container">
-                            <label for="render-block-vertex-limit-input">Render Block Vertex Limit
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Soft maximum source-geometry vertex count for a multi-tile Morton render block. A single tile is always allowed."
-                                   tooltipPosition="top"></i>
-                            </label>
-                            <div class="slider-controls">
-                                <div style="display: inline-block">
-                                    <input id="render-block-vertex-limit-input"
-                                           class="tiles-input w-full"
-                                           type="text"
-                                           pInputText
-                                           [(ngModel)]="renderBlockVertexLimitInput"
-                                           (ngModelChange)="onRenderBlockVertexLimitInputChange($event)"
-                                           (keydown.enter)="applyRenderBlockVertexLimit()"/>
-                                    <p-slider [(ngModel)]="renderBlockVertexLimitInput"
-                                              (ngModelChange)="onRenderBlockVertexLimitSliderChange($event)"
-                                              class="w-full"
-                                              [min]="MIN_RENDER_BLOCK_VERTEX_LIMIT"
-                                              [max]="MAX_RENDER_BLOCK_VERTEX_LIMIT"
-                                              [step]="256"></p-slider>
-                                </div>
-                                <p-button (click)="applyRenderBlockVertexLimit()"
-                                          label=""
-                                          icon="pi pi-check"
-                                          [disabled]="!renderBlockVertexLimitChanged"></p-button>
-                            </div>
-                        </div>
-                        <div class="button-container">
-                            <label>Debug Render Blocks
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Draw the actual Morton block boundaries, tile count, and source-geometry vertex count."
-                                   tooltipPosition="top"></i>
-                            </label>
-                            <p-toggleswitch
-                                [(ngModel)]="stateService.debugRenderBlocks"></p-toggleswitch>
-                        </div>
-                        <div class="button-container">
-                            <label>Stable Geometry While Navigating
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Keep the currently installed Deck layers unchanged while the camera moves, then apply accumulated tile and buffer updates when navigation ends."
-                                   tooltipPosition="top"></i>
-                            </label>
-                            <p-toggleswitch
-                                [(ngModel)]="stateService.deferPresentationDuringInteraction"></p-toggleswitch>
-                        </div>
-                        <div class="button-container">
-                            <label>Merge Render Blocks
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Merge immutable Morton render blocks into larger Deck buffer pages. Disable this to compare direct per-block layers against buffer-arena consolidation."
-                                   tooltipPosition="top"></i>
-                            </label>
-                            <p-toggleswitch
-                                [(ngModel)]="stateService.renderBufferArenaEnabled"></p-toggleswitch>
-                        </div>
                     </p-tabpanel>
 
                     <p-tabpanel value="storage">
@@ -513,8 +454,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     lowFiTileThresholdInput: number | string = DEFAULT_LOW_FI_TILE_THRESHOLD;
     renderWorkerCountInput: number | string =
         AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
-    renderBlockVertexLimitInput: number | string =
-        DEFAULT_RENDER_BLOCK_VERTEX_LIMIT;
     mapZoomStepInput: number | string = DEFAULT_MAP_ZOOM_STEP;
     tilesToLoadChanged: boolean = false;
     inspectionsLimitChanged: boolean = false;
@@ -522,7 +461,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     locationSearchResultLimitChanged: boolean = false;
     lowFiTileThresholdChanged: boolean = false;
     renderWorkerCountChanged: boolean = false;
-    renderBlockVertexLimitChanged: boolean = false;
     mapZoomStepChanged: boolean = false;
     toggleOptions = [
         {label: 'Off', value: false},
@@ -596,12 +534,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
                 workerCount => {
                     this.renderWorkerCountInput = workerCount;
                     this.updateRenderWorkerCountChangeState();
-                }
-            ),
-            this.stateService.renderBlockVertexLimitState.subscribe(
-                vertexLimit => {
-                    this.renderBlockVertexLimitInput = vertexLimit;
-                    this.updateRenderBlockVertexLimitChangeState();
                 }
             )
         );
@@ -702,15 +634,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.lowFiTileThresholdInput = this.stateService.lowFiTileThreshold;
         this.renderWorkerCountInput =
             this.stateService.tileSubsetRenderWorkerCount;
-        this.renderBlockVertexLimitInput =
-            this.stateService.renderBlockVertexLimit;
         this.tilesToLoadChanged = false;
         this.inspectionsLimitChanged = false;
         this.drillPickRadiusChanged = false;
         this.locationSearchResultLimitChanged = false;
         this.lowFiTileThresholdChanged = false;
         this.renderWorkerCountChanged = false;
-        this.renderBlockVertexLimitChanged = false;
         this.mapZoomStepChanged = false;
         this.refreshHoverLabelFieldOptions();
         this.dialogStack.bringToFront(this.preferencesDialog);
@@ -884,28 +813,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.renderWorkerCountChanged = false;
     }
 
-    /** Applies the soft source-geometry vertex limit for aggregate blocks. */
-    applyRenderBlockVertexLimit() {
-        if (!this.renderBlockVertexLimitChanged) {
-            return;
-        }
-        const vertexLimit = Number(this.renderBlockVertexLimitInput);
-        if (!Number.isInteger(vertexLimit) ||
-            vertexLimit < MIN_RENDER_BLOCK_VERTEX_LIMIT ||
-            vertexLimit > MAX_RENDER_BLOCK_VERTEX_LIMIT) {
-            this.messageService.showError(
-                `Please enter a render block vertex limit between ` +
-                `${MIN_RENDER_BLOCK_VERTEX_LIMIT} and ` +
-                `${MAX_RENDER_BLOCK_VERTEX_LIMIT}.`
-            );
-            return;
-        }
-        const normalized = clampRenderBlockVertexLimit(vertexLimit);
-        this.renderBlockVertexLimitInput = normalized;
-        this.stateService.renderBlockVertexLimit = normalized;
-        this.renderBlockVertexLimitChanged = false;
-    }
-
     /** Applies a manually chosen map zoom step for wheel and keyboard deck interactions. */
     applyMapZoomStep() {
         if (!this.mapZoomStepChanged) {
@@ -1056,12 +963,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.updateRenderWorkerCountChangeState();
     }
 
-    /** Tracks slider edits for the aggregate render-block vertex limit. */
-    protected onRenderBlockVertexLimitSliderChange(value: number) {
-        this.renderBlockVertexLimitInput = value;
-        this.updateRenderBlockVertexLimitChangeState();
-    }
-
     /** Tracks free-form edits for the tile-load input. */
     protected onTilesToLoadInputChange(value: number | string) {
         this.tilesToLoadInput = value;
@@ -1104,12 +1005,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.updateRenderWorkerCountChangeState();
     }
 
-    /** Tracks free-form edits for the render-block vertex limit. */
-    protected onRenderBlockVertexLimitInputChange(value: number | string) {
-        this.renderBlockVertexLimitInput = value;
-        this.updateRenderBlockVertexLimitChangeState();
-    }
-
     /** Updates the dirty flag for the low-fi threshold control. */
     private updateLowFiTileThresholdChangeState(): void {
         const threshold = Number(this.lowFiTileThresholdInput);
@@ -1136,20 +1031,6 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.stateService.tileSubsetRenderWorkerCount;
     }
 
-    /** Updates the dirty flag for the render-block vertex limit control. */
-    private updateRenderBlockVertexLimitChangeState(): void {
-        const vertexLimit = Number(this.renderBlockVertexLimitInput);
-        if (!Number.isInteger(vertexLimit) ||
-            vertexLimit < MIN_RENDER_BLOCK_VERTEX_LIMIT ||
-            vertexLimit > MAX_RENDER_BLOCK_VERTEX_LIMIT) {
-            this.renderBlockVertexLimitChanged = true;
-            return;
-        }
-        this.renderBlockVertexLimitChanged =
-            clampRenderBlockVertexLimit(vertexLimit) !==
-            this.stateService.renderBlockVertexLimit;
-    }
-
     /** Determines whether a numeric preference control still has an unapplied change. */
     private hasPendingNumericChange(value: number | string, currentValue: number): boolean {
         if (typeof value === "string" && value.trim().length === 0) {
@@ -1172,8 +1053,4 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
     protected readonly MAX_TILE_SUBSET_RENDER_WORKER_COUNT =
         MAX_TILE_SUBSET_RENDER_WORKER_COUNT;
-    protected readonly MIN_RENDER_BLOCK_VERTEX_LIMIT =
-        MIN_RENDER_BLOCK_VERTEX_LIMIT;
-    protected readonly MAX_RENDER_BLOCK_VERTEX_LIMIT =
-        MAX_RENDER_BLOCK_VERTEX_LIMIT;
 }

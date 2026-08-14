@@ -1,12 +1,8 @@
 import {describe, expect, it} from "vitest";
 import {
     AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
-    clampRenderBlockVertexLimit,
     clampTileSubsetRenderWorkerCount,
-    DEFAULT_RENDER_BLOCK_VERTEX_LIMIT,
-    MAX_RENDER_BLOCK_VERTEX_LIMIT,
-    MAX_TILE_SUBSET_RENDER_WORKER_COUNT,
-    MIN_RENDER_BLOCK_VERTEX_LIMIT
+    MAX_TILE_SUBSET_RENDER_WORKER_COUNT
 } from "./tile-render-policy";
 
 describe("tile render policy", () => {
@@ -21,16 +17,4 @@ describe("tile render policy", () => {
         );
     });
 
-    it("clamps aggregate block budgets while retaining a useful default", () => {
-        expect(clampRenderBlockVertexLimit(undefined)).toBe(
-            DEFAULT_RENDER_BLOCK_VERTEX_LIMIT
-        );
-        expect(clampRenderBlockVertexLimit(1)).toBe(
-            MIN_RENDER_BLOCK_VERTEX_LIMIT
-        );
-        expect(clampRenderBlockVertexLimit(12345.9)).toBe(12345);
-        expect(clampRenderBlockVertexLimit(Number.MAX_SAFE_INTEGER)).toBe(
-            MAX_RENDER_BLOCK_VERTEX_LIMIT
-        );
-    });
 });

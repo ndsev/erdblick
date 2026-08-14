@@ -19,12 +19,34 @@ namespace erdblick
  */
 struct BoundEvalFun
 {
+    using EvalRef = simfil::Value(*)(void*, std::string const&);
+    using ReportIssueRef = void(*)(
+        void*,
+        std::string const&,
+        std::string const&,
+        std::string const&,
+        uint32_t);
+
     std::function<simfil::Value(std::string const& expr)> eval_;
     std::function<void(
         std::string const& property,
         std::string const& expression,
         std::string const& message,
         uint32_t ruleIndex)> reportIssue_;
+    void* context_ = nullptr;
+    EvalRef evalRef_ = nullptr;
+    ReportIssueRef reportIssueRef_ = nullptr;
+
+    /** Evaluate through the allocation-free reference or owning fallback callback. */
+    [[nodiscard]] simfil::Value evaluate(std::string const& expression) const;
+    /** Report a style issue through the configured reference or owning callback. */
+    void reportIssue(
+        std::string const& property,
+        std::string const& expression,
+        std::string const& message,
+        uint32_t ruleIndex) const;
+    /** Return whether either callback representation can report style issues. */
+    [[nodiscard]] bool hasIssueReporter() const;
 };
 
 /**
@@ -161,6 +183,8 @@ public:
     [[nodiscard]] int dashPattern() const;
     /** Resolve arrow direction, including optional expression-backed overrides. */
     [[nodiscard]] Arrow arrow(BoundEvalFun const& evalFun) const;
+    /** Return a compile-time arrow mode, or no value when it depends on entry data. */
+    [[nodiscard]] std::optional<Arrow> constantArrow() const;
     /** Return the outline RGBA color for point/icon/label rendering. */
     [[nodiscard]] glm::fvec4 const& outlineColor() const;
     /** Return the outline thickness in renderer-specific units. */
@@ -256,11 +280,19 @@ private:
     }
 
 public:
+    /** Dense integer lookup used by small enum-like categorical scales. */
+    template<typename T>
+    struct DenseIntegerScale {
+        int64_t minimum = 0;
+        std::vector<std::optional<T>> values;
+    };
+
     /** Typed literal stop used by the Erdblick-only color-scale presentation. */
     struct ColorScaleStop {
         using Key = std::variant<bool, int64_t, double, std::string>;
         Key key;
         glm::fvec4 color;
+        std::optional<double> numericKey;
     };
     struct ColorScale {
         enum class Mode { Linear, Categorical };
@@ -268,16 +300,19 @@ public:
         std::string expression;
         std::vector<ColorScaleStop> stops;
         std::optional<glm::fvec4> fallback;
+        std::optional<DenseIntegerScale<glm::fvec4>> denseIntegerStops;
     };
     struct WidthScaleStop {
         ColorScaleStop::Key key;
         float width = 0.0f;
+        std::optional<double> numericKey;
     };
     struct WidthScale {
         ColorScale::Mode mode = ColorScale::Mode::Linear;
         std::string expression;
         std::vector<WidthScaleStop> stops;
         std::optional<float> fallback;
+        std::optional<DenseIntegerScale<float>> denseIntegerStops;
     };
     /** Literal screen-space glow material for vector geometry. */
     struct Glow {
@@ -296,6 +331,7 @@ private:
     bool selectable_ = true;
     uint32_t geometryTypes_ = 0;  // bitfield from GeomType enum
     std::optional<std::string> geometryName_;
+    std::optional<std::string> exactType_;
     std::optional<std::regex> type_;
     std::string filter_;
     glm::fvec4 color_{.0, .0, .0, 1.};
