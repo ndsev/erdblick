@@ -1595,9 +1595,9 @@ rules:
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
         static_cast<int>(FeatureStyleRule::AnyFidelity));
-    renderer.addTileSubsetLayer(TileSubsetLayer(subset));
+    installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
     REQUIRE(renderer.vertexCount() == 0);
-    REQUIRE(renderer.runtimeStyleIssues().empty());
+    REQUIRE(RendererPacketView(renderer).issues().empty());
 }
