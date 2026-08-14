@@ -719,6 +719,52 @@ std::string compactValidityOffset(InspectionNode const& offsetNode)
     return value;
 }
 
+/** Render a logical attribute-point index or inclusive range as one compact token. */
+std::optional<std::string> compactAttrPointReference(InspectionNode const& node)
+{
+    auto const key = inspectionKeyString(node);
+    auto const* point = key == "attrPointIndex"
+        ? &node
+        : directChildByKey(node, "attrPointIndex");
+    if (point) {
+        if (auto const* index = directChildByKey(*point, "index")) {
+            return fmt::format("AP #{}", index->value_.toString());
+        }
+    }
+
+    auto const* range = key == "attrPointIndexRange"
+        ? &node
+        : directChildByKey(node, "attrPointIndexRange");
+    if (range) {
+        auto const* start = directChildByKey(*range, "start");
+        auto const* end = directChildByKey(*range, "end");
+        if (start && end) {
+            return fmt::format(
+                "AP #{}–#{}",
+                start->value_.toString(),
+                end->value_.toString());
+        }
+    }
+    return std::nullopt;
+}
+
+/** Build the row-local summary shown while attribute-point details are collapsed. */
+std::optional<ValueBubble> attrPointBubbleForNode(InspectionNode const& node)
+{
+    auto label = compactAttrPointReference(node);
+    if (!label) {
+        return std::nullopt;
+    }
+    auto const* target = directChildByKey(
+        node,
+        inspectionKeyString(node) == "attrPointIndex" ? "index" : "start");
+    return makeValueBubble(
+        std::move(*label),
+        target ? target->nodeId_ : node.nodeId_,
+        "attr-point",
+        "attr-point");
+}
+
 /** Label and propagation strength for one compact validity bubble. */
 struct CompactValidityBubble {
     std::string label_;
@@ -754,6 +800,10 @@ CompactValidityBubble compactValidityBubble(InspectionNode const& validityNode)
             parts.push_back(fmt::format("{} to {}", compactValidityOffset(*start), compactValidityOffset(*end)));
             hasCompleteDirectionOnly = false;
         }
+    }
+    if (auto attrPoint = compactAttrPointReference(validityNode)) {
+        parts.push_back(std::move(*attrPoint));
+        hasCompleteDirectionOnly = false;
     }
 
     if (parts.empty()) {
@@ -798,7 +848,9 @@ BubblePropagation validityBubblesForNode(InspectionNode const& node)
                 || directChildByKey(child, "featureId")
                 || directChildByKey(child, "transitionNumber")
                 || directChildByKey(child, "start")
-                || directChildByKey(child, "point"));
+                || directChildByKey(child, "point")
+                || directChildByKey(child, "attrPointIndex")
+                || directChildByKey(child, "attrPointIndexRange"));
         if (!hasValidityHoverId && !looksLikeIndexedValidity) {
             continue;
         }
@@ -1011,6 +1063,11 @@ BubblePropagation buildPropagatedValueBubbles(InspectionNode& node, std::string_
     if (!monthsOfYearBubbles.empty()) {
         node.valueBubbles_ = std::move(monthsOfYearBubbles);
         return {.bubbles_ = node.valueBubbles_};
+    }
+
+    if (auto attrPointBubble = attrPointBubbleForNode(node)) {
+        node.valueBubbles_.push_back(*attrPointBubble);
+        return {.bubbles_ = {std::move(*attrPointBubble)}};
     }
 
     auto booleanArrayBitsBubble = booleanArrayBitsBubbleForNode(node);
@@ -1424,6 +1481,9 @@ void InspectionConverter::convertValidity(
     auto scope = push(key, key.as<std::string>());
     auto renderValidity = [this](Validity const& v) -> bool {
 
+        auto attrPointIndex = v.attrPointIndex();
+        auto attrPointIndexRange = v.attrPointIndexRange();
+
         if (auto direction = v.direction()) {
             auto dirScope = push("direction", "direction", ValueType::String);
             switch (direction) {
@@ -1446,6 +1506,9 @@ void InspectionConverter::convertValidity(
         if (auto featureId = v.featureId()) {
             auto featureIdScope = push("featureId", "featureId", ValueType::FeatureId);
             assignFeatureReference(*featureIdScope, featureId);
+            if (attrPointIndex || attrPointIndexRange) {
+                featureIdScope->geoJsonPath_.clear();
+            }
         }
 
         if (auto transitionNumber = v.transitionNumber()) {
@@ -1469,6 +1532,23 @@ void InspectionConverter::convertValidity(
                 push("toConnectedEnd", "toConnectedEnd", ValueType::String)->value_ =
                     convertString(*toConnectedEnd == Validity::End ? "END" : "START");
             }
+            return true;
+        }
+
+        if (attrPointIndex) {
+            convertAttrPointValidity(
+                convertString("attrPointIndex"),
+                attrPointIndex->sequence(),
+                attrPointIndex->index());
+            return true;
+        }
+
+        if (attrPointIndexRange) {
+            convertAttrPointValidity(
+                convertString("attrPointIndexRange"),
+                attrPointIndexRange->sequence(),
+                attrPointIndexRange->start(),
+                attrPointIndexRange->end());
             return true;
         }
 
@@ -1538,6 +1618,90 @@ void InspectionConverter::convertValidity(
         ++valIndex;
         return renderValidity(v);
     });
+}
+
+void InspectionConverter::convertAttrPointValidity(
+    JsValue const& key,
+    model_ptr<AttrPointSequence> const& sequence,
+    uint32_t start,
+    std::optional<uint32_t> end)
+{
+    auto scope = push(key, key.as<std::string>());
+
+    {
+        auto const sequencePath = std::string{"sequence.[\"$mapgetAttrPointSequence\"]"};
+        auto sequenceScope = push("sequence", RawPath{sequencePath}, ValueType::Number);
+        sequenceScope->value_ = JsValue(sequence->addr().index());
+        convertSourceDataReferences(sequence->sourceDataReferences(), *sequenceScope);
+    }
+
+    auto const appendSyntheticNumber = [this](std::string_view name, auto value) {
+        auto child = push(name, AbsolutePath{""}, ValueType::Number);
+        child->value_ = JsValue(value);
+    };
+    auto const appendSyntheticString = [this](std::string_view name, std::string_view value) {
+        auto child = push(name, AbsolutePath{""}, ValueType::String);
+        child->value_ = convertString(value);
+    };
+    auto const attrPointAt = [&sequence](uint32_t logicalIndex) -> model_ptr<AttrPoint> {
+        auto attrPoints = sequence->attrPoints();
+        for (uint32_t index = 0; index < sequence->attrPointCount(); ++index) {
+            auto candidate = attrPoints->attrPointAt(index);
+            if (candidate->index() == logicalIndex) {
+                return candidate;
+            }
+            if (candidate->index() > logicalIndex) {
+                break;
+            }
+        }
+        return {};
+    };
+    auto const appendLogicalPosition = [
+        this,
+        &sequence,
+        &attrPointAt,
+        &appendSyntheticNumber,
+        &appendSyntheticString
+    ](std::string_view name, uint32_t logicalIndex) {
+        {
+            auto indexScope = push(name, name, ValueType::Number);
+            indexScope->value_ = JsValue(logicalIndex);
+            if (auto attrPoint = attrPointAt(logicalIndex)) {
+                convertSourceDataReferences(attrPoint->sourceDataReferences(), *indexScope);
+            }
+        }
+
+        auto const prefix = name == "index" ? std::string{} : std::string{name};
+        auto const resolvedPointName = prefix.empty() ? "point" : prefix + "Point";
+        {
+            auto pointScope = push(
+                resolvedPointName,
+                AbsolutePath{""},
+                ValueType::Number | ValueType::ArrayBit);
+            pointScope->value_ = pointArrayValue(sequence->pointAt(logicalIndex));
+        }
+
+        auto const kindName = prefix.empty() ? "pointKind" : prefix + "PointKind";
+        appendSyntheticString(
+            kindName,
+            sequence->isAttrPoint(logicalIndex) ? "ATTRIBUTE_POINT" : "SHAPE_POINT");
+        auto const offsetName = prefix.empty() ? "metricOffsetMeters" : prefix + "MetricOffsetMeters";
+        appendSyntheticNumber(offsetName, sequence->metricOffsetAt(logicalIndex));
+    };
+
+    if (auto geometryName = sequence->geometry()->name()) {
+        appendSyntheticString("geometryName", *geometryName);
+    }
+    appendSyntheticNumber("geometryIndex", sequence->geometryIndex());
+    appendSyntheticNumber("positionCount", sequence->positionCount());
+
+    if (end) {
+        appendLogicalPosition("start", start);
+        appendLogicalPosition("end", *end);
+    }
+    else {
+        appendLogicalPosition("index", start);
+    }
 }
 
 void InspectionConverter::convertField(

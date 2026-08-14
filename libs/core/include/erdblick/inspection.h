@@ -175,6 +175,16 @@ public:
         mapget::model_ptr<mapget::MultiValidity> const& r,
         std::string const* hoverIdPrefix = nullptr);
 
+    /**
+     * Expand an interwoven attribute-point validity into source indices and
+     * resolved position details while keeping synthetic fields out of search paths.
+     */
+    void convertAttrPointValidity(
+        JsValue const& key,
+        mapget::model_ptr<mapget::AttrPointSequence> const& sequence,
+        uint32_t start,
+        std::optional<uint32_t> end = std::nullopt);
+
     /** Convert a field value while resolving the field id through the current string pool. */
     void convertField(simfil::StringId const& fieldId, simfil::ModelNode::Ptr const& value);
     /** Convert a named field value into its inspection representation. */

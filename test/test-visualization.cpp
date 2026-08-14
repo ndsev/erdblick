@@ -1080,6 +1080,74 @@ TEST_CASE("FeatureInspection exposes compact validity value bubbles", "[erdblick
     REQUIRE(std::find(labels.begin(), labels.end(), "+ Way.1") != labels.end());
 }
 
+TEST_CASE("FeatureInspection resolves attribute-point validity details", "[erdblick.inspection]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    REQUIRE(feature);
+
+    mapget::model_ptr<mapget::Geometry> geometry;
+    feature->geomOrNull()->forEachGeometry([&geometry](auto const& candidate) {
+        geometry = candidate;
+        return false;
+    });
+    REQUIRE(geometry);
+    geometry->setName("centerline");
+
+    auto const firstPoint = geometry->pointAt(0);
+    auto const lastPoint = geometry->pointAt(1);
+    auto sequence = tile->newAttrPointSequence(feature, geometry);
+    sequence->appendAttrPoint(1, (firstPoint + lastPoint) * 0.5);
+
+    auto attr = feature->attributeLayers()->newLayer("rules")->newAttribute("INDEXED_RULE");
+    attr->validity()->newAttrPointIndex(sequence, 1, mapget::Validity::Positive);
+    attr->validity()->newAttrPointIndexRange(sequence, 0, 2, mapget::Validity::Negative);
+
+    auto inspection = InspectionConverter().convert(feature);
+    auto const* attrNode = findInspectionNodeByKey(*inspection, "INDEXED_RULE");
+    REQUIRE(attrNode);
+    auto const* validityNode = findInspectionDirectChildByKey(*attrNode, "validity");
+    REQUIRE(validityNode);
+    auto validityLabels = inspectionValueBubbleLabels(*validityNode);
+    REQUIRE(std::find(validityLabels.begin(), validityLabels.end(), "+ Way.1 AP #1") != validityLabels.end());
+    REQUIRE(std::find(validityLabels.begin(), validityLabels.end(), "- Way.1 AP #0–#2") != validityLabels.end());
+
+    auto const& exactValidity = validityNode->at("children").at(0);
+    auto const* exactFeatureId = findInspectionDirectChildByKey(exactValidity, "featureId");
+    REQUIRE(exactFeatureId);
+    REQUIRE(exactFeatureId->value("value", std::string{}) == "Way.1");
+    REQUIRE_FALSE(exactFeatureId->contains("geoJsonPath"));
+
+    auto const* exactIndex = findInspectionDirectChildByKey(exactValidity, "attrPointIndex");
+    REQUIRE(exactIndex);
+    REQUIRE(inspectionValueBubbleLabels(*exactIndex) == std::vector<std::string>{"AP #1"});
+    auto const* sequenceId = findInspectionDirectChildByKey(*exactIndex, "sequence");
+    REQUIRE(sequenceId);
+    REQUIRE(sequenceId->at("value") == 0);
+    REQUIRE(sequenceId->value("geoJsonPath", std::string{}).ends_with(
+        "attrPointIndex.sequence.[\"$mapgetAttrPointSequence\"]"));
+    REQUIRE(findInspectionDirectChildByKey(*exactIndex, "geometryName")
+        ->value("value", std::string{}) == "centerline");
+    REQUIRE(findInspectionDirectChildByKey(*exactIndex, "geometryIndex")->at("value") == 0);
+    REQUIRE(findInspectionDirectChildByKey(*exactIndex, "positionCount")->at("value") == 3);
+    REQUIRE(findInspectionDirectChildByKey(*exactIndex, "index")->at("value") == 1);
+    REQUIRE(findInspectionDirectChildByKey(*exactIndex, "pointKind")
+        ->value("value", std::string{}) == "ATTRIBUTE_POINT");
+    REQUIRE_FALSE(findInspectionDirectChildByKey(*exactIndex, "pointKind")->contains("geoJsonPath"));
+    REQUIRE(findInspectionDirectChildByKey(*exactIndex, "metricOffsetMeters")->at("value").get<double>() > 0.0);
+
+    auto const& rangeValidity = validityNode->at("children").at(1);
+    auto const* range = findInspectionDirectChildByKey(rangeValidity, "attrPointIndexRange");
+    REQUIRE(range);
+    REQUIRE(inspectionValueBubbleLabels(*range) == std::vector<std::string>{"AP #0–#2"});
+    REQUIRE(findInspectionDirectChildByKey(*range, "start")->at("value") == 0);
+    REQUIRE(findInspectionDirectChildByKey(*range, "end")->at("value") == 2);
+    REQUIRE(findInspectionDirectChildByKey(*range, "startPointKind")
+        ->value("value", std::string{}) == "SHAPE_POINT");
+    REQUIRE(findInspectionDirectChildByKey(*range, "endPointKind")
+        ->value("value", std::string{}) == "SHAPE_POINT");
+}
+
 TEST_CASE("FeatureInspection keeps complete validity bubbles local when values add more information", "[erdblick.inspection]")
 {
     auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
