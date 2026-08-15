@@ -526,7 +526,6 @@ private:
     mutable double coordinateOriginCosine_ = 1.0;
     mutable double coordinateOriginTangent_ = 0.0;
     mutable double coordinateUnitsPerMeter_ = 0.0;
-    mutable double coordinateUnitsPerMeter2_ = 0.0;
     mutable bool coordinateScalesValid_ = false;
     uint32_t gpuSceneGeneration_ = 0U;
     uint32_t gpuPacketSequence_ = 0U;

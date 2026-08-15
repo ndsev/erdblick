@@ -556,6 +556,116 @@ rules:
 }
 
 TEST_CASE(
+    "TileSubsetLayerRenderer keeps geometry continuous across packet origins",
+    "[erdblick.subset-renderer][projection]")
+{
+    auto info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>(
+        "SubsetRendererProjectionPool");
+    auto tileId = mapget::TileId::fromWgs84(11.25, 50.0, 5);
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        tileId,
+        "SubsetRendererProjectionPool",
+        "TestMap",
+        info,
+        strings,
+        "roads",
+        1);
+    auto featureId = subset->newFeatureId(
+        "Road",
+        {{"roadId", int64_t{8}}});
+    auto channel = subset->newChannel(
+        "style-rule:0",
+        mapget::Scope::Feature,
+        1U << static_cast<uint8_t>(mapget::GeomType::Line),
+        "centerline");
+    std::array<mapget::Point, 2> const points{{
+        {11.25, 50.0, 0.0},
+        {11.251, 50.001, 0.0},
+    }};
+    channel->newFeatureEntry(
+        featureId,
+        lineGeometryWithPoints(*subset, "centerline", points),
+        {});
+
+    auto style = rendererStyle(R"yaml(
+name: Projection
+version: 2
+rules:
+  - type: Road
+    geometry: line
+    geometry-name: centerline
+    color: "#ff0000"
+    width: 2
+)yaml");
+    REQUIRE(style.isValid());
+
+    auto renderFirstPoint = [&](double originLongitude,
+                                double originLatitude) {
+        TileSubsetLayerRenderer renderer(
+            0,
+            "Features:TestMap:Road:0",
+            style,
+            static_cast<int>(FeatureStyleRule::NoHighlight),
+            static_cast<int>(FeatureStyleRule::AnyFidelity));
+        renderer.setCoordinateOrigin(
+            originLongitude,
+            originLatitude,
+            0.0);
+        installSubset(renderer, TileSubsetLayer(subset));
+        renderer.run();
+        auto const paths = RendererPacketView(renderer).paths();
+        REQUIRE(paths.size() == 1U);
+        REQUIRE(paths.front().points.size() == 2U);
+        return paths.front().points.front();
+    };
+    auto reconstructCommonPosition = [](double originLongitude,
+                                        double originLatitude,
+                                        mapget::Point const& localPoint) {
+        constexpr double pi = 3.14159265358979323846;
+        constexpr double worldSize = 512.0;
+        constexpr double earthCircumferenceMeters = 40.03e6;
+        auto const originLatitudeRadians = originLatitude * pi / 180.0;
+        auto const unitsPerMeter = worldSize /
+            earthCircumferenceMeters /
+            std::abs(std::cos(originLatitudeRadians));
+        auto const originWorldX = worldSize *
+            ((originLongitude * pi / 180.0) + pi) / (2.0 * pi);
+        auto const originWorldY = worldSize *
+            (pi + std::log(std::tan(
+                pi * 0.25 + originLatitudeRadians * 0.5))) /
+            (2.0 * pi);
+        return mapget::Point{
+            originWorldX + localPoint.x * unitsPerMeter,
+            originWorldY + localPoint.y * unitsPerMeter,
+            localPoint.z,
+        };
+    };
+
+    auto const west = reconstructCommonPosition(
+        8.4375,
+        47.8125,
+        renderFirstPoint(8.4375, 47.8125));
+    auto const east = reconstructCommonPosition(
+        14.0625,
+        47.8125,
+        renderFirstPoint(14.0625, 47.8125));
+    REQUIRE(std::abs(west.x - east.x) < 1e-5);
+    REQUIRE(std::abs(west.y - east.y) < 1e-5);
+
+    auto const south = reconstructCommonPosition(
+        11.25,
+        47.8125,
+        renderFirstPoint(11.25, 47.8125));
+    auto const north = reconstructCommonPosition(
+        11.25,
+        53.4375,
+        renderFirstPoint(11.25, 53.4375));
+    REQUIRE(std::abs(south.x - north.x) < 1e-5);
+    REQUIRE(std::abs(south.y - north.y) < 1e-5);
+}
+
+TEST_CASE(
     "TileSubsetLayerRenderer fuses compatible bundled line strokes",
     "[erdblick.subset-renderer][performance]")
 {

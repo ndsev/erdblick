@@ -287,9 +287,9 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
         });
     });
 
-    it("holds the worker credit until one completed packet is frame-admitted", () => {
-        const callbacks: FrameRequestCallback[] = [];
-        vi.stubGlobal("requestAnimationFrame", vi.fn(callback => {
+    it("holds the worker credit until one completed packet is task-admitted", () => {
+        const callbacks: Array<() => void> = [];
+        vi.stubGlobal("setTimeout", vi.fn((callback: () => void) => {
             callbacks.push(callback);
             return callbacks.length;
         }));
@@ -307,7 +307,7 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
                 completed: 0
             });
 
-            callbacks.shift()!(performance.now());
+            callbacks.shift()!();
 
             expect(admit).toHaveBeenCalledTimes(1);
             expect(resolve).toHaveBeenCalledTimes(1);
@@ -325,8 +325,8 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
     });
 
     it("retains worker credit and revision state across bounded fragments", () => {
-        const callbacks: FrameRequestCallback[] = [];
-        vi.stubGlobal("requestAnimationFrame", vi.fn(callback => {
+        const callbacks: Array<() => void> = [];
+        vi.stubGlobal("setTimeout", vi.fn((callback: () => void) => {
             callbacks.push(callback);
             return callbacks.length;
         }));
@@ -338,7 +338,7 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
                 new Uint8Array(fragmentBytes)
             ]);
 
-            callbacks.shift()!(performance.now());
+            callbacks.shift()!();
             expect(admit).toHaveBeenCalledTimes(1);
             expect(resolve).not.toHaveBeenCalled();
             expect(service.debugSnapshot()).toMatchObject({
@@ -349,7 +349,7 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
             });
             expect(callbacks).toHaveLength(1);
 
-            callbacks.shift()!(performance.now());
+            callbacks.shift()!();
             expect(admit).toHaveBeenCalledTimes(2);
             expect(resolve).toHaveBeenCalledTimes(1);
             expect(service.debugSnapshot()).toMatchObject({
@@ -377,8 +377,8 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
     });
 
     it("rejects a worker response whose task identity changed in flight", () => {
-        const callbacks: FrameRequestCallback[] = [];
-        vi.stubGlobal("requestAnimationFrame", vi.fn(callback => {
+        const callbacks: Array<() => void> = [];
+        vi.stubGlobal("setTimeout", vi.fn((callback: () => void) => {
             callbacks.push(callback);
             return callbacks.length;
         }));
@@ -413,9 +413,9 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
         }
     });
 
-    it("admits several cheap worker results in one animation frame", () => {
-        const callbacks: FrameRequestCallback[] = [];
-        vi.stubGlobal("requestAnimationFrame", vi.fn(callback => {
+    it("admits several cheap worker results in one task", () => {
+        const callbacks: Array<() => void> = [];
+        vi.stubGlobal("setTimeout", vi.fn((callback: () => void) => {
             callbacks.push(callback);
             return callbacks.length;
         }));
@@ -482,7 +482,7 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
 
             expect(callbacks).toHaveLength(1);
             expect(service.debugSnapshot().ready).toBe(2);
-            callbacks.shift()!(performance.now());
+            callbacks.shift()!();
             expect(resolves[0]).toHaveBeenCalledTimes(1);
             expect(resolves[1]).toHaveBeenCalledTimes(1);
             expect(admits[0]).toHaveBeenCalledTimes(1);

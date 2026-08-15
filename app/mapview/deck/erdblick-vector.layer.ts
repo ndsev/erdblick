@@ -15,7 +15,11 @@ import type {
 import { Geometry, Model } from "@luma.gl/engine";
 
 import { GpuMaterialFlag, GpuPrimitiveKind } from "./gpu-render-packet";
-import { GpuScene, type GpuSceneMaterialStore } from "./gpu-scene";
+import {
+  GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP,
+  GpuScene,
+  type GpuSceneMaterialStore,
+} from "./gpu-scene";
 import {
   ARROW_FRAGMENT_SHADER,
   ARROW_VERTEX_SHADER,
@@ -285,6 +289,7 @@ function sameSceneShaderProps(
     left.zIndexTexture === right.zIndexTexture &&
     left.lookupTextureWidth === right.lookupTextureWidth &&
     left.flattenZ === right.flattenZ &&
+    left.primitiveDepthBias === right.primitiveDepthBias &&
     left.disabledPickIndices.length === right.disabledPickIndices.length &&
     left.disabledPickIndices.every(
       (value, index) => value === right.disabledPickIndices[index],
@@ -556,7 +561,6 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
 
   /** Return persistent models so Deck can apply projection and picking module props. */
   override getModels(): Model[] {
-    this.syncModels();
     return [...this.materialModels.values()]
       .sort(compareMaterialModels)
       .map((item) => item.model);
@@ -607,17 +611,23 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
 
   /** Bind compact scene tables and issue exactly one draw per material model. */
   override draw({ renderPass }: { renderPass: unknown }): void {
-    this.syncModels();
     const shaderProps = this.currentSceneShaderProps();
     if (!shaderProps) {
       return;
     }
     for (const item of [...this.materialModels.values()].sort(compareMaterialModels)) {
-      if (item.source.store.highWaterRecord <= 0) {
+      if (item.source.store.presentedHighWaterRecord <= 0) {
         continue;
       }
       if (item.shaderPropsRevision !== this.sceneShaderPropsRevision) {
-        item.model.shaderInputs.setProps({ gpuScene: { ...shaderProps } });
+        item.model.shaderInputs.setProps({
+          gpuScene: {
+            ...shaderProps,
+            primitiveDepthBias:
+              primitiveRenderPass(item.source.kind) *
+              GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP,
+          },
+        });
         item.shaderPropsRevision = this.sceneShaderPropsRevision;
       }
       if (!item.model.draw(renderPass as never)) {
@@ -640,6 +650,7 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
       zIndexTexture,
       lookupTextureWidth: this.props.scene.lookupTextureWidth,
       flattenZ: this.props.flattenZ,
+      primitiveDepthBias: 0,
       disabledPickIndices: [...this.disabledPickIndices],
     };
     if (!sameSceneShaderProps(this.sceneShaderProps, next)) {
@@ -651,7 +662,8 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
 
   /** Create/rebind only low-cardinality material models after scene mutation. */
   private syncModels(): void {
-    if (!this.initialized || this.sceneRevision === this.props.scene.revision) {
+    if (!this.initialized ||
+        this.sceneRevision === this.props.scene.presentationRevision) {
       return;
     }
     const desired = new Set<bigint>();
@@ -661,7 +673,7 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
         continue;
       }
       const store = source.store;
-      const buffer = store.buffer;
+      const buffer = store.presentedBuffer;
       if (!buffer) {
         continue;
       }
@@ -681,9 +693,9 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
         };
         this.materialModels.set(store.materialKey, item);
       }
-      if (item.bufferRevision !== store.bufferRevision) {
+      if (item.bufferRevision !== store.presentedBufferRevision) {
         item.model.setAttributes({ instances: buffer });
-        item.bufferRevision = store.bufferRevision;
+        item.bufferRevision = store.presentedBufferRevision;
       }
       if (source.kind === GpuPrimitiveKind.Icon) {
         item.model.setBindings({
@@ -693,7 +705,7 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
           ),
         });
       }
-      item.model.setInstanceCount(store.highWaterRecord);
+      item.model.setInstanceCount(store.presentedHighWaterRecord);
     }
     for (const [materialKey, item] of this.materialModels) {
       if (!desired.has(materialKey)) {
@@ -701,7 +713,7 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
         this.materialModels.delete(materialKey);
       }
     }
-    this.sceneRevision = this.props.scene.revision;
+    this.sceneRevision = this.props.scene.presentationRevision;
   }
 
   /** Build one material model whose instance buffer remains scene-owned. */
@@ -789,7 +801,6 @@ export class ErdblickVectorMaskLayer extends Layer<
 
   /** Return current mask models to Deck's internal identity render pass. */
   override getModels(): Model[] {
-    this.syncModels();
     return [...this.materialModels.values()]
       .sort(compareMaterialModels)
       .map((item) => item.model);
@@ -811,7 +822,6 @@ export class ErdblickVectorMaskLayer extends Layer<
 
   /** Draw shared stores with mask filtering and identity-color shader inputs. */
   override draw({ renderPass }: { renderPass: unknown }): void {
-    this.syncModels();
     const originTexture = this.props.scene.originTexture;
     const contributionTexture = this.props.scene.contributionTexture;
     const zIndexTexture = this.props.scene.zIndexTexture;
@@ -819,7 +829,7 @@ export class ErdblickVectorMaskLayer extends Layer<
       return;
     }
     for (const item of [...this.materialModels.values()].sort(compareMaterialModels)) {
-      if (item.source.store.highWaterRecord <= 0) {
+      if (item.source.store.presentedHighWaterRecord <= 0) {
         continue;
       }
       item.model.shaderInputs.setProps({
@@ -829,6 +839,9 @@ export class ErdblickVectorMaskLayer extends Layer<
           zIndexTexture,
           lookupTextureWidth: this.props.scene.lookupTextureWidth,
           flattenZ: this.props.flattenZ,
+          primitiveDepthBias:
+            primitiveRenderPass(item.source.kind) *
+            GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP,
           disabledPickIndices: [],
         },
         gpuSceneMask: {
@@ -848,14 +861,14 @@ export class ErdblickVectorMaskLayer extends Layer<
   private syncModels(): void {
     if (
       !this.initialized ||
-      (this.sceneRevision === this.props.scene.revision &&
+      (this.sceneRevision === this.props.scene.presentationRevision &&
         this.synchronizedConfigurationRevision === this.configurationRevision)
     ) {
       return;
     }
     const desired = new Set<bigint>();
     for (const source of this.props.scene.materialStores()) {
-      if (!this.accepts(source) || !source.store.buffer) {
+      if (!this.accepts(source) || !source.store.presentedBuffer) {
         continue;
       }
       const materialKey = source.store.materialKey;
@@ -875,9 +888,9 @@ export class ErdblickVectorMaskLayer extends Layer<
         };
         this.materialModels.set(materialKey, item);
       }
-      if (item.bufferRevision !== source.store.bufferRevision) {
-        item.model.setAttributes({ instances: source.store.buffer });
-        item.bufferRevision = source.store.bufferRevision;
+      if (item.bufferRevision !== source.store.presentedBufferRevision) {
+        item.model.setAttributes({ instances: source.store.presentedBuffer });
+        item.bufferRevision = source.store.presentedBufferRevision;
       }
       if (source.kind === GpuPrimitiveKind.Icon) {
         item.model.setBindings({
@@ -887,7 +900,7 @@ export class ErdblickVectorMaskLayer extends Layer<
           ),
         });
       }
-      item.model.setInstanceCount(source.store.highWaterRecord);
+      item.model.setInstanceCount(source.store.presentedHighWaterRecord);
     }
     for (const [materialKey, item] of this.materialModels) {
       if (!desired.has(materialKey)) {
@@ -895,7 +908,7 @@ export class ErdblickVectorMaskLayer extends Layer<
         this.materialModels.delete(materialKey);
       }
     }
-    this.sceneRevision = this.props.scene.revision;
+    this.sceneRevision = this.props.scene.presentationRevision;
     this.synchronizedConfigurationRevision = this.configurationRevision;
   }
 

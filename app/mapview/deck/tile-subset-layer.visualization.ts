@@ -41,8 +41,6 @@ import {
     type GpuResourceRequestView,
     type GpuRuntimeIssueView
 } from "./gpu-render-packet";
-import type {ErdblickVectorLayer} from "./erdblick-vector.layer";
-import type {GpuTextLayerHost} from "./gpu-text-layer.host";
 import type {GpuSceneMaskController} from "./gpu-scene-mask.controller";
 import {gpuIconAtlasService} from "./gpu-icon-atlas.service";
 
@@ -54,8 +52,6 @@ interface DeckScene {
     sceneMode?: SceneMode;
     device?: Device | null;
     gpuScene?: GpuScene | null;
-    gpuVectorLayers?: readonly ErdblickVectorLayer[];
-    gpuTextLayerHost?: GpuTextLayerHost | null;
     gpuMaskController?: GpuSceneMaskController | null;
 }
 
@@ -444,7 +440,7 @@ export class TileSubsetLayerVisualization {
         this.retireContributions(sceneHandle, [identity]);
     }
 
-    /** Remove many persistent vector owners with one scene-host refresh. */
+    /** Remove many persistent vector owners in one scene transaction. */
     static retireContributions(
         sceneHandle: IRenderSceneHandle | null,
         identities: Iterable<string>
@@ -454,15 +450,7 @@ export class TileSubsetLayerVisualization {
         }
         const scene = (sceneHandle.scene as DeckScene | undefined)
             ?.gpuScene ?? null;
-        const labelsChanged = scene?.removeContributions(identities) ?? false;
-        for (const layer of (sceneHandle.scene as DeckScene | undefined)
-            ?.gpuVectorLayers ?? []) {
-            layer.sceneChanged();
-        }
-        if (labelsChanged) {
-            (sceneHandle.scene as DeckScene | undefined)
-                ?.gpuTextLayerHost?.sceneChanged();
-        }
+        scene?.removeContributions(identities);
     }
 
     /** Permanently retire many independent tile owners as one GPU mutation. */
@@ -556,12 +544,6 @@ export class TileSubsetLayerVisualization {
             return null;
         }
         this.requestMissingIcons(applied.resourceRequests);
-        for (const layer of this.vectorLayers(sceneHandle)) {
-            layer.sceneChanged();
-        }
-        if (applied.labelsChanged) {
-            this.textLayerHost(sceneHandle)?.sceneChanged();
-        }
         const maskController = this.maskController(sceneHandle);
         maskController?.setOverlays(
             this.visualizationId,
@@ -569,8 +551,6 @@ export class TileSubsetLayerVisualization {
             this.coordinateOrigin,
             this.interactionOverlays
         );
-        maskController?.sceneChanged();
-
         const origin = this.parseCoordinateOrigin(
             result.bridge.coordinateOrigin
         );
@@ -787,20 +767,6 @@ export class TileSubsetLayerVisualization {
     /** Resolve the persistent scene owned by the current Deck view generation. */
     private gpuScene(sceneHandle: IRenderSceneHandle): GpuScene | null {
         return (sceneHandle.scene as DeckScene | undefined)?.gpuScene ?? null;
-    }
-
-    /** Resolve both fixed vector pass shells associated with the current scene. */
-    private vectorLayers(
-        sceneHandle: IRenderSceneHandle
-    ): readonly ErdblickVectorLayer[] {
-        return (sceneHandle.scene as DeckScene | undefined)?.gpuVectorLayers ?? [];
-    }
-
-    /** Resolve the single bounded-snapshot TextLayer host for the current scene. */
-    private textLayerHost(
-        sceneHandle: IRenderSceneHandle
-    ): GpuTextLayerHost | null {
-        return (sceneHandle.scene as DeckScene | undefined)?.gpuTextLayerHost ?? null;
     }
 
     /** Resolve the shared semantic mask/glow controller for this view. */

@@ -23,9 +23,10 @@ export interface RenderVector3 {
     z: number;
 }
 
-/** Exact selectable feature surface used as a 3D navigation or first-person camera target. */
+/** Physical surface used as a 3D navigation or first-person camera target. */
 export interface RenderNavigationTarget {
     position: [longitude: number, latitude: number, altitude: number];
+    /** Application identities represented by the surface; empty for ground or identity-less geometry. */
     featureIds: TileFeatureId[];
     surfaceNormal?: [east: number, north: number, up: number];
 }

@@ -102,6 +102,7 @@ export class ViewLayerController {
         {tileIds: readonly number[]; priorityTileIds: readonly number[]}
     >();
     private pendingDispatchQueued = false;
+    private nextStyledLayerDispatchIndex = 0;
     private readonly pendingVisualizationRenders =
         new Set<TileSubsetLayerVisualization>();
     private readonly unregisterDiagnostics: () => void;
@@ -246,6 +247,15 @@ export class ViewLayerController {
     /** Removes a Deck diagnostics provider when its renderer generation ends. */
     clearDeckPresentationDiagnostics(): void {
         this.renderService.clearDeckPresentationDiagnostics(this.viewIndex);
+    }
+
+    /** Report whether this view still has undispatched or worker-owned presentation work. */
+    hasPendingRenderWork(): boolean {
+        return this.pendingVisualizationRenders.size > 0 ||
+            [...this.styledLayers.values()].some(
+                owned => owned.pendingTiles.size > 0
+            ) ||
+            this.renderService.hasPendingWork(this.viewIndex);
     }
 
     /** Current regular-presentation styled layers, for diagnostics and grid aggregation. */
@@ -1362,20 +1372,29 @@ export class ViewLayerController {
                 this.startVisualizationRender(rerender);
                 continue;
             }
-            let dispatched = false;
-            for (const owned of this.styledLayers.values()) {
-                if (this.renderService.availableWorkerSlots() <= 0) {
-                    return;
-                }
-                if (this.dispatchOnePendingTile(owned)) {
-                    dispatched = true;
-                    break;
-                }
-            }
-            if (!dispatched) {
+            if (!this.dispatchOnePendingStyledLayerTile()) {
                 return;
             }
         }
+    }
+
+    /** Dispatches one tile while rotating fairly across all active styled layers. */
+    private dispatchOnePendingStyledLayerTile(): boolean {
+        const layers = [...this.styledLayers.values()];
+        if (!layers.length) {
+            this.nextStyledLayerDispatchIndex = 0;
+            return false;
+        }
+        const start = this.nextStyledLayerDispatchIndex % layers.length;
+        for (let offset = 0; offset < layers.length; ++offset) {
+            const index = (start + offset) % layers.length;
+            if (!this.dispatchOnePendingTile(layers[index])) {
+                continue;
+            }
+            this.nextStyledLayerDispatchIndex = (index + 1) % layers.length;
+            return true;
+        }
+        return false;
     }
 
     /** Turn one current pending tile into an independently replaceable scene owner. */

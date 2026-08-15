@@ -491,7 +491,7 @@ describe("GpuScene contribution lifecycle", () => {
             .toEqual([2, 7]);
     });
 
-    it("rank-compresses float64 orders that collapse when stored as floats", () => {
+    it("globally ranks exact z values at the presentation boundary", () => {
         const {device, scene} = createScene();
         for (const [index, zIndex] of [65535, 65535.0001].entries()) {
             const reservation = scene.prepareRender(
@@ -509,12 +509,13 @@ describe("GpuScene contribution lifecycle", () => {
 
         expect(new Set(new Float32Array([65535, 65535.0001])).size).toBe(1);
         expect(scene.snapshot().zIndexHighWater).toBe(2);
+        scene.publishPresentation();
         const texture = activeTexture(device, "erdblick-gpu-z-index-table");
-        const reranked = texture.writes.at(-1)!.data as Float32Array;
-        expect(reranked[4]).toBeGreaterThan(reranked[0]);
+        const ranked = texture.writes.at(-1)!.data as Float32Array;
+        expect(ranked[4]).toBeGreaterThan(ranked[0]);
     });
 
-    it("updates only the arriving z-index range when ordering is unchanged", () => {
+    it("defers whole-scene z-index ranking while packets are arriving", () => {
         const {device, scene} = createScene();
         const install = (identity: string, tileId: number) => {
             const reservation = scene.prepareRender(
@@ -536,6 +537,9 @@ describe("GpuScene contribution lifecycle", () => {
         install("second", 2);
 
         expect(texture.writes.length - writesBefore).toBe(1);
+        scene.publishPresentation();
+        expect(activeTexture(device, "erdblick-gpu-z-index-table"))
+            .not.toBe(texture);
     });
 
     it("rejects a superseded packet without replacing the visible revision", () => {
@@ -663,7 +667,7 @@ describe("GpuScene contribution lifecycle", () => {
         }]);
     });
 
-    it("keeps the prior revision when predecessor deactivation fails", () => {
+    it("keeps the prior presentation when predecessor deactivation fails", () => {
         const {device, scene} = createScene();
         const input = [{
             identity: "tile",
@@ -676,79 +680,24 @@ describe("GpuScene contribution lifecycle", () => {
             zIndex: 10
         }), initial);
         scene.finishRender(initial);
-
+        scene.publishPresentation();
+        const presentedRevision = scene.presentationRevision;
         const contributionLookup = activeTexture(
             device,
             "erdblick-gpu-contribution-table"
         );
-        const writeData = contributionLookup.writeData.bind(contributionLookup);
-        let writeCount = 0;
-        vi.spyOn(contributionLookup, "writeData").mockImplementation(
-            (data, options) => {
-                writeCount += 1;
-                if (writeCount === 2) {
-                    throw new Error("Synthetic predecessor clear failure.");
-                }
-                writeData(data, options);
-            }
-        );
         const replacement = scene.prepareRender("origin", [11, 48, 0], input);
 
-        expect(() => scene.applyPacket(pointPacket(replacement, {
+        scene.applyPacket(pointPacket(replacement, {
             featureId: "Road.2",
             zIndex: 10
-        }), replacement)).toThrow(/predecessor clear/);
+        }), replacement);
         scene.finishRender(replacement);
+        device.failNextTextureWriteId = "erdblick-gpu-contribution-table";
 
-        expect(scene.snapshot()).toMatchObject({
-            activeContributionCount: 1,
-            pickingHighWater: 1,
-            zIndexHighWater: 1
-        });
-        expect(scene.resolvePick(0)).toEqual([{
-            mapTileKey: "Features:Map:Layer:1:0",
-            featureId: "Road.1"
-        }]);
-    });
-
-    it("keeps both active order tables when a global rerank upload fails", () => {
-        const {device, scene} = createScene();
-        const initial = scene.prepareRender("origin", [11, 48, 0], [{
-            identity: "initial",
-            mapTileKey: "Features:Map:Layer:1:0",
-            styleOrder: 0
-        }]);
-        scene.applyPacket(pointPacket(initial, {
-            featureId: "Road.1",
-            zIndex: 10
-        }), initial);
-        scene.finishRender(initial);
-        const oldContributionTexture = scene.contributionTexture;
-        const oldZIndexTexture = scene.zIndexTexture;
-        const replacement = scene.prepareRender("origin", [11, 48, 0], [{
-            identity: "replacement",
-            mapTileKey: "Features:Map:Layer:2:0",
-            styleOrder: 1
-        }]);
-        device.failNextTextureWriteId = "erdblick-gpu-z-index-table";
-
-        expect(() => scene.applyPacket(pointPacket(replacement, {
-            featureId: "Road.2",
-            zIndex: 20
-        }), replacement)).toThrow(/Synthetic texture/);
-        scene.finishRender(replacement);
-
-        expect(scene.contributionTexture).toBe(oldContributionTexture);
-        expect(scene.zIndexTexture).toBe(oldZIndexTexture);
-        expect((oldContributionTexture as unknown as FakeTexture).destroyed)
-            .toBe(false);
-        expect((oldZIndexTexture as unknown as FakeTexture).destroyed)
-            .toBe(false);
-        expect(scene.snapshot()).toMatchObject({
-            activeContributionCount: 1,
-            pickingHighWater: 1,
-            zIndexHighWater: 1
-        });
+        expect(() => scene.publishPresentation()).toThrow(/Synthetic texture/);
+        expect(scene.presentationRevision).toBe(presentedRevision);
+        expect(contributionLookup.destroyed).toBe(false);
         expect(scene.resolvePick(0)).toEqual([{
             mapTileKey: "Features:Map:Layer:1:0",
             featureId: "Road.1"
@@ -801,6 +750,38 @@ describe("GpuScene contribution lifecycle", () => {
         expect(device.buffers).toHaveLength(2);
     });
 
+    it("retains a presented lookup texture while staging grows its allocation", () => {
+        const {scene} = createScene();
+        const install = (index: number) => {
+            const reservation = scene.prepareRender(
+                `origin-${index}`,
+                [11 + index / 1000, 48, 0],
+                [{
+                    identity: `tile-${index}`,
+                    mapTileKey: `Features:Map:Layer:${index}:0`,
+                    styleOrder: 0
+                }]
+            );
+            scene.applyPacket(pointPacket(reservation), reservation);
+            scene.finishRender(reservation);
+        };
+        for (let index = 0; index < 512; ++index) {
+            install(index);
+        }
+        scene.publishPresentation();
+        const presented = scene.originTexture as unknown as FakeTexture;
+
+        install(512);
+
+        expect(scene.originTexture).toBe(presented);
+        expect(presented.destroyed).toBe(false);
+        scene.publishPresentation();
+        expect(scene.originTexture).not.toBe(presented);
+        expect(presented.destroyed).toBe(false);
+        scene.releaseRetiredPresentationResources();
+        expect(presented.destroyed).toBe(true);
+    });
+
     it("rejects late worker reservations after context-owned resources die", () => {
         const {scene} = createScene();
         const reservation = scene.prepareRender("origin", [11, 48, 0], [{
@@ -824,7 +805,9 @@ describe("GpuScene contribution lifecycle", () => {
         }]);
         scene.applyPacket(pointPacket(first), first);
         scene.finishRender(first);
+        scene.publishPresentation();
         expect(scene.removeContribution("first-tile")).toBe(false);
+        scene.publishPresentation();
 
         const second = scene.prepareRender("second-origin", [12, 49, 0], [{
             identity: "second-tile",
@@ -858,6 +841,7 @@ describe("GpuScene contribution lifecycle", () => {
         };
         const stale = install("stale", 1, 7n, 31);
         install("retained", 2, 7n, 47);
+        scene.publishPresentation();
         const oldStore = device.buffers.at(-1)!;
         const oldStoreView = new DataView(
             oldStore.bytes.buffer,
@@ -868,6 +852,7 @@ describe("GpuScene contribution lifecycle", () => {
 
         scene.removeContribution("stale");
         expect(oldStoreView.getUint32(36, true)).toBe(oldRecordWord);
+        scene.publishPresentation();
 
         const replacement = install("replacement", 3, 8n, 59);
         expect(replacement.contributions[0].slot)
@@ -902,6 +887,7 @@ describe("GpuScene contribution lifecycle", () => {
         });
         const result = scene.applyPacket(packet, reservation);
         scene.finishRender(reservation);
+        scene.publishPresentation();
 
         expect(result.labelsChanged).toBe(true);
         expect(scene.labels()).toMatchObject([{
@@ -921,6 +907,11 @@ describe("GpuScene contribution lifecycle", () => {
         }).picks.size).toBe(1);
         expect(scene.removeContribution("tile")).toBe(true);
         expect(scene.labels()).toEqual([]);
+        expect(scene.resolvePick(0)).toEqual([{
+            mapTileKey: "Features:Map:Layer:1:0",
+            featureId: "Road.1"
+        }]);
+        scene.publishPresentation();
         expect(scene.resolvePick(0)).toEqual([]);
     });
 

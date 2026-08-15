@@ -160,6 +160,35 @@ describe("Deck rendered-feature picking", () => {
             .toHaveBeenCalledWith([top], false);
     });
 
+    it("picks after a touch tap when no pointer-down picking info is available", () => {
+        const view = createView() as any;
+        const tapped = {mapTileKey: "map/tile", featureId: "tapped"};
+        view.desktopDrillPickingEnabled = false;
+        view.stateService = {
+            focusedView: 0,
+            drillPickRadius: 5,
+            inspectionsLimit: 10,
+            marker: false,
+            unsetUnlockedSelections: vi.fn()
+        };
+        view.inspectionSelection = {inspectFeatureIds: vi.fn()};
+        view.coordinatesService = {
+            mouseClickCoordinates: {next: vi.fn()}
+        };
+        view.menuService = {tileOutline: {next: vi.fn()}};
+        view.drillPickFeatures = vi.fn(() => ({featureIds: [tapped]}));
+        view.pickCartographic = vi.fn(() => null);
+
+        view.onClick(
+            {x: 10, y: 20},
+            {srcEvent: {button: 0, pointerType: "touch", ctrlKey: false}}
+        );
+
+        expect(view.drillPickFeatures).toHaveBeenCalledWith({x: 10, y: 20}, 5, 1);
+        expect(view.inspectionSelection.inspectFeatureIds)
+            .toHaveBeenCalledWith([tapped], false);
+    });
+
     it("uses one bounded asynchronous rectangle query with the same eligible layer set", async () => {
         const view = createView();
         const baseLayer = {
@@ -200,23 +229,59 @@ describe("Deck rendered-feature picking", () => {
         });
     });
 
-    it("uses the configured drill-pick radius for hover", () => {
+    it("uses one asynchronous rectangle query with the configured hover radius", async () => {
         const view = createView() as any;
-        const hovered = {mapTileKey: "map/tile", featureId: "hovered"};
+        const baseLayer = {
+            id: "base-path",
+            props: {
+                drillPickEligible: true,
+                featureAddresses: [7],
+                subsetPickResolver: subsetPickResolver("map/tile")
+            }
+        };
+        const pickObjectsAsync = vi.fn(async () => [{layer: baseLayer, index: 0}]);
         view.deckCanvasPointerInside = true;
         view.stateService = {drillPickRadius: 6};
         view.inspectionSelection = {setHoveredFeatures: vi.fn()};
-        view.drillPickFeatures = vi.fn(() => ({featureIds: [hovered]}));
+        view.layerController = {hasPendingRenderWork: () => false};
+        view.deck = {
+            props: {layers: [baseLayer]},
+            getCanvas: () => ({clientWidth: 100, clientHeight: 100}),
+            pickObjectsAsync,
+            setProps: vi.fn()
+        };
 
-        view.processHoverPick({x: 12, y: 24});
+        await view.processHoverPick({x: 12, y: 24});
 
-        expect(view.drillPickFeatures).toHaveBeenCalledWith(
-            {x: 12, y: 24},
-            6,
-            10
-        );
+        expect(pickObjectsAsync).toHaveBeenCalledWith({
+            x: 6,
+            y: 18,
+            width: 13,
+            height: 13,
+            layerIds: ["base-path"],
+            maxObjects: 10
+        });
         expect(view.inspectionSelection.setHoveredFeatures)
-            .toHaveBeenCalledWith([hovered]);
+            .toHaveBeenCalledWith([{
+                mapTileKey: "map/tile",
+                featureId: "feature-7"
+            }]);
+    });
+
+    it("updates the ground navigation pivot without starting a hover pick while dragging", () => {
+        const view = createView() as any;
+        const groundTarget = {position: [11, 48, 0]};
+        view.deckCanvasPointerInside = true;
+        view.coordinatesService = {mouseMoveCoordinates: {next: vi.fn()}};
+        view.pickCartographic = vi.fn(() => ({lon: 11, lat: 48, alt: 0}));
+        view.groundNavigationTarget = vi.fn(() => groundTarget);
+        view.setHoverNavigationPivot = vi.fn();
+        view.scheduleHoverPickProcessing = vi.fn();
+
+        view.onCanvasPointerMove({offsetX: 12, offsetY: 24, buttons: 1});
+
+        expect(view.setHoverNavigationPivot).toHaveBeenCalledWith(groundTarget);
+        expect(view.scheduleHoverPickProcessing).not.toHaveBeenCalled();
     });
 
     it("snaps a thick picked path ribbon to its base XYZ centerline", () => {
@@ -420,6 +485,22 @@ describe("Deck rendered-feature picking", () => {
         expect(target?.surfaceNormal?.[0]).toBe(0);
         expect(target?.surfaceNormal?.[1]).toBeCloseTo(-Math.SQRT1_2, 6);
         expect(target?.surfaceNormal?.[2]).toBeCloseTo(Math.SQRT1_2, 6);
+    });
+
+    it("accepts an eligible physical surface without a logical feature identity", () => {
+        const view = createView();
+        const coordinate: [number, number, number] = [11, 48, 120];
+        (view as unknown as {deck: unknown}).deck = {
+            pickMultipleObjects: vi.fn(() => [{
+                layer: {props: {navigationAnchorEligible: true}},
+                coordinate
+            }])
+        };
+
+        const target = view.pickNavigationTarget({x: 500, y: 350});
+
+        expect(target?.position).toEqual(coordinate);
+        expect(target?.featureIds).toEqual([]);
     });
 
     it("uses a deeper surface orientation for the same topmost path feature", () => {

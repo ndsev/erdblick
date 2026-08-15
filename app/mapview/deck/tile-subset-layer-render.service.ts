@@ -22,8 +22,8 @@ import {
 const AUTO_WORKER_MIN = 2;
 const AUTO_WORKER_FALLBACK_CPU_COUNT = 4;
 const WORKER_CAP = 32;
-const MAX_ADMISSION_PACKETS_PER_FRAME = 16;
-const MAX_ADMISSION_BYTES_PER_FRAME = 4 * 1024 * 1024;
+const MAX_ADMISSION_PACKETS_PER_TASK = 16;
+const MAX_ADMISSION_BYTES_PER_TASK = 4 * 1024 * 1024;
 const MAX_ADMISSION_TIME_MS = 4;
 
 /** Choose a bounded worker count that leaves half the logical CPUs for the UI. */
@@ -197,7 +197,7 @@ export class TileSubsetLayerRenderService {
     private maxRoundTripMs = 0;
     private maxNativeMs = 0;
     private maxReadyPacketBytes = 0;
-    private admissionFrame: number | null = null;
+    private admissionTimer: ReturnType<typeof setTimeout> | null = null;
     private latestGeometryVertices = 0;
     private maxGeometryVertices = 0;
 
@@ -232,6 +232,14 @@ export class TileSubsetLayerRenderService {
     /** Count jobs which have worker credit, including queued and executing work. */
     visualizationQueueLength(): number {
         return this.queue.length + this.inFlight.size;
+    }
+
+    /** Return whether one view still owns queued, running, or admission-ready work. */
+    hasPendingWork(viewIndex: number): boolean {
+        return this.queue.some(pending => pending.task.viewIndex === viewIndex) ||
+            [...this.inFlight.values()].some(
+                pending => pending.task.viewIndex === viewIndex
+            );
     }
 
     /** Number of tile renders accepted without building a hidden queue. */
@@ -404,7 +412,7 @@ export class TileSubsetLayerRenderService {
     }
 
     /**
-     * Render one tile and install its vector packet through the frame-budgeted
+     * Render one tile and install its vector packet through the task-budgeted
      * admission callback before resolving the result promise.
      */
     render(
@@ -723,27 +731,31 @@ export class TileSubsetLayerRenderService {
     }
 
     /**
-     * Admit a byte- and time-bounded batch of completed packets per browser
-     * frame. The callback performs the real scene upload, so elapsed time is
-     * the actual installation cost rather than the cost of resolving promises.
+     * Admit a byte- and time-bounded batch independently of browser rendering.
+     *
+     * Tying uploads to requestAnimationFrame alternated every small packet batch
+     * with a full draw of the growing scene. Chrome then synchronized writes to
+     * buffers used by the preceding draw, starving workers and exposing tile-row
+     * snapshots for seconds. A short task keeps uploads cooperative without
+     * making scene admission wait for (or implicitly request) a render frame.
      */
     private scheduleAdmission(): void {
-        if (this.admissionFrame !== null || !this.ready.length) {
+        if (this.admissionTimer !== null || !this.ready.length) {
             return;
         }
-        this.admissionFrame = requestAnimationFrame(() => {
-            this.admissionFrame = null;
+        this.admissionTimer = setTimeout(() => {
+            this.admissionTimer = null;
             const startedAt = performance.now();
             let admittedPackets = 0;
             let admittedBytes = 0;
             while (this.ready.length &&
-                admittedPackets < MAX_ADMISSION_PACKETS_PER_FRAME) {
+                admittedPackets < MAX_ADMISSION_PACKETS_PER_TASK) {
                 const next = this.ready[0];
                 const packet = next.buffers.packets[next.nextPacketIndex];
                 const packetBytes = packet.byteLength;
                 if (admittedPackets > 0 &&
                     admittedBytes + packetBytes >
-                        MAX_ADMISSION_BYTES_PER_FRAME) {
+                        MAX_ADMISSION_BYTES_PER_TASK) {
                     break;
                 }
                 this.ready.shift();
@@ -758,7 +770,7 @@ export class TileSubsetLayerRenderService {
                 }
             }
             this.scheduleAdmission();
-        });
+        }, 0);
     }
 
     /** Admit one fragment and resolve only after the complete revision is staged. */

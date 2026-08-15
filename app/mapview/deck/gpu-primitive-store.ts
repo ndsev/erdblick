@@ -33,8 +33,12 @@ export interface GpuPrimitiveStoreSnapshot {
 export class GpuPrimitiveStore {
     private readonly allocator = new GpuRangeAllocator();
     private gpuBuffer: Buffer | null = null;
+    private renderBuffer: Buffer | null = null;
     private capacity = 0;
     private _bufferRevision = 0;
+    private renderBufferRevision = 0;
+    private renderHighWaterRecord = 0;
+    private readonly retiredBuffers: Buffer[] = [];
     private uploadedBytes = 0;
     private uploadCount = 0;
     private growthCount = 0;
@@ -96,11 +100,38 @@ export class GpuPrimitiveStore {
 
     /** Destroy the physical buffer and reset all range ownership. */
     destroy(): void {
-        this.gpuBuffer?.destroy();
+        const buffers = new Set<Buffer>();
+        if (this.gpuBuffer) {
+            buffers.add(this.gpuBuffer);
+        }
+        if (this.renderBuffer) {
+            buffers.add(this.renderBuffer);
+        }
+        this.retiredBuffers.forEach(buffer => buffers.add(buffer));
+        buffers.forEach(buffer => buffer.destroy());
         this.gpuBuffer = null;
+        this.renderBuffer = null;
+        this.retiredBuffers.length = 0;
         this.capacity = 0;
         this.allocator.clear();
         this._bufferRevision += 1;
+        this.renderBufferRevision = this._bufferRevision;
+        this.renderHighWaterRecord = 0;
+    }
+
+    /** Publish the latest allocation while retaining one old generation for in-flight draws. */
+    publish(): void {
+        this.renderBuffer = this.allocator.highWaterRecord > 0
+            ? this.gpuBuffer
+            : null;
+        this.renderBufferRevision = this._bufferRevision;
+        this.renderHighWaterRecord = this.allocator.highWaterRecord;
+    }
+
+    /** Destroy superseded allocations after every model has rebound to the published buffer. */
+    releaseRetiredBuffers(): void {
+        this.retiredBuffers.forEach(buffer => buffer.destroy());
+        this.retiredBuffers.length = 0;
     }
 
     /** Current luma buffer, absent until the first non-empty allocation. */
@@ -108,14 +139,29 @@ export class GpuPrimitiveStore {
         return this.gpuBuffer;
     }
 
+    /** Buffer visible to models at the last explicit scene publication. */
+    get presentedBuffer(): Buffer | null {
+        return this.renderBuffer;
+    }
+
     /** Changes whenever a model must bind a newly allocated physical buffer. */
     get bufferRevision(): number {
         return this._bufferRevision;
     }
 
+    /** Published buffer generation used to decide when model attributes must rebind. */
+    get presentedBufferRevision(): number {
+        return this.renderBufferRevision;
+    }
+
     /** Exclusive record bound that must be supplied as the instance count. */
     get highWaterRecord(): number {
         return this.allocator.highWaterRecord;
+    }
+
+    /** Published instance bound which remains stable across unrelated Deck redraws. */
+    get presentedHighWaterRecord(): number {
+        return this.renderHighWaterRecord;
     }
 
     /** Number of live instances, excluding cleared holes below the draw bound. */
@@ -201,7 +247,15 @@ export class GpuPrimitiveStore {
             next?.destroy();
             throw error;
         }
-        this.gpuBuffer?.destroy();
+        if (this.gpuBuffer) {
+            if (this.gpuBuffer === this.renderBuffer) {
+                this.retiredBuffers.push(this.gpuBuffer);
+            } else {
+                // A staging-only generation was never visible to a model and
+                // can be released as soon as its GPU copy has been submitted.
+                this.gpuBuffer.destroy();
+            }
+        }
         this.gpuBuffer = next;
         this.capacity = nextCapacity;
         this._bufferRevision += 1;

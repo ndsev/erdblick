@@ -56,6 +56,11 @@ interface CameraPersistenceTestInternals {
     pushViewStateToAppState(): void;
 }
 
+interface GestureTargetTestInternals {
+    pickNavigationTarget: ReturnType<typeof vi.fn>;
+    resolveControllerNavigationTarget(screenPosition: [number, number]): NavigationAnchor | null;
+}
+
 /** Creates a 3D deck view with service collaborators outside the focused unit scope. */
 function createView(): DeckMapView3D {
     return new DeckMapView3D(
@@ -102,6 +107,15 @@ function installDeckMock(
 }
 
 describe("Deck navigation target and layout", () => {
+    it("does not issue a synchronous GPU pick when a gesture starts without a hover target", () => {
+        const view = createView();
+        const internals = view as unknown as GestureTargetTestInternals;
+        internals.pickNavigationTarget = vi.fn();
+
+        expect(internals.resolveControllerNavigationTarget([500, 350])).toBeNull();
+        expect(internals.pickNavigationTarget).not.toHaveBeenCalled();
+    });
+
     it("projects a vertical surface target with a fixed eight-pixel major radius", () => {
         const state = {
             longitude: 11,

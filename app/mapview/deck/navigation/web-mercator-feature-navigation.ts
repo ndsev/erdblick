@@ -66,6 +66,57 @@ export function createDeckMapViewport(
     });
 }
 
+/**
+ * Re-expresses a perspective camera around the ground plane without changing screen positions.
+ *
+ * deck.gl's target navigation temporarily stores the map center as a meter offset so elevated
+ * features remain exact gesture pivots. Keeping that representation after the gesture is harmful:
+ * TileLayer still selects its quadtree depth from `zoom`, even when a large center altitude makes
+ * the visible ground footprint many levels coarser. Intersecting the camera's center ray with the
+ * ground and adapting zoom produces the same projection while returning `position` to zero.
+ */
+export function viewStateWithGroundCenter<StateT extends DeckMapCameraState>(
+    state: StateT,
+    width: number,
+    height: number,
+    orthographic: boolean
+): StateT {
+    const position = state.position;
+    if (orthographic || !position || position.every(value => value === 0)) {
+        return state;
+    }
+    const viewport = createDeckMapViewport(state, width, height, false);
+    const centerToCamera = viewport.cameraPosition.map(
+        (value, index) => value - viewport.center[index]
+    );
+    const centerDistance = Math.hypot(...centerToCamera);
+    if (!Number.isFinite(centerDistance) || centerDistance <= 0) {
+        return state;
+    }
+    const direction = centerToCamera.map(value => value / centerDistance);
+    const upward = direction[2];
+    const groundDistance = viewport.cameraPosition[2] / upward;
+    if (!Number.isFinite(groundDistance) || groundDistance <= 0 || upward <= 0) {
+        return state;
+    }
+    const groundCenter = viewport.cameraPosition.map(
+        (value, index) => value - direction[index] * groundDistance
+    );
+    const [longitude, latitude] = viewport.unprojectFlat(groundCenter);
+    const zoom = Math.log2(viewport.altitude * viewport.height / groundDistance);
+    if (![longitude, latitude, zoom].every(Number.isFinite)
+        || Math.abs(latitude) > 85.05113) {
+        return state;
+    }
+    return {
+        ...state,
+        longitude,
+        latitude,
+        zoom,
+        position: [0, 0, 0]
+    };
+}
+
 /** Resolves an anchor into the repeated-world copy local to a viewport. */
 export function navigationAnchorInViewportWorld(
     anchor: NavigationAnchor,

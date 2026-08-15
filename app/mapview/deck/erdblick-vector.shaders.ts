@@ -8,12 +8,14 @@ export interface GpuSceneShaderProps {
   zIndexTexture: Texture;
   lookupTextureWidth: number;
   flattenZ: boolean;
+  primitiveDepthBias: number;
   disabledPickIndices: readonly number[];
 }
 
 type GpuSceneShaderUniforms = {
   lookupTextureWidth: number;
   flattenZ: number;
+  primitiveDepthBias: number;
   disabledPickCount: number;
   disabledPickIndices0: Matrix4Values;
   disabledPickIndices1: Matrix4Values;
@@ -29,13 +31,16 @@ type Matrix4Values = [
 ];
 
 const GPU_SCENE_VERTEX_SOURCE = `\
-uniform sampler2D gpuSceneOriginTexture;
-uniform sampler2D gpuSceneContributionTexture;
-uniform sampler2D gpuSceneZIndexTexture;
+// ANGLE may otherwise lower the helper's sampler parameter to lowp. Tile
+// origins need full RGBA32F precision on both the uniforms and the parameter.
+uniform highp sampler2D gpuSceneOriginTexture;
+uniform highp sampler2D gpuSceneContributionTexture;
+uniform highp sampler2D gpuSceneZIndexTexture;
 
 layout(std140) uniform gpuSceneUniforms {
   float lookupTextureWidth;
   float flattenZ;
+  float primitiveDepthBias;
   float disabledPickCount;
   mat4 disabledPickIndices0;
   mat4 disabledPickIndices1;
@@ -51,7 +56,7 @@ ivec2 gpuScene_lookupCoordinate(uint texelIndex) {
   return ivec2(int(texelIndex % width), int(texelIndex / width));
 }
 
-vec4 gpuScene_lookup(sampler2D lookupTexture, uint texelIndex) {
+vec4 gpuScene_lookup(highp sampler2D lookupTexture, uint texelIndex) {
   return texelFetch(lookupTexture, gpuScene_lookupCoordinate(texelIndex), 0);
 }
 
@@ -83,7 +88,15 @@ void gpuScene_projectLocal(
   vec3 originLow;
   gpuScene_origin(originSlot, originHigh, originLow);
   geometry.worldPosition = originHigh;
-  vec3 localCommon = project_size(gpuScene_localPosition(localPosition));
+  // GpuScene packets always store meter offsets around an LNGLAT origin, so this
+  // branch-free conversion is exact and does not depend on Deck's shared geometry
+  // state while deciding whether to apply Web Mercator's latitude correction.
+  float originScale = project_size_at_latitude(originHigh.y);
+  if (project.projectionMode == PROJECTION_MODE_WEB_MERCATOR_AUTO_OFFSET) {
+    originScale /= project_size_at_latitude(project.coordinateOrigin.y);
+  }
+  vec3 localCommon = gpuScene_localPosition(localPosition) *
+    project.commonUnitsPerMeter * originScale;
   clipPosition = project_position_to_clipspace(
     originHigh,
     originLow,
@@ -207,12 +220,12 @@ float gpuScene_depthBias(
     uint contributionSlot,
     uint instanceIndex) {
   if (contribution.w < 0.0) {
-    return 0.0;
+    return gpuScene.primitiveDepthBias;
   }
-  uint globalZIndex = uint(contribution.w + 0.5) + localZIndex;
-  vec4 ranked = gpuScene_lookup(gpuSceneZIndexTexture, globalZIndex);
+  uint zIndexSlot = uint(contribution.w + 0.5) + localZIndex;
+  vec4 ranked = gpuScene_lookup(gpuSceneZIndexTexture, zIndexSlot);
   if (ranked.y <= 0.0) {
-    return ranked.x;
+    return gpuScene.primitiveDepthBias + ranked.x;
   }
   uint tiesPerStyle = max(1u, uint(ranked.z + 0.5));
   uint tieLimit = max(1u, uint(ranked.w + 0.5));
@@ -221,7 +234,8 @@ float gpuScene_depthBias(
     : localPickIndex;
   uint tie = uint(contribution.y + 0.5) * tiesPerStyle +
     tieSource % tiesPerStyle;
-  return ranked.x + float(min(tie, tieLimit - 1u)) * ranked.y;
+  return gpuScene.primitiveDepthBias +
+    ranked.x + float(min(tie, tieLimit - 1u)) * ranked.y;
 }
 
 void gpuScene_applyDepthBias(
@@ -259,6 +273,7 @@ export const gpuSceneShaderModule = {
   uniformTypes: {
     lookupTextureWidth: "f32",
     flattenZ: "f32",
+    primitiveDepthBias: "f32",
     disabledPickCount: "f32",
     disabledPickIndices0: "mat4x4<f32>",
     disabledPickIndices1: "mat4x4<f32>",
@@ -272,6 +287,7 @@ export const gpuSceneShaderModule = {
       !props.zIndexTexture ||
       props.lookupTextureWidth === undefined ||
       props.flattenZ === undefined ||
+      props.primitiveDepthBias === undefined ||
       !props.disabledPickIndices
     ) {
       return {};
@@ -280,6 +296,7 @@ export const gpuSceneShaderModule = {
     return {
       lookupTextureWidth: props.lookupTextureWidth,
       flattenZ: props.flattenZ ? 1 : 0,
+      primitiveDepthBias: props.primitiveDepthBias,
       disabledPickCount: disabled.length,
       disabledPickIndices0: disabledMatrix(disabled, 0),
       disabledPickIndices1: disabledMatrix(disabled, 16),

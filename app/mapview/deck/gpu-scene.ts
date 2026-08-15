@@ -20,6 +20,11 @@ const MAX_ACTIVATION_TOKEN = 0x00ff_ffff;
 const MAX_CLIP_SPACE_BIAS = 0.00025;
 const TARGET_DEPTH_STEPS = 1024;
 const MAX_TIE_BUCKETS = 32;
+/** Depth interval reserved for each semantic primitive pass. */
+export const GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP =
+  MAX_CLIP_SPACE_BIAS / 5;
+const MAX_LOCAL_CLIP_SPACE_BIAS =
+  GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP * 0.8;
 
 interface OriginEntry {
   identity: string;
@@ -194,24 +199,21 @@ interface ScenePickRecord {
 
 type ScenePickIndices = number | Set<number>;
 
-interface ZIndexOrderState {
-  zIndexRanks: ReadonlyMap<number, number>;
-  styleRanks: ReadonlyMap<number, number>;
-  zIndexStep: number;
-  zIndexTiesPerStyle: number;
-  zIndexTieBucketCount: number;
-}
-
 interface FloatLookupUpdate {
   firstSlot: number;
   values: ArrayLike<number>;
 }
 
 interface PreparedFloatLookupReplacement {
-  /** Publish the prepared texture and return the superseded allocation. */
-  commit(): Texture | null;
+  /** Publish the prepared texture into the staging generation. */
+  commit(): void;
   /** Destroy an unpublished allocation after another preparation failed. */
   discard(): void;
+}
+
+interface PreparedSceneOrder {
+  contribution: PreparedFloatLookupReplacement;
+  zIndex: PreparedFloatLookupReplacement;
 }
 
 /**
@@ -224,6 +226,8 @@ class FloatLookupTable {
   private capacitySlots = 0;
   private values = new Float32Array();
   private gpuTexture: Texture | null = null;
+  private renderTexture: Texture | null = null;
+  private readonly retiredTextures: Texture[] = [];
   private _revision = 0;
 
   /** Create a lazily allocated lookup with a fixed texel layout per scene slot. */
@@ -278,16 +282,15 @@ class FloatLookupTable {
   /**
    * Prepare a complete replacement without mutating the visible lookup.
    *
-   * Global order changes use this path for both contribution and z-index
-   * tables. The scene can therefore upload both candidates first and swap
-   * their texture references together only after every graphics call succeeds.
+   * Presentation changes use this path to upload the next lookup generation
+   * before retiring the texture still referenced by Deck's current models.
    */
   prepareReplacement(
     updates: readonly FloatLookupUpdate[],
   ): PreparedFloatLookupReplacement {
     if (!updates.length) {
       return {
-        commit: () => null,
+        commit: () => {},
         discard: () => {},
       };
     }
@@ -356,7 +359,7 @@ class FloatLookupTable {
           (height * LOOKUP_TEXTURE_WIDTH) / this.texelsPerSlot,
         );
         this._revision += 1;
-        return previous;
+        this.retireOrDestroy(previous);
       },
       discard: () => {
         if (!settled) {
@@ -377,19 +380,40 @@ class FloatLookupTable {
 
   /** Destroy the context-owned texture and all small CPU lookup state. */
   destroy(): void {
-    this.gpuTexture?.destroy();
+    const textures = new Set<Texture>();
+    if (this.gpuTexture) {
+      textures.add(this.gpuTexture);
+    }
+    if (this.renderTexture) {
+      textures.add(this.renderTexture);
+    }
+    this.retiredTextures.forEach(texture => textures.add(texture));
+    textures.forEach(texture => texture.destroy());
     this.gpuTexture = null;
+    this.renderTexture = null;
+    this.retiredTextures.length = 0;
     this.values = new Float32Array();
     this.capacitySlots = 0;
     this._revision += 1;
   }
 
   get texture(): Texture | null {
-    return this.gpuTexture;
+    return this.renderTexture;
   }
 
   get revision(): number {
     return this._revision;
+  }
+
+  /** Publish the latest staging allocation without invalidating the displayed one. */
+  publish(): void {
+    this.renderTexture = this.gpuTexture;
+  }
+
+  /** Destroy allocations after every model has rebound to the published lookup. */
+  releaseRetiredTextures(): void {
+    this.retiredTextures.forEach(texture => texture.destroy());
+    this.retiredTextures.length = 0;
   }
 
   /** Geometrically grow a two-dimensional table and upload its compact mirror. */
@@ -427,13 +451,25 @@ class FloatLookupTable {
       nextTexture.destroy();
       throw error;
     }
-    this.gpuTexture?.destroy();
+    this.retireOrDestroy(this.gpuTexture);
     this.gpuTexture = nextTexture;
     this.values = nextValues;
     this.capacitySlots = Math.floor(
       (height * LOOKUP_TEXTURE_WIDTH) / this.texelsPerSlot,
     );
     this._revision += 1;
+  }
+
+  /** Keep only a texture visible to the current presentation alive until rebinding. */
+  private retireOrDestroy(texture: Texture | null): void {
+    if (!texture) {
+      return;
+    }
+    if (texture === this.renderTexture) {
+      this.retiredTextures.push(texture);
+    } else {
+      texture.destroy();
+    }
   }
 }
 
@@ -492,18 +528,12 @@ export class GpuScene {
     GpuSceneRenderReservation,
     StagedRender
   >();
+  private readonly presentationReleases: InstalledContribution[] = [];
   private packetSequence = 0;
   private nextActivationToken = 0;
   private _revision = 0;
+  private _presentationRevision = 0;
   private labelCount = 0;
-  private readonly knownZIndices = new Set<number>();
-  private readonly knownStyleOrders = new Set<number>();
-  private zIndexRanks = new Map<number, number>();
-  private styleRanks = new Map<number, number>();
-  private zIndexStep = 0;
-  private zIndexTiesPerStyle = 1;
-  private zIndexTieBucketCount = 1;
-  private hasAuthoredZIndex = false;
   private lastZIndexUpdateMs = 0;
   private destroyed = false;
 
@@ -842,12 +872,12 @@ export class GpuScene {
       let labelsChanged = false;
       for (const item of ready) {
         const previous = item.entry.active;
-        // A task owns exactly one contribution, so retiring its predecessor
-        // before the no-throw CPU publication keeps replacement transactional:
-        // a failed lookup clear leaves the old revision authoritative and the
-        // catch path can discard every range staged for the replacement.
         if (previous) {
-          this.releaseInstalled(previous);
+          // Keep the predecessor active until the same publication that raises
+          // the model's draw bound to include its replacement. Clearing this
+          // slot during admission would create a tile-shaped hole in unrelated
+          // Deck frames that still draw the previous buffer generation.
+          this.presentationReleases.push(previous);
         }
         item.reserved.installed = true;
         item.entry.active = item.installed;
@@ -939,7 +969,7 @@ export class GpuScene {
       entry.expectedRevision = ++entry.nextRevision;
       if (entry.active) {
         labelsChanged ||= entry.active.labels.length > 0;
-        this.releaseInstalled(entry.active);
+        this.presentationReleases.push(entry.active);
         entry.active = null;
         sceneChanged = true;
       }
@@ -1170,6 +1200,7 @@ export class GpuScene {
     this.contributionByIdentity.clear();
     this.contributionByKey.clear();
     this.activeContributionBySlot.clear();
+    this.presentationReleases.length = 0;
     this.pickOwnerSlots = new Uint32Array();
     this.pickIndicesByTileAndFeature.clear();
     this.picks.clear();
@@ -1177,6 +1208,45 @@ export class GpuScene {
 
   get revision(): number {
     return this._revision;
+  }
+
+  /** Revision of the material-buffer generation currently visible to Deck models. */
+  get presentationRevision(): number {
+    return this._presentationRevision;
+  }
+
+  /** Publish admitted material buffers as one coherent model-visible scene revision. */
+  publishPresentation(): boolean {
+    this.ensureAlive();
+    if (this._presentationRevision === this._revision) {
+      return false;
+    }
+    const order = this.prepareSceneOrder();
+    order.contribution.commit();
+    order.zIndex.commit();
+    for (const installed of this.presentationReleases) {
+      this.releaseInstalled(installed, false);
+    }
+    this.presentationReleases.length = 0;
+    for (const store of this.storesByMaterial.values()) {
+      store.publish();
+    }
+    this.originLookup.publish();
+    this.contributionLookup.publish();
+    this.zIndexLookup.publish();
+    this._presentationRevision = this._revision;
+    return true;
+  }
+
+  /** Release superseded GPU allocations after visible and mask models have rebound. */
+  releaseRetiredPresentationResources(): void {
+    this.ensureAlive();
+    for (const store of this.storesByMaterial.values()) {
+      store.releaseRetiredBuffers();
+    }
+    this.originLookup.releaseRetiredTextures();
+    this.contributionLookup.releaseRetiredTextures();
+    this.zIndexLookup.releaseRetiredTextures();
   }
 
   get originTexture(): Texture | null {
@@ -1380,8 +1450,13 @@ export class GpuScene {
   }
 
   /** Release all ranges and semantic metadata owned by one old revision. */
-  private releaseInstalled(installed: InstalledContribution): void {
-    this.contributionLookup.clear(installed.contributionSlot);
+  private releaseInstalled(
+    installed: InstalledContribution,
+    clearContributionLookup = true,
+  ): void {
+    if (clearContributionLookup) {
+      this.contributionLookup.clear(installed.contributionSlot);
+    }
     this.contributionSlots.release({
       firstRecord: installed.contributionSlot,
       recordCount: 1,
@@ -1465,13 +1540,7 @@ export class GpuScene {
     return removed;
   }
 
-  /**
-   * Register newly encountered ordering values and update only affected texels.
-   *
-   * Exact z values and style orders are append-only for one scene generation.
-   * A genuinely new value requires one compact global rerank; ordinary tile
-   * arrivals reuse the existing rank table and write only their own metadata.
-   */
+  /** Initialize admitted ordering slots without exposing stale recycled values. */
   private updateZIndexLookup(
     staged: readonly {
       entry: ContributionEntry;
@@ -1479,203 +1548,128 @@ export class GpuScene {
     }[],
   ): void {
     const startedAt = performance.now();
-    const nextKnownZIndices = new Set(this.knownZIndices);
-    const nextKnownStyleOrders = new Set(this.knownStyleOrders);
-    let nextHasAuthoredZIndex = this.hasAuthoredZIndex;
-    let orderingChanged = false;
     for (const {installed} of staged) {
-      if (!nextKnownStyleOrders.has(installed.styleOrder)) {
-        nextKnownStyleOrders.add(installed.styleOrder);
-        orderingChanged = true;
-      }
-      for (const rawValue of installed.zIndices) {
-        if (Number.isFinite(rawValue) && !nextHasAuthoredZIndex) {
-          nextHasAuthoredZIndex = true;
-          orderingChanged = true;
-        }
-        const value = this.normalizedZIndex(rawValue);
-        if (!nextKnownZIndices.has(value)) {
-          nextKnownZIndices.add(value);
-          orderingChanged = true;
-        }
-      }
-    }
-    if (orderingChanged) {
-      const nextOrder = this.buildZIndexOrderState(
-        nextKnownZIndices,
-        nextKnownStyleOrders,
-        nextHasAuthoredZIndex,
+      this.contributionLookup.setRange(
+        installed.contributionSlot,
+        [
+          installed.pickingRange?.firstRecord ?? -1,
+          installed.styleOrder,
+          installed.activationToken,
+          installed.zIndexRange?.firstRecord ?? -1,
+        ],
       );
-      const contributionUpdates: FloatLookupUpdate[] = [];
-      const zIndexUpdates: FloatLookupUpdate[] = [];
-      for (const entry of this.contributionByIdentity.values()) {
-        if (entry.active) {
-          this.collectZIndexMetadata(
-            entry.active,
-            nextOrder,
-            contributionUpdates,
-            zIndexUpdates,
-          );
-        }
-      }
-      for (const {installed} of staged) {
-        this.collectZIndexMetadata(
-          installed,
-          nextOrder,
-          contributionUpdates,
-          zIndexUpdates,
+      if (installed.zIndexRange) {
+        this.zIndexLookup.setRange(
+          installed.zIndexRange.firstRecord,
+          new Float32Array(installed.zIndices.length * 4),
         );
-      }
-      const contributionReplacement =
-        this.contributionLookup.prepareReplacement(contributionUpdates);
-      let zIndexReplacement: PreparedFloatLookupReplacement;
-      try {
-        zIndexReplacement =
-          this.zIndexLookup.prepareReplacement(zIndexUpdates);
-      } catch (error) {
-        contributionReplacement.discard();
-        throw error;
-      }
-      // Both candidates are fully uploaded. These pointer swaps are synchronous
-      // and non-graphics operations, so the next draw observes either the old
-      // pair or the complete new pair, never a partially reranked scene.
-      const oldContributionTexture = contributionReplacement.commit();
-      const oldZIndexTexture = zIndexReplacement.commit();
-      oldContributionTexture?.destroy();
-      oldZIndexTexture?.destroy();
-      this.knownZIndices.clear();
-      nextKnownZIndices.forEach((value) => this.knownZIndices.add(value));
-      this.knownStyleOrders.clear();
-      nextKnownStyleOrders.forEach((value) =>
-        this.knownStyleOrders.add(value));
-      this.hasAuthoredZIndex = nextHasAuthoredZIndex;
-      this.zIndexRanks = new Map(nextOrder.zIndexRanks);
-      this.styleRanks = new Map(nextOrder.styleRanks);
-      this.zIndexStep = nextOrder.zIndexStep;
-      this.zIndexTiesPerStyle = nextOrder.zIndexTiesPerStyle;
-      this.zIndexTieBucketCount = nextOrder.zIndexTieBucketCount;
-    } else {
-      for (const {installed} of staged) {
-        this.writeZIndexMetadata(installed);
       }
     }
     this.lastZIndexUpdateMs = performance.now() - startedAt;
   }
 
-  /** Derive compact rank constants without mutating the active ordering state. */
-  private buildZIndexOrderState(
-    knownZIndices: ReadonlySet<number>,
-    knownStyleOrders: ReadonlySet<number>,
-    hasAuthoredZIndex: boolean,
-  ): ZIndexOrderState {
-    const orderedStyles = [...knownStyleOrders]
+  /**
+   * Prepare one globally coherent exact-order table for the next presentation.
+   *
+   * Tile-local ranks are invalid once contributions share persistent material
+   * buffers: the same authored value can otherwise receive a different depth in
+   * each tile and let lower geometry occlude its neighbors. Publication already
+   * batches many admissions, so doing the compact metadata walk here avoids the
+   * former per-packet whole-scene rerank without weakening ordering semantics.
+   */
+  private prepareSceneOrder(): PreparedSceneOrder {
+    const startedAt = performance.now();
+    const active = [...this.contributionByIdentity.values()]
+      .flatMap((entry) => entry.active ? [entry.active] : []);
+    const normalizedByContribution = new Map<
+      InstalledContribution,
+      number[]
+    >();
+    const uniqueZIndices = new Set<number>();
+    const uniqueStyleOrders = new Set<number>();
+    let hasAuthoredZIndex = false;
+    for (const installed of active) {
+      uniqueStyleOrders.add(installed.styleOrder);
+      const normalized = installed.zIndices.map((value) => {
+        hasAuthoredZIndex ||= Number.isFinite(value);
+        const result = Number.isFinite(value) ? value : 0;
+        uniqueZIndices.add(result === 0 ? 0 : result);
+        return result === 0 ? 0 : result;
+      });
+      normalizedByContribution.set(installed, normalized);
+    }
+    const orderedZIndices = [...uniqueZIndices]
+      .sort((left, right) => left - right);
+    const zRanks = new Map(
+      orderedZIndices.map((value, index) => [value, index]),
+    );
+    const orderedStyleOrders = [...uniqueStyleOrders]
       .sort((left, right) => left - right);
     const styleRanks = new Map(
-      orderedStyles.map((value, index) => [value, index]),
+      orderedStyleOrders.map((value, index) => [value, index]),
     );
-    const orderedValues = [...knownZIndices]
-      .sort((left, right) => left - right);
-    const zIndexTieBucketCount = !hasAuthoredZIndex || !orderedValues.length
-      ? 1
-      : Math.max(1, Math.min(
+    const tieBucketCount = hasAuthoredZIndex && orderedZIndices.length
+      ? Math.max(1, Math.min(
           MAX_TIE_BUCKETS,
-          Math.floor(TARGET_DEPTH_STEPS / orderedValues.length),
-        ));
+          Math.floor(TARGET_DEPTH_STEPS / orderedZIndices.length),
+        ))
+      : 1;
+    const tiesPerStyle = Math.max(
+      1,
+      Math.floor(tieBucketCount / Math.max(1, orderedStyleOrders.length)),
+    );
     const rankCount = Math.max(
       1,
-      orderedValues.length * zIndexTieBucketCount,
+      orderedZIndices.length * tieBucketCount,
     );
-    const zIndexStep = hasAuthoredZIndex
-      ? MAX_CLIP_SPACE_BIAS / rankCount
+    const step = hasAuthoredZIndex
+      ? MAX_LOCAL_CLIP_SPACE_BIAS / rankCount
       : 0;
-    const zIndexTiesPerStyle = Math.max(
-      1,
-      Math.floor(
-        zIndexTieBucketCount / Math.max(1, orderedStyles.length),
-      ),
+    const contributionUpdates: FloatLookupUpdate[] = active.map(
+      (installed) => ({
+        firstSlot: installed.contributionSlot,
+        values: [
+          installed.pickingRange?.firstRecord ?? -1,
+          styleRanks.get(installed.styleOrder) ?? 0,
+          installed.activationToken,
+          installed.zIndexRange?.firstRecord ?? -1,
+        ],
+      }),
     );
-    return {
-      styleRanks,
-      zIndexRanks: new Map(orderedValues.map((value, index) => [
-        value,
-        hasAuthoredZIndex
-          ? index * zIndexTieBucketCount * zIndexStep
-          : 0,
-      ])),
-      zIndexStep,
-      zIndexTiesPerStyle,
-      zIndexTieBucketCount,
-    };
-  }
-
-  /** Upload one contribution's compact exact-order lookup without touching geometry. */
-  private writeZIndexMetadata(
-    installed: InstalledContribution,
-    order: ZIndexOrderState = {
-      zIndexRanks: this.zIndexRanks,
-      styleRanks: this.styleRanks,
-      zIndexStep: this.zIndexStep,
-      zIndexTiesPerStyle: this.zIndexTiesPerStyle,
-      zIndexTieBucketCount: this.zIndexTieBucketCount,
-    },
-  ): void {
-    const contributionUpdates: FloatLookupUpdate[] = [];
+    contributionUpdates.push(...this.presentationReleases.map(
+      (installed) => ({
+        firstSlot: installed.contributionSlot,
+        values: [0, 0, 0, 0],
+      }),
+    ));
     const zIndexUpdates: FloatLookupUpdate[] = [];
-    this.collectZIndexMetadata(
-      installed,
-      order,
-      contributionUpdates,
-      zIndexUpdates,
-    );
-    const contribution = contributionUpdates[0];
-    this.contributionLookup.setRange(
-      contribution.firstSlot,
-      contribution.values,
-    );
-    const zIndex = zIndexUpdates[0];
-    if (zIndex) {
-      this.zIndexLookup.setRange(zIndex.firstSlot, zIndex.values);
+    for (const installed of active) {
+      if (!installed.zIndexRange) {
+        continue;
+      }
+      const values = new Float32Array(installed.zIndices.length * 4);
+      normalizedByContribution.get(installed)!.forEach((value, index) => {
+        const offset = index * 4;
+        values[offset] = (zRanks.get(value) ?? 0) * tieBucketCount * step;
+        values[offset + 1] = step;
+        values[offset + 2] = tiesPerStyle;
+        values[offset + 3] = tieBucketCount;
+      });
+      zIndexUpdates.push({
+        firstSlot: installed.zIndexRange.firstRecord,
+        values,
+      });
     }
-  }
-
-  /** Build compact ordering-table updates without mutating visible textures. */
-  private collectZIndexMetadata(
-    installed: InstalledContribution,
-    order: ZIndexOrderState,
-    contributionUpdates: FloatLookupUpdate[],
-    zIndexUpdates: FloatLookupUpdate[],
-  ): void {
-    contributionUpdates.push({
-      firstSlot: installed.contributionSlot,
-      values: [
-        installed.pickingRange?.firstRecord ?? -1,
-        order.styleRanks.get(installed.styleOrder) ?? 0,
-        installed.activationToken,
-        installed.zIndexRange?.firstRecord ?? -1,
-      ],
-    });
-    if (!installed.zIndexRange) {
-      return;
+    const contribution =
+      this.contributionLookup.prepareReplacement(contributionUpdates);
+    try {
+      const zIndex = this.zIndexLookup.prepareReplacement(zIndexUpdates);
+      this.lastZIndexUpdateMs = performance.now() - startedAt;
+      return {contribution, zIndex};
+    } catch (error) {
+      contribution.discard();
+      throw error;
     }
-    const values = new Float32Array(installed.zIndices.length * 4);
-    installed.zIndices.forEach((rawValue, index) => {
-      const offset = index * 4;
-      values[offset] = order.zIndexRanks.get(
-        this.normalizedZIndex(rawValue),
-      ) ?? 0;
-      values[offset + 1] = order.zIndexStep;
-      values[offset + 2] = order.zIndexTiesPerStyle;
-      values[offset + 3] = order.zIndexTieBucketCount;
-    });
-    zIndexUpdates.push({
-      firstSlot: installed.zIndexRange.firstRecord,
-      values,
-    });
-  }
-
-  /** Canonicalize absent and signed-zero orders to one stable lookup key. */
-  private normalizedZIndex(value: number): number {
-    return Number.isFinite(value) ? (value === 0 ? 0 : value) : 0;
   }
 
   /** Remove one semantic pick from both sparse target and dense index tables. */

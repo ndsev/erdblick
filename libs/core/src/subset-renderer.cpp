@@ -25,6 +25,8 @@ constexpr uint32_t kUnselectable = std::numeric_limits<uint32_t>::max();
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kDegToRad = kPi / 180.0;
 constexpr double kMercatorTileSize = 512.0;
+constexpr double kMercatorMaximumLatitudeDegrees = 89.9;
+constexpr double kMercatorTaylorMaximumLatitudeDeltaRadians = 0.001;
 constexpr double kFallbackEarthRadiusMeters = 6378137.0;
 constexpr double kEarthCircumferenceMeters = 40.03e6;
 constexpr double kTransitionFilletMeters = 6.0;
@@ -411,7 +413,10 @@ double mercatorWorldX(double longitudeDeg)
 
 double mercatorWorldY(double latitudeDeg)
 {
-    auto const latitudeRad = latitudeDeg * kDegToRad;
+    auto const latitudeRad = glm::clamp(
+        latitudeDeg,
+        -kMercatorMaximumLatitudeDegrees,
+        kMercatorMaximumLatitudeDegrees) * kDegToRad;
     auto const mercatorTerm =
         glm::log(glm::tan((kPi * 0.25) + (latitudeRad * 0.5)));
     return (kMercatorTileSize * (kPi + mercatorTerm)) / (2.0 * kPi);
@@ -421,10 +426,12 @@ bool distanceScalesAt(
     double latitudeDeg,
     double& latitudeCosine,
     double& latitudeTangent,
-    double& unitsPerMeter,
-    double& unitsPerMeter2)
+    double& unitsPerMeter)
 {
-    auto const latitudeRad = latitudeDeg * kDegToRad;
+    auto const latitudeRad = glm::clamp(
+        latitudeDeg,
+        -kMercatorMaximumLatitudeDegrees,
+        kMercatorMaximumLatitudeDegrees) * kDegToRad;
     latitudeCosine = glm::cos(latitudeRad);
     latitudeTangent = glm::tan(latitudeRad);
     if (!std::isfinite(latitudeCosine) ||
@@ -437,12 +444,7 @@ bool distanceScalesAt(
     auto const latCosine = std::abs(latitudeCosine);
     unitsPerMeter =
         worldSize / kEarthCircumferenceMeters / latCosine;
-    unitsPerMeter2 =
-        unitsPerMeter * latitudeTangent /
-        kFallbackEarthRadiusMeters;
-    return std::isfinite(unitsPerMeter) &&
-        std::isfinite(unitsPerMeter2) &&
-        std::abs(unitsPerMeter) > 1e-12;
+    return std::isfinite(unitsPerMeter) && std::abs(unitsPerMeter) > 1e-12;
 }
 
 /** Preserve the distinction between an authored zero and no z-index at all. */
@@ -594,7 +596,6 @@ void TileSubsetLayerRenderer::resetForNextTile()
     coordinateOriginCosine_ = 1.0;
     coordinateOriginTangent_ = 0.0;
     coordinateUnitsPerMeter_ = 0.0;
-    coordinateUnitsPerMeter2_ = 0.0;
     coordinateScalesValid_ = false;
     gpuSceneGeneration_ = 0U;
     gpuPacketSequence_ = 0U;
@@ -622,8 +623,7 @@ void TileSubsetLayerRenderer::setCoordinateOrigin(
         latitude,
         coordinateOriginCosine_,
         coordinateOriginTangent_,
-        coordinateUnitsPerMeter_,
-        coordinateUnitsPerMeter2_);
+        coordinateUnitsPerMeter_);
 }
 
 void TileSubsetLayerRenderer::setLineSimplificationTolerance(
@@ -711,8 +711,7 @@ void TileSubsetLayerRenderer::addTileSubsetContribution(
             coordinateOriginWgs_.y,
             coordinateOriginCosine_,
             coordinateOriginTangent_,
-            coordinateUnitsPerMeter_,
-            coordinateUnitsPerMeter2_);
+            coordinateUnitsPerMeter_);
     }
 }
 
@@ -3358,32 +3357,32 @@ mapget::Point TileSubsetLayerRenderer::projectWgsPoint(
             wgsPoint.z - coordinateOriginWgs_.z,
         };
     }
+    auto deltaX = mercatorWorldX(wgsPoint.x) - coordinateOriginWorldX_;
+    deltaX -= glm::round(deltaX / kMercatorTileSize) * kMercatorTileSize;
     auto const latitudeDelta =
         (wgsPoint.y - coordinateOriginWgs_.y) * kDegToRad;
-    auto const latitudeDelta2 = latitudeDelta * latitudeDelta;
-    auto const tangent2 =
-        coordinateOriginTangent_ * coordinateOriginTangent_;
-    // A level-13 tile spans less than 0.001 radians. Expanding Mercator Y
-    // around the tile center avoids one tan/log pair per vertex while the
-    // omitted fourth-order term remains far below float packet precision.
-    auto const metersPerRadian =
-        kEarthCircumferenceMeters / (2.0 * kPi);
-    auto const yMeters = metersPerRadian * (
-        latitudeDelta +
-        0.5 * coordinateOriginTangent_ * latitudeDelta2 +
-        ((1.0 + 2.0 * tangent2) / 6.0) *
-            latitudeDelta2 * latitudeDelta);
-    auto const xScaleCorrection = 1.0 +
-        coordinateOriginTangent_ * yMeters /
-            kFallbackEarthRadiusMeters;
-    auto const longitudeDelta =
-        (wgsPoint.x - coordinateOriginWgs_.x) * kDegToRad;
+    double localY = 0.0;
+    if (std::abs(latitudeDelta) <=
+        kMercatorTaylorMaximumLatitudeDeltaRadians)
+    {
+        auto const latitudeDelta2 = latitudeDelta * latitudeDelta;
+        auto const tangent2 =
+            coordinateOriginTangent_ * coordinateOriginTangent_;
+        auto const metersPerRadian =
+            kEarthCircumferenceMeters / (2.0 * kPi);
+        localY = metersPerRadian * (
+            latitudeDelta +
+            0.5 * coordinateOriginTangent_ * latitudeDelta2 +
+            ((1.0 + 2.0 * tangent2) / 6.0) *
+                latitudeDelta2 * latitudeDelta);
+    }
+    else {
+        localY = (mercatorWorldY(wgsPoint.y) - coordinateOriginWorldY_) /
+            coordinateUnitsPerMeter_;
+    }
     return {
-        std::abs(xScaleCorrection) < 1e-12
-            ? 0.0
-            : metersPerRadian * coordinateOriginCosine_ *
-                longitudeDelta / xScaleCorrection,
-        yMeters,
+        deltaX / coordinateUnitsPerMeter_,
+        localY,
         wgsPoint.z - coordinateOriginWgs_.z,
     };
 }
@@ -3408,14 +3407,18 @@ mapget::Point TileSubsetLayerRenderer::unprojectLocalPoint(
         worldY * (2.0 * kPi / kMercatorTileSize) - kPi;
     auto const latitudeRadians =
         2.0 * glm::atan(glm::exp(mercatorTerm)) - kPi * 0.5;
-    auto const xScale = coordinateUnitsPerMeter_ +
-        coordinateUnitsPerMeter2_ * localPoint.y;
     auto const worldX = coordinateOriginWorldX_ +
-        localPoint.x * xScale;
+        localPoint.x * coordinateUnitsPerMeter_;
     auto const longitudeRadians =
         worldX * (2.0 * kPi / kMercatorTileSize) - kPi;
+    auto longitudeDegrees = glm::degrees(longitudeRadians);
+    longitudeDegrees = std::fmod(longitudeDegrees + 180.0, 360.0);
+    if (longitudeDegrees < 0.0) {
+        longitudeDegrees += 360.0;
+    }
+    longitudeDegrees -= 180.0;
     return {
-        glm::degrees(longitudeRadians),
+        longitudeDegrees,
         glm::degrees(latitudeRadians),
         coordinateOriginWgs_.z + localPoint.z,
     };

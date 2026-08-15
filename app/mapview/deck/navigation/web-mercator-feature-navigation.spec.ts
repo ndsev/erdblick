@@ -12,7 +12,8 @@ import {
     NAVIGATION_TARGET_NEAR_RELATIVE_EPSILON,
     type DeckMapCameraState,
     viewStateKeepingAnchor,
-    viewStateKeepingSafeNavigationAnchor
+    viewStateKeepingSafeNavigationAnchor,
+    viewStateWithGroundCenter
 } from "./web-mercator-feature-navigation";
 import type {NavigationAnchor} from "./feature-navigation.types";
 
@@ -42,6 +43,78 @@ describe("Web Mercator feature navigation", () => {
         expect(DECK_MAP_FAR_Z_MULTIPLIER).toBe(1.01);
         expect(viewport.fovy).toBe(DECK_MAP_FOV_DEGREES);
         expect(viewport.altitude).toBeCloseTo(DECK_MAP_DEFAULT_ALTITUDE, 12);
+    });
+
+    it("turns a high target plane into the equivalent coarse ground zoom", () => {
+        const elevatedState: DeckMapCameraState = {
+            longitude: 13.64432155,
+            latitude: 47.72654096,
+            zoom: 14.85,
+            pitch: 0,
+            bearing: 0,
+            position: [0, 0, 2384835.59976474]
+        };
+        const groundState = viewStateWithGroundCenter(
+            elevatedState,
+            1600,
+            1000,
+            false
+        );
+        const elevatedViewport = createDeckMapViewport(elevatedState, 1600, 1000, false);
+        const groundViewport = createDeckMapViewport(groundState, 1600, 1000, false);
+
+        expect(groundState.position).toEqual([0, 0, 0]);
+        expect(groundState.zoom).toBeCloseTo(5.0462220736, 8);
+        for (const point of [
+            [10, 47, 0],
+            [13.6, 47.7, 0],
+            [15, 49, 1000]
+        ]) {
+            const before = elevatedViewport.project(point);
+            const after = groundViewport.project(point);
+            expect(after[0]).toBeCloseTo(before[0], 5);
+            expect(after[1]).toBeCloseTo(before[1], 5);
+        }
+    });
+
+    it("preserves a pitched projection while removing all center-offset components", () => {
+        const elevatedState: DeckMapCameraState = {
+            ...BASE_CAMERA,
+            zoom: 17,
+            pitch: 40,
+            bearing: 35,
+            position: [100, -200, 500]
+        };
+        const groundState = viewStateWithGroundCenter(
+            elevatedState,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false
+        );
+        const elevatedViewport = createDeckMapViewport(
+            elevatedState,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false
+        );
+        const groundViewport = createDeckMapViewport(
+            groundState,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false
+        );
+
+        expect(groundState.position).toEqual([0, 0, 0]);
+        for (const point of [
+            [10.8, 47.9, 0],
+            [11.1, 48.0, 500],
+            [11.3, 48.2, 1500]
+        ]) {
+            const before = elevatedViewport.project(point);
+            const after = groundViewport.project(point);
+            expect(after[0]).toBeCloseTo(before[0], 4);
+            expect(after[1]).toBeCloseTo(before[1], 4);
+        }
     });
 
     it("retains an elevated anchor through combined zoom, tilt, and rotation", () => {

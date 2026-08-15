@@ -18,6 +18,7 @@ const TARGET_TEXTURE_WIDTH = 1024;
 const ZERO_INITIALIZATION_ROWS = 64;
 const VECTOR_SOURCE_ID = "scene-vector";
 const STYLE_GLOW_ORDER = 300;
+const RECONCILE_DEBOUNCE_MS = 50;
 
 interface MaskOwner {
     contributions: ReadonlySet<string>;
@@ -211,7 +212,7 @@ class SparseMaskTargetTable {
 export class GpuSceneMaskController {
     private readonly owners = new Map<string, MaskOwner>();
     private readonly groups = new Map<string, InstalledMaskGroup>();
-    private reconcileHandle: number | null = null;
+    private reconcileHandle: ReturnType<typeof setTimeout> | null = null;
     private destroyed = false;
 
     /** Bind semantic overlays to one scene and its shared outline compositor. */
@@ -254,6 +255,9 @@ export class GpuSceneMaskController {
     /** Refresh sparse targets and shared material models after a scene packet mutation. */
     sceneChanged(): void {
         if (!this.destroyed) {
+            for (const installed of this.groups.values()) {
+                installed.vectorLayer.sceneChanged();
+            }
             this.scheduleReconcile();
         }
     }
@@ -265,7 +269,7 @@ export class GpuSceneMaskController {
         }
         this.destroyed = true;
         if (this.reconcileHandle !== null) {
-            window.cancelAnimationFrame(this.reconcileHandle);
+            clearTimeout(this.reconcileHandle);
             this.reconcileHandle = null;
         }
         this.owners.clear();
@@ -448,13 +452,15 @@ export class GpuSceneMaskController {
         };
     }
 
-    /** Coalesce arbitrary packet/selection bursts behind one animation frame. */
+    /** Debounce packet bursts while keeping isolated selection changes responsive. */
     private scheduleReconcile(): void {
         if (this.reconcileHandle !== null) {
-            return;
+            clearTimeout(this.reconcileHandle);
         }
-        this.reconcileHandle = window.requestAnimationFrame(() =>
-            this.reconcile());
+        this.reconcileHandle = setTimeout(
+            () => this.reconcile(),
+            RECONCILE_DEBOUNCE_MS
+        );
     }
 }
 

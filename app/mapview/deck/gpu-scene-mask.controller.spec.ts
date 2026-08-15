@@ -175,24 +175,18 @@ function overlay(id: string, featureIds: readonly string[]): TileSubsetInteracti
 }
 
 describe("GpuSceneMaskController", () => {
-    let callbacks: FrameRequestCallback[];
-
     beforeEach(() => {
-        callbacks = [];
-        vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => {
-            callbacks.push(callback);
-            return callbacks.length;
-        });
-        vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+        vi.useFakeTimers();
     });
 
-    afterEach(() => vi.restoreAllMocks());
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+    });
 
     /** Run all reconciliation callbacks queued by one logical update burst. */
     function flush(): void {
-        for (const callback of callbacks.splice(0)) {
-            callback(performance.now());
-        }
+        vi.runOnlyPendingTimers();
     }
 
     it("coalesces owners into one sparse target group and geometry-faithful pass", () => {
@@ -212,7 +206,7 @@ describe("GpuSceneMaskController", () => {
         controller.setOverlays("owner-b", new Set(["b"]), [11, 48, 0], [
             overlay("selection", ["Road.5"])
         ]);
-        expect(callbacks).toHaveLength(1);
+        expect(vi.getTimerCount()).toBe(1);
         flush();
 
         expect(outline.masks.size).toBe(1);

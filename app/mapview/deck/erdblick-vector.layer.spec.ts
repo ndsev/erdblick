@@ -7,6 +7,7 @@ import {
 import {
     DUAL_COMPACT_PATH_FRAGMENT_SHADER,
     DUAL_SIMPLE_PATH_FRAGMENT_SHADER,
+    gpuSceneShaderModule,
     gpuSceneMaskFragmentShader
 } from "./erdblick-vector.shaders";
 import {GpuMaterialFlag, GpuPrimitiveKind} from "./gpu-render-packet";
@@ -43,6 +44,40 @@ function material(
 }
 
 describe("ErdblickVectorLayer model order", () => {
+    it("keeps scene lookup samplers high precision through helper calls", () => {
+        const source = gpuSceneShaderModule.vs as string;
+
+        expect(source).toContain(
+            "uniform highp sampler2D gpuSceneOriginTexture;"
+        );
+        expect(source).toContain(
+            "uniform highp sampler2D gpuSceneContributionTexture;"
+        );
+        expect(source).toContain(
+            "uniform highp sampler2D gpuSceneZIndexTexture;"
+        );
+        expect(source).toContain(
+            "vec4 gpuScene_lookup(highp sampler2D lookupTexture, uint texelIndex)"
+        );
+    });
+
+    it("scales LNGLAT meter offsets without relying on shared geometry state", () => {
+        const source = gpuSceneShaderModule.vs as string;
+
+        expect(source).toContain(
+            "project.projectionMode == PROJECTION_MODE_WEB_MERCATOR_AUTO_OFFSET"
+        );
+        expect(source).toContain(
+            "originScale /= project_size_at_latitude(project.coordinateOrigin.y);"
+        );
+        expect(source).toContain(
+            "project.commonUnitsPerMeter * originScale"
+        );
+        expect(source).not.toContain(
+            "project_size(gpuScene_localPosition(localPosition))"
+        );
+    });
+
     it("does not require Deck picking uniforms in dual-stroke mask passes", () => {
         for (const shader of [
             DUAL_COMPACT_PATH_FRAGMENT_SHADER,
@@ -145,6 +180,11 @@ describe("ErdblickVectorLayer model order", () => {
             `${GpuPrimitiveKind.SurfaceTriangle}:60:0`,
             `${GpuPrimitiveKind.PathSegment}:9:0`
         ]);
+        const surfaceBias = internal.materialModels.get(2n).model
+            .shaderInputs.setProps.mock.calls[0][0].gpuScene.primitiveDepthBias;
+        const pathBias = internal.materialModels.get(1n).model
+            .shaderInputs.setProps.mock.calls[0][0].gpuScene.primitiveDepthBias;
+        expect(pathBias).toBeGreaterThan(surfaceBias);
     });
 
     it("does not rebind unchanged scene shader inputs on every draw", () => {
@@ -214,15 +254,15 @@ describe("ErdblickVectorLayer model order", () => {
         const replacementBuffer = {id: "replacement"};
         const firstStore = {
             materialKey: 7n,
-            buffer: firstBuffer,
-            bufferRevision: 1,
-            highWaterRecord: 3
+            presentedBuffer: firstBuffer,
+            presentedBufferRevision: 1,
+            presentedHighWaterRecord: 3
         };
         const replacementStore = {
             materialKey: 7n,
-            buffer: replacementBuffer,
-            bufferRevision: 1,
-            highWaterRecord: 2
+            presentedBuffer: replacementBuffer,
+            presentedBufferRevision: 1,
+            presentedHighWaterRecord: 2
         };
         const source = (store: typeof firstStore) => ({
             kind: GpuPrimitiveKind.Point,
@@ -235,7 +275,7 @@ describe("ErdblickVectorLayer model order", () => {
             store
         });
         const scene = {
-            revision: 1,
+            presentationRevision: 1,
             materialStores: vi.fn(() => [source(firstStore)])
         };
         const layer = new ErdblickVectorLayer({
@@ -260,9 +300,9 @@ describe("ErdblickVectorLayer model order", () => {
         expect(models[0].setAttributes)
             .toHaveBeenLastCalledWith({instances: firstBuffer});
 
-        firstStore.buffer = grownBuffer;
-        firstStore.bufferRevision = 2;
-        scene.revision += 1;
+        firstStore.presentedBuffer = grownBuffer;
+        firstStore.presentedBufferRevision = 2;
+        scene.presentationRevision += 1;
         internal.syncModels();
         expect(models[0].setAttributes)
             .toHaveBeenLastCalledWith({instances: grownBuffer});
@@ -271,7 +311,7 @@ describe("ErdblickVectorLayer model order", () => {
         scene.materialStores.mockReturnValue([
             source(replacementStore as typeof firstStore)
         ]);
-        scene.revision += 1;
+        scene.presentationRevision += 1;
         internal.syncModels();
         expect(models[0].destroy).toHaveBeenCalledOnce();
         expect(models[1].setAttributes)

@@ -113,6 +113,30 @@ describe("GpuPrimitiveStore", () => {
         });
     });
 
+    it("retains a presented buffer until models can bind the grown generation", () => {
+        const device = new FakeDevice();
+        const store = new GpuPrimitiveStore(
+            device as unknown as Device,
+            10n,
+            4
+        );
+        const first = store.allocate(40);
+        store.write(first, new Uint8Array(160).fill(17));
+        store.publish();
+        const presented = store.presentedBuffer as unknown as FakeBuffer;
+
+        const second = store.allocate(500);
+        store.write(second, new Uint8Array(2000).fill(23));
+
+        expect(store.presentedBuffer).toBe(presented);
+        expect(presented.destroyed).toBe(false);
+        store.publish();
+        expect(store.presentedBuffer).not.toBe(presented);
+        expect(presented.destroyed).toBe(false);
+        store.releaseRetiredBuffers();
+        expect(presented.destroyed).toBe(true);
+    });
+
     it("reuses released ranges without uploading over inactive bytes", () => {
         const device = new FakeDevice();
         const store = new GpuPrimitiveStore(

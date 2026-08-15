@@ -160,6 +160,49 @@ describe("ViewLayerController", () => {
         expect(controller.pendingVisualizationRenders).toEqual(new Set([second]));
     });
 
+    it("interleaves new tile renders across styled layers", () => {
+        const controller = Object.create(
+            ViewLayerController.prototype
+        ) as any;
+        const first = {id: "first"};
+        const second = {id: "second"};
+        const third = {id: "third"};
+        let availableChecks = 0;
+        const remaining = new Map([
+            [first, 2],
+            [second, 2],
+            [third, 2]
+        ]);
+        controller.sceneHandle = {scene: {}};
+        controller.nextStyledLayerDispatchIndex = 0;
+        controller.pendingVisualizationRenders = new Set();
+        controller.styledLayers = new Map([
+            ["first", first],
+            ["second", second],
+            ["third", third]
+        ]);
+        controller.renderService = {
+            availableWorkerSlots: vi.fn(() => availableChecks++ < 6 ? 1 : 0)
+        };
+        controller.dispatchOnePendingTile = vi.fn(owned => {
+            const count = remaining.get(owned) ?? 0;
+            if (!count) {
+                return false;
+            }
+            remaining.set(owned, count - 1);
+            return true;
+        });
+
+        controller.drainPendingTiles();
+
+        expect(controller.dispatchOnePendingTile.mock.calls.map(
+            ([owned]: [typeof first]) => owned.id
+        )).toEqual([
+            "first", "second", "third",
+            "first", "second", "third"
+        ]);
+    });
+
     it("reattaches scene owners by queueing rather than rendering immediately", () => {
         const controller = Object.create(
             ViewLayerController.prototype
