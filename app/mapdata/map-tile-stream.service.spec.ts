@@ -63,7 +63,51 @@ describe("MapTileStreamService viewport timing", () => {
     });
 });
 
-describe("MapTileStreamService TTL renewal fairness", () => {
+describe("MapTileStreamService TTL renewal scheduling", () => {
+    it("does not immediately renew expired retained values", () => {
+        const service = Object.create(
+            MapTileStreamService.prototype
+        ) as MapTileStreamService;
+        const internal = service as any;
+        const owner = {expireTiles: vi.fn()};
+        internal.tileExpiryScheduler = {
+            cancel: vi.fn(),
+            schedule: vi.fn()
+        };
+        const now = vi.spyOn(Date, "now").mockReturnValue(2_000);
+
+        service.updateRetainedTileExpiry(owner, 7, 3, 1_999);
+
+        expect(internal.tileExpiryScheduler.cancel).toHaveBeenCalledWith(
+            owner,
+            7
+        );
+        expect(internal.tileExpiryScheduler.schedule).not.toHaveBeenCalled();
+        now.mockRestore();
+    });
+
+    it("keeps immediate expiry enabled for filter subscriptions", () => {
+        const service = Object.create(
+            MapTileStreamService.prototype
+        ) as MapTileStreamService;
+        const internal = service as any;
+        const ref = {filterId: "filter", released: false};
+        internal.filterSubscriptionsById = new Map([["filter", ref]]);
+        internal.tileExpiryScheduler = {
+            cancel: vi.fn(),
+            schedule: vi.fn()
+        };
+
+        service.updateFilterTileExpiry(ref as any, 7, 3, 1_999);
+
+        expect(internal.tileExpiryScheduler.schedule).toHaveBeenCalledWith(
+            ref,
+            7,
+            3,
+            1_999
+        );
+    });
+
     it("takes bounded round-robin owner slices without capping queued coverage", () => {
         const service = Object.create(
             MapTileStreamService.prototype

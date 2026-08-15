@@ -236,7 +236,11 @@ export class MapTileStreamService {
             ref.released) {
             return;
         }
-        this.updateRetainedTileExpiry(
+        if (expiresAtMs === null) {
+            this.tileExpiryScheduler.cancel(ref, tileId);
+            return;
+        }
+        this.tileExpiryScheduler.schedule(
             ref,
             tileId,
             deliveryEpoch,
@@ -251,7 +255,10 @@ export class MapTileStreamService {
         deliveryEpoch: number,
         expiresAtMs: number | null
     ): void {
-        if (expiresAtMs === null) {
+        // This value came from an explicit request which just completed. If
+        // its encoded lifetime elapsed in transit, retrying it immediately
+        // creates a self-sustaining request loop without making it fresher.
+        if (expiresAtMs === null || expiresAtMs <= Date.now()) {
             this.tileExpiryScheduler.cancel(owner, tileId);
             return;
         }
