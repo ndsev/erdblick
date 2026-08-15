@@ -138,7 +138,9 @@ interface SelectionRectangleOverlay {
                 <ng-template #item let-item>
                     <a pRipple class="p-contextmenu-item-link"
                        [attr.data-automationid]="item.automationId"
-                       [attr.title]="item.title">
+                       [attr.title]="item.title"
+                       (mouseenter)="onContextMenuItemHover(item)"
+                       (mouseleave)="onContextMenuItemHoverExit(item)">
                         @if (item.icon) {
                             <span class="p-contextmenu-item-icon" [ngClass]="item.icon"></span>
                         }
@@ -229,6 +231,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private viewerContextMenuCapture?: (event: MouseEvent) => void;
     private layoutResizePrepareListener?: (event: Event) => void;
     private viewerSetupGeneration = 0;
+    private viewerSetupQueue: Promise<void> = Promise.resolve();
     private layerController?: ViewLayerController;
     private cacheResetSubscription?: Subscription;
 
@@ -335,7 +338,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                     feature?.mapTileKey === mapTileKey))) {
                 return;
             }
-            this.ngZone.run(() => this.refreshHoverPopover());
+            this.refreshHoverPopover();
         }));
         this.firstPersonViewRequestSubscription = this.menuService.firstPersonViewRequests.subscribe(request => {
             if (request.viewIndex !== this.viewIndex()) {
@@ -393,6 +396,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     /** Handles context-menu teardown and queued reopen requests when the menu is toggled while already open. */
     onContextMenuHide() {
         this.contextMenuVisible = false;
+        this.inspectionSelection.setHoveredFeatures([]);
         if (this.pendingContextMenuOpenEvent && this.viewerContextMenu) {
             const event = this.pendingContextMenuOpenEvent;
             this.pendingContextMenuOpenEvent = null;
@@ -412,6 +416,21 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     /** Tracks whether the PrimeNG context menu is currently visible. */
     onContextMenuShow() {
         this.contextMenuVisible = true;
+    }
+
+    /** Highlights the exact already-rendered feature represented by a context-menu row. */
+    onContextMenuItemHover(item: MenuItem): void {
+        const feature = item["hoverFeature"] as TileFeatureId | undefined;
+        if (feature) {
+            this.inspectionSelection.setHoveredFeatures([feature]);
+        }
+    }
+
+    /** Clears a context-menu-owned feature hover when the pointer leaves its row. */
+    onContextMenuItemHoverExit(item: MenuItem): void {
+        if (item["hoverFeature"]) {
+            this.inspectionSelection.setHoveredFeatures([]);
+        }
     }
 
     /**
@@ -502,39 +521,47 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      */
     private initializeViewer(mode2d: boolean) {
         const setupGeneration = ++this.viewerSetupGeneration;
-        this.createViewerForMode(mode2d, setupGeneration).catch((error) => {
+        // Persisted projection and antialiasing state may both emit while Angular creates the
+        // component. Serialize those rebuilds: two Deck instances must never initialize against
+        // the same container, because stale teardown would remove the current instance's canvas.
+        this.viewerSetupQueue = this.viewerSetupQueue.then(async () => {
             if (setupGeneration !== this.viewerSetupGeneration) {
                 return;
             }
-            console.error('Failed to initialize viewer:', error);
-            const detail = error instanceof Error ? error.message : String(error);
-            const summary = detail.split(" userAgent=")[0] || "WebGL2 context could not be created.";
-            this.viewerInitError = `${summary} ${MapViewComponent.WEBGL_SETUP_HINT}`;
-        }).finally(() => {
-            if (setupGeneration !== this.viewerSetupGeneration) {
-                return;
+            try {
+                await this.createViewerForMode(mode2d, setupGeneration);
+            } catch (error) {
+                if (setupGeneration !== this.viewerSetupGeneration) {
+                    return;
+                }
+                console.error('Failed to initialize viewer:', error);
+                const detail = error instanceof Error ? error.message : String(error);
+                const summary = detail.split(" userAgent=")[0] || "WebGL2 context could not be created.";
+                this.viewerInitError = `${summary} ${MapViewComponent.WEBGL_SETUP_HINT}`;
+            } finally {
+                if (setupGeneration === this.viewerSetupGeneration) {
+                    const spinner = document.getElementById('global-spinner-container');
+                    if (spinner) {
+                        spinner.style.display = 'none';
+                    }
+                    this.stateService.focusedView = this.stateService.focusedView.valueOf();
+                    const mapView = this.mapView;
+                    if (!mapView) {
+                        this.cdr.markForCheck();
+                    } else {
+                        this.showSyncMenu = this.stateService.numViews > 1 && mapView.viewIndex > 0;
+                        this.firstPersonViewActiveSubscription = mapView.firstPersonViewActive.subscribe(() => {
+                            this.cdr.markForCheck();
+                        });
+                        this.hoverSubscription = mapView.hoveredFeatureIds.subscribe(result => {
+                            this.lastHoverResult = result;
+                            this.refreshHoverPopover();
+                        });
+                        this.mapViewState.requestViewRecalculation(ViewRecalculationReason.HoverPopover);
+                        this.cdr.markForCheck();
+                    }
+                }
             }
-            // Hide the global loading spinner
-            const spinner = document.getElementById('global-spinner-container');
-            if (spinner) {
-                spinner.style.display = 'none';
-            }
-            this.stateService.focusedView = this.stateService.focusedView.valueOf(); // Focus on the last focused view
-            const mapView = this.mapView;
-            if (!mapView) {
-                this.cdr.markForCheck();
-                return;
-            }
-            this.showSyncMenu = this.stateService.numViews > 1 && mapView.viewIndex > 0;
-            this.firstPersonViewActiveSubscription = mapView.firstPersonViewActive.subscribe(() => {
-                this.cdr.markForCheck();
-            });
-            this.hoverSubscription = mapView.hoveredFeatureIds.subscribe(result => {
-                this.lastHoverResult = result;
-                this.refreshHoverPopover();
-            });
-            this.mapViewState.requestViewRecalculation(ViewRecalculationReason.HoverPopover);
-            this.cdr.markForCheck();
         });
     }
 
@@ -577,7 +604,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         } else {
             this.featureIdsPopover.show(null, anchor);
         }
-        this.cdr.markForCheck();
+        this.cdr.detectChanges();
     }
 
     /** Returns the DOM id used for this map view canvas. */

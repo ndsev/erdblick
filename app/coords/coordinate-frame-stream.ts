@@ -5,21 +5,15 @@ import {
     type Subscription
 } from "rxjs";
 
-/** Minimal Angular-zone surface needed to re-enter change detection. */
-export interface CoordinateFrameZone {
-    run(callback: () => void): void;
-}
-
 /**
- * Coalesces an external coordinate stream to animation frames and delivers
- * each retained value inside Angular's zone.
+ * Coalesces an external coordinate stream to animation frames without turning
+ * every pointer sample into a global Angular change-detection pass.
  */
 export function subscribeCoordinateFrames<T>(
     source: Observable<T>,
-    zone: CoordinateFrameZone,
     receive: (value: T) => void
 ): Subscription {
     return source.pipe(
         auditTime(0, animationFrameScheduler)
-    ).subscribe(value => zone.run(() => receive(value)));
+    ).subscribe(receive);
 }

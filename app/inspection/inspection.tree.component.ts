@@ -1143,10 +1143,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.activeFeatureIdNodeId = typeof targetRow?.["nodeId"] === "string"
                 ? targetRow["nodeId"]
                 : undefined;
-            this.jumpService.highlightByJumpTargetFilter(
-                targetRow["mapId"],
-                targetRow["value"],
-                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+            this.highlightVisibleFeatureReference(targetRow);
             return;
         }
         this.highlightRowHoverTarget(targetRow);
@@ -1444,10 +1441,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.activeFeatureIdNodeId = typeof rowData?.["nodeId"] === "string"
             ? rowData["nodeId"]
             : undefined;
-        this.jumpService.highlightByJumpTargetFilter(
-            rowData["mapId"],
-            rowData["value"],
-            coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+        this.highlightVisibleFeatureReference(rowData);
     }
 
     /** Restores row-level hover once the pointer leaves a feature-id cell. */
@@ -1475,12 +1469,18 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.mapService.setHoveredFeatures([]);
             return;
         }
-        this.mapService.setHoveredFeatures([{
-            mapTileKey,
-            featureId: hoverId
-        }], true);
+        this.mapService.setHoveredFeatures([{mapTileKey, featureId: hoverId}], true);
     }
 
+    /** Highlights a referenced feature only within the already loaded tile, without issuing a locate request. */
+    private highlightVisibleFeatureReference(rowData: any): void {
+        const mapTileKey = rowData?.["mapTileKey"];
+        const featureId = rowData?.["value"];
+        const valid = typeof mapTileKey === "string" && typeof featureId === "string";
+        this.mapService.setHoveredFeatures(valid && mapTileKey && featureId
+            ? [{mapTileKey, featureId}]
+            : []);
+    }
     /** Returns whether a row's value column stores a FeatureId rather than a plain scalar. */
     protected isFeatureIdValueRow(rowData: any): boolean {
         return rowData?.["type"] === this.InspectionValueType.FEATUREID.value;

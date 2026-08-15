@@ -16,11 +16,9 @@ describe("subscribeCoordinateFrames", () => {
             window.clearTimeout(handle));
 
         const coordinates = new BehaviorSubject<number | null>(null);
-        const ngZone = {run: vi.fn((callback: () => void) => callback())};
         const received: Array<number | null> = [];
         const subscription = subscribeCoordinateFrames(
             coordinates,
-            ngZone,
             value => received.push(value)
         );
 
@@ -31,7 +29,6 @@ describe("subscribeCoordinateFrames", () => {
         await vi.advanceTimersByTimeAsync(16);
 
         expect(received).toEqual([2]);
-        expect(ngZone.run).toHaveBeenCalledTimes(1);
 
         subscription.unsubscribe();
     });

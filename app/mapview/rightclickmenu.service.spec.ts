@@ -134,6 +134,7 @@ describe("RightClickMenuService", () => {
             "Select all", "same", "same", "other"
         ]);
         expect(items.slice(1, 4).map(item => item["mapIdLabel"])).toEqual(["map-a", "map-b", "map-a"]);
+        expect(items.slice(1, 4).map(item => item["hoverFeature"])).toEqual([topmost, otherMap, otherFeature]);
         expect(items.slice(1, 4).map(item => item.icon)).toEqual([undefined, undefined, undefined]);
         expect(new Set(items.slice(1, 4).map(item => item.id)).size).toBe(3);
         expect(items[4].separator).toBe(true);

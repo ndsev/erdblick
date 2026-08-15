@@ -271,6 +271,7 @@ export class RightClickMenuService {
             automationId: `inspect-picked-feature-${index}`,
             label: row.feature.featureId,
             mapIdLabel: row.mapIdLabel,
+            hoverFeature: row.feature,
             command: () => this.inspectionSelection.inspectFeatureIds([row.feature])
         };
     }

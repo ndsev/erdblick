@@ -1,4 +1,4 @@
-import {Component, ElementRef, HostListener, NgZone, OnDestroy, ViewChild} from "@angular/core";
+import {ChangeDetectorRef, Component, ElementRef, HostListener, NgZone, OnDestroy, ViewChild} from "@angular/core";
 import {InfoMessageService} from "../shared/info.service";
 import {MapViewStateService, ViewRecalculationReason} from "../mapview/map-view-state.service";
 import {StyleService} from "./style.service";
@@ -644,6 +644,7 @@ export class StyleComponent implements OnDestroy {
                 private readonly mapInfoService: MapInfoService,
                 private dialogStack: DialogStackService,
                 private ngZone: NgZone,
+                private changeDetector: ChangeDetectorRef,
                 styleEditorRequestService: StyleEditorRequestService) {
         this.stateService.ready.pipe(filter(state => state)).subscribe(_ => {
             this.refreshUpdatedStylesDialogVisibility();
@@ -1243,10 +1244,13 @@ export class StyleComponent implements OnDestroy {
                 if (this.quickProjectionRefreshTimer) {
                     clearTimeout(this.quickProjectionRefreshTimer);
                 }
-                this.quickProjectionRefreshTimer = setTimeout(() => {
-                    this.quickProjectionRefreshTimer = undefined;
-                    this.refreshQuickProjection(editedStyleSource);
-                }, 150);
+                this.ngZone.runOutsideAngular(() => {
+                    this.quickProjectionRefreshTimer = setTimeout(() => {
+                        this.quickProjectionRefreshTimer = undefined;
+                        this.refreshQuickProjection(editedStyleSource);
+                        this.changeDetector.detectChanges();
+                    }, 150);
+                });
             }
         );
         this.styleEditorSaveSubscription.unsubscribe();

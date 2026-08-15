@@ -1,4 +1,4 @@
-import {Component, NgZone, OnDestroy} from "@angular/core";
+import {ChangeDetectorRef, Component, OnDestroy} from "@angular/core";
 import {CoordinatesService} from "./coordinates.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService} from "../shared/appstate.service";
@@ -102,7 +102,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
                 public coordinatesService: CoordinatesService,
                 public clipboardService: ClipboardService,
                 public stateService: AppStateService,
-                private ngZone: NgZone) {
+                private changeDetector: ChangeDetectorRef) {
         for (let level = 0; level <= 15; level++) {
             this.displayOptions.push({name: packedTileIdOptionName(level)});
         }
@@ -140,16 +140,16 @@ export class CoordinatesPanelComponent implements OnDestroy {
 
         this.subscriptions.push(subscribeCoordinateFrames(
             this.coordinatesService.mouseMoveCoordinates,
-            this.ngZone,
             coordinates => {
-            // Deck publishes outside Angular and may do so during renderer setup. Applying the
-            // latest sample at a frame boundary keeps check-no-changes passes stable.
+            // Deck publishes outside Angular. Check only this HUD after applying the coalesced
+            // sample; entering the zone would check every open dialog on every pointer frame.
             if (!this.markerPosition && coordinates) {
                 this.longitude = GeoMath.toDegrees(coordinates.longitude);
                 this.latitude = GeoMath.toDegrees(coordinates.latitude);
                 this.updateValues();
             }
             this.restoreSelectedOptions();
+            this.changeDetector.detectChanges();
         }));
     }
 
