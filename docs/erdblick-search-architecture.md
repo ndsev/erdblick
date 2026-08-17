@@ -117,9 +117,10 @@ style identity and may contain slashes for existing tree grouping. There is no
 parallel configuration ID/revision store or generated YAML cache.
 
 `search-style-sheet.converter.ts` emits deterministic version-2 source with
-`default: false` and flat rules. It deliberately excludes query, scope,
-map/layer identity, views, feature-type selection, density controls, UI row
-IDs, and automatic-rule metadata. The normal imported-style lifecycle parses,
+the save dialog's explicit Boolean `default`, optional exact layer-ID affinity,
+and flat rules. Empty affinity omits `layer` and means any layer. It deliberately
+excludes query, search scope, map identity, views, feature-type selection,
+density controls, UI row IDs, and automatic-rule metadata. The normal imported-style lifecycle parses,
 persists, lists, edits, renders, and exports that source. Imported persistence
 stores only a versioned list of raw YAML sources; no legacy search-style store
 is read.
@@ -129,7 +130,8 @@ GUI. AST-based Quick edits preserve comments, root metadata, unsupported keys,
 and untouched rules. Ambiguous branch/dynamic rules remain read-only and are
 reported as warnings. Feature Search uses the same projection permissively:
 compatible rules are deep-copied, incompatible rules are omitted with visible
-reasons, and the YAML source is never changed.
+reasons, and the YAML source is never changed. Detached reuse copies rules only;
+stylesheet `default` and `layer` metadata continue to govern normal rendering.
 
 ## Result identity
 

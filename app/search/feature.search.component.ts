@@ -90,7 +90,8 @@ import {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {
     convertSearchStyleRulesToYaml,
     projectStyleSourceForSearch,
-    SearchStyleApplicationProjection
+    SearchStyleApplicationProjection,
+    type SearchStyleSaveOptions
 } from "./search-style-sheet.converter";
 
 interface FeatureSearchGroupingOption {
@@ -729,6 +730,13 @@ interface FeatureSearchResultTreeItem {
                 </p-button>
             </ng-template>
         </app-confirm-popup>
+        <search-style-save-dialog
+            [visible]="searchStyleSaveVisible"
+            (visibleChange)="onSearchStyleSaveVisibleChange($event)"
+            [layerIds]="searchStyleSaveLayerIds"
+            [saving]="searchStyleSavePending"
+            (saveRequested)="confirmSearchStyleSave($event)">
+        </search-style-save-dialog>
         <div #alert></div>
     `,
     standalone: false
@@ -809,6 +817,10 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     selectedSearchStyleId: string | null = null;
     searchStyleApplicationMessage = "";
     searchStyleApplicationWarning = false;
+    protected searchStyleSaveVisible = false;
+    protected searchStyleSavePending = false;
+    protected searchStyleSaveLayerIds: string[] = [];
+    private pendingSearchStyleRules: FeatureSearchStyleRule[] = [];
     protected readonly featureSearchColorPickerOverlayOptions: OverlayOptions = {
         styleClass: "feature-search-colorpicker-overlay"
     };
@@ -1707,26 +1719,38 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             : `Applied all ${projection.rules.length} rules from “${style.id}” as a detached copy.`;
     }
 
-    /** Creates a canonical flat YAML stylesheet through the ordinary imported-style lifecycle. */
+    /** Opens the AppDialog with an immutable snapshot of the current high-fidelity rules. */
     protected saveSearchStyle(): void {
         const rules = this.serializeStyleRuleDrafts();
         if (!rules.length) {
             this.infoMessageService.showError("Add at least one high-fidelity rule before saving a search stylesheet.");
             return;
         }
-        const requestedName = window.prompt("Save search stylesheet as", "Search Style");
-        if (requestedName === null) {
+        this.pendingSearchStyleRules = structuredClone(rules);
+        this.searchStyleSaveLayerIds = Array.from(new Set(
+            Array.from(this.mapService.maps.allFeatureLayers(), layer => layer.id)
+                .filter(layerId => layerId.length > 0)
+        )).sort();
+        this.searchStyleSaveVisible = true;
+    }
+
+    /** Persists one dialog payload through the ordinary transactional style import path. */
+    protected confirmSearchStyleSave(options: Readonly<SearchStyleSaveOptions>): void {
+        if (this.searchStyleSavePending || !this.searchStyleSaveVisible) {
             return;
         }
-        const conflict = this.styleService.styleIdentityConflict(requestedName);
+        const conflict = this.styleService.styleIdentityConflict(options.name);
         if (conflict) {
             this.infoMessageService.showError(
-                `A style named or resolved by “${requestedName}” already exists. Edit that style or choose another name.`);
+                `A style named or resolved by “${options.name}” already exists. Edit that style or choose another name.`);
             return;
         }
+        this.searchStyleSavePending = true;
         try {
-            const generated = convertSearchStyleRulesToYaml(requestedName, rules);
-            const importedStyleId = this.styleService.importStyleYamlSource(generated.source, false);
+            const generated = convertSearchStyleRulesToYaml(options, this.pendingSearchStyleRules);
+            const importedStyleId = this.styleService.importStyleYamlSource(
+                generated.source,
+                options.defaultEnabled);
             if (!importedStyleId) {
                 return;
             }
@@ -1734,8 +1758,19 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.searchStyleApplicationWarning = false;
             this.searchStyleApplicationMessage = `Saved “${importedStyleId}” as an imported search stylesheet. This search remains a detached copy.`;
             this.infoMessageService.showSuccess(`Saved search stylesheet “${importedStyleId}”.`);
+            this.searchStyleSaveVisible = false;
+            this.pendingSearchStyleRules = [];
         } catch (error) {
             this.infoMessageService.showError(error instanceof Error ? error.message : String(error));
+        } finally {
+            this.searchStyleSavePending = false;
+        }
+    }
+
+    protected onSearchStyleSaveVisibleChange(visible: boolean): void {
+        this.searchStyleSaveVisible = visible;
+        if (!visible && !this.searchStyleSavePending) {
+            this.pendingSearchStyleRules = [];
         }
     }
 

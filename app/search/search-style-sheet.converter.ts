@@ -42,6 +42,12 @@ export interface CanonicalSearchStyleSheet {
     source: string;
 }
 
+export interface SearchStyleSaveOptions {
+    name: string;
+    defaultEnabled: boolean;
+    layerIds: readonly string[];
+}
+
 export interface QuickStyleWarning {
     path: string;
     code: string;
@@ -85,9 +91,10 @@ export class SearchStyleConversionError extends Error {
 
 /** Creates one deterministic, flat, ordinary stylesheet from detached search rules. */
 export function convertSearchStyleRulesToYaml(
-    name: string,
+    options: SearchStyleSaveOptions,
     rules: readonly FeatureSearchStyleRule[]
 ): CanonicalSearchStyleSheet {
+    const {name, defaultEnabled} = options;
     if (!name.trim()) {
         throw new SearchStyleConversionError(["A style name is required."]);
     }
@@ -95,13 +102,17 @@ export function convertSearchStyleRulesToYaml(
         throw new SearchStyleConversionError(["At least one high-fidelity rule is required."]);
     }
     assertCanonicalSearchStyleRules(rules);
-    const document = {
+    const layerIds = normalizedLayerAffinity(options.layerIds);
+    const document: Record<string, unknown> = {
         name,
         category: "search",
         version: 2,
-        default: false,
+        default: defaultEnabled,
         rules: rules.map(rule => featureSearchRuleToStyleRule(rule))
     };
+    if (layerIds.length) {
+        document["layer"] = `^(${layerIds.map(escapeRegexLiteral).join("|")})$`;
+    }
     return {
         styleId: name,
         filename: canonicalSearchStyleFilename(name),
@@ -111,6 +122,19 @@ export function convertSearchStyleRulesToYaml(
             sortKeys: false
         })
     };
+}
+
+/** Preserves exact layer IDs while producing deterministic affinity metadata. */
+export function normalizedLayerAffinity(layerIds: readonly string[]): string[] {
+    if (layerIds.some(layerId => layerId.length === 0)) {
+        throw new SearchStyleConversionError(["Layer affinity cannot contain an empty layer ID."]);
+    }
+    return Array.from(new Set(layerIds)).sort();
+}
+
+/** Escapes one exact layer ID for the native ECMAScript regular-expression matcher. */
+function escapeRegexLiteral(value: string): string {
+    return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }
 
 /** Returns a transport-safe filename without changing the stylesheet's exact YAML name. */

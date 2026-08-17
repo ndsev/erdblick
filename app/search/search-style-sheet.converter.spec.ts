@@ -43,9 +43,15 @@ describe("search style sheet codec", () => {
         }
     ];
 
+    const saveOptions = (
+        name: string,
+        defaultEnabled = false,
+        layerIds: readonly string[] = []
+    ) => ({name, defaultEnabled, layerIds});
+
     it("emits deterministic exact-name category-search YAML with flat rules", () => {
-        const first = convertSearchStyleRulesToYaml("Team/Road emphasis", rules);
-        const second = convertSearchStyleRulesToYaml("Team/Road emphasis", rules);
+        const first = convertSearchStyleRulesToYaml(saveOptions("Team/Road emphasis"), rules);
+        const second = convertSearchStyleRulesToYaml(saveOptions("Team/Road emphasis"), rules);
         const parsed = load(first.source) as any;
 
         expect(first).toEqual(second);
@@ -66,7 +72,7 @@ describe("search style sheet codec", () => {
     });
 
     it("produces a category-search sheet accepted by the native parser", () => {
-        const generated = convertSearchStyleRulesToYaml("Team/Road emphasis", rules);
+        const generated = convertSearchStyleRulesToYaml(saveOptions("Team/Road emphasis"), rules);
         const style = uint8ArrayToWasm(
             wasmBuffer => new coreLib.FeatureLayerStyle(wasmBuffer),
             new TextEncoder().encode(generated.source)
@@ -79,9 +85,9 @@ describe("search style sheet codec", () => {
     });
 
     it("round-trips canonical YAML through the detached search projection without filter drift", () => {
-        const generated = convertSearchStyleRulesToYaml("Round trip", rules);
+        const generated = convertSearchStyleRulesToYaml(saveOptions("Round trip"), rules);
         const projected = projectStyleSourceForSearch(generated.source, "feature");
-        const regenerated = convertSearchStyleRulesToYaml("Round trip copy", projected.rules);
+        const regenerated = convertSearchStyleRulesToYaml(saveOptions("Round trip copy"), projected.rules);
         const first = load(generated.source) as any;
         const second = load(regenerated.source) as any;
 
@@ -90,8 +96,8 @@ describe("search style sheet codec", () => {
     });
 
     it("rejects empty rules and values conversion cannot preserve", () => {
-        expect(() => convertSearchStyleRulesToYaml("Empty", [])).toThrow(/at least one/i);
-        expect(() => convertSearchStyleRulesToYaml("Broken", [{
+        expect(() => convertSearchStyleRulesToYaml(saveOptions("Empty"), [])).toThrow(/at least one/i);
+        expect(() => convertSearchStyleRulesToYaml(saveOptions("Broken"), [{
             geometry: "line",
             filter: [{field: "speed", op: "approximately", value: 80}],
             color: {
@@ -100,6 +106,41 @@ describe("search style sheet codec", () => {
                 stops: [{value: {nested: true}, color: "#ffffff"}]
             }
         }])).toThrow(/unsupported operator.*non-scalar value/i);
+    });
+
+    it("emits the chosen default and exact deterministic layer affinity", () => {
+        const generated = convertSearchStyleRulesToYaml(
+            saveOptions("Scoped", true, ["roads.v2", "lane[0]", "roads.v2"]),
+            rules);
+        const parsed = load(generated.source) as any;
+        const style = uint8ArrayToWasm(
+            wasmBuffer => new coreLib.FeatureLayerStyle(wasmBuffer),
+            new TextEncoder().encode(generated.source)
+        );
+
+        expect(parsed.default).toBe(true);
+        expect(parsed.layer).toBe("^(lane\\[0\\]|roads\\.v2)$");
+        expect(style.defaultEnabled()).toBe(true);
+        expect(style.hasLayerAffinity("lane[0]")).toBe(true);
+        expect(style.hasLayerAffinity("roads.v2")).toBe(true);
+        expect(style.hasLayerAffinity("roadsXv2")).toBe(false);
+        style.delete();
+    });
+
+    it("omits affinity for Any and preserves exact whitespace-bearing IDs", () => {
+        const any = load(convertSearchStyleRulesToYaml(
+            saveOptions("Any", false, []), rules).source) as any;
+        const exact = convertSearchStyleRulesToYaml(
+            saveOptions("Whitespace", false, [" roads "]), rules);
+        const style = uint8ArrayToWasm(
+            wasmBuffer => new coreLib.FeatureLayerStyle(wasmBuffer),
+            new TextEncoder().encode(exact.source)
+        );
+
+        expect(any).not.toHaveProperty("layer");
+        expect(style.hasLayerAffinity(" roads ")).toBe(true);
+        expect(style.hasLayerAffinity("roads")).toBe(false);
+        style.delete();
     });
 
     it("applies only effective compatible rules and reports every omission", () => {

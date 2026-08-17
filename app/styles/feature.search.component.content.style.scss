@@ -1353,6 +1353,39 @@ search-style-rule-editor {
   }
 }
 
+.search-style-save-content {
+  display: grid;
+  gap: 0.65rem;
+
+  > input,
+  > p-multiselect {
+    width: 100%;
+  }
+
+  .search-style-save-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0.25rem 0;
+  }
+
+  .search-style-save-help {
+    color: var(--p-text-muted-color);
+    line-height: 1.35;
+  }
+
+  .search-style-save-error {
+    color: var(--p-message-error-color, #dc2626);
+  }
+
+  .search-style-save-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+}
+
 .feature-search-colorpicker-overlay {
   // PrimeNG writes an inline transform on the body-appended overlay root, so shift the panel itself.
   // The search visualization color pickers sit near the right dock edge and need the panel to open leftward.

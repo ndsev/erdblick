@@ -35,11 +35,13 @@ Category is metadata independent of whether a style is built in, additional,
 modified, imported, or visible.
 
 Feature Search saves reusable high-fidelity rules as ordinary imported YAML
-with `category: search` and `default: false`. The source is added directly to
+with `category: search`, an explicit user-selected `default`, and optional exact
+layer-ID affinity. Empty affinity applies to any layer. The source is added directly to
 the Styles tree, marked with a **Search** tag, persisted through the normal
 imported-style mechanism, and exported through the normal style action. Its
-canonical source contains flat, generally applicable rules and no query,
-scope, map ID, layer ID, or separate JSON-library identity.
+canonical source contains flat rules and no query, search scope, map ID, or
+separate JSON-library identity. Its optional `layer` metadata affects ordinary
+rendering but is not copied into a detached Feature Search rule template.
 
 The Style Editor has **Quick** and **Advanced** tabs for every loaded base or
 search style. Quick exposes exactly the rule properties supported by the

@@ -32,6 +32,7 @@ import {SearchStyleColorComponent} from "./search/search-style-color.component";
 import {SearchStyleRuleEditorComponent} from "./search/search-style-rule-editor.component";
 import {FeatureSearchDialogsComponent} from "./search/feature.search.dialogs.component";
 import {FeatureSearchExportDialogComponent} from "./search/feature-search-export.dialog.component";
+import {SearchStyleSaveDialogComponent} from "./search/search-style-save.dialog.component";
 import {MapPanelComponent} from "./mapdata/map.panel.component";
 import {InspectionPanelComponent} from "./inspection/inspection.panel.component";
 import {FeaturePanelComponent} from "./inspection/feature.panel.component";
@@ -213,6 +214,7 @@ export const initializeServices = () => {
         SearchStyleRuleEditorComponent,
         FeatureSearchDialogsComponent,
         FeatureSearchExportDialogComponent,
+        SearchStyleSaveDialogComponent,
         DatasourcesComponent,
         OnEnterClickDirective,
         HighlightSearch,
