@@ -107,6 +107,7 @@ async function globalSetup(config: FullConfig): Promise<void> {
     }
 
     const mapgetExecutable = process.env["MAPGET_BIN"] || 'mapget';
+    const cacheType = process.env["EB_MAPGET_CACHE_TYPE"] || 'none';
     const args = [
         '--config',
         mapgetConfigPath,
@@ -115,7 +116,7 @@ async function globalSetup(config: FullConfig): Promise<void> {
         '--port',
         port,
         '--cache-type',
-        'none',
+        cacheType,
         '--webapp',
         '/:static/browser'
     ];
