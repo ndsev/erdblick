@@ -268,6 +268,7 @@ export type ErdblickVectorLayerProps = LayerProps & {
   sharedDisabledPickIndices?: Set<number>;
   drillPickEligible?: boolean;
   navigationAnchorEligible?: boolean;
+  navigationAltitudeResolver?: (globalPickIndex: number) => number | undefined;
   markerAnchorEligible?: boolean;
 };
 
@@ -542,6 +543,7 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
   override initializeState(): void {
     this.initialized = true;
     this.syncModels();
+    this.bindSceneShaderProps();
   }
 
   /** Rebind the scene if Deck ever reconciles this shell with another view generation. */
@@ -551,6 +553,7 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
       this.sceneRevision = -1;
     }
     this.syncModels();
+    this.bindSceneShaderProps();
   }
 
   /** Destroy only model-owned static meshes; GpuScene owns all instance buffers. */
@@ -572,6 +575,10 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
       return;
     }
     this.syncModels();
+    // Rebind before GpuScene retires the previous presentation. A model
+    // filtered out of the next frame cannot rely on draw() to drop its old
+    // lookup texture references.
+    this.bindSceneShaderProps();
     this.setNeedsRedraw();
   }
 
@@ -611,29 +618,47 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
 
   /** Bind compact scene tables and issue exactly one draw per material model. */
   override draw({ renderPass }: { renderPass: unknown }): void {
-    const shaderProps = this.currentSceneShaderProps();
-    if (!shaderProps) {
+    if (!this.bindSceneShaderProps()) {
       return;
     }
     for (const item of [...this.materialModels.values()].sort(compareMaterialModels)) {
       if (item.source.store.presentedHighWaterRecord <= 0) {
         continue;
       }
-      if (item.shaderPropsRevision !== this.sceneShaderPropsRevision) {
-        item.model.shaderInputs.setProps({
-          gpuScene: {
-            ...shaderProps,
-            primitiveDepthBias:
-              primitiveRenderPass(item.source.kind) *
-              GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP,
-          },
-        });
-        item.shaderPropsRevision = this.sceneShaderPropsRevision;
-      }
       if (!item.model.draw(renderPass as never)) {
         this.setNeedsRedraw();
       }
     }
+  }
+
+  /**
+   * Bind the current presentation to every retained model, including models
+   * omitted from the next visible pass by Deck's layer filter.
+   */
+  private bindSceneShaderProps(): boolean {
+    const shaderProps = this.currentSceneShaderProps();
+    if (!shaderProps) {
+      return false;
+    }
+    for (const item of this.materialModels.values()) {
+      if (item.shaderPropsRevision === this.sceneShaderPropsRevision) {
+        continue;
+      }
+      item.model.shaderInputs.setProps({
+        gpuScene: {
+          ...shaderProps,
+          primitiveDepthBias:
+            primitiveRenderPass(item.source.kind) *
+            GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP,
+        },
+      });
+      // ShaderInputs is only the declarative source. Flush it into Model.bindings
+      // now so a deferred picking/mask pass cannot retain the old texture after
+      // GpuScene's end-of-frame retirement.
+      item.model.updateShaderInputs();
+      item.shaderPropsRevision = this.sceneShaderPropsRevision;
+    }
+    return true;
   }
 
   /** Reuse scene textures and static uniforms until their identity really changes. */
@@ -774,6 +799,10 @@ export class ErdblickVectorMaskLayer extends Layer<
   private sceneRevision = -1;
   private configurationRevision = 0;
   private synchronizedConfigurationRevision = -1;
+  private shaderPropsRevision = 0;
+  private shaderPropsSceneRevision = -1;
+  private shaderPropsConfigurationRevision = -1;
+  private shaderPropsFlattenZ: boolean | null = null;
   private initialized = false;
 
   /** Bind a mask-pass configuration without taking ownership of scene buffers. */
@@ -791,6 +820,7 @@ export class ErdblickVectorMaskLayer extends Layer<
   override initializeState(): void {
     this.initialized = true;
     this.syncModels();
+    this.bindShaderProps();
   }
 
   /** Release mask-only pipelines while preserving scene-owned instance buffers. */
@@ -811,25 +841,54 @@ export class ErdblickVectorMaskLayer extends Layer<
     this.configuration = configuration;
     this.configurationRevision += 1;
     this.syncModels();
+    this.bindShaderProps();
     this.setNeedsRedraw();
   }
 
   /** Rebind grown stores and include newly created matching materials. */
   sceneChanged(): void {
     this.syncModels();
+    // Rebind eagerly so a hidden pass cannot retain a lookup texture after
+    // GpuScene releases the previous presentation at the end of the frame.
+    this.bindShaderProps();
     this.setNeedsRedraw();
   }
 
   /** Draw shared stores with mask filtering and identity-color shader inputs. */
   override draw({ renderPass }: { renderPass: unknown }): void {
-    const originTexture = this.props.scene.originTexture;
-    const contributionTexture = this.props.scene.contributionTexture;
-    const zIndexTexture = this.props.scene.zIndexTexture;
-    if (!originTexture || !contributionTexture || !zIndexTexture) {
+    if (!this.bindShaderProps()) {
       return;
     }
     for (const item of [...this.materialModels.values()].sort(compareMaterialModels)) {
       if (item.source.store.presentedHighWaterRecord <= 0) {
+        continue;
+      }
+      if (!item.model.draw(renderPass as never)) {
+        this.setNeedsRedraw();
+      }
+    }
+  }
+
+  /** Rebind current scene and sparse-target textures before either owner retires them. */
+  private bindShaderProps(): boolean {
+    const originTexture = this.props.scene.originTexture;
+    const contributionTexture = this.props.scene.contributionTexture;
+    const zIndexTexture = this.props.scene.zIndexTexture;
+    if (!originTexture || !contributionTexture || !zIndexTexture) {
+      return false;
+    }
+    if (
+      this.shaderPropsSceneRevision !== this.props.scene.presentationRevision ||
+      this.shaderPropsConfigurationRevision !== this.configurationRevision ||
+      this.shaderPropsFlattenZ !== this.props.flattenZ
+    ) {
+      this.shaderPropsSceneRevision = this.props.scene.presentationRevision;
+      this.shaderPropsConfigurationRevision = this.configurationRevision;
+      this.shaderPropsFlattenZ = this.props.flattenZ;
+      this.shaderPropsRevision += 1;
+    }
+    for (const item of this.materialModels.values()) {
+      if (item.shaderPropsRevision === this.shaderPropsRevision) {
         continue;
       }
       item.model.shaderInputs.setProps({
@@ -851,10 +910,10 @@ export class ErdblickVectorMaskLayer extends Layer<
           identityColor: this.configuration.identityColor,
         },
       });
-      if (!item.model.draw(renderPass as never)) {
-        this.setNeedsRedraw();
-      }
+      item.model.updateShaderInputs();
+      item.shaderPropsRevision = this.shaderPropsRevision;
     }
+    return true;
   }
 
   /** Synchronize only low-cardinality material models after scene/config changes. */
@@ -982,6 +1041,8 @@ export function createErdblickVectorLayers(
       pickable: true,
       drillPickEligible: true,
       navigationAnchorEligible: true,
+      navigationAltitudeResolver: (globalPickIndex) =>
+        scene.navigationAltitude(globalPickIndex),
       markerAnchorEligible: true,
     });
   return [

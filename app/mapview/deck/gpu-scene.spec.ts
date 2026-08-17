@@ -1,7 +1,11 @@
 import type {Buffer, Device, Texture} from "@luma.gl/core";
 import {describe, expect, it, vi} from "vitest";
 
-import {GpuScene, type GpuSceneRenderReservation} from "./gpu-scene";
+import {
+    GpuScene,
+    type GpuSceneRenderReservation
+} from "./gpu-scene";
+import {gpuSceneShaderModule} from "./erdblick-vector.shaders";
 import {
     GPU_RENDER_PACKET_ABI_VERSION,
     GPU_RENDER_PACKET_HEADER_BYTES,
@@ -136,6 +140,7 @@ interface PacketOptions {
     materialKey?: bigint;
     pointByte?: number;
     zIndex?: number;
+    depthTieKey?: number;
     renderOrder?: number;
 }
 
@@ -177,7 +182,7 @@ function pointPacket(
     cursor += strings.byteLength;
     const resourceOffset = align(cursor);
     const zIndexOffset = resourceOffset;
-    const recordOffset = zIndexOffset + 8;
+    const recordOffset = zIndexOffset + 16;
     const totalBytes = recordOffset + POINT_BYTES;
     const bytes = new Uint8Array(totalBytes);
     const view = new DataView(bytes.buffer);
@@ -266,6 +271,7 @@ function pointPacket(
     }
     bytes.set(strings, stringOffset);
     view.setFloat64(zIndexOffset, options.zIndex ?? Number.NaN, true);
+    view.setUint32(zIndexOffset + 8, options.depthTieKey ?? 0, true);
     bytes.fill(options.pointByte ?? 23, recordOffset, recordOffset + POINT_BYTES);
     view.setUint32(recordOffset + 16, 0, true);
     view.setUint32(recordOffset + 24, reservation.origin.slot, true);
@@ -302,6 +308,10 @@ function activeTexture(device: FakeDevice, id: string): FakeTexture {
 }
 
 describe("GpuScene contribution lifecycle", () => {
+    it("does not invent feature-local depth ordering for equal semantic z-index values", () => {
+        expect(gpuSceneShaderModule.vs).not.toContain("tieSource");
+    });
+
     it("rejects multi-contribution tasks at the scene boundary", () => {
         const {scene} = createScene();
 
@@ -513,6 +523,103 @@ describe("GpuScene contribution lifecycle", () => {
         const texture = activeTexture(device, "erdblick-gpu-z-index-table");
         const ranked = texture.writes.at(-1)!.data as Float32Array;
         expect(ranked[4]).toBeGreaterThan(ranked[0]);
+    });
+
+    it("assigns matching semantic ties the same depth across tile contributions", () => {
+        const {device, scene} = createScene();
+        for (const tileId of [1, 2]) {
+            const reservation = scene.prepareRender(
+                "origin",
+                [11, 48, 0],
+                [{
+                    identity: `tile-${tileId}`,
+                    mapTileKey: `Features:Map:Layer:${tileId}:0`,
+                    styleOrder: 0
+                }]
+            );
+            scene.applyPacket(pointPacket(reservation, {
+                featureId: `Road.${tileId}`,
+                zIndex: 10,
+                depthTieKey: 17
+            }), reservation);
+            scene.finishRender(reservation);
+        }
+
+        scene.publishPresentation();
+        const zTexture = activeTexture(device, "erdblick-gpu-z-index-table");
+        const ranked = zTexture.writes.at(-1)!.data as Float32Array;
+        expect(ranked[0]).toBe(ranked[4]);
+        expect(ranked[1]).toBe(0);
+        expect(ranked[5]).toBe(0);
+        const contributionTexture = activeTexture(
+            device,
+            "erdblick-gpu-contribution-table"
+        );
+        const contributions = contributionTexture.writes.at(-1)!
+            .data as Float32Array;
+        expect(contributions[1]).toBe(0);
+        expect(contributions[5]).toBe(0);
+    });
+
+    it("separates distinct semantic ties at the same authored depth", () => {
+        const {device, scene} = createScene();
+        for (const [tileId, depthTieKey] of [[1, 17], [2, 18]]) {
+            const reservation = scene.prepareRender(
+                "origin",
+                [11, 48, 0],
+                [{
+                    identity: `tile-${tileId}`,
+                    mapTileKey: `Features:Map:Layer:${tileId}:0`,
+                    styleOrder: 0
+                }]
+            );
+            scene.applyPacket(pointPacket(reservation, {
+                zIndex: 10,
+                depthTieKey
+            }), reservation);
+            scene.finishRender(reservation);
+        }
+
+        scene.publishPresentation();
+        const ranked = activeTexture(device, "erdblick-gpu-z-index-table")
+            .writes.at(-1)!.data as Float32Array;
+        expect(ranked[0]).not.toBe(ranked[4]);
+    });
+
+    it("retains tie separation when many unrelated authored depths consume the scene", () => {
+        const {device, scene} = createScene();
+        const install = (
+            identity: string,
+            tileId: number,
+            zIndex: number,
+            depthTieKey: number
+        ) => {
+            const reservation = scene.prepareRender(
+                "origin",
+                [11, 48, 0],
+                [{
+                    identity,
+                    mapTileKey: `Features:Map:Layer:${tileId}:0`,
+                    styleOrder: 0
+                }]
+            );
+            scene.applyPacket(pointPacket(reservation, {
+                zIndex,
+                depthTieKey
+            }), reservation);
+            scene.finishRender(reservation);
+        };
+        install("tied-a", 1, 0, 16);
+        install("tied-b", 2, 0, 17);
+        for (let zIndex = 1; zIndex <= 512; zIndex++) {
+            install(`unique-${zIndex}`, zIndex + 2, zIndex, 0);
+        }
+
+        scene.publishPresentation();
+        const ranked = activeTexture(device, "erdblick-gpu-z-index-table")
+            .writes.at(-1)!.data as Float32Array;
+        expect(ranked[0]).not.toBe(ranked[4]);
+        expect(ranked[8]).toBeGreaterThan(Math.max(ranked[0], ranked[4]));
     });
 
     it("defers whole-scene z-index ranking while packets are arriving", () => {

@@ -49,7 +49,10 @@ erdblick::GpuRenderPacketData samplePacket()
         .activationToken = 23U,
         .totalPickCount = 1U,
         .spans = {{.streamIndex = 0U, .firstRecord = 0U, .recordCount = 2U}},
-        .zIndices = {65535.0, 65535.0001},
+        .zIndices = {
+            {.value = 65535.0, .tieBreaker = 17U},
+            {.value = 65535.0001, .tieBreaker = 23U},
+        },
     });
     packet.picks.push_back({
         .contributionIndex = 0U,
@@ -57,6 +60,7 @@ erdblick::GpuRenderPacketData samplePacket()
         .channelOrdinal = 3U,
         .entryOrdinal = 17U,
         .endpointRole = 2U,
+        .navigationAltitude = 412.25F,
     });
     packet.labels.push_back({
         .contributionIndex = 0U,
@@ -64,8 +68,10 @@ erdblick::GpuRenderPacketData samplePacket()
         .positionWgs84 = {11.5, 48.1, 500.0},
         .text = "Main Street",
         .fontFamily = "Noto Sans",
+        .flags = static_cast<uint32_t>(GpuLabelFlag::Collision),
         .renderOrder = 6U,
         .fontWeight = 700U,
+        .collisionPriority = 42,
     });
     packet.resourceRequests.push_back({
         .resourceKind = 1U,
@@ -96,6 +102,14 @@ TEST_CASE("GpuRenderPacket round-trips its validated header and tables")
     CHECK(info.pickCount == 1U);
     CHECK(info.labelCount == 1U);
     CHECK(info.zIndexCount == 2U);
+    uint32_t pickTable = 0U;
+    std::memcpy(&pickTable, bytes.data() + 96U, sizeof(pickTable));
+    float navigationAltitude = 0.0F;
+    std::memcpy(
+        &navigationAltitude,
+        bytes.data() + pickTable + 20U,
+        sizeof(navigationAltitude));
+    CHECK(navigationAltitude == 412.25F);
 }
 
 TEST_CASE("GpuRenderPacket rejects malformed wire data before upload")
@@ -148,6 +162,15 @@ TEST_CASE("GpuRenderPacket rejects malformed wire data before upload")
             erdblick::GpuRenderPacketCodec::validate(bytes),
             std::invalid_argument);
     }
+    SECTION("invalid label collision priority") {
+        auto bytes = erdblick::GpuRenderPacketCodec::encode(samplePacket());
+        uint32_t labelTable = 0U;
+        std::memcpy(&labelTable, bytes.data() + 112U, sizeof(labelTable));
+        overwrite(bytes, labelTable + 116U, int32_t{1001});
+        CHECK_THROWS_AS(
+            erdblick::GpuRenderPacketCodec::validate(bytes),
+            std::invalid_argument);
+    }
     SECTION("overlapping packet tables") {
         auto bytes = erdblick::GpuRenderPacketCodec::encode(samplePacket());
         uint32_t contributionTable = 0U;
@@ -177,11 +200,14 @@ TEST_CASE("GpuRenderPacket rejects malformed wire data before upload")
             erdblick::GpuRenderPacketCodec::validate(bytes),
             std::invalid_argument);
     }
-    SECTION("reserved pick bytes") {
+    SECTION("infinite pick navigation altitude") {
         auto bytes = erdblick::GpuRenderPacketCodec::encode(samplePacket());
         uint32_t pickTable = 0U;
         std::memcpy(&pickTable, bytes.data() + 96U, sizeof(pickTable));
-        overwrite(bytes, pickTable + 20U, uint32_t{1U});
+        overwrite(
+            bytes,
+            pickTable + 20U,
+            std::numeric_limits<float>::infinity());
         CHECK_THROWS_AS(
             erdblick::GpuRenderPacketCodec::validate(bytes),
             std::invalid_argument);
@@ -242,7 +268,10 @@ TEST_CASE("GpuRenderPacket rejects invalid logical references while encoding")
     SECTION("infinite z-index") {
         auto packet = samplePacket();
         packet.contributions.front().zIndices = {
-            std::numeric_limits<double>::infinity(),
+            {
+                .value = std::numeric_limits<double>::infinity(),
+                .tieBreaker = 1U,
+            },
         };
         CHECK_THROWS_AS(
             erdblick::GpuRenderPacketCodec::encode(packet),

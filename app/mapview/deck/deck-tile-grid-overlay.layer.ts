@@ -24,7 +24,6 @@ interface TileGridShaderModuleProps {
     subdivisionY?: number;
     lineColor?: [number, number, number, number];
     lineWidthPx?: number;
-    debugSolid?: number;
     gridMode?: number;
 }
 
@@ -94,7 +93,6 @@ uniform tileGridOverlayUniforms {
   float subdivisionY;
   vec4 lineColor;
   float lineWidthPx;
-  float debugSolid;
   float gridMode;
 } tileGridOverlay;
 `,
@@ -106,7 +104,6 @@ uniform tileGridOverlayUniforms {
   float subdivisionY;
   vec4 lineColor;
   float lineWidthPx;
-  float debugSolid;
   float gridMode;
 } tileGridOverlay;
 `,
@@ -117,7 +114,6 @@ uniform tileGridOverlayUniforms {
         subdivisionY: "f32",
         lineColor: "vec4<f32>",
         lineWidthPx: "f32",
-        debugSolid: "f32",
         gridMode: "f32"
     },
     getUniforms: (opts?: TileGridShaderModuleProps) => {
@@ -143,7 +139,6 @@ uniform tileGridOverlayUniforms {
                 clamp(lineColor[3], 0, 1)
             ],
             lineWidthPx: Math.max(0.5, lineWidthPx),
-            debugSolid: opts?.debugSolid ?? 0,
             gridMode: opts?.gridMode ?? 0
         };
     }
@@ -261,7 +256,6 @@ export interface TileGridOverlayLayerProps extends SolidPolygonLayerProps<TileGr
     subdivisionY: number;
     lineColor: [number, number, number, number];
     lineWidthPixels: number;
-    debugSolid: boolean;
 }
 
 /** Props for the shader-driven tile-state raster overlay. */
@@ -335,16 +329,12 @@ float tile_grid_line_mask(vec2 localCoords) {
     return max(verticalMask, horizontalMask);
 }`,
                 "fs:DECKGL_FILTER_COLOR": `${existingFilter}
-if (tileGridOverlay.debugSolid > 0.5) {
-    color = vec4(1.0, 0.1, 0.1, 0.65);
-} else {
-    vec2 tileGridLocal01 = tile_grid_local_coords();
-    float mask = tile_grid_line_mask(tileGridLocal01);
-    color = vec4(
-        tileGridOverlay.lineColor.rgb,
-        tileGridOverlay.lineColor.a * mask * layer.opacity
-    );
-}`
+vec2 tileGridLocal01 = tile_grid_local_coords();
+float mask = tile_grid_line_mask(tileGridLocal01);
+color = vec4(
+    tileGridOverlay.lineColor.rgb,
+    tileGridOverlay.lineColor.a * mask * layer.opacity
+);`
             }
         };
     }
@@ -365,7 +355,6 @@ if (tileGridOverlay.debugSolid > 0.5) {
                     lineColor[3] / 255
                 ],
                 lineWidthPx: this.props.lineWidthPixels,
-                debugSolid: this.props.debugSolid ? 1 : 0,
                 gridMode: this.props.gridMode === "nds" ? 1 : 0
             } satisfies TileGridShaderModuleProps
         });

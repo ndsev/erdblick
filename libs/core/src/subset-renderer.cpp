@@ -2,6 +2,7 @@
 #include "style-filter-plan.h"
 
 #include "geometry.h"
+#include "mapget/model/hash.h"
 
 #include <algorithm>
 #include <array>
@@ -577,6 +578,7 @@ void TileSubsetLayerRenderer::resetForNextTile()
     vertexCount_ = 0U;
     bridgePickResults_.clear();
     pickRefs_.clear();
+    pickNavigationAltitudes_.clear();
     pickIndices_.clear();
     runtimeIssues_.clear();
     runtimeIssueIndices_.clear();
@@ -588,6 +590,9 @@ void TileSubsetLayerRenderer::resetForNextTile()
     attributeOffsetSlotsBySegment_.clear();
     attributeOffsetSlotsByTransitionLeg_.clear();
     transitionOffsetScaleGroups_.clear();
+    subsetMapDepthSeed_ = 0U;
+    currentDepthIdentity_ = 0U;
+    subsetDepthPhase_ = 0U;
     gpuIconResources_.clear();
     hasCoordinateOriginWgs_ = false;
     coordinateOriginWgs_ = {0.0, 0.0, 0.0};
@@ -694,6 +699,13 @@ void TileSubsetLayerRenderer::addTileSubsetContribution(
             "TileSubsetLayerRenderer accepts exactly one tile subset.");
     }
     subset_ = subset.model_;
+    subsetMapDepthSeed_ = mapget::Hash{}
+        .mix(subset_->mapId())
+        .value();
+    // Classic effectiveRenderOrder values repeat their source-list fraction in
+    // every tile. Keep neighboring tiles on distinct stable depth phases so
+    // their overlapping edge geometry cannot fight as packets arrive.
+    subsetDepthPhase_ = subset_->tileId().mortonNumber() & 0xFU;
     gpuContributionContext_ = {
         .key = static_cast<uint64_t>(contributionKeyLow) |
             (static_cast<uint64_t>(contributionKeyHigh) << 32U),
@@ -899,6 +911,7 @@ void TileSubsetLayerRenderer::run()
             .channelOrdinal = pick.channelOrdinal,
             .entryOrdinal = pick.entryOrdinal,
             .endpointRole = pick.endpointRole,
+            .navigationAltitude = pickNavigationAltitudes_[index],
         });
     }
     for (auto const& issue : runtimeIssues_) {
@@ -1055,6 +1068,13 @@ void TileSubsetLayerRenderer::renderFeature(
     if (needsFeatureType && !featureId) {
         return;
     }
+    if (!featureId) {
+        featureId = entry->featureId();
+    }
+    if (!featureId) {
+        return;
+    }
+    currentDepthIdentity_ = featureDepthIdentity(featureId);
     FeatureStyleRule::MatchContext context{
         .featureType = featureId
             ? featureId->typeId()
@@ -1302,6 +1322,14 @@ void TileSubsetLayerRenderer::renderAttribute(
     if (!featureId) {
         return;
     }
+    auto attributeIdentity = mapget::Hash{};
+    attributeIdentity.hash_ = featureDepthIdentity(featureId);
+    attributeIdentity
+        .mix(entry->attributeIndex().value_or(
+            mapget::AttributeValidityEntry::InvalidAttributeIndex))
+        .mix(entry->hasValidity())
+        .mix(entry->validityIndex());
+    currentDepthIdentity_ = attributeIdentity.value();
     ProjectedEvalState hostEvalState;
     ProjectedEvalState entryEvalState;
     auto hostEval = makeEvalFun(
@@ -1423,6 +1451,7 @@ void TileSubsetLayerRenderer::renderGroup(
     if (!representativeFeatureId) {
         return;
     }
+    currentDepthIdentity_ = featureDepthIdentity(representativeFeatureId);
     ProjectedEvalState evalState;
     auto eval = makeEvalFun(
         binding.entryFields,
@@ -1491,13 +1520,19 @@ void TileSubsetLayerRenderer::renderRelation(
     if (!source || !target || !sourceFeatureId || !targetFeatureId) {
         return;
     }
+    auto const relationName = entry->name();
+    auto relationIdentity = mapget::Hash{};
+    relationIdentity.hash_ = featureDepthIdentity(sourceFeatureId);
+    relationIdentity
+        .mix(featureDepthIdentity(targetFeatureId))
+        .mix(entry->relationId());
+    auto const relationDepthIdentity = relationIdentity.value();
 
     ProjectedEvalState relationEvalState;
     auto relationEval = makeEvalFun(
         binding.entryFields,
         entry->values(),
         relationEvalState);
-    auto const relationName = entry->name();
     FeatureStyleRule::MatchContext relationContext{
         .featureType = sourceFeatureId->typeId(),
         .relationName = relationName,
@@ -1507,6 +1542,7 @@ void TileSubsetLayerRenderer::renderRelation(
         relationContext,
         relationEval,
         [&](FeatureStyleRule const& rule) {
+            currentDepthIdentity_ = relationDepthIdentity;
             auto const relationPick = pickIndex(
                 channelOrdinal,
                 entryOrdinal,
@@ -1522,6 +1558,8 @@ void TileSubsetLayerRenderer::renderRelation(
             renderRelationLine(
                 entry->sourceGeometry(),
                 entry->targetGeometry(),
+                source->geometry(),
+                target->geometry(),
                 rule,
                 relationEval,
                 relationPick);
@@ -1580,6 +1618,10 @@ void TileSubsetLayerRenderer::renderRelation(
                             });
                         auto const previousLabelIdentity =
                             relationEndpointLabelIdentity_;
+                        auto const previousDepthIdentity =
+                            currentDepthIdentity_;
+                        currentDepthIdentity_ =
+                            featureDepthIdentity(endpointFeatureId);
                         relationEndpointLabelIdentity_ =
                             endpointFeatureId->mapId() + "\n" +
                             getEndpointFeatureIdString();
@@ -1591,6 +1633,7 @@ void TileSubsetLayerRenderer::renderRelation(
                             endpointRule.offset());
                         relationEndpointLabelIdentity_ =
                             previousLabelIdentity;
+                        currentDepthIdentity_ = previousDepthIdentity;
                     });
             };
 
@@ -2605,12 +2648,198 @@ bool TileSubsetLayerRenderer::renderSegmentStackedLine(
 void TileSubsetLayerRenderer::renderRelationLine(
     mapget::model_ptr<mapget::GeometryCollection> const& sourceGeometry,
     mapget::model_ptr<mapget::GeometryCollection> const& targetGeometry,
+    mapget::model_ptr<mapget::GeometryCollection> const& sourceFeatureGeometry,
+    mapget::model_ptr<mapget::GeometryCollection> const& targetFeatureGeometry,
     FeatureStyleRule const& rule,
     BoundEvalFun const& evalFun,
     uint32_t pick)
 {
-    auto sourceCenter = collectionCenter(sourceGeometry);
-    auto targetCenter = collectionCenter(targetGeometry);
+    std::optional<mapget::Point> sourceCenter;
+    std::optional<mapget::Point> targetCenter;
+
+    if (rule.relationLineGeometry() ==
+        FeatureStyleRule::RelationLineGeometry::NearestEndpoints)
+    {
+        struct EndpointCandidate {
+            mapget::Point wgs;
+            mapget::Point local;
+            bool lineEndpoint = false;
+        };
+        auto candidates = [&](mapget::model_ptr<mapget::GeometryCollection> const& collection) {
+            std::vector<EndpointCandidate> result;
+            if (!collection) {
+                return result;
+            }
+            collection->forEachGeometry(
+                [&](mapget::model_ptr<mapget::Geometry> const& geometry) {
+                    if (!geometry) {
+                        return true;
+                    }
+                    auto const value = geometry->toSelfContained();
+                    if (value.points_.empty()) {
+                        return true;
+                    }
+                    auto append = [&](mapget::Point const& point, bool lineEndpoint) {
+                        result.push_back({
+                            .wgs = point,
+                            .local = projectWgsPoint(point),
+                            .lineEndpoint = lineEndpoint,
+                        });
+                    };
+                    if (geometry->geomType() == mapget::GeomType::Line) {
+                        append(value.points_.front(), true);
+                        if (value.points_.size() > 1U) {
+                            append(value.points_.back(), true);
+                        }
+                    }
+                    else if (geometry->geomType() == mapget::GeomType::Points) {
+                        for (auto const& point : value.points_) {
+                            append(point, false);
+                        }
+                    }
+                    else {
+                        append(geometryCenter(value), false);
+                    }
+                    return true;
+                });
+            return result;
+        };
+        auto candidatesWithFallback = [&](auto const& effective, auto const& feature) {
+            auto result = candidates(effective);
+            return result.empty() ? candidates(feature) : result;
+        };
+        auto const sourceCandidates = candidatesWithFallback(
+            sourceGeometry,
+            sourceFeatureGeometry);
+        auto const targetCandidates = candidatesWithFallback(
+            targetGeometry,
+            targetFeatureGeometry);
+        std::optional<std::pair<EndpointCandidate, EndpointCandidate>> nearest;
+        auto nearestDistanceSquared = std::numeric_limits<double>::infinity();
+        for (auto const& source : sourceCandidates) {
+            for (auto const& target : targetCandidates) {
+                auto const dx = target.local.x - source.local.x;
+                auto const dy = target.local.y - source.local.y;
+                auto const distanceSquared = dx * dx + dy * dy;
+                if (distanceSquared < nearestDistanceSquared) {
+                    nearestDistanceSquared = distanceSquared;
+                    nearest = {source, target};
+                }
+            }
+        }
+        if (nearest) {
+            auto source = nearest->first;
+            auto target = nearest->second;
+            if (source.lineEndpoint && target.lineEndpoint) {
+                auto const distance = std::sqrt(nearestDistanceSquared);
+                if (distance > 1.0e-6) {
+                    // A short gap keeps ordinary lane endpoints legible. Point
+                    // endpoints represent zero-length lanes and remain exact.
+                    auto const trim = std::min(1.5, distance * 0.25);
+                    auto const dx = (target.local.x - source.local.x) / distance;
+                    auto const dy = (target.local.y - source.local.y) / distance;
+                    source.local.x += dx * trim;
+                    source.local.y += dy * trim;
+                    target.local.x -= dx * trim;
+                    target.local.y -= dy * trim;
+                    source.wgs = unprojectLocalPoint(source.local);
+                    target.wgs = unprojectLocalPoint(target.local);
+                }
+            }
+            sourceCenter = source.wgs;
+            targetCenter = target.wgs;
+        }
+
+        // Some relation carriers, notably NDS.Classic LaneConnector features,
+        // intentionally have no geometry. Their endpoint validity still gives
+        // the exact lane endpoint; draw a short stub into the target feature so
+        // the relation remains visible without inventing a carrier position.
+        auto inwardPoint = [&](mapget::model_ptr<mapget::GeometryCollection> const& collection,
+                               mapget::Point const& anchor) -> std::optional<mapget::Point> {
+            constexpr auto stubLengthMeters = 8.0;
+            auto const anchorLocal = projectWgsPoint(anchor);
+            auto nearestDistanceSquared = std::numeric_limits<double>::infinity();
+            std::optional<mapget::Point> result;
+            if (!collection) {
+                return result;
+            }
+            collection->forEachGeometry(
+                [&](mapget::model_ptr<mapget::Geometry> const& geometry) {
+                    if (!geometry || geometry->geomType() != mapget::GeomType::Line) {
+                        return true;
+                    }
+                    auto const value = geometry->toSelfContained();
+                    if (value.points_.size() < 2U) {
+                        return true;
+                    }
+                    for (auto const fromFront : {true, false}) {
+                        auto const& endpoint = fromFront
+                            ? value.points_.front()
+                            : value.points_.back();
+                        auto const endpointLocal = projectWgsPoint(endpoint);
+                        auto const dx = endpointLocal.x - anchorLocal.x;
+                        auto const dy = endpointLocal.y - anchorLocal.y;
+                        auto const distanceSquared = dx * dx + dy * dy;
+                        if (distanceSquared >= nearestDistanceSquared) {
+                            continue;
+                        }
+                        auto remaining = stubLengthMeters;
+                        auto current = endpointLocal;
+                        auto interior = current;
+                        for (size_t step = 1U; step < value.points_.size(); ++step) {
+                            auto const index = fromFront
+                                ? step
+                                : value.points_.size() - 1U - step;
+                            auto const next = projectWgsPoint(value.points_[index]);
+                            auto const segmentX = next.x - current.x;
+                            auto const segmentY = next.y - current.y;
+                            auto const segmentZ = next.z - current.z;
+                            auto const length = std::sqrt(
+                                segmentX * segmentX +
+                                segmentY * segmentY +
+                                segmentZ * segmentZ);
+                            if (length > 1.0e-9) {
+                                auto const fraction = std::min(1.0, remaining / length);
+                                interior = {
+                                    current.x + segmentX * fraction,
+                                    current.y + segmentY * fraction,
+                                    current.z + segmentZ * fraction,
+                                };
+                                remaining -= length;
+                                if (remaining <= 0.0) {
+                                    break;
+                                }
+                            }
+                            current = next;
+                        }
+                        if (interior.distanceTo(endpointLocal) > 1.0e-6) {
+                            nearestDistanceSquared = distanceSquared;
+                            result = unprojectLocalPoint(interior);
+                        }
+                    }
+                    return true;
+                });
+            return result;
+        };
+        if (!sourceCenter && !targetCandidates.empty()) {
+            auto const endpoint = targetCandidates.front().wgs;
+            if (auto const interior = inwardPoint(targetFeatureGeometry, endpoint)) {
+                sourceCenter = endpoint;
+                targetCenter = *interior;
+            }
+        }
+        else if (!targetCenter && !sourceCandidates.empty()) {
+            auto const endpoint = sourceCandidates.front().wgs;
+            if (auto const interior = inwardPoint(sourceFeatureGeometry, endpoint)) {
+                sourceCenter = *interior;
+                targetCenter = endpoint;
+            }
+        }
+    }
+    else {
+        sourceCenter = collectionCenter(sourceGeometry);
+        targetCenter = collectionCenter(targetGeometry);
+    }
     if (!sourceCenter || !targetCenter) {
         return;
     }
@@ -2726,6 +2955,8 @@ uint32_t TileSubsetLayerRenderer::pickIndex(
     auto const index = static_cast<uint32_t>(pickRefs_.size());
     bridgePickResults_.emplace(index, resultFactory());
     pickRefs_.push_back(key);
+    pickNavigationAltitudes_.push_back(
+        std::numeric_limits<float>::quiet_NaN());
     pickIndices_.emplace(key, index);
     return index;
 }
@@ -2740,7 +2971,25 @@ uint32_t TileSubsetLayerRenderer::featurePickIndex(
     }
     auto const index = static_cast<uint32_t>(pickRefs_.size());
     pickRefs_.push_back({channelOrdinal, entryOrdinal, 0U});
+    pickNavigationAltitudes_.push_back(
+        std::numeric_limits<float>::quiet_NaN());
     return index;
+}
+
+void TileSubsetLayerRenderer::recordPickNavigationAltitude(
+    uint32_t pick,
+    std::span<mapget::Point const> points)
+{
+    if (pick == kUnselectable || pick >= pickNavigationAltitudes_.size() ||
+        points.empty() || std::isfinite(pickNavigationAltitudes_[pick]))
+    {
+        return;
+    }
+    auto const altitude = coordinateOriginWgs_.z +
+        points[points.size() / 2U].z;
+    if (std::isfinite(altitude)) {
+        pickNavigationAltitudes_[pick] = static_cast<float>(altitude);
+    }
 }
 
 TileSubsetLayerRenderer::PickResult
@@ -2871,6 +3120,7 @@ void TileSubsetLayerRenderer::appendPoint(
     double zIndex,
     uint32_t pick)
 {
+    recordPickNavigationAltitude(pick, std::span{&point, size_t{1U}});
     auto const radius = std::max(
         0.0f,
         rule.width(evalFun) * 0.5f);
@@ -2909,6 +3159,7 @@ void TileSubsetLayerRenderer::appendIcon(
     if (scale <= 0.0F) {
         return;
     }
+    recordPickNavigationAltitude(pick, std::span{&point, size_t{1U}});
     gpuPacketBuilder_.appendIcon(
         GpuIconRecordData{
             .position = point,
@@ -2938,6 +3189,7 @@ void TileSubsetLayerRenderer::appendSurface(
     if (points.size() < 3) {
         return;
     }
+    recordPickNavigationAltitude(pick, points);
     gpuPacketBuilder_.appendSurface(
         points,
         ringStarts,
@@ -2997,6 +3249,7 @@ GpuPathRecordHandle TileSubsetLayerRenderer::appendPath(
     {
         renderedPoints = simplifyPath(points);
     }
+    recordPickNavigationAltitude(pick, renderedPoints);
     auto const gpuHandle = gpuPacketBuilder_.appendPath(
         GpuPathRecordData{
             .points = renderedPoints,
@@ -3297,15 +3550,18 @@ void TileSubsetLayerRenderer::appendLabel(
     if (rule.showBackground()) {
         labelFlags |= static_cast<uint32_t>(GpuLabelFlag::Background);
     }
+    if (rule.labelCollision()) {
+        labelFlags |= static_cast<uint32_t>(GpuLabelFlag::Collision);
+    }
     auto const pixelOffset = rule.labelPixelOffset().value_or(
         std::pair<float, float>{0.0F, 0.0F});
     auto const backgroundPadding = rule.labelBackgroundPadding();
-    auto colorBytes = [](glm::fvec4 const& value) {
+    auto colorBytes = [&](glm::fvec4 const& value) {
         return std::array<uint8_t, 4>{
             toColorByte(value.r),
             toColorByte(value.g),
             toColorByte(value.b),
-            toColorByte(value.a),
+            toColorByte(value.a * rule.labelOpacity()),
         };
     };
     gpuPacketBuilder_.appendLabel({
@@ -3334,6 +3590,7 @@ void TileSubsetLayerRenderer::appendLabel(
         .verticalOrigin = labelOriginCode(rule.labelVerticalOrigin()),
         .renderOrder = rule.renderIndex(),
         .fontWeight = font.weight,
+        .collisionPriority = rule.labelCollisionPriority(),
     });
     ++vertexCount_;
 }
@@ -3446,6 +3703,9 @@ GpuRecordStyle TileSubsetLayerRenderer::gpuRecordStyle(
             toColorByte(color.a),
         },
         .zIndex = zIndex,
+        .depthTieKey = depthTieKey(
+            currentDepthIdentity_,
+            rule.renderIndex()),
         .localPickIndex = gpuPickIndex(legacyPickIndex),
         .renderOrder = rule.renderIndex(),
     };
@@ -3461,6 +3721,41 @@ GpuRecordStyle TileSubsetLayerRenderer::gpuRecordStyle(
         result.glowRadius = glow->radius;
     }
     return result;
+}
+
+uint64_t TileSubsetLayerRenderer::featureDepthIdentity(
+    mapget::model_ptr<mapget::FeatureId> const& featureId) const
+{
+    if (!featureId) {
+        return subsetMapDepthSeed_;
+    }
+    auto identity = mapget::Hash{};
+    if (auto const externalMapId = featureId->externalMapId()) {
+        identity.mix(*externalMapId);
+    }
+    else {
+        identity.hash_ = subsetMapDepthSeed_;
+    }
+    return identity
+        .mix(featureId->typeId())
+        .mix(featureId->keyValuePairs())
+        .value();
+}
+
+uint32_t TileSubsetLayerRenderer::depthTieKey(
+    uint64_t semanticIdentity,
+    uint32_t ruleRenderIndex) const
+{
+    auto const hash = mapget::Hash{}
+        .mix(semanticIdentity)
+        .mix(ruleRenderIndex)
+        .value();
+    auto const folded = static_cast<uint32_t>(hash) ^
+        static_cast<uint32_t>(hash >> 32U);
+    // The GPU masks this key to its available power-of-two tie lattice. Add
+    // the tile phase instead of overwriting low bits so that same-tile
+    // semantic identities still participate in that ordering.
+    return folded + subsetDepthPhase_;
 }
 
 JsValue TileSubsetLayerRenderer::coordinateOriginToJs() const

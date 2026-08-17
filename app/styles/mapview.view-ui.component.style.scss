@@ -213,24 +213,50 @@
   backdrop-filter: blur(2px);
 }
 
-.p-popover.feature-hover-popover {
+.feature-hover-hud {
+  position: absolute;
+  left: 50%;
+  // Match the view-local coordinate card instead of the browser viewport. This
+  // keeps one HUD centered correctly inside every split view.
+  bottom: 2.25rem;
+  z-index: 30040;
   pointer-events: none;
+  width: max-content;
+  max-width: min(32em, calc(100% - 1rem));
+  padding: 0.25em 0.5em;
+  transform: translateX(-50%);
+  border: 1px solid;
+  border-radius: 6px;
+  font-size: 0.9em;
+  line-height: 1.25;
+  background: var(--erdblick-card-bg);
+  box-shadow: none;
 
-  .p-popover-content {
-    background: transparent;
+  &::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    width: 0.65em;
+    height: 0.65em;
+    background: inherit;
+    border-right: 1px solid;
+    border-bottom: 1px solid;
+    border-color: inherit;
+    transform: translate(-50%, -50%) rotate(45deg);
   }
 
   .hover-label-feature + .hover-label-feature {
-    margin-top: 0.35em;
-    padding-top: 0.35em;
+    margin-top: 0.2em;
+    padding-top: 0.2em;
     border-top: 1px solid var(--p-content-border-color);
   }
 
   .hover-label-row {
     display: grid;
     grid-template-columns: minmax(5em, auto) minmax(0, 1fr);
-    gap: 0.65em;
-    max-width: min(32em, 60vw);
+    gap: 0.5em;
+    max-width: 100%;
 
     span {
       overflow: hidden;

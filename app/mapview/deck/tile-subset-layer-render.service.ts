@@ -234,14 +234,6 @@ export class TileSubsetLayerRenderService {
         return this.queue.length + this.inFlight.size;
     }
 
-    /** Return whether one view still owns queued, running, or admission-ready work. */
-    hasPendingWork(viewIndex: number): boolean {
-        return this.queue.some(pending => pending.task.viewIndex === viewIndex) ||
-            [...this.inFlight.values()].some(
-                pending => pending.task.viewIndex === viewIndex
-            );
-    }
-
     /** Number of tile renders accepted without building a hidden queue. */
     availableWorkerSlots(): number {
         return Math.max(

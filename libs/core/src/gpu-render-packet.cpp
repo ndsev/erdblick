@@ -32,7 +32,8 @@ constexpr uint32_t kGpuActivationTokenMax = 0x00ffffffU;
 constexpr uint32_t kKnownLabelFlags =
     static_cast<uint32_t>(GpuLabelFlag::Billboard) |
     static_cast<uint32_t>(GpuLabelFlag::DepthTest) |
-    static_cast<uint32_t>(GpuLabelFlag::Background);
+    static_cast<uint32_t>(GpuLabelFlag::Background) |
+    static_cast<uint32_t>(GpuLabelFlag::Collision);
 
 /** One validated byte interval inside an untrusted packet. */
 struct PacketRange {
@@ -440,9 +441,11 @@ void validateLogicalOwnership(GpuRenderPacketData const& packet)
         }
     }
     for (auto const& contribution : packet.contributions) {
-        if (std::ranges::any_of(contribution.zIndices, [](double value) {
-                return std::isinf(value);
-            }))
+        if (std::ranges::any_of(
+                contribution.zIndices,
+                [](GpuZIndexEntry const& entry) {
+                    return std::isinf(entry.value);
+                }))
         {
             throw std::invalid_argument(
                 "GpuRenderPacket z-index table contains infinity.");
@@ -502,7 +505,7 @@ uint64_t GpuRenderPacketCodec::encodedSize(
         size,
         packet.contributions.size(),
         kContributionDescriptorBytes);
-    size = alignedTableEnd(size, totalZIndices, sizeof(double));
+    size = alignedTableEnd(size, totalZIndices, kGpuZIndexEntryBytes);
     size = alignedTableEnd(size, totalSpans, kContributionSpanBytes);
     size = alignedTableEnd(size, packet.picks.size(), kPickRecordBytes);
     size = alignedTableEnd(size, 0U, kPickMemberBytes);
@@ -550,13 +553,13 @@ std::vector<std::byte> GpuRenderPacketCodec::encode(
         totalZIndices += contribution.zIndices.size();
     }
     if (totalZIndices >
-        std::numeric_limits<uint32_t>::max() / sizeof(double))
+        std::numeric_limits<uint32_t>::max() / kGpuZIndexEntryBytes)
     {
         throw std::length_error("GpuRenderPacket has too many z-index values.");
     }
     writer.align();
     auto const zIndexTable = writer.reserve(
-        static_cast<uint32_t>(totalZIndices) * sizeof(double));
+        static_cast<uint32_t>(totalZIndices) * kGpuZIndexEntryBytes);
 
     uint64_t totalSpans = 0U;
     for (auto const& contribution : packet.contributions) {
@@ -642,10 +645,11 @@ std::vector<std::byte> GpuRenderPacketCodec::encode(
             descriptor + 48U,
             static_cast<uint32_t>(contribution.zIndices.size()));
         writer.put(descriptor + 52U, contribution.totalPickCount);
-        for (auto const value : contribution.zIndices) {
-            writer.put(
-                zIndexTable + zIndex * static_cast<uint32_t>(sizeof(double)),
-                value);
+        for (auto const& entry : contribution.zIndices) {
+            auto const offset = zIndexTable + zIndex * kGpuZIndexEntryBytes;
+            writer.put(offset, entry.value);
+            writer.put(offset + 8U, entry.tieBreaker);
+            writer.put(offset + 12U, uint32_t{0U});
             ++zIndex;
         }
 
@@ -686,7 +690,7 @@ std::vector<std::byte> GpuRenderPacketCodec::encode(
         writer.put(offset + 8U, pick.channelOrdinal);
         writer.put(offset + 12U, pick.entryOrdinal);
         writer.put(offset + 16U, pick.endpointRole);
-        writer.put(offset + 20U, uint32_t{0U});
+        writer.put(offset + 20U, pick.navigationAltitude);
     }
 
     for (uint32_t index = 0U; index < packet.labels.size(); ++index) {
@@ -725,6 +729,7 @@ std::vector<std::byte> GpuRenderPacketCodec::encode(
         writer.put(offset + 104U, label.verticalOrigin);
         writer.put(offset + 108U, label.renderOrder);
         writer.put(offset + 112U, label.fontWeight);
+        writer.put(offset + 116U, label.collisionPriority);
     }
 
     for (uint32_t index = 0U;
@@ -949,7 +954,7 @@ GpuRenderPacketInfo GpuRenderPacketCodec::validate(
     reader.table(
         zIndices.first,
         zIndices.second,
-        static_cast<uint32_t>(sizeof(double)));
+        kGpuZIndexEntryBytes);
 
     std::vector<PacketRange> packetRanges;
     auto addTableRange = [&](std::pair<uint32_t, uint32_t> table,
@@ -973,7 +978,7 @@ GpuRenderPacketInfo GpuRenderPacketCodec::validate(
     addTableRange(strings, 1U);
     addTableRange(resources, kResourceRequestBytes);
     addTableRange(issues, kRuntimeIssueBytes);
-    addTableRange(zIndices, static_cast<uint32_t>(sizeof(double)));
+    addTableRange(zIndices, kGpuZIndexEntryBytes);
 
     std::vector<uint32_t> streamRecordCounts;
     streamRecordCounts.reserve(streams.second);
@@ -1111,11 +1116,11 @@ GpuRenderPacketInfo GpuRenderPacketCodec::validate(
             "GpuRenderPacket contribution tables are not fully owned.");
     }
     for (uint32_t index = 0U; index < zIndices.second; ++index) {
-        auto const value = reader.get<double>(
-            zIndices.first + index * static_cast<uint32_t>(sizeof(double)));
-        if (std::isinf(value)) {
+        auto const offset = zIndices.first + index * kGpuZIndexEntryBytes;
+        auto const value = reader.get<double>(offset);
+        if (std::isinf(value) || reader.get<uint32_t>(offset + 12U) != 0U) {
             throw std::invalid_argument(
-                "GpuRenderPacket z-index table contains infinity.");
+                "GpuRenderPacket z-index metadata is invalid.");
         }
     }
 
@@ -1167,9 +1172,10 @@ GpuRenderPacketInfo GpuRenderPacketCodec::validate(
 
     for (uint32_t index = 0U; index < picks.second; ++index) {
         auto const pick = picks.first + index * kPickRecordBytes;
-        if (reader.get<uint32_t>(pick + 20U) != 0U) {
+        auto const navigationAltitude = reader.get<float>(pick + 20U);
+        if (std::isinf(navigationAltitude)) {
             throw std::invalid_argument(
-                "GpuRenderPacket pick reserved data is nonzero.");
+                "GpuRenderPacket pick navigation altitude is infinite.");
         }
         if (reader.get<uint32_t>(pick) >= contributions.second) {
             throw std::invalid_argument(
@@ -1183,11 +1189,12 @@ GpuRenderPacketInfo GpuRenderPacketCodec::validate(
     for (uint32_t index = 0U; index < labels.second; ++index) {
         auto const label = labels.first + index * kLabelRecordBytes;
         auto const fontWeight = reader.get<uint32_t>(label + 112U);
-        if (reader.get<uint32_t>(label + 116U) != 0U ||
-            fontWeight == 0U || fontWeight > 1000U ||
+        auto const collisionPriority = reader.get<int32_t>(label + 116U);
+        if (fontWeight == 0U || fontWeight > 1000U ||
+            collisionPriority < -1000 || collisionPriority > 1000 ||
             (reader.get<uint32_t>(label + 96U) & ~kKnownLabelFlags) != 0U) {
             throw std::invalid_argument(
-                "GpuRenderPacket label reserved data is nonzero.");
+                "GpuRenderPacket label metadata is invalid.");
         }
         if (reader.get<uint32_t>(label) >= contributions.second) {
             throw std::invalid_argument(

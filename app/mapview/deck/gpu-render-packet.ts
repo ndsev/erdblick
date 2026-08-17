@@ -1,4 +1,4 @@
-export const GPU_RENDER_PACKET_ABI_VERSION = 8;
+export const GPU_RENDER_PACKET_ABI_VERSION = 10;
 export const GPU_RENDER_PACKET_HEADER_BYTES = 160;
 // One oversized packet is still admitted by itself, so this ceiling is also
 // the maximum unavoidable geometry upload burst from one worker task.
@@ -40,7 +40,8 @@ export enum GpuMaterialFlag {
 export enum GpuLabelFlag {
     Billboard = 1 << 0,
     DepthTest = 1 << 1,
-    Background = 1 << 2
+    Background = 1 << 2,
+    Collision = 1 << 3
 }
 
 /** Browser resource categories emitted by native packet generation. */
@@ -75,6 +76,12 @@ export interface GpuContributionSpanView {
     recordCount: number;
 }
 
+/** One authored z-index and its contribution-independent rule-order tie key. */
+export interface GpuZIndexEntryView {
+    value: number;
+    tieBreaker: number;
+}
+
 export interface GpuContributionView {
     key: bigint;
     revision: number;
@@ -86,7 +93,7 @@ export interface GpuContributionView {
     pickCount: number;
     firstLabel: number;
     labelCount: number;
-    zIndices: number[];
+    zIndices: GpuZIndexEntryView[];
 }
 
 export interface GpuPickRecordView {
@@ -95,6 +102,7 @@ export interface GpuPickRecordView {
     channelOrdinal: number;
     entryOrdinal: number;
     endpointRole: number;
+    navigationAltitude: number;
 }
 
 interface PickStorage {
@@ -144,7 +152,8 @@ function decodePickRecord(
         localPickIndex: storage.picks.getUint32(offset + 4, true),
         channelOrdinal: storage.picks.getUint32(offset + 8, true),
         entryOrdinal: storage.picks.getUint32(offset + 12, true),
-        endpointRole: storage.picks.getUint32(offset + 16, true)
+        endpointRole: storage.picks.getUint32(offset + 16, true),
+        navigationAltitude: storage.picks.getFloat32(offset + 20, true)
     };
 }
 
@@ -249,12 +258,19 @@ export class GpuPickTableView {
         return new GpuRetainedPickTable(pickBytes);
     }
 
-    /** Validate the reserved tuple word without allocating semantic objects. */
+    /** Reject infinite navigation heights without allocating semantic objects. */
     private validate(): void {
         for (let index = 0; index < this.count; ++index) {
             const offset = index * PICK_RECORD_BYTES;
-            if (this.storage.picks.getUint32(offset + 20, true) !== 0) {
-                throw new Error(`GPU pick ${index} has nonzero reserved data.`);
+            const navigationAltitude = this.storage.picks.getFloat32(
+                offset + 20,
+                true
+            );
+            if (!Number.isFinite(navigationAltitude) &&
+                !Number.isNaN(navigationAltitude)) {
+                throw new Error(
+                    `GPU pick ${index} has an infinite navigation altitude.`
+                );
             }
         }
     }
@@ -280,6 +296,7 @@ export interface GpuLabelRecordView {
     verticalOrigin: number;
     renderOrder: number;
     fontWeight: number;
+    collisionPriority: number;
 }
 
 export interface GpuResourceRequestView {
@@ -386,7 +403,7 @@ export class GpuRenderPacketView {
             throw new Error("GPU render packet reserved table is nonzero.");
         }
         const issueTable = this.table(144, ISSUE_RECORD_BYTES);
-        const zIndexTable = this.table(152, 8);
+        const zIndexTable = this.table(152, 16);
 
         this.streams = this.readStreams(streamTable);
         const spans = this.readSpans(spanTable);
@@ -574,15 +591,21 @@ export class GpuRenderPacketView {
                 firstLabel,
                 labelCount: ownedLabelCount,
                 zIndices: Array.from({length: zIndexCount}, (_, ordinal) => {
+                    const offset = zIndexTable.offset +
+                        (firstZIndex + ordinal) * 16;
                     const value = this.f64(
-                        zIndexTable.offset + (firstZIndex + ordinal) * 8
+                        offset
                     );
-                    if (!Number.isFinite(value) && !Number.isNaN(value)) {
+                    if ((!Number.isFinite(value) && !Number.isNaN(value)) ||
+                        this.u32(offset + 12) !== 0) {
                         throw new Error(
-                            `GPU contribution ${index} contains an infinite z-index.`
+                            `GPU contribution ${index} has invalid z-index metadata.`
                         );
                     }
-                    return value;
+                    return {
+                        value,
+                        tieBreaker: this.u32(offset + 8)
+                    };
                 })
             });
             expectedSpan += spanCount;
@@ -609,12 +632,14 @@ export class GpuRenderPacketView {
             const offset = table.offset + index * LABEL_RECORD_BYTES;
             const flags = this.u32(offset + 96);
             const fontWeight = this.u32(offset + 112);
-            if (this.u32(offset + 116) !== 0 ||
-                fontWeight === 0 || fontWeight > 1000 ||
+            const collisionPriority = this.i32(offset + 116);
+            if (fontWeight === 0 || fontWeight > 1000 ||
+                collisionPriority < -1000 || collisionPriority > 1000 ||
                 (flags & ~(GpuLabelFlag.Billboard |
                     GpuLabelFlag.DepthTest |
-                    GpuLabelFlag.Background)) !== 0) {
-                throw new Error(`GPU label ${index} has invalid reserved data.`);
+                    GpuLabelFlag.Background |
+                    GpuLabelFlag.Collision)) !== 0) {
+                throw new Error(`GPU label ${index} has invalid metadata.`);
             }
             return {
                 contributionIndex: this.u32(offset),
@@ -635,7 +660,8 @@ export class GpuRenderPacketView {
                 horizontalOrigin: this.i32(offset + 100),
                 verticalOrigin: this.i32(offset + 104),
                 renderOrder: this.u32(offset + 108),
-                fontWeight
+                fontWeight,
+                collisionPriority
             };
         });
     }

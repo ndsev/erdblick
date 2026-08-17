@@ -77,6 +77,7 @@ public:
         uint32_t channelOrdinal = 0U;
         uint32_t entryOrdinal = 0U;
         uint32_t endpointRole = 0U;
+        float navigationAltitude = 0.0F;
     };
 
     struct Issue {
@@ -216,6 +217,7 @@ public:
                 .channelOrdinal = read<uint32_t>(record + 8U),
                 .entryOrdinal = read<uint32_t>(record + 12U),
                 .endpointRole = read<uint32_t>(record + 16U),
+                .navigationAltitude = read<float>(record + 20U),
             });
         }
         return result;
@@ -310,7 +312,29 @@ public:
         std::vector<double> result;
         result.reserve(count);
         for (uint32_t index = 0U; index < count; ++index) {
-            result.push_back(read<double>(table + (first + index) * 8U));
+            result.push_back(read<double>(
+                table + (first + index) * kGpuZIndexEntryBytes));
+        }
+        return result;
+    }
+
+    /** Decode stable semantic tie keys owned by one contribution. */
+    [[nodiscard]] std::vector<uint32_t> depthTieKeys(
+        uint32_t contributionIndex) const
+    {
+        auto const contributionTable = read<uint32_t>(80U);
+        REQUIRE(contributionIndex < read<uint32_t>(84U));
+        auto const descriptor = contributionTable + contributionIndex * 56U;
+        auto const first = read<uint32_t>(descriptor + 44U);
+        auto const count = read<uint32_t>(descriptor + 48U);
+        auto const table = read<uint32_t>(152U);
+        REQUIRE(first <= read<uint32_t>(156U));
+        REQUIRE(count <= read<uint32_t>(156U) - first);
+        std::vector<uint32_t> result;
+        result.reserve(count);
+        for (uint32_t index = 0U; index < count; ++index) {
+            result.push_back(read<uint32_t>(
+                table + (first + index) * kGpuZIndexEntryBytes + 8U));
         }
         return result;
     }
@@ -530,6 +554,7 @@ rules:
     REQUIRE(picks[0].channelOrdinal == 0U);
     REQUIRE(picks[0].entryOrdinal == 0U);
     REQUIRE(picks[0].endpointRole == 0U);
+    REQUIRE(picks[0].navigationAltitude == 0.0F);
     REQUIRE(packet.issues().empty());
 
     TileSubsetLayer pickLayer(subset);
@@ -663,6 +688,68 @@ rules:
         renderFirstPoint(11.25, 53.4375));
     REQUIRE(std::abs(south.x - north.x) < 1e-5);
     REQUIRE(std::abs(south.y - north.y) < 1e-5);
+}
+
+TEST_CASE(
+    "TileSubsetLayerRenderer assigns stable depth ties by feature identity",
+    "[erdblick.subset-renderer][depth]")
+{
+    auto info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>(
+        "SubsetRendererDepthPool");
+    auto style = rendererStyle(R"yaml(
+name: StableDepth
+version: 2
+rules:
+  - type: Road
+    geometry: line
+    geometry-name: centerline
+    color: "#ffffff"
+    width: 2
+    z-index: 10
+)yaml");
+    REQUIRE(style.isValid());
+
+    auto renderTieKeys = [&](mapget::TileId const& tileId) {
+        auto subset = std::make_shared<mapget::TileSubsetLayer>(
+            tileId,
+            "SubsetRendererDepthPool",
+            "TestMap",
+            info,
+            strings,
+            "roads",
+            1);
+        auto channel = subset->newChannel(
+            "style-rule:0",
+            mapget::Scope::Feature,
+            1U << static_cast<uint8_t>(mapget::GeomType::Line),
+            "centerline");
+        for (auto const roadId : {int64_t{7}, int64_t{8}}) {
+            channel->newFeatureEntry(
+                subset->newFeatureId("Road", {{"roadId", roadId}}),
+                lineGeometry(*subset, "centerline"),
+                {});
+        }
+        TileSubsetLayerRenderer renderer(
+            0,
+            "Features:TestMap:Road:0",
+            style,
+            static_cast<int>(FeatureStyleRule::NoHighlight),
+            static_cast<int>(FeatureStyleRule::AnyFidelity));
+        installSubset(renderer, TileSubsetLayer(subset));
+        renderer.run();
+        return RendererPacketView(renderer).depthTieKeys(0U);
+    };
+
+    auto const tileId = mapget::TileId::fromWgs84(11.0, 48.0, 13);
+    auto const first = renderTieKeys(tileId);
+    auto const second = renderTieKeys(tileId);
+    auto const east = renderTieKeys(tileId.neighbour(1, 0));
+    REQUIRE(first.size() == 2U);
+    REQUIRE(first[0] != first[1]);
+    REQUIRE((first[0] & 0xFU) != (first[1] & 0xFU));
+    REQUIRE(second == first);
+    REQUIRE((first[0] & 0xFU) != (east[0] & 0xFU));
 }
 
 TEST_CASE(
@@ -1056,6 +1143,104 @@ rules:
     REQUIRE(packet.labelFontWeights() == std::vector<uint32_t>(3U, 800U));
     REQUIRE(packet.labelOrigins() ==
         std::vector<std::pair<int32_t, int32_t>>(3U, {-1, 1}));
+}
+
+TEST_CASE(
+    "TileSubsetLayerRenderer draws a short relation stub for a geometry-less carrier",
+    "[erdblick.subset-renderer][relation]")
+{
+    auto info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>(
+        "SubsetRendererRelationStubPool");
+    auto tileId = mapget::TileId::fromWgs84(11.0, 48.0, 13);
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        tileId,
+        "SubsetRendererRelationStubPool",
+        "TestMap",
+        info,
+        strings,
+        "relations",
+        1);
+    subset->setGeometryAnchor({11.0, 48.0, 0.0});
+
+    auto emptyGeometry = subset->newGeometryCollection(0, true);
+    auto laneGeometry = lineGeometryWithPoints(
+        *subset,
+        "centerline",
+        std::array{
+            mapget::Point{11.0, 48.0, 0.0},
+            mapget::Point{11.001, 48.0, 0.0},
+        });
+    auto endpointGeometry = subset->newGeometryCollection(1, true);
+    auto endpoint = subset->newGeometry(mapget::GeomType::Points, 1, true);
+    endpoint->append({11.0, 48.0, 0.0});
+    endpointGeometry->addGeometry(endpoint);
+
+    auto connectorId = subset->newFeatureId(
+        "Road",
+        {{"roadId", int64_t{1}}});
+    auto laneId = subset->newFeatureId(
+        "Road",
+        {{"roadId", int64_t{2}}});
+    auto channel = subset->newChannel(
+        "style-rule:0",
+        mapget::Scope::Relation,
+        1U << static_cast<uint8_t>(mapget::GeomType::Line),
+        std::nullopt);
+    auto connector = channel->newFeatureEntry(
+        connectorId,
+        emptyGeometry,
+        {});
+    auto lane = channel->newFeatureEntry(
+        laneId,
+        laneGeometry,
+        {});
+    channel->newRelationEntry(
+        "Road.1/outgoingLane/0",
+        "outgoingLane",
+        "stored",
+        mapget::RelationDirection::Forward,
+        false,
+        connector,
+        lane,
+        emptyGeometry,
+        endpointGeometry);
+
+    auto style = rendererStyle(R"yaml(
+name: RelationStub
+version: 2
+rules:
+  - type: Road
+    scope: relation
+    relation-type: outgoingLane
+    relation-line-geometry: nearest-endpoints
+    geometry: line
+    color: "#ffffff"
+    width: 2
+    arrow: forward
+)yaml");
+    REQUIRE(style.isValid());
+
+    TileSubsetLayerRenderer renderer(
+        0,
+        "Features:TestMap:Road:0",
+        style,
+        static_cast<int>(FeatureStyleRule::NoHighlight),
+        static_cast<int>(FeatureStyleRule::AnyFidelity));
+    renderer.setCoordinateOrigin(11.0, 48.0, 0.0);
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+
+    auto const paths = RendererPacketView(renderer).paths();
+    REQUIRE(paths.size() == 1U);
+    REQUIRE(paths.front().points.size() == 2U);
+    auto const& first = paths.front().points.front();
+    auto const& second = paths.front().points.back();
+    REQUIRE(std::hypot(first.x, first.y) < 0.01);
+    REQUIRE(std::abs(second.z - first.z) < 1.0e-6);
+    REQUIRE(second.x > first.x);
+    REQUIRE(second.distanceTo(first) > 7.9);
+    REQUIRE(second.distanceTo(first) < 8.1);
 }
 
 TEST_CASE(

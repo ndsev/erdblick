@@ -7,6 +7,7 @@ import {
   type GpuPickRecordView,
   type GpuRetainedPickTable,
   type GpuRuntimeIssueView,
+  type GpuZIndexEntryView,
 } from "./gpu-render-packet";
 import {
   GpuPrimitiveStore,
@@ -17,14 +18,77 @@ import { GpuRangeAllocator, type GpuRecordRange } from "./gpu-range-allocator";
 const LOOKUP_TEXTURE_WIDTH = 1024;
 const MAX_PICKING_INDEX = 0x00ff_fffe;
 const MAX_ACTIVATION_TOKEN = 0x00ff_ffff;
-const MAX_CLIP_SPACE_BIAS = 0.00025;
+// Keep adjacent semantic depth slots farther apart than one 24-bit depth-buffer
+// unit. The former 0.001 budget collapsed dense BMD ranks at distant cameras.
+const MAX_CLIP_SPACE_BIAS = 0.005;
 const TARGET_DEPTH_STEPS = 1024;
+// Keep synchronized with kGpuDepthTieBucketCount: packets retain exactly the
+// hash bits consumed by this power-of-two allocator.
 const MAX_TIE_BUCKETS = 32;
 /** Depth interval reserved for each semantic primitive pass. */
 export const GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP =
   MAX_CLIP_SPACE_BIAS / 5;
 const MAX_LOCAL_CLIP_SPACE_BIAS =
   GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP * 0.8;
+
+interface DepthRankAllocation {
+  firstSlot: number;
+  tieBucketCount: number;
+}
+
+/**
+ * Assign depth slots only to authored ranks which actually contain semantic ties.
+ *
+ * A global tie lattice wastes the same number of slots on every unique z-index.
+ * Dense Classic styles then exhaust the safe depth budget before repeated ranks
+ * receive even a second slot. Power-of-two per-rank buckets retain the hash's
+ * spatial low-bit distribution while spending the remaining budget on the most
+ * heavily contended ranks first.
+ */
+function allocateDepthRanks(
+  orderedZIndices: readonly number[],
+  tieBreakersByZIndex: ReadonlyMap<number, ReadonlySet<number>>,
+): {allocations: Map<number, DepthRankAllocation>; slotCount: number} {
+  const bucketCounts = new Map<number, number>(
+    orderedZIndices.map((value) => [value, 1]),
+  );
+  let slotCount = Math.max(1, orderedZIndices.length);
+  if (slotCount < TARGET_DEPTH_STEPS) {
+    const candidates = orderedZIndices
+      .map((value, rank) => ({
+        value,
+        rank,
+        tieCount: tieBreakersByZIndex.get(value)?.size ?? 0,
+      }))
+      .filter(({tieCount}) => tieCount > 1);
+    for (let nextBucketCount = 2;
+      nextBucketCount <= MAX_TIE_BUCKETS;
+      nextBucketCount *= 2) {
+      candidates.sort((left, right) =>
+        right.tieCount - left.tieCount || left.rank - right.rank,
+      );
+      for (const candidate of candidates) {
+        const currentBucketCount = bucketCounts.get(candidate.value)!;
+        if (currentBucketCount * 2 !== nextBucketCount
+          || candidate.tieCount <= currentBucketCount
+          || slotCount + currentBucketCount > TARGET_DEPTH_STEPS) {
+          continue;
+        }
+        bucketCounts.set(candidate.value, nextBucketCount);
+        slotCount += currentBucketCount;
+      }
+    }
+  }
+
+  const allocations = new Map<number, DepthRankAllocation>();
+  let firstSlot = 0;
+  for (const value of orderedZIndices) {
+    const tieBucketCount = bucketCounts.get(value)!;
+    allocations.set(value, {firstSlot, tieBucketCount});
+    firstSlot += tieBucketCount;
+  }
+  return {allocations, slotCount: Math.max(1, firstSlot)};
+}
 
 interface OriginEntry {
   identity: string;
@@ -61,7 +125,7 @@ interface InstalledContribution {
   spans: InstalledSpan[];
   pickingRange: GpuRecordRange | null;
   zIndexRange: GpuRecordRange | null;
-  zIndices: number[];
+  zIndices: GpuZIndexEntryView[];
   labels: GpuSceneLabel[];
   pickTables: GpuRetainedPickTable[];
   resolvedPickIndices: number[];
@@ -195,6 +259,12 @@ interface ScenePickRecord {
   contributionIdentity: string;
   mapTileKey: string;
   featureIds: string | readonly string[];
+  navigationAltitude?: number;
+}
+
+interface OwnedPackedPick {
+  installed: InstalledContribution;
+  record: GpuPickRecordView;
 }
 
 type ScenePickIndices = number | Set<number>;
@@ -788,7 +858,9 @@ export class GpuScene {
             item.installed.zIndices.length &&
             (item.installed.zIndices.length !== descriptor.zIndices.length ||
               item.installed.zIndices.some(
-                (value, index) => value !== descriptor.zIndices[index],
+                (entry, index) =>
+                  entry.value !== descriptor.zIndices[index].value ||
+                  entry.tieBreaker !== descriptor.zIndices[index].tieBreaker,
               ))
           ) {
             throw new Error("GPU render fragments disagree about z-index data.");
@@ -1001,6 +1073,17 @@ export class GpuScene {
       }));
   }
 
+  /** Return the representative physical altitude of one rendered pick. */
+  navigationAltitude(globalPickIndex: number): number | undefined {
+    const cached = this.picks.get(globalPickIndex)?.navigationAltitude;
+    if (cached !== undefined) {
+      return cached;
+    }
+    const altitude = this.ownedPackedPick(globalPickIndex)
+      ?.record.navigationAltitude;
+    return Number.isFinite(altitude) ? altitude : undefined;
+  }
+
   /** Test whether selected contributions already retain an exact local target. */
   hasInteractionTarget(
     contributionIdentities: ReadonlySet<string>,
@@ -1063,6 +1146,24 @@ export class GpuScene {
     if (cached) {
       return cached;
     }
+    const ownedPick = this.ownedPackedPick(globalPickIndex);
+    if (!ownedPick) {
+      return undefined;
+    }
+    const {installed, record} = ownedPick;
+    return this.cacheScenePick(
+      globalPickIndex,
+      installed,
+      installed.resolvePick(record),
+      record.navigationAltitude,
+    );
+  }
+
+  /** Resolve one scene-global index to its contribution-owned packed tuple. */
+  private ownedPackedPick(globalPickIndex: number): OwnedPackedPick | undefined {
+    if (!Number.isInteger(globalPickIndex) || globalPickIndex < 0) {
+      return undefined;
+    }
     const encodedSlot = this.pickOwnerSlots[globalPickIndex] ?? 0;
     if (encodedSlot === 0) {
       return undefined;
@@ -1073,13 +1174,10 @@ export class GpuScene {
       globalPickIndex >= range.firstRecord + range.recordCount) {
       return undefined;
     }
-    return this.cacheScenePick(
-      globalPickIndex,
+    return {
       installed,
-      installed.resolvePick(
-        this.packedPick(installed, globalPickIndex - range.firstRecord),
-      ),
-    );
+      record: this.packedPick(installed, globalPickIndex - range.firstRecord),
+    };
   }
 
   /** Find one local record across the bounded fragment list and decode only it. */
@@ -1101,6 +1199,7 @@ export class GpuScene {
     globalPickIndex: number,
     installed: InstalledContribution,
     featureIds: string | readonly string[] | undefined,
+    navigationAltitude: number,
   ): ScenePickRecord | undefined {
     if (featureIds === undefined || featureIds.length === 0) {
       return undefined;
@@ -1111,6 +1210,7 @@ export class GpuScene {
       featureIds: typeof featureIds === "string"
         ? featureIds
         : [...new Set(featureIds)],
+      ...(Number.isFinite(navigationAltitude) ? {navigationAltitude} : {}),
     };
     this.picks.set(globalPickIndex, selected);
     installed.resolvedPickIndices.push(globalPickIndex);
@@ -1165,6 +1265,7 @@ export class GpuScene {
             globalPickIndex,
             installed,
             installed.resolvePick(record),
+            record.navigationAltitude,
           );
         }
       }
@@ -1553,7 +1654,7 @@ export class GpuScene {
         installed.contributionSlot,
         [
           installed.pickingRange?.firstRecord ?? -1,
-          installed.styleOrder,
+          0,
           installed.activationToken,
           installed.zIndexRange?.firstRecord ?? -1,
         ],
@@ -1583,54 +1684,46 @@ export class GpuScene {
       .flatMap((entry) => entry.active ? [entry.active] : []);
     const normalizedByContribution = new Map<
       InstalledContribution,
-      number[]
+      GpuZIndexEntryView[]
     >();
     const uniqueZIndices = new Set<number>();
-    const uniqueStyleOrders = new Set<number>();
+    const tieBreakersByZIndex = new Map<number, Set<number>>();
     let hasAuthoredZIndex = false;
     for (const installed of active) {
-      uniqueStyleOrders.add(installed.styleOrder);
-      const normalized = installed.zIndices.map((value) => {
-        hasAuthoredZIndex ||= Number.isFinite(value);
-        const result = Number.isFinite(value) ? value : 0;
-        uniqueZIndices.add(result === 0 ? 0 : result);
-        return result === 0 ? 0 : result;
+      const normalized = installed.zIndices.map((entry) => {
+        hasAuthoredZIndex ||= Number.isFinite(entry.value);
+        const result = Number.isFinite(entry.value) ? entry.value : 0;
+        const value = result === 0 ? 0 : result;
+        const tieBreaker = entry.tieBreaker >>> 0;
+        uniqueZIndices.add(value);
+        let tieBreakers = tieBreakersByZIndex.get(value);
+        if (!tieBreakers) {
+          tieBreakers = new Set<number>();
+          tieBreakersByZIndex.set(value, tieBreakers);
+        }
+        tieBreakers.add(tieBreaker);
+        return {
+          value,
+          tieBreaker,
+        };
       });
       normalizedByContribution.set(installed, normalized);
     }
     const orderedZIndices = [...uniqueZIndices]
       .sort((left, right) => left - right);
-    const zRanks = new Map(
-      orderedZIndices.map((value, index) => [value, index]),
-    );
-    const orderedStyleOrders = [...uniqueStyleOrders]
-      .sort((left, right) => left - right);
-    const styleRanks = new Map(
-      orderedStyleOrders.map((value, index) => [value, index]),
-    );
-    const tieBucketCount = hasAuthoredZIndex && orderedZIndices.length
-      ? Math.max(1, Math.min(
-          MAX_TIE_BUCKETS,
-          Math.floor(TARGET_DEPTH_STEPS / orderedZIndices.length),
-        ))
-      : 1;
-    const tiesPerStyle = Math.max(
-      1,
-      Math.floor(tieBucketCount / Math.max(1, orderedStyleOrders.length)),
-    );
-    const rankCount = Math.max(
-      1,
-      orderedZIndices.length * tieBucketCount,
+    const depthRanks = allocateDepthRanks(
+      orderedZIndices,
+      tieBreakersByZIndex,
     );
     const step = hasAuthoredZIndex
-      ? MAX_LOCAL_CLIP_SPACE_BIAS / rankCount
+      ? MAX_LOCAL_CLIP_SPACE_BIAS / depthRanks.slotCount
       : 0;
     const contributionUpdates: FloatLookupUpdate[] = active.map(
       (installed) => ({
         firstSlot: installed.contributionSlot,
         values: [
           installed.pickingRange?.firstRecord ?? -1,
-          styleRanks.get(installed.styleOrder) ?? 0,
+          0,
           installed.activationToken,
           installed.zIndexRange?.firstRecord ?? -1,
         ],
@@ -1648,12 +1741,17 @@ export class GpuScene {
         continue;
       }
       const values = new Float32Array(installed.zIndices.length * 4);
-      normalizedByContribution.get(installed)!.forEach((value, index) => {
+      normalizedByContribution.get(installed)!.forEach((entry, index) => {
         const offset = index * 4;
-        values[offset] = (zRanks.get(value) ?? 0) * tieBucketCount * step;
-        values[offset + 1] = step;
-        values[offset + 2] = tiesPerStyle;
-        values[offset + 3] = tieBucketCount;
+        const allocation = depthRanks.allocations.get(entry.value);
+        if (!allocation) {
+          return;
+        }
+        // The renderer puts a Morton tile phase in the low bits. Power-of-two
+        // masking preserves that spatial coloring instead of randomly letting
+        // neighboring tile-edge geometry collide in the same depth bucket.
+        const tieOrdinal = entry.tieBreaker & (allocation.tieBucketCount - 1);
+        values[offset] = (allocation.firstSlot + tieOrdinal) * step;
       });
       zIndexUpdates.push({
         firstSlot: installed.zIndexRange.firstRecord,

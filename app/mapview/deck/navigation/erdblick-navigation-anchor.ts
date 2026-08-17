@@ -21,6 +21,7 @@ export interface DeckFeaturePickLayerProps {
     featureAddressesByPath?: ArrayLike<number | null>;
     subsetPickResolver?: (pickIndex: number) => TileFeatureId[];
     navigationAnchorEligible?: boolean;
+    navigationAltitudeResolver?: (globalPickIndex: number) => number | undefined;
     markerAnchorEligible?: boolean;
     markerAnchorPositionIsWgs84?: boolean;
     drillPickEligible?: boolean;
@@ -50,18 +51,25 @@ export function pickNavigationAnchor<ValueT>(
     deck: Pick<Deck, "pickMultipleObjects">,
     screenPosition: NavigationScreenPosition,
     resolveValue: (picked: PickingInfo) => ValueT | null,
-    sameValue?: (first: ValueT, second: ValueT) => boolean
+    sameValue?: (first: ValueT, second: ValueT) => boolean,
+    radius = NAVIGATION_PICK_RADIUS_PIXELS,
+    layerIds?: string[]
 ): NavigationAnchorPick<ValueT> | undefined {
     const pickedObjects = deck.pickMultipleObjects({
         x: screenPosition[0],
         y: screenPosition[1],
-        radius: NAVIGATION_PICK_RADIUS_PIXELS,
+        radius,
         depth: NAVIGATION_PICK_DEPTH,
+        ...(layerIds ? {layerIds} : {}),
         unproject3D: true
     });
     let firstMatch: NavigationAnchorPick<ValueT> | undefined;
     for (const picked of pickedObjects) {
-        const target = navigationTargetFromPickingInfo(picked);
+        const target = navigationTargetFromPickingInfo({
+            ...picked,
+            x: screenPosition[0],
+            y: screenPosition[1]
+        }, radius);
         if (!target) {
             continue;
         }
@@ -90,13 +98,20 @@ export function navigationAnchorFromPickingInfo(picked: PickingInfo): Navigation
 
 /** Returns the finite physical target and optional surface orientation of a camera layer. */
 export function navigationTargetFromPickingInfo(
-    picked: PickingInfo
+    picked: PickingInfo,
+    maxScreenDistancePx = NAVIGATION_PICK_RADIUS_PIXELS,
+    preferPickedCoordinate = false
 ): NavigationVisualTarget | null {
     const layerProps = picked.layer?.props as DeckFeaturePickLayerProps | undefined;
     if (!layerProps?.navigationAnchorEligible) {
         return null;
     }
-    const position = physicalAnchorFromPickingInfo(picked, layerProps);
+    const position = physicalAnchorFromPickingInfo(
+        picked,
+        layerProps,
+        maxScreenDistancePx,
+        preferPickedCoordinate
+    );
     if (!position) {
         return null;
     }
@@ -108,17 +123,43 @@ export function navigationTargetFromPickingInfo(
 export function markerAnchorFromPickingInfo(picked: PickingInfo): NavigationAnchor | null {
     const layerProps = picked.layer?.props as DeckFeaturePickLayerProps | undefined;
     return layerProps?.markerAnchorEligible
-        ? physicalAnchorFromPickingInfo(picked, layerProps)
+        ? physicalAnchorFromPickingInfo(
+            picked,
+            layerProps,
+            NAVIGATION_PICK_RADIUS_PIXELS
+        )
         : null;
 }
 
-/** Resolves geometry metadata before falling back to deck.gl's depth coordinate. */
+/** Resolves an explicitly requested depth sample before semantic geometry fallbacks. */
 function physicalAnchorFromPickingInfo(
     picked: PickingInfo,
-    layerProps: DeckFeaturePickLayerProps
+    layerProps: DeckFeaturePickLayerProps,
+    maxScreenDistancePx: number,
+    preferPickedCoordinate = false
 ): NavigationAnchor | null {
+    const coordinate = picked.coordinate;
+    // Custom vector shaders apply a small clip-space depth bias for stable
+    // ordering. Unprojecting that biased depth produces a visually plausible
+    // point whose physical altitude is wrong enough to move the controller's
+    // true rotation center. Scene picks expose their physical altitude, so
+    // intersect the pointer ray with that plane below instead.
+    if (preferPickedCoordinate
+        && !layerProps.navigationAltitudeResolver
+        && coordinate
+        && coordinate.length >= 3) {
+        const position: NavigationAnchor = [coordinate[0], coordinate[1], coordinate[2]];
+        if (position.every(Number.isFinite)) {
+            return position;
+        }
+    }
+
     if (layerProps.pathCenterline) {
-        const pathAnchor = nearestPathCenterlineAnchor(picked, layerProps.pathCenterline);
+        const pathAnchor = nearestPathCenterlineAnchor(
+            picked,
+            layerProps.pathCenterline,
+            maxScreenDistancePx
+        );
         return pathAnchor;
     }
 
@@ -157,7 +198,35 @@ function physicalAnchorFromPickingInfo(
         }
     }
 
-    const coordinate = picked.coordinate;
+    const globalPickIndex = Number(
+        picked.object?.globalPickIndex ?? picked.index
+    );
+    const navigationAltitude = Number.isInteger(globalPickIndex)
+        ? layerProps.navigationAltitudeResolver?.(globalPickIndex)
+        : undefined;
+    if (typeof navigationAltitude === "number"
+        && Number.isFinite(navigationAltitude)
+        && picked.viewport) {
+        const screenPosition = [
+            Number(picked.x) - Number(picked.viewport.x ?? 0),
+            Number(picked.y) - Number(picked.viewport.y ?? 0)
+        ];
+        if (screenPosition.every(Number.isFinite)) {
+            const unprojected = picked.viewport.unproject(
+                screenPosition,
+                {targetZ: navigationAltitude}
+            );
+            const position: NavigationAnchor = [
+                Number(unprojected[0]),
+                Number(unprojected[1]),
+                Number(unprojected[2])
+            ];
+            if (position.every(Number.isFinite)) {
+                return position;
+            }
+        }
+    }
+
     if (!coordinate || coordinate.length < 3) {
         return null;
     }
@@ -206,7 +275,8 @@ function meterOffsetAnchor(
 /** Snaps a picked path ribbon point to the nearest point on its base XYZ centerline. */
 function nearestPathCenterlineAnchor(
     picked: PickingInfo,
-    path: DeckFeaturePickLayerProps["pathCenterline"]
+    path: DeckFeaturePickLayerProps["pathCenterline"],
+    maxScreenDistancePx: number
 ): NavigationAnchor | null {
     const viewport = picked.viewport;
     const pathIndex = Number(picked.index);
@@ -267,7 +337,7 @@ function nearestPathCenterlineAnchor(
         }
     }
     if (!bestSegment
-        || bestDistanceSquared > NAVIGATION_PICK_RADIUS_PIXELS ** 2) {
+        || bestDistanceSquared > Math.max(0, maxScreenDistancePx) ** 2) {
         return null;
     }
     const fraction = bestSegment.fraction;

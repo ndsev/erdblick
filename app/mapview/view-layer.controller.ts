@@ -22,7 +22,10 @@ import {
     TileSubsetLayerVisualization,
     type TileSubsetInteractionOverlay
 } from "./deck/tile-subset-layer.visualization";
-import {resolveDeckInteractionEffect} from
+import {
+    resolveDeckInteractionEffect,
+    type DeckInteractionEffect
+} from
     "./deck/deck-interaction-effect";
 import {tileCoordinateOrigin} from "./deck/tile-coordinate-origin";
 import type {FeatureSearchService} from "../search/feature.search.service";
@@ -97,10 +100,18 @@ export class ViewLayerController {
     private lastInteractionViewportSignature = "";
     private localInteractionOverlaysByLayer =
         new Map<string, readonly TileSubsetInteractionOverlay[]>();
+    private readonly localInteractionVisualizationsWithOverlays =
+        new Set<TileSubsetLayerVisualization>();
     private readonly regularCoverageByLayer = new WeakMap<
         StyledMapgetLayer,
         {tileIds: readonly number[]; priorityTileIds: readonly number[]}
     >();
+    private interactionLayerAffinityCache =
+        new WeakMap<ErdblickStyle, Map<string, boolean>>();
+    private interactionFilterPlanCache =
+        new WeakMap<ErdblickStyle, Map<string, StyleFilterPlan | null>>();
+    private interactionEffectCache =
+        new WeakMap<ErdblickStyle, Map<string, DeckInteractionEffect | null>>();
     private pendingDispatchQueued = false;
     private nextStyledLayerDispatchIndex = 0;
     private readonly pendingVisualizationRenders =
@@ -129,6 +140,8 @@ export class ViewLayerController {
         );
         this.subscriptions.push(
             this.mapInfo.maps$.subscribe(() => this.scheduleReconcile()),
+            this.mapInfo.dataSourceInfoChanged.subscribe(() =>
+                this.resetInteractionStyleCaches()),
             this.mapInfo.layerStateChanged.subscribe(() => this.scheduleReconcile()),
             this.mapInfo.styleOptionsChanged.subscribe(changes => {
                 if (changes.some(change => change.viewIndex === this.viewIndex)) {
@@ -147,10 +160,10 @@ export class ViewLayerController {
                 this.scheduleReconcile()
             ),
             this.inspection.selectionIdsTopic.subscribe(() =>
-                this.scheduleReconcile()
+                this.scheduleInteractionReconcile()
             ),
             this.inspection.hoverIdsTopic.subscribe(() =>
-                this.scheduleReconcile()
+                this.scheduleInteractionReconcile()
             ),
             this.renderService.capacityChanged.subscribe(() =>
                 this.schedulePendingTiles()
@@ -247,15 +260,6 @@ export class ViewLayerController {
     /** Removes a Deck diagnostics provider when its renderer generation ends. */
     clearDeckPresentationDiagnostics(): void {
         this.renderService.clearDeckPresentationDiagnostics(this.viewIndex);
-    }
-
-    /** Report whether this view still has undispatched or worker-owned presentation work. */
-    hasPendingRenderWork(): boolean {
-        return this.pendingVisualizationRenders.size > 0 ||
-            [...this.styledLayers.values()].some(
-                owned => owned.pendingTiles.size > 0
-            ) ||
-            this.renderService.hasPendingWork(this.viewIndex);
     }
 
     /** Current regular-presentation styled layers, for diagnostics and grid aggregation. */
@@ -357,29 +361,57 @@ export class ViewLayerController {
             }
             this.fullReconcileRequired ||= fullReconcile;
             this.interactionReconcileRequired ||= fullReconcile;
-            if (this.reconcileQueued) {
+            this.queueReconcile();
+        });
+    }
+
+    /** Queue only exact hover/selection mask work, without revisiting regular coverage. */
+    private scheduleInteractionReconcile(): void {
+        this.ngZone.runOutsideAngular(() => {
+            if (this.disposed) {
                 return;
             }
-            this.reconcileQueued = true;
-            queueMicrotask(() => {
-                this.reconcileQueued = false;
-                if (this.disposed) {
-                    return;
-                }
-                const full = this.fullReconcileRequired;
-                this.fullReconcileRequired = false;
-                const viewportSignature =
-                    this.viewportPresentationSignature();
-                if (!full &&
-                    viewportSignature ===
-                        this.lastViewportPresentationSignature) {
-                    return;
-                }
-                this.reconcile();
-                this.lastViewportPresentationSignature =
-                    this.viewportPresentationSignature();
-            });
+            this.interactionReconcileRequired = true;
+            this.queueReconcile();
         });
+    }
+
+    /** Coalesce full, viewport-only, and interaction-only work into one microtask. */
+    private queueReconcile(): void {
+        if (this.reconcileQueued) {
+            return;
+        }
+        this.reconcileQueued = true;
+        queueMicrotask(() => {
+            this.reconcileQueued = false;
+            if (this.disposed) {
+                return;
+            }
+            const full = this.fullReconcileRequired;
+            this.fullReconcileRequired = false;
+            const viewportSignature = this.viewportPresentationSignature();
+            const viewportChanged = viewportSignature !==
+                this.lastViewportPresentationSignature;
+            if (!full && !viewportChanged) {
+                if (this.interactionReconcileRequired) {
+                    this.reconcileInteractions();
+                }
+                return;
+            }
+            this.reconcile();
+            this.lastViewportPresentationSignature =
+                this.viewportPresentationSignature();
+        });
+    }
+
+    /** Reconcile semantic masks and authored interaction styles against retained tiles. */
+    private reconcileInteractions(): void {
+        this.interactionReconcileRequired = false;
+        const orderedStyles = [...this.styleService.styles.values()]
+            .filter(style => style.visible);
+        this.reconcileHighlightLayers(orderedStyles);
+        this.lastInteractionViewportSignature =
+            this.interactionViewportSignature();
     }
 
     /**
@@ -682,6 +714,9 @@ export class ViewLayerController {
         }
         for (const visualization of owned.visualizations.values()) {
             this.pendingVisualizationRenders.delete(visualization);
+            this.localInteractionVisualizationsWithOverlays.delete(
+                visualization
+            );
             visualization.destroy(this.sceneHandle);
         }
         owned.visualizations.clear();
@@ -929,7 +964,8 @@ export class ViewLayerController {
                      styleIndex < orderedStyles.length;
                      ++styleIndex) {
                     const style = orderedStyles[styleIndex];
-                    if (!style.featureLayerStyle.hasLayerAffinity(
+                    if (!this.hasInteractionLayerAffinity(
+                        style,
                         mapgetLayer.layerId
                     )) {
                         continue;
@@ -947,40 +983,39 @@ export class ViewLayerController {
                     }
                     const remoteAllowed = group.kind !== "hover" ||
                         this.inspection.remoteHoverHighlightAllowed;
+                    const optionsSignature = sipHash64Hex(
+                        JSON.stringify(options)
+                    );
                     let rawPlan: StyleFilterPlan | null = null;
                     let remotePlan: ReturnType<
                         typeof planRemoteInteractionHighlight
                     > = null;
-                    if (remoteAllowed &&
-                        style.featureLayerStyle.supportsHighlightMode(
+                    if (remoteAllowed) {
+                        rawPlan = this.interactionFilterPlan(
+                            style,
+                            mapgetLayer,
                             group.mode
-                        )) {
-                        const candidate = this.mapInfo.planStyleFilter(
-                            style.featureLayerStyle,
-                            mapgetLayer.mapId,
-                            mapgetLayer.layerId,
-                            group.mode.value,
-                            coreLib.RuleFidelity.ANY.value
-                        ) as StyleFilterPlan;
-                        if (candidate.valid && candidate.channels.length) {
-                            rawPlan = candidate;
+                        );
+                        if (rawPlan) {
                             remotePlan = planRemoteInteractionHighlight(
-                                candidate,
+                                rawPlan,
                                 features
                             );
                         }
                     }
-                    const effect = resolveDeckInteractionEffect(
-                        style.featureLayerStyle,
+                    const effect = this.interactionEffect(
+                        style,
                         group.mode,
-                        options);
+                        options,
+                        optionsSignature
+                    );
                     if (effect) {
                         const overlayId = [
                             group.kind,
                             group.id,
                             style.id,
                             this.styleVersion(style),
-                            sipHash64Hex(JSON.stringify(options))
+                            optionsSignature
                         ].join(":");
                         let byId = localOverlaysByLayer.get(mapgetLayer.key);
                         if (!byId) {
@@ -1126,9 +1161,106 @@ export class ViewLayerController {
                 [...overlays.values()]
             ])
         );
-        for (const visualization of this.localInteractionVisualizations()) {
+        const nextVisualizations = this.localInteractionVisualizations(
+            localOverlaysByLayer
+        );
+        for (const visualization of
+            this.localInteractionVisualizationsWithOverlays) {
+            if (!nextVisualizations.has(visualization)) {
+                visualization.setInteractionOverlays([]);
+            }
+        }
+        this.localInteractionVisualizationsWithOverlays.clear();
+        for (const visualization of nextVisualizations) {
             this.applyLocalInteractionOverlays(visualization);
         }
+    }
+
+    /** Memoizes the immutable layer-affinity query across hover targets. */
+    private hasInteractionLayerAffinity(
+        style: ErdblickStyle,
+        layerId: string
+    ): boolean {
+        let byLayer = this.interactionLayerAffinityCache.get(style);
+        if (!byLayer) {
+            byLayer = new Map();
+            this.interactionLayerAffinityCache.set(style, byLayer);
+        }
+        const cached = byLayer.get(layerId);
+        if (cached !== undefined) {
+            return cached;
+        }
+        const affinity = style.featureLayerStyle.hasLayerAffinity(layerId);
+        byLayer.set(layerId, affinity);
+        return affinity;
+    }
+
+    /** Memoizes schema-dependent interaction plans until datasource metadata changes. */
+    private interactionFilterPlan(
+        style: ErdblickStyle,
+        mapgetLayer: MapgetLayer,
+        mode: typeof coreLib.HighlightMode.SELECTION_HIGHLIGHT
+    ): StyleFilterPlan | null {
+        let byContext = this.interactionFilterPlanCache.get(style);
+        if (!byContext) {
+            byContext = new Map();
+            this.interactionFilterPlanCache.set(style, byContext);
+        }
+        const key = [
+            mapgetLayer.key,
+            mode.value,
+            coreLib.RuleFidelity.ANY.value
+        ].join("\n");
+        if (byContext.has(key)) {
+            return byContext.get(key) ?? null;
+        }
+        let plan: StyleFilterPlan | null = null;
+        if (style.featureLayerStyle.supportsHighlightMode(mode)) {
+            const candidate = this.mapInfo.planStyleFilter(
+                style.featureLayerStyle,
+                mapgetLayer.mapId,
+                mapgetLayer.layerId,
+                mode.value,
+                coreLib.RuleFidelity.ANY.value
+            ) as StyleFilterPlan;
+            if (candidate.valid && candidate.channels.length) {
+                plan = candidate;
+            }
+        }
+        byContext.set(key, plan);
+        return plan;
+    }
+
+    /** Memoizes one expression-free interaction material per style option state. */
+    private interactionEffect(
+        style: ErdblickStyle,
+        mode: typeof coreLib.HighlightMode.SELECTION_HIGHLIGHT,
+        options: Readonly<Record<string, boolean | number | string>>,
+        optionsSignature: string
+    ): DeckInteractionEffect | null {
+        let byContext = this.interactionEffectCache.get(style);
+        if (!byContext) {
+            byContext = new Map();
+            this.interactionEffectCache.set(style, byContext);
+        }
+        const key = `${mode.value}\n${optionsSignature}`;
+        if (byContext.has(key)) {
+            return byContext.get(key) ?? null;
+        }
+        const effect = resolveDeckInteractionEffect(
+            style.featureLayerStyle,
+            mode,
+            options
+        );
+        byContext.set(key, effect);
+        return effect;
+    }
+
+    /** Drops schema-derived interaction caches after a datasource catalog replacement. */
+    private resetInteractionStyleCaches(): void {
+        this.interactionLayerAffinityCache = new WeakMap();
+        this.interactionFilterPlanCache = new WeakMap();
+        this.interactionEffectCache = new WeakMap();
     }
 
     /** Apply retained semantic overlays only to targets present in one rendered contribution. */
@@ -1142,26 +1274,57 @@ export class ViewLayerController {
         const overlays = this.localInteractionOverlaysByLayer.get(
             visualization.owner.mapgetLayer.key
         ) ?? [];
-        visualization.setInteractionOverlays(overlays.flatMap(overlay => {
+        const applicable = overlays.flatMap(overlay => {
             const targets = overlay.targets.filter(target =>
                 visualization.hasLocalInteractionTarget(target));
             return targets.length ? [{...overlay, targets}] : [];
-        }));
+        });
+        visualization.setInteractionOverlays(applicable);
+        if (applicable.length) {
+            this.localInteractionVisualizationsWithOverlays.add(visualization);
+        } else {
+            this.localInteractionVisualizationsWithOverlays.delete(visualization);
+        }
     }
 
-    /** Collect regular/search contributions eligible for request-free local masks. */
+    /** Resolve only tile visualizations named by the next request-free local masks. */
     private localInteractionVisualizations(
-        mapgetLayer?: MapgetLayer
-    ): TileSubsetLayerVisualization[] {
+        overlaysByLayer: ReadonlyMap<
+            string,
+            ReadonlyMap<string, TileSubsetInteractionOverlay>
+        >
+    ): Set<TileSubsetLayerVisualization> {
         const result = new Set<TileSubsetLayerVisualization>();
+        const tileIdsByLayer = new Map<string, Set<number>>();
+        for (const [layerKey, overlays] of overlaysByLayer) {
+            const tileIds = new Set<number>();
+            for (const overlay of overlays.values()) {
+                for (const target of overlay.targets) {
+                    const parsed = this.parseFeatureTileId(target);
+                    if (parsed) {
+                        tileIds.add(parsed.tileId);
+                    }
+                }
+            }
+            if (tileIds.size) {
+                tileIdsByLayer.set(layerKey, tileIds);
+            }
+        }
         const collect = (owned: OwnedStyledLayer) => {
             const kind = owned.layer.identity.presentationKind;
-            if ((kind !== "regular" && kind !== "search") ||
-                (mapgetLayer && owned.layer.mapgetLayer !== mapgetLayer)) {
+            const tileIds = tileIdsByLayer.get(owned.layer.mapgetLayer.key);
+            if ((kind !== "regular" && kind !== "search") || !tileIds) {
                 return;
             }
-            for (const visualization of owned.visualizations.values()) {
-                result.add(visualization);
+            for (const tileId of tileIds) {
+                const visualizationKey =
+                    owned.visualizationKeyByTileId.get(tileId);
+                const visualization = visualizationKey
+                    ? owned.visualizations.get(visualizationKey)
+                    : undefined;
+                if (visualization) {
+                    result.add(visualization);
+                }
             }
         };
         for (const owned of this.styledLayers.values()) {
@@ -1170,7 +1333,7 @@ export class ViewLayerController {
         for (const {owned} of this.retiringRegularLayers.values()) {
             collect(owned);
         }
-        return [...result];
+        return result;
     }
 
     /** Decode a semantic target through the authoritative WASM MapTileKey parser. */
@@ -1454,6 +1617,7 @@ export class ViewLayerController {
         }
         owned.visualizations.delete(key);
         this.pendingVisualizationRenders.delete(visualization);
+        this.localInteractionVisualizationsWithOverlays.delete(visualization);
         visualization.destroy(this.sceneHandle);
     }
 
@@ -1476,6 +1640,9 @@ export class ViewLayerController {
             }
             owned.visualizations.delete(key);
             this.pendingVisualizationRenders.delete(visualization);
+            this.localInteractionVisualizationsWithOverlays.delete(
+                visualization
+            );
             visualizations.push(visualization);
         }
         TileSubsetLayerVisualization.destroyMany(
@@ -1496,6 +1663,7 @@ export class ViewLayerController {
         }
         owned.visualizations.delete(key);
         this.pendingVisualizationRenders.delete(visualization);
+        this.localInteractionVisualizationsWithOverlays.delete(visualization);
         const state = visualization.state;
         if (state && owned.visualizationKeyByTileId.get(state.tileId) === key) {
             owned.visualizationKeyByTileId.delete(state.tileId);

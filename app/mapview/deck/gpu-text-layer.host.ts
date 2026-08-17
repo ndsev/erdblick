@@ -5,6 +5,7 @@ import {
     type LayerProps,
     type PickingInfo
 } from "@deck.gl/core";
+import {CollisionFilterExtension} from "@deck.gl/extensions";
 import {TextLayer} from "@deck.gl/layers";
 
 import {DeckZIndexExtension} from "./deck-z-index.extension";
@@ -32,6 +33,7 @@ interface GpuTextBucket {
     depthTest: boolean;
     pickable: boolean;
     background: boolean;
+    collision: boolean;
     fontFamily: string;
     fontWeight: number;
     outlineColor: [number, number, number, number];
@@ -108,8 +110,20 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
                 outlineColor: bucket.outlineColor,
                 outlineWidth: bucket.outlineWidth,
                 fontSettings: {sdf: bucket.outlineWidth > 0},
-                extensions: [new DeckZIndexExtension()],
+                extensions: [
+                    ...(bucket.depthTest
+                        ? [new DeckZIndexExtension()]
+                        : []),
+                    ...(bucket.collision
+                        ? [new CollisionFilterExtension()]
+                        : [])
+                ],
                 getZIndexOffset: (label: GpuTextDatum) => label.zIndexOffset,
+                collisionEnabled: bucket.collision,
+                collisionGroup: `${this.props.id}-labels`,
+                getCollisionPriority: (label: GpuTextDatum) =>
+                    label.collisionPriority,
+                characterSet: "auto",
                 parameters: bucket.depthTest ? {} : NO_DEPTH_PARAMETERS,
                 pickable: bucket.pickable,
                 drillPickEligible: bucket.pickable
@@ -142,6 +156,7 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
             const depthTest = (label.flags & GpuLabelFlag.DepthTest) !== 0;
             const pickable = label.globalPickIndex !== null;
             const background = (label.flags & GpuLabelFlag.Background) !== 0;
+            const collision = (label.flags & GpuLabelFlag.Collision) !== 0;
             const key = JSON.stringify([
                 label.styleOrder,
                 label.renderOrder,
@@ -149,6 +164,7 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
                 depthTest,
                 pickable,
                 background,
+                collision,
                 label.fontFamily,
                 label.fontWeight,
                 label.outlineColor,
@@ -165,6 +181,7 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
                     depthTest,
                     pickable,
                     background,
+                    collision,
                     fontFamily: label.fontFamily,
                     fontWeight: label.fontWeight,
                     outlineColor: label.outlineColor,
@@ -223,6 +240,10 @@ export function createGpuTextLayerHost(
         data: [],
         scene,
         flattenZ,
+        // Deck evaluates layerFilter against the root composite layer. Keep
+        // the host pickable so its eligible TextLayer children participate in
+        // both ordinary picking and CollisionFilterExtension's picking pass.
+        pickable: true,
         drillPickEligible: true
     });
 }

@@ -308,7 +308,7 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
 
-        expect(service.drillPickRadius).toBe(1);
+        expect(service.drillPickRadius).toBe(3);
 
         service.drillPickRadius = 7.8;
         expect(service.drillPickRadius).toBe(7);

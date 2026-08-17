@@ -2,11 +2,13 @@ import {describe, expect, it, vi} from "vitest";
 
 import {
     createErdblickVectorLayers,
-    ErdblickVectorLayer
+    ErdblickVectorLayer,
+    ErdblickVectorMaskLayer
 } from "./erdblick-vector.layer";
 import {
     DUAL_COMPACT_PATH_FRAGMENT_SHADER,
     DUAL_SIMPLE_PATH_FRAGMENT_SHADER,
+    GpuSceneMaskMode,
     gpuSceneShaderModule,
     gpuSceneMaskFragmentShader
 } from "./erdblick-vector.shaders";
@@ -23,6 +25,7 @@ function material(
     return {
         model: {
             shaderInputs: {setProps: vi.fn()},
+            updateShaderInputs: vi.fn(),
             draw: vi.fn(() => {
                 draws.push(`${kind}:${styleOrder}:${renderOrder}`);
                 return true;
@@ -211,6 +214,128 @@ describe("ErdblickVectorLayer model order", () => {
         layer.draw({renderPass: {}});
 
         expect(model.model.shaderInputs.setProps).toHaveBeenCalledTimes(1);
+    });
+
+    it("eagerly rebinds a published lookup before the previous texture retires", () => {
+        const oldOrigin = {};
+        const newOrigin = {};
+        const scene = {
+            presentationRevision: 1,
+            originTexture: oldOrigin,
+            contributionTexture: {},
+            zIndexTexture: {},
+            lookupTextureWidth: 1024,
+            materialStores: vi.fn(() => [])
+        };
+        const layer = new ErdblickVectorLayer({
+            id: "vector",
+            data: [],
+            scene,
+            flattenZ: false
+        } as never);
+        const model = material(GpuPrimitiveKind.PathSegment, 1n, []);
+        const internal = layer as any;
+        internal.initialized = true;
+        internal.sceneRevision = 1;
+        internal.materialModels.set(1n, model);
+        layer.draw({renderPass: {}});
+        model.model.shaderInputs.setProps.mockClear();
+        model.model.updateShaderInputs.mockClear();
+
+        scene.originTexture = newOrigin;
+        scene.presentationRevision = 2;
+        internal.sceneRevision = 2;
+        layer.sceneChanged();
+
+        expect(model.model.shaderInputs.setProps).toHaveBeenCalledOnce();
+        expect(model.model.shaderInputs.setProps).toHaveBeenCalledWith({
+            gpuScene: expect.objectContaining({originTexture: newOrigin})
+        });
+        expect(model.model.updateShaderInputs).toHaveBeenCalledOnce();
+        expect(model.model.draw).toHaveBeenCalledTimes(1);
+    });
+
+    it("eagerly rebinds a replaced sparse mask target", () => {
+        const oldTarget = {width: 1};
+        const newTarget = {width: 2};
+        const scene = {
+            presentationRevision: 1,
+            originTexture: {},
+            contributionTexture: {},
+            zIndexTexture: {},
+            lookupTextureWidth: 1024,
+            materialStores: vi.fn(() => [])
+        };
+        const layer = new ErdblickVectorMaskLayer({
+            id: "mask",
+            data: [],
+            scene,
+            flattenZ: false,
+            configuration: {
+                targetTexture: oldTarget,
+                mode: GpuSceneMaskMode.Target,
+                identityColor: [1, 2, 3, 4],
+                materialKeys: null
+            }
+        } as never);
+        const model = material(GpuPrimitiveKind.PathSegment, 1n, []);
+        const internal = layer as any;
+        internal.initialized = true;
+        internal.sceneRevision = 1;
+        internal.synchronizedConfigurationRevision = 1;
+        internal.materialModels.set(1n, model);
+
+        layer.configure({
+            targetTexture: newTarget as never,
+            mode: GpuSceneMaskMode.Target,
+            identityColor: [1, 2, 3, 4],
+            materialKeys: null
+        });
+
+        expect(model.model.shaderInputs.setProps).toHaveBeenCalledWith({
+            gpuScene: expect.any(Object),
+            gpuSceneMask: expect.objectContaining({
+                targetTexture: newTarget,
+                targetTextureWidth: 2
+            })
+        });
+        expect(model.model.updateShaderInputs).toHaveBeenCalledOnce();
+        expect(model.model.draw).not.toHaveBeenCalled();
+    });
+
+    it("does not rebind unchanged mask shader inputs on every draw", () => {
+        const scene = {
+            presentationRevision: 1,
+            originTexture: {},
+            contributionTexture: {},
+            zIndexTexture: {},
+            lookupTextureWidth: 1024,
+            materialStores: vi.fn(() => [])
+        };
+        const layer = new ErdblickVectorMaskLayer({
+            id: "mask",
+            data: [],
+            scene,
+            flattenZ: false,
+            configuration: {
+                targetTexture: {width: 1},
+                mode: GpuSceneMaskMode.Target,
+                identityColor: [1, 2, 3, 4],
+                materialKeys: null
+            }
+        } as never);
+        const model = material(GpuPrimitiveKind.PathSegment, 1n, []);
+        const internal = layer as any;
+        internal.initialized = true;
+        internal.sceneRevision = 1;
+        internal.synchronizedConfigurationRevision = 0;
+        internal.materialModels.set(1n, model);
+
+        layer.draw({renderPass: {}});
+        layer.draw({renderPass: {}});
+
+        expect(model.model.shaderInputs.setProps).toHaveBeenCalledOnce();
+        expect(model.model.updateShaderInputs).toHaveBeenCalledOnce();
     });
 
     it("preserves concrete rule order before opaque material hashes", () => {

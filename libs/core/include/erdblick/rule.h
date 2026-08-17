@@ -93,6 +93,12 @@ public:
         DoubleArrow
     };
 
+    /** Selects how a relation helper line chooses its endpoint positions. */
+    enum class RelationLineGeometry {
+        Centers,
+        NearestEndpoints,
+    };
+
     /** Unit system used by the lateral component of line offsets. */
     enum class LateralOffsetUnit {
         Meter,
@@ -209,6 +215,8 @@ public:
     [[nodiscard]] std::optional<std::string> const& relationTypePattern() const;
     /** Return the vertical offset used when drawing relation helper lines. */
     [[nodiscard]] float relationLineHeightOffset() const;
+    /** Return how relation helper-line endpoints are selected. */
+    [[nodiscard]] RelationLineGeometry relationLineGeometry() const;
     /** Return the optional style used for relation end markers. */
     [[nodiscard]] std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle() const;
     /** Return the optional style recursively applied to relation source features. */
@@ -236,6 +244,10 @@ public:
     [[nodiscard]] glm::fvec4 const& labelColor() const;
     /** Return the opacity multiplier applied to every label material color. */
     [[nodiscard]] float labelOpacity() const;
+    /** Report whether overlapping labels should be hidden by Deck. */
+    [[nodiscard]] bool labelCollision() const;
+    /** Return the priority used when collision-filtered labels overlap. */
+    [[nodiscard]] int32_t labelCollisionPriority() const;
     /** Return the label outline color. */
     [[nodiscard]] glm::fvec4 const& labelOutlineColor() const;
     /** Return the label outline width. */
@@ -364,6 +376,8 @@ private:
     std::string labelFont_ = "24px Helvetica";
     glm::fvec4 labelColor_{1., 1., 1., 1.};
     float labelOpacity_ = 1.0f;
+    bool labelCollision_ = false;
+    int32_t labelCollisionPriority_ = 0;
     glm::fvec4 labelOutlineColor_{.0, .0, .0, .1};
     float labelOutlineWidth_ = .1;
     bool showBackground_ = false;
@@ -385,6 +399,7 @@ private:
     std::optional<std::regex> relationType_;
     std::optional<std::string> relationTypePattern_;
     float relationLineHeightOffset_ = 1.0; // Offset of the relation line over the center in m.
+    RelationLineGeometry relationLineGeometry_ = RelationLineGeometry::Centers;
     std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle_;
     std::shared_ptr<FeatureStyleRule> relationSourceStyle_;
     std::shared_ptr<FeatureStyleRule> relationTargetStyle_;

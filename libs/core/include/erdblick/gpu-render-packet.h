@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string>
 #include <vector>
@@ -11,7 +12,7 @@ namespace erdblick
 {
 
 /** Binary ABI version understood by the persistent GPU renderer. */
-inline constexpr uint16_t kGpuRenderPacketAbiVersion = 8U;
+inline constexpr uint16_t kGpuRenderPacketAbiVersion = 10U;
 
 /** Little-endian integer whose bytes spell `ERGP`. */
 inline constexpr uint32_t kGpuRenderPacketMagic = 0x50475245U;
@@ -50,7 +51,7 @@ enum class GpuMaterialFlag : uint16_t {
     DualStrokePath = 1U << 4U,
 };
 
-/** Exact fixed strides associated with each primitive program in ABI v8. */
+/** Exact fixed strides associated with each primitive program in ABI v10. */
 inline constexpr uint32_t kGpuPointRecordBytes = 40U;
 inline constexpr uint32_t kGpuSimplePathSegmentRecordBytes = 52U;
 inline constexpr uint32_t kGpuCompactPathSegmentRecordBytes = 76U;
@@ -60,6 +61,7 @@ inline constexpr uint32_t kGpuPathSegmentRecordBytes = 144U;
 inline constexpr uint32_t kGpuArrowRecordBytes = 68U;
 inline constexpr uint32_t kGpuSurfaceTriangleRecordBytes = 60U;
 inline constexpr uint32_t kGpuIconRecordBytes = 68U;
+inline constexpr uint32_t kGpuZIndexEntryBytes = 16U;
 
 /** Browser-owned resource categories requested by native packet generation. */
 enum class GpuResourceKind : uint32_t {
@@ -72,6 +74,7 @@ enum class GpuLabelFlag : uint32_t {
     Billboard = 1U << 0U,
     DepthTest = 1U << 1U,
     Background = 1U << 2U,
+    Collision = 1U << 3U,
 };
 
 /** Scene-assigned origin metadata shared by every vector record in a packet. */
@@ -103,6 +106,12 @@ struct GpuContributionSpan {
     uint32_t recordCount = 0U;
 };
 
+/** One authored z-index and its contribution-independent rule-order tie key. */
+struct GpuZIndexEntry {
+    double value = 0.0;
+    uint32_t tieBreaker = 0U;
+};
+
 /** Independently replaceable tile/style revision and its physical stream spans. */
 struct GpuContribution {
     uint64_t key = 0U;
@@ -111,7 +120,7 @@ struct GpuContribution {
     uint32_t activationToken = 0U;
     uint32_t totalPickCount = 0U;
     std::vector<GpuContributionSpan> spans;
-    std::vector<double> zIndices;
+    std::vector<GpuZIndexEntry> zIndices;
 };
 
 /** Compact subset row identity resolved semantically only after interaction. */
@@ -121,6 +130,7 @@ struct GpuPickRecord {
     uint32_t channelOrdinal = 0U;
     uint32_t entryOrdinal = 0U;
     uint32_t endpointRole = 0U;
+    float navigationAltitude = std::numeric_limits<float>::quiet_NaN();
 };
 
 /** Logical text datum retained by the shared Deck TextLayer host. */
@@ -144,6 +154,7 @@ struct GpuLabelRecord {
     int32_t verticalOrigin = 0;
     uint32_t renderOrder = 0U;
     uint32_t fontWeight = 400U;
+    int32_t collisionPriority = 0;
 };
 
 /** Browser resource missing from the worker's current append-only icon catalog. */

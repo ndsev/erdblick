@@ -2,7 +2,10 @@ import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {addMetersToLngLat} from "@math.gl/web-mercator";
 
-import type {NavigationAnchor} from "./navigation/feature-navigation.types";
+import type {
+    NavigationAnchor,
+    NavigationVisualTarget
+} from "./navigation/feature-navigation.types";
 import {createDeckMapViewport} from "./navigation/web-mercator-feature-navigation";
 import {projectNavigationTarget} from "./deck-navigation-target";
 import {DeckMapView3D} from "./deck-view3d";
@@ -57,8 +60,15 @@ interface CameraPersistenceTestInternals {
 }
 
 interface GestureTargetTestInternals {
-    pickNavigationTarget: ReturnType<typeof vi.fn>;
-    resolveControllerNavigationTarget(screenPosition: [number, number]): NavigationAnchor | null;
+    pointerNavigationTarget: NavigationVisualTarget | null;
+    hoverNavigationTargetNear: ReturnType<typeof vi.fn>;
+    groundNavigationTarget: ReturnType<typeof vi.fn>;
+    setHoverNavigationPivot: ReturnType<typeof vi.fn>;
+    resolveControllerNavigationTarget(screenPosition: [number, number]): NavigationVisualTarget | null;
+    onControllerNavigationTargetChange(
+        target: NavigationVisualTarget,
+        active: boolean
+    ): void;
 }
 
 /** Creates a 3D deck view with service collaborators outside the focused unit scope. */
@@ -107,13 +117,62 @@ function installDeckMock(
 }
 
 describe("Deck navigation target and layout", () => {
-    it("does not issue a synchronous GPU pick when a gesture starts without a hover target", () => {
+    it("retains the exact pointer-down target while drag recognition queries repeatedly", () => {
         const view = createView();
         const internals = view as unknown as GestureTargetTestInternals;
-        internals.pickNavigationTarget = vi.fn();
+        const target = {position: [11, 48, 120] as NavigationAnchor};
+        internals.pointerNavigationTarget = target;
+        internals.hoverNavigationTargetNear = vi.fn();
+        internals.groundNavigationTarget = vi.fn();
+        internals.setHoverNavigationPivot = vi.fn();
 
-        expect(internals.resolveControllerNavigationTarget([500, 350])).toBeNull();
-        expect(internals.pickNavigationTarget).not.toHaveBeenCalled();
+        expect(internals.resolveControllerNavigationTarget([540, 380]))
+            .toEqual(target);
+        expect(internals.resolveControllerNavigationTarget([620, 410]))
+            .toEqual(target);
+        expect(internals.pointerNavigationTarget).toBe(target);
+        expect(internals.setHoverNavigationPivot).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not let release of an older controller target erase a fresh pointer-down target", () => {
+        const view = createView();
+        const internals = view as unknown as GestureTargetTestInternals;
+        const frozen = {position: [11, 48, 120] as NavigationAnchor};
+        const released = {position: [12, 49, 0] as NavigationAnchor};
+        internals.pointerNavigationTarget = frozen;
+
+        internals.onControllerNavigationTargetChange(released, false);
+
+        expect(internals.pointerNavigationTarget).toBe(frozen);
+    });
+
+    it("reuses a local prepared hover target without a gesture-time GPU readback", () => {
+        const view = createView();
+        const internals = view as unknown as GestureTargetTestInternals;
+        const target = {position: [11, 48, 120] as NavigationAnchor};
+        internals.pointerNavigationTarget = null;
+        internals.hoverNavigationTargetNear = vi.fn(() => target);
+        internals.groundNavigationTarget = vi.fn();
+        internals.setHoverNavigationPivot = vi.fn();
+
+        expect(internals.resolveControllerNavigationTarget([500, 350]))
+            .toEqual(target);
+        expect(internals.groundNavigationTarget).not.toHaveBeenCalled();
+        expect(internals.setHoverNavigationPivot).toHaveBeenCalledWith(target);
+    });
+
+    it("uses the exact gesture ground target when no feature target is available", () => {
+        const view = createView();
+        const internals = view as unknown as GestureTargetTestInternals;
+        const groundTarget = {position: [11, 48, 0] as NavigationAnchor};
+        internals.pointerNavigationTarget = null;
+        internals.hoverNavigationTargetNear = vi.fn(() => null);
+        internals.groundNavigationTarget = vi.fn(() => groundTarget);
+        internals.setHoverNavigationPivot = vi.fn();
+
+        expect(internals.resolveControllerNavigationTarget([500, 350])).toEqual(groundTarget);
+        expect(internals.groundNavigationTarget).toHaveBeenCalledWith({x: 500, y: 350});
+        expect(internals.setHoverNavigationPivot).toHaveBeenCalledWith(groundTarget);
     });
 
     it("projects a vertical surface target with a fixed eight-pixel major radius", () => {

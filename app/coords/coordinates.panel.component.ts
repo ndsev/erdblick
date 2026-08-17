@@ -28,7 +28,8 @@ interface PanelOption {
                       tooltipPosition="bottom" [styleClass]="isMarkerEnabled ? 'p-button-success' : 'p-button-primary'">
                 <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">{{ markerButtonIcon }}</span>
             </p-button>
-            <p-card *ngIf="longitude !== undefined && latitude !== undefined" class="coordinates-panel">
+            <p-card *ngIf="longitude !== undefined && latitude !== undefined"
+                    class="coordinates-panel">
                 <p-multiSelect dropdownIcon="pi pi-list-check" [options]="displayOptions" [(ngModel)]="selectedOptions"
                                (ngModelChange)="updateSelectedOptions()" optionLabel="name" placeholder=""
                                class="coordinates-select" appendTo="body"/>
@@ -154,7 +155,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
     }
 
     /** Releases subscriptions to marker, coordinate, and option state streams. */
-    ngOnDestroy() {
+    ngOnDestroy(): void {
         this.subscriptions.forEach(sub => sub.unsubscribe());
     }
 

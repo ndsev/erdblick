@@ -19,16 +19,40 @@ T read(std::vector<std::byte> const& bytes, size_t offset)
 
 erdblick::GpuRecordStyle style(
     uint32_t pick = 0U,
-    uint32_t renderOrder = 5U)
+    uint32_t renderOrder = 5U,
+    uint32_t depthTieKey = 0U)
 {
     return {
         .color = {10U, 20U, 30U, 255U},
         .glowColor = {255U, 200U, 100U, 128U},
         .glowRadius = 3.0F,
         .zIndex = 12.0,
+        .depthTieKey = depthTieKey,
         .localPickIndex = pick,
         .renderOrder = renderOrder,
     };
+}
+
+TEST_CASE("GpuRenderPacketBuilder bounds depth-tie metadata to GPU buckets")
+{
+    using namespace erdblick;
+    GpuRenderPacketBuilder builder;
+    builder.configure(1U, 1U, 0U, {});
+    builder.beginContribution(1U, 1U, 0U, 1U);
+    for (uint32_t tieKey = 0U;
+         tieKey < kGpuDepthTieBucketCount * 4U;
+         ++tieKey)
+    {
+        builder.appendPoint({
+            .position = {static_cast<double>(tieKey), 0.0, 0.0},
+            .radius = 1.0F,
+            .style = style(0U, 5U, tieKey),
+        }, false, false);
+    }
+    builder.endContribution();
+
+    auto const info = GpuRenderPacketCodec::validate(builder.build());
+    CHECK(info.zIndexCount == kGpuDepthTieBucketCount);
 }
 
 } // namespace

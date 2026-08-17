@@ -17,6 +17,9 @@ namespace erdblick
 {
 
 inline constexpr uint32_t kGpuUnselectable = 0xffffffffU;
+// The scene allocator uses power-of-two tie buckets up to this fixed limit.
+// Retaining any higher hash bits in packet metadata cannot affect rendering.
+inline constexpr uint32_t kGpuDepthTieBucketCount = 32U;
 
 /** Per-segment branches consumed by the shared path and mask shaders. */
 enum class GpuPathRecordFlag : uint32_t {
@@ -43,6 +46,7 @@ struct GpuRecordStyle {
     std::array<uint8_t, 4> glowColor{};
     float glowRadius = 0.0F;
     double zIndex = 0.0;
+    uint32_t depthTieKey = 0U;
     uint32_t localPickIndex = kGpuUnselectable;
     uint32_t renderOrder = 0U;
 };

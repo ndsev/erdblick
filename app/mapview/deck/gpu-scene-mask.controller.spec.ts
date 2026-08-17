@@ -224,6 +224,9 @@ describe("GpuSceneMaskController", () => {
             (write.options as {width?: number}).width === 1
         );
         expect(sparseWrites).toHaveLength(2);
+        expect(device.textures[0].writes.every(write =>
+            (write.options as {width?: number}).width !== device.textures[0].width
+        )).toBe(true);
 
         controller.removeOwner("owner-a");
         flush();
@@ -234,6 +237,8 @@ describe("GpuSceneMaskController", () => {
         expect(outline.removals.slice(-1)).toEqual([
             "gpu-interaction/selection/scene-vector"
         ]);
+        expect(device.textures[0].destroyed).toBe(false);
+        controller.releaseRetiredResources();
         expect(device.textures[0].destroyed).toBe(true);
     });
 
@@ -283,6 +288,23 @@ describe("GpuSceneMaskController", () => {
         expect(outline.masks.size).toBe(0);
     });
 
+    it("does not let a packet burst postpone an interaction reconciliation", () => {
+        const controller = new GpuSceneMaskController(
+            new FakeDevice() as unknown as Device,
+            new FakeScene() as unknown as GpuScene,
+            new FakeOutlineService() as unknown as DeckInteractionOutlineService,
+            false
+        );
+
+        controller.setOverlays("owner", new Set(["a"]), [11, 48, 0], [
+            overlay("hover", ["Road.2"])
+        ]);
+        controller.sceneChanged();
+
+        vi.advanceTimersByTime(0);
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
     it("keeps the active sparse table when a growth upload fails", () => {
         const device = new FakeDevice();
         const scene = new FakeScene();
@@ -311,7 +333,9 @@ describe("GpuSceneMaskController", () => {
 
         controller.sceneChanged();
         flush();
-        expect(original.destroyed).toBe(true);
+        expect(original.destroyed).toBe(false);
         expect(device.textures.at(-1)?.destroyed).toBe(false);
+        controller.releaseRetiredResources();
+        expect(original.destroyed).toBe(true);
     });
 });

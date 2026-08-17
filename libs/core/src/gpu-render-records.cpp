@@ -24,6 +24,7 @@ constexpr float kArrowWidthFactor = 4.0F;
 constexpr float kArrowShaftOverlapPixels = 1.0F;
 constexpr uint32_t kGpuRecordFlagMask = 0xffU;
 constexpr uint32_t kGpuActivationTokenMax = 0x00ffffffU;
+static_assert(std::has_single_bit(kGpuDepthTieBucketCount));
 
 template<typename T>
 void appendScalar(std::vector<std::byte>& bytes, T value)
@@ -242,7 +243,7 @@ public:
     std::vector<uint32_t> contributionStreamStarts;
     std::unordered_set<std::string> resourceRequestKeys;
     std::optional<uint32_t> activeContribution;
-    std::vector<uint64_t> activeZIndexBits;
+    std::vector<std::pair<uint64_t, uint32_t>> activeZIndexKeys;
 
     /** Resolve or create one material-compatible fixed-stride output stream. */
     [[nodiscard]] uint32_t stream(
@@ -338,8 +339,8 @@ public:
             output.records.size() / output.recordStride);
     }
 
-    /** Intern one exact authored order in the current contribution metadata. */
-    [[nodiscard]] uint32_t zIndexSlot(double value)
+    /** Intern one authored order and stable rule-order tie in contribution metadata. */
+    [[nodiscard]] uint32_t zIndexSlot(double value, uint32_t tieBreaker)
     {
         auto const normalized = std::isfinite(value)
             ? (value == 0.0 ? 0.0 : value)
@@ -347,10 +348,13 @@ public:
         auto const bits = std::isnan(normalized)
             ? uint64_t{0x7ff8000000000000ULL}
             : std::bit_cast<uint64_t>(normalized);
-        auto const found = std::ranges::find(activeZIndexBits, bits);
-        if (found != activeZIndexBits.end()) {
+        auto const compactTieBreaker =
+            tieBreaker & (kGpuDepthTieBucketCount - 1U);
+        auto const key = std::pair{bits, compactTieBreaker};
+        auto const found = std::ranges::find(activeZIndexKeys, key);
+        if (found != activeZIndexKeys.end()) {
             return static_cast<uint32_t>(
-                std::distance(activeZIndexBits.begin(), found));
+                std::distance(activeZIndexKeys.begin(), found));
         }
         auto& values = contribution().zIndices;
         if (values.size() >= std::numeric_limits<uint32_t>::max()) {
@@ -358,8 +362,8 @@ public:
                 "GPU contribution has too many distinct z-index values.");
         }
         auto const index = static_cast<uint32_t>(values.size());
-        values.push_back(normalized);
-        activeZIndexBits.push_back(bits);
+        values.push_back({normalized, compactTieBreaker});
+        activeZIndexKeys.push_back(key);
         return index;
     }
 
@@ -377,7 +381,7 @@ public:
             throw std::logic_error(
                 "GPU record flags or activation token exceed their packed ABI fields.");
         }
-        appendScalar(bytes, zIndexSlot(style.zIndex));
+        appendScalar(bytes, zIndexSlot(style.zIndex, style.depthTieKey));
         appendColor(bytes, style.color);
         appendScalar(bytes, packet.origin.slot);
         appendScalar(bytes, contribution().slot);
@@ -448,7 +452,7 @@ void GpuRenderPacketBuilder::reset()
     impl_->contributionStreamStarts.clear();
     impl_->resourceRequestKeys.clear();
     impl_->activeContribution.reset();
-    impl_->activeZIndexBits.clear();
+    impl_->activeZIndexKeys.clear();
 }
 
 void GpuRenderPacketBuilder::configure(
@@ -491,7 +495,7 @@ void GpuRenderPacketBuilder::beginContribution(
         .activationToken = activationToken,
     });
     impl_->activeContribution = index;
-    impl_->activeZIndexBits.clear();
+    impl_->activeZIndexKeys.clear();
     impl_->contributionStreamStarts.clear();
     impl_->contributionStreamStarts.reserve(impl_->packet.streams.size());
     for (uint32_t stream = 0U; stream < impl_->packet.streams.size(); ++stream) {
@@ -517,7 +521,7 @@ void GpuRenderPacketBuilder::endContribution()
         }
     }
     impl_->activeContribution.reset();
-    impl_->activeZIndexBits.clear();
+    impl_->activeZIndexKeys.clear();
     impl_->contributionStreamStarts.clear();
 }
 
@@ -606,7 +610,9 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
     auto const trimPixels = std::max(
         0.0F,
         arrowPixels * 0.9375F - kArrowShaftOverlapPixels);
-    auto const zIndexSlot = impl_->zIndexSlot(path.style.zIndex);
+    auto const zIndexSlot = impl_->zIndexSlot(
+        path.style.zIndex,
+        path.style.depthTieKey);
     auto const& contribution = impl_->contribution();
     auto const activationToken = contribution.activationToken;
     if (activationToken == 0U || activationToken > kGpuActivationTokenMax) {

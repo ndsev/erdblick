@@ -204,10 +204,16 @@ Common primitive fields include:
 - outline color/width;
 - icon URL/expression;
 - label text/expression, font, color, `label-opacity`, outline, background, padding, origin,
-  pixel offset, and height reference.
+  pixel offset, height reference, `label-collision`, and `label-collision-priority`.
 
 Literal values are resolved without projection. Every expression-backed field
 is collected by the planner and transported in the appropriate field list.
+
+`label-collision: true` lets Deck hide lower-priority labels that overlap
+inside one rendered style layer. `label-collision-priority` is an integer from
+`-1000` to `1000`; larger values win. Collision filtering is intentionally
+opt-in because diagnostic labels often need to remain visible even when they
+overlap.
 
 `lateral-offset-unit` changes only the first (lateral) component of `offset`
 and `offset-increment`. Meter offsets are baked into projected geometry.
@@ -624,6 +630,7 @@ Relation fields:
 - `relation-recursive`: local recursion plus at most one hop across a tile;
 - `relation-merge-twoway`: pair reverse descriptors;
 - `relation-line-height-offset`;
+- `relation-line-geometry`: `centers` (default) or `nearest-endpoints`;
 - `relation-line-end-markers`;
 - `relation-source-style`;
 - `relation-target-style`.
@@ -632,6 +639,12 @@ Relation expressions can use the relation root plus `$source`, `$target`, and
 `$twoway`. Endpoint styles may independently select semantic geometry.
 `RelationEntry` carries source/target feature entries and explicit source and
 target geometry collections.
+
+`nearest-endpoints` selects the closest pair among line ends and point
+positions in those collections. Point positions remain exact, which makes the
+mode suitable for zero-length-lane connectors. When both selected positions
+are ordinary line ends, the renderer shortens the connector at both ends so
+the relation arrow does not obscure either joined line.
 
 Generic bidirectional display uses permanent south-west ownership. If that
 owner is outside current coverage, the pair is not rendered. Selection

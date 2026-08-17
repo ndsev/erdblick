@@ -1,4 +1,5 @@
 import type {Viewport} from "../../build/libs/core/erdblick-core";
+import {coreLib} from "../integrations/wasm";
 import {tileGridMaxLevel, type TileGridMode} from "../shared/appstate.service";
 
 const TILE_GRID_MAX_LEVEL = 22;
@@ -51,14 +52,19 @@ export function coarsenedTileLevel(
     return effectiveLevel;
 }
 
-/** Selects the deepest grid level whose visible cell count remains practical for inspection. */
-export function autoTileGridLevel(viewport: Viewport, mode: TileGridMode): number {
-    return coarsenedTileLevel(
-        tileGridMaxLevel(mode),
-        viewport,
-        AUTO_TILE_GRID_MAX_VISIBLE_CELLS,
-        mode
-    );
+/** Selects auto level from a fixed equatorial, north-up camera at the supplied physical altitude. */
+export function autoTileGridLevel(
+    canonicalCameraAltitudeMeters: number,
+    mode: TileGridMode
+): number {
+    let level = tileGridMaxLevel(mode);
+    while (level > 0 && coreLib.getNumTileIdsForCanonicalCamera(
+        canonicalCameraAltitudeMeters,
+        level
+    ) > AUTO_TILE_GRID_MAX_VISIBLE_CELLS) {
+        level -= 1;
+    }
+    return level;
 }
 
 /** Returns the number of grid cells that would be visible for a level in the supplied viewport. */

@@ -28,6 +28,7 @@ function label(overrides: Record<string, unknown> = {}) {
         verticalOrigin: 0,
         renderOrder: 0,
         fontWeight: 400,
+        collisionPriority: 0,
         globalPickIndex: 7,
         styleOrder: 0,
         ...overrides
@@ -115,6 +116,34 @@ describe("GpuTextLayerHost", () => {
             .toEqual([true, false]);
     });
 
+    it("enables one shared collision group only for opted-in labels", () => {
+        const host = new GpuTextLayerHost({
+            id: "text",
+            data: [],
+            scene: {
+                labels: () => [
+                    label({
+                        flags: GpuLabelFlag.Billboard |
+                            GpuLabelFlag.Collision,
+                        collisionPriority: 17
+                    })
+                ]
+            } as never,
+            flattenZ: false
+        });
+        const [layer] = host.renderLayers();
+
+        expect(layer.props.collisionEnabled).toBe(true);
+        expect(layer.props.collisionGroup).toBe("text-labels");
+        expect(layer.props.characterSet).toBe("auto");
+        expect(layer.props.getCollisionPriority(layer.props.data[0], {} as never))
+            .toBe(17);
+        // Collision renders labels through a separate picking-color pass.
+        // Depth-free labels must not inject the independent z-index shader
+        // hook into that pass, or the collision map rejects every label.
+        expect(layer.props.extensions).toHaveLength(1);
+    });
+
     it("retains label order below Float32 precision", () => {
         const host = new GpuTextLayerHost({
             id: "text",
@@ -138,6 +167,7 @@ describe("GpuTextLayerHost", () => {
             {labels: () => []} as never,
             false
         );
+        expect(host.props.pickable).toBe(true);
         expect(host.props.drillPickEligible).toBe(true);
     });
 

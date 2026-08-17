@@ -552,6 +552,12 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse vertical offset for relation line in meters.
         relationLineHeightOffset_ = yaml["relation-line-height-offset"].as<float>();
     }
+    if (yaml["relation-line-geometry"].IsDefined()) {
+        auto const value = yaml["relation-line-geometry"].as<std::string>();
+        relationLineGeometry_ = value == "nearest-endpoints"
+            ? RelationLineGeometry::NearestEndpoints
+            : RelationLineGeometry::Centers;
+    }
     if (yaml["relation-line-end-markers"].IsDefined()) {
         // Parse style for the relation line end-markers.
         relationLineEndMarkerStyle_ = std::make_shared<FeatureStyleRule>(*this, true);
@@ -624,6 +630,13 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["label-opacity"].IsDefined()) {
         labelOpacity_ = yaml["label-opacity"].as<float>();
+    }
+    if (yaml["label-collision"].IsDefined()) {
+        labelCollision_ = yaml["label-collision"].as<bool>();
+    }
+    if (yaml["label-collision-priority"].IsDefined()) {
+        labelCollisionPriority_ =
+            yaml["label-collision-priority"].as<int32_t>();
     }
     if (yaml["label-outline-color"].IsDefined()) {
         // Parse option to have a label background color.
@@ -1302,6 +1315,12 @@ float FeatureStyleRule::relationLineHeightOffset() const
     return relationLineHeightOffset_;
 }
 
+FeatureStyleRule::RelationLineGeometry
+FeatureStyleRule::relationLineGeometry() const
+{
+    return relationLineGeometry_;
+}
+
 FeatureStyleRule::Scope FeatureStyleRule::scope() const
 {
     return scope_;
@@ -1376,6 +1395,16 @@ glm::fvec4 const& FeatureStyleRule::labelColor() const
 float FeatureStyleRule::labelOpacity() const
 {
     return labelOpacity_;
+}
+
+bool FeatureStyleRule::labelCollision() const
+{
+    return labelCollision_;
+}
+
+int32_t FeatureStyleRule::labelCollisionPriority() const
+{
+    return labelCollisionPriority_;
 }
 
 glm::fvec4 const& FeatureStyleRule::labelOutlineColor() const

@@ -1283,6 +1283,13 @@ bool validateStyleRuleYamlImpl(
     markInvalid(validateEnumValue(ruleYaml, "mode", {"none", "hover", "selection"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "fidelity", {"any", "high", "low"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "arrow", {"none", "forward", "backward", "double"}, rulePath, report, sourceRuleIndex));
+    markInvalid(validateEnumValue(
+        ruleYaml,
+        "relation-line-geometry",
+        {"centers", "nearest-endpoints"},
+        rulePath,
+        report,
+        sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "attribute-validity-geom", {"any", "required", "none"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "offset-type", {"miter"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(
@@ -1346,6 +1353,20 @@ bool validateStyleRuleYamlImpl(
 
     markInvalid(validateNumericRange(ruleYaml, "opacity", 0.0, 1.0, rulePath, report, sourceRuleIndex));
     markInvalid(validateNumericRange(ruleYaml, "label-opacity", 0.0, 1.0, rulePath, report, sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "label-collision-priority",
+        -1000.0,
+        1000.0,
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(readScalar<bool>(
+        ruleYaml,
+        "label-collision",
+        rulePath,
+        report,
+        sourceRuleIndex));
     markInvalid(validateNumericRange(
         ruleYaml,
         "z-index",

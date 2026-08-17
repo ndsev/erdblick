@@ -1796,6 +1796,22 @@ offset-increment: [4.0, 5.0, 6.0]
     REQUIRE(rule.offsetIncrement() == glm::dvec3(4.0, 5.0, 6.0));
 }
 
+TEST_CASE("FeatureStyleRule relation endpoints and label collision parsing", "[erdblick.style]")
+{
+    FeatureStyleRule rule(YAML::Load(R"yaml(
+type: LaneConnector
+geometry: line
+relation-line-geometry: nearest-endpoints
+label-collision: true
+label-collision-priority: 23
+)yaml"), 0);
+
+    REQUIRE(rule.relationLineGeometry() ==
+        FeatureStyleRule::RelationLineGeometry::NearestEndpoints);
+    REQUIRE(rule.labelCollision());
+    REQUIRE(rule.labelCollisionPriority() == 23);
+}
+
 TEST_CASE("FeatureStyleRuleZIndexExpressionFallback", "[erdblick.style]")
 {
     auto rule = FeatureStyleRule(YAML::Load(R"yaml(

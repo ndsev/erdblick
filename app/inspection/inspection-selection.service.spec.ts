@@ -198,4 +198,17 @@ describe("InspectionSelectionService multi-inspection", () => {
         service.setHoveredFeatures([]);
         expect(service.remoteHoverHighlightAllowed).toBe(false);
     });
+
+    it("does not republish an unchanged hover set", () => {
+        const first = feature("Road.7", "Map/Layer/42");
+        const second = feature("Road.8", "Map/Layer/42");
+        const {service} = createHarness(2);
+        const emissions: TileFeatureId[][] = [];
+        service.hoverIdsTopic.subscribe(value => emissions.push(value));
+
+        service.setHoveredFeatures([first, second]);
+        service.setHoveredFeatures([second, first]);
+
+        expect(emissions).toEqual([[], [first, second]]);
+    });
 });

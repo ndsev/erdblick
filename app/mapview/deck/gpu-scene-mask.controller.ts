@@ -15,10 +15,10 @@ import type {TileSubsetInteractionOverlay} from
     "./tile-subset-interaction.model";
 
 const TARGET_TEXTURE_WIDTH = 1024;
-const ZERO_INITIALIZATION_ROWS = 64;
 const VECTOR_SOURCE_ID = "scene-vector";
 const STYLE_GLOW_ORDER = 300;
-const RECONCILE_DEBOUNCE_MS = 50;
+const SCENE_RECONCILE_DEBOUNCE_MS = 50;
+const INTERACTION_RECONCILE_DELAY_MS = 0;
 
 interface MaskOwner {
     contributions: ReadonlySet<string>;
@@ -51,6 +51,7 @@ interface InstalledMaskGroup {
  */
 class SparseMaskTargetTable {
     private targetTexture: Texture;
+    private readonly retiredTextures: Texture[] = [];
     private height = 1;
     private entries = new Map<number, DeckRgba>();
 
@@ -81,7 +82,7 @@ class SparseMaskTargetTable {
             this.targetTexture = replacement;
             this.height = nextHeight;
             this.entries = new Map(next);
-            previous.destroy();
+            this.retiredTextures.push(previous);
             return replacement;
         }
         const changed = new Set<number>();
@@ -105,7 +106,15 @@ class SparseMaskTargetTable {
     /** Release the sampled target texture. */
     destroy(): void {
         this.targetTexture.destroy();
+        this.retiredTextures.forEach(texture => texture.destroy());
+        this.retiredTextures.length = 0;
         this.entries.clear();
+    }
+
+    /** Release textures only after every mask model has rebound at a frame boundary. */
+    releaseRetiredTextures(): void {
+        this.retiredTextures.forEach(texture => texture.destroy());
+        this.retiredTextures.length = 0;
     }
 
     get texture(): Texture {
@@ -170,34 +179,6 @@ class SparseMaskTargetTable {
                 addressModeV: "clamp-to-edge"
             }
         });
-        // Newly allocated WebGL texture storage has undefined contents. Clear
-        // it in bounded chunks so sparse mask lookups can never select stale
-        // identities outside the explicitly uploaded target entries.
-        const zeroRows = new Uint8Array(
-            TARGET_TEXTURE_WIDTH * ZERO_INITIALIZATION_ROWS * 4
-        );
-        try {
-            for (let y = 0; y < height; y += ZERO_INITIALIZATION_ROWS) {
-                const rowCount = Math.min(ZERO_INITIALIZATION_ROWS, height - y);
-                texture.writeData(
-                    rowCount === ZERO_INITIALIZATION_ROWS
-                        ? zeroRows
-                        : zeroRows.subarray(
-                            0,
-                            TARGET_TEXTURE_WIDTH * rowCount * 4
-                        ),
-                    {
-                        x: 0,
-                        y,
-                        width: TARGET_TEXTURE_WIDTH,
-                        height: rowCount
-                    }
-                );
-            }
-        } catch (error) {
-            texture.destroy();
-            throw error;
-        }
         return texture;
     }
 }
@@ -212,7 +193,9 @@ class SparseMaskTargetTable {
 export class GpuSceneMaskController {
     private readonly owners = new Map<string, MaskOwner>();
     private readonly groups = new Map<string, InstalledMaskGroup>();
+    private readonly retiredTargetTables: SparseMaskTargetTable[] = [];
     private reconcileHandle: ReturnType<typeof setTimeout> | null = null;
+    private reconcileDelayMs: number | null = null;
     private destroyed = false;
 
     /** Bind semantic overlays to one scene and its shared outline compositor. */
@@ -242,13 +225,13 @@ export class GpuSceneMaskController {
             stripeAnchor: [...stripeAnchor],
             overlays: [...overlays]
         });
-        this.scheduleReconcile();
+        this.scheduleReconcile(INTERACTION_RECONCILE_DELAY_MS);
     }
 
     /** Remove every transient mask contribution associated with one visualization. */
     removeOwner(ownerId: string): void {
         if (this.owners.delete(ownerId)) {
-            this.scheduleReconcile();
+            this.scheduleReconcile(INTERACTION_RECONCILE_DELAY_MS);
         }
     }
 
@@ -258,7 +241,7 @@ export class GpuSceneMaskController {
             for (const installed of this.groups.values()) {
                 installed.vectorLayer.sceneChanged();
             }
-            this.scheduleReconcile();
+            this.scheduleReconcile(SCENE_RECONCILE_DEBOUNCE_MS);
         }
     }
 
@@ -271,6 +254,7 @@ export class GpuSceneMaskController {
         if (this.reconcileHandle !== null) {
             clearTimeout(this.reconcileHandle);
             this.reconcileHandle = null;
+            this.reconcileDelayMs = null;
         }
         this.owners.clear();
         for (const [groupId, group] of this.groups) {
@@ -278,6 +262,20 @@ export class GpuSceneMaskController {
             group.targetTable.destroy();
         }
         this.groups.clear();
+        this.retiredTargetTables.forEach(table => table.destroy());
+        this.retiredTargetTables.length = 0;
+    }
+
+    /** Release textures after Deck has retired hidden mask models from the completed frame. */
+    releaseRetiredResources(): void {
+        if (this.destroyed) {
+            return;
+        }
+        for (const group of this.groups.values()) {
+            group.targetTable.releaseRetiredTextures();
+        }
+        this.retiredTargetTables.forEach(table => table.destroy());
+        this.retiredTargetTables.length = 0;
     }
 
     /** Collapse scene materials and owner overlays into final compositor groups. */
@@ -373,6 +371,7 @@ export class GpuSceneMaskController {
     /** Install, mutate, or remove the bounded hidden layer set. */
     private reconcile(): void {
         this.reconcileHandle = null;
+        this.reconcileDelayMs = null;
         if (this.destroyed) {
             return;
         }
@@ -382,7 +381,7 @@ export class GpuSceneMaskController {
                 continue;
             }
             this.outlineService.removeMask(groupId, VECTOR_SOURCE_ID);
-            installed.targetTable.destroy();
+            this.retiredTargetTables.push(installed.targetTable);
             this.groups.delete(groupId);
         }
         for (const [groupId, group] of desired) {
@@ -452,14 +451,20 @@ export class GpuSceneMaskController {
         };
     }
 
-    /** Debounce packet bursts while keeping isolated selection changes responsive. */
-    private scheduleReconcile(): void {
+    /** Coalesce equal work without allowing scene bursts to postpone interaction masks. */
+    private scheduleReconcile(delayMs: number): void {
+        if (this.reconcileHandle !== null &&
+            this.reconcileDelayMs !== null &&
+            this.reconcileDelayMs <= delayMs) {
+            return;
+        }
         if (this.reconcileHandle !== null) {
             clearTimeout(this.reconcileHandle);
         }
+        this.reconcileDelayMs = delayMs;
         this.reconcileHandle = setTimeout(
             () => this.reconcile(),
-            RECONCILE_DEBOUNCE_MS
+            delayMs
         );
     }
 }

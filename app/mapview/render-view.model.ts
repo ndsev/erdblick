@@ -2,12 +2,6 @@ import {BehaviorSubject, type Observable} from "rxjs";
 import {CameraViewState, TileFeatureId} from "../shared/appstate.service";
 import {Viewport} from "../../build/libs/core/erdblick-core";
 
-/** Hover pick payload emitted by a render view after a screen-space hover query. */
-export interface HoveredFeatureIds {
-    featureIds: (TileFeatureId | null)[];
-    position: {x: number, y: number};
-}
-
 /** WGS84 rectangle used for fit-to-bounds navigation requests. */
 export interface RenderRectangle {
     west: number;
@@ -61,7 +55,7 @@ export interface IRenderSceneHandle {
  */
 export interface IRenderView {
     readonly viewIndex: number;
-    readonly hoveredFeatureIds: BehaviorSubject<HoveredFeatureIds | undefined>;
+    readonly hoveredFeatureIds: BehaviorSubject<TileFeatureId[]>;
     readonly firstPersonViewActive: BehaviorSubject<boolean>;
     /** Emits once when the browser invalidates this view's graphics context. */
     readonly contextLost: Observable<void>;

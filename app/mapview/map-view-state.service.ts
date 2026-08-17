@@ -420,22 +420,23 @@ export class MapViewStateService {
         }
     }
 
-    /** Chooses the automatic grid level, retaining the configured value before layout exists. */
+    /** Chooses the automatic grid level solely from canonical camera altitude. */
     private autoSelectedTileGridLevel(
         viewIndex: number,
         fallbackLevel: number
     ): number {
-        const viewport = this.viewVisualizationState[viewIndex]?.viewport;
-        if (!viewport || viewport.width <= 0 || viewport.height <= 0) {
+        const canonicalAltitude =
+            this.viewVisualizationState[viewIndex]?.canonicalCameraAltitudeMeters;
+        if (!Number.isFinite(canonicalAltitude)) {
             return fallbackLevel;
         }
         return autoTileGridLevel(
-            viewport,
+            Number(canonicalAltitude),
             this.mapInfo.maps.getViewTileGridMode(viewIndex)
         );
     }
 
-    /** Chooses the deepest advertised level whose tile density stays below the auto-level threshold. */
+    /** Chooses the deepest advertised level whose canonical tile density stays below the threshold. */
     private autoSelectedMapLayerLevel(viewIndex: number, mapId: string, layerId: string, fallbackLevel: number): number;
     private autoSelectedMapLayerLevel(viewIndex: number, mapId: string, layerId: string, fallbackLevel: null): number | null;
     private autoSelectedMapLayerLevel(
@@ -448,19 +449,17 @@ export class MapViewStateService {
         if (!advertisedLevels.length) {
             return fallbackLevel;
         }
-        const viewport = this.viewVisualizationState[viewIndex]?.viewport;
-        if (!viewport || viewport.width <= 0 || viewport.height <= 0) {
+        const canonicalAltitude =
+            this.viewVisualizationState[viewIndex]?.canonicalCameraAltitudeMeters;
+        if (!Number.isFinite(canonicalAltitude)) {
             return fallbackLevel === null
                 ? advertisedLevels[advertisedLevels.length - 1]
                 : this.clampLayerLevelToAdvertised(fallbackLevel, advertisedLevels);
         }
         for (let index = advertisedLevels.length - 1; index >= 0; index--) {
             const candidateLevel = advertisedLevels[index];
-            const visibleTileCount = coreLib.getNumTileIdsForBounds(
-                viewport.south,
-                viewport.west,
-                viewport.width,
-                viewport.height,
+            const visibleTileCount = coreLib.getNumTileIdsForCanonicalCamera(
+                Number(canonicalAltitude),
                 candidateLevel
             );
             if (visibleTileCount <= MapViewStateService.AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES) {

@@ -327,6 +327,8 @@ private:
     void renderRelationLine(
         mapget::model_ptr<mapget::GeometryCollection> const& sourceGeometry,
         mapget::model_ptr<mapget::GeometryCollection> const& targetGeometry,
+        mapget::model_ptr<mapget::GeometryCollection> const& sourceFeatureGeometry,
+        mapget::model_ptr<mapget::GeometryCollection> const& targetFeatureGeometry,
         FeatureStyleRule const& rule,
         BoundEvalFun const& evalFun,
         uint32_t pickIndex);
@@ -355,6 +357,10 @@ private:
         uint32_t channelOrdinal,
         uint32_t entryOrdinal,
         bool selectable);
+    /** Retain one representative physical height independently of render-depth bias. */
+    void recordPickNavigationAltitude(
+        uint32_t pickIndex,
+        std::span<mapget::Point const> points);
     /** Build a semantic attribute/validity pick payload. */
     [[nodiscard]] static PickResult pickResult(
         mapget::model_ptr<mapget::AttributeValidityEntry> const& entry,
@@ -390,6 +396,13 @@ private:
         glm::fvec4 const& color,
         double zIndex,
         uint32_t legacyPickIndex) const;
+    /** Hash one feature identity independently of tile clipping and entry order. */
+    [[nodiscard]] uint64_t featureDepthIdentity(
+        mapget::model_ptr<mapget::FeatureId> const& featureId) const;
+    /** Fold stable tile, semantic, and rule identity into the packet's 32-bit tie key. */
+    [[nodiscard]] uint32_t depthTieKey(
+        uint64_t semanticIdentity,
+        uint32_t ruleRenderIndex) const;
     /** Serialize the exact double-precision coordinate origin for the GLTF bridge. */
     [[nodiscard]] JsValue coordinateOriginToJs() const;
     /** Serialize temporary GLTF-local semantic pick results for TypeScript. */
@@ -494,6 +507,7 @@ private:
 
     std::unordered_map<uint32_t, PickResult> bridgePickResults_;
     std::vector<PickRef> pickRefs_;
+    std::vector<float> pickNavigationAltitudes_;
     std::unordered_map<PickRef, uint32_t, PickRefHash> pickIndices_;
     std::vector<RuntimeIssue> runtimeIssues_;
     std::unordered_map<std::string, size_t> runtimeIssueIndices_;
@@ -510,6 +524,9 @@ private:
     std::unordered_map<std::string, TransitionOffsetScaleGroup>
         transitionOffsetScaleGroups_;
     std::unordered_map<std::string, ChannelBinding> channelBindings_;
+    uint64_t subsetMapDepthSeed_ = 0U;
+    uint64_t currentDepthIdentity_ = 0U;
+    uint32_t subsetDepthPhase_ = 0U;
 
     /** Browser-atlas entry installed before rendering starts. */
     struct GpuIconResource {

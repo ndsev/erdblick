@@ -224,18 +224,7 @@ float gpuScene_depthBias(
   }
   uint zIndexSlot = uint(contribution.w + 0.5) + localZIndex;
   vec4 ranked = gpuScene_lookup(gpuSceneZIndexTexture, zIndexSlot);
-  if (ranked.y <= 0.0) {
-    return gpuScene.primitiveDepthBias + ranked.x;
-  }
-  uint tiesPerStyle = max(1u, uint(ranked.z + 0.5));
-  uint tieLimit = max(1u, uint(ranked.w + 0.5));
-  uint tieSource = localPickIndex == GPU_SCENE_UNSELECTABLE
-    ? instanceIndex + contributionSlot * 2654435761u
-    : localPickIndex;
-  uint tie = uint(contribution.y + 0.5) * tiesPerStyle +
-    tieSource % tiesPerStyle;
-  return gpuScene.primitiveDepthBias +
-    ranked.x + float(min(tie, tieLimit - 1u)) * ranked.y;
+  return gpuScene.primitiveDepthBias + ranked.x;
 }
 
 void gpuScene_applyDepthBias(

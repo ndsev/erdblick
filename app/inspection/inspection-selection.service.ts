@@ -274,8 +274,13 @@ export class InspectionSelectionService {
             !selectedTargets.some(selected =>
                 tileFeatureInteractionTargetsEqual(id, selected))
         );
-        this.remoteHoverHighlightAllowed =
+        const remoteHighlightAllowed =
             hoverTargets.length > 0 && allowRemoteHighlight;
+        if (featureSetsEqual(this.hoverIdsTopic.getValue(), hoverTargets) &&
+            this.remoteHoverHighlightAllowed === remoteHighlightAllowed) {
+            return;
+        }
+        this.remoteHoverHighlightAllowed = remoteHighlightAllowed;
         this.hoverIdsTopic.next(hoverTargets);
     }
 

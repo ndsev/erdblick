@@ -3,8 +3,43 @@ import {describe, expect, it, vi} from "vitest";
 import {ViewLayerController} from "./view-layer.controller";
 import {TileSubsetLayerVisualization} from
     "./deck/tile-subset-layer.visualization";
+import {coreLib} from "../integrations/wasm";
 
 describe("ViewLayerController", () => {
+    it("reconciles hover masks without rebuilding regular presentation demand", async () => {
+        const controller = Object.create(
+            ViewLayerController.prototype
+        ) as any;
+        controller.disposed = false;
+        controller.reconcileQueued = false;
+        controller.fullReconcileRequired = false;
+        controller.interactionReconcileRequired = false;
+        controller.lastViewportPresentationSignature = "viewport";
+        controller.lastInteractionViewportSignature = "previous";
+        controller.ngZone = {
+            runOutsideAngular: (callback: () => void) => callback()
+        };
+        controller.styleService = {
+            styles: new Map([
+                ["visible", {visible: true}],
+                ["hidden", {visible: false}]
+            ])
+        };
+        controller.viewportPresentationSignature = vi.fn(() => "viewport");
+        controller.interactionViewportSignature = vi.fn(() => "hover");
+        controller.reconcile = vi.fn();
+        controller.reconcileHighlightLayers = vi.fn();
+
+        controller.scheduleInteractionReconcile();
+        await Promise.resolve();
+
+        expect(controller.reconcile).not.toHaveBeenCalled();
+        expect(controller.reconcileHighlightLayers).toHaveBeenCalledWith([
+            {visible: true}
+        ]);
+        expect(controller.lastInteractionViewportSignature).toBe("hover");
+    });
+
     it("does not scan replacement coverage when no fallback exists", () => {
         const controller = Object.create(
             ViewLayerController.prototype
@@ -28,6 +63,7 @@ describe("ViewLayerController", () => {
         controller.occupancyChanged = {next: vi.fn()};
         controller.diagnostics = {notifyChanged: vi.fn()};
         controller.pendingVisualizationRenders = new Set();
+        controller.localInteractionVisualizationsWithOverlays = new Set();
 
         const owned = (
             mapId: string,
@@ -273,6 +309,7 @@ describe("ViewLayerController", () => {
             effect: {},
             order: 1
         }]]]);
+        controller.localInteractionVisualizationsWithOverlays = new Set();
 
         controller.applyLocalInteractionOverlays(visualization);
 
@@ -282,6 +319,140 @@ describe("ViewLayerController", () => {
             effect: {},
             order: 1
         }]);
+    });
+
+    it("resolves local interaction work directly from target tile ids", () => {
+        const controller = Object.create(
+            ViewLayerController.prototype
+        ) as any;
+        const matching = {};
+        const unrelated = {};
+        controller.parseFeatureTileId = vi.fn(target => ({
+            mapId: "Map",
+            layerId: "Road",
+            tileId: target.featureId === "Road.7" ? 7 : 8
+        }));
+        controller.styledLayers = new Map([["regular", {
+            layer: {
+                identity: {presentationKind: "regular"},
+                mapgetLayer: {key: "Map/Road"}
+            },
+            visualizations: new Map([
+                ["tile-7", matching],
+                ["tile-8", unrelated]
+            ]),
+            visualizationKeyByTileId: new Map([
+                [7, "tile-7"],
+                [8, "tile-8"]
+            ])
+        }]]);
+        controller.retiringRegularLayers = new Map();
+        const overlays = new Map([["Map/Road", new Map([["hover", {
+            id: "hover",
+            targets: [{mapTileKey: "tile", featureId: "Road.7"}],
+            effect: {},
+            order: 1
+        }]])]]);
+
+        expect(controller.localInteractionVisualizations(overlays))
+            .toEqual(new Set([matching]));
+    });
+
+    it("reuses immutable interaction planning across hover targets", () => {
+        const controller = Object.create(
+            ViewLayerController.prototype
+        ) as any;
+        controller.interactionLayerAffinityCache = new WeakMap();
+        controller.interactionFilterPlanCache = new WeakMap();
+        controller.interactionEffectCache = new WeakMap();
+        const nativeStyle = {
+            hasLayerAffinity: vi.fn(() => true),
+            supportsHighlightMode: vi.fn(() => true),
+            supportsInteractionEffect: vi.fn(() => true),
+            interactionEffect: vi.fn(() => ({
+                tint: [255, 0, 0, 255],
+                tintMix: 1,
+                opacity: 1,
+                edgeWidth: 2,
+                haloRadius: 0,
+                haloOpacity: 0,
+                stripeSpacing: 0,
+                stripeWidth: 0,
+                stripeOpacity: 0,
+                stripeAngle: 45,
+                stripeOffset: 0,
+                stripeSoftness: 1
+            }))
+        };
+        const style = {featureLayerStyle: nativeStyle};
+        const mapgetLayer = {
+            key: "Map/Road",
+            mapId: "Map",
+            layerId: "Road"
+        };
+        const plan = {valid: true, channels: [{}]};
+        controller.mapInfo = {planStyleFilter: vi.fn(() => plan)};
+        const mode = coreLib.HighlightMode.HOVER_HIGHLIGHT;
+
+        expect(controller.hasInteractionLayerAffinity(style, "Road")).toBe(true);
+        expect(controller.hasInteractionLayerAffinity(style, "Road")).toBe(true);
+        expect(controller.interactionFilterPlan(style, mapgetLayer, mode)).toBe(plan);
+        expect(controller.interactionFilterPlan(style, mapgetLayer, mode)).toBe(plan);
+        const firstEffect = controller.interactionEffect(
+            style,
+            mode,
+            {},
+            "options"
+        );
+        const secondEffect = controller.interactionEffect(
+            style,
+            mode,
+            {},
+            "options"
+        );
+
+        expect(firstEffect).toBe(secondEffect);
+        expect(nativeStyle.hasLayerAffinity).toHaveBeenCalledOnce();
+        expect(nativeStyle.supportsHighlightMode).toHaveBeenCalledOnce();
+        expect(controller.mapInfo.planStyleFilter).toHaveBeenCalledOnce();
+        expect(nativeStyle.supportsInteractionEffect).toHaveBeenCalledOnce();
+        expect(nativeStyle.interactionEffect).toHaveBeenCalledOnce();
+    });
+
+    it("invalidates interaction planning after datasource metadata changes", () => {
+        const controller = Object.create(
+            ViewLayerController.prototype
+        ) as any;
+        const style = {
+            featureLayerStyle: {
+                supportsHighlightMode: vi.fn(() => true)
+            }
+        };
+        const mapgetLayer = {
+            key: "Map/Road",
+            mapId: "Map",
+            layerId: "Road"
+        };
+        controller.interactionLayerAffinityCache = new WeakMap();
+        controller.interactionFilterPlanCache = new WeakMap();
+        controller.interactionEffectCache = new WeakMap();
+        controller.mapInfo = {
+            planStyleFilter: vi.fn(() => ({valid: true, channels: [{}]}))
+        };
+
+        controller.interactionFilterPlan(
+            style,
+            mapgetLayer,
+            coreLib.HighlightMode.HOVER_HIGHLIGHT
+        );
+        controller.resetInteractionStyleCaches();
+        controller.interactionFilterPlan(
+            style,
+            mapgetLayer,
+            coreLib.HighlightMode.HOVER_HIGHLIGHT
+        );
+
+        expect(controller.mapInfo.planStyleFilter).toHaveBeenCalledTimes(2);
     });
 
     it("skips membership scans for identical regular coverage inputs", () => {

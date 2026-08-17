@@ -18,7 +18,8 @@ const START_PIXEL: [number, number] = [280, 310];
 function gestureEvent(
     type: string,
     screenPosition: [number, number],
-    delta: [number, number] = [0, 0]
+    delta: [number, number] = [0, 0],
+    rightButton = false
 ) {
     const event = {
         type,
@@ -32,7 +33,8 @@ function gestureEvent(
         deltaTime: 0,
         scale: 1,
         rotation: 0,
-        srcEvent: {preventDefault() {}},
+        rightButton,
+        srcEvent: {button: rightButton ? 2 : 0, preventDefault() {}},
         handled: false,
         stopPropagation() {
             event.handled = true;
@@ -121,6 +123,83 @@ describe("Erdblick target navigation integration", () => {
             {target: richTarget, active: true},
             {target: richTarget, active: false}
         ]);
+        controller.finalize();
+    });
+
+    it("keeps a right-drag rotation target at its acquired screen position", () => {
+        const view = new MapView({
+            id: VIEW_ID,
+            ...VIEW_SIZE,
+            controller: true
+        });
+        const makeViewport = (viewState: Record<string, unknown>) =>
+            view.makeViewport({
+                ...VIEW_SIZE,
+                viewState: viewState as MapViewState
+            }) as WebMercatorViewport;
+        const initialViewState = {
+            longitude: 11.12,
+            latitude: 48,
+            zoom: 16,
+            pitch: 55,
+            bearing: 25,
+            maxPitch: 85,
+            position: [0, 0, 0]
+        };
+        let currentProps: Record<string, unknown> = {
+            ...view.controller,
+            ...view.getDimensions(VIEW_SIZE),
+            id: VIEW_ID,
+            ...initialViewState
+        };
+        const initialViewport = makeViewport(currentProps);
+        const richTarget: NavigationVisualTarget = {
+            position: initialViewport.unproject(
+                START_PIXEL,
+                {targetZ: 120}
+            ) as NavigationAnchor
+        };
+        const adapter = new ErdblickTargetNavigationAdapter({
+            viewId: VIEW_ID,
+            resolveTarget: () => richTarget,
+            getRetainedTarget: () => null,
+            onTargetChange: vi.fn()
+        });
+        let controller!: MapController;
+        controller = new MapController({
+            timeline: new Timeline(),
+            eventManager: null as never,
+            makeViewport,
+            onViewStateChange: ({viewState}) => {
+                currentProps = {...currentProps, ...viewState};
+                controller.setProps(currentProps as never);
+            },
+            onStateChange: (state: InteractionState) =>
+                adapter.handleInteractionState(state)
+        });
+        currentProps = {
+            ...currentProps,
+            _targetNavigation: true,
+            getInteractionTarget: adapter.resolveInteractionTarget
+        };
+        controller.setProps(currentProps as never);
+
+        const endPixel: [number, number] = [430, 390];
+        controller.handleEvent(gestureEvent("panstart", START_PIXEL, [0, 0], true) as never);
+        controller.handleEvent(gestureEvent(
+            "panmove",
+            endPixel,
+            [endPixel[0] - START_PIXEL[0], endPixel[1] - START_PIXEL[1]],
+            true
+        ) as never);
+        const rotatedProps = controller.controllerState.getViewportProps();
+        const projected = makeViewport(rotatedProps).project(richTarget.position);
+        controller.handleEvent(gestureEvent("panend", endPixel, [0, 0], true) as never);
+
+        expect(rotatedProps.bearing).not.toBe(initialViewState.bearing);
+        expect(rotatedProps.pitch).not.toBe(initialViewState.pitch);
+        expect(Math.abs(projected[0] - START_PIXEL[0])).toBeLessThanOrEqual(0.1);
+        expect(Math.abs(projected[1] - START_PIXEL[1])).toBeLessThanOrEqual(0.1);
         controller.finalize();
     });
 });
