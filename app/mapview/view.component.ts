@@ -36,8 +36,7 @@ import {DeckMapView3D} from "./deck/deck-view3d";
 import {
     IRenderView,
     MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT,
-    RenderNavigationTarget,
-    RenderScreenRectangle
+    RenderNavigationTarget
 } from "./render-view.model";
 import {combineLatest, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
@@ -68,13 +67,6 @@ interface PreparedContextMenuPosition {
     featureIds: TileFeatureId[];
 }
 
-interface SelectionRectangleOverlay {
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-}
-
 @Component({
     selector: 'map-view',
     template: `
@@ -84,14 +76,6 @@ interface SelectionRectangleOverlay {
              [attr.data-testid]="canvasId"
              class="mapviewer-renderlayer"
              style="z-index: 0"></div>
-        @if (selectionRectangle) {
-            <div class="map-selection-rectangle"
-                 [attr.data-testid]="'map-selection-rectangle-' + viewIndex()"
-                 [style.left.px]="selectionRectangle.left"
-                 [style.top.px]="selectionRectangle.top"
-                 [style.width.px]="selectionRectangle.width"
-                 [style.height.px]="selectionRectangle.height"></div>
-        }
         @if (viewerInitError) {
             <div class="mapviewer-error-state" role="alert">
                 <span class="material-symbols-outlined">warning</span>
@@ -183,7 +167,6 @@ interface SelectionRectangleOverlay {
  */
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 4;
-    private static readonly RECTANGLE_DRAG_THRESHOLD_PX = 4;
     private static readonly SOURCE_DATA_TILE_LEVEL_COUNT = 16;
     private static readonly WEBGL_SETUP_HINT =
         "Ensure WebGL2 is available and browser hardware acceleration is enabled. " +
@@ -196,7 +179,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     is2DMode: boolean = false;
     mapView?: IRenderView;
     viewerInitError = "";
-    selectionRectangle: SelectionRectangleOverlay | null = null;
     viewIndex: InputSignal<number> = input.required<number>();
     outlined: boolean = false;
     showSyncMenu: boolean = false;
@@ -216,9 +198,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private pendingContextMenuOpenTimeout?: ReturnType<typeof setTimeout>;
     private rightPressStart: {x: number; y: number} | null = null;
     private rightPressMoved = false;
-    private rectanglePressStart: {pointerId: number; x: number; y: number} | null = null;
-    private rectangleDragActive = false;
-    private rectanglePickGeneration = 0;
     private viewerPointerDownCapture?: (event: PointerEvent) => void;
     private viewerPointerMoveCapture?: (event: PointerEvent) => void;
     private viewerPointerUpCapture?: (_event: PointerEvent) => void;
@@ -344,9 +323,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.mediaQueryChangeListener = (event: MediaQueryListEvent) => {
             this.isNarrow = event.matches;
             this.mapView?.setDesktopDrillPickingEnabled(!event.matches);
-            if (event.matches) {
-                this.cancelRectangleSelection();
-            }
             this.cdr.markForCheck();
         };
         this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
@@ -430,7 +406,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * Recreate the viewer with different projection for 2D/3D modes
      */
     private async createViewerForMode(is2D: boolean, setupGeneration: number): Promise<IRenderView | undefined> {
-        this.cancelRectangleSelection();
         this.rendererContextLostSubscription?.unsubscribe();
         this.rendererContextLostSubscription = undefined;
         this.hoverSubscription?.unsubscribe();
@@ -499,7 +474,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.rendererContextLostSubscription?.unsubscribe();
         this.subscriptions.splice(0).forEach(subscription =>
             subscription.unsubscribe());
-        this.cancelRectangleSelection();
         if (this.mapView) {
             this.ngZone.runOutsideAngular(() => this.mapView!.destroy()).then();
         }
@@ -581,175 +555,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.rightPressMoved = false;
     }
 
-    /** Starts a desktop-only Shift+primary gesture before Deck can reinterpret it as rotation. */
-    private beginRectangleSelection(event: PointerEvent): void {
-        this.rectanglePressStart = {
-            pointerId: event.pointerId,
-            x: event.clientX,
-            y: event.clientY
-        };
-        this.rectangleDragActive = false;
-        try {
-            this.viewerElement.nativeElement.setPointerCapture(event.pointerId);
-        } catch {
-            // Pointer capture can fail if the browser already ended the pointer; normal listeners still clean up.
-        }
-    }
-
-    /** Activates and redraws the screen rectangle once the drag threshold is crossed. */
-    private updateRectangleSelection(event: PointerEvent): void {
-        const start = this.rectanglePressStart;
-        if (!start) {
-            return;
-        }
-        if ((event.buttons & 1) === 0) {
-            if (this.rectangleDragActive) {
-                this.cancelRectangleSelection();
-            } else {
-                this.abandonRectanglePress();
-            }
-            return;
-        }
-        if (!this.rectangleDragActive) {
-            const threshold = MapViewComponent.RECTANGLE_DRAG_THRESHOLD_PX;
-            if (Math.abs(event.clientX - start.x) <= threshold
-                && Math.abs(event.clientY - start.y) <= threshold) {
-                return;
-            }
-            this.rectangleDragActive = true;
-            // Only a real rectangle gesture supersedes an earlier asynchronous selection.
-            this.rectanglePickGeneration += 1;
-            this.ngZone.run(() => {
-                this.stateService.focusedView = this.viewIndex();
-            });
-        }
-        const overlay = this.selectionOverlayFromClientPoints(start, event);
-        this.ngZone.run(() => {
-            this.selectionRectangle = overlay;
-            this.cdr.markForCheck();
-        });
-    }
-
-    /** Completes a rectangle query, while a below-threshold Shift+click deliberately does nothing. */
-    private finishRectangleSelection(event: PointerEvent): void {
-        const start = this.rectanglePressStart;
-        const wasActive = this.rectangleDragActive;
-        this.releaseRectanglePointerCapture(event.pointerId);
-        this.rectanglePressStart = null;
-        this.rectangleDragActive = false;
-        if (!start || !wasActive) {
-            return;
-        }
-        if (!this.mapView) {
-            this.rectanglePickGeneration += 1;
-            this.selectionRectangle = null;
-            return;
-        }
-
-        const bounds = this.renderRectangleFromClientPoints(start, event);
-        const mapView = this.mapView;
-        const operationGeneration = ++this.rectanglePickGeneration;
-        const maxObjects = this.stateService.inspectionsLimit;
-        void this.ngZone.runOutsideAngular(() =>
-            mapView.pickFeaturesInRectangle(bounds, maxObjects)
-        ).then(result => {
-            if (operationGeneration !== this.rectanglePickGeneration || this.mapView !== mapView) {
-                return;
-            }
-            this.ngZone.run(() => this.inspectionSelection.inspectFeatureIds(result.featureIds));
-        }).catch(error => {
-            if (operationGeneration === this.rectanglePickGeneration) {
-                console.error("Failed to inspect features in selection rectangle.", error);
-            }
-        }).finally(() => {
-            if (operationGeneration !== this.rectanglePickGeneration) {
-                return;
-            }
-            this.ngZone.run(() => {
-                this.selectionRectangle = null;
-                this.cdr.markForCheck();
-            });
-        });
-    }
-
-    /** Cancels the active rectangle gesture/query and removes its transient overlay. */
-    private cancelRectangleSelection(): void {
-        this.rectanglePickGeneration += 1;
-        const pointerId = this.rectanglePressStart?.pointerId;
-        if (pointerId !== undefined) {
-            this.releaseRectanglePointerCapture(pointerId);
-        }
-        this.rectanglePressStart = null;
-        this.rectangleDragActive = false;
-        this.selectionRectangle = null;
-    }
-
-    /** Ends a below-threshold Shift press without affecting an earlier pending rectangle query. */
-    private abandonRectanglePress(): void {
-        const pointerId = this.rectanglePressStart?.pointerId;
-        if (pointerId !== undefined) {
-            this.releaseRectanglePointerCapture(pointerId);
-        }
-        this.rectanglePressStart = null;
-        this.rectangleDragActive = false;
-    }
-
-    /** Releases viewer pointer capture without depending on browser-specific capture timing. */
-    private releaseRectanglePointerCapture(pointerId: number): void {
-        const viewer = this.viewerElement?.nativeElement;
-        if (!viewer) {
-            return;
-        }
-        try {
-            if (viewer.hasPointerCapture(pointerId)) {
-                viewer.releasePointerCapture(pointerId);
-            }
-        } catch {
-            // Losing capture during teardown is harmless.
-        }
-    }
-
-    /** Returns the fixed-position overlay rectangle clipped to the current render canvas. */
-    private selectionOverlayFromClientPoints(
-        start: {x: number; y: number},
-        end: {clientX: number; clientY: number}
-    ): SelectionRectangleOverlay {
-        const canvasRect = this.mapView?.getCanvasClientRect()
-            ?? this.viewerElement.nativeElement.getBoundingClientRect();
-        const startX = Math.min(canvasRect.right, Math.max(canvasRect.left, start.x));
-        const startY = Math.min(canvasRect.bottom, Math.max(canvasRect.top, start.y));
-        const endX = Math.min(canvasRect.right, Math.max(canvasRect.left, end.clientX));
-        const endY = Math.min(canvasRect.bottom, Math.max(canvasRect.top, end.clientY));
-        return {
-            left: Math.min(startX, endX),
-            top: Math.min(startY, endY),
-            width: Math.max(1, Math.abs(endX - startX)),
-            height: Math.max(1, Math.abs(endY - startY))
-        };
-    }
-
-    /** Converts client coordinates to a positive CSS-pixel rectangle relative to Deck's canvas. */
-    private renderRectangleFromClientPoints(
-        start: {x: number; y: number},
-        end: {clientX: number; clientY: number}
-    ): RenderScreenRectangle {
-        const overlay = this.selectionOverlayFromClientPoints(start, end);
-        const canvasRect = this.mapView?.getCanvasClientRect()
-            ?? this.viewerElement.nativeElement.getBoundingClientRect();
-        return {
-            x: overlay.left - canvasRect.left,
-            y: overlay.top - canvasRect.top,
-            width: overlay.width,
-            height: overlay.height
-        };
-    }
-
-    /** Prevents Deck and the browser from observing a claimed Shift+primary pointer gesture. */
-    private suppressPointerEvent(event: PointerEvent): void {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-    }
-
     /** Cancels a queued same-view context-menu reopen when another view is about to open one. */
     private clearPendingContextMenuOpenTimeout(): void {
         if (this.pendingContextMenuOpenTimeout === undefined) {
@@ -773,11 +578,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             if (event.button === 0 && this.contextMenuVisible && this.viewerContextMenu) {
                 this.ngZone.run(() => this.viewerContextMenu?.hide());
             }
-            if (event.button === 0 && event.shiftKey && !this.isNarrow) {
-                this.beginRectangleSelection(event);
-                this.suppressPointerEvent(event);
-                return;
-            }
             if (event.button !== 2) {
                 return;
             }
@@ -785,11 +585,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.rightPressMoved = false;
         };
         this.viewerPointerMoveCapture = (event: PointerEvent) => {
-            if (this.rectanglePressStart?.pointerId === event.pointerId) {
-                this.updateRectangleSelection(event);
-                this.suppressPointerEvent(event);
-                return;
-            }
             if (!this.rightPressStart || this.rightPressMoved) {
                 return;
             }
@@ -802,11 +597,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.rightPressMoved = true;
         };
         this.viewerPointerUpCapture = (event: PointerEvent) => {
-            if (this.rectanglePressStart?.pointerId === event.pointerId) {
-                this.finishRectangleSelection(event);
-                this.suppressPointerEvent(event);
-                return;
-            }
             if (event.button !== 2) {
                 return;
             }
@@ -831,14 +621,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             }
             this.resetRightPressTracking();
         };
-        this.viewerPointerCancelCapture = (event: PointerEvent) => {
-            if (this.rectanglePressStart?.pointerId === event.pointerId) {
-                if (this.rectangleDragActive) {
-                    this.cancelRectangleSelection();
-                } else {
-                    this.abandonRectanglePress();
-                }
-            }
+        this.viewerPointerCancelCapture = (_event: PointerEvent) => {
             this.resetRightPressTracking();
         };
         this.viewerContextMenuCapture = (event: MouseEvent) => {
@@ -884,7 +667,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.viewerPointerCancelCapture = undefined;
         this.viewerContextMenuCapture = undefined;
         this.resetRightPressTracking();
-        this.cancelRectangleSelection();
     }
 
     /** Prepares source-data context and opens the PrimeNG context menu at the supplied screen position. */

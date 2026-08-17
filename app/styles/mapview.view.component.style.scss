@@ -111,16 +111,6 @@ map-view {
     }
   }
 
-  .map-selection-rectangle {
-    position: fixed;
-    z-index: 1001;
-    pointer-events: none;
-    box-sizing: border-box;
-    border: 1px solid var(--p-primary-color);
-    background: color-mix(in srgb, var(--p-primary-color) 18%, transparent);
-    box-shadow: 0 0 0 1px color-mix(in srgb, white 55%, transparent) inset;
-  }
-
 }
 
 @media (prefers-reduced-motion: reduce) {

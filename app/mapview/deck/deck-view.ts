@@ -58,8 +58,7 @@ import {
     IRenderSceneHandle,
     IRenderView,
     RenderNavigationTarget,
-    RenderedFeaturePickResult,
-    RenderScreenRectangle
+    RenderedFeaturePickResult
 } from "../render-view.model";
 import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {DeckLayerRegistry} from "./deck-layer-registry";
@@ -232,7 +231,6 @@ interface DeckGestureEventLike {
     srcEvent?: {
         button?: number;
         ctrlKey?: boolean;
-        shiftKey?: boolean;
         pointerType?: string;
     };
 }
@@ -1251,28 +1249,6 @@ export abstract class DeckMapView implements IRenderView {
         };
     }
 
-    /**
-     * Resolves unique visible eligible features in one screen-aligned rectangle.
-     * This intentionally performs one non-deep asynchronous rectangle query.
-     */
-    async pickFeaturesInRectangle(
-        bounds: RenderScreenRectangle,
-        maxObjects: number
-    ): Promise<RenderedFeaturePickResult> {
-        if (!this.deck || bounds.width <= 0 || bounds.height <= 0) {
-            return {featureIds: []};
-        }
-        const pickedObjects = await this.deck.pickObjectsAsync({
-            x: bounds.x,
-            y: bounds.y,
-            width: bounds.width,
-            height: bounds.height,
-            layerIds: this.drillPickLayerIds(),
-            maxObjects
-        });
-        return {featureIds: this.uniqueFeatureIdsFromPickingInfos(pickedObjects)};
-    }
-
     /** Returns the current top-level layer ids explicitly marked as ordinary feature representations. */
     private drillPickLayerIds(): string[] {
         return this.eligiblePickLayerIds("drillPickEligible");
@@ -2282,10 +2258,6 @@ export abstract class DeckMapView implements IRenderView {
         if (srcEvent && Number.isInteger(srcEvent.button) && srcEvent.button !== 0) {
             return;
         }
-        if (srcEvent?.shiftKey) {
-            return;
-        }
-
         this.stateService.focusedView = this._viewIndex;
         if (!info || !Number.isFinite(info.x) || !Number.isFinite(info.y)) {
             this.stateService.unsetUnlockedSelections();

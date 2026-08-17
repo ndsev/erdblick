@@ -208,46 +208,6 @@ describe("Deck rendered-feature picking", () => {
             .toHaveBeenCalledWith([tapped], false);
     });
 
-    it("uses one bounded asynchronous rectangle query with the same eligible layer set", async () => {
-        const view = createView();
-        const baseLayer = {
-            id: "base-path",
-            props: {
-                drillPickEligible: true,
-                tileKey: "map/tile",
-                featureAddressesByPath: [9],
-                subsetPickResolver: subsetPickResolver("map/tile")
-            }
-        };
-        const gltfLayer = {
-            id: "map/tile/gltf-pick-proxy",
-            props: {pickable: true}
-        };
-        const pickObjectsAsync = vi.fn(async () => [{layer: baseLayer, index: 0}]);
-        (view as any).deck = {
-            props: {layers: [baseLayer, gltfLayer]},
-            pickObjectsAsync
-        };
-
-        const result = await view.pickFeaturesInRectangle(
-            {x: 5, y: 6, width: 70, height: 80},
-            4
-        );
-
-        expect(pickObjectsAsync).toHaveBeenCalledOnce();
-        expect(pickObjectsAsync).toHaveBeenCalledWith({
-            x: 5,
-            y: 6,
-            width: 70,
-            height: 80,
-            layerIds: ["base-path"],
-            maxObjects: 4
-        });
-        expect(result).toEqual({
-            featureIds: [{mapTileKey: "map/tile", featureId: "feature-9"}]
-        });
-    });
-
     it("separates the configured-radius anchor and deep hover queries", async () => {
         const view = createView() as any;
         const baseLayer = {

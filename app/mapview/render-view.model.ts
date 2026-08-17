@@ -25,14 +25,6 @@ export interface RenderNavigationTarget {
     surfaceNormal?: [east: number, north: number, up: number];
 }
 
-/** Screen-aligned rectangle expressed in CSS pixels relative to the render canvas. */
-export interface RenderScreenRectangle {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-}
-
 /** Logical feature result returned by bounded rendered-object picking operations. */
 export interface RenderedFeaturePickResult {
     /** Unique exact feature identities in renderer traversal order. */
@@ -81,11 +73,6 @@ export interface IRenderView {
         radius: number,
         maxObjects: number
     ): RenderedFeaturePickResult;
-    pickFeaturesInRectangle(
-        bounds: RenderScreenRectangle,
-        maxObjects: number
-    ): Promise<RenderedFeaturePickResult>;
-
     setViewFromState(cameraData: CameraViewState): void;
     getViewState(): CameraViewState;
     computeViewport(): Viewport | undefined;
