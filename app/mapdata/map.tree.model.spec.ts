@@ -445,6 +445,20 @@ describe("layer presets in the map tree", () => {
         ]);
     });
 
+    it("keeps an empty preset node for reconciliation but omits it from presentation", () => {
+        const {tree} = presetTreeFixture();
+        const layer = tree.getFeatureLayer("Map", "Example")!;
+        const presetNode = layerPresetNode(layer)!;
+        presetNode.presets = [];
+        presetNode.selectOptions = [{label: "Custom options", value: ""}];
+        layer.projectPresetOnly[0] = true;
+
+        const projected = filterMapTreeNodes(tree.nodes, "", 0)[0].children?.[0];
+
+        expect(layerPresetNode(layer)).toBe(presetNode);
+        expect(projected?.children?.map(child => child.id)).toEqual(["owned", "unowned"]);
+    });
+
     it("finds preset names and temporarily projects a matching collapsed owned option", () => {
         const {tree} = presetTreeFixture();
         const presetNode = layerPresetNode(tree.getFeatureLayer("Map", "Example")!)!;

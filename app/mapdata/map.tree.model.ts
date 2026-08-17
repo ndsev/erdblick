@@ -341,7 +341,7 @@ function mapTreeNodeChildren(
     if (node instanceof LayerTreeNode) {
         const presetNode = layerPresetNode(node);
         const options = layerStyleOptions(node);
-        if (!presetNode) {
+        if (!presetNode || presetNode.presets.length === 0) {
             return options;
         }
         if (node.projectPresetOnly[viewIndex]) {

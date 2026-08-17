@@ -28,10 +28,6 @@ import {
 import {stripFeatureInspectionTarget} from "./tile-feature-id";
 import type {LayerPresetRef} from "../styledata/layer-preset.model";
 import {
-    MAP_PRESET_APP_STATE_SCHEMA,
-    MapPresetDefinition
-} from "../styledata/map-preset.model";
-import {
     compressUrlCsvRuns,
     decodeLayerNamesV2,
     decodeMapNamesV2,
@@ -485,6 +481,7 @@ export class AppStateService implements OnDestroy {
     private readonly CONFIG_DEFAULT_STATE_META_KEY = "erdblickConfigDefaultStateMeta";
     private readonly SNAPSHOT_UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
     private readonly RETIRED_URL_PARAM_KEYS = new Set(["s"]);
+    private readonly RETIRED_STATE_KEYS = new Set(["mapPresets"]);
     private static readonly URL_SYNC_MIN_INTERVAL_MS = 50;
     private configDefaultStateMeta: ConfigDefaultStateMeta = {
         version: 1,
@@ -843,15 +840,6 @@ export class AppStateService implements OnDestroy {
         snapshotPersist: false
     });
 
-    readonly mapPresetsState = this.createState<MapPresetDefinition[]>({
-        name: "mapPresets",
-        defaultValue: [],
-        schema: MAP_PRESET_APP_STATE_SCHEMA,
-        toStorage: value => value,
-        snapshotPersist: false,
-        configDefault: true
-    });
-
     readonly styleVisibilityState = this.createState<Record<string, boolean>>({
         name: 'styleVisiblity',
         schema: z.record(z.string(), z.coerce.boolean()),
@@ -1116,6 +1104,7 @@ export class AppStateService implements OnDestroy {
     /** Registers all persisted state slots and wires startup hydration/persistence flow. */
     constructor(private readonly router: Router,
                 private readonly infoMessageService: InfoMessageService) {
+        this.retireMapPresetDefinitionStorage();
         // Perform initial hydration after the initial NavigationEnd event arrives.
         this.router.events.pipe(filter(event => event instanceof NavigationEnd), take(1)).subscribe(() => {
             this.initializePersistence();
@@ -2006,6 +1995,10 @@ export class AppStateService implements OnDestroy {
         }
 
         for (const key of keys) {
+            if (this.RETIRED_STATE_KEYS.has(key)) {
+                delete normalized[key];
+                continue;
+            }
             const state = this.statePool.get(key);
             if (!state) {
                 if (this.validateStyleOptionSnapshotEntry(key, normalized[key], errors)) {
@@ -2095,6 +2088,25 @@ export class AppStateService implements OnDestroy {
         }
         for (const key of keys) {
             localStorage.removeItem(key);
+        }
+    }
+
+    /** Removes the obsolete browser-owned map-preset catalog and its ownership metadata. */
+    private retireMapPresetDefinitionStorage(): void {
+        localStorage.removeItem("mapPresets");
+        const rawMeta = localStorage.getItem(this.CONFIG_DEFAULT_STATE_META_KEY);
+        if (!rawMeta) {
+            return;
+        }
+        try {
+            const meta = JSON.parse(rawMeta) as {entries?: Record<string, unknown>};
+            if (!meta.entries || !Object.prototype.hasOwnProperty.call(meta.entries, "mapPresets")) {
+                return;
+            }
+            delete meta.entries["mapPresets"];
+            localStorage.setItem(this.CONFIG_DEFAULT_STATE_META_KEY, JSON.stringify(meta));
+        } catch {
+            // The normal metadata loader handles malformed input.
         }
     }
 
@@ -2277,10 +2289,6 @@ export class AppStateService implements OnDestroy {
     get layerNames() {return this.layerNamesState.getValue();}
     set layerNames(val: Array<string>) {this.layerNamesState.next(val);};
     get styles() {return this.stylesState.getValue();}
-    get mapPresets() {return this.mapPresetsState.getValue();}
-    set mapPresets(val: MapPresetDefinition[]) {
-        this.mapPresetsState.next(structuredClone(val));
-    };
     get styleVisibility() {return this.styleVisibilityState.getValue();}
     set styleVisibility(val: Record<string, boolean>) {this.styleVisibilityState.next(val);};
     get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}

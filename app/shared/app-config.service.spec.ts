@@ -280,7 +280,68 @@ describe("AppConfigService", () => {
 
         const config = await service.load();
 
-        expect(config.state?.["mapPresets"]).toEqual(mapPresets);
+        expect(config.mapPresets).toEqual([{...mapPresets[0], enabled: true}]);
+        expect(config.mapPresetsEnabled).toBe(true);
+        expect(config.mapPresetConfig).toMatchObject({configured: true, valid: true, write: false});
+        expect(config.state).not.toHaveProperty("mapPresets");
+    });
+
+    it("keeps the map-preset feature gated off when both config sources omit it", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "/static-config/config.json") {
+                return of({});
+            }
+            return of(new HttpResponse({status: 200, body: {erdblick: {}}}));
+        });
+
+        const config = await service.load();
+
+        expect(config.mapPresets).toEqual([]);
+        expect(config.mapPresetsEnabled).toBe(false);
+        expect(config.mapPresetConfig).toMatchObject({
+            configured: false,
+            valid: true,
+            write: false
+        });
+    });
+
+    it("normalizes the server map-preset capability and revision", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "/static-config/config.json") {
+                return of({});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    capabilities: {
+                        mapPresets: {
+                            configured: true,
+                            valid: true,
+                            write: true,
+                            endpoint: "/config/erdblick/map-presets",
+                            revision: "revision-1",
+                            ephemeral: false,
+                            issues: []
+                        }
+                    },
+                    erdblick: {mapPresets: []}
+                } satisfies ServerConfigResponse
+            }));
+        });
+
+        const config = await service.load();
+
+        expect(config.mapPresetConfig).toEqual({
+            configured: true,
+            valid: true,
+            write: true,
+            endpoint: "/config/erdblick/map-presets",
+            revision: "revision-1",
+            ephemeral: false,
+            issues: []
+        });
     });
 
     it("replaces static map presets when the server key is present", async () => {
@@ -301,10 +362,11 @@ describe("AppConfigService", () => {
             }));
         });
 
-        expect((await replacementHarness.service.load()).state?.["mapPresets"])
+        expect((await replacementHarness.service.load()).mapPresets)
             .toEqual([{
                 id: "server",
                 name: "Server",
+                enabled: true,
                 layerPresets: [{layerId: "Road", styleId: "Roads", presetId: "geometry"}]
             }]);
     });
@@ -323,7 +385,100 @@ describe("AppConfigService", () => {
             }));
         });
 
-        expect((await service.load()).state?.["mapPresets"]).toEqual([]);
+        const config = await service.load();
+        expect(config.mapPresets).toEqual([]);
+        expect(config.mapPresetsEnabled).toBe(true);
+    });
+
+    it("lets malformed authoritative server presets block valid static fallback", async () => {
+        const {service, httpClient} = createService();
+        const staticPreset = {
+            id: "static",
+            name: "Static",
+            layerPresets: [{layerId: "Lane", styleId: "Lanes", presetId: "topology"}]
+        };
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "/static-config/config.json") {
+                return of({mapPresets: [staticPreset]});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    capabilities: {
+                        mapPresets: {
+                            configured: true,
+                            valid: false,
+                            write: false,
+                            issues: ["mapPresets must be a sequence."]
+                        }
+                    },
+                    erdblick: {mapPresets: 42}
+                } as unknown as ServerConfigResponse
+            }));
+        });
+
+        const config = await service.load();
+
+        expect(config.mapPresets).toEqual([]);
+        expect(config.mapPresetsEnabled).toBe(true);
+        expect(config.mapPresetConfig.valid).toBe(false);
+        expect(config.mapPresetConfig.write).toBe(false);
+        expect(config.mapPresetConfig.issues).toContainEqual({
+            message: "mapPresets must be a sequence."
+        });
+    });
+
+    it("keeps valid server siblings while reporting a partially invalid catalog", async () => {
+        const {service, httpClient} = createService();
+        const validPreset = {
+            id: "network",
+            name: "Network",
+            layerPresets: [{layerId: "Lane", styleId: "Lanes", presetId: "topology"}]
+        };
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "/static-config/config.json") {
+                return of({});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    capabilities: {
+                        mapPresets: {
+                            configured: true,
+                            valid: false,
+                            write: false,
+                            issues: ["mapPresets[1] is invalid."]
+                        }
+                    },
+                    erdblick: {mapPresets: [validPreset]}
+                } satisfies ServerConfigResponse
+            }));
+        });
+
+        const config = await service.load();
+
+        expect(config.mapPresets).toEqual([{...validPreset, enabled: true}]);
+        expect(config.mapPresetConfig.valid).toBe(false);
+        expect(config.mapPresetConfig.write).toBe(false);
+    });
+
+    it("excludes retired state.mapPresets from normalized state and its hash", async () => {
+        const loadWithState = async (state: Record<string, unknown>) => {
+            const {service, httpClient} = createService();
+            httpClient.get.mockImplementation((url: string) => {
+                if (url === "/static-config/config.json") {
+                    return of({state});
+                }
+                return of(new HttpResponse({status: 200, body: {erdblick: {}}}));
+            });
+            return service.load();
+        };
+
+        const withoutLegacy = await loadWithState({foo: true});
+        const withLegacy = await loadWithState({foo: true, mapPresets: [{id: "legacy"}]});
+
+        expect(withLegacy.state).toEqual(withoutLegacy.state);
+        expect(withLegacy.configStateHash).toBe(withoutLegacy.configStateHash);
     });
 
     it("ignores an invalid map-presets type without discarding the rest of the config", async () => {
@@ -341,7 +496,10 @@ describe("AppConfigService", () => {
         const config = await service.load();
 
         expect(config.styles).toEqual([{url: "static.yaml", additional: false}]);
-        expect(config.state?.["mapPresets"]).toEqual([]);
+        expect(config.mapPresets).toEqual([]);
+        expect(config.mapPresetsEnabled).toBe(true);
+        expect(config.mapPresetConfig.valid).toBe(false);
+        expect(config.state).not.toHaveProperty("mapPresets");
     });
 
     it("does not override static extension modules with empty server values", async () => {

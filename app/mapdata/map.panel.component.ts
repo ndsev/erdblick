@@ -420,16 +420,18 @@ const MAP_FILTER_DELAY_MS = 300;
                                                 </label>
                                             </span>
                                             <div class="map-controls">
-                                                <p-select class="map-preset-select"
-                                                          [options]="mapPresetOptionsForView(node.id, index)"
-                                                          [ngModel]="node.selectedMapPresetIds[index]"
-                                                          (ngModelChange)="selectMapPreset(node.id, index, $event)"
-                                                          optionLabel="label"
-                                                          optionValue="value"
-                                                          optionDisabled="disabled"
-                                                          appendTo="body"
-                                                          [disabled]="dataSourceStatus(node.info) !== 'ready' || node.mapPresets.length === 0"
-                                                          [attr.aria-label]="'Map preset for ' + node.id"/>
+                                                @if (node.mapPresets.length > 0) {
+                                                    <p-select class="map-preset-select"
+                                                              [options]="mapPresetOptionsForView(node.id, index)"
+                                                              [ngModel]="node.selectedMapPresetIds[index]"
+                                                              (ngModelChange)="selectMapPreset(node.id, index, $event)"
+                                                              optionLabel="label"
+                                                              optionValue="value"
+                                                              optionDisabled="disabled"
+                                                              appendTo="body"
+                                                              [disabled]="dataSourceStatus(node.info) !== 'ready'"
+                                                              [attr.aria-label]="'Map preset for ' + node.id"/>
+                                                }
                                                 <p-button onEnterClick (click)="focus($event, index, mapCoverage(node.id))"
                                                           label="" pTooltip="Focus on map" tooltipPosition="bottom"
                                                           [style]="{'padding-left': '0', 'padding-right': '0'}"

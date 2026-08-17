@@ -63,14 +63,16 @@ interface QuickPresetOption {
             <p-tabs [(value)]="stylesDialogTab" class="style-sheets-tabs" data-testid="style-sheets-tabs">
                 <p-tablist>
                     <p-tab value="styles">Styles</p-tab>
-                    <p-tab value="presets" data-testid="style-presets-tab">
-                        <span>Map Presets </span>
-                        @if (presetService.issues$ | async; as presetIssues) {
-                            @if (presetIssues.length) {
-                                <p-badge [value]="presetIssues.length"/>
+                    @if (presetService.enabled) {
+                        <p-tab value="presets" data-testid="style-presets-tab">
+                            <span>Map Presets </span>
+                            @if (presetService.issues$ | async; as presetIssues) {
+                                @if (presetIssues.length) {
+                                    <p-badge [value]="presetIssues.length"/>
+                                }
                             }
-                        }
-                    </p-tab>
+                        </p-tab>
+                    }
                     <p-tab value="errors">
                         <span>Errors </span>
                         @if (styleValidationReportService.reports$ | async; as styleIssues) {
@@ -195,18 +197,21 @@ interface QuickPresetOption {
                             }
                         </div>
                     </p-tabpanel>
+                    @if (presetService.enabled) {
                     <p-tabpanel value="presets">
                         <div class="style-presets-tab" data-testid="style-presets-panel">
                             <div class="style-presets-toolbar">
                                 <p-button label="Add" icon="pi pi-plus"
                                           data-testid="style-preset-add-button"
-                                          [disabled]="presetEditorSourceModified"
+                                          [disabled]="presetEditorSourceModified || !presetService.canWrite"
                                           (click)="toggleQuickPresetForm()"/>
                                 <p-button label="Edit raw map presets" icon="pi pi-file-edit"
                                           data-testid="style-preset-raw-edit-button"
+                                          [disabled]="!presetService.canWrite"
                                           (click)="openPresetEditor()"/>
-                                @if (presetService.hasLocalOverride) {
-                                    <p-tag severity="info" value="Local override" [rounded]="true"/>
+                                @if (presetService.readOnlyReason; as readOnlyReason) {
+                                    <p-tag severity="secondary" value="Read only" [rounded]="true"
+                                           [pTooltip]="readOnlyReason"/>
                                 }
                             </div>
 
@@ -263,7 +268,7 @@ interface QuickPresetOption {
                                         <p-toggleswitch
                                             [inputId]="'style-preset-enabled-' + preset.id"
                                             [ngModel]="presetService.isAvailable(preset)"
-                                            [disabled]="presetEditorSourceModified"
+                                            [disabled]="presetEditorSourceModified || !presetService.canWrite"
                                             (ngModelChange)="setPresetAvailability(preset.id, $event)"/>
                                         <label [for]="'style-preset-enabled-' + preset.id">
                                             <strong>{{ preset.name }}</strong>
@@ -279,6 +284,7 @@ interface QuickPresetOption {
                             </div>
                         </div>
                     </p-tabpanel>
+                    }
                     <p-tabpanel value="errors">
                         @if (styleValidationReportService.reports$ | async; as styleIssues) {
                             <div class="style-errors-tab">
@@ -446,18 +452,12 @@ interface QuickPresetOption {
                 <div class="editor-actions-left">
                     <p-button data-testid="style-preset-editor-apply-button"
                               label="Apply" icon="pi pi-check"
-                              [disabled]="!presetEditorSourceModified"
+                              [disabled]="!presetEditorSourceModified || !presetService.canWrite"
                               (click)="applyPresetEditorSource()"/>
                     <p-button data-testid="style-preset-editor-close-button"
                               [label]="presetEditorSourceModified ? 'Discard' : 'Close'"
                               icon="pi pi-times"
                               (click)="closePresetEditor($event)"/>
-                </div>
-                <div class="editor-actions-right">
-                    <p-button data-testid="style-preset-editor-reset-button"
-                              label="Reset to Configured" icon="pi pi-refresh"
-                              [disabled]="!presetService.hasLocalOverride && !presetEditorSourceModified"
-                              (click)="resetPresetEditorToConfigured()"/>
                 </div>
             </div>
         </app-dialog>
@@ -758,7 +758,8 @@ export class StyleComponent implements OnDestroy {
     canSaveQuickPreset(): boolean {
         const name = this.quickPresetName.trim();
         const selectedOptions = this.quickPresetSelectedOptions();
-        if (this.presetEditorSourceModified
+        if (!this.presetService.canWrite
+            || this.presetEditorSourceModified
             || !name
             || !selectedOptions.length
             || this.presetService.presets.some(preset =>
@@ -769,7 +770,7 @@ export class StyleComponent implements OnDestroy {
     }
 
     /** Validates and appends the quick-form definition to the normalized map-preset catalog. */
-    saveQuickPreset(): void {
+    async saveQuickPreset(): Promise<void> {
         if (!this.canSaveQuickPreset()) {
             return;
         }
@@ -784,7 +785,7 @@ export class StyleComponent implements OnDestroy {
                 presetId: option.presetId
             }))
         };
-        if (this.presetService.addPreset(preset)) {
+        if (await this.presetService.addPreset(preset)) {
             this.messageService.showInfo(`Added map preset '${preset.name}'.`);
             this.closeQuickPresetForm();
         } else {
@@ -793,8 +794,10 @@ export class StyleComponent implements OnDestroy {
     }
 
     /** Updates one preset's enabled flag in the combined map-preset AppState. */
-    setPresetAvailability(presetId: string, available: boolean): void {
-        this.presetService.setAvailable(presetId, available);
+    async setPresetAvailability(presetId: string, available: boolean): Promise<void> {
+        if (!await this.presetService.setAvailable(presetId, available)) {
+            this.messageService.showError("Could not update the map preset. The server catalog remains authoritative.");
+        }
     }
 
     /** Formats the exact schema-level layer targets composed by one map preset. */
@@ -834,24 +837,15 @@ export class StyleComponent implements OnDestroy {
     }
 
     /** Validates and atomically activates the current raw preset source. */
-    applyPresetEditorSource(): void {
+    async applyPresetEditorSource(): Promise<void> {
         const source = this.editorService.getSessionSource(this.presetEditorSessionId);
-        if (!this.presetService.applyOverrideSource(source)) {
+        if (!await this.presetService.applyOverrideSource(source)) {
             this.messageService.showError("The preset source is invalid. The previous presets remain active.");
             return;
         }
         this.presetEditorOriginalSource = source.replace(/\n+$/, "");
         this.presetEditorSourceModified = false;
         this.messageService.showInfo("Applied map presets.");
-    }
-
-    /** Restores the configured baseline in both the effective service and raw editor. */
-    resetPresetEditorToConfigured(): void {
-        this.presetService.resetToConfigured();
-        this.presetEditorOriginalSource = this.presetService.source.replace(/\n+$/, "");
-        this.editorService.updateSessionSource(this.presetEditorSessionId, this.presetService.source);
-        this.presetEditorSourceModified = false;
-        this.messageService.showInfo("Restored configured map presets.");
     }
 
     /** Closes the raw editor or asks for confirmation before discarding unsaved changes. */

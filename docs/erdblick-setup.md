@@ -81,7 +81,9 @@ The `config/` directory used to build or host erdblick controls UI-side metadata
 - `config/*.js`: optional modules referenced from `config.json`.
 - `images/backgrounds/*`: optional bundled XYZ raster tiles. The default config includes OpenStreetMap as the active background, an online Esri World Imagery entry for higher zoom satellite imagery, and a coarse bundled Blue Marble overview under `bundle/images/backgrounds/world-overview/...` for offline fallback. The `world-overview` path is kept stable for compatibility even though the user-facing layer name is now `Blue Marble`.
 
-The merged `mapPresets` list seeds one typed, non-URL `mapPresets` AppState. The GUI edits that complete normalized list, including each entry's `enabled` flag. It is persisted in browser storage but excluded from ordinary view snapshots; **Reset to Configured** restores the current merged config list.
+The effective `mapPresets` list is configuration-owned and is not AppState or browser storage. Key omission disables the map-level catalog and management tab; an explicit `[]` enables an empty catalog. A present server list replaces the static list, while server omission inherits static configuration. Valid survivors from malformed server input remain usable, but editing is disabled until the YAML is repaired.
+
+Native MapViewer deployments may advertise a narrow, revision-guarded map-preset write capability when `allow-post-config` is enabled and the server YAML contains a valid `erdblick.mapPresets` list. Add, availability toggles, and raw Apply then replace only that complete YAML list using `If-Match`; conflicts refetch the authoritative catalog. Static-only deployments and Python-launched Docker sessions are read-only because the latter mounts a disposable transformed YAML copy. Per-view selected map/layer presets remain ordinary browser state.
 
 The bundled overview layer is documented in `docs/erdblick-backgrounds.md`.
 

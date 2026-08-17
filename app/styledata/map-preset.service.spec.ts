@@ -1,35 +1,40 @@
-import {BehaviorSubject} from "rxjs";
-import {beforeEach, describe, expect, it} from "vitest";
+import "@angular/compiler";
+import {HttpErrorResponse, HttpHeaders, HttpResponse} from "@angular/common/http";
+import {of, Subject, throwError} from "rxjs";
+import {beforeEach, describe, expect, it, vi} from "vitest";
 import type {MapPresetDefinition} from "./map-preset.model";
 import {MapPresetService} from "./map-preset.service";
 
-class StateStub {
-    readonly mapPresetsState: BehaviorSubject<MapPresetDefinition[]>;
-
-    constructor(initial: MapPresetDefinition[]) {
-        this.mapPresetsState = new BehaviorSubject(initial);
-    }
-
-    get mapPresets() {
-        return this.mapPresetsState.getValue();
-    }
-
-    set mapPresets(value: MapPresetDefinition[]) {
-        this.mapPresetsState.next(structuredClone(value));
-    }
-}
-
-const configured = [{
+const configured: MapPresetDefinition[] = [{
     id: "network",
     name: "Network",
+    enabled: true,
     layerPresets: [{layerId: "Lane", styleId: "Lanes", presetId: "topology"}]
 }];
 
-function createService() {
-    const state = new StateStub(configured.map(preset => ({...preset, enabled: true})));
-    const config: {snapshot: {state: {mapPresets: unknown[]}}} = {
-        snapshot: {state: {mapPresets: configured}}
+function createService(write = true) {
+    const config: any = {
+        snapshot: {
+            mapPresets: structuredClone(configured),
+            mapPresetsEnabled: true,
+            mapPresetConfig: {
+                configured: true,
+                valid: true,
+                write,
+                endpoint: "/config/erdblick/map-presets",
+                revision: "rev-1",
+                ephemeral: false,
+                issues: []
+            }
+        },
+        applyCanonicalMapPresets: vi.fn((definitions: MapPresetDefinition[], revision: string) => {
+            config.snapshot.mapPresets = structuredClone(definitions);
+            config.snapshot.mapPresetConfig.revision = revision;
+            return true;
+        }),
+        refreshMapPresetConfig: vi.fn(async () => config.snapshot)
     };
+    const http = {put: vi.fn()};
     const styles = new Map<string, any>([["Lanes", {
         id: "Lanes",
         visible: true,
@@ -40,16 +45,16 @@ function createService() {
             values: [{optionId: "show", value: true}]
         }]
     }]]);
-    const service = new MapPresetService(config as any, state as any, {styles} as any);
-    return {service, state, config};
+    const service = new MapPresetService(config, http as any, {styles} as any);
+    service.initialize();
+    return {service, config, http};
 }
 
 describe("MapPresetService", () => {
     beforeEach(() => localStorage.clear());
 
-    it("loads inline definitions and resolves embedded presets for an affine layer", () => {
+    it("loads config definitions and resolves embedded presets for an affine layer", () => {
         const {service} = createService();
-        service.initialize();
 
         expect(service.presets.map(preset => preset.id)).toEqual(["network"]);
         const resolved = service.presetsForLayer("Lane", [{styleId: "Lanes", id: "show"}]);
@@ -58,39 +63,61 @@ describe("MapPresetService", () => {
         expect(service.presetsForLayer("Road", [{styleId: "Lanes", id: "show"}])).toEqual([]);
     });
 
-    it("operates definitions and availability through one map-presets AppState", () => {
-        const {service, state, config} = createService();
-        const emissions: MapPresetDefinition[][] = [];
-        const issues: unknown[][] = [];
-        service.presets$.subscribe(presets => emissions.push(presets));
-        service.issues$.subscribe(current => issues.push(current));
-        config.snapshot.state.mapPresets = [{id: "invalid"}, ...configured];
-        service.initialize();
-        expect(issues.at(-1)).not.toEqual([]);
-        service.setAvailable("network", false);
-        expect(service.isAvailable(service.presets[0])).toBe(false);
-        expect(state.mapPresets[0].enabled).toBe(false);
-        expect(issues.at(-1)).toEqual([]);
+    it("publishes only the canonical response from a revision-guarded write", async () => {
+        const {service, config, http} = createService();
+        const canonical = [{...configured[0], enabled: false}];
+        http.put.mockReturnValue(of(new HttpResponse({
+            status: 200,
+            body: {mapPresets: canonical, revision: "rev-2"}
+        })));
 
-        expect(service.addPreset({
+        expect(await service.setAvailable("network", false)).toBe(true);
+        expect(service.presets).toEqual(canonical);
+        expect(config.applyCanonicalMapPresets).toHaveBeenCalledWith(canonical, "rev-2");
+        const options = http.put.mock.calls[0][2] as {headers: HttpHeaders};
+        expect(options.headers.get("If-Match")).toBe('"rev-1"');
+    });
+
+    it("allows only one complete-catalog write in flight", async () => {
+        const {service, http} = createService();
+        const pending = new Subject<HttpResponse<unknown>>();
+        http.put.mockReturnValue(pending);
+
+        const first = service.setAvailable("network", false);
+        expect(service.writePending).toBe(true);
+        expect(await service.addPreset({
             id: "geometry",
             name: "Geometry",
             enabled: true,
             layerPresets: [{layerId: "Road", styleId: "Roads", presetId: "geometry"}]
-        })).toBe(true);
-        expect(state.mapPresets).toHaveLength(2);
-        expect(emissions.at(-1)?.map(preset => preset.id)).toEqual(["network", "geometry"]);
-        expect(service.hasLocalOverride).toBe(true);
-
-        service.resetToConfigured();
-        expect(state.mapPresets).toEqual([{...configured[0], enabled: true}]);
-        expect(service.hasLocalOverride).toBe(false);
+        })).toBe(false);
+        pending.next(new HttpResponse({
+            status: 200,
+            body: {mapPresets: [{...configured[0], enabled: false}], revision: "rev-2"}
+        }));
+        pending.complete();
+        expect(await first).toBe(true);
     });
 
-    it("rejects an invalid raw edit transactionally", () => {
-        const {service} = createService();
-        service.initialize();
-        expect(service.applyOverrideSource("- id: invalid")).toBe(false);
-        expect(service.presets.map(preset => preset.id)).toEqual(["network"]);
+    it("refetches the authoritative catalog after a stale revision", async () => {
+        const {service, config, http} = createService();
+        http.put.mockReturnValue(throwError(() => new HttpErrorResponse({status: 412})));
+        config.refreshMapPresetConfig.mockImplementation(async () => {
+            config.snapshot.mapPresets = [{...configured[0], name: "Server version"}];
+            config.snapshot.mapPresetConfig.revision = "rev-2";
+            return config.snapshot;
+        });
+
+        expect(await service.setAvailable("network", false)).toBe(false);
+        expect(config.refreshMapPresetConfig).toHaveBeenCalledOnce();
+        expect(service.presets[0].name).toBe("Server version");
+    });
+
+    it("keeps read-only and invalid edits out of the effective catalog", async () => {
+        const {service, http} = createService(false);
+        expect(await service.applyOverrideSource("- id: invalid")).toBe(false);
+        expect(await service.setAvailable("network", false)).toBe(false);
+        expect(service.presets).toEqual(configured);
+        expect(http.put).not.toHaveBeenCalled();
     });
 });

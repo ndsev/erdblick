@@ -1056,49 +1056,26 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('keeps the normalized map-preset catalog in one non-URL config-default AppState', () => {
+    it('retires browser-owned map-preset definitions and ignores legacy config state', () => {
+        localStorage.setItem('mapPresets', JSON.stringify([{id: 'legacy'}]));
+        localStorage.setItem('erdblickConfigDefaultStateMeta', JSON.stringify({
+            version: 1,
+            sourceHash: 'old',
+            entries: {
+                mapPresets: {owner: 'user', valueHash: 'old'},
+                unrelated: {owner: 'user', valueHash: 'keep'}
+            }
+        }));
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
 
-        const errors = service.seedConfigDefaultState({
-            mapPresets: [
-                {id: 'invalid'},
-                {
-                    id: 'network',
-                    name: 'Network',
-                    layerPresets: [{
-                        layerId: 'Lane',
-                        styleId: 'Lanes',
-                        presetId: 'topology'
-                    }]
-                }
-            ]
-        }, 'map-preset-config');
+        const errors = service.seedConfigDefaultState({mapPresets: [{id: 'legacy'}]}, 'map-preset-config');
 
         expect(errors).toEqual([]);
-        expect(service.mapPresets).toEqual([{
-            id: 'network',
-            name: 'Network',
-            enabled: true,
-            layerPresets: [{
-                layerId: 'Lane',
-                styleId: 'Lanes',
-                presetId: 'topology'
-            }]
-        }]);
-        expect(service.mapPresetsState.isUrlState()).toBe(false);
-        expect(service.mapPresetsState.isSnapshotState()).toBe(false);
-        expect(service.mapPresetsState.isConfigDefaultState()).toBe(true);
+        expect(localStorage.getItem('mapPresets')).toBeNull();
+        const metadata = JSON.parse(localStorage.getItem('erdblickConfigDefaultStateMeta')!);
+        expect(metadata.entries).not.toHaveProperty('mapPresets');
         expect(service.exportSnapshot()).not.toHaveProperty('mapPresets');
-
-        service.mapPresets = [{...service.mapPresets[0], enabled: false}];
-        const serialized = service.mapPresetsState.serialize(false);
-        expect(serialized).toEqual({
-            mapPresets: JSON.stringify([{...service.mapPresets[0], enabled: false}])
-        });
-        service.mapPresets = [];
-        service.mapPresetsState.deserialize(serialized!["mapPresets"]!);
-        expect(service.mapPresets[0].enabled).toBe(false);
 
         service.ngOnDestroy();
         routerStub.events.complete();
