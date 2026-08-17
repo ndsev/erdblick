@@ -356,12 +356,9 @@ ParsedLabelFont parseLabelFont(std::string const& font)
             : separator + 1U;
         if (begin < pixels) {
             float parsedSize = result.size;
-            auto const parsed = std::from_chars(
-                font.data() + begin,
-                font.data() + pixels,
-                parsedSize);
-            if (parsed.ec == std::errc{} &&
-                parsed.ptr == font.data() + pixels &&
+            std::istringstream parser(font.substr(begin, pixels - begin));
+            parser >> std::noskipws >> parsedSize;
+            if (parser.eof() && !parser.fail() &&
                 std::isfinite(parsedSize) && parsedSize > 0.0F)
             {
                 result.size = parsedSize;
