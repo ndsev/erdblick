@@ -87,7 +87,7 @@ const MAP_FILTER_DELAY_MS = 300;
         <app-dialog #mapLayerDialog class="map-layer-dialog" data-testid="map-layer-dialog" header=""
                   [visible]="layerDialogVisible"
                   (visibleChange)="setMapsPanelVisible($event)"
-                  [position]="'left'" [draggable]="false" [resizable]="false" 
+                  [position]="'left'" [draggable]="false" [resizable]="true"
                   (onShow)="onMapLayerDialogShow()"
                   [style]="{ 'max-height': '100%', 
                   'border-top-left-radius': '0 !important',

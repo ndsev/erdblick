@@ -24,13 +24,15 @@
   }
 
   .p-dialog {
-    max-width: 25em;
+    width: fit-content;
+    max-width: calc(100vw - 0.3em);
     min-width: 25em;
     margin: 0 !important;
     position: absolute;
     bottom: 0;
     left: 0.15em;
-    overflow: auto;
+    overflow-x: auto;
+    overflow-y: auto;
     height: calc(100% - 2.5em);
   }
 

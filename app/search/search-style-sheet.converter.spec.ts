@@ -62,11 +62,18 @@ describe("search style sheet codec", () => {
         expect(parsed.category).toBe("search");
         expect(parsed.default).toBe(false);
         expect(parsed.version).toBe(2);
+        expect(parsed.options).toEqual([{
+            label: "Show Team/Road emphasis",
+            id: "showSearchStyle",
+            type: "bool",
+            default: true
+        }]);
         expect(parsed.rules).toHaveLength(3);
         expect(parsed.rules[0]).not.toHaveProperty("all-of");
         expect(parsed.rules[0]).not.toHaveProperty("scope");
         expect(parsed.rules[0].geometry).toEqual(["line"]);
-        expect(parsed.rules[0].filter).toBe("speed >= 80");
+        expect(parsed.rules[0].filter).toBe("showSearchStyle == true and (speed >= 80)");
+        expect(parsed.rules[1].filter).toBe("showSearchStyle == true");
         expect(parsed.rules[1].width).toBe(8);
         expect(parsed.rules[2]["label-background-color"]).toBe("#000000");
         expect(first.source).not.toContain("UI-only name");
@@ -84,6 +91,11 @@ describe("search style sheet codec", () => {
         expect(style.isValid(), JSON.stringify(style.validationReport())).toBe(true);
         expect(style.defaultEnabled()).toBe(false);
         expect(style.category()).toBe(coreLib.StyleCategory.Search);
+        const options = style.options();
+        expect(options.size()).toBe(1);
+        expect(options.get(0)?.id).toBe("showSearchStyle");
+        expect(options.get(0)?.defaultValue).toBe(true);
+        options.delete();
         style.delete();
     });
 
@@ -96,6 +108,85 @@ describe("search style sheet codec", () => {
 
         expect(projected.omissions).toEqual([]);
         expect(second.rules).toEqual(first.rules);
+    });
+
+    it("keeps the generated layer-option gate stable but out of Quick and detached search rules", () => {
+        const generated = convertSearchStyleRulesToYaml(saveOptions("Gated"), rules);
+        const projection = projectStyleSourceToQuick(generated.source);
+
+        expect(projection.usesSearchStyleVisibilityOption).toBe(true);
+        expect(projection.editableRules).toHaveLength(3);
+        expect(projection.editableRules[0].rule.filter).toEqual([{
+            field: "speed >= 80",
+            op: "=",
+            value: true,
+            customExpression: true
+        }]);
+        expect(projection.editableRules[1].rule.filter).toEqual([]);
+
+        const updates = projection.editableRules.map(projected => ({
+            sourceIndex: projected.sourceIndex,
+            rule: structuredClone(projected.rule)
+        }));
+        updates[0].rule.filter[0].field = "speed >= 90";
+        const addedRule = structuredClone(projection.editableRules[1].rule);
+        const updated = updateStyleSourceFromQuick(generated.source, projection, [
+            ...updates,
+            {rule: addedRule}
+        ]);
+        const parsed = load(updated) as any;
+
+        expect(parsed.options).toEqual([{
+            label: "Show Gated",
+            id: "showSearchStyle",
+            type: "bool",
+            default: true
+        }]);
+        expect(parsed.rules[0].filter).toBe("showSearchStyle == true and (speed >= 90)");
+        expect(parsed.rules.at(-1).filter).toBe("showSearchStyle == true");
+
+        const detached = projectStyleSourceForSearch(updated, "feature");
+        expect(detached.omissions).toEqual([]);
+        expect(detached.rules[0].filter[0].field).toBe("speed >= 90");
+        expect(detached.rules.at(-1)?.filter).toEqual([]);
+    });
+
+    it("projects the all-geometry rule shape as one Quick rule independently of style options", () => {
+        const projection = projectStyleSourceToQuick(`
+name: Search Style
+category: search
+version: 2
+default: true
+rules:
+  - geometry: [point, line, polygon, mesh, aabb, gltf]
+    color: '#ea4336'
+    width: 5
+    opacity: 0.6
+layer: ^(Road)$
+`);
+
+        expect(projection.totalRuleCount).toBe(1);
+        expect(projection.editableRules).toHaveLength(1);
+        expect(projection.editableRules[0].rule.geometry).toBe("any");
+        expect(projection.usesSearchStyleVisibilityOption).toBe(false);
+    });
+
+    it("does not strip a visibility-like prefix that does not gate the complete filter", () => {
+        const source = `
+name: Custom gate
+category: search
+version: 2
+options:
+  - {label: Show Custom gate, id: showSearchStyle, type: bool, default: true}
+rules:
+  - geometry: line
+    filter: 'showSearchStyle == true and (kind == "a") or (kind == "b")'
+    color: '#ea4336'
+`;
+        const projection = projectStyleSourceToQuick(source);
+
+        expect(projection.editableRules[0].rule.filter[0].field)
+            .toBe('showSearchStyle == true and (kind == "a") or (kind == "b")');
     });
 
     it("rejects empty rules and values conversion cannot preserve", () => {
@@ -180,6 +271,25 @@ rules:
             JSON.stringify(exactExpression),
             JSON.stringify("Road.*")));
         expect(custom.layerAffinity).toEqual({kind: "custom", expression: "Road.*"});
+    });
+
+    it("keeps the generated visibility label synchronized with a Quick rename", () => {
+        const source = convertSearchStyleRulesToYaml(
+            saveOptions("Original Search"),
+            rules
+        ).source;
+
+        const renamed = updateStyleSourceMetadata(source, {name: "Renamed/Search"});
+        const parsed = load(renamed) as any;
+
+        expect(parsed.name).toBe("Renamed/Search");
+        expect(parsed.options).toEqual([{
+            label: "Show Renamed/Search",
+            id: "showSearchStyle",
+            type: "bool",
+            default: true
+        }]);
+        expect(parsed.rules[0].filter).toBe("showSearchStyle == true and (speed >= 80)");
     });
 
     it("applies only effective compatible rules and reports every omission", () => {

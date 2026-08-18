@@ -15,9 +15,7 @@ import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
                 <mapview-container></mapview-container>
                 @if (!environment.visualizationOnly) {
                     <main-bar></main-bar>
-                    @if (coordinatesPolicy.effectiveEnabled) {
-                        <coordinates-panel></coordinates-panel>
-                    }
+                    <coordinates-panel [coordinatesVisible]="coordinatesPolicy.effectiveEnabled"></coordinates-panel>
                     <div class="dock-toggle" (click)="toggleDock()">
                         @if (stateService.isDockOpen) {
                             <span class="material-symbols-outlined" pTooltip="Collapse dock">

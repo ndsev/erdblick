@@ -368,31 +368,30 @@ interface QuickPresetOption {
                 [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
         <app-dialog [(visible)]="styleEditorVisible" [modal]="false" #editorDialog
                   data-testid="style-editor-dialog" class="editor-dialog"
+                  [closable]="false" [closeOnEscape]="false"
                   [persistLayout]="true" [layoutId]="styleEditorDialogLayoutId"
                   (onShow)="onEditorDialogShow()" (onHide)="onEditorDialogHide()">
             <ng-template #header>
-                <div class="style-editor-header">
-                    <span class="style-editor-header-title">Style Editor
-                        @if (stateService.styleEditorTargetId; as styleId) {
-                            <span> — {{ styleId }}</span>
-                        }
-                    </span>
+                <app-surface-header data-testid="style-editor-header"
+                                    [title]="styleEditorHeaderTitle()"
+                                    [hasSmartControl]="!!currentEditorStyle()"
+                                    [dragEnabled]="true"
+                                    (dragPointerDown)="editorDialog.startDrag($event)"
+                                    (closeRequest)="closeEditorDialog($event)">
                     @if (currentEditorStyle(); as style) {
-                        <span class="style-editor-header-toggle"
-                              (pointerdown)="$event.stopPropagation()"
-                              (mousedown)="$event.stopPropagation()"
-                              (click)="$event.stopPropagation()">
-                            <p-toggleswitch inputId="style-editor-enabled"
-                                            data-testid="style-editor-enabled"
-                                            [ngModel]="style.visible"
-                                            (ngModelChange)="toggleEditorStyle($event)"
-                                            [pTooltip]="style.visible ? 'Disable style sheet' : 'Enable style sheet'"
-                                            tooltipPosition="bottom"
-                                            aria-label="Enable style sheet">
-                            </p-toggleswitch>
-                        </span>
+                        <p-toggleswitch surfaceHeaderSmartControl
+                                        inputId="style-editor-enabled"
+                                        data-testid="style-editor-enabled"
+                                        [ngModel]="style.visible"
+                                        (ngModelChange)="toggleEditorStyle($event)"
+                                        (click)="$event.stopPropagation()"
+                                        (mousedown)="$event.stopPropagation()"
+                                        [pTooltip]="style.visible ? 'Disable style sheet' : 'Enable style sheet'"
+                                        tooltipPosition="bottom"
+                                        aria-label="Enable style sheet">
+                        </p-toggleswitch>
                     }
-                </div>
+                </app-surface-header>
             </ng-template>
             <p-tabs [(value)]="styleEditorTab" class="style-editor-tabs" data-testid="style-editor-tabs">
                 <p-tablist>
@@ -481,6 +480,8 @@ interface QuickPresetOption {
                                     [sourceRuleIndices]="quickRuleSourceIndicesByDraftId"
                                     [readOnlyRuleIndices]="quickReadOnlyRuleIndices"
                                     [notesBySourceIndex]="quickWarningsBySourceIndex"
+                                    [expandRulesByDefault]="true"
+                                    [expansionContext]="stateService.styleEditorTargetId ?? ''"
                                     [canRefreshValueSummaries]="false">
                                 </search-style-rule-editor>
                             </div>
@@ -1433,6 +1434,12 @@ export class StyleComponent implements OnDestroy {
     protected currentEditorStyle(): ErdblickStyle | undefined {
         const styleId = this.stateService.styleEditorTargetId;
         return styleId ? this.styleService.styles.get(styleId) : undefined;
+    }
+
+    /** Builds the shared surface-header title from the currently persisted editor identity. */
+    protected styleEditorHeaderTitle(): string {
+        const styleId = this.stateService.styleEditorTargetId;
+        return styleId ? `Style Editor — ${styleId}` : "Style Editor";
     }
 
     /** Applies header visibility through the ordinary persisted style lifecycle. */

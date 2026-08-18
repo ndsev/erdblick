@@ -48,7 +48,15 @@ describe("Feature Search style save lifecycle", () => {
         await Promise.resolve();
 
         const [source, visibility] = component.styleService.importStyleYamlSource.mock.calls[0];
-        expect((load(source) as any).default).toBe(true);
+        const parsed = load(source) as any;
+        expect(parsed.default).toBe(true);
+        expect(parsed.options).toEqual([{
+            label: "Show Folder/Saved",
+            id: "showSearchStyle",
+            type: "bool",
+            default: true
+        }]);
+        expect(parsed.rules[0].filter).toBe("showSearchStyle == true");
         expect(visibility).toBe(true);
         expect(component.searchStyleSaveVisible).toBe(false);
         expect(component.styleEditorRequestService.open).not.toHaveBeenCalled();

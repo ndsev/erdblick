@@ -860,6 +860,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private resultTreeInputLength = 0;
     private resultTreeGroupingSignature = "";
     private resultTreeRunId = "";
+    private resultTreeAutoExpandedSignature = "";
     private resultTreeFilterValue = "";
     private resultTreeGroupNodesByKey = new Map<string, TreeNode>();
     private resultTreeAppendRaf: number | null = null;
@@ -3600,6 +3601,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.resultsTree = [];
         this.resultTreeGroupNodesByKey.clear();
         this.resultTreeInputLength = 0;
+        this.resultTreeAutoExpandedSignature = "";
         this.showFilter = false;
         this.resultsStatus = "Loading...";
     }
@@ -3842,6 +3844,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.resultTreeInputLength = 0;
         this.resultTreeGroupingSignature = "";
         this.resultTreeRunId = "";
+        this.resultTreeAutoExpandedSignature = "";
         this.resultTreeFilterValue = "";
         this.resultTreeGroupNodesByKey.clear();
         this.cancelResultTreeAppend();
@@ -4061,6 +4064,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.resultTreeInputLength = 0;
         this.resultTreeRunId = runId;
         this.resultTreeGroupingSignature = groupingSignature;
+        this.resultTreeAutoExpandedSignature = "";
         if (runChanged) {
             this.resultTreeFilterValue = "";
             this.tree?.resetFilter();
@@ -4111,6 +4115,31 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
     }
 
+    /** Expands every populated result group once, after the completed session is fully rendered. */
+    private expandCompletedResultTreeIfReady(session: FeatureSearchSession): void {
+        if (!session.complete || this.resultTreeInputLength < session.searchResults.length) {
+            return;
+        }
+        const signature = `${session.runId}\n${this.resultTreeGroupingSignature}`;
+        if (this.resultTreeAutoExpandedSignature === signature) {
+            return;
+        }
+
+        const expandGroups = (nodes: TreeNode[]): void => {
+            for (const node of nodes) {
+                if (!node.children?.length) {
+                    continue;
+                }
+                node.expanded = true;
+                expandGroups(node.children);
+            }
+        };
+        expandGroups(this.resultsTree);
+        this.resultTreeAutoExpandedSignature = signature;
+        this.resultsTree = [...this.resultsTree];
+        this.scheduleTreeScrollHeightSync();
+    }
+
     /** Appends pending streamed results for a bounded amount of work to keep the UI responsive. */
     private appendStreamingResultsChunk(): void {
         const session = this.session;
@@ -4122,6 +4151,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.resultCount = results.length;
             this.scheduleProgressDisplayRefresh(session);
             this.updateResultTreeStatus(session.complete);
+            this.expandCompletedResultTreeIfReady(session);
             return;
         }
 
@@ -4149,6 +4179,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.scheduleResultTreeAppend();
         }
         this.updateResultTreeStatus(session.complete);
+        this.expandCompletedResultTreeIfReady(session);
     }
 
     /**
@@ -4177,6 +4208,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
         this.scheduleProgressDisplayRefresh(session);
         this.updateResultTreeStatus(session.complete);
+        this.expandCompletedResultTreeIfReady(session);
     }
 
     /**

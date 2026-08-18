@@ -117,8 +117,11 @@ style identity and may contain slashes for existing tree grouping. There is no
 parallel configuration ID/revision store or generated YAML cache.
 
 `search-style-sheet.converter.ts` emits deterministic version-2 source with
-the save dialog's checked-by-default enable choice as Boolean `default`, optional exact layer-ID affinity,
-and flat rules. Empty affinity omits `layer` and means any layer. It deliberately
+the save dialog's checked-by-default enable choice as Boolean root `default`,
+optional exact layer-ID affinity, one `showSearchStyle` Boolean option whose
+display label is `Show <stylesheet name>` and which defaults on, and flat rules
+gated by that option. Empty affinity omits `layer`
+and means any layer. It deliberately
 excludes query, search scope, map identity, views, feature-type selection,
 density controls, UI row IDs, and automatic-rule metadata. The normal imported-style lifecycle parses,
 persists, lists, edits, renders, and exports that source. Imported persistence
@@ -130,8 +133,10 @@ GUI. AST-based Quick edits preserve comments, root metadata, unsupported keys,
 and untouched rules. Ambiguous branch/dynamic rules remain read-only and are
 reported as warnings. Feature Search uses the same projection permissively:
 compatible rules are deep-copied, incompatible rules are omitted with visible
-reasons, and the YAML source is never changed. Detached reuse copies rules only;
-stylesheet `default` and `layer` metadata continue to govern normal rendering.
+reasons, and the YAML source is never changed. The generated option gate is
+removed from Quick/detached rule data and restored on Quick writes, including
+new rules. Detached reuse copies rules only; stylesheet `default`, `layer`, and
+option state continue to govern normal rendering.
 
 The save dialog emits an action-bearing immutable request. Both **Save** and
 **Save and Open** import through the same transactional style lifecycle and use

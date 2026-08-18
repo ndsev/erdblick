@@ -1,4 +1,4 @@
-import {ChangeDetectorRef, Component, OnDestroy} from "@angular/core";
+import {ChangeDetectorRef, Component, Input, OnDestroy} from "@angular/core";
 import {CoordinatesService} from "./coordinates.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService} from "../shared/appstate.service";
@@ -24,12 +24,13 @@ interface PanelOption {
     selector: "coordinates-panel",
     template: `
         <div class="coordinates-container">
-            <p-button class="marker-button" (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip" 
+            <p-button class="marker-button" data-testid="map-marker-toggle"
+                      (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip"
                       tooltipPosition="bottom" [styleClass]="isMarkerEnabled ? 'p-button-success' : 'p-button-primary'">
                 <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">{{ markerButtonIcon }}</span>
             </p-button>
-            <p-card *ngIf="longitude !== undefined && latitude !== undefined"
-                    class="coordinates-panel">
+            <p-card *ngIf="coordinatesVisible && longitude !== undefined && latitude !== undefined"
+                    class="coordinates-panel" data-testid="coordinates-display">
                 <p-multiSelect dropdownIcon="pi pi-list-check" [options]="displayOptions" [(ngModel)]="selectedOptions"
                                (ngModelChange)="updateSelectedOptions()" optionLabel="name" placeholder=""
                                class="coordinates-select" appendTo="body"/>
@@ -68,7 +69,8 @@ interface PanelOption {
                     </ng-container>
                 </div>
             </p-card>
-            <p-button *ngIf="isMarkerEnabled && markerPosition" class="marker-button" styleClass="p-button-primary"
+            <p-button *ngIf="isMarkerEnabled && markerPosition" class="marker-button"
+                      data-testid="map-marker-focus" styleClass="p-button-primary"
                       (click)="focusOnMarker(markerPosition)" label="" pTooltip="Focus on marker" tooltipPosition="bottom">
                 <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
             </p-button>
@@ -77,12 +79,14 @@ interface PanelOption {
     standalone: false
 })
 /**
- * HUD panel for live coordinates, auxiliary projections, and tile ids.
+ * HUD controls for marker placement plus the independently gated coordinate readout.
  *
  * The panel follows the mouse by default and switches to the persisted marker
  * position once marker placement is enabled.
  */
 export class CoordinatesPanelComponent implements OnDestroy {
+
+    @Input() coordinatesVisible = true;
 
     longitude: number | undefined = undefined;
     latitude: number | undefined = undefined;

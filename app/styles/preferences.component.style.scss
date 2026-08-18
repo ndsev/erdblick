@@ -192,27 +192,6 @@
 }
 
 .editor-dialog {
-  .style-editor-header {
-    align-items: center;
-    display: flex;
-    gap: 0.75em;
-    justify-content: space-between;
-    min-width: 0;
-    width: 100%;
-  }
-
-  .style-editor-header-title {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .style-editor-header-toggle {
-    align-items: center;
-    display: inline-flex;
-    flex: 0 0 auto;
-  }
-
   .spinner {
     display: flex;
     flex: 1 1 auto;

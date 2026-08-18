@@ -12,6 +12,8 @@ import {searchStyleColorProperties} from "./search-style-color.util";
 
 const SUPPORTED_SEARCH_STYLE_OPERATORS = new Set(["=", "!=", "<", "<=", ">", ">=", "contains"]);
 const ALL_GEOMETRY_TYPES = ["point", "line", "polygon", "mesh", "aabb", "gltf"];
+const SEARCH_STYLE_VISIBILITY_OPTION_ID = "showSearchStyle";
+const SEARCH_STYLE_VISIBILITY_FILTER = `${SEARCH_STYLE_VISIBILITY_OPTION_ID} == true`;
 const SUPPORTED_RULE_KEYS = new Set([
     "geometry",
     "scope",
@@ -72,6 +74,7 @@ export interface QuickStyleProjection {
     name: string;
     layerAffinity: QuickStyleLayerAffinity;
     category: StyleSheetCategory;
+    usesSearchStyleVisibilityOption: boolean;
     totalRuleCount: number;
     editableRules: QuickStyleProjectedRule[];
     readOnlyRuleIndices: number[];
@@ -121,7 +124,13 @@ export function convertSearchStyleRulesToYaml(
         category: "search",
         version: 2,
         default: defaultEnabled,
-        rules: rules.map(rule => featureSearchRuleToStyleRule(rule))
+        options: [{
+            label: searchStyleVisibilityOptionLabel(name),
+            id: SEARCH_STYLE_VISIBILITY_OPTION_ID,
+            type: "bool",
+            default: true
+        }],
+        rules: rules.map(rule => addSearchStyleVisibilityGate(featureSearchRuleToStyleRule(rule)))
     };
     if (layerIds.length) {
         document["layer"] = canonicalLayerAffinityExpression(layerIds);
@@ -273,6 +282,8 @@ export function projectStyleSourceToQuick(source: string): QuickStyleProjection 
     const exactLayerIds = typeof rawLayer === "string"
         ? decodeCanonicalLayerAffinity(rawLayer)
         : undefined;
+    const usesSearchStyleVisibilityOption = category === "search"
+        && hasSearchStyleVisibilityOption(root["options"]);
     if (!Array.isArray(rawRules)) {
         throw new SearchStyleConversionError(["The stylesheet rules property must be a list."]);
     }
@@ -281,7 +292,7 @@ export function projectStyleSourceToQuick(source: string): QuickStyleProjection 
     const readOnlyRuleIndices: number[] = [];
     const warnings: QuickStyleWarning[] = [];
     rawRules.forEach((rawRule, sourceIndex) => {
-        const projected = projectRule(rawRule, sourceIndex);
+        const projected = projectRule(rawRule, sourceIndex, usesSearchStyleVisibilityOption);
         warnings.push(...projected.warnings);
         if (projected.rule) {
             editableRules.push({
@@ -302,6 +313,7 @@ export function projectStyleSourceToQuick(source: string): QuickStyleProjection 
                 ? {kind: "exact", layerIds: exactLayerIds}
                 : {kind: "custom", expression: rawLayer},
         category,
+        usesSearchStyleVisibilityOption,
         totalRuleCount: rawRules.length,
         editableRules,
         readOnlyRuleIndices,
@@ -314,9 +326,18 @@ export function updateStyleSourceMetadata(
     source: string,
     patch: QuickStyleMetadataPatch
 ): string {
-    const {document} = parseStyleDocument(source);
+    const {document, root} = parseStyleDocument(source);
     if (patch.name !== undefined) {
         document.set("name", patch.name);
+        const optionIndex = root["category"] === "search"
+            ? searchStyleVisibilityOptionIndex(root["options"])
+            : undefined;
+        if (optionIndex !== undefined) {
+            document.setIn(
+                ["options", optionIndex, "label"],
+                searchStyleVisibilityOptionLabel(patch.name)
+            );
+        }
     }
     if (patch.layerAffinity?.kind === "any") {
         document.delete("layer");
@@ -409,7 +430,8 @@ export function updateStyleSourceFromQuick(
             rawRules[projected.sourceIndex],
             projected.sourceIndex,
             projected.rule,
-            updated
+            updated,
+            projection.usesSearchStyleVisibilityOption
         );
     }
 
@@ -422,7 +444,13 @@ export function updateStyleSourceFromQuick(
     }
     for (const rule of added) {
         assertCanonicalSearchStyleRules([rule]);
-        document.addIn(["rules"], featureSearchRuleToStyleRule(rule));
+        const addedRule = featureSearchRuleToStyleRule(rule);
+        document.addIn(
+            ["rules"],
+            projection.usesSearchStyleVisibilityOption
+                ? addSearchStyleVisibilityGate(addedRule)
+                : addedRule
+        );
     }
     return document.toString({lineWidth: 120});
 }
@@ -453,12 +481,26 @@ interface ProjectedRuleResult {
     searchCompatible: boolean;
 }
 
-function projectRule(rawValue: unknown, sourceIndex: number): ProjectedRuleResult {
+function projectRule(
+    rawValue: unknown,
+    sourceIndex: number,
+    usesSearchStyleVisibilityOption = false
+): ProjectedRuleResult {
     const path = `rules[${sourceIndex}]`;
     if (!isRecord(rawValue)) {
         return readOnlyRule(sourceIndex, path, "rule-not-map", "is not a rule map.");
     }
-    const raw = rawValue;
+    const raw = {...rawValue};
+    if (usesSearchStyleVisibilityOption) {
+        for (const filterKey of ["filter", "attribute-filter"] as const) {
+            const stripped = removeSearchStyleVisibilityGate(raw[filterKey]);
+            if (stripped === undefined) {
+                delete raw[filterKey];
+            } else {
+                raw[filterKey] = stripped;
+            }
+        }
+    }
     if ("first-of" in raw || "all-of" in raw) {
         const branch = "first-of" in raw ? "first-of" : "all-of";
         return readOnlyRule(sourceIndex, `${path}.${branch}`, "branch-rule", `uses ${branch}; nested rule trees are read-only in Quick.`);
@@ -561,12 +603,16 @@ function patchProjectedRule(
     rawValue: unknown,
     sourceIndex: number,
     original: FeatureSearchStyleRule,
-    updated: FeatureSearchStyleRule
+    updated: FeatureSearchStyleRule,
+    usesSearchStyleVisibilityOption: boolean
 ): void {
     const raw = isRecord(rawValue) ? rawValue : {};
     const scope = raw["scope"] === "attribute" ? "attribute" : "feature";
     const target = featureSearchRuleToStyleRule(updated, scope);
     delete target["scope"];
+    if (usesSearchStyleVisibilityOption) {
+        addSearchStyleVisibilityGate(target);
+    }
     const path = (key: string) => ["rules", sourceIndex, key];
     const sync = (keys: string[]) => {
         for (const key of keys) {
@@ -620,6 +666,77 @@ function patchProjectedRule(
     if (original.labelBackgroundColor !== updated.labelBackgroundColor) {
         sync(["label-background-color"]);
     }
+}
+
+/** Builds the user-facing label while keeping the option's internal ID stable. */
+function searchStyleVisibilityOptionLabel(styleName: string): string {
+    return `Show ${styleName}`;
+}
+
+/** Finds only the generated, local Boolean option whose filter gate Quick owns. */
+function searchStyleVisibilityOptionIndex(value: unknown): number | undefined {
+    if (!Array.isArray(value)) {
+        return undefined;
+    }
+    const index = value.findIndex(option =>
+        isRecord(option)
+        && option["id"] === SEARCH_STYLE_VISIBILITY_OPTION_ID
+        && option["type"] === "bool");
+    return index >= 0 ? index : undefined;
+}
+
+/** Recognizes only the generated, local Boolean option whose filter gate Quick owns. */
+function hasSearchStyleVisibilityOption(value: unknown): boolean {
+    return searchStyleVisibilityOptionIndex(value) !== undefined;
+}
+
+/** Makes a saved stylesheet option functional by applying it to one flat rule. */
+function addSearchStyleVisibilityGate(rule: Record<string, unknown>): Record<string, unknown> {
+    const filterKey = rule["scope"] === "attribute" || rule["attribute-filter"] !== undefined
+        ? "attribute-filter"
+        : "filter";
+    const existingFilter = rule[filterKey];
+    rule[filterKey] = typeof existingFilter === "string" && existingFilter.trim()
+        ? `${SEARCH_STYLE_VISIBILITY_FILTER} and (${existingFilter})`
+        : SEARCH_STYLE_VISIBILITY_FILTER;
+    return rule;
+}
+
+/** Removes only the canonical generated gate before presenting a rule as detached/Quick data. */
+function removeSearchStyleVisibilityGate(value: unknown): unknown {
+    if (value === SEARCH_STYLE_VISIBILITY_FILTER) {
+        return undefined;
+    }
+    if (typeof value !== "string") {
+        return value;
+    }
+    const prefix = `${SEARCH_STYLE_VISIBILITY_FILTER} and (`;
+    if (!value.startsWith(prefix)) {
+        return value;
+    }
+    let depth = 1;
+    let quote = "";
+    for (let index = prefix.length; index < value.length; ++index) {
+        const character = value[index];
+        if (quote) {
+            if (character === "\\") {
+                ++index;
+            } else if (character === quote) {
+                quote = "";
+            }
+            continue;
+        }
+        if (character === "\"" || character === "'") {
+            quote = character;
+        } else if (character === "(") {
+            ++depth;
+        } else if (character === ")" && --depth === 0) {
+            return index === value.length - 1
+                ? value.slice(prefix.length, index)
+                : value;
+        }
+    }
+    return value;
 }
 
 function colorFromStyle(raw: Record<string, unknown>): FeatureSearchColorMode | undefined {

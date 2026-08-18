@@ -74,6 +74,8 @@ Use the **Maps & Layers** panel to:
 - control the OSM overlay and its opacity per view
 - add the right-hand split view for side-by-side comparison
 
+On desktop, the panel grows to accommodate wider control rows and can also be resized. Its width is capped by the viewport; horizontal scrolling is retained only as the narrow-screen or exceptionally-wide-content fallback.
+
 !!! note "Map grouping is controlled by map IDs"
     Slash-separated `mapId` values create group nodes in the layer tree. For example, `NDS.Live/Europe` places `Europe` under the parent group `NDS.Live`.
 
@@ -102,7 +104,7 @@ Click the diagnostics indicator to open its progress popover. From there you can
 
 Marker state is shared across views, so split-view comparisons can reference the same point.
 
-Use **Edit -> Preferences -> Show coordinates** to hide or show the complete coordinate readout. This preference stays in browser-local state and is not added to shared URLs or exported snapshots. A deployment may require coordinate-display terms; the first enable attempt then opens **Accept Legal Terms**. Accepting remembers consent and enables the panel. Refusing leaves it disabled and asks again on a later enable attempt.
+Use **Edit -> Preferences -> Show coordinates** to hide or show the complete coordinate readout. The marker enable/reset and focus buttons remain available even when that readout is disabled by a preference, deployment default, or unaccepted legal terms. The preference stays in browser-local state and is not added to shared URLs or exported snapshots. A deployment may require coordinate-display terms; the first enable attempt then opens **Accept Legal Terms**. Accepting remembers consent and enables the readout. Refusing leaves it disabled and asks again on a later enable attempt.
 
 ## Styles in the UI
 
@@ -143,7 +145,7 @@ Open **Edit -> Preferences** to access the main viewer preferences:
 - **Max Tiles to Load** limits how much data the current view may page in
 - **Max Inspections** controls how many locked inspection panels can stay open
 - **Location Matches** controls how many place-name search results the palette requests and displays; the default is 10 and the supported range is 1 to 50
-- **Show coordinates** controls whether the coordinate readout is present and, when configured by the deployment, requests acceptance of its legal terms
+- **Show coordinates** controls whether the coordinate readout is present and, when configured by the deployment, requests acceptance of its legal terms; it does not hide the marker controls
 - **Tile pull compression** toggles compressed tile downloads
 - **WebGL antialiasing** controls multisample rendering when the browser/device supports it
 - **High/Low-Fi Tile Threshold** controls the visible-tile-count cutoff between high- and low-fidelity rendering

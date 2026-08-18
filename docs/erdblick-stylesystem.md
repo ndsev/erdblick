@@ -39,14 +39,24 @@ with `category: search`, a checked-by-default **Enable this style upon save** ch
 layer-ID affinity. Empty affinity applies to any layer. The source is added directly to
 the Styles tree, marked with a **Search** tag, persisted through the normal
 imported-style mechanism, and exported through the normal style action. Its
-canonical source contains flat rules and no query, search scope, map ID, or
-separate JSON-library identity. Its optional `layer` metadata affects ordinary
-rendering but is not copied into a detached Feature Search rule template.
+canonical source contains flat rules, plus one `showSearchStyle` Boolean option
+that defaults on and gates every generated rule. This produces a real per-layer
+**Show &lt;stylesheet name&gt;** control in Maps & Layers. The option gate is plumbing: it
+is kept out of Quick rule controls and removed when a saved style is copied
+back into detached Feature Search rules. The source contains no query, search
+scope, map ID, or separate JSON-library identity. Its optional `layer` metadata
+affects ordinary rendering but is not copied into a detached Feature Search
+rule template.
+
+The root `default` and the generated Boolean option are deliberately distinct.
+Root `default` determines whether the whole stylesheet is enabled when first
+saved or loaded; `options[].default` seeds the per-layer control once that
+stylesheet is active.
 
 The Style Editor has **Quick** and **Advanced** tabs for every loaded base or
 search style. Its header switch controls the loaded style's current visible
 state directly and intentionally does not rewrite the YAML `default`. Quick
-exposes the root name, exact layer-affinity IDs, and the rule properties
+opens all rules initially and exposes the root name, exact layer-affinity IDs, and the rule properties
 supported by the current controls, updating the authoritative Advanced YAML on
 every change. No selected affinity means Any. A noncanonical regular expression
 is presented as Custom and is preserved until the user explicitly replaces it

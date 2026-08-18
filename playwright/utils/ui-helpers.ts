@@ -113,13 +113,11 @@ export async function revealPrefButtons(page: Page): Promise<Locator> {
 
 export async function clickPrefButton(page: Page, label: string): Promise<void> {
     const submenu = await revealPrefButtons(page);
-    const currentLabel = label === 'Preferences'
-        ? 'Settings'
-        : label === 'Styles'
-            ? 'Styles Configurator'
-            : label;
+    const currentLabels = label === 'Preferences'
+        ? ['Preferences', 'Settings']
+        : [label === 'Styles' ? 'Styles Configurator' : label];
     const button = submenu.getByRole('menuitem', {
-        name: menuItemNamePattern(currentLabel)
+        name: new RegExp(`(?:${currentLabels.map(escapeRegExp).join('|')})$`)
     }).first();
     await expect(button).toBeVisible();
     await button.click();
@@ -127,7 +125,7 @@ export async function clickPrefButton(page: Page, label: string): Promise<void> 
 
 export async function openPreferencesDialog(page: Page): Promise<Locator> {
     await clickPrefButton(page, 'Preferences');
-    const dialog = page.locator('.pref-dialog').first().locator('.p-dialog').first();
+    const dialog = page.getByRole('dialog', {name: 'Preferences'}).first();
     await expect(dialog).toBeVisible();
     return dialog;
 }

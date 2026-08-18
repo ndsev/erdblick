@@ -75,7 +75,7 @@ The `config/` directory used to build or host erdblick controls UI-side metadata
     - `xyz`: tiled raster sources with `urlTemplate`, `minZoom`, `maxZoom`, `tileSize`, optional `extent`, optional HTTP `headers`, and `defaultOpacity`. If `maxZoom` is omitted, erdblick now allows XYZ sources up to level 22; cap public providers explicitly when they stop earlier.
     - `wms`: deck.gl `WMSLayer` sources with `url`, `layers`, optional `version`, `crs`, `format`, `transparent`, optional HTTP `headers`, optional `vendorParameters`, and `defaultOpacity`.
   - `defaultBackgroundLayerId`: optional id of the background enabled by default for new views.
-  - `coordinates-enabled`: optional boolean default for the browser-local **Show coordinates** preference. The bundled default is `true`.
+  - `coordinates-enabled`: optional boolean default for the browser-local **Show coordinates** preference. The bundled default is `true`. This controls only the coordinate readout; marker enable/reset and focus controls remain available.
   - `coordinates-legal-terms`: optional browser-reachable JSON, YAML, or YML document containing a non-empty `legal-terms` string. Supplying it forces the initial coordinate display off until the user accepts the terms.
 - `config/styles/*.yaml`: style sheets that appear in the Styles dialog.
 - `config/*.js`: optional modules referenced from `config.json`.

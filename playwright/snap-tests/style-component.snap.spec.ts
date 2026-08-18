@@ -41,6 +41,8 @@ test.describe('Snapshot – style component', () => {
         await editButton.click();
         const editorDialog = page.getByTestId('style-editor-dialog').locator('.p-dialog').first();
         await expect(editorDialog).toBeVisible();
+        await expect(editorDialog.getByTestId('style-editor-header').locator('.app-surface-header'))
+            .toBeVisible();
         await expect(editorDialog.getByTestId('style-editor-enabled')).toBeVisible();
         await expect(editorDialog.getByTestId('style-editor-quick-name')).toBeVisible();
         await expect(editorDialog.getByTestId('style-editor-custom-affinity')).toBeVisible();

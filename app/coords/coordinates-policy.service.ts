@@ -5,7 +5,7 @@ import {AppStateService} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 
 @Injectable({providedIn: "root"})
-/** Enforces the local coordinate-panel preference and its optional legal gate. */
+/** Enforces the local coordinate-readout preference and its optional legal gate. */
 export class CoordinatesPolicyService implements OnDestroy {
     private readonly effectiveEnabledSubject = new BehaviorSubject(false);
     private readonly subscriptions = new Subscription();
@@ -30,7 +30,7 @@ export class CoordinatesPolicyService implements OnDestroy {
         this.refreshEffectiveState();
     }
 
-    /** Returns whether the coordinate panel may currently be displayed. */
+    /** Returns whether coordinate values may currently be displayed. */
     get effectiveEnabled(): boolean {
         return this.effectiveEnabledSubject.getValue();
     }
@@ -62,7 +62,7 @@ export class CoordinatesPolicyService implements OnDestroy {
         this.legalDialogVisible = true;
     }
 
-    /** Records acceptance, enables the coordinate panel, and closes the legal dialog. */
+    /** Records acceptance, enables the coordinate readout, and closes the legal dialog. */
     accept(): void {
         this.stateService.coordinatesLegalTermsAcceptedState.next(true);
         this.stateService.coordinatesEnabledState.next(true);
@@ -91,7 +91,7 @@ export class CoordinatesPolicyService implements OnDestroy {
         }
     }
 
-    /** Publishes the effective panel state after applying the loaded legal configuration. */
+    /** Publishes the effective readout state after applying the loaded legal configuration. */
     private refreshEffectiveState(): void {
         const coordinatesConfig = this.configService.snapshot.coordinates;
         const legalGateOpen = !coordinatesConfig.legalTermsUrl

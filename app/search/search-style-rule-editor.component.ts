@@ -357,6 +357,8 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
     @Input() showAddButton = true;
     @Input() showRuleNames = true;
     @Input() canRefreshValueSummaries = true;
+    @Input() expandRulesByDefault = false;
+    @Input() expansionContext = "";
     /** Source indices let Quick retain the authoritative YAML rule ordering. */
     @Input() sourceRuleIndices: Record<number, number> = {};
     @Input() readOnlyRuleIndices: number[] = [];
@@ -385,6 +387,7 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
         {label: "contains", value: "contains"}
     ];
     private readonly codec = new SearchStyleRuleDraftCodec();
+    private knownPanelValues = new Set<string>();
 
     /** Interleaves editable rows and Advanced-only placeholders in YAML order. */
     protected displayItems(): Array<{
@@ -421,8 +424,22 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
         if (changes["drafts"]) {
             this.drafts = this.codec.cloneDrafts(this.drafts);
             this.codec.synchronizeIds(this.drafts);
+        }
+        if (changes["drafts"] || changes["expandRulesByDefault"] || changes["expansionContext"]) {
             const panels = new Set(this.drafts.map(rule => this.panelValue(rule)));
-            this.accordionValue = this.accordionValue.filter(value => panels.has(value));
+            const contextChanged = !!changes["expansionContext"];
+            const expanded = contextChanged
+                ? []
+                : this.accordionValue.filter(value => panels.has(value));
+            if (this.expandRulesByDefault) {
+                for (const panel of panels) {
+                    if (contextChanged || !this.knownPanelValues.has(panel)) {
+                        expanded.push(panel);
+                    }
+                }
+            }
+            this.accordionValue = [...new Set(expanded)];
+            this.knownPanelValues = panels;
         }
     }
 
@@ -430,7 +447,10 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
     protected addStyleRule(): void {
         const rule = this.codec.createRule();
         this.drafts = [rule, ...this.drafts];
-        this.accordionValue = [this.panelValue(rule)];
+        const panel = this.panelValue(rule);
+        this.accordionValue = this.expandRulesByDefault
+            ? [...new Set([...this.accordionValue, panel])]
+            : [panel];
         this.emitDrafts();
     }
 
