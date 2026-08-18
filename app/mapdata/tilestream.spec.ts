@@ -46,21 +46,23 @@ function packedFrames(...frames: Uint8Array[]): ArrayBuffer {
 }
 
 describe('MapTileStreamClient', () => {
-    it('chunks one very large filter group at tile boundaries with aligned epochs', () => {
+    it('chunks one logical pending snapshot with aligned tile-indexed fields', () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;
         try {
-            const tileIds = Array.from({length: 100_000}, (_, index) => index + 1);
+            const tileIds = Array.from({length: 250_000}, (_, index) => index + 1);
             const request = {
                 mapId: "Map",
                 layerId: "Layer",
                 filterId: "large",
                 generation: 1,
-                deliveryEpoch: 1,
                 channels: [{channelId: "all", scope: "feature"}],
                 tileIds,
                 priorityTileIds: tileIds.slice(0, 200),
-                deliveryEpochs: tileIds.map(tileId => ({tileId, epoch: 2}))
+                roots: tileIds.slice(0, 200).map(tileId => ({
+                    tileId,
+                    featureId: `root-${tileId}`
+                }))
             };
 
             const payloads = tileStream.buildRequestPayloads([request], {}, 17);
@@ -78,8 +80,8 @@ describe('MapTileStreamClient', () => {
             expect(pieces.flatMap((piece: any) => piece.tileIds)).toEqual(tileIds);
             for (const piece of pieces) {
                 const membership = new Set(piece.tileIds);
-                expect(piece.deliveryEpochs.every((item: any) =>
-                    membership.has(item.tileId)
+                expect(piece.roots.every((root: any) =>
+                    membership.has(root.tileId)
                 )).toBe(true);
                 expect(piece.priorityTileIds.every((tileId: number) =>
                     membership.has(tileId)
@@ -90,44 +92,35 @@ describe('MapTileStreamClient', () => {
         }
     });
 
-    it('bounds sparse renewal envelopes without losing tile ids', () => {
+    it('can force an otherwise identical ordinary pending snapshot', async () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;
         try {
-            const tileIds = Array.from({length: 250_000}, (_, index) => index + 1);
-            const renewal = {
+            const request = {
                 mapId: "Map",
                 layerId: "Layer",
-                filterId: "large",
+                filterId: "styled",
                 generation: 1,
-                deliveryEpoch: 2,
-                channels: [{
-                    channelId: "all",
-                    scope: "feature",
-                    featureFilter: "x".repeat(4_096)
-                }],
-                tileIds
+                channels: [],
+                tileIds: [7]
             };
+            tileStream.sendSerializedRequests = vi.fn();
+            tileStream.waitForSend = vi.fn().mockResolvedValue(undefined);
 
-            const payloads = tileStream.buildRenewalPayloads([renewal]);
-            const renewed = payloads.flatMap((payload: string) =>
-                JSON.parse(payload).renewals
+            expect(await client.updateRequest([request])).toBe("sent");
+            expect(await client.updateRequest([request])).toBe("unchanged");
+            expect(await client.updateRequest([request], true)).toBe("sent");
+
+            expect(tileStream.sendSerializedRequests).toHaveBeenCalledTimes(2);
+            const sentPayloads = tileStream.sendSerializedRequests.mock.calls
+                .map((call: [string[]]) => JSON.parse(call[0][0]));
+            expect(sentPayloads.map((payload: any) => payload.requests)).toEqual([
+                [request],
+                [request]
+            ]);
+            expect(sentPayloads[1].requestId).toBeGreaterThan(
+                sentPayloads[0].requestId
             );
-
-            expect(payloads.length).toBeGreaterThan(1);
-            expect(payloads.every((payload: string) =>
-                new TextEncoder().encode(payload).byteLength <= 9 * 1024 * 1024
-            )).toBe(true);
-            expect(payloads.every((payload: string) =>
-                JSON.parse(payload).renewals.reduce(
-                    (count: number, item: any) => count + item.tileIds.length,
-                    0
-                ) <= 2_048
-            )).toBe(true);
-            expect(renewed.every((item: any) =>
-                item.tileIds.length <= 512
-            )).toBe(true);
-            expect(renewed.flatMap((item: any) => item.tileIds)).toEqual(tileIds);
         } finally {
             client.destroy();
         }
@@ -270,6 +263,10 @@ describe('MapTileStreamClient', () => {
             expect(new URL(tileStream.resolvePullUrl(7)).pathname).toBe('/interactive/payload');
 
             expect(tileStream.activateLegacyPullFallbackForStatus(404)).toBe(true);
+            expect(tileStream.activateLegacyPullFallbackForStatus(
+                404,
+                new URL('/interactive/payload', document.baseURI).toString()
+            )).toBe(true);
 
             const url = new URL(tileStream.resolvePullUrl(7));
             expect(url.pathname).toBe('/tiles/next');
@@ -280,6 +277,10 @@ describe('MapTileStreamClient', () => {
                 usingLegacyWebSocketFallback: false,
                 usingLegacyPullFallback: true
             });
+            expect(tileStream.activateLegacyPullFallbackForStatus(
+                404,
+                url.toString()
+            )).toBe(false);
         } finally {
             client.destroy();
         }
@@ -428,7 +429,7 @@ describe('MapTileStreamClient', () => {
         }
     });
 
-    it('rejects untagged statuses after observing protocol-3 request contexts', async () => {
+    it('rejects untagged statuses after observing versioned request contexts', async () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;
         const statusCallback = vi.fn();
@@ -538,12 +539,82 @@ describe('MapTileStreamClient', () => {
         }
     });
 
+    it('closes the connection after an undecodable VTLV message', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const close = vi.fn();
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            tileStream.socket = {readyState: 1, close};
+
+            tileStream.enqueueFrame(new ArrayBuffer(3));
+            await tileStream.frameMessageChain;
+
+            expect(close).toHaveBeenCalledWith(
+                1011,
+                "interactive transport failure"
+            );
+            expect(client.getPendingFrameQueueSize()).toBe(0);
+        } finally {
+            tileStream.socket = null;
+            client.destroy();
+            error.mockRestore();
+        }
+    });
+
+    it('closes on current subset admission failure but not benign rejection', () => {
+        const failingClient = new MapTileStreamClient('/interactive');
+        const failingStream = failingClient as any;
+        const failingClose = vi.fn();
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            failingStream.socket = {readyState: 1, close: failingClose};
+            failingClient.withSubsetsCallback(() => {
+                throw new Error("current subset could not be installed");
+            });
+
+            failingStream.handleFrame(
+                jsonFrame(MAP_TILE_STREAM_TYPE_SUBSETS, {tileId: 42}),
+                MAP_TILE_STREAM_TYPE_SUBSETS
+            );
+
+            expect(failingClose).toHaveBeenCalledWith(
+                1011,
+                "interactive transport failure"
+            );
+        } finally {
+            failingStream.socket = null;
+            failingClient.destroy();
+        }
+
+        const benignClient = new MapTileStreamClient('/interactive');
+        const benignStream = benignClient as any;
+        const benignClose = vi.fn();
+        try {
+            benignStream.socket = {readyState: 1, close: benignClose};
+            benignClient.withSubsetsCallback(() => {});
+
+            benignStream.handleFrame(
+                jsonFrame(MAP_TILE_STREAM_TYPE_SUBSETS, {tileId: 42}),
+                MAP_TILE_STREAM_TYPE_SUBSETS
+            );
+
+            expect(benignClose).not.toHaveBeenCalled();
+        } finally {
+            benignStream.socket = null;
+            benignClient.destroy();
+            error.mockRestore();
+        }
+    });
+
     it('reports incompatible VTLV frame versions before dispatching payloads', async () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;
         let mismatch: unknown = null;
         let statusReceived = false;
+        const close = vi.fn();
         try {
+            tileStream.socket = {readyState: 1, close};
             client.withProtocolMismatchCallback(payload => {
                 mismatch = payload;
             });
@@ -564,7 +635,15 @@ describe('MapTileStreamClient', () => {
                 }
             });
             expect(statusReceived).toBe(false);
+            expect(close).toHaveBeenCalledWith(
+                1002,
+                "unsupported mapget tile-stream protocol"
+            );
+            await expect(client.connect()).rejects.toThrow(
+                "incompatible tile-stream protocol"
+            );
         } finally {
+            tileStream.socket = null;
             client.destroy();
         }
     });

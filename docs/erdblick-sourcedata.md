@@ -62,7 +62,9 @@ tile-zero metadata layer `Metadata-Classic-tileContentIndexTable`. Results from
 multiple product databases are presented together and identify their physical
 source per row.
 
-When SourceData is opened from a feature node, erdblick tries to preselect the matching address range in the raw tree so you can line up the interpreted feature view with the original payload faster.
+When SourceData is opened from a feature node, erdblick preselects the matching
+address range, reopens its ancestor path even if that path was collapsed during
+an earlier visit, and scrolls the raw tree to the first matching row.
 
 ## Hints for Efficient Debugging
 

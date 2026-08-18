@@ -393,6 +393,7 @@ private:
     /** Assemble common record metadata from evaluated style and semantic state. */
     [[nodiscard]] GpuRecordStyle gpuRecordStyle(
         FeatureStyleRule const& rule,
+        BoundEvalFun const& evalFun,
         glm::fvec4 const& color,
         double zIndex,
         uint32_t legacyPickIndex) const;
@@ -416,6 +417,15 @@ private:
         glm::fvec4 const& color,
         double zIndex,
         uint32_t pickIndex);
+    /** Append one hollow screen-facing point glyph with an explicit pixel radius. */
+    void appendPointRing(
+        mapget::Point const& point,
+        float radius,
+        FeatureStyleRule const& rule,
+        BoundEvalFun const& evalFun,
+        glm::fvec4 const& color,
+        double zIndex,
+        uint32_t pickIndex);
     /** Append or request one style icon without falling back to point geometry. */
     void appendIcon(
         mapget::Point const& point,
@@ -430,6 +440,7 @@ private:
         std::vector<mapget::Point> const& points,
         std::vector<uint32_t> const& ringStarts,
         FeatureStyleRule const& rule,
+        BoundEvalFun const& evalFun,
         glm::fvec4 const& color,
         double zIndex,
         uint32_t pickIndex);
@@ -437,6 +448,7 @@ private:
     void appendMesh(
         std::vector<mapget::Point> const& points,
         FeatureStyleRule const& rule,
+        BoundEvalFun const& evalFun,
         glm::fvec4 const& color,
         double zIndex,
         uint32_t pickIndex);
@@ -444,6 +456,7 @@ private:
     GpuPathRecordHandle appendPath(
         std::vector<mapget::Point> const& points,
         FeatureStyleRule const& rule,
+        BoundEvalFun const& evalFun,
         glm::fvec4 const& color,
         double zIndex,
         uint32_t pickIndex,
@@ -453,7 +466,8 @@ private:
         std::span<glm::fvec2 const> lateralOffsetVectorsPx = {},
         float lateralOffsetScaleThreshold = 0.0f,
         bool simplificationApplied = false,
-        std::optional<GpuPathOverlay> pathOverlay = std::nullopt);
+        std::optional<GpuPathOverlay> pathOverlay = std::nullopt,
+        GpuScreenLengthAnchor screenLengthAnchor = GpuScreenLengthAnchor::None);
     /** Project WGS84 path points, discarding sub-pixel vertices first when allowed. */
     void projectPathPoints(
         std::span<mapget::Point const> points,
@@ -468,6 +482,7 @@ private:
         mapget::Point const& origin,
         mapget::Point const& size,
         FeatureStyleRule const& rule,
+        BoundEvalFun const& evalFun,
         glm::fvec4 const& color,
         double zIndex,
         uint32_t pickIndex);
@@ -525,6 +540,7 @@ private:
         transitionOffsetScaleGroups_;
     std::unordered_map<std::string, ChannelBinding> channelBindings_;
     uint64_t subsetMapDepthSeed_ = 0U;
+    uint64_t subsetSemanticGroupSeed_ = 0U;
     uint64_t currentDepthIdentity_ = 0U;
     uint32_t subsetDepthPhase_ = 0U;
 

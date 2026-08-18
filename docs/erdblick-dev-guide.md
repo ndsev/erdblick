@@ -2,7 +2,7 @@
 
 Erdblick is MapViewer's Angular/Deck.gl browser client plus a C++ core compiled
 to WebAssembly. This guide describes the S4E2 architecture introduced with
-mapget protocol 3.
+mapget protocol 4.
 
 ## Design boundary
 
@@ -144,11 +144,12 @@ view/controller disposes them.
 - one-shot feature-restricted inspection fetches.
 
 `FilterSubscriptionRef` has explicit replace, refresh, suspend/resume, and
-release operations. Replacement increments generation. A delivered frame is
-accepted only when `filterId`, generation, map/layer, and output tile match the
-active subscription. Within that semantic slot, `deliveryEpoch` orders TTL
-renewals: requesting a newer epoch does not invalidate an older in-flight
-delivery; only accepting a newer delivery makes an older one stale.
+release operations. It retains complete ordered presentation coverage
+separately from the exact output tiles still pending at mapget. Replacement
+increments generation. A delivered frame is acknowledged only after
+`filterId`, generation, current coverage, full map/layer/tile identity, and
+immutable-byte installation have succeeded. Same-generation refresh values
+are ordered by their absolute `conversionTimestamp + ttl` deadlines.
 
 `TileAttachmentRef` coalesces simultaneous requests and retains immutable bytes
 while referenced. Last release aborts/drops the value. There is no unpinned
@@ -204,7 +205,7 @@ sequenceDiagram
   Controller->>Styled: set ordered coverage/options/roots
   Styled->>Stream: replace filter definition + generation
   Stream->>WS: current logical request
-  WS->>Mapget: channels, bindings, ordered tiles
+  WS->>Mapget: channels, bindings, ordered pending tiles
   Mapget-->>WS: request context + status
   Stream->>Pull: long-poll(clientId, maxBytes)
   Mapget-->>Pull: VTLV subset/string-pool frames
@@ -218,7 +219,7 @@ The transport supports bounded outgoing queues and adaptive payload batches.
 `/tiles` and `/tiles/next` remain fallback aliases for stale proxy
 deployments; new clients use `/interactive` and `/interactive/payload`.
 
-### TTL renewal
+### TTL refresh
 
 Every retained `TileLayer` path reads the serialized conversion timestamp and
 optional TTL. Missing, zero, and negative TTL values are non-expiring. Positive
@@ -231,19 +232,19 @@ source-data panel. It uses one timer regardless of active tile count,
 `O(log A)` replacement/cancellation, and at most 512 expiry callbacks in one
 browser task for `A` finite-lifetime retained tiles.
 
-Due subset tiles advance their per-tile delivery epoch and enter a fair sparse
-renewal queue. At most 2,048 are in flight globally; each wire entry contains
-at most 512 tiles and each envelope at most 2,048. These are work-window bounds,
-not coverage limits: hundreds of thousands of active tiles remain queued and
-are drained without a whole-generation refresh or an `O(A)` TTL scan.
-Reconnect sends the authoritative full snapshot, including current per-tile
-epochs, before sparse renewals resume.
+When a subset expires, its immutable bytes remain presentation-eligible while
+the output re-enters pending membership. Erdblick sends the ordinary complete
+pending snapshot; there is no sparse renewal operation or wire delivery
+epoch. Expiry-triggered snapshots may bypass identical-body suppression so an
+already-expired handoff can be reconciled without an omission/re-add phase.
 
-There is deliberately no retry delay or backoff. An expired value remains
-visible while its renewal is pending or fails. A newly delivered value is
-installed even if its own deadline is already past, then scheduled at the
-strict expiry boundary. Late older values remain admissible until a newer
-delivery for the same output has been accepted; afterward they are discarded.
+A frontend-only `valueVersion` prevents an old heap token from expiring a
+newer installation. It does not order wire values. Same-generation deliveries
+with the same output identity are instead ordered by absolute semantic
+deadline: an older or equal deadline cannot replace the retained value or
+acknowledge pending work. A semantically fresher value may be installed even
+when it is already expired, in which case it remains stale and the output
+stays pending.
 
 ## Render pipeline
 
@@ -443,15 +444,19 @@ See [Style System](erdblick-stylesystem.md).
   produce terminal error state.
 - Long loops check cancellation at feature boundaries and fixed batches.
 - There is no datasource-wide snapshot/revision contract, so independently
-  renewed tiles need not form a transactionally consistent global snapshot.
-- TTL renewal has no backoff by design. A transport failure is reported and
-  the expired value remains visible; it does not start an unbounded retry loop.
-- Successful negative values with a positive TTL are renewable; values with
+  refreshed tiles need not form a transactionally consistent global snapshot.
+- An ambiguous payload fetch, undecodable VTLV message, or failure to install
+  a current subset closes the interactive connection. Ordinary reconnect
+  starts a fresh mapget session and resends the complete pending snapshot.
+- A VTLV protocol mismatch is terminal for that client rather than retried.
+- Successful negative values with a positive TTL are refreshable; values with
   no positive TTL remain durable for the lifetime of their owner.
 
 ## Protocol migration
 
-Protocol 3 and stylesheet schema 2 are clean breaks. Old staged cache blobs,
-stage-suffixed keys, LOD fields, `TileSearchResultLayer`, and full-feature
-visualizer APIs must not be reintroduced as compatibility paths. The URL
-decoder may discard an old stage suffix solely to restore older links.
+Protocol 4 and stylesheet schema 2 are clean breaks. Protocol 4 removes subset
+delivery epochs in favor of complete pending snapshots; no epoch-bearing
+compatibility parser exists. Old staged cache blobs, stage-suffixed keys, LOD
+fields, `TileSearchResultLayer`, and full-feature visualizer APIs must not be
+reintroduced as compatibility paths. The URL decoder may discard an old stage
+suffix solely to restore older links.

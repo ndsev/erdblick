@@ -15,8 +15,9 @@ import {
     FilterSubscriptionDefinition,
     FilterSubscriptionRef,
     TileAttachmentRef,
-    filterSubscriptionCoverageMembershipEqual,
+    filterSubscriptionCoverageEqual,
     type FilterChannelDefinition,
+    type FilterTileInstallResult,
     type TileSubsetDelivery
 } from "./filter-subscription.model";
 import {
@@ -52,6 +53,7 @@ export interface StyleFilterPlan {
 
 export type StyledMapgetLayerEvent =
     | {type: "tile-ready"; state: FilterTileState}
+    | {type: "tiles-pending"; states: readonly FilterTileState[]}
     | {type: "tiles-removed"; states: readonly FilterTileState[]}
     | {type: "generation"; generation: number}
     | {type: "status"; status: MapTileStreamFilterStatusPayload}
@@ -117,7 +119,10 @@ export class StyledMapgetLayer {
             this.filterDefinition(),
             this.coverage,
             {
-                onTile: delivery => this.acceptTile(delivery),
+                onTile: (delivery, remainsPending) =>
+                    this.acceptTile(delivery, remainsPending),
+                onTilesPending: (tileIds, generation) =>
+                    this.markTilesPending(tileIds, generation),
                 onStatus: status => this.acceptStatus(status),
                 onError: message => this.acceptError(message),
                 onRequestSynchronized: () => this.disposeRetiredTileStates()
@@ -156,7 +161,7 @@ export class StyledMapgetLayer {
             ...(priorityTileIds.length ? {priorityTileIds: [...priorityTileIds]} : {}),
             ...(roots?.length ? {roots: structuredClone(roots)} : {})
         };
-        if (filterSubscriptionCoverageMembershipEqual(
+        if (filterSubscriptionCoverageEqual(
             nextCoverage,
             this.coverage
         )) {
@@ -211,12 +216,11 @@ export class StyledMapgetLayer {
                 }
                 this.tileStates.set(tileId, state);
             }
+            if (this.filterRef.isPending(tileId)) {
+                state.markPending(this.generation);
+            }
             if (restored && state.status === "ready") {
                 this.events.next({type: "tile-ready", state});
-            } else if (!restored &&
-                       (this.generation !== previousGeneration ||
-                        state.status !== "ready")) {
-                state.markPending(this.generation);
             }
         }
         if (this.generation !== previousGeneration) {
@@ -354,16 +358,50 @@ export class StyledMapgetLayer {
     }
 
     /** Install a delivery only when its generation and tile are still demanded. */
-    private acceptTile(delivery: TileSubsetDelivery): void {
+    private acceptTile(
+        delivery: TileSubsetDelivery,
+        remainsPending: boolean
+    ): FilterTileInstallResult {
         if (this.disposed || delivery.generation !== this.generation) {
-            return;
+            return {status: "superseded"};
         }
         const state = this.tileStates.get(delivery.tileId);
         if (!state) {
+            return {status: "superseded"};
+        }
+        if (!state.install(delivery, remainsPending)) {
+            return {status: "superseded"};
+        }
+        const valueVersion = state.valueVersion;
+        try {
+            this.events.next({type: "tile-ready", state});
+        } catch (error) {
+            // Immutable-byte installation is the acceptance boundary.
+            // Presentation observers run downstream and cannot roll it back.
+            console.error("Subset presentation observer failed.", error);
+        }
+        return {status: "accepted", valueVersion};
+    }
+
+    /** Mark retained values stale while their ordinary replacement is pending. */
+    private markTilesPending(
+        tileIds: readonly number[],
+        generation: number
+    ): void {
+        if (this.disposed || generation !== this.generation) {
             return;
         }
-        state.install(delivery);
-        this.events.next({type: "tile-ready", state});
+        const states = tileIds.flatMap(tileId => {
+            const state = this.tileStates.get(tileId);
+            if (!state) {
+                return [];
+            }
+            state.markPending(generation);
+            return [state];
+        });
+        if (states.length) {
+            this.events.next({type: "tiles-pending", states});
+        }
     }
 
     /** Forward backend completion and convert status errors into tile failures. */

@@ -50,7 +50,7 @@ interface InspectionModelData {
     template: `
         <div style="position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; min-height: 0;">
             @if (loading) {
-                <div style="position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.55);">
+                <div style="position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--p-content-background) 55%, transparent);">
                     <p-progressSpinner ariaLabel="loading"/>
                 </div>
             }
@@ -142,9 +142,10 @@ export class FeaturePanelComponent implements OnDestroy {
     /** Re-reads GeoJSON and inspection trees from the selected feature values. */
     private rebuildInspectionTree() {
         const previousExpansionState = this.captureTreeExpansionState(this.treeData);
-        this.selectedFeatures = this.panel().features ?? [];
+        const panel = this.panel();
+        this.selectedFeatures = panel.features ?? [];
+        this.loading = panel.loading === true;
         if (!this.selectedFeatures.length) {
-            this.loading = false;
             this.geoJson = `{"type":"FeatureCollection","features":[]}`;
             this.featureIds = [];
             this.treeData = [];

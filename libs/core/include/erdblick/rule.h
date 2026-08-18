@@ -96,13 +96,23 @@ public:
     /** Selects how a relation helper line chooses its endpoint positions. */
     enum class RelationLineGeometry {
         Centers,
-        NearestEndpoints,
+        ConnectionStubs,
     };
 
-    /** Unit system used by the lateral component of line offsets. */
-    enum class LateralOffsetUnit {
+    /** Unit system used by authored physical or screen-space lengths. */
+    enum class LengthUnit {
         Meter,
         Pixel,
+    };
+
+    /** Backward-compatible name for the shared length unit contract. */
+    using LateralOffsetUnit = LengthUnit;
+
+    /** Selects a feature's function in semantic support/overlay ordering. */
+    enum class ZIndexRole {
+        None,
+        Support,
+        Overlay,
     };
 
     /** Describes how nested rule fragments are evaluated. */
@@ -175,14 +185,25 @@ public:
     [[nodiscard]] bool depthTest() const;
     /** Resolve the optional ordinal draw order used to separate coplanar geometry. */
     [[nodiscard]] std::optional<double> zIndex(BoundEvalFun const& evalFun) const;
+    /** Hash the optional typed semantic ordering-group expression. */
+    [[nodiscard]] std::optional<uint64_t> zIndexGroup(
+        BoundEvalFun const& evalFun) const;
+    /** Return the authored semantic ordering-group expression. */
+    [[nodiscard]] std::string const& zIndexGroupExpression() const;
+    /** Return whether this rule provides support geometry or a grouped overlay. */
+    [[nodiscard]] ZIndexRole zIndexRole() const;
     /** Return the billboard override, or `std::nullopt` to use renderer defaults. */
     [[nodiscard]] std::optional<bool> const& billboard() const;
     /** Report whether geometry should be flattened onto the 2D/ground plane. */
     [[nodiscard]] bool flat() const;
     /** Report whether polyline rendering should use a dash pattern. */
     [[nodiscard]] bool isDashed() const;
-    /** Return the dash segment length in pixels. */
-    [[nodiscard]] int dashLength() const;
+    /** Return the authored length of each visible dash segment. */
+    [[nodiscard]] float dashLength() const;
+    /** Return the authored length of each gap between dash segments. */
+    [[nodiscard]] float dashGap() const;
+    /** Return whether dash and gap lengths are measured in metres or pixels. */
+    [[nodiscard]] LengthUnit dashUnit() const;
     /** Return the color used for the "off" segments of dashed lines. */
     [[nodiscard]] glm::fvec4 const& gapColor() const;
     /** Return the 8-bit dash pattern mask. */
@@ -357,10 +378,14 @@ private:
     bool depthTest_ = true;
     std::optional<double> zIndex_;
     std::string zIndexExpression_;
+    std::string zIndexGroupExpression_;
+    ZIndexRole zIndexRole_ = ZIndexRole::None;
     std::optional<bool> billboard_;
     bool flat_ = false;
     bool dashed_ = false;
-    int dashLength_ = 16;
+    float dashLength_ = 16.0F;
+    float dashGap_ = 16.0F;
+    LengthUnit dashUnit_ = LengthUnit::Pixel;
     glm::fvec4 gapColor_{.0, .0, .0, 0.};
     int dashPattern_ = 255;
     Arrow arrow_ = NoArrow;
@@ -369,7 +394,7 @@ private:
     float outlineWidth_ = .0;
     glm::dvec3 offset_{.0, .0, .0};
     glm::dvec3 offsetIncrement_{.0, .0, .0};
-    LateralOffsetUnit lateralOffsetUnit_ = LateralOffsetUnit::Meter;
+    LengthUnit lateralOffsetUnit_ = LengthUnit::Meter;
     std::optional<glm::dvec3> pointMergeGridCellSize_;
 
     // Labels' rules

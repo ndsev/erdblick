@@ -52,7 +52,6 @@ export interface TileSubsetDelivery {
     readonly blob: Uint8Array;
     readonly filterId: string;
     readonly generation: number;
-    readonly deliveryEpoch: number;
     readonly mapId: string;
     readonly layerId: string;
     readonly tileId: number;
@@ -81,9 +80,21 @@ export interface TileSubsetDelivery {
     readonly receivedAt: number;
 }
 
+/** Result of attempting to install one semantically current subset value. */
+export type FilterTileInstallResult =
+    | {readonly status: "accepted"; readonly valueVersion: number}
+    | {readonly status: "superseded"};
+
+/** Outcome of routing one subset through the subscription admission boundary. */
+export type FilterSubsetAdmission = "accepted" | "benign-rejection";
+
 /** Consumer callbacks invoked only for the currently active generation. */
 export interface FilterSubscriptionCallbacks {
-    onTile(delivery: TileSubsetDelivery): void;
+    onTile(
+        delivery: TileSubsetDelivery,
+        remainsPending: boolean
+    ): FilterTileInstallResult;
+    onTilesPending?(tileIds: readonly number[], generation: number): void;
     onStatus?(status: MapTileStreamFilterStatusPayload): void;
     onError?(message: string): void;
     onRequestSynchronized?(): void;
@@ -96,20 +107,10 @@ export interface FilterSubscriptionOwner {
     updateFilterTileExpiry?(
         ref: FilterSubscriptionRef,
         tileId: number,
-        deliveryEpoch: number,
+        valueVersion: number,
         expiresAtMs: number | null
     ): void;
     cancelFilterTileExpiries?(ref: FilterSubscriptionRef, tileIds?: readonly number[]): void;
-    completeFilterTileRenewal?(
-        ref: FilterSubscriptionRef,
-        tileId: number,
-        deliveryEpoch: number
-    ): void;
-    renewFilterTiles?(
-        ref: FilterSubscriptionRef,
-        tileIds: readonly number[],
-        deliveryEpoch: number
-    ): void;
 }
 
 function cloneDefinition(definition: FilterSubscriptionDefinition): FilterSubscriptionDefinition {
@@ -138,22 +139,6 @@ function orderedValuesEqual<T>(
     const rightValues = right ?? [];
     return leftValues.length === rightValues.length &&
         leftValues.every((value, index) => value === rightValues[index]);
-}
-
-function unorderedValuesEqual<T>(
-    left: readonly T[] | undefined,
-    right: readonly T[] | undefined
-): boolean {
-    const leftValues = left ?? [];
-    const rightValues = right ?? [];
-    if (leftValues.length !== rightValues.length) {
-        return false;
-    }
-    const leftSet = new Set(leftValues);
-    const rightSet = new Set(rightValues);
-    return leftSet.size === leftValues.length &&
-        rightSet.size === rightValues.length &&
-        leftValues.every(value => rightSet.has(value));
 }
 
 function featureIdsEqual(
@@ -192,38 +177,22 @@ export function filterSubscriptionCoverageEqual(
 }
 
 /**
- * Compares output/priority membership while retaining exact root order.
- *
- * Presentation owners use this to avoid replacing an already-running request
- * merely because continuous camera motion slightly reordered the same tiles.
- * A later membership change still carries the newest priority order.
- */
-export function filterSubscriptionCoverageMembershipEqual(
-    left: FilterSubscriptionCoverage,
-    right: FilterSubscriptionCoverage
-): boolean {
-    return unorderedValuesEqual(left.tileIds, right.tileIds) &&
-        unorderedValuesEqual(left.priorityTileIds, right.priorityTileIds) &&
-        rootsEqual(left.roots, right.roots);
-}
-
-/**
  * One independently owned filter demand.
  *
  * Definition and exact-root replacement advance the semantic generation.
- * Tile coverage and priority changes retain it, allowing the transport to
- * preserve already delivered overlap. The transport never stores delivered
+ * Tile coverage and priority changes retain it, allowing mapget to preserve
+ * overlapping pending work. The transport never stores delivered
  * subsets: the callback receives the immutable byte value and its metadata.
  */
 export class FilterSubscriptionRef {
     private definitionValue: FilterSubscriptionDefinition;
     private coverageValue: FilterSubscriptionCoverage;
     private generationValue = 1;
-    private nextDeliveryEpochValue = 2;
     private releasedValue = false;
     private suspendedValue = false;
-    private readonly requestedEpochsByTile = new Map<number, number>();
-    private readonly deliveredEpochsByTile = new Map<number, number>();
+    private readonly coveredTileIds = new Set<number>();
+    private readonly pendingTileIds = new Set<number>();
+    private readonly acceptedValueVersionsByTile = new Map<number, number>();
     private readonly expiredWhileSuspended = new Map<number, number>();
 
     constructor(
@@ -235,7 +204,8 @@ export class FilterSubscriptionRef {
     ) {
         this.definitionValue = cloneDefinition(definition);
         this.coverageValue = cloneCoverage(coverage);
-        this.resetDeliveryEpochs();
+        this.resetCoveredTiles();
+        this.resetPendingTiles();
     }
 
     get generation(): number {
@@ -248,6 +218,23 @@ export class FilterSubscriptionRef {
 
     get suspended(): boolean {
         return this.suspendedValue;
+    }
+
+    /** Number of output keys currently projected into the backend snapshot. */
+    get pendingTileCount(): number {
+        return this.releasedValue || this.suspendedValue
+            ? 0
+            : this.pendingTileIds.size;
+    }
+
+    /** Returns whether one covered output is currently awaiting acceptance. */
+    isPending(tileId: number): boolean {
+        return this.pendingTileIds.has(Number(tileId));
+    }
+
+    /** Returns whether one output identity still belongs to current coverage. */
+    covers(tileId: number): boolean {
+        return this.coveredTileIds.has(Number(tileId));
     }
 
     /** Replaces both immutable definition and output coverage as one generation. */
@@ -264,6 +251,7 @@ export class FilterSubscriptionRef {
         }
         this.definitionValue = nextDefinition;
         this.coverageValue = nextCoverage;
+        this.resetCoveredTiles();
         this.advanceGeneration();
     }
 
@@ -281,18 +269,20 @@ export class FilterSubscriptionRef {
             nextCoverage.roots,
             this.coverageValue.roots
         );
+        const previousTileIds = new Set(this.coverageValue.tileIds);
         const nextTileIds = new Set(nextCoverage.tileIds);
-        const removedTileIds = [...this.requestedEpochsByTile.keys()]
+        const removedTileIds = [...previousTileIds]
             .filter(tileId => !nextTileIds.has(tileId));
         this.coverageValue = nextCoverage;
+        this.resetCoveredTiles();
         for (const tileId of removedTileIds) {
-            this.requestedEpochsByTile.delete(tileId);
-            this.deliveredEpochsByTile.delete(tileId);
+            this.pendingTileIds.delete(tileId);
+            this.acceptedValueVersionsByTile.delete(tileId);
             this.expiredWhileSuspended.delete(tileId);
         }
         for (const tileId of nextCoverage.tileIds) {
-            if (!this.requestedEpochsByTile.has(tileId)) {
-                this.requestedEpochsByTile.set(tileId, 1);
+            if (!previousTileIds.has(tileId)) {
+                this.pendingTileIds.add(tileId);
             }
         }
         if (removedTileIds.length) {
@@ -328,6 +318,21 @@ export class FilterSubscriptionRef {
             return;
         }
         this.suspendedValue = false;
+        const expiredTileIds = [...this.expiredWhileSuspended]
+            .filter(([tileId, valueVersion]) =>
+                this.acceptedValueVersionsByTile.get(tileId) === valueVersion
+            )
+            .map(([tileId]) => tileId);
+        this.expiredWhileSuspended.clear();
+        for (const tileId of expiredTileIds) {
+            this.pendingTileIds.add(tileId);
+        }
+        if (expiredTileIds.length) {
+            this.callbacks.onTilesPending?.(
+                expiredTileIds,
+                this.generationValue
+            );
+        }
         this.owner.updateFilterSubscription(this, true);
     }
 
@@ -343,93 +348,85 @@ export class FilterSubscriptionRef {
 
     /** Internal canonical request object serialized into `/interactive`. */
     requestJson(): Record<string, unknown> {
-        const deliveryEpochs = [...this.requestedEpochsByTile]
-            .filter(([, epoch]) => epoch !== 1)
-            .map(([tileId, epoch]) => ({tileId, epoch}));
-        return {
-            ...cloneDefinition(this.definitionValue),
-            ...cloneCoverage(this.coverageValue),
-            filterId: this.filterId,
-            generation: this.generationValue,
-            deliveryEpoch: 1,
-            ...(deliveryEpochs.length ? {deliveryEpochs} : {})
-        };
-    }
-
-    /** Internal sparse request object for one scheduler batch. */
-    renewalJson(
-        tileIds: readonly number[],
-        deliveryEpoch: number
-    ): Record<string, unknown> | null {
-        const retainedTileIds = tileIds.filter(tileId =>
-            this.requestedEpochsByTile.get(tileId) === deliveryEpoch
-        );
-        if (this.releasedValue || this.suspendedValue || !retainedTileIds.length) {
-            return null;
-        }
-        const retained = new Set(retainedTileIds);
+        const tileIds = this.coverageValue.tileIds
+            .filter(tileId => this.pendingTileIds.has(tileId));
+        const pending = new Set(tileIds);
         const priorityTileIds = (this.coverageValue.priorityTileIds ?? [])
-            .filter(tileId => retained.has(tileId));
+            .filter(tileId => pending.has(tileId));
         const roots = (this.coverageValue.roots ?? [])
-            .filter(root => retained.has(root.tileId));
+            .filter(root => pending.has(root.tileId));
         return {
             ...cloneDefinition(this.definitionValue),
-            tileIds: retainedTileIds,
+            tileIds,
             ...(priorityTileIds.length ? {priorityTileIds} : {}),
             ...(roots.length ? {roots: structuredClone(roots)} : {}),
             filterId: this.filterId,
-            generation: this.generationValue,
-            deliveryEpoch
+            generation: this.generationValue
         };
     }
 
-    /** Internal stale-safe delivery boundary. */
-    accept(delivery: TileSubsetDelivery): boolean {
-        const requestedEpoch = this.requestedEpochsByTile.get(delivery.tileId);
-        const deliveredEpoch = this.deliveredEpochsByTile.get(delivery.tileId);
+    /**
+     * Internal transactional delivery boundary.
+     *
+     * Superseded or no-longer-demanded frames are benign. Exceptions from the
+     * current-value install callback deliberately propagate to the transport,
+     * which must close the connection so mapget releases its handoff record.
+     */
+    accept(delivery: TileSubsetDelivery): FilterSubsetAdmission {
         if (this.releasedValue || this.suspendedValue ||
             delivery.generation !== this.generationValue ||
-            requestedEpoch === undefined ||
-            delivery.deliveryEpoch > requestedEpoch ||
-            (deliveredEpoch !== undefined &&
-             delivery.deliveryEpoch < deliveredEpoch)) {
-            return false;
+            !this.covers(delivery.tileId)) {
+            return "benign-rejection";
         }
-        this.deliveredEpochsByTile.set(
-            delivery.tileId,
-            Math.max(deliveredEpoch ?? 0, delivery.deliveryEpoch)
+        const expiresAtMs = delivery.conversionTimestampMs !== null &&
+            delivery.ttlMs !== null
+            ? delivery.conversionTimestampMs + delivery.ttlMs
+            : null;
+        const finiteExpiry = expiresAtMs !== null &&
+            Number.isFinite(expiresAtMs)
+            ? expiresAtMs
+            : null;
+        const remainsPending = finiteExpiry !== null &&
+            Date.now() > finiteExpiry;
+        const installResult = this.callbacks.onTile(
+            delivery,
+            remainsPending
         );
-        this.callbacks.onTile(delivery);
-        if (delivery.deliveryEpoch === requestedEpoch) {
-            const expiresAtMs = delivery.conversionTimestampMs !== null &&
-                delivery.ttlMs !== null
-                ? delivery.conversionTimestampMs + delivery.ttlMs
-                : null;
+        if (installResult.status === "superseded") {
+            return "benign-rejection";
+        }
+        this.acceptedValueVersionsByTile.set(
+            delivery.tileId,
+            installResult.valueVersion
+        );
+        if (remainsPending) {
+            this.pendingTileIds.add(delivery.tileId);
+            this.owner.cancelFilterTileExpiries?.(this, [delivery.tileId]);
+            // An already-expired handoff can leave the logical body unchanged,
+            // so bypass suppression and give mapget a fresh reconciliation.
+            this.owner.updateFilterSubscription(this, true);
+        } else {
+            this.pendingTileIds.delete(delivery.tileId);
             this.owner.updateFilterTileExpiry?.(
                 this,
                 delivery.tileId,
-                delivery.deliveryEpoch,
-                expiresAtMs !== null && Number.isFinite(expiresAtMs)
-                    ? expiresAtMs
-                    : null
+                installResult.valueVersion,
+                finiteExpiry
             );
-            this.owner.completeFilterTileRenewal?.(
-                this,
-                delivery.tileId,
-                delivery.deliveryEpoch
-            );
+            this.owner.updateFilterSubscription(this, false);
         }
-        return true;
+        return "accepted";
     }
 
-    /** Internal scheduler boundary; advances only tiles whose scheduled value is still current. */
-    expireTiles(tokens: ReadonlyArray<{tileId: number; deliveryEpoch: number}>): void {
+    /** Internal scheduler boundary; expires only the installed value incarnation. */
+    expireTiles(tokens: ReadonlyArray<{tileId: number; valueVersion: number}>): void {
         if (this.releasedValue) {
             return;
         }
         const tileIds = tokens
             .filter(token =>
-                this.requestedEpochsByTile.get(token.tileId) === token.deliveryEpoch
+                this.acceptedValueVersionsByTile.get(token.tileId) ===
+                    token.valueVersion
             )
             .map(token => token.tileId);
         if (!tileIds.length) {
@@ -437,17 +434,21 @@ export class FilterSubscriptionRef {
         }
         if (this.suspendedValue) {
             for (const token of tokens) {
-                if (this.requestedEpochsByTile.get(token.tileId) === token.deliveryEpoch) {
-                    this.expiredWhileSuspended.set(token.tileId, token.deliveryEpoch);
+                if (this.acceptedValueVersionsByTile.get(token.tileId) ===
+                    token.valueVersion) {
+                    this.expiredWhileSuspended.set(
+                        token.tileId,
+                        token.valueVersion
+                    );
                 }
             }
             return;
         }
-        const deliveryEpoch = this.nextDeliveryEpochValue++;
         for (const tileId of tileIds) {
-            this.requestedEpochsByTile.set(tileId, deliveryEpoch);
+            this.pendingTileIds.add(tileId);
         }
-        this.owner.renewFilterTiles?.(this, tileIds, deliveryEpoch);
+        this.callbacks.onTilesPending?.(tileIds, this.generationValue);
+        this.owner.updateFilterSubscription(this, true);
     }
 
     /** Internal generation-aware status boundary. */
@@ -473,29 +474,29 @@ export class FilterSubscriptionRef {
     notifyRequestSynchronized(): void {
         if (!this.releasedValue && !this.suspendedValue) {
             this.callbacks.onRequestSynchronized?.();
-            if (this.expiredWhileSuspended.size) {
-                const expired = [...this.expiredWhileSuspended]
-                    .map(([tileId, deliveryEpoch]) => ({tileId, deliveryEpoch}));
-                this.expiredWhileSuspended.clear();
-                this.expireTiles(expired);
-            }
         }
     }
 
     private advanceGeneration(): void {
         this.owner.cancelFilterTileExpiries?.(this);
         this.generationValue += 1;
-        this.resetDeliveryEpochs();
+        this.resetPendingTiles();
         this.owner.updateFilterSubscription(this, true);
     }
 
-    private resetDeliveryEpochs(): void {
-        this.requestedEpochsByTile.clear();
-        this.deliveredEpochsByTile.clear();
+    private resetPendingTiles(): void {
+        this.pendingTileIds.clear();
+        this.acceptedValueVersionsByTile.clear();
         this.expiredWhileSuspended.clear();
-        this.nextDeliveryEpochValue = 2;
         for (const tileId of this.coverageValue.tileIds) {
-            this.requestedEpochsByTile.set(tileId, 1);
+            this.pendingTileIds.add(tileId);
+        }
+    }
+
+    private resetCoveredTiles(): void {
+        this.coveredTileIds.clear();
+        for (const tileId of this.coverageValue.tileIds) {
+            this.coveredTileIds.add(tileId);
         }
     }
 

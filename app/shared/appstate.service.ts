@@ -158,6 +158,15 @@ export interface TileFeatureId {
 export interface HoverLabelFieldConfig {
     expression: string;
     customExpression: boolean;
+    /** Optional short key shown next to the value; the expression leaf is used when absent. */
+    displayKey?: string;
+}
+
+/** Derives the concise key used for a hover field when no override was configured. */
+export function defaultHoverLabelFieldKey(expression: string): string {
+    const trimmed = expression.trim();
+    const leaf = trimmed.split(".").filter(segment => segment.length).at(-1);
+    return leaf ?? trimmed;
 }
 
 /** Initial hover overlay preserves the previous feature-id-only behavior. */
@@ -182,6 +191,8 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     sourceData?: SelectedSourceData;
     color: string;
     undocked: boolean;
+    /** Runtime-only marker used while feature identities are resolving into inspectable wrappers. */
+    loading?: boolean;
 }
 
 /** Transient expansion state for one mounted inspection tree. */
@@ -1032,7 +1043,8 @@ export class AppStateService implements OnDestroy {
         defaultValue: DEFAULT_HOVER_LABEL_FIELDS.map(field => ({...field})),
         schema: z.array(z.object({
             expression: z.string(),
-            customExpression: Boolish
+            customExpression: Boolish,
+            displayKey: z.string().optional()
         }))
     });
 

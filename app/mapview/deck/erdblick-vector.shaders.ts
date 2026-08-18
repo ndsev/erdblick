@@ -9,6 +9,7 @@ export interface GpuSceneShaderProps {
   lookupTextureWidth: number;
   flattenZ: boolean;
   primitiveDepthBias: number;
+  semanticRole: number;
   disabledPickIndices: readonly number[];
 }
 
@@ -16,6 +17,7 @@ type GpuSceneShaderUniforms = {
   lookupTextureWidth: number;
   flattenZ: number;
   primitiveDepthBias: number;
+  semanticRole: number;
   disabledPickCount: number;
   disabledPickIndices0: Matrix4Values;
   disabledPickIndices1: Matrix4Values;
@@ -24,10 +26,22 @@ type GpuSceneShaderUniforms = {
 };
 
 type Matrix4Values = [
-  number, number, number, number,
-  number, number, number, number,
-  number, number, number, number,
-  number, number, number, number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
 ];
 
 const GPU_SCENE_VERTEX_SOURCE = `\
@@ -37,10 +51,14 @@ uniform highp sampler2D gpuSceneOriginTexture;
 uniform highp sampler2D gpuSceneContributionTexture;
 uniform highp sampler2D gpuSceneZIndexTexture;
 
+flat out float gpuScene_vSemanticGroup;
+flat out float gpuScene_vSemanticDepth;
+
 layout(std140) uniform gpuSceneUniforms {
   float lookupTextureWidth;
   float flattenZ;
   float primitiveDepthBias;
+  float semanticRole;
   float disabledPickCount;
   mat4 disabledPickIndices0;
   mat4 disabledPickIndices1;
@@ -213,18 +231,14 @@ bool gpuScene_isActive(
     activationToken == uint(contribution.z + 0.5);
 }
 
-float gpuScene_depthBias(
+vec4 gpuScene_zIndexMetadata(
     uint localZIndex,
-    vec4 contribution,
-    uint localPickIndex,
-    uint contributionSlot,
-    uint instanceIndex) {
+    vec4 contribution) {
   if (contribution.w < 0.0) {
-    return gpuScene.primitiveDepthBias;
+    return vec4(0.0);
   }
   uint zIndexSlot = uint(contribution.w + 0.5) + localZIndex;
-  vec4 ranked = gpuScene_lookup(gpuSceneZIndexTexture, zIndexSlot);
-  return gpuScene.primitiveDepthBias + ranked.x;
+  return gpuScene_lookup(gpuSceneZIndexTexture, zIndexSlot);
 }
 
 void gpuScene_applyDepthBias(
@@ -234,14 +248,19 @@ void gpuScene_applyDepthBias(
     uint localPickIndex,
     uint contributionSlot,
     uint instanceIndex) {
-  float bias = gpuScene_depthBias(
-    localZIndex,
-    contribution,
-    localPickIndex,
-    contributionSlot,
-    instanceIndex);
-  clipPosition.z -= bias * clipPosition.w;
+  vec4 ranked = gpuScene_zIndexMetadata(localZIndex, contribution);
+  gpuScene_vSemanticGroup = ranked.y;
+  gpuScene_vSemanticDepth = ranked.z;
+  if (gpuScene.semanticRole < 0.5) {
+    float bias = gpuScene.primitiveDepthBias + ranked.x;
+    clipPosition.z -= bias * clipPosition.w;
+  }
 }
+`;
+
+const GPU_SCENE_FRAGMENT_SOURCE = `\
+flat in float gpuScene_vSemanticGroup;
+flat in float gpuScene_vSemanticDepth;
 `;
 
 /** Pack one sixteen-index drill-picking suppression page into a shader matrix. */
@@ -250,7 +269,7 @@ function disabledMatrix(
   offset: number,
 ): Matrix4Values {
   return Array.from(
-    {length: 16},
+    { length: 16 },
     (_, index) => values[offset + index] ?? 0,
   ) as Matrix4Values;
 }
@@ -259,10 +278,12 @@ function disabledMatrix(
 export const gpuSceneShaderModule = {
   name: "gpuScene",
   vs: GPU_SCENE_VERTEX_SOURCE,
+  fs: GPU_SCENE_FRAGMENT_SOURCE,
   uniformTypes: {
     lookupTextureWidth: "f32",
     flattenZ: "f32",
     primitiveDepthBias: "f32",
+    semanticRole: "f32",
     disabledPickCount: "f32",
     disabledPickIndices0: "mat4x4<f32>",
     disabledPickIndices1: "mat4x4<f32>",
@@ -277,6 +298,7 @@ export const gpuSceneShaderModule = {
       props.lookupTextureWidth === undefined ||
       props.flattenZ === undefined ||
       props.primitiveDepthBias === undefined ||
+      props.semanticRole === undefined ||
       !props.disabledPickIndices
     ) {
       return {};
@@ -286,6 +308,7 @@ export const gpuSceneShaderModule = {
       lookupTextureWidth: props.lookupTextureWidth,
       flattenZ: props.flattenZ ? 1 : 0,
       primitiveDepthBias: props.primitiveDepthBias,
+      semanticRole: props.semanticRole,
       disabledPickCount: disabled.length,
       disabledPickIndices0: disabledMatrix(disabled, 0),
       disabledPickIndices1: disabledMatrix(disabled, 16),
@@ -297,6 +320,82 @@ export const gpuSceneShaderModule = {
     };
   },
 } as const satisfies ShaderModule<GpuSceneShaderProps, GpuSceneShaderUniforms>;
+
+/** Replace ordinary color with a semantic-group id while hardware records depth. */
+export const gpuSceneSemanticSupportShaderModule = {
+  name: "gpuSceneSemanticSupport",
+  fs: `\
+vec3 gpuSceneSemantic_packUint24(uint value) {
+  return vec3(
+    float(value & 255u),
+    float((value >> 8u) & 255u),
+    float((value >> 16u) & 255u)) / 255.0;
+}
+`,
+  inject: {
+    "fs:DECKGL_FILTER_COLOR": {
+      order: 99,
+      injection: `\
+  if (gpuScene_vSemanticGroup < 0.5) {
+    discard;
+  }
+  uint semanticGroup = uint(gpuScene_vSemanticGroup + 0.5);
+  color = vec4(gpuSceneSemantic_packUint24(semanticGroup), 1.0);
+`,
+    },
+  },
+} as const satisfies ShaderModule;
+
+/** Runtime support-buffer binding used while resolving semantic overlays. */
+export interface GpuSceneSemanticOverlayShaderProps {
+  supportGroupTexture: Texture;
+}
+
+type GpuSceneSemanticOverlayShaderBindings = {
+  gpuSceneSemanticOverlaySupportGroupTexture: Texture;
+};
+
+/** Keep only overlays whose group owns the physically nearest support pixel. */
+export const gpuSceneSemanticOverlayShaderModule = {
+  name: "gpuSceneSemanticOverlay",
+  fs: `\
+uniform highp sampler2D gpuSceneSemanticOverlaySupportGroupTexture;
+
+uint gpuSceneSemantic_unpackUint24(vec3 packed) {
+  uvec3 bytes = uvec3(floor(packed * 255.0 + 0.5));
+  return bytes.r | (bytes.g << 8u) | (bytes.b << 16u);
+}
+`,
+  inject: {
+    "fs:DECKGL_FILTER_COLOR": {
+      // Resolve group/depth before Deck replaces color with a pick identity.
+      order: 98,
+      injection: `\
+  ivec2 semanticCoordinate = ivec2(gl_FragCoord.xy);
+  uint supportGroup = gpuSceneSemantic_unpackUint24(texelFetch(
+    gpuSceneSemanticOverlaySupportGroupTexture,
+    semanticCoordinate,
+    0).rgb);
+  uint overlayGroup = uint(gpuScene_vSemanticGroup + 0.5);
+  if (overlayGroup == 0u || overlayGroup != supportGroup) {
+    discard;
+  }
+  gl_FragDepth = clamp(gpuScene_vSemanticDepth, 0.0, 1.0);
+`,
+    },
+  },
+  getUniforms: (props?: Partial<GpuSceneSemanticOverlayShaderProps>) =>
+    props?.supportGroupTexture
+      ? {
+          gpuSceneSemanticOverlaySupportGroupTexture:
+            props.supportGroupTexture,
+        }
+      : {},
+} as const satisfies ShaderModule<
+  GpuSceneSemanticOverlayShaderProps,
+  Record<never, never>,
+  GpuSceneSemanticOverlayShaderBindings
+>;
 
 /** Sparse mask mode installed on vector shaders without duplicating geometry. */
 export enum GpuSceneMaskMode {
@@ -451,6 +550,7 @@ in uvec4 instanceMetadata;
 
 out vec4 vColor;
 out vec2 vUnitPosition;
+out float vRadius;
 
 void main(void) {
   vec4 commonPosition;
@@ -470,6 +570,7 @@ void main(void) {
   vUnitPosition = positions.xy;
   geometry.uv = vUnitPosition;
   float radius = max(0.0, instanceRadius);
+  vRadius = radius;
   vec3 offset = positions * project_pixel_size(radius);
   offset = gpuScene_rotateCommonOffset(commonPosition, offset);
   geometry.position = commonPosition + vec4(offset, 0.0);
@@ -492,7 +593,7 @@ void main(void) {
 
 export const POINT_BILLBOARD_VERTEX_SHADER = POINT_VERTEX_SHADER.replace(
   `vec3 offset = positions * project_pixel_size(radius);\n  offset = gpuScene_rotateCommonOffset(commonPosition, offset);\n  geometry.position = commonPosition + vec4(offset, 0.0);\n  gl_Position = project_common_position_to_clipspace(geometry.position);`,
-  `geometry.position = commonPosition;\n  gl_Position = clipPosition;\n  gl_Position.xy += project_pixel_size_to_clipspace(positions.xy * radius);`,
+  `geometry.position = commonPosition;\n  gl_Position = clipPosition;\n  gl_Position.xy += project_pixel_size_to_clipspace(positions.xy * radius) * gl_Position.w;`,
 );
 
 export const POINT_FRAGMENT_SHADER = `\
@@ -502,7 +603,7 @@ precision highp float;
 
 in vec4 vColor;
 in vec2 vUnitPosition;
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
 
 void main(void) {
   geometry.uv = vUnitPosition;
@@ -512,6 +613,44 @@ void main(void) {
   }
   float alpha = 1.0 - smoothstep(0.96, 1.0, distanceToCenter);
   fragColor = vec4(vColor.rgb, vColor.a * alpha);
+  DECKGL_FILTER_COLOR(fragColor, geometry);
+}
+`;
+
+/** Hollow point glyph used when a topology relation has no drawable direction. */
+export const POINT_RING_FRAGMENT_SHADER = `\
+#version 300 es
+#define SHADER_NAME erdblick-gpu-point-ring-fragment
+precision highp float;
+
+in vec4 vColor;
+in vec2 vUnitPosition;
+in float vRadius;
+layout(location = 0) out vec4 fragColor;
+
+void main(void) {
+  geometry.uv = vUnitPosition;
+  float distanceToCenter = length(vUnitPosition);
+  if (distanceToCenter > 1.0) {
+    discard;
+  }
+  float feather = max(fwidth(distanceToCenter), 0.004);
+  float strokePixels = clamp(vRadius * 0.2, 1.5, 3.5);
+  float innerRadius = max(
+    0.0,
+    1.0 - strokePixels / max(vRadius, 0.0001));
+  if (distanceToCenter < innerRadius - feather) {
+    discard;
+  }
+  float outerAlpha = 1.0 - smoothstep(
+    1.0 - feather,
+    1.0,
+    distanceToCenter);
+  float innerAlpha = smoothstep(
+    innerRadius - feather,
+    innerRadius + feather,
+    distanceToCenter);
+  fragColor = vec4(vColor.rgb, vColor.a * outerAlpha * innerAlpha);
   DECKGL_FILTER_COLOR(fragColor, geometry);
 }
 `;
@@ -574,7 +713,7 @@ void main(void) {
 
 export const ICON_BILLBOARD_VERTEX_SHADER = ICON_VERTEX_SHADER.replace(
   `vec3 offset = vec3(pixelPosition * project_pixel_size(1.0), 0.0);\n  offset = gpuScene_rotateCommonOffset(commonPosition, offset);\n  geometry.position = commonPosition + vec4(offset, 0.0);\n  gl_Position = project_common_position_to_clipspace(geometry.position);`,
-  `geometry.position = commonPosition;\n  gl_Position = clipPosition;\n  gl_Position.xy += project_pixel_size_to_clipspace(pixelPosition);`,
+  `geometry.position = commonPosition;\n  gl_Position = clipPosition;\n  gl_Position.xy += project_pixel_size_to_clipspace(pixelPosition) * gl_Position.w;`,
 );
 
 export const ICON_FRAGMENT_SHADER = `\
@@ -586,7 +725,7 @@ uniform sampler2D gpuIconAtlasTexture;
 
 in vec4 vColor;
 in vec2 vUv;
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
 
 void main(void) {
   vec4 sampled = texture(gpuIconAtlasTexture, vUv);
@@ -596,6 +735,69 @@ void main(void) {
   }
   DECKGL_FILTER_COLOR(fragColor, geometry);
 }
+`;
+
+const BILLBOARD_MINIMUM_SCREEN_LENGTH_SHADER = `\
+#if defined(ERDBLICK_SCREEN_LENGTH_START_ANCHOR) || \
+    defined(ERDBLICK_SCREEN_LENGTH_END_ANCHOR) || \
+    defined(ERDBLICK_SCREEN_LENGTH_CENTER_ANCHOR)
+void gpuScene_applyMinimumScreenLength(
+    inout vec4 startClip,
+    inout vec4 endClip,
+    float width) {
+  vec2 segment = gpuScene_clipToPixels(endClip) -
+    gpuScene_clipToPixels(startClip);
+  float segmentLength = length(segment);
+  if (segmentLength <= 0.000000001) {
+    return;
+  }
+  float minimumLength = max(24.0, width * 6.0);
+  float extension = max(0.0, minimumLength - segmentLength);
+  vec2 extensionNdc = project_pixel_size_to_clipspace(
+    segment / segmentLength * extension);
+#ifdef ERDBLICK_SCREEN_LENGTH_START_ANCHOR
+  endClip.xy += extensionNdc * endClip.w;
+#elif defined(ERDBLICK_SCREEN_LENGTH_END_ANCHOR)
+  startClip.xy -= extensionNdc * startClip.w;
+#else
+  startClip.xy -= extensionNdc * startClip.w * 0.5;
+  endClip.xy += extensionNdc * endClip.w * 0.5;
+#endif
+}
+#endif
+`;
+
+const WORLD_MINIMUM_SCREEN_LENGTH_SHADER = `\
+#if defined(ERDBLICK_SCREEN_LENGTH_START_ANCHOR) || \
+    defined(ERDBLICK_SCREEN_LENGTH_END_ANCHOR) || \
+    defined(ERDBLICK_SCREEN_LENGTH_CENTER_ANCHOR)
+void gpuScene_applyMinimumWorldLength(
+    inout vec4 startCommon,
+    inout vec4 startClip,
+    inout vec4 endCommon,
+    inout vec4 endClip,
+    float width) {
+  vec2 projectedSegment = gpuScene_clipToPixels(endClip) -
+    gpuScene_clipToPixels(startClip);
+  float projectedLength = length(projectedSegment);
+  if (projectedLength <= 0.000000001) {
+    return;
+  }
+  float minimumLength = max(24.0, width * 6.0);
+  float extensionScale = max(0.0, minimumLength / projectedLength - 1.0);
+  vec3 extension = (endCommon.xyz - startCommon.xyz) * extensionScale;
+#ifdef ERDBLICK_SCREEN_LENGTH_START_ANCHOR
+  endCommon.xyz += extension;
+#elif defined(ERDBLICK_SCREEN_LENGTH_END_ANCHOR)
+  startCommon.xyz -= extension;
+#else
+  startCommon.xyz -= extension * 0.5;
+  endCommon.xyz += extension * 0.5;
+#endif
+  startClip = project_common_position_to_clipspace(startCommon);
+  endClip = project_common_position_to_clipspace(endCommon);
+}
+#endif
 `;
 
 const PATH_VERTEX_PREFIX = `\
@@ -621,12 +823,15 @@ in float instancePathWidth;
 #define instanceScalarOffsets vec4(0.0)
 #define instancePathStyle vec4(instancePathWidth, 1.0, 0.0, 0.0)
 #define instanceTrim vec2(0.0)
+#define instanceDashPhase 0.0
 #else
 in vec4 instanceOffsetVectors01;
 in vec4 instanceOffsetVectors23;
 in vec4 instanceScalarOffsets;
 in vec4 instancePathStyle;
-in vec2 instanceTrim;
+in vec3 instancePathMetrics;
+#define instanceTrim instancePathMetrics.xy
+#define instanceDashPhase instancePathMetrics.z
 #endif
 in uint instanceZIndex;
 in vec4 instanceColor;
@@ -643,6 +848,9 @@ out vec2 vPathPosition;
 out float vPathLength;
 out float vJointType;
 out vec2 vDashArray;
+#if !defined(ERDBLICK_COMPACT_PATH) && !defined(ERDBLICK_SIMPLE_PATH)
+out float vDashPosition;
+#endif
 flat out uint vPathFlags;
 #ifdef ERDBLICK_DUAL_STROKE
 flat out vec4 vInnerColor;
@@ -656,6 +864,7 @@ const uint PATH_VARIABLE_OFFSET = 8u;
 const uint PATH_DASHED = 16u;
 const uint PATH_TRIM_START = 32u;
 const uint PATH_TRIM_END = 64u;
+const uint PATH_DASH_METERS = 128u;
 
 float pathFlipIfTrue(bool flag) {
   return -(float(flag) * 2.0 - 1.0);
@@ -759,6 +968,8 @@ void pathClipLine(inout vec4 position, vec4 reference) {
   }
 }
 
+${BILLBOARD_MINIMUM_SCREEN_LENGTH_SHADER}
+
 vec2 pathScreenNormal(vec4 previous, vec4 next) {
   vec2 direction = gpuScene_clipToPixels(next) - gpuScene_clipToPixels(previous);
   float directionLength = length(direction);
@@ -814,25 +1025,33 @@ void main(void) {
   gpuScene_projectLocal(instanceEnd, instanceMetadata.x, common2, clip2);
   gpuScene_projectLocal(instanceNext, instanceMetadata.x, common3, clip3);
 
+#if defined(ERDBLICK_SCREEN_LENGTH_START_ANCHOR) || \
+    defined(ERDBLICK_SCREEN_LENGTH_END_ANCHOR) || \
+    defined(ERDBLICK_SCREEN_LENGTH_CENTER_ANCHOR)
+  gpuScene_applyMinimumScreenLength(clip1, clip2, instancePathStyle.x);
+  clip0 = clip1;
+  clip3 = clip2;
+#endif
+
   float offsetScale = gpuScene_offsetScale(instancePathStyle.w);
   if ((flags & PATH_VARIABLE_OFFSET) != 0u) {
     clip0.xy += project_pixel_size_to_clipspace(gpuScene_localVectorToScreen(
-      common0, clip0, instanceOffsetVectors01.xy * offsetScale));
+      common0, clip0, instanceOffsetVectors01.xy * offsetScale)) * clip0.w;
     clip1.xy += project_pixel_size_to_clipspace(gpuScene_localVectorToScreen(
-      common1, clip1, instanceOffsetVectors01.zw * offsetScale));
+      common1, clip1, instanceOffsetVectors01.zw * offsetScale)) * clip1.w;
     clip2.xy += project_pixel_size_to_clipspace(gpuScene_localVectorToScreen(
-      common2, clip2, instanceOffsetVectors23.xy * offsetScale));
+      common2, clip2, instanceOffsetVectors23.xy * offsetScale)) * clip2.w;
     clip3.xy += project_pixel_size_to_clipspace(gpuScene_localVectorToScreen(
-      common3, clip3, instanceOffsetVectors23.zw * offsetScale));
+      common3, clip3, instanceOffsetVectors23.zw * offsetScale)) * clip3.w;
   } else {
     vec2 offset0 = pathScreenNormal(clip0, clip1) * instanceScalarOffsets.x;
     vec2 offset1 = pathScreenNormal(clip0, clip2) * instanceScalarOffsets.y;
     vec2 offset2 = pathScreenNormal(clip1, clip3) * instanceScalarOffsets.z;
     vec2 offset3 = pathScreenNormal(clip2, clip3) * instanceScalarOffsets.w;
-    clip0.xy += project_pixel_size_to_clipspace(offset0);
-    clip1.xy += project_pixel_size_to_clipspace(offset1);
-    clip2.xy += project_pixel_size_to_clipspace(offset2);
-    clip3.xy += project_pixel_size_to_clipspace(offset3);
+    clip0.xy += project_pixel_size_to_clipspace(offset0) * clip0.w;
+    clip1.xy += project_pixel_size_to_clipspace(offset1) * clip1.w;
+    clip2.xy += project_pixel_size_to_clipspace(offset2) * clip2.w;
+    clip3.xy += project_pixel_size_to_clipspace(offset3) * clip3.w;
   }
 
   if ((flags & PATH_TRIM_START) != 0u) {
@@ -843,9 +1062,9 @@ void main(void) {
       ? segment / segmentPixels
       : vec2(0.0);
     vec2 trim = direction * min(instanceTrim.x, max(0.0, segmentPixels - 0.5));
-    vec2 trimClip = project_pixel_size_to_clipspace(trim);
-    clip0.xy += trimClip;
-    clip1.xy += trimClip;
+    vec2 trimNdc = project_pixel_size_to_clipspace(trim);
+    clip0.xy += trimNdc * clip0.w;
+    clip1.xy += trimNdc * clip1.w;
   }
   if ((flags & PATH_TRIM_END) != 0u) {
     vec2 segment = gpuScene_clipToPixels(clip2) -
@@ -855,11 +1074,15 @@ void main(void) {
       ? segment / segmentPixels
       : vec2(0.0);
     vec2 trim = direction * min(instanceTrim.y, max(0.0, segmentPixels - 0.5));
-    vec2 trimClip = project_pixel_size_to_clipspace(trim);
-    clip2.xy -= trimClip;
-    clip3.xy -= trimClip;
+    vec2 trimNdc = project_pixel_size_to_clipspace(trim);
+    clip2.xy -= trimNdc * clip2.w;
+    clip3.xy -= trimNdc * clip3.w;
   }
 
+#ifndef ERDBLICK_COMPACT_PATH
+  float dashSegmentPixels = length(
+    gpuScene_clipToPixels(clip2) - gpuScene_clipToPixels(clip1));
+#endif
   bool isEnd = positions.x > 0.0;
   vec4 previous = mix(clip0, clip1, float(isEnd));
   vec4 current = mix(clip1, clip2, float(isEnd));
@@ -877,6 +1100,16 @@ void main(void) {
     isEnd,
     flags,
     false);
+#ifndef ERDBLICK_COMPACT_PATH
+  float dashPositionPixels = vPathLength > PATH_EPSILON
+    ? vPathPosition.y * dashSegmentPixels / vPathLength
+    : 0.0;
+  float dashPositionMeters = instanceDashPhase +
+    (vPathLength > PATH_EPSILON
+      ? vPathPosition.y * length(instanceEnd.xy - instanceStart.xy) /
+        vPathLength
+      : 0.0);
+#endif
   geometry.position = current;
   gl_Position = vec4(current.xyz + offset * current.w, current.w);
   gpuScene_applyDepthBias(
@@ -890,6 +1123,14 @@ void main(void) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   }
   DECKGL_FILTER_GL_POSITION(gl_Position, geometry);
+#ifndef ERDBLICK_COMPACT_PATH
+  // Meter coordinates use ordinary perspective interpolation. Pixel
+  // coordinates are pre-multiplied so the fragment can recover screen-linear
+  // distance after interpolation.
+  vDashPosition = (flags & PATH_DASH_METERS) != 0u
+    ? dashPositionMeters
+    : dashPositionPixels * gl_Position.w;
+#endif
   vDashArray = (flags & PATH_DASHED) != 0u
     ? instancePathStyle.yz
     : vec2(1.0, 0.0);
@@ -898,6 +1139,8 @@ void main(void) {
 `;
 
 export const PATH_WORLD_VERTEX_SHADER = `${PATH_VERTEX_PREFIX}
+${WORLD_MINIMUM_SCREEN_LENGTH_SHADER}
+
 void main(void) {
   uint recordWord = instanceMetadata.w;
   uint flags = recordWord & GPU_SCENE_RECORD_FLAG_MASK;
@@ -909,14 +1152,29 @@ void main(void) {
     ? gpuScene_pickingColor(instanceMetadata.z, contribution)
     : vec3(0.0);
 
-  vec4 point0; vec4 unused0;
-  vec4 point1; vec4 unused1;
-  vec4 point2; vec4 unused2;
-  vec4 point3; vec4 unused3;
-  gpuScene_projectLocal(instancePrevious, instanceMetadata.x, point0, unused0);
-  gpuScene_projectLocal(instanceStart, instanceMetadata.x, point1, unused1);
-  gpuScene_projectLocal(instanceEnd, instanceMetadata.x, point2, unused2);
-  gpuScene_projectLocal(instanceNext, instanceMetadata.x, point3, unused3);
+  vec4 point0; vec4 clip0;
+  vec4 point1; vec4 clip1;
+  vec4 point2; vec4 clip2;
+  vec4 point3; vec4 clip3;
+  gpuScene_projectLocal(instancePrevious, instanceMetadata.x, point0, clip0);
+  gpuScene_projectLocal(instanceStart, instanceMetadata.x, point1, clip1);
+  gpuScene_projectLocal(instanceEnd, instanceMetadata.x, point2, clip2);
+  gpuScene_projectLocal(instanceNext, instanceMetadata.x, point3, clip3);
+
+#if defined(ERDBLICK_SCREEN_LENGTH_START_ANCHOR) || \
+    defined(ERDBLICK_SCREEN_LENGTH_END_ANCHOR) || \
+    defined(ERDBLICK_SCREEN_LENGTH_CENTER_ANCHOR)
+  gpuScene_applyMinimumWorldLength(
+    point1,
+    clip1,
+    point2,
+    clip2,
+    instancePathStyle.x);
+  point0 = point1;
+  clip0 = clip1;
+  point3 = point2;
+  clip3 = clip2;
+#endif
 
   float offsetScale = gpuScene_offsetScale(instancePathStyle.w);
   if ((flags & PATH_VARIABLE_OFFSET) != 0u) {
@@ -963,6 +1221,13 @@ void main(void) {
     point3.xy -= trim;
   }
 
+#ifndef ERDBLICK_COMPACT_PATH
+  vec4 dashStartClip = project_common_position_to_clipspace(point1);
+  vec4 dashEndClip = project_common_position_to_clipspace(point2);
+  float dashSegmentPixels = length(
+    gpuScene_clipToPixels(dashEndClip) -
+    gpuScene_clipToPixels(dashStartClip));
+#endif
   bool isEnd = positions.x > 0.0;
   vec4 previous = mix(point0, point1, float(isEnd));
   vec4 current = mix(point1, point2, float(isEnd));
@@ -977,6 +1242,16 @@ void main(void) {
     isEnd,
     flags,
     true);
+#ifndef ERDBLICK_COMPACT_PATH
+  float dashPositionPixels = vPathLength > PATH_EPSILON
+    ? vPathPosition.y * dashSegmentPixels / vPathLength
+    : 0.0;
+  float dashPositionMeters = instanceDashPhase +
+    (vPathLength > PATH_EPSILON
+      ? vPathPosition.y * length(instanceEnd.xy - instanceStart.xy) /
+        vPathLength
+      : 0.0);
+#endif
   geometry.position = current + vec4(offset, 0.0);
   gl_Position = project_common_position_to_clipspace(geometry.position);
   gpuScene_applyDepthBias(
@@ -990,6 +1265,14 @@ void main(void) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   }
   DECKGL_FILTER_GL_POSITION(gl_Position, geometry);
+#ifndef ERDBLICK_COMPACT_PATH
+  // Meter coordinates use ordinary perspective interpolation. Pixel
+  // coordinates are pre-multiplied so the fragment can recover screen-linear
+  // distance after interpolation.
+  vDashPosition = (flags & PATH_DASH_METERS) != 0u
+    ? dashPositionMeters
+    : dashPositionPixels * gl_Position.w;
+#endif
   vDashArray = (flags & PATH_DASHED) != 0u
     ? instancePathStyle.yz
     : vec2(1.0, 0.0);
@@ -1001,8 +1284,7 @@ void main(void) {
 function compactPathShader(shader: string): string {
   return shader.replace(
     "#define SHADER_NAME",
-    "#define ERDBLICK_COMPACT_PATH\n" +
-      "#define ERDBLICK_FAST_PATH\n#define SHADER_NAME",
+    "#define ERDBLICK_COMPACT_PATH\n#define SHADER_NAME",
   );
 }
 
@@ -1030,7 +1312,7 @@ flat in uint vPathFlags;
 flat in vec4 vInnerColor;
 flat in float vInnerWidthRatio;
 #endif
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
 
 const uint PATH_START_CAP = 2u;
 const uint PATH_END_CAP = 4u;
@@ -1112,18 +1394,20 @@ export const DUAL_COMPACT_PATH_WORLD_VERTEX_SHADER = dualStrokePathShader(
   COMPACT_PATH_WORLD_VERTEX_SHADER,
 );
 
-export const DUAL_COMPACT_PATH_FRAGMENT_SHADER = COMPACT_PATH_FRAGMENT_SHADER
-  .replace(
+export const DUAL_COMPACT_PATH_FRAGMENT_SHADER =
+  COMPACT_PATH_FRAGMENT_SHADER.replace(
     "#define SHADER_NAME",
     "#define ERDBLICK_DUAL_STROKE\n#define SHADER_NAME",
   );
 
 /** Compile a complete two-point path against the reduced record declaration. */
 function simplePathShader(main: string): string {
-  return PATH_VERTEX_PREFIX.replace(
-    "#define SHADER_NAME",
-    "#define ERDBLICK_SIMPLE_PATH\n#define SHADER_NAME",
-  ) + main;
+  return (
+    PATH_VERTEX_PREFIX.replace(
+      "#define SHADER_NAME",
+      "#define ERDBLICK_SIMPLE_PATH\n#define SHADER_NAME",
+    ) + main
+  );
 }
 
 export const SIMPLE_PATH_BILLBOARD_VERTEX_SHADER = simplePathShader(
@@ -1156,7 +1440,8 @@ void main(void) {
   vec4 currentClip = mix(startClip, endClip, float(isEnd));
   geometry.position = mix(startCommon, endCommon, float(isEnd));
   gl_Position = currentClip;
-  gl_Position.xy += project_pixel_size_to_clipspace(offsetPixels);
+  gl_Position.xy += project_pixel_size_to_clipspace(offsetPixels) *
+    gl_Position.w;
   gpuScene_applyDepthBias(
     gl_Position,
     instanceZIndex,
@@ -1240,7 +1525,7 @@ in float vPathLength;
 flat in vec4 vInnerColor;
 flat in float vInnerWidthRatio;
 #endif
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
 
 void main(void) {
   geometry.uv = vPathPosition;
@@ -1300,8 +1585,8 @@ export const DUAL_SIMPLE_PATH_WORLD_VERTEX_SHADER = dualSimplePathShader(
   SIMPLE_PATH_WORLD_VERTEX_SHADER,
 );
 
-export const DUAL_SIMPLE_PATH_FRAGMENT_SHADER = SIMPLE_PATH_FRAGMENT_SHADER
-  .replace(
+export const DUAL_SIMPLE_PATH_FRAGMENT_SHADER =
+  SIMPLE_PATH_FRAGMENT_SHADER.replace(
     "#define SHADER_NAME",
     "#define ERDBLICK_DUAL_STROKE\n#define SHADER_NAME",
   );
@@ -1318,7 +1603,11 @@ in vec2 vPathPosition;
 in float vPathLength;
 in float vJointType;
 in vec2 vDashArray;
-out vec4 fragColor;
+in float vDashPosition;
+flat in uint vPathFlags;
+layout(location = 0) out vec4 fragColor;
+
+const uint PATH_DASH_METERS = 128u;
 
 void main(void) {
   geometry.uv = vPathPosition;
@@ -1331,8 +1620,11 @@ void main(void) {
     }
   }
   float dashUnit = vDashArray.x + vDashArray.y;
+  float dashPosition = (vPathFlags & PATH_DASH_METERS) != 0u
+    ? vDashPosition
+    : vDashPosition * gl_FragCoord.w;
   if (dashUnit > 0.0 && vDashArray.y > 0.0 &&
-      mod(vPathPosition.y, dashUnit) > vDashArray.x) {
+      mod(dashPosition, dashUnit) > vDashArray.x) {
     discard;
   }
   fragColor = vColor;
@@ -1340,9 +1632,9 @@ void main(void) {
 }
 `;
 
-export const ARROW_VERTEX_SHADER = `\
+export const ARROW_BILLBOARD_VERTEX_SHADER = `\
 #version 300 es
-#define SHADER_NAME erdblick-gpu-arrow-vertex
+#define SHADER_NAME erdblick-gpu-arrow-billboard-vertex
 
 in vec2 positions;
 in vec3 instancePrevious;
@@ -1355,12 +1647,22 @@ in uvec4 instanceMetadata;
 
 out vec4 vColor;
 
+${BILLBOARD_MINIMUM_SCREEN_LENGTH_SHADER}
+
 void main(void) {
   vec4 previousCommon; vec4 previousClip;
   vec4 tipCommon; vec4 tipClip;
   gpuScene_projectLocal(
     instancePrevious, instanceMetadata.x, previousCommon, previousClip);
   gpuScene_projectLocal(instanceTip, instanceMetadata.x, tipCommon, tipClip);
+#if defined(ERDBLICK_SCREEN_LENGTH_START_ANCHOR) || \
+    defined(ERDBLICK_SCREEN_LENGTH_END_ANCHOR) || \
+    defined(ERDBLICK_SCREEN_LENGTH_CENTER_ANCHOR)
+  gpuScene_applyMinimumScreenLength(
+    previousClip,
+    tipClip,
+    instanceArrowStyle.y);
+#endif
   vec4 contribution = gpuScene_contribution(instanceMetadata.y);
   bool recordActive = gpuScene_isActive(
     instanceMetadata.w, contribution, instanceMetadata.z);
@@ -1382,8 +1684,9 @@ void main(void) {
       ? vec2(direction.y, -direction.x) / directionLength * instanceArrowStyle.x
       : vec2(0.0);
   }
-  previousClip.xy += project_pixel_size_to_clipspace(offsetPixels);
-  tipClip.xy += project_pixel_size_to_clipspace(offsetPixels);
+  previousClip.xy += project_pixel_size_to_clipspace(offsetPixels) *
+    previousClip.w;
+  tipClip.xy += project_pixel_size_to_clipspace(offsetPixels) * tipClip.w;
   vec2 tangent = gpuScene_clipToPixels(tipClip) -
     gpuScene_clipToPixels(previousClip);
   float tangentLength = length(tangent);
@@ -1396,7 +1699,91 @@ void main(void) {
     normal * positions.x * arrowSize + tangent * positions.y * arrowSize;
   geometry.position = tipCommon;
   gl_Position = tipClip;
-  gl_Position.xy += project_pixel_size_to_clipspace(triangleOffset);
+  gl_Position.xy += project_pixel_size_to_clipspace(triangleOffset) *
+    gl_Position.w;
+  gpuScene_applyDepthBias(
+    gl_Position,
+    instanceZIndex,
+    contribution,
+    instanceMetadata.z,
+    instanceMetadata.y,
+    uint(gl_InstanceID));
+  if (!recordActive) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  }
+  DECKGL_FILTER_GL_POSITION(gl_Position, geometry);
+  vColor = vec4(instanceColor.rgb, instanceColor.a * layer.opacity);
+  DECKGL_FILTER_COLOR(vColor, geometry);
+}
+`;
+
+export const ARROW_WORLD_VERTEX_SHADER = `\
+#version 300 es
+#define SHADER_NAME erdblick-gpu-arrow-world-vertex
+
+in vec2 positions;
+in vec3 instancePrevious;
+in vec3 instanceTip;
+in vec2 instanceOffsetVector;
+in vec3 instanceArrowStyle;
+in uint instanceZIndex;
+in vec4 instanceColor;
+in uvec4 instanceMetadata;
+
+out vec4 vColor;
+
+${WORLD_MINIMUM_SCREEN_LENGTH_SHADER}
+
+void main(void) {
+  vec4 previousCommon; vec4 previousClip;
+  vec4 tipCommon; vec4 tipClip;
+  gpuScene_projectLocal(
+    instancePrevious, instanceMetadata.x, previousCommon, previousClip);
+  gpuScene_projectLocal(instanceTip, instanceMetadata.x, tipCommon, tipClip);
+#if defined(ERDBLICK_SCREEN_LENGTH_START_ANCHOR) || \
+    defined(ERDBLICK_SCREEN_LENGTH_END_ANCHOR) || \
+    defined(ERDBLICK_SCREEN_LENGTH_CENTER_ANCHOR)
+  gpuScene_applyMinimumWorldLength(
+    previousCommon,
+    previousClip,
+    tipCommon,
+    tipClip,
+    instanceArrowStyle.y);
+#endif
+  vec4 contribution = gpuScene_contribution(instanceMetadata.y);
+  bool recordActive = gpuScene_isActive(
+    instanceMetadata.w, contribution, instanceMetadata.z);
+  geometry.pickingColor = recordActive
+    ? gpuScene_pickingColor(instanceMetadata.z, contribution)
+    : vec3(0.0);
+
+  vec2 tangent = tipCommon.xy - previousCommon.xy;
+  float tangentLength = length(tangent);
+  tangent = tangentLength > 0.000000001
+    ? tangent / tangentLength
+    : vec2(0.0, 1.0);
+  vec2 normal = vec2(-tangent.y, tangent.x);
+  float offsetScale = gpuScene_offsetScale(instanceArrowStyle.z);
+  vec3 commonOffset;
+  uint flags = instanceMetadata.w & GPU_SCENE_RECORD_FLAG_MASK;
+  if ((flags & 2u) != 0u) {
+    commonOffset = gpuScene_localVectorToCommon(
+      tipCommon,
+      instanceOffsetVector * offsetScale);
+  } else {
+    commonOffset = vec3(
+      normal * project_pixel_size(instanceArrowStyle.x),
+      0.0);
+  }
+  previousCommon.xyz += commonOffset;
+  tipCommon.xyz += commonOffset;
+
+  float arrowSize = project_pixel_size(
+    max(8.0, instanceArrowStyle.y * 4.0));
+  vec2 triangleOffset =
+    normal * positions.x * arrowSize + tangent * positions.y * arrowSize;
+  geometry.position = tipCommon + vec4(triangleOffset, 0.0, 0.0);
+  gl_Position = project_common_position_to_clipspace(geometry.position);
   gpuScene_applyDepthBias(
     gl_Position,
     instanceZIndex,
@@ -1418,7 +1805,7 @@ export const ARROW_FRAGMENT_SHADER = `\
 #define SHADER_NAME erdblick-gpu-arrow-fragment
 precision highp float;
 in vec4 vColor;
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
 void main(void) {
   fragColor = vColor;
   DECKGL_FILTER_COLOR(fragColor, geometry);
@@ -1476,7 +1863,7 @@ export const SURFACE_FRAGMENT_SHADER = `\
 #define SHADER_NAME erdblick-gpu-surface-fragment
 precision highp float;
 in vec4 vColor;
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
 void main(void) {
   fragColor = vColor;
   DECKGL_FILTER_COLOR(fragColor, geometry);

@@ -18,6 +18,7 @@ import {
     MIN_MAP_ZOOM_STEP,
     MIN_DRILL_PICK_RADIUS,
     AppStateService,
+    defaultHoverLabelFieldKey,
     DEFAULT_LOW_FI_TILE_THRESHOLD,
     MAX_TILE_SUBSET_RENDER_WORKER_COUNT,
     MAX_LOW_FI_TILE_THRESHOLD,
@@ -271,6 +272,15 @@ import type {
                                                           placeholder="Select field">
                                                 </p-select>
                                             }
+                                            <input class="hover-label-display-key"
+                                                   type="text"
+                                                   pInputText
+                                                   aria-label="Display key"
+                                                   title="Display key"
+                                                   [disabled]="field.expression.trim() === 'id'"
+                                                   [placeholder]="field.expression.trim() === 'id' ? 'No key' : defaultHoverLabelFieldKey(field.expression)"
+                                                   [ngModel]="field.displayKey ?? ''"
+                                                   (ngModelChange)="setHoverLabelDisplayKey($index, $event)"/>
                                             <p-button icon="pi pi-times"
                                                       size="small"
                                                       severity="danger"
@@ -677,6 +687,16 @@ export class PreferencesComponent implements OnInit, OnDestroy {
                 ? {...field, expression: expression ?? ""}
                 : field);
     }
+
+    /** Updates or clears the optional short key displayed beside one hover value. */
+    setHoverLabelDisplayKey(index: number, displayKey: string): void {
+        this.stateService.hoverLabelFields = this.hoverLabelFields.map(
+            (field, fieldIndex) => fieldIndex === index
+                ? {...field, displayKey: displayKey || undefined}
+                : field);
+    }
+
+    protected readonly defaultHoverLabelFieldKey = defaultHoverLabelFieldKey;
 
     /** Loads unique scalar feature fields from the shared schema worker. */
     private refreshHoverLabelFieldOptions(): void {

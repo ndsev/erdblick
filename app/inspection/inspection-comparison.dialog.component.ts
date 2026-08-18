@@ -420,11 +420,11 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     private async renewComparisonOwner(
         owner: ComparisonExpiryOwner,
-        tokens: ReadonlyArray<{tileId: number; deliveryEpoch: number}>
+        tokens: ReadonlyArray<{tileId: number; valueVersion: number}>
     ): Promise<void> {
         if (this.comparisonExpiryOwners.get(owner.key) !== owner ||
             owner.revision !== this.comparisonRevision ||
-            !tokens.some(token => token.deliveryEpoch === owner.epoch)) {
+            !tokens.some(token => token.valueVersion === owner.epoch)) {
             return;
         }
         let replacements: FeatureWrapper[];

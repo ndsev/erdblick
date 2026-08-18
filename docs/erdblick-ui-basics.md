@@ -146,6 +146,7 @@ Open **Edit -> Preferences** to access the main viewer preferences:
 - **Max Inspections** controls how many locked inspection panels can stay open
 - **Location Matches** controls how many place-name search results the palette requests and displays; the default is 10 and the supported range is 1 to 50
 - **Show coordinates** controls whether the coordinate readout is present and, when configured by the deployment, requests acceptance of its legal terms; it does not hide the marker controls
+- **Hover Labels** controls which feature fields appear above the coordinate readout; each value can use a short display key, which defaults to the final segment of its field expression, and its joined key/value pill follows the inspection value-bubble color, outline, and striping preferences
 - **Tile pull compression** toggles compressed tile downloads
 - **WebGL antialiasing** controls multisample rendering when the browser/device supports it
 - **High/Low-Fi Tile Threshold** controls the visible-tile-count cutoff between high- and low-fidelity rendering

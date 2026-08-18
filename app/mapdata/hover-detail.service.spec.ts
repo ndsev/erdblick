@@ -6,6 +6,7 @@ import type {
     HoverLabelFieldConfig,
     TileFeatureId
 } from "../shared/appstate.service";
+import {defaultHoverLabelFieldKey} from "../shared/appstate.service";
 import {HoverDetailService} from "./hover-detail.service";
 import {MapgetLayer} from "./mapget-layer.model";
 
@@ -34,6 +35,7 @@ function createHarness(
                 callbacks,
                 generation: 1,
                 suspended: false,
+                isPending: vi.fn(() => true),
                 setCoverage: vi.fn(),
                 replace: vi.fn(),
                 release: vi.fn(),
@@ -66,6 +68,11 @@ function createHarness(
 }
 
 describe("HoverDetailService", () => {
+    it("derives concise display keys from leaf field names", () => {
+        expect(defaultHoverLabelFieldKey("abc.speedLimit")).toBe("speedLimit");
+        expect(defaultHoverLabelFieldKey("typeId")).toBe("typeId");
+    });
+
     it("renders the intrinsic feature id without creating a filter subscription", () => {
         const {service, tileStream, mapgetLayer} = createHarness([{
             expression: "id",
@@ -83,7 +90,8 @@ describe("HoverDetailService", () => {
 
         expect(service.detailsFor(0, [target])).toEqual([{
             featureId: "Road.42",
-            fields: [{label: "Feature ID", value: "Road.42"}]
+            showFeatureId: true,
+            fields: []
         }]);
         expect(tileStream.createFilterSubscription).not.toHaveBeenCalled();
         service.ngOnDestroy();
@@ -209,12 +217,65 @@ describe("HoverDetailService", () => {
             featureId: "Road.42"
         }])).toEqual([{
             featureId: "Road.42",
+            showFeatureId: true,
             fields: [
-                {label: "Feature ID", value: "Road.42"},
-                {label: "typeId", value: "Road"}
+                {key: "typeId", value: "Road", colorKey: "typeId"}
             ]
         }]);
         expect(tileStream.parseMapTileKeySafe).toHaveBeenCalledOnce();
+        service.ngOnDestroy();
+    });
+
+    it("uses a configured display key for projected values", () => {
+        const {service, filterRefs, mapInfo, mapgetLayer} = createHarness([{
+            expression: "properties.rules.speedLimit",
+            customExpression: false,
+            displayKey: "limit"
+        }]);
+        const tileId = 545379780;
+        const mapTileKey = coreLib.getTileFeatureLayerKey("Map", "Road", tileId);
+        service.reconcileView(0, [{mapgetLayer, tileIds: [tileId], priorityTileIds: [tileId]}]);
+        mapInfo.tileLayerParser.readTileSubsetLayer.mockReturnValue({
+            channelSchema: vi.fn(() => ({
+                featureFields: ["properties.rules.speedLimit"],
+                entryCount: 1
+            })),
+            entryRange: vi.fn(() => [{
+                mapTileKey,
+                featureId: "Road.42",
+                resultIndex: 0,
+                values: [80]
+            }]),
+            delete: vi.fn()
+        });
+        filterRefs[0].callbacks.onTile({
+            blob: new Uint8Array([1]),
+            filterId: "hover-details",
+            generation: 1,
+            mapId: "Map",
+            layerId: "Road",
+            tileId,
+            mapTileKey,
+            stringPoolId: "pool",
+            dependencies: [],
+            issues: [],
+            info: {},
+            numEntries: 1,
+            geometryVertexCount: 0,
+            glbAttachmentName: "",
+            receivedAt: 1
+        });
+
+        expect(service.detailsFor(0, [{mapTileKey, featureId: "Road.42"}]))
+            .toEqual([{
+                featureId: "Road.42",
+                showFeatureId: false,
+                fields: [{
+                    key: "limit",
+                    value: "80",
+                    colorKey: "properties.rules.speedLimit"
+                }]
+            }]);
         service.ngOnDestroy();
     });
 });

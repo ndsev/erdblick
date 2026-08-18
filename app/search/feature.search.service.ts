@@ -59,7 +59,7 @@ import {
     type StyledMapgetLayerEvent
 } from "../mapdata/styled-mapget-layer.model";
 import {
-    filterSubscriptionCoverageMembershipEqual,
+    filterSubscriptionCoverageEqual,
     type FilterSubscriptionCoverage
 } from "../mapdata/filter-subscription.model";
 import type {FilterTileState} from "../mapdata/filter-tile-state.model";
@@ -1569,7 +1569,7 @@ export class FeatureSearchService {
                         presentation.mapgetLayer
                     );
                     if (!presentation.coverage ||
-                        !filterSubscriptionCoverageMembershipEqual(
+                        !filterSubscriptionCoverageEqual(
                             coverage,
                             presentation.coverage
                         )) {
@@ -1752,7 +1752,9 @@ export class FeatureSearchService {
             }
             total += presentation.styledLayer.tileStates.size;
             completed += [...presentation.styledLayer.tileStates.values()]
-                .filter(state => state.status === "ready").length;
+                .filter(state =>
+                    state.status === "ready" && !state.backendPending
+                ).length;
         }
         session.progressTotal = Math.max(1, total);
         session.progressDone = total === 0 ? 1 : completed;
@@ -2672,6 +2674,10 @@ export class FeatureSearchService {
             this.applySearchCoverageSnapshot(session.id);
             return;
         }
+        if (event.type === "tiles-pending") {
+            this.applySearchCoverageSnapshot(session.id);
+            return;
+        }
         if (event.type !== "tile-ready") {
             return;
         }
@@ -2839,7 +2845,7 @@ export class FeatureSearchService {
         return task.offset >= task.resultCount;
     }
 
-    /** Aggregates protocol-3 filter progress across a search's source layers. */
+    /** Aggregates interactive filter progress across a search's source layers. */
     private applyFilterSearchStatus(
         presentation: SearchStyledPresentation,
         status: MapTileStreamFilterStatusPayload

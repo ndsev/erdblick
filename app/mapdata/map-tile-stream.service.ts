@@ -39,7 +39,7 @@ import {TileExpiryScheduler} from "./tile-expiry-scheduler";
 export interface RetainedTileExpiryOwner {
     expireTiles(tokens: ReadonlyArray<{
         tileId: number;
-        deliveryEpoch: number;
+        valueVersion: number;
     }>): void;
 }
 
@@ -51,7 +51,7 @@ export interface BackendRequestProgress {
 }
 
 /**
- * Owns protocol-3 filter transport and attachment refs.
+ * Owns interactive filter transport and attachment refs.
  *
  * Delivered subsets are transferred directly to their subscription owner.
  * Complete feature data is fetched only through feature-restricted, one-shot
@@ -71,22 +71,11 @@ export class MapTileStreamService {
     private updatePending = false;
     private updateInProgress = false;
     private updateRequestedWhilePaused = false;
+    private forceNextUpdate = false;
     private readonly tileExpiryScheduler =
         new TileExpiryScheduler<RetainedTileExpiryOwner>(
             (owner, tokens) => owner.expireTiles(tokens)
         );
-    private pendingFilterRenewals: Array<{
-        ref: FilterSubscriptionRef;
-        tileIds: number[];
-        deliveryEpoch: number;
-    }> = [];
-    private renewalTimer: ReturnType<typeof setTimeout> | null = null;
-    private readonly renewalTilesInFlight =
-        new Map<FilterSubscriptionRef, Map<number, number>>();
-    private renewalTilesInFlightCount = 0;
-    private lastDispatchedRenewalRef: FilterSubscriptionRef | null = null;
-    private readonly maxRenewalTilesInFlight = 2048;
-    private readonly maxRenewalTilesPerOwnerSlice = 512;
     private readonly updateDebounceMs = 25;
     private lastUpdateAt = 0;
     private backendRequestProgress: BackendRequestProgress = {
@@ -153,8 +142,8 @@ export class MapTileStreamService {
             this.backendProtocolMismatchActive = false;
             this.messageService.clearBackendConnectionError();
             this.messageService.clearBackendProtocolError();
-            // A websocket reconnect creates a blank server-side session. The
-            // authoritative full snapshot must arrive before sparse renewals.
+            // A websocket reconnect creates a blank server-side session, so
+            // resend the authoritative complete pending-work snapshot.
             this.scheduleUpdate();
         });
         this.tileStream.onProtocolMismatch = mismatch => {
@@ -182,6 +171,9 @@ export class MapTileStreamService {
                 this.showBackendConnectionError(
                     `The map backend connection was closed${detail}.`
                 );
+            }
+            if (!this.backendProtocolMismatchActive) {
+                this.scheduleUpdate();
             }
         };
         await this.mapInfo.reloadDataSources();
@@ -218,10 +210,11 @@ export class MapTileStreamService {
 
     updateFilterSubscription(
         ref: FilterSubscriptionRef,
-        _force: boolean
+        force: boolean
     ): void {
         if (!ref.released &&
             this.filterSubscriptionsById.get(ref.filterId) === ref) {
+            this.forceNextUpdate ||= force;
             this.scheduleUpdate();
         }
     }
@@ -229,7 +222,7 @@ export class MapTileStreamService {
     updateFilterTileExpiry(
         ref: FilterSubscriptionRef,
         tileId: number,
-        deliveryEpoch: number,
+        valueVersion: number,
         expiresAtMs: number | null
     ): void {
         if (this.filterSubscriptionsById.get(ref.filterId) !== ref ||
@@ -243,7 +236,7 @@ export class MapTileStreamService {
         this.tileExpiryScheduler.schedule(
             ref,
             tileId,
-            deliveryEpoch,
+            valueVersion,
             expiresAtMs
         );
     }
@@ -252,7 +245,7 @@ export class MapTileStreamService {
     updateRetainedTileExpiry(
         owner: RetainedTileExpiryOwner,
         tileId: number,
-        deliveryEpoch: number,
+        valueVersion: number,
         expiresAtMs: number | null
     ): void {
         // This value came from an explicit request which just completed. If
@@ -265,7 +258,7 @@ export class MapTileStreamService {
         this.tileExpiryScheduler.schedule(
             owner,
             tileId,
-            deliveryEpoch,
+            valueVersion,
             expiresAtMs
         );
     }
@@ -281,81 +274,12 @@ export class MapTileStreamService {
         tileIds?: readonly number[]
     ): void {
         if (tileIds) {
-            const removed = new Set(tileIds.map(Number));
             for (const tileId of tileIds) {
                 this.tileExpiryScheduler.cancel(ref, tileId);
-            }
-            this.pendingFilterRenewals = this.pendingFilterRenewals
-                .map(renewal => renewal.ref === ref
-                    ? {
-                        ...renewal,
-                        tileIds: renewal.tileIds.filter(tileId =>
-                            !removed.has(tileId)
-                        )
-                    }
-                    : renewal
-                )
-                .filter(renewal => renewal.tileIds.length > 0);
-            for (const tileId of removed) {
-                this.forgetInFlightRenewal(ref, tileId);
             }
             return;
         }
         this.tileExpiryScheduler.cancelOwner(ref);
-        this.pendingFilterRenewals = this.pendingFilterRenewals
-            .filter(renewal => renewal.ref !== ref);
-        const inFlight = this.renewalTilesInFlight.get(ref);
-        if (inFlight) {
-            this.renewalTilesInFlightCount = Math.max(
-                0,
-                this.renewalTilesInFlightCount - inFlight.size
-            );
-            this.renewalTilesInFlight.delete(ref);
-        }
-        this.scheduleRenewalFlush();
-    }
-
-    completeFilterTileRenewal(
-        ref: FilterSubscriptionRef,
-        tileId: number,
-        deliveryEpoch: number
-    ): void {
-        const inFlight = this.renewalTilesInFlight.get(ref);
-        if (inFlight?.get(tileId) !== deliveryEpoch) {
-            return;
-        }
-        this.forgetInFlightRenewal(ref, tileId);
-        this.scheduleRenewalFlush();
-    }
-
-    renewFilterTiles(
-        ref: FilterSubscriptionRef,
-        tileIds: readonly number[],
-        deliveryEpoch: number
-    ): void {
-        if (this.filterSubscriptionsById.get(ref.filterId) !== ref ||
-            ref.released || !tileIds.length) {
-            return;
-        }
-        const existing = this.pendingFilterRenewals.find(renewal =>
-            renewal.ref === ref && renewal.deliveryEpoch === deliveryEpoch
-        );
-        if (existing) {
-            const membership = new Set(existing.tileIds);
-            for (const tileId of tileIds) {
-                if (!membership.has(tileId)) {
-                    membership.add(tileId);
-                    existing.tileIds.push(tileId);
-                }
-            }
-        } else {
-            this.pendingFilterRenewals.push({
-                ref,
-                tileIds: [...tileIds],
-                deliveryEpoch
-            });
-        }
-        this.scheduleRenewalFlush();
     }
 
     releaseFilterSubscription(ref: FilterSubscriptionRef): void {
@@ -776,7 +700,6 @@ export class MapTileStreamService {
             this.updateRequestedWhilePaused = false;
             this.scheduleUpdate();
         }
-        this.scheduleRenewalFlush();
     }
 
     toggleTilePipelinePause(source: string = "diagnostics"): void {
@@ -839,15 +762,10 @@ export class MapTileStreamService {
             updateInProgress: this.updateInProgress,
             transport: this.tileStream?.getDebugState() ?? null,
             backendRequestProgress: this.getBackendRequestProgress(),
-            ttlRenewal: {
+            tileExpiry: {
                 scheduledTiles: this.tileExpiryScheduler.size,
-                queuedBatches: this.pendingFilterRenewals.length,
-                queuedTiles: this.pendingFilterRenewals.reduce(
-                    (count, renewal) => count + renewal.tileIds.length,
-                    0
-                ),
-                inFlightTiles: this.renewalTilesInFlightCount,
-                maxInFlightTiles: this.maxRenewalTilesInFlight
+                pendingFilterTiles: [...this.filterSubscriptionsById.values()]
+                    .reduce((count, ref) => count + ref.pendingTileCount, 0)
             },
             activeFilters: [...this.filterSubscriptionsById.values()].map(ref => ({
                 filterId: ref.filterId,
@@ -890,6 +808,8 @@ export class MapTileStreamService {
         }
         this.updateInProgress = true;
         this.updatePending = false;
+        const force = this.forceNextUpdate;
+        this.forceNextUpdate = false;
         try {
             const activeRefs = [...this.filterSubscriptionsById.values()]
                 .filter(ref => !ref.released && !ref.suspended);
@@ -903,12 +823,7 @@ export class MapTileStreamService {
                     request["tileIds"].length > 0
                 );
             const updateResult =
-                await this.tileStream?.updateRequest(requests);
-            if (updateResult === "sent") {
-                // The complete snapshot carries every current per-tile epoch,
-                // so queued sparse messages for the same state are redundant.
-                this.pendingFilterRenewals = [];
-            }
+                await this.tileStream?.updateRequest(requests, force);
             if (updateResult && updateResult !== "failed") {
                 for (const ref of activeRefs) {
                     if (this.filterSubscriptionsById.get(ref.filterId) === ref) {
@@ -927,159 +842,12 @@ export class MapTileStreamService {
                     ? this.viewportLoadStartedAtMs
                     : null;
             }
-            if (updateResult && updateResult !== "failed") {
-                this.scheduleRenewalFlush();
-            }
         } finally {
             this.updateInProgress = false;
             this.lastUpdateAt = Date.now();
             if (this.updatePending) {
                 this.scheduleUpdate();
             }
-        }
-    }
-
-    private scheduleRenewalFlush(): void {
-        if (this.tilePipelinePaused ||
-            this.renewalTimer !== null ||
-            this.pendingFilterRenewals.length === 0 ||
-            this.renewalTilesInFlightCount >=
-                this.maxRenewalTilesInFlight) {
-            return;
-        }
-        this.renewalTimer = this.ngZone.runOutsideAngular(() =>
-            setTimeout(() => {
-                this.renewalTimer = null;
-                void this.flushFilterRenewals();
-            }, 0)
-        );
-    }
-
-    private async flushFilterRenewals(): Promise<void> {
-        if (this.tilePipelinePaused || !this.pendingFilterRenewals.length) {
-            return;
-        }
-        if (!this.tileStream?.isOpen()) {
-            // A new server-side session must receive the full subscription
-            // snapshot before any sparse epoch advance can be validated.
-            this.scheduleUpdate();
-            return;
-        }
-        const available = Math.max(
-            0,
-            this.maxRenewalTilesInFlight -
-                this.renewalTilesInFlightCount
-        );
-        if (!available) {
-            return;
-        }
-        const queued = this.takeFairRenewalBatch(available);
-        const renewals = queued
-            .map(renewal => renewal.ref.renewalJson(
-                renewal.tileIds,
-                renewal.deliveryEpoch
-            ))
-            .filter((renewal): renewal is Record<string, unknown> =>
-                renewal !== null
-            );
-        if (!renewals.length) {
-            this.scheduleRenewalFlush();
-            return;
-        }
-        const result = await this.tileStream.renewFilterTiles(renewals);
-        if (result === "sent") {
-            for (const renewal of renewals) {
-                const ref = queued.find(candidate =>
-                    candidate.ref.filterId === renewal["filterId"] &&
-                    candidate.ref.generation === Number(renewal["generation"])
-                )?.ref;
-                if (!ref) {
-                    continue;
-                }
-                const epoch = Number(renewal["deliveryEpoch"]);
-                const tileIds = Array.isArray(renewal["tileIds"])
-                    ? renewal["tileIds"] as number[]
-                    : [];
-                let inFlight = this.renewalTilesInFlight.get(ref);
-                if (!inFlight) {
-                    inFlight = new Map();
-                    this.renewalTilesInFlight.set(ref, inFlight);
-                }
-                for (const tileId of tileIds) {
-                    if (!inFlight.has(tileId)) {
-                        this.renewalTilesInFlightCount++;
-                    }
-                    inFlight.set(tileId, epoch);
-                }
-            }
-        } else if (result === "disconnected") {
-            this.pendingFilterRenewals.unshift(...queued);
-            this.scheduleUpdate();
-        } else if (result === "failed") {
-            for (const renewal of queued) {
-                renewal.ref.reportError(
-                    `Failed to renew ${renewal.tileIds.length} expired tile(s).`
-                );
-            }
-        }
-        this.scheduleRenewalFlush();
-    }
-
-    /** Pulls a bounded round-robin slice so one huge owner cannot monopolize capacity. */
-    private takeFairRenewalBatch(capacity: number): Array<{
-        ref: FilterSubscriptionRef;
-        tileIds: number[];
-        deliveryEpoch: number;
-    }> {
-        const selected: Array<{
-            ref: FilterSubscriptionRef;
-            tileIds: number[];
-            deliveryEpoch: number;
-        }> = [];
-        let remaining = capacity;
-        while (remaining > 0 && this.pendingFilterRenewals.length) {
-            let index = this.pendingFilterRenewals.findIndex(renewal =>
-                renewal.ref !== this.lastDispatchedRenewalRef
-            );
-            if (index < 0) {
-                index = 0;
-            }
-            const [renewal] = this.pendingFilterRenewals.splice(index, 1);
-            const tileIds = renewal.tileIds.slice(
-                0,
-                Math.min(
-                    remaining,
-                    this.maxRenewalTilesPerOwnerSlice
-                )
-            );
-            const leftover = renewal.tileIds.slice(tileIds.length);
-            selected.push({...renewal, tileIds});
-            remaining -= tileIds.length;
-            this.lastDispatchedRenewalRef = renewal.ref;
-            if (leftover.length) {
-                this.pendingFilterRenewals.push({
-                    ...renewal,
-                    tileIds: leftover
-                });
-            }
-        }
-        return selected;
-    }
-
-    private forgetInFlightRenewal(
-        ref: FilterSubscriptionRef,
-        tileId: number
-    ): void {
-        const inFlight = this.renewalTilesInFlight.get(ref);
-        if (!inFlight?.delete(tileId)) {
-            return;
-        }
-        this.renewalTilesInFlightCount = Math.max(
-            0,
-            this.renewalTilesInFlightCount - 1
-        );
-        if (!inFlight.size) {
-            this.renewalTilesInFlight.delete(ref);
         }
     }
 
@@ -1097,7 +865,6 @@ export class MapTileStreamService {
             };
             filterId: string;
             generation: bigint | number;
-            deliveryEpoch: bigint | number;
             dependencies?: TileSubsetDelivery["dependencies"];
             issues?: TileSubsetDelivery["issues"];
             glbAttachmentName?: string;
@@ -1109,15 +876,23 @@ export class MapTileStreamService {
                 subsetBlob
             ) as unknown as typeof metadata;
         } catch (error) {
-            console.error("Failed to read TileSubsetLayer metadata.", error);
-            return;
+            throw new Error(
+                "Failed to read TileSubsetLayer metadata.",
+                {cause: error}
+            );
         }
         const filterId = String(metadata.filterId);
         const generation = Number(metadata.generation);
-        const deliveryEpoch = Number(metadata.deliveryEpoch);
         const subscription = this.filterSubscriptionsById.get(filterId);
-        if (!subscription || subscription.generation !== generation ||
-            !Number.isSafeInteger(deliveryEpoch) || deliveryEpoch < 0) {
+        if (!subscription) {
+            return;
+        }
+        if (!Number.isSafeInteger(generation) || generation < 0) {
+            throw new Error(
+                `Filter '${filterId}' supplied an invalid generation.`
+            );
+        }
+        if (subscription.generation !== generation) {
             return;
         }
 
@@ -1125,6 +900,14 @@ export class MapTileStreamService {
             const mapId = String(metadata.layer.mapName);
             const layerId = String(metadata.layer.layerName);
             const tileId = Number(metadata.layer.tileId);
+            if (!Number.isInteger(tileId)) {
+                throw new Error(
+                    `Filter '${filterId}' supplied an invalid tile id.`
+                );
+            }
+            if (!subscription.covers(tileId)) {
+                return;
+            }
             const scalarFields =
                 metadata.layer.scalarFields &&
                 typeof metadata.layer.scalarFields === "object"
@@ -1144,7 +927,6 @@ export class MapTileStreamService {
                 blob: subsetBlob,
                 filterId,
                 generation,
-                deliveryEpoch,
                 mapId,
                 layerId,
                 tileId,
@@ -1183,18 +965,19 @@ export class MapTileStreamService {
                 ),
                 receivedAt: performance.now()
             };
-            subscription.accept(delivery);
-            if (metadata.layer.legalInfo) {
+            const admission = subscription.accept(delivery);
+            if (admission === "accepted" && metadata.layer.legalInfo) {
                 this.mapInfo.setLegalInfo(
                     mapId,
                     String(metadata.layer.legalInfo)
                 );
             }
         } catch (error) {
-            subscription.reportError(
-                `Failed to decode filter '${filterId}' generation ${generation}: ` +
-                (error instanceof Error ? error.message : String(error))
-            );
+            const message =
+                `Failed to install filter '${filterId}' generation ${generation}: ` +
+                (error instanceof Error ? error.message : String(error));
+            subscription.reportError(message);
+            throw new Error(message, {cause: error});
         }
     }
 

@@ -26,7 +26,7 @@ describe("TileExpiryScheduler", () => {
         vi.advanceTimersByTime(201);
         expect(expired).toHaveBeenCalledWith(owner, [{
             tileId: 1,
-            deliveryEpoch: 2
+            valueVersion: 2
         }]);
         expect(scheduler.size).toBe(0);
     });

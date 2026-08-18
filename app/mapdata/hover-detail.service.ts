@@ -4,6 +4,7 @@ import type {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {
     AppStateService,
+    defaultHoverLabelFieldKey,
     type HoverLabelFieldConfig,
     type TileFeatureId
 } from "../shared/appstate.service";
@@ -19,9 +20,10 @@ import {
     type StyledMapgetLayerEvent
 } from "./styled-mapget-layer.model";
 
-export type HoverDetailField = {label: string; value: string};
+export type HoverDetailField = {key: string; value: string; colorKey: string};
 export type HoverFeatureDetails = {
     featureId: string;
+    showFeatureId: boolean;
     fields: HoverDetailField[];
 };
 
@@ -153,19 +155,23 @@ export class HoverDetailService implements OnDestroy {
                 : undefined;
             const displayedFields = fields.flatMap(field => {
                 const expression = field.expression.trim();
-                const rawValue = expression === FEATURE_ID_EXPRESSION
-                    ? (values?.get(expression) ?? baseFeatureId)
-                    : values?.get(expression);
+                if (expression === FEATURE_ID_EXPRESSION) {
+                    return [];
+                }
+                const rawValue = values?.get(expression);
                 const value = this.displayValue(rawValue);
                 return value === null ? [] : [{
-                    label: expression === FEATURE_ID_EXPRESSION
-                        ? "Feature ID"
-                        : expression,
-                    value
+                    key: field.displayKey?.trim() ||
+                        defaultHoverLabelFieldKey(expression),
+                    value,
+                    colorKey: expression
                 }];
             });
-            if (displayedFields.length) {
-                result.push({featureId: baseFeatureId, fields: displayedFields});
+            const showFeatureId = fields.some(field =>
+                field.expression === FEATURE_ID_EXPRESSION
+            );
+            if (showFeatureId || displayedFields.length) {
+                result.push({featureId: baseFeatureId, showFeatureId, fields: displayedFields});
             }
         }
         return result;
@@ -387,7 +393,11 @@ export class HoverDetailService implements OnDestroy {
         fields: readonly HoverLabelFieldConfig[]
     ): HoverLabelFieldConfig[] {
         return fields
-            .map(field => ({...field, expression: field.expression.trim()}))
+            .map(field => ({
+                ...field,
+                expression: field.expression.trim(),
+                displayKey: field.displayKey?.trim() || undefined
+            }))
             .filter(field => field.expression.length > 0);
     }
 

@@ -7,6 +7,7 @@ import type {DeckInteractionOutlineService} from
     "./deck-interaction-outline.service";
 import {
     ErdblickVectorMaskLayer,
+    NO_POLYGON_OFFSET,
     type ErdblickVectorMaskConfiguration
 } from "./erdblick-vector.layer";
 import {GpuSceneMaskMode} from "./erdblick-vector.shaders";
@@ -425,7 +426,8 @@ export class GpuSceneMaskController {
             flattenZ: this.flattenZ,
             coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
             pickable: true,
-            drillPickEligible: false
+            drillPickEligible: false,
+            getPolygonOffset: NO_POLYGON_OFFSET
         };
         let vectorLayer!: ErdblickVectorMaskLayer;
         this.outlineService.upsertMask(

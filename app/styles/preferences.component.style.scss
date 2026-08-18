@@ -108,7 +108,7 @@
     --hover-label-control-size: 2rem;
 
     display: grid;
-    grid-template-columns: var(--hover-label-control-size) minmax(0, 1fr) var(--hover-label-control-size);
+    grid-template-columns: var(--hover-label-control-size) minmax(0, 1fr) minmax(6em, 0.45fr) var(--hover-label-control-size);
     gap: 0.35em;
     align-items: center;
     min-height: var(--hover-label-control-size);
@@ -138,6 +138,7 @@
     }
 
     .hover-label-expression,
+    .hover-label-display-key,
     .p-select,
     .simfil-expression-input {
       box-sizing: border-box;

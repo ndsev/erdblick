@@ -35,6 +35,8 @@ import {
     inspectionHtmlPresentation,
     type InspectionHtmlPresentation
 } from "./inspection-html.presentation";
+import {expandPathToFirstHighlightedRow} from "./inspection-tree-highlight";
+import {inspectionValueBubbleClasses} from "./inspection-value-bubble.presentation";
 
 /** Column definition used by the inspection tree's generic table renderer. */
 export interface Column {
@@ -490,9 +492,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.expansionSnapshotBeforeFullCollapse = undefined;
             this.applyInitialExpansion(this.data);
             this.restorePanelExpansionState(this.data);
+            const targetedHighlightIndex = expandPathToFirstHighlightedRow(this.data);
 
             this.refreshLayout();
-            this.scrollToHighlightedIndex(this.firstHighlightedItemIndex());
+            this.scrollToHighlightedIndex(
+                targetedHighlightIndex ?? this.firstHighlightedItemIndex()
+            );
             this.cdr.markForCheck();
         });
         effect(() => {
@@ -1045,54 +1050,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Assigns stable kind and color classes so grouped bubbles keep their leaf colors. */
     protected valueBubbleClasses(bubble: any): Record<string, boolean> {
-        const kind = typeof bubble?.kind === "string" && bubble.kind.length ? bubble.kind : "scalar";
-        const classes: Record<string, boolean> = {
-            [`inspection-value-bubble-${kind}`]: true
-        };
-        if (this.stateService.inspectionValueVaryColors) {
-            classes[`inspection-value-bubble-color-${this.valueBubbleColorIndex(bubble)}`] = true;
-        }
-        if (this.stateService.inspectionValueVaryOutlines) {
-            classes[`inspection-value-bubble-outline-${this.valueBubbleOutlineIndex(bubble)}`] = true;
-        }
-        if (this.stateService.inspectionValueVaryStriping) {
-            classes[`inspection-value-bubble-stripe-${this.valueBubbleStripeIndex(bubble)}`] = true;
-        }
-        return classes;
-    }
-
-    /** Hashes the source target/label so color and outline assignments survive regrouping. */
-    private valueBubbleHash(bubble: any): number {
-        const key = `${bubble?.colorKey ?? bubble?.label ?? ""}`;
-        let hash = 0;
-        for (let i = 0; i < key.length; ++i) {
-            hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
-        }
-        return Math.abs(hash);
-    }
-
-    /** Maps a bubble's stable hash to the color palette. */
-    private valueBubbleColorIndex(bubble: any): number {
-        return this.valueBubbleHash(bubble) % 10;
-    }
-
-    /** Maps a bubble's stable hash to an additional non-color visual discriminator. */
-    private valueBubbleOutlineIndex(bubble: any): number {
-        if (this.isValidityBubble(bubble)) {
-            return 6;
-        }
-        const nonValidityOutlines = [0, 1, 2, 3, 4, 5, 7];
-        return nonValidityOutlines[Math.floor(this.valueBubbleHash(bubble) / 10) % nonValidityOutlines.length];
-    }
-
-    /** Maps a bubble's stable hash to a subtle background stripe discriminator. */
-    private valueBubbleStripeIndex(bubble: any): number {
-        return Math.floor(this.valueBubbleHash(bubble) / 80) % 5;
-    }
-
-    /** Returns whether a bubble should use the dedicated validity outline family. */
-    private isValidityBubble(bubble: any): boolean {
-        return typeof bubble?.kind === "string" && bubble.kind.startsWith("validity");
+        return inspectionValueBubbleClasses(bubble, {
+            varyColors: this.stateService.inspectionValueVaryColors,
+            varyOutlines: this.stateService.inspectionValueVaryOutlines,
+            varyStriping: this.stateService.inspectionValueVaryStriping
+        });
     }
 
     /** Expands and highlights the inspection row represented by one propagated value bubble. */

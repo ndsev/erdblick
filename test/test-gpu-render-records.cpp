@@ -86,6 +86,7 @@ TEST_CASE("GpuRenderPacketBuilder emits final primitive records and ownership sp
         .width = 5.0F,
         .dashLength = 2.0F,
         .dashGap = 2.0F,
+        .dashUnitsMeters = true,
         .forwardArrow = true,
         .backwardArrow = true,
         .style = style(),
@@ -125,6 +126,7 @@ TEST_CASE("GpuRenderPacketBuilder emits final primitive records and ownership sp
         auto const kind = read<uint16_t>(bytes, descriptor);
         auto const count = read<uint32_t>(bytes, descriptor + 16U);
         CHECK(read<uint32_t>(bytes, descriptor + 40U) == 5U);
+        CHECK(read<uint32_t>(bytes, descriptor + 44U) == 0U);
         if (kind == static_cast<uint16_t>(GpuPrimitiveKind::Point)) {
             pointCount = count;
         } else if (kind == static_cast<uint16_t>(GpuPrimitiveKind::PathSegment)) {
@@ -142,18 +144,24 @@ TEST_CASE("GpuRenderPacketBuilder emits final primitive records and ownership sp
     CHECK(arrowCount == 2U);
     CHECK(triangleCount > 0U);
 
-    auto const firstFlags = read<uint32_t>(bytes, pathDataOffset + 140U);
+    auto const firstFlags = read<uint32_t>(bytes, pathDataOffset + 144U);
     auto const secondFlags = read<uint32_t>(
         bytes,
-        pathDataOffset + kGpuPathSegmentRecordBytes + 140U);
+        pathDataOffset + kGpuPathSegmentRecordBytes + 144U);
     CHECK((firstFlags & static_cast<uint32_t>(GpuPathRecordFlag::TrimStart)) != 0U);
     CHECK((secondFlags & static_cast<uint32_t>(GpuPathRecordFlag::TrimEnd)) != 0U);
+    CHECK((firstFlags & static_cast<uint32_t>(GpuPathRecordFlag::DashMeters)) != 0U);
+    CHECK((secondFlags & static_cast<uint32_t>(GpuPathRecordFlag::DashMeters)) != 0U);
     CHECK((firstFlags >> 8U) == 17U);
     CHECK((secondFlags >> 8U) == 17U);
     CHECK(read<float>(bytes, pathDataOffset + 112U) > 0.0F);
     CHECK(read<float>(
         bytes,
         pathDataOffset + kGpuPathSegmentRecordBytes + 116U) > 0.0F);
+    CHECK(read<float>(bytes, pathDataOffset + 120U) == 0.0F);
+    CHECK(read<float>(
+        bytes,
+        pathDataOffset + kGpuPathSegmentRecordBytes + 120U) == 1.0F);
     CHECK(read<float>(bytes, arrowDataOffset + 32U) == 2.0F);
     CHECK(read<float>(
         bytes,

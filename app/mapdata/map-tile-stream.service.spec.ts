@@ -1,5 +1,5 @@
 import "@angular/compiler";
-import {Subject} from "rxjs";
+import {BehaviorSubject, Subject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 import {MapTileStreamService} from "./map-tile-stream.service";
 
@@ -63,8 +63,8 @@ describe("MapTileStreamService viewport timing", () => {
     });
 });
 
-describe("MapTileStreamService TTL renewal scheduling", () => {
-    it("does not immediately renew expired retained values", () => {
+describe("MapTileStreamService TTL expiry scheduling", () => {
+    it("does not immediately reschedule expired retained values", () => {
         const service = Object.create(
             MapTileStreamService.prototype
         ) as MapTileStreamService;
@@ -108,40 +108,59 @@ describe("MapTileStreamService TTL renewal scheduling", () => {
         );
     });
 
-    it("takes bounded round-robin owner slices without capping queued coverage", () => {
+    it("passes a forced complete pending snapshot to the transport", async () => {
         const service = Object.create(
             MapTileStreamService.prototype
         ) as MapTileStreamService;
         const internal = service as any;
-        const firstRef = {filterId: "first"};
-        const secondRef = {filterId: "second"};
-        internal.lastDispatchedRenewalRef = null;
-        internal.maxRenewalTilesPerOwnerSlice = 512;
-        internal.pendingFilterRenewals = [
-            {
-                ref: firstRef,
-                tileIds: Array.from({length: 5_000}, (_, index) => index),
-                deliveryEpoch: 2
-            },
-            {
-                ref: secondRef,
-                tileIds: Array.from({length: 5_000}, (_, index) => index + 10_000),
-                deliveryEpoch: 2
-            }
-        ];
-
-        const selected = internal.takeFairRenewalBatch(1_024);
-
-        expect(selected.map((item: any) => item.ref)).toEqual([
-            firstRef,
-            secondRef
+        const request = {
+            mapId: "Map",
+            layerId: "Layer",
+            filterId: "first",
+            generation: 1,
+            tileIds: [7]
+        };
+        const firstRef = {
+            filterId: "first",
+            released: false,
+            suspended: false,
+            requestJson: vi.fn(() => request),
+            notifyRequestSynchronized: vi.fn()
+        };
+        const emptyRef = {
+            filterId: "empty",
+            released: false,
+            suspended: false,
+            requestJson: vi.fn(() => ({
+                mapId: "Map",
+                layerId: "Layer",
+                filterId: "empty",
+                generation: 1,
+                tileIds: []
+            })),
+            notifyRequestSynchronized: vi.fn()
+        };
+        const updateRequest = vi.fn().mockResolvedValue("sent");
+        internal.tilePipelinePaused$ = new BehaviorSubject(false);
+        internal.updateInProgress = false;
+        internal.updatePending = false;
+        internal.forceNextUpdate = true;
+        internal.filterSubscriptionsById = new Map([
+            [firstRef.filterId, firstRef],
+            [emptyRef.filterId, emptyRef]
         ]);
-        expect(selected.map((item: any) => item.tileIds.length)).toEqual([
-            512,
-            512
-        ]);
-        expect(internal.pendingFilterRenewals.map(
-            (item: any) => item.tileIds.length
-        )).toEqual([4_488, 4_488]);
+        internal.tileStream = {updateRequest};
+        internal.lastUpdateAt = 0;
+        internal.backendRequestProgress = {done: 0, total: 0, allDone: true};
+        internal.viewportLoadStartedAtMs = null;
+        internal.viewportCompletedAtMs = null;
+        internal.scheduleUpdate = vi.fn();
+
+        await internal.runUpdate();
+
+        expect(updateRequest).toHaveBeenCalledWith([request], true);
+        expect(internal.forceNextUpdate).toBe(false);
+        expect(firstRef.notifyRequestSynchronized).toHaveBeenCalledOnce();
+        expect(emptyRef.notifyRequestSynchronized).toHaveBeenCalledOnce();
     });
 });

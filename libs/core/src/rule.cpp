@@ -1,4 +1,5 @@
 #include "rule.h"
+#include "mapget/model/hash.h"
 #include <algorithm>
 #include <charconv>
 #include <cctype>
@@ -61,6 +62,17 @@ std::optional<FeatureStyleRule::Arrow> parseArrowMode(std::string const& arrowSt
 
     std::cout << "Unsupported arrow mode: " << arrowStr << std::endl;
     return {};
+}
+
+/** Parse the shared style length-unit aliases used by offsets and dashes. */
+FeatureStyleRule::LengthUnit parseLengthUnit(std::string unit)
+{
+    std::ranges::transform(unit, unit.begin(), [](unsigned char value) {
+        return static_cast<char>(std::tolower(value));
+    });
+    return unit == "pixel" || unit == "pixels" || unit == "px"
+        ? FeatureStyleRule::LengthUnit::Pixel
+        : FeatureStyleRule::LengthUnit::Meter;
 }
 
 /** Parse one geometry keyword from YAML into the corresponding mapget geometry enum. */
@@ -452,6 +464,19 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["z-index-expression"].IsDefined()) {
         zIndexExpression_ = yaml["z-index-expression"].as<std::string>();
     }
+    if (yaml["z-index-group-expression"].IsDefined()) {
+        zIndexGroupExpression_ =
+            yaml["z-index-group-expression"].as<std::string>();
+    }
+    if (yaml["z-index-role"].IsDefined()) {
+        auto const role = yaml["z-index-role"].as<std::string>();
+        if (role == "support") {
+            zIndexRole_ = ZIndexRole::Support;
+        }
+        else if (role == "overlay") {
+            zIndexRole_ = ZIndexRole::Overlay;
+        }
+    }
     if (yaml["billboard"].IsDefined()) {
         // Parse whether the rendered primitive should face the camera.
         billboard_ = yaml["billboard"].as<bool>();
@@ -487,14 +512,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         offsetIncrement_.z = yaml["offset-increment"][2].as<double>();
     }
     if (yaml["lateral-offset-unit"].IsDefined()) {
-        auto unit = yaml["lateral-offset-unit"].as<std::string>();
-        std::ranges::transform(unit, unit.begin(), [](unsigned char value) {
-            return static_cast<char>(std::tolower(value));
-        });
-        lateralOffsetUnit_ =
-            unit == "pixel" || unit == "pixels" || unit == "px"
-            ? LateralOffsetUnit::Pixel
-            : LateralOffsetUnit::Meter;
+        lateralOffsetUnit_ = parseLengthUnit(
+            yaml["lateral-offset-unit"].as<std::string>());
     }
     if (yaml["point-merge-grid-cell"].IsDefined() && yaml["point-merge-grid-cell"].size() >= 3) {
         pointMergeGridCellSize_ = glm::dvec3();
@@ -514,18 +533,27 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     /////////////////////////////////////
 
     if (yaml["dashed"].IsDefined()) {
-        // Parse line dashes
         dashed_ = yaml["dashed"].as<bool>();
-        if (yaml["dash-length"].IsDefined()) {
-            dashLength_ = yaml["dash-length"].as<int>();
+    }
+    if (yaml["dash-length"].IsDefined()) {
+        dashLength_ = yaml["dash-length"].as<float>();
+        // Preserve the legacy one-value cadence unless a gap is authored.
+        if (!yaml["dash-gap"].IsDefined()) {
+            dashGap_ = dashLength_;
         }
-        if (yaml["gap-color"].IsDefined()) {
-            auto colorStr = yaml["gap-color"].as<std::string>();
-            gapColor_ = Color(colorStr).toFVec4();
-        }
-        if (yaml["dash-pattern"].IsDefined()) {
-            dashPattern_ = yaml["dash-pattern"].as<int>();
-        }
+    }
+    if (yaml["dash-gap"].IsDefined()) {
+        dashGap_ = yaml["dash-gap"].as<float>();
+    }
+    if (yaml["dash-unit"].IsDefined()) {
+        dashUnit_ = parseLengthUnit(yaml["dash-unit"].as<std::string>());
+    }
+    if (yaml["gap-color"].IsDefined()) {
+        auto colorStr = yaml["gap-color"].as<std::string>();
+        gapColor_ = Color(colorStr).toFVec4();
+    }
+    if (yaml["dash-pattern"].IsDefined()) {
+        dashPattern_ = yaml["dash-pattern"].as<int>();
     }
     if (yaml["arrow"].IsDefined()) {
         // Parse line arrowheads
@@ -554,9 +582,12 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["relation-line-geometry"].IsDefined()) {
         auto const value = yaml["relation-line-geometry"].as<std::string>();
-        relationLineGeometry_ = value == "nearest-endpoints"
-            ? RelationLineGeometry::NearestEndpoints
-            : RelationLineGeometry::Centers;
+        if (value == "connection-stubs") {
+            relationLineGeometry_ = RelationLineGeometry::ConnectionStubs;
+        }
+        else {
+            relationLineGeometry_ = RelationLineGeometry::Centers;
+        }
     }
     if (yaml["relation-line-end-markers"].IsDefined()) {
         // Parse style for the relation line end-markers.
@@ -971,6 +1002,7 @@ FeatureStyleRule::expressionUses() const
     }
     append("arrow-expression", arrowExpression_);
     append("z-index-expression", zIndexExpression_);
+    append("z-index-group-expression", zIndexGroupExpression_);
     append("icon-url-expression", iconUrlExpression_);
     append("label-text-expression", labelTextExpression_);
     return result;
@@ -1235,6 +1267,61 @@ std::optional<double> FeatureStyleRule::zIndex(
     return zIndex_;
 }
 
+std::optional<uint64_t> FeatureStyleRule::zIndexGroup(
+    BoundEvalFun const& evalFun) const
+{
+    if (zIndexGroupExpression_.empty()) {
+        return std::nullopt;
+    }
+
+    auto const value = evalFun.evaluate(zIndexGroupExpression_);
+    auto hash = mapget::Hash{};
+    if (value.isa(simfil::ValueType::Bool)) {
+        return hash
+            .mix(uint32_t{1U})
+            .mix(value.as<simfil::ValueType::Bool>())
+            .value();
+    }
+    if (value.isa(simfil::ValueType::Int)) {
+        return hash
+            .mix(uint32_t{2U})
+            .mix(value.as<simfil::ValueType::Int>())
+            .value();
+    }
+    if (value.isa(simfil::ValueType::Float)) {
+        auto number = value.as<simfil::ValueType::Float>();
+        if (std::isfinite(number)) {
+            number = number == 0.0 ? 0.0 : number;
+            return hash.mix(uint32_t{3U}).mix(number).value();
+        }
+    }
+    if (value.isa(simfil::ValueType::String)) {
+        return hash
+            .mix(uint32_t{4U})
+            .mix(value.as<simfil::ValueType::String>())
+            .value();
+    }
+
+    if (evalFun.hasIssueReporter()) {
+        evalFun.reportIssue(
+            "z-index-group-expression",
+            zIndexGroupExpression_,
+            "Expression must evaluate to a boolean, integer, finite number, or string; grouped rendering was skipped.",
+            index_);
+    }
+    return std::nullopt;
+}
+
+std::string const& FeatureStyleRule::zIndexGroupExpression() const
+{
+    return zIndexGroupExpression_;
+}
+
+FeatureStyleRule::ZIndexRole FeatureStyleRule::zIndexRole() const
+{
+    return zIndexRole_;
+}
+
 std::optional<bool> const& FeatureStyleRule::billboard() const
 {
     return billboard_;
@@ -1250,9 +1337,19 @@ bool FeatureStyleRule::isDashed() const
     return dashed_;
 }
 
-int FeatureStyleRule::dashLength() const
+float FeatureStyleRule::dashLength() const
 {
     return dashLength_;
+}
+
+float FeatureStyleRule::dashGap() const
+{
+    return dashGap_;
+}
+
+FeatureStyleRule::LengthUnit FeatureStyleRule::dashUnit() const
+{
+    return dashUnit_;
 }
 
 glm::fvec4 const& FeatureStyleRule::gapColor() const

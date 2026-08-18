@@ -25,7 +25,16 @@ constexpr uint32_t kLabelRecordBytes = 120U;
 constexpr uint32_t kResourceRequestBytes = 24U;
 constexpr uint32_t kRuntimeIssueBytes = 40U;
 constexpr uint32_t kTableAlignment = 8U;
-constexpr uint16_t kKnownMaterialFlags = 31U;
+constexpr uint16_t kKnownMaterialFlags =
+    static_cast<uint16_t>(GpuMaterialFlag::Billboard) |
+    static_cast<uint16_t>(GpuMaterialFlag::DepthTest) |
+    static_cast<uint16_t>(GpuMaterialFlag::CompactPath) |
+    static_cast<uint16_t>(GpuMaterialFlag::SimplePath) |
+    static_cast<uint16_t>(GpuMaterialFlag::DualStrokePath) |
+    static_cast<uint16_t>(GpuMaterialFlag::SemanticSupport) |
+    static_cast<uint16_t>(GpuMaterialFlag::SemanticOverlay) |
+    static_cast<uint16_t>(GpuMaterialFlag::PointRing) |
+    kGpuScreenLengthAnchorFlags;
 constexpr uint32_t kKnownPacketFlags =
     static_cast<uint32_t>(GpuRenderPacketFlag::RevisionComplete);
 constexpr uint32_t kGpuActivationTokenMax = 0x00ffffffU;
@@ -224,10 +233,27 @@ private:
         (flags & static_cast<uint16_t>(GpuMaterialFlag::SimplePath)) != 0U;
     auto const dualStrokePath =
         (flags & static_cast<uint16_t>(GpuMaterialFlag::DualStrokePath)) != 0U;
+    auto const pointRing =
+        (flags & static_cast<uint16_t>(GpuMaterialFlag::PointRing)) != 0U;
+    auto const screenLengthAnchor = static_cast<uint16_t>(
+        flags & kGpuScreenLengthAnchorFlags);
+    auto const semanticRoles = static_cast<uint16_t>(
+        flags & (
+            static_cast<uint16_t>(GpuMaterialFlag::SemanticSupport) |
+            static_cast<uint16_t>(GpuMaterialFlag::SemanticOverlay)));
+    auto const validScreenLengthAnchor = screenLengthAnchor == 0U ||
+        std::has_single_bit(screenLengthAnchor);
     if ((compactPath && simplePath) ||
         (dualStrokePath && !compactPath && !simplePath) ||
+        (semanticRoles != 0U && !std::has_single_bit(semanticRoles)) ||
+        (pointRing && kind != GpuPrimitiveKind::Point) ||
         ((compactPath || simplePath) &&
-            kind != GpuPrimitiveKind::PathSegment))
+            kind != GpuPrimitiveKind::PathSegment) ||
+        !validScreenLengthAnchor ||
+        (screenLengthAnchor != 0U &&
+            ((kind != GpuPrimitiveKind::PathSegment &&
+              kind != GpuPrimitiveKind::Arrow) ||
+             compactPath || simplePath)))
     {
         return 0U;
     }
@@ -649,7 +675,7 @@ std::vector<std::byte> GpuRenderPacketCodec::encode(
             auto const offset = zIndexTable + zIndex * kGpuZIndexEntryBytes;
             writer.put(offset, entry.value);
             writer.put(offset + 8U, entry.tieBreaker);
-            writer.put(offset + 12U, uint32_t{0U});
+            writer.put(offset + 12U, entry.semanticGroup);
             ++zIndex;
         }
 
@@ -802,6 +828,7 @@ std::vector<std::byte> GpuRenderPacketCodec::encode(
         writer.put(descriptor + 32U, stream.glowRadius);
         writer.put(descriptor + 36U, stream.atlasPage);
         writer.put(descriptor + 40U, stream.renderOrder);
+        writer.put(descriptor + 44U, uint32_t{0U});
     }
 
     auto const totalBytes = writer.size();
@@ -999,13 +1026,14 @@ GpuRenderPacketInfo GpuRenderPacketCodec::validate(
         auto const glowRadius = reader.get<float>(descriptor + 32U);
         if ((flags & ~kKnownMaterialFlags) != 0U ||
             stride != recordStride(primitiveKind, flags) ||
-            static_cast<uint64_t>(stride) * count != length ||
-            reader.get<uint32_t>(descriptor + 44U) != 0U) {
+            static_cast<uint64_t>(stride) * count != length) {
             throw std::invalid_argument("GpuRenderPacket stream shape is invalid.");
         }
-        if (!std::isfinite(glowRadius) || glowRadius < 0.0F) {
+        if (!std::isfinite(glowRadius) || glowRadius < 0.0F ||
+            reader.get<uint32_t>(descriptor + 44U) != 0U)
+        {
             throw std::invalid_argument(
-                "GpuRenderPacket stream glow radius is invalid.");
+                "GpuRenderPacket stream material parameters are invalid.");
         }
         reader.byteRange(offset, length, kTableAlignment);
         packetRanges.push_back({offset, length});
@@ -1118,7 +1146,7 @@ GpuRenderPacketInfo GpuRenderPacketCodec::validate(
     for (uint32_t index = 0U; index < zIndices.second; ++index) {
         auto const offset = zIndices.first + index * kGpuZIndexEntryBytes;
         auto const value = reader.get<double>(offset);
-        if (std::isinf(value) || reader.get<uint32_t>(offset + 12U) != 0U) {
+        if (std::isinf(value)) {
             throw std::invalid_argument(
                 "GpuRenderPacket z-index metadata is invalid.");
         }

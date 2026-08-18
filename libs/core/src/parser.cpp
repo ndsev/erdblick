@@ -1477,7 +1477,6 @@ TileLayerParser::TileSubsetLayerMetadata TileLayerParser::readTileSubsetLayerMet
         readTileLayerMetadata(buffer),
         std::move(metadata.identity_.filterId_),
         metadata.identity_.generation_,
-        metadata.identity_.deliveryEpoch_,
         *dependencies,
         *issues,
         metadata.glbAttachmentName_.value_or(std::string{}),

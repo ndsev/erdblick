@@ -12,7 +12,7 @@ namespace erdblick
 {
 
 /** Binary ABI version understood by the persistent GPU renderer. */
-inline constexpr uint16_t kGpuRenderPacketAbiVersion = 10U;
+inline constexpr uint16_t kGpuRenderPacketAbiVersion = 14U;
 
 /** Little-endian integer whose bytes spell `ERGP`. */
 inline constexpr uint32_t kGpuRenderPacketMagic = 0x50475245U;
@@ -49,15 +49,27 @@ enum class GpuMaterialFlag : uint16_t {
     CompactPath = 1U << 2U,
     SimplePath = 1U << 3U,
     DualStrokePath = 1U << 4U,
+    ScreenLengthStartAnchor = 1U << 5U,
+    ScreenLengthEndAnchor = 1U << 6U,
+    ScreenLengthCenterAnchor = 1U << 7U,
+    SemanticSupport = 1U << 8U,
+    SemanticOverlay = 1U << 9U,
+    PointRing = 1U << 10U,
 };
 
-/** Exact fixed strides associated with each primitive program in ABI v10. */
+/** Mask selecting the mutually exclusive screen-length anchor material flags. */
+inline constexpr uint16_t kGpuScreenLengthAnchorFlags =
+    static_cast<uint16_t>(GpuMaterialFlag::ScreenLengthStartAnchor) |
+    static_cast<uint16_t>(GpuMaterialFlag::ScreenLengthEndAnchor) |
+    static_cast<uint16_t>(GpuMaterialFlag::ScreenLengthCenterAnchor);
+
+/** Exact fixed strides associated with each primitive program in ABI v14. */
 inline constexpr uint32_t kGpuPointRecordBytes = 40U;
 inline constexpr uint32_t kGpuSimplePathSegmentRecordBytes = 52U;
 inline constexpr uint32_t kGpuCompactPathSegmentRecordBytes = 76U;
 inline constexpr uint32_t kGpuDualSimplePathSegmentRecordBytes = 60U;
 inline constexpr uint32_t kGpuDualCompactPathSegmentRecordBytes = 84U;
-inline constexpr uint32_t kGpuPathSegmentRecordBytes = 144U;
+inline constexpr uint32_t kGpuPathSegmentRecordBytes = 148U;
 inline constexpr uint32_t kGpuArrowRecordBytes = 68U;
 inline constexpr uint32_t kGpuSurfaceTriangleRecordBytes = 60U;
 inline constexpr uint32_t kGpuIconRecordBytes = 68U;
@@ -110,6 +122,7 @@ struct GpuContributionSpan {
 struct GpuZIndexEntry {
     double value = 0.0;
     uint32_t tieBreaker = 0U;
+    uint32_t semanticGroup = 0U;
 };
 
 /** Independently replaceable tile/style revision and its physical stream spans. */

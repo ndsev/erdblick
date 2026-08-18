@@ -39,7 +39,7 @@ describe("Web Mercator feature navigation", () => {
 
         expect(DECK_MAP_DEFAULT_ALTITUDE).toBe(1.5);
         expect(DECK_MAP_FOV_DEGREES).toBeCloseTo(36.86989764584402, 12);
-        expect(DECK_MAP_NEAR_Z_MULTIPLIER).toBe(0.0005);
+        expect(DECK_MAP_NEAR_Z_MULTIPLIER).toBe(0.01);
         expect(DECK_MAP_FAR_Z_MULTIPLIER).toBe(1.01);
         expect(viewport.fovy).toBe(DECK_MAP_FOV_DEGREES);
         expect(viewport.altitude).toBeCloseTo(DECK_MAP_DEFAULT_ALTITUDE, 12);

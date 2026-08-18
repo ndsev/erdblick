@@ -683,6 +683,11 @@ export class ViewLayerController {
             this.diagnostics.notifyChanged();
             return;
         }
+        if (event.type === "tiles-pending") {
+            this.occupancyChanged.next();
+            this.diagnostics.notifyChanged();
+            return;
+        }
         if (event.type === "status" &&
             ["Success", "Failed", "Aborted"].includes(event.status.state)) {
             this.reconcileOwnedVisualizations(owned);

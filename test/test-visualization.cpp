@@ -1413,7 +1413,7 @@ TEST_CASE("TileLayerParser exposes the tile lifetime in milliseconds", "[erdblic
             SharedUint8Array(absentStream.str())).ttlMs));
 }
 
-TEST_CASE("TileLayerParser exposes subset delivery identity and lifetime", "[erdblick.parser]")
+TEST_CASE("TileLayerParser exposes subset identity and lifetime", "[erdblick.parser]")
 {
     using namespace std::chrono;
 
@@ -1429,8 +1429,7 @@ TEST_CASE("TileLayerParser exposes subset delivery identity and lifetime", "[erd
         source->layerInfo(),
         source->strings(),
         "styled:test",
-        17,
-        23);
+        17);
     subset->adoptSourceInfo(*source);
 
     std::ostringstream stream;
@@ -1440,7 +1439,6 @@ TEST_CASE("TileLayerParser exposes subset delivery identity and lifetime", "[erd
 
     REQUIRE(metadata.filterId == "styled:test");
     REQUIRE(metadata.generation == 17);
-    REQUIRE(metadata.deliveryEpoch == 23);
     REQUIRE(metadata.layer.conversionTimestampMs == 1'725'000'123'456.0);
     REQUIRE(metadata.layer.ttlMs == 875.0);
 }
@@ -1796,18 +1794,18 @@ offset-increment: [4.0, 5.0, 6.0]
     REQUIRE(rule.offsetIncrement() == glm::dvec3(4.0, 5.0, 6.0));
 }
 
-TEST_CASE("FeatureStyleRule relation endpoints and label collision parsing", "[erdblick.style]")
+TEST_CASE("FeatureStyleRule relation stubs and label collision parsing", "[erdblick.style]")
 {
     FeatureStyleRule rule(YAML::Load(R"yaml(
 type: LaneConnector
 geometry: line
-relation-line-geometry: nearest-endpoints
+relation-line-geometry: connection-stubs
 label-collision: true
 label-collision-priority: 23
 )yaml"), 0);
 
     REQUIRE(rule.relationLineGeometry() ==
-        FeatureStyleRule::RelationLineGeometry::NearestEndpoints);
+        FeatureStyleRule::RelationLineGeometry::ConnectionStubs);
     REQUIRE(rule.labelCollision());
     REQUIRE(rule.labelCollisionPriority() == 23);
 }
@@ -1867,17 +1865,46 @@ TEST_CASE("FeatureStyleRuleLateralOffsetUnitAliases", "[erdblick.style]")
     for (auto const& alias : {"pixel", "pixels", "px"}) {
         auto rule = FeatureStyleRule(YAML::Load(
             "type: Way\ngeometry: [line]\nlateral-offset-unit: " +
+            std::string(alias) + "\ndash-unit: " +
             std::string(alias)), 0);
         REQUIRE(rule.lateralOffsetUnit() ==
             FeatureStyleRule::LateralOffsetUnit::Pixel);
+        REQUIRE(rule.dashUnit() == FeatureStyleRule::LengthUnit::Pixel);
     }
     for (auto const& alias : {"meter", "meters", "m"}) {
         auto rule = FeatureStyleRule(YAML::Load(
             "type: Way\ngeometry: [line]\nlateral-offset-unit: " +
+            std::string(alias) + "\ndash-unit: " +
             std::string(alias)), 0);
         REQUIRE(rule.lateralOffsetUnit() ==
             FeatureStyleRule::LateralOffsetUnit::Meter);
+        REQUIRE(rule.dashUnit() == FeatureStyleRule::LengthUnit::Meter);
     }
+}
+
+TEST_CASE("FeatureStyleRuleDashLengths", "[erdblick.style]")
+{
+    auto const defaults = FeatureStyleRule(YAML::Load(R"yaml(
+type: Way
+geometry: line
+dashed: true
+dash-length: 2.5
+)yaml"), 0);
+    REQUIRE(defaults.dashLength() == 2.5F);
+    REQUIRE(defaults.dashGap() == 2.5F);
+    REQUIRE(defaults.dashUnit() == FeatureStyleRule::LengthUnit::Pixel);
+
+    auto const explicitGap = FeatureStyleRule(YAML::Load(R"yaml(
+type: Way
+geometry: line
+dashed: true
+dash-length: 3.25
+dash-gap: 7.5
+dash-unit: meter
+)yaml"), 0);
+    REQUIRE(explicitGap.dashLength() == 3.25F);
+    REQUIRE(explicitGap.dashGap() == 7.5F);
+    REQUIRE(explicitGap.dashUnit() == FeatureStyleRule::LengthUnit::Meter);
 }
 
 TEST_CASE("FeatureStyleRuleGlowParsing", "[erdblick.style]")

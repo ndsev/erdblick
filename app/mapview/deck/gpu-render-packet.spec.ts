@@ -3,6 +3,8 @@ import {
     GPU_RENDER_PACKET_ABI_VERSION,
     GPU_RENDER_PACKET_HEADER_BYTES,
     GPU_RENDER_PACKET_MAX_BYTES,
+    GpuMaterialFlag,
+    GpuPrimitiveKind,
     GpuRenderPacketView
 } from "./gpu-render-packet";
 
@@ -151,5 +153,23 @@ describe("GpuRenderPacketView", () => {
         const bytes = ownedPacket();
         new DataView(bytes.buffer).setUint32(284, 1, true);
         expect(() => new GpuRenderPacketView(bytes)).toThrow(/disagrees/);
+    });
+
+    it("accepts the point-ring material only for point streams", () => {
+        const bytes = ownedPacket();
+        const view = new DataView(bytes.buffer);
+        view.setUint16(162, GpuMaterialFlag.PointRing, true);
+        expect(new GpuRenderPacketView(bytes).streams[0].flags).toBe(
+            GpuMaterialFlag.PointRing
+        );
+
+        // Make the descriptor otherwise valid for one icon record so the
+        // rejection specifically covers the point-only material flag.
+        view.setUint16(160, GpuPrimitiveKind.Icon, true);
+        view.setUint32(172, 68, true);
+        view.setUint32(176, 1, true);
+        view.setUint32(184, 68, true);
+        view.setUint32(272, 1, true);
+        expect(() => new GpuRenderPacketView(bytes)).toThrow(/layout/);
     });
 });

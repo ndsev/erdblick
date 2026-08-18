@@ -28,9 +28,9 @@ export interface TileSubsetIssue {
  */
 export class FilterTileState {
     status: FilterTileStatus = "pending";
+    backendPending = true;
     pendingGeneration: number;
     deliveredGeneration = 0;
-    deliveredEpoch = 0;
     subsetBlob: Uint8Array | null = null;
     stringPoolId = "";
     conversionTimestampMs: number | null = null;
@@ -62,12 +62,31 @@ export class FilterTileState {
     /** Retain the previous ready value while marking a newer generation pending. */
     markPending(generation: number): void {
         this.pendingGeneration = generation;
-        this.status = "pending";
+        this.backendPending = true;
+        this.status = this.subsetBlob ? "ready" : "pending";
         this.error = null;
     }
 
-    /** Atomically replace immutable subset bytes after strict identity validation. */
-    install(delivery: TileSubsetDelivery): void {
+    /** Absolute semantic lifetime of the installed value, or null when it does not expire. */
+    get expiresAtMs(): number | null {
+        if (this.conversionTimestampMs === null || this.ttlMs === null) {
+            return null;
+        }
+        const deadline = this.conversionTimestampMs + this.ttlMs;
+        return Number.isFinite(deadline) ? deadline : null;
+    }
+
+    /**
+     * Atomically replace immutable subset bytes after strict identity validation.
+     *
+     * Same-generation responses are ordered by semantic lifetime rather than
+     * transport arrival. Returning false is a benign supersession; identity
+     * mismatches still throw because the current handoff cannot be acknowledged.
+     */
+    install(
+        delivery: TileSubsetDelivery,
+        remainsPending = false
+    ): boolean {
         if (delivery.mapId !== this.mapId ||
             delivery.layerId !== this.layerId ||
             delivery.tileId !== this.tileId ||
@@ -75,6 +94,22 @@ export class FilterTileState {
             throw new Error(
                 `Subset identity mismatch: expected '${this.mapTileKey}', got '${delivery.mapTileKey}'.`
             );
+        }
+
+        if (this.subsetBlob &&
+            delivery.generation === this.deliveredGeneration) {
+            const retainedDeadline = this.expiresAtMs ??
+                Number.POSITIVE_INFINITY;
+            const incomingDeadline = delivery.conversionTimestampMs !== null &&
+                delivery.ttlMs !== null &&
+                Number.isFinite(
+                    delivery.conversionTimestampMs + delivery.ttlMs
+                )
+                ? delivery.conversionTimestampMs + delivery.ttlMs
+                : Number.POSITIVE_INFINITY;
+            if (incomingDeadline <= retainedDeadline) {
+                return false;
+            }
         }
 
         const dependencies = delivery.dependencies as TileSubsetDependency[];
@@ -93,9 +128,9 @@ export class FilterTileState {
 
         this.subsetBlob = delivery.blob;
         this.deliveredGeneration = delivery.generation;
-        this.deliveredEpoch = delivery.deliveryEpoch;
         this.pendingGeneration = delivery.generation;
         this.valueVersion += 1;
+        this.backendPending = remainsPending;
         this.status = "ready";
         this.error = null;
         this.renderStats = {};
@@ -110,6 +145,7 @@ export class FilterTileState {
         this.ttlMs = delivery.ttlMs;
         this.glbAttachmentName = delivery.glbAttachmentName;
         this.receivedAt = delivery.receivedAt;
+        return true;
     }
 
     /** Record only failures belonging to the currently pending generation. */
@@ -117,13 +153,14 @@ export class FilterTileState {
         if (generation !== this.pendingGeneration) {
             return;
         }
-        this.status = "error";
+        this.status = this.subsetBlob ? "ready" : "error";
         this.error = message;
     }
 
     /** Drop all potentially large immutable payloads while preserving identity fields. */
     dispose(): void {
         this.subsetBlob = null;
+        this.backendPending = false;
         this.stringPoolId = "";
         this.conversionTimestampMs = null;
         this.ttlMs = null;

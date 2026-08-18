@@ -90,6 +90,44 @@ function createHarness(
 }
 
 describe("InspectionSelectionService multi-inspection", () => {
+    it("publishes loading panel shells and starts independent feature loads concurrently", async () => {
+        const first = feature("first", "map/tile-1");
+        const second = feature("second", "map/tile-2");
+        const initialPanels: InspectionPanelModel<TileFeatureId>[] = [first, second]
+            .map((selected, id) => ({
+                id,
+                features: [selected],
+                locked: true,
+                focused: id === 1,
+                size: [30, 20],
+                color: "#fff",
+                undocked: false
+            }));
+        const resolvers: Array<(features: FeatureWrapper[]) => void> = [];
+        const loadFeatures = vi.fn(() => new Promise<FeatureWrapper[]>(resolve => {
+            resolvers.push(resolve);
+        }));
+        const {service} = createHarness(3, initialPanels, loadFeatures);
+
+        service.initialize();
+
+        expect(loadFeatures).toHaveBeenCalledTimes(2);
+        expect(service.selectionTopic.getValue().map(panel => ({
+            id: panel.id,
+            loading: panel.loading,
+            featureCount: panel.features.length
+        }))).toEqual([
+            {id: 0, loading: true, featureCount: 0},
+            {id: 1, loading: true, featureCount: 0}
+        ]);
+        expect(service.selectionIdsTopic.getValue().map(panel => panel.features))
+            .toEqual([[first], [second]]);
+
+        resolvers.forEach(resolve => resolve([]));
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(service.selectionTopic.getValue()).toEqual([]);
+    });
+
     it("deduplicates exact identities and warns once when logical hits exceed capacity", () => {
         const {service, panels, infoMessageService} = createHarness(2);
         const result = service.inspectFeatureIds([

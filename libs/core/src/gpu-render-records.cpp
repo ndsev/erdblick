@@ -7,6 +7,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -93,7 +94,10 @@ void padRecord(std::vector<std::byte>& bytes, size_t recordStart, size_t stride)
     bool depthTest,
     bool compactPath = false,
     bool simplePath = false,
-    bool dualStrokePath = false)
+    bool dualStrokePath = false,
+    GpuScreenLengthAnchor screenLengthAnchor = GpuScreenLengthAnchor::None,
+    GpuSemanticZIndexRole semanticRole = GpuSemanticZIndexRole::None,
+    bool pointRing = false)
 {
     if ((compactPath && simplePath) ||
         (dualStrokePath && !compactPath && !simplePath))
@@ -111,7 +115,37 @@ void padRecord(std::vector<std::byte>& bytes, size_t recordStart, size_t stride)
             : 0U) |
         (dualStrokePath
             ? static_cast<uint16_t>(GpuMaterialFlag::DualStrokePath)
+            : 0U) |
+        (screenLengthAnchor == GpuScreenLengthAnchor::Start
+            ? static_cast<uint16_t>(GpuMaterialFlag::ScreenLengthStartAnchor)
+            : 0U) |
+        (screenLengthAnchor == GpuScreenLengthAnchor::End
+            ? static_cast<uint16_t>(GpuMaterialFlag::ScreenLengthEndAnchor)
+            : 0U) |
+        (screenLengthAnchor == GpuScreenLengthAnchor::Center
+            ? static_cast<uint16_t>(GpuMaterialFlag::ScreenLengthCenterAnchor)
+            : 0U) |
+        (semanticRole == GpuSemanticZIndexRole::Support
+            ? static_cast<uint16_t>(GpuMaterialFlag::SemanticSupport)
+            : 0U) |
+        (semanticRole == GpuSemanticZIndexRole::Overlay
+            ? static_cast<uint16_t>(GpuMaterialFlag::SemanticOverlay)
+            : 0U) |
+        (pointRing
+            ? static_cast<uint16_t>(GpuMaterialFlag::PointRing)
             : 0U));
+}
+
+[[nodiscard]] GpuScreenLengthAnchor reversedAnchor(
+    GpuScreenLengthAnchor anchor)
+{
+    if (anchor == GpuScreenLengthAnchor::Start) {
+        return GpuScreenLengthAnchor::End;
+    }
+    if (anchor == GpuScreenLengthAnchor::End) {
+        return GpuScreenLengthAnchor::Start;
+    }
+    return anchor;
 }
 
 [[nodiscard]] uint64_t materialKey(
@@ -140,6 +174,7 @@ void padRecord(std::vector<std::byte>& bytes, size_t recordStart, size_t stride)
     }
     append(std::max(0.0F, style.glowRadius));
     append(style.renderOrder);
+    append(uint32_t{0U});
     return result;
 }
 
@@ -243,7 +278,7 @@ public:
     std::vector<uint32_t> contributionStreamStarts;
     std::unordered_set<std::string> resourceRequestKeys;
     std::optional<uint32_t> activeContribution;
-    std::vector<std::pair<uint64_t, uint32_t>> activeZIndexKeys;
+    std::vector<std::tuple<uint64_t, uint32_t, uint32_t>> activeZIndexKeys;
 
     /** Resolve or create one material-compatible fixed-stride output stream. */
     [[nodiscard]] uint32_t stream(
@@ -340,7 +375,10 @@ public:
     }
 
     /** Intern one authored order and stable rule-order tie in contribution metadata. */
-    [[nodiscard]] uint32_t zIndexSlot(double value, uint32_t tieBreaker)
+    [[nodiscard]] uint32_t zIndexSlot(
+        double value,
+        uint32_t tieBreaker,
+        uint32_t semanticGroup)
     {
         auto const normalized = std::isfinite(value)
             ? (value == 0.0 ? 0.0 : value)
@@ -350,7 +388,11 @@ public:
             : std::bit_cast<uint64_t>(normalized);
         auto const compactTieBreaker =
             tieBreaker & (kGpuDepthTieBucketCount - 1U);
-        auto const key = std::pair{bits, compactTieBreaker};
+        auto const key = std::tuple{
+            bits,
+            compactTieBreaker,
+            semanticGroup,
+        };
         auto const found = std::ranges::find(activeZIndexKeys, key);
         if (found != activeZIndexKeys.end()) {
             return static_cast<uint32_t>(
@@ -362,7 +404,7 @@ public:
                 "GPU contribution has too many distinct z-index values.");
         }
         auto const index = static_cast<uint32_t>(values.size());
-        values.push_back({normalized, compactTieBreaker});
+        values.push_back({normalized, compactTieBreaker, semanticGroup});
         activeZIndexKeys.push_back(key);
         return index;
     }
@@ -381,7 +423,10 @@ public:
             throw std::logic_error(
                 "GPU record flags or activation token exceed their packed ABI fields.");
         }
-        appendScalar(bytes, zIndexSlot(style.zIndex, style.depthTieKey));
+        appendScalar(bytes, zIndexSlot(
+            style.zIndex,
+            style.depthTieKey,
+            style.semanticGroup));
         appendColor(bytes, style.color);
         appendScalar(bytes, packet.origin.slot);
         appendScalar(bytes, contribution().slot);
@@ -395,7 +440,14 @@ public:
         bool billboard,
         bool depthTest)
     {
-        auto const flags = materialFlags(billboard, depthTest);
+        auto const flags = materialFlags(
+            billboard,
+            depthTest,
+            false,
+            false,
+            false,
+            arrow.screenLengthAnchor,
+            arrow.style.semanticZIndexRole);
         auto const streamIndex = stream(
             GpuPrimitiveKind::Arrow,
             flags,
@@ -528,9 +580,18 @@ void GpuRenderPacketBuilder::endContribution()
 void GpuRenderPacketBuilder::appendPoint(
     GpuPointRecordData const& point,
     bool billboard,
-    bool depthTest)
+    bool depthTest,
+    bool ring)
 {
-    auto const flags = materialFlags(billboard, depthTest);
+    auto const flags = materialFlags(
+        billboard,
+        depthTest,
+        false,
+        false,
+        false,
+        GpuScreenLengthAnchor::None,
+        point.style.semanticZIndexRole,
+        ring);
     auto const streamIndex = impl_->stream(
         GpuPrimitiveKind::Point,
         flags,
@@ -554,10 +615,24 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
     }
     auto const variableOffset =
         path.lateralOffsetVectorsPx.size() >= path.points.size();
+    if (path.screenLengthAnchor != GpuScreenLengthAnchor::None &&
+        path.points.size() != 2U)
+    {
+        throw std::logic_error(
+            "Minimum screen-length paths must contain exactly two points.");
+    }
+    if (path.forwardArrow && path.backwardArrow &&
+        path.screenLengthAnchor != GpuScreenLengthAnchor::None &&
+        path.screenLengthAnchor != GpuScreenLengthAnchor::Center)
+    {
+        throw std::logic_error(
+            "Double-ended minimum screen-length paths require a center anchor.");
+    }
     auto const compact =
         !variableOffset && path.lateralOffsetsPx.empty() &&
         path.dashGap <= 0.0F &&
-        !path.forwardArrow && !path.backwardArrow;
+        !path.forwardArrow && !path.backwardArrow &&
+        path.screenLengthAnchor == GpuScreenLengthAnchor::None;
     auto const dualStroke = path.overlay.has_value();
     if (dualStroke &&
         (!compact || path.overlay->width <= 0.0F ||
@@ -572,7 +647,9 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
         depthTest,
         compact && !simple,
         simple,
-        dualStroke);
+        dualStroke,
+        path.screenLengthAnchor,
+        path.style.semanticZIndexRole);
     auto const stride = simple
         ? dualStroke
             ? kGpuDualSimplePathSegmentRecordBytes
@@ -612,7 +689,8 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
         arrowPixels * 0.9375F - kArrowShaftOverlapPixels);
     auto const zIndexSlot = impl_->zIndexSlot(
         path.style.zIndex,
-        path.style.depthTieKey);
+        path.style.depthTieKey,
+        path.style.semanticGroup);
     auto const& contribution = impl_->contribution();
     auto const activationToken = contribution.activationToken;
     if (activationToken == 0U || activationToken > kGpuActivationTokenMax) {
@@ -697,6 +775,12 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
             impl_->recordCount(streamIndex) - handle.firstPathRecord;
         return handle;
     }
+    auto const dashPeriodMeters = static_cast<double>(
+        path.dashLength + path.dashGap);
+    auto const meterDashes =
+        path.dashUnitsMeters && path.dashGap > 0.0F &&
+        std::isfinite(dashPeriodMeters) && dashPeriodMeters > 0.0;
+    double dashPhaseMeters = 0.0;
     for (size_t segment = 0U; segment < segmentCount; ++segment) {
         auto const start = firstByte + segment * stride;
         overwritePoint3(
@@ -743,6 +827,10 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
             segment + 2U == path.points.size() && path.forwardArrow
                 ? trimPixels
                 : 0.0F);
+        overwriteScalar(
+            bytes,
+            start + 120U,
+            meterDashes ? static_cast<float>(dashPhaseMeters) : 0.0F);
         uint32_t recordFlags = pathBits(GpuPathRecordFlag::Active);
         recordFlags |= segment == 0U
             ? pathBits(GpuPathRecordFlag::StartCap)
@@ -762,23 +850,43 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
         recordFlags |= segment + 2U == path.points.size() && path.forwardArrow
             ? pathBits(GpuPathRecordFlag::TrimEnd)
             : 0U;
-        overwriteScalar(bytes, start + 120U, zIndexSlot);
+        recordFlags |= meterDashes
+            ? pathBits(GpuPathRecordFlag::DashMeters)
+            : 0U;
+        overwriteScalar(bytes, start + 124U, zIndexSlot);
         std::memcpy(
-            bytes.data() + static_cast<std::ptrdiff_t>(start + 124U),
+            bytes.data() + static_cast<std::ptrdiff_t>(start + 128U),
             path.style.color.data(),
             path.style.color.size());
-        overwriteScalar(bytes, start + 128U, impl_->packet.origin.slot);
-        overwriteScalar(bytes, start + 132U, contribution.slot);
-        overwriteScalar(bytes, start + 136U, path.style.localPickIndex);
+        overwriteScalar(bytes, start + 132U, impl_->packet.origin.slot);
+        overwriteScalar(bytes, start + 136U, contribution.slot);
+        overwriteScalar(bytes, start + 140U, path.style.localPickIndex);
         overwriteScalar(
             bytes,
-            start + 140U,
+            start + 144U,
             recordFlags | (activationToken << 8U));
+        if (meterDashes) {
+            auto const& from = path.points[segment];
+            auto const& to = path.points[segment + 1U];
+            dashPhaseMeters = std::fmod(
+                dashPhaseMeters + std::hypot(to.x - from.x, to.y - from.y),
+                dashPeriodMeters);
+        }
     }
     handle.pathRecordCount =
         impl_->recordCount(streamIndex) - handle.firstPathRecord;
 
-    auto const arrowFlags = materialFlags(billboard, depthTest);
+    auto const arrowAnchor = path.backwardArrow && !path.forwardArrow
+        ? reversedAnchor(path.screenLengthAnchor)
+        : path.screenLengthAnchor;
+    auto const arrowFlags = materialFlags(
+        billboard,
+        depthTest,
+        false,
+        false,
+        false,
+        arrowAnchor,
+        path.style.semanticZIndexRole);
     auto const arrowKey = materialKey(
         GpuPrimitiveKind::Arrow,
         arrowFlags,
@@ -801,6 +909,7 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
             .width = path.width,
             .lateralOffsetScaleThreshold = path.lateralOffsetScaleThreshold,
             .variableOffset = variableOffset,
+            .screenLengthAnchor = path.screenLengthAnchor,
             .style = path.style,
         }, billboard, depthTest);
     }
@@ -818,6 +927,7 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
             .width = path.width,
             .lateralOffsetScaleThreshold = path.lateralOffsetScaleThreshold,
             .variableOffset = variableOffset,
+            .screenLengthAnchor = reversedAnchor(path.screenLengthAnchor),
             .style = path.style,
         }, billboard, depthTest);
     }
@@ -913,7 +1023,14 @@ void GpuRenderPacketBuilder::appendSurface(
         }
     }
     auto const indices = mapbox::earcut<uint32_t>(polygon);
-    auto const flags = materialFlags(false, depthTest);
+    auto const flags = materialFlags(
+        false,
+        depthTest,
+        false,
+        false,
+        false,
+        GpuScreenLengthAnchor::None,
+        style.semanticZIndexRole);
     auto const streamIndex = impl_->stream(
         GpuPrimitiveKind::SurfaceTriangle,
         flags,
@@ -941,7 +1058,14 @@ void GpuRenderPacketBuilder::appendIcon(
     bool billboard,
     bool depthTest)
 {
-    auto const flags = materialFlags(billboard, depthTest);
+    auto const flags = materialFlags(
+        billboard,
+        depthTest,
+        false,
+        false,
+        false,
+        GpuScreenLengthAnchor::None,
+        icon.style.semanticZIndexRole);
     auto const streamIndex = impl_->stream(
         GpuPrimitiveKind::Icon,
         flags,

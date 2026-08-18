@@ -1285,8 +1285,15 @@ bool validateStyleRuleYamlImpl(
     markInvalid(validateEnumValue(ruleYaml, "arrow", {"none", "forward", "backward", "double"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(
         ruleYaml,
+        "z-index-role",
+        {"support", "overlay"},
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateEnumValue(
+        ruleYaml,
         "relation-line-geometry",
-        {"centers", "nearest-endpoints"},
+        {"centers", "connection-stubs"},
         rulePath,
         report,
         sourceRuleIndex));
@@ -1295,6 +1302,13 @@ bool validateStyleRuleYamlImpl(
     markInvalid(validateEnumValue(
         ruleYaml,
         "lateral-offset-unit",
+        {"meter", "meters", "m", "pixel", "pixels", "px"},
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateEnumValue(
+        ruleYaml,
+        "dash-unit",
         {"meter", "meters", "m", "pixel", "pixels", "px"},
         rulePath,
         report,
@@ -1376,6 +1390,22 @@ bool validateStyleRuleYamlImpl(
         report,
         sourceRuleIndex));
     markInvalid(readScalar<double>(ruleYaml, "lateral-offset", rulePath, report, sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "dash-length",
+        0.0,
+        static_cast<double>(std::numeric_limits<float>::max()),
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "dash-gap",
+        0.0,
+        static_cast<double>(std::numeric_limits<float>::max()),
+        rulePath,
+        report,
+        sourceRuleIndex));
     markInvalid(validateRegexValue(ruleYaml, "type", rulePath, report, sourceRuleIndex));
     markInvalid(validateRegexValue(ruleYaml, "relation-type", rulePath, report, sourceRuleIndex));
     markInvalid(validateRegexValue(ruleYaml, "attribute-type", rulePath, report, sourceRuleIndex));
@@ -1404,11 +1434,29 @@ bool validateStyleRuleYamlImpl(
     markInvalid(validateExpression(ruleYaml, "color-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "arrow-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "z-index-expression", false, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateExpression(ruleYaml, "z-index-group-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "icon-url-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "label-text-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateColorScale(ruleYaml, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateWidthScale(ruleYaml, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateGlow(ruleYaml, rulePath, report, sourceRuleIndex));
+
+    if (ruleYaml["z-index-role"].IsDefined() !=
+        ruleYaml["z-index-group-expression"].IsDefined())
+    {
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            "z-index-role and z-index-group-expression must be configured together.",
+            locationForNode(ruleYaml));
+        issue.ruleIndex = sourceRuleIndex;
+        issue.rulePath = rulePath;
+        issue.property = ruleYaml["z-index-role"].IsDefined()
+            ? "z-index-group-expression"
+            : "z-index-role";
+        ok = false;
+    }
 
     uint32_t colorModeCount = 0;
     colorModeCount += ruleYaml["color"].IsDefined() ? 1U : 0U;

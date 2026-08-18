@@ -859,7 +859,6 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("layer", &TileLayerParser::TileSubsetLayerMetadata::layer)
         .field("filterId", &TileLayerParser::TileSubsetLayerMetadata::filterId)
         .field("generation", &TileLayerParser::TileSubsetLayerMetadata::generation)
-        .field("deliveryEpoch", &TileLayerParser::TileSubsetLayerMetadata::deliveryEpoch)
         .field("dependencies", &TileLayerParser::TileSubsetLayerMetadata::dependencies)
         .field("issues", &TileLayerParser::TileSubsetLayerMetadata::issues)
         .field(

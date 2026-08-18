@@ -8,7 +8,7 @@ import {AppStateService, InspectionComparisonModel, InspectionPanelModel} from "
     selector: 'inspection-dialogs',
     template: `
         @for (panel of undockedPanels; track panel.id; let i = $index) {
-            @if (panel.features.length > 0 || panel.sourceData !== undefined) {
+            @if (panel.loading || panel.features.length > 0 || panel.sourceData !== undefined) {
                 <inspection-panel-dialog [panel]="panel" [dialogIndex]="i"></inspection-panel-dialog>
             }
         }

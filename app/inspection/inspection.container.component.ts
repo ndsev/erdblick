@@ -31,7 +31,7 @@ import {DockedPanelDragController, DockedPanelDragOffset} from "../shared/docked
                 </div>
             }
             @for (panel of dockedPanels; track panel.id) {
-                @if (panel.features.length > 0 || panel.sourceData !== undefined) {
+                @if (panel.loading || panel.features.length > 0 || panel.sourceData !== undefined) {
                     <inspection-panel [panel]="panel"
                                       [dockedPanelCount]="dockedPanels.length"
                                       [ngClass]="{'dragging': dockDrag.state.draggedId === panel.id,

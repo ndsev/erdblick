@@ -76,7 +76,6 @@ public:
         TileLayerMetadata layer;
         std::string filterId;
         uint64_t generation;
-        uint64_t deliveryEpoch;
         NativeJsValue dependencies;
         NativeJsValue issues;
         std::string glbAttachmentName;

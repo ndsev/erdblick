@@ -23,8 +23,6 @@ export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-contex
 export const MAP_TILE_STREAM_FILTER_STATUS_TYPE = "mapget.filter.status";
 const TARGET_TILE_REQUEST_CHUNK_BYTES = 1024 * 1024;
 const MAX_TILE_REQUEST_MESSAGE_BYTES = 9 * 1024 * 1024;
-const MAX_SPARSE_RENEWAL_TILES_PER_ENTRY = 512;
-const MAX_SPARSE_RENEWAL_TILES_PER_ENVELOPE = 2048;
 
 export interface MapTileStreamStatusRequest {
     index: number;
@@ -193,7 +191,6 @@ export class MapTileStreamClient {
     private pullControllers: AbortController[] = [];
     private readonly pullParallelism: number = 2;
     private readonly pullWaitMs: number = 25000;
-    private readonly pullRetryDelayMs: number = 50;
     private readonly pullBatchMaxBytesCap: number = 64 * 1024 * 1024;
     private readonly pullBatchMinBytes: number = 64 * 1024;
     private readonly pullDownstreamEwmaAlpha: number = 0.2;
@@ -211,6 +208,8 @@ export class MapTileStreamClient {
     private usingLegacyPullFallback: boolean = false;
     private readonly ownsParser: boolean;
     private protocolMismatchReported: boolean = false;
+    private protocolMismatchActive: boolean = false;
+    private transportFailureActive: boolean = false;
     /** Counts successful websocket connections so the first context frame can identify reconnects. */
     private openedSocketCount: number = 0;
     /** True until the current socket identifies its datasource-catalog revision. */
@@ -370,6 +369,25 @@ export class MapTileStreamClient {
         } catch (_err) {
             // Ignore close errors.
         }
+    }
+
+    /**
+     * Abort one ambiguous interactive transfer and let ordinary reconnect
+     * create a fresh server-side session. No same-session parser repair is
+     * attempted because payload bytes are not retained for retransmission.
+     */
+    failInteractiveConnection(message: string, error?: unknown): void {
+        if (this.transportFailureActive || this.protocolMismatchActive) {
+            return;
+        }
+        this.transportFailureActive = true;
+        console.error(message, error);
+        this.stopPullLoops();
+        this.clearPendingFrames();
+        this.rejectCompletion(
+            error instanceof Error ? error : new Error(message)
+        );
+        this.close(1011, "interactive transport failure");
     }
 
     /** Tears down websocket, pull loops, parser state, and any pending completion promise. */
@@ -549,106 +567,13 @@ export class MapTileStreamClient {
         return this;
     }
 
-    /** Sends sparse delivery-epoch advances without replacing full subscription state. */
-    async renewFilterTiles(
-        renewals: Record<string, unknown>[]
-    ): Promise<"sent" | "disconnected" | "failed"> {
-        if (!renewals.length) {
-            return "sent";
-        }
-        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-            return "disconnected";
-        }
-        try {
-            for (const payload of this.buildRenewalPayloads(renewals)) {
-                this.socket.send(payload);
-            }
-            return "sent";
-        } catch (error) {
-            console.error("Failed to send expired-tile renewals.", error);
-            return this.socket?.readyState === WebSocket.OPEN
-                ? "failed"
-                : "disconnected";
-        }
-    }
-
-    /** Bounds sparse messages by encoded bytes and work units. */
-    private buildRenewalPayloads(
-        renewals: Record<string, unknown>[]
-    ): string[] {
-        const boundedRenewals = renewals.flatMap(renewal =>
-            this.splitRenewalGroupForTransport(renewal)
-        );
-        const payloads: string[] = [];
-        let current: Record<string, unknown>[] = [];
-        let currentTileCount = 0;
-        for (const renewal of boundedRenewals) {
-            const renewalTileCount = Array.isArray(renewal["tileIds"])
-                ? renewal["tileIds"].length
-                : 0;
-            const candidate = JSON.stringify({renewals: [...current, renewal]});
-            if (current.length && (
-                this.byteLength(candidate) > TARGET_TILE_REQUEST_CHUNK_BYTES ||
-                currentTileCount + renewalTileCount >
-                    MAX_SPARSE_RENEWAL_TILES_PER_ENVELOPE
-            )) {
-                payloads.push(JSON.stringify({renewals: current}));
-                current = [];
-                currentTileCount = 0;
-            }
-            current.push(renewal);
-            currentTileCount += renewalTileCount;
-            const single = JSON.stringify({renewals: current});
-            if (current.length === 1 &&
-                this.byteLength(single) > MAX_TILE_REQUEST_MESSAGE_BYTES) {
-                throw new Error(
-                    `Single filter renewal exceeds ` +
-                    `${MAX_TILE_REQUEST_MESSAGE_BYTES} bytes; refusing to send it.`
-                );
-            }
-        }
-        if (current.length) {
-            payloads.push(JSON.stringify({renewals: current}));
-        }
-        return payloads;
-    }
-
-    /** Bisects one sparse renewal until both byte and work-unit limits are met. */
-    private splitRenewalGroupForTransport(
-        renewal: Record<string, unknown>
-    ): Record<string, unknown>[] {
-        const tileIds = Array.isArray(renewal["tileIds"])
-            ? renewal["tileIds"] as unknown[]
-            : [];
-        const encoded = JSON.stringify({renewals: [renewal]});
-        if (tileIds.length <= MAX_SPARSE_RENEWAL_TILES_PER_ENTRY &&
-            this.byteLength(encoded) <= TARGET_TILE_REQUEST_CHUNK_BYTES) {
-            return [renewal];
-        }
-        if (tileIds.length <= 1) {
-            return [renewal];
-        }
-        const midpoint = Math.ceil(tileIds.length / 2);
-        const left = this.sliceRequestGroup(
-            renewal,
-            tileIds.slice(0, midpoint)
-        );
-        const right = this.sliceRequestGroup(
-            renewal,
-            tileIds.slice(midpoint)
-        );
-        return [
-            ...this.splitRenewalGroupForTransport(left),
-            ...this.splitRenewalGroupForTransport(right)
-        ];
-    }
-
     /**
      * Sends the current logical interactive tile request if it differs from the last one.
      * Large requests are chunked across multiple websocket messages but still share one request id.
      */
     async updateRequest(
-        tileLayerRequests: any[]
+        tileLayerRequests: any[],
+        force = false
     ): Promise<"sent" | "unchanged" | "failed"> {
         const stringPoolOffsets = this.parser!.getFieldDictOffsets();
         const requestBodyBase = {
@@ -659,7 +584,7 @@ export class MapTileStreamClient {
         const newRequestBody = JSON.stringify(requestBodyBase);
 
         // Ensure that the new request is different from the previous one.
-        if (this.lastTilesRequestBody === newRequestBody) {
+        if (!force && this.lastTilesRequestBody === newRequestBody) {
             return "unchanged";
         }
         this.lastTilesRequestBody = newRequestBody;
@@ -683,17 +608,16 @@ export class MapTileStreamClient {
     }
 
     /**
-     * Splits oversized interactive requests at request-group boundaries so the backend can process
-     * each map/layer/level group independently without reassembly.
+     * Splits oversized interactive requests while preserving one atomic logical
+     * snapshot identified by the shared request id and ordered chunk metadata.
      */
     private buildRequestPayloads(
         tileLayerRequests: any[],
         stringPoolOffsets: unknown,
         requestId: number): string[]
     {
-        // Chunk only between complete request groups. The stream service keeps these
-        // groups disjoint by map/layer/tile-level, so the server can schedule
-        // each chunk immediately while keeping one logical request id.
+        // Chunk only between complete request groups where possible. Mapget
+        // stages every piece and reconciles only after the final chunk.
         const singlePayload = JSON.stringify({
             requests: tileLayerRequests,
             stringPoolOffsets,
@@ -706,7 +630,7 @@ export class MapTileStreamClient {
         // A user-configured view can put hundreds of thousands of IDs into one
         // map/layer/filter group. Split tile-indexed fields together so that a
         // single logical group never becomes an unsendable all-or-nothing JSON
-        // object after per-tile delivery epochs accumulate.
+        // object when one presentation covers a very large tile set.
         const boundedRequests = tileLayerRequests.flatMap(request =>
             this.splitRequestGroupForTransport(
                 request,
@@ -818,8 +742,7 @@ export class MapTileStreamClient {
         for (const field of [
             "priorityTileIds",
             "roots",
-            "featureIds",
-            "deliveryEpochs"
+            "featureIds"
         ]) {
             const values = request?.[field];
             if (!Array.isArray(values)) {
@@ -872,6 +795,11 @@ export class MapTileStreamClient {
 
     /** Opens the websocket once and reuses an in-flight connection attempt for concurrent callers. */
     async connect(): Promise<void> {
+        if (this.protocolMismatchActive) {
+            throw new Error(
+                "The map backend uses an incompatible tile-stream protocol."
+            );
+        }
         if (this.socket?.readyState === WebSocket.OPEN) {
             return;
         }
@@ -943,7 +871,7 @@ export class MapTileStreamClient {
                 }
                 opened = true;
                 this.prepareForOpenedSocket();
-                this.protocolMismatchReported = false;
+                this.transportFailureActive = false;
                 this.onOpen?.();
                 resolve();
             };
@@ -1072,7 +1000,10 @@ export class MapTileStreamClient {
                 }
             })
             .catch(err => {
-                console.error("Tile stream message handler failed.", err);
+                this.failInteractiveConnection(
+                    "Tile stream message could not be decoded.",
+                    err
+                );
             })
             .finally(() => {
                 if (epoch === this.frameQueueEpoch) {
@@ -1100,13 +1031,11 @@ export class MapTileStreamClient {
         } else if (data instanceof Blob) {
             bytes = new Uint8Array(await data.arrayBuffer());
         } else {
-            console.warn("Unexpected WebSocket message payload.");
-            return [];
+            throw new Error("Unexpected WebSocket message payload.");
         }
 
         if (bytes.length < MAP_TILE_STREAM_HEADER_SIZE) {
-            console.warn("Tile stream frame too small.");
-            return [];
+            throw new Error("Tile stream frame is smaller than its header.");
         }
 
         const frames: QueuedTransportFrame[] = [];
@@ -1117,8 +1046,7 @@ export class MapTileStreamClient {
             const payloadLength = header.payloadLength;
             const frameEnd = offset + MAP_TILE_STREAM_HEADER_SIZE + payloadLength;
             if (frameEnd > bytes.length) {
-                console.warn("Tile stream frame size mismatch.");
-                return [];
+                throw new Error("Tile stream frame size does not match its header.");
             }
 
             frames.push({
@@ -1130,8 +1058,7 @@ export class MapTileStreamClient {
         }
 
         if (offset !== bytes.length) {
-            console.warn("Tile stream frame alignment mismatch.");
-            return [];
+            throw new Error("Tile stream frame alignment is invalid.");
         }
         return frames;
     }
@@ -1168,6 +1095,8 @@ export class MapTileStreamClient {
 
     /** Reports one protocol mismatch and stops the active transport because following frame parsing is unsafe. */
     private reportProtocolMismatch(version: {major: number; minor: number; patch: number}): void {
+        this.protocolMismatchActive = true;
+        this.transportFailureActive = true;
         if (!this.protocolMismatchReported) {
             this.protocolMismatchReported = true;
             this.onProtocolMismatch?.({
@@ -1191,27 +1120,23 @@ export class MapTileStreamClient {
             if (type === MAP_TILE_STREAM_TYPE_STATUS) {
                 const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
                 const payloadText = this.decoder.decode(payloadBytes);
-                try {
-                    const payload = JSON.parse(payloadText) as MapTileStreamStatusPayload;
-                    if (!this.matchesCurrentRequest(payload.requestId)) {
-                        return;
+                const payload = JSON.parse(payloadText) as MapTileStreamStatusPayload;
+                if (!this.matchesCurrentRequest(payload.requestId)) {
+                    return;
+                }
+                if (payload.type === MAP_TILE_STREAM_FILTER_STATUS_TYPE) {
+                    if (this.onFilterStatus) {
+                        this.onFilterStatus(payload as unknown as MapTileStreamFilterStatusPayload);
                     }
-                    if (payload.type === MAP_TILE_STREAM_FILTER_STATUS_TYPE) {
-                        if (this.onFilterStatus) {
-                            this.onFilterStatus(payload as unknown as MapTileStreamFilterStatusPayload);
-                        }
-                        return;
-                    }
-                    if (this.onStatus) {
-                        this.onStatus(payload);
-                    }
-                    if (payload.allDone && this.awaitingCompletion) {
-                        this.resolveCompletion(payload);
-                    } else if (payload.allDone) {
-                        this.lastStatusPayload = payload;
-                    }
-                } catch (err) {
-                    console.error("Failed to parse interactive status payload:", err);
+                    return;
+                }
+                if (this.onStatus) {
+                    this.onStatus(payload);
+                }
+                if (payload.allDone && this.awaitingCompletion) {
+                    this.resolveCompletion(payload);
+                } else if (payload.allDone) {
+                    this.lastStatusPayload = payload;
                 }
                 return;
             }
@@ -1219,29 +1144,25 @@ export class MapTileStreamClient {
             if (type === MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT) {
                 const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
                 const payloadText = this.decoder.decode(payloadBytes);
-                try {
-                    const payload = JSON.parse(payloadText) as MapTileStreamRequestContextPayload;
-                    if (payload.type === MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE && Number.isFinite(payload.requestId)) {
-                        this.supportsRequestContextFrames = true;
-                        this.incomingRequestId = Math.max(0, Math.floor(payload.requestId));
-                        if (Number.isFinite(payload.sourcesRevision)) {
-                            const reconnected = this.awaitingSocketSourcesRevision
-                                && this.openedSocketCount > 1;
-                            this.awaitingSocketSourcesRevision = false;
-                            this.updateSourcesRevision(Number(payload.sourcesRevision), true, reconnected);
-                        }
-                        if (Number.isFinite(payload.clientId)) {
-                            const nextClientId = Math.max(1, Math.floor(Number(payload.clientId)));
-                            if (this.pullClientId !== nextClientId) {
-                                this.pullClientId = nextClientId;
-                                this.startPullLoops();
-                            } else if (!this.pullControllers.length) {
-                                this.startPullLoops();
-                            }
+                const payload = JSON.parse(payloadText) as MapTileStreamRequestContextPayload;
+                if (payload.type === MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE && Number.isFinite(payload.requestId)) {
+                    this.supportsRequestContextFrames = true;
+                    this.incomingRequestId = Math.max(0, Math.floor(payload.requestId));
+                    if (Number.isFinite(payload.sourcesRevision)) {
+                        const reconnected = this.awaitingSocketSourcesRevision
+                            && this.openedSocketCount > 1;
+                        this.awaitingSocketSourcesRevision = false;
+                        this.updateSourcesRevision(Number(payload.sourcesRevision), true, reconnected);
+                    }
+                    if (Number.isFinite(payload.clientId)) {
+                        const nextClientId = Math.max(1, Math.floor(Number(payload.clientId)));
+                        if (this.pullClientId !== nextClientId) {
+                            this.pullClientId = nextClientId;
+                            this.startPullLoops();
+                        } else if (!this.pullControllers.length) {
+                            this.startPullLoops();
                         }
                     }
-                } catch (err) {
-                    console.error("Failed to parse interactive request-context payload:", err);
                 }
                 return;
             }
@@ -1249,21 +1170,17 @@ export class MapTileStreamClient {
             if (type === MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE) {
                 const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
                 const payloadText = this.decoder.decode(payloadBytes);
-                try {
-                    const payload = JSON.parse(payloadText) as MapTileStreamSourceCatalogChangePayload;
-                    if (payload.type === "mapget.sources.changed" && Number.isFinite(payload.revision)) {
-                        const revision = Math.max(0, Math.floor(Number(payload.revision)));
-                        this.updateSourcesRevision(revision, false);
-                        const source = this.parseSourceCatalogChangeSource(payload.source);
-                        this.onSourceCatalogChanged?.({
-                            type: "mapget.sources.changed",
-                            revision,
-                            reason: typeof payload.reason === "string" ? payload.reason : undefined,
-                            ...(source ? {source} : {})
-                        });
-                    }
-                } catch (err) {
-                    console.error("Failed to parse source-catalog change payload:", err);
+                const payload = JSON.parse(payloadText) as MapTileStreamSourceCatalogChangePayload;
+                if (payload.type === "mapget.sources.changed" && Number.isFinite(payload.revision)) {
+                    const revision = Math.max(0, Math.floor(Number(payload.revision)));
+                    this.updateSourcesRevision(revision, false);
+                    const source = this.parseSourceCatalogChangeSource(payload.source);
+                    this.onSourceCatalogChanged?.({
+                        type: "mapget.sources.changed",
+                        revision,
+                        reason: typeof payload.reason === "string" ? payload.reason : undefined,
+                        ...(source ? {source} : {})
+                    });
                 }
                 return;
             }
@@ -1322,7 +1239,10 @@ export class MapTileStreamClient {
                 this.onFrame(bytes, type);
             }
         } catch (err) {
-            console.error("Tile stream message handler failed.", err);
+            this.failInteractiveConnection(
+                "Tile stream frame could not be processed.",
+                err
+            );
         }
     }
 
@@ -1340,7 +1260,7 @@ export class MapTileStreamClient {
             return true;
         }
         if (requestId === undefined) {
-            // Protocol-3 servers tag every logical request status.  Reject
+            // Versioned interactive servers tag every logical request status. Reject
             // untagged frames once that capability has been observed so an
             // unrelated control/error frame cannot complete the active
             // request or overwrite its terminal diagnostics.
@@ -1360,7 +1280,7 @@ export class MapTileStreamClient {
             this.pullControllers.push(controller);
             this.runPullLoop(controller).catch(err => {
                 if (!controller.signal.aborted) {
-                    console.error("Tile pull loop failed.", err);
+                    this.failInteractiveConnection("Tile pull loop failed.", err);
                 }
             });
         }
@@ -1384,7 +1304,8 @@ export class MapTileStreamClient {
 
             try {
                 const startedAt = performance.now();
-                const response = await fetch(this.resolvePullUrl(clientId), {
+                const pullUrl = this.resolvePullUrl(clientId);
+                const response = await fetch(pullUrl, {
                     method: "GET",
                     cache: "no-store",
                     signal: controller.signal,
@@ -1411,23 +1332,32 @@ export class MapTileStreamClient {
                 }
 
                 if (response.status === 410) {
-                    if (this.pullClientId === clientId) {
-                        this.pullClientId = null;
-                        this.stopPullLoops();
-                    }
+                    this.failInteractiveConnection(
+                        "The interactive payload session disappeared."
+                    );
                     return;
                 }
 
-                if (this.activateLegacyPullFallbackForStatus(response.status)) {
+                if (this.activateLegacyPullFallbackForStatus(
+                    response.status,
+                    pullUrl
+                )) {
                     continue;
                 }
+                this.failInteractiveConnection(
+                    `Interactive payload fetch failed with HTTP ${response.status}.`
+                );
+                return;
             } catch (err) {
                 if (controller.signal.aborted) {
                     return;
                 }
+                this.failInteractiveConnection(
+                    "Interactive payload fetch failed.",
+                    err
+                );
+                return;
             }
-
-            await this.delay(this.pullRetryDelayMs, controller.signal);
         }
     }
 
@@ -1461,12 +1391,29 @@ export class MapTileStreamClient {
     }
 
     /** Switches payload pulls to `/tiles/next` when a stale proxy rejects `/interactive/payload`. */
-    private activateLegacyPullFallbackForStatus(status: number): boolean {
-        if (this.usingLegacyPullFallback || ![404, 405, 501].includes(status)) {
+    private activateLegacyPullFallbackForStatus(
+        status: number,
+        requestedUrl?: string
+    ): boolean {
+        if (![404, 405, 501].includes(status)) {
             return false;
         }
-        if (!this.legacyEndpointPath(this.activeStreamPath, "interactive", "tiles/next")) {
+        const legacyPath = this.legacyEndpointPath(
+            this.activeStreamPath,
+            "interactive",
+            "tiles/next"
+        );
+        if (!legacyPath) {
             return false;
+        }
+        if (this.usingLegacyPullFallback) {
+            // Parallel pulls may both have targeted the primary route before
+            // the first 404 enables fallback. Treat those already-issued
+            // primary responses as handled, but fail if the legacy route
+            // itself returns an unsupported-route status.
+            return requestedUrl !== undefined &&
+                new URL(requestedUrl, document.baseURI).pathname !==
+                    new URL(legacyPath, document.baseURI).pathname;
         }
         this.usingLegacyPullFallback = true;
         console.warn(`Fell back to legacy mapget tile payload endpoint ${this.debugPath(this.resolvePullPath())}.`);
@@ -1567,22 +1514,4 @@ export class MapTileStreamClient {
         return parsed;
     }
 
-    /** Abort-aware timeout used by the pull loop retry path. */
-    private async delay(ms: number, signal: AbortSignal): Promise<void> {
-        if (signal.aborted || ms <= 0) {
-            return;
-        }
-        await new Promise<void>(resolve => {
-            const timeout = setTimeout(() => {
-                signal.removeEventListener("abort", onAbort);
-                resolve();
-            }, ms);
-            const onAbort = () => {
-                clearTimeout(timeout);
-                signal.removeEventListener("abort", onAbort);
-                resolve();
-            };
-            signal.addEventListener("abort", onAbort, {once: true});
-        });
-    }
 }

@@ -77,6 +77,11 @@ import {
     DeckInteractionOutlineService,
     isDeckInteractionMaskLayer
 } from "./deck-interaction-outline.service";
+import {
+    DeckSemanticZIndexService,
+    isSemanticZIndexPassLayer,
+    isSemanticZIndexPickingLayer
+} from "./deck-semantic-z-index.service";
 import {NavigationTargetOverlay} from "./deck-navigation-target";
 import {planarPanViewState} from "./deck-planar-pan";
 import {environment} from "../../environments/environment";
@@ -298,8 +303,11 @@ export abstract class DeckMapView implements IRenderView {
     protected readonly layerRegistry = new DeckLayerRegistry();
     protected readonly interactionOutlineService =
         new DeckInteractionOutlineService(this.layerRegistry);
+    protected readonly semanticZIndexService =
+        new DeckSemanticZIndexService(this.layerRegistry);
     private gpuScene: GpuScene | null = null;
     private gpuVectorLayers: readonly ErdblickVectorLayer[] = [];
+    private readonly gpuVectorDisabledPickIndices = new Set<number>();
     private gpuTextLayerHost: GpuTextLayerHost | null = null;
     private gpuMaskController: GpuSceneMaskController | null = null;
     protected readonly subscriptions: Subscription[] = [];
@@ -429,6 +437,12 @@ export abstract class DeckMapView implements IRenderView {
         const layerId = String(layer.id ?? "");
         if (isDeckInteractionMaskLayer(layerId)) {
             return false;
+        }
+        if (isSemanticZIndexPassLayer(layerId)) {
+            return false;
+        }
+        if (isSemanticZIndexPickingLayer(layerId)) {
+            return isPicking;
         }
         const layerPickable = Boolean((layer.props as {pickable?: boolean | "3d"} | undefined)?.pickable);
         const isGltfPickProxyLayer = layerId.includes("/gltf-pick-proxy");
@@ -560,7 +574,10 @@ export abstract class DeckMapView implements IRenderView {
             views: this.createMapDeckView(this.createDeckControllerOptions()),
             viewState: this.viewState,
             layers: [],
-            effects: [this.interactionOutlineService],
+            effects: [
+                this.semanticZIndexService,
+                this.interactionOutlineService
+            ],
             controller: false,
             pickingRadius: NAVIGATION_PICK_RADIUS_PIXELS,
             layerFilter: this.deckLayerFilter,
@@ -631,6 +648,12 @@ export abstract class DeckMapView implements IRenderView {
             this.deckDevice!,
             reason => this.requestGpuSceneRender(reason)
         );
+        this.gpuVectorDisabledPickIndices.clear();
+        this.semanticZIndexService.bindScene(
+            this.gpuScene,
+            this.sceneMode === SceneMode.SCENE2D,
+            this.gpuVectorDisabledPickIndices
+        );
         this.layerController.setDeckPresentationDiagnosticsProvider(() => ({
             layers: this.layerRegistry.size,
             scene: this.gpuScene?.snapshot() ?? {
@@ -650,7 +673,8 @@ export abstract class DeckMapView implements IRenderView {
         this.gpuVectorLayers = createErdblickVectorLayers(
             `builtin/gpu-vector-${this._viewIndex}`,
             this.gpuScene,
-            this.sceneMode === SceneMode.SCENE2D
+            this.sceneMode === SceneMode.SCENE2D,
+            this.gpuVectorDisabledPickIndices
         );
         this.gpuTextLayerHost = createGpuTextLayerHost(
             `builtin/gpu-text-${this._viewIndex}`,
@@ -722,6 +746,8 @@ export abstract class DeckMapView implements IRenderView {
         this.tileGridEnabled = false;
         this.gpuMaskController?.destroy();
         this.gpuMaskController = null;
+        this.semanticZIndexService.unbindScene();
+        this.gpuVectorDisabledPickIndices.clear();
         for (const layer of this.gpuVectorLayers) {
             this.layerRegistry.remove(layer.id);
         }
@@ -841,6 +867,7 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.gpuTextLayerHost?.sceneChanged();
         this.gpuMaskController?.sceneChanged();
+        this.semanticZIndexService.sceneChanged();
         this.gpuSceneRetiredResourcesPending = true;
         this.requestRender(this.gpuSceneRedrawReason);
     }

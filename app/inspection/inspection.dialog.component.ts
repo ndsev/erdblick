@@ -180,7 +180,11 @@ export class InspectionPanelDialogComponent implements OnDestroy {
                 this.selectedLayerItem = undefined;
             }
         } else {
-            this.title = panel.features.length > 1 ? `Selected ${panel.features.length} features` : displayFeatureId(panel.features[0].featureId);
+            this.title = panel.loading ? "Loading inspection…" : panel.features.length > 1
+                ? `Selected ${panel.features.length} features`
+                : panel.features.length
+                    ? displayFeatureId(panel.features[0].featureId)
+                    : "Inspection";
             this.layerMenuItems = [];
             this.selectedLayerItem = undefined;
         }

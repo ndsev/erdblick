@@ -214,8 +214,13 @@ Common primitive fields include:
 - `z-index` and optional `z-index-expression`;
 - `lateral-offset-unit`: `meter`, `meters`, `m`, `pixel`, `pixels`, or `px`;
 - literal screen-space `glow` material;
-- `flat`, `billboard`, and `depth-test`;
-- `dashed`, `dash-length`, `dash-pattern`, and `gap-color`;
+- `flat`, `billboard`, and `depth-test`; paths extrude in the map plane by
+  default, while `billboard: true` explicitly requests a constant
+  screen-facing width;
+- `dashed`, `dash-length`, optional `dash-gap`, `dash-unit`, `dash-pattern`,
+  and `gap-color`; `dash-unit` accepts the same metre/pixel aliases as
+  `lateral-offset-unit`, defaults to pixels, and omitted `dash-gap` preserves
+  the legacy cadence by matching `dash-length`;
 - `arrow` / `arrow-expression`;
 - outline color/width;
 - icon URL/expression;
@@ -646,7 +651,13 @@ Relation fields:
 - `relation-recursive`: local recursion plus at most one hop across a tile;
 - `relation-merge-twoway`: pair reverse descriptors;
 - `relation-line-height-offset`;
-- `relation-line-geometry`: `centers` (default) or `nearest-endpoints`;
+- `relation-line-geometry`: `centers` (default) or `connection-stubs`; the
+  latter draws a short directed segment through the
+  physical connection from relation and feature geometry already available to
+  the subset renderer, then preserves a minimum projected size for overview
+  zooms. If both selected endpoints are coincident point geometries and neither
+  feature provides a line tangent, it draws a screen-facing ring around the
+  connection because no direction can be derived;
 - `relation-line-end-markers`;
 - `relation-source-style`;
 - `relation-target-style`.
@@ -655,12 +666,6 @@ Relation expressions can use the relation root plus `$source`, `$target`, and
 `$twoway`. Endpoint styles may independently select semantic geometry.
 `RelationEntry` carries source/target feature entries and explicit source and
 target geometry collections.
-
-`nearest-endpoints` selects the closest pair among line ends and point
-positions in those collections. Point positions remain exact, which makes the
-mode suitable for zero-length-lane connectors. When both selected positions
-are ordinary line ends, the renderer shortens the connector at both ends so
-the relation arrow does not obscure either joined line.
 
 Generic bidirectional display uses permanent south-west ownership. If that
 owner is outside current coverage, the pair is not rendered. Selection

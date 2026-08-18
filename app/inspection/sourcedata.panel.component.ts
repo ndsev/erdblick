@@ -133,9 +133,9 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
 
     expireTiles(tokens: ReadonlyArray<{
         tileId: number;
-        deliveryEpoch: number;
+        valueVersion: number;
     }>): void {
-        if (!tokens.some(token => token.deliveryEpoch === this.valueEpoch)) {
+        if (!tokens.some(token => token.valueVersion === this.valueEpoch)) {
             return;
         }
         const sourceData = this.panel().sourceData;
@@ -392,7 +392,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             if (node.data.address && addressInRange(node.data.address)) {
                 highlight = true;
 
-                if (!firstHighlightedItemIndex) {
+                if (firstHighlightedItemIndex === undefined) {
                     firstHighlightedItemIndex = virtualRowIndex;
                 }
 

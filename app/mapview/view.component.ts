@@ -57,8 +57,10 @@ import {
 import {CacheResetService} from "../mapdata/cache-reset.service";
 import {
     HoverDetailService,
+    type HoverDetailField,
     type HoverFeatureDetails
 } from "../mapdata/hover-detail.service";
+import {inspectionValueBubbleClasses} from "../inspection/inspection-value-bubble.presentation";
 
 interface PreparedContextMenuPosition {
     screenPos: {x: number; y: number};
@@ -148,11 +150,15 @@ interface PreparedContextMenuPosition {
             <div class="feature-hover-hud hover-label-surface" role="tooltip">
                 @for (feature of hoverDetailsContent; track feature.featureId) {
                     <div class="hover-label-feature">
+                        @if (feature.showFeatureId) {
+                            <span class="hover-label-feature-id">{{ feature.featureId }}</span>
+                        }
                         @for (field of feature.fields; track $index) {
-                            <div class="hover-label-row">
-                                <span>{{ field.label }}</span>
-                                <strong>{{ field.value }}</strong>
-                            </div>
+                            <span class="hover-label-field"
+                                  [ngClass]="hoverValuePillClasses(field)">
+                                <span class="hover-label-key">{{ field.key }}</span>
+                                <span class="hover-label-value">{{ field.value }}</span>
+                            </span>
                         }
                     </div>
                 }
@@ -542,6 +548,19 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         // Deck emits outside Angular; update only this view instead of entering
         // the zone and checking every open inspection/search panel.
         this.cdr.detectChanges();
+    }
+
+    /** Applies the inspection value-bubble presentation to one joined hover key/value pill. */
+    protected hoverValuePillClasses(field: HoverDetailField): Record<string, boolean> {
+        return inspectionValueBubbleClasses({
+            kind: "scalar",
+            colorKey: field.colorKey,
+            label: field.key
+        }, {
+            varyColors: this.stateService.inspectionValueVaryColors,
+            varyOutlines: this.stateService.inspectionValueVaryOutlines,
+            varyStriping: this.stateService.inspectionValueVaryStriping
+        });
     }
 
     /** Returns the DOM id used for this map view canvas. */

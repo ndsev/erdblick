@@ -15,14 +15,11 @@ import type {
 import { Geometry, Model } from "@luma.gl/engine";
 
 import { GpuMaterialFlag, GpuPrimitiveKind } from "./gpu-render-packet";
-import {
-  GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP,
-  GpuScene,
-  type GpuSceneMaterialStore,
-} from "./gpu-scene";
+import { GpuScene, type GpuSceneMaterialStore } from "./gpu-scene";
 import {
   ARROW_FRAGMENT_SHADER,
-  ARROW_VERTEX_SHADER,
+  ARROW_BILLBOARD_VERTEX_SHADER,
+  ARROW_WORLD_VERTEX_SHADER,
   COMPACT_PATH_BILLBOARD_VERTEX_SHADER,
   COMPACT_PATH_FRAGMENT_SHADER,
   COMPACT_PATH_WORLD_VERTEX_SHADER,
@@ -35,6 +32,8 @@ import {
   GpuSceneMaskMode,
   type GpuSceneShaderProps,
   gpuSceneShaderModule,
+  gpuSceneSemanticOverlayShaderModule,
+  gpuSceneSemanticSupportShaderModule,
   gpuSceneMaskShaderModule,
   gpuSceneMaskFragmentShader,
   gpuSceneMaskVertexShader,
@@ -46,6 +45,7 @@ import {
   PATH_WORLD_VERTEX_SHADER,
   POINT_BILLBOARD_VERTEX_SHADER,
   POINT_FRAGMENT_SHADER,
+  POINT_RING_FRAGMENT_SHADER,
   POINT_VERTEX_SHADER,
   SIMPLE_PATH_BILLBOARD_VERTEX_SHADER,
   SIMPLE_PATH_FRAGMENT_SHADER,
@@ -53,7 +53,7 @@ import {
   SURFACE_FRAGMENT_SHADER,
   SURFACE_VERTEX_SHADER,
 } from "./erdblick-vector.shaders";
-import {gpuIconAtlasService} from "./gpu-icon-atlas.service";
+import { gpuIconAtlasService } from "./gpu-icon-atlas.service";
 
 const DEPTH_PARAMETERS: RenderPipelineParameters = {
   depthCompare: "less-equal",
@@ -71,6 +71,14 @@ const MASK_NO_DEPTH_PARAMETERS: RenderPipelineParameters = {
   depthCompare: "always",
   depthWriteEnabled: false,
 };
+const SEMANTIC_DEPTH_PARAMETERS: RenderPipelineParameters = {
+  depthCompare: "less-equal",
+  depthWriteEnabled: true,
+  blend: false,
+};
+// WebGL presents a 24-bit depth buffer. Four quantized depth values separate
+// primitive kinds inside the vector pass without changing physical deck order.
+const PRIMITIVE_DEPTH_BIAS_STEP = 8 / 0x00ff_ffff;
 // Drill picking disables every object already returned by the picker. Keep
 // this above the configurable inspection limit so overlapping vector objects
 // cannot reappear before Deck finishes one drill-pick operation.
@@ -95,7 +103,7 @@ const PATH_LAYOUT: BufferLayout[] = [
   {
     name: "instances",
     stepMode: "instance",
-    byteStride: 144,
+    byteStride: 148,
     attributes: [
       { attribute: "instancePrevious", format: "float32x3", byteOffset: 0 },
       { attribute: "instanceStart", format: "float32x3", byteOffset: 12 },
@@ -118,13 +126,13 @@ const PATH_LAYOUT: BufferLayout[] = [
       },
       { attribute: "instancePathStyle", format: "float32x4", byteOffset: 96 },
       {
-        attribute: "instanceTrim",
-        format: "float32x2",
+        attribute: "instancePathMetrics",
+        format: "float32x3",
         byteOffset: 112,
       },
-      { attribute: "instanceZIndex", format: "uint32", byteOffset: 120 },
-      { attribute: "instanceColor", format: "unorm8x4", byteOffset: 124 },
-      { attribute: "instanceMetadata", format: "uint32x4", byteOffset: 128 },
+      { attribute: "instanceZIndex", format: "uint32", byteOffset: 124 },
+      { attribute: "instanceColor", format: "unorm8x4", byteOffset: 128 },
+      { attribute: "instanceMetadata", format: "uint32x4", byteOffset: 132 },
     ],
   },
 ];
@@ -177,7 +185,11 @@ const DUAL_COMPACT_PATH_LAYOUT: BufferLayout[] = [
       { attribute: "instanceZIndex", format: "uint32", byteOffset: 52 },
       { attribute: "instanceColor", format: "unorm8x4", byteOffset: 56 },
       { attribute: "instanceMetadata", format: "uint32x4", byteOffset: 60 },
-      { attribute: "instanceInnerPathWidth", format: "float32", byteOffset: 76 },
+      {
+        attribute: "instanceInnerPathWidth",
+        format: "float32",
+        byteOffset: 76,
+      },
       { attribute: "instanceInnerColor", format: "unorm8x4", byteOffset: 80 },
     ],
   },
@@ -195,7 +207,11 @@ const DUAL_SIMPLE_PATH_LAYOUT: BufferLayout[] = [
       { attribute: "instanceZIndex", format: "uint32", byteOffset: 28 },
       { attribute: "instanceColor", format: "unorm8x4", byteOffset: 32 },
       { attribute: "instanceMetadata", format: "uint32x4", byteOffset: 36 },
-      { attribute: "instanceInnerPathWidth", format: "float32", byteOffset: 52 },
+      {
+        attribute: "instanceInnerPathWidth",
+        format: "float32",
+        byteOffset: 52,
+      },
       { attribute: "instanceInnerColor", format: "unorm8x4", byteOffset: 56 },
     ],
   },
@@ -270,7 +286,15 @@ export type ErdblickVectorLayerProps = LayerProps & {
   navigationAnchorEligible?: boolean;
   navigationAltitudeResolver?: (globalPickIndex: number) => number | undefined;
   markerAnchorEligible?: boolean;
+  renderMode?: ErdblickVectorRenderMode;
 };
+
+/** Select the visible, support-prepass, or overlay-resolution material subset. */
+export enum ErdblickVectorRenderMode {
+  Visible = "visible",
+  SemanticSupport = "semantic-support",
+  SemanticOverlay = "semantic-overlay",
+}
 
 interface MaterialModel {
   model: Model;
@@ -284,17 +308,20 @@ function sameSceneShaderProps(
   left: GpuSceneShaderProps | null,
   right: GpuSceneShaderProps,
 ): boolean {
-  return !!left &&
+  return (
+    !!left &&
     left.originTexture === right.originTexture &&
     left.contributionTexture === right.contributionTexture &&
     left.zIndexTexture === right.zIndexTexture &&
     left.lookupTextureWidth === right.lookupTextureWidth &&
     left.flattenZ === right.flattenZ &&
     left.primitiveDepthBias === right.primitiveDepthBias &&
+    left.semanticRole === right.semanticRole &&
     left.disabledPickIndices.length === right.disabledPickIndices.length &&
     left.disabledPickIndices.every(
       (value, index) => value === right.disabledPickIndices[index],
-    );
+    )
+  );
 }
 
 /** Return the fixed semantic pass for one primitive kind. */
@@ -315,14 +342,25 @@ function primitiveRenderPass(kind: number): number {
   }
 }
 
+/** Separate coplanar primitive passes by four 24-bit depth-buffer values. */
+function primitiveDepthBias(kind: number): number {
+  const pass = primitiveRenderPass(kind);
+  return pass === Number.MAX_SAFE_INTEGER
+    ? 0
+    : pass * PRIMITIVE_DEPTH_BIAS_STEP;
+}
+
 /** Order low-cardinality material models deterministically across packet arrival order. */
-function compareMaterialModels(left: MaterialModel, right: MaterialModel): number {
+function compareMaterialModels(
+  left: MaterialModel,
+  right: MaterialModel,
+): number {
   const primitivePass =
     primitiveRenderPass(left.source.kind) -
     primitiveRenderPass(right.source.kind);
   if (primitivePass !== 0) {
-    // A late stylesheet must never push a surface above paths or labels. Style
-    // and rule ordering are meaningful only inside one semantic primitive pass.
+    // Draw coplanar semantic overlays after their supporting surfaces, but let
+    // the depth buffer preserve the physical order of vertically stacked data.
     return primitivePass;
   }
   const styleOrder = left.source.styleOrder - right.source.styleOrder;
@@ -339,11 +377,36 @@ function compareMaterialModels(left: MaterialModel, right: MaterialModel): numbe
 }
 
 /** Returns fixed GPU parameters for the material's authored depth policy. */
-function materialParameters(flags: number): RenderPipelineParameters {
-  return (flags & GpuMaterialFlag.DepthTest) !== 0
-    ? DEPTH_PARAMETERS
-    : NO_DEPTH_PARAMETERS;
+function materialParameters(
+  flags: number,
+  mask = false,
+): RenderPipelineParameters {
+  const depthTest = (flags & GpuMaterialFlag.DepthTest) !== 0;
+  return depthTest
+    ? mask
+      ? MASK_DEPTH_PARAMETERS
+      : DEPTH_PARAMETERS
+    : mask
+      ? MASK_NO_DEPTH_PARAMETERS
+      : NO_DEPTH_PARAMETERS;
 }
+
+/** Return the shader-side semantic role encoded by one immutable material. */
+function semanticRole(flags: number): number {
+  if ((flags & GpuMaterialFlag.SemanticSupport) !== 0) {
+    return 1;
+  }
+  if ((flags & GpuMaterialFlag.SemanticOverlay) !== 0) {
+    return 2;
+  }
+  return 0;
+}
+
+/** Neutralize Deck's layer-index bias because scene materials own depth ordering. */
+export const NO_POLYGON_OFFSET = () => [0, 0] as [number, number];
+
+/** Pull vector triangles over supporting surfaces with slope-aware hardware depth bias. */
+export const VECTOR_POLYGON_OFFSET = () => [-2, -80] as [number, number];
 
 /** Builds the immutable six-vertex mesh expanded into one path segment. */
 function pathGeometry(): Geometry {
@@ -359,7 +422,7 @@ function pathGeometry(): Geometry {
   });
 }
 
-/** Build the four-corner strip used by compact and complete path segments. */
+/** Build the four-corner strip used by complete two-point path segments. */
 function fastPathGeometry(): Geometry {
   return new Geometry({
     topology: "triangle-strip",
@@ -386,8 +449,7 @@ function primitiveGeometry(source: GpuSceneMaterialStore): Geometry {
         },
       });
     case GpuPrimitiveKind.PathSegment:
-      return (source.flags &
-        (GpuMaterialFlag.CompactPath | GpuMaterialFlag.SimplePath)) !== 0
+      return (source.flags & GpuMaterialFlag.SimplePath) !== 0
         ? fastPathGeometry()
         : pathGeometry();
     case GpuPrimitiveKind.Arrow:
@@ -425,6 +487,21 @@ function primitiveGeometry(source: GpuSceneMaterialStore): Geometry {
   }
 }
 
+/** Compile the stream-level endpoint anchor into minimum-length path shaders. */
+function screenLengthShader(shader: string, flags: number): string {
+  let define = "";
+  if ((flags & GpuMaterialFlag.ScreenLengthStartAnchor) !== 0) {
+    define = "#define ERDBLICK_SCREEN_LENGTH_START_ANCHOR";
+  } else if ((flags & GpuMaterialFlag.ScreenLengthEndAnchor) !== 0) {
+    define = "#define ERDBLICK_SCREEN_LENGTH_END_ANCHOR";
+  } else if ((flags & GpuMaterialFlag.ScreenLengthCenterAnchor) !== 0) {
+    define = "#define ERDBLICK_SCREEN_LENGTH_CENTER_ANCHOR";
+  }
+  return define
+    ? shader.replace("#define SHADER_NAME", `${define}\n#define SHADER_NAME`)
+    : shader;
+}
+
 /** Resolve the shader pair and direct interleaved layout for one primitive stream. */
 function primitiveProgram(source: GpuSceneMaterialStore): {
   vertexShader: string;
@@ -438,7 +515,10 @@ function primitiveProgram(source: GpuSceneMaterialStore): {
         vertexShader: billboard
           ? POINT_BILLBOARD_VERTEX_SHADER
           : POINT_VERTEX_SHADER,
-        fragmentShader: POINT_FRAGMENT_SHADER,
+        fragmentShader:
+          (source.flags & GpuMaterialFlag.PointRing) !== 0
+            ? POINT_RING_FRAGMENT_SHADER
+            : POINT_FRAGMENT_SHADER,
         layout: POINT_LAYOUT,
       };
     case GpuPrimitiveKind.PathSegment:
@@ -479,15 +559,19 @@ function primitiveProgram(source: GpuSceneMaterialStore): {
         };
       }
       return {
-        vertexShader: billboard
-          ? PATH_BILLBOARD_VERTEX_SHADER
-          : PATH_WORLD_VERTEX_SHADER,
+        vertexShader: screenLengthShader(
+          billboard ? PATH_BILLBOARD_VERTEX_SHADER : PATH_WORLD_VERTEX_SHADER,
+          source.flags,
+        ),
         fragmentShader: PATH_FRAGMENT_SHADER,
         layout: PATH_LAYOUT,
       };
     case GpuPrimitiveKind.Arrow:
       return {
-        vertexShader: ARROW_VERTEX_SHADER,
+        vertexShader: screenLengthShader(
+          billboard ? ARROW_BILLBOARD_VERTEX_SHADER : ARROW_WORLD_VERTEX_SHADER,
+          source.flags,
+        ),
         fragmentShader: ARROW_FRAGMENT_SHADER,
         layout: ARROW_LAYOUT,
       };
@@ -525,6 +609,7 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
   private sceneRevision = -1;
   private sceneShaderProps: GpuSceneShaderProps | null = null;
   private sceneShaderPropsRevision = 0;
+  private semanticSupportTexture: Texture | null = null;
   private initialized = false;
 
   /** Retain a view-wide drill-pick suppression set across fixed render-pass shells. */
@@ -582,6 +667,16 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
     this.setNeedsRedraw();
   }
 
+  /** Bind the completed support-group texture consumed by the overlay pass. */
+  setSemanticSupportTexture(texture: Texture | null): void {
+    if (this.semanticSupportTexture === texture) {
+      return;
+    }
+    this.semanticSupportTexture = texture;
+    this.sceneShaderPropsRevision += 1;
+    this.bindSceneShaderProps();
+  }
+
   /** Resolve Deck's decoded object index without constructing a CPU data mirror. */
   override getPickingInfo({
     info,
@@ -621,7 +716,9 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
     if (!this.bindSceneShaderProps()) {
       return;
     }
-    for (const item of [...this.materialModels.values()].sort(compareMaterialModels)) {
+    for (const item of [...this.materialModels.values()].sort(
+      compareMaterialModels,
+    )) {
       if (item.source.store.presentedHighWaterRecord <= 0) {
         continue;
       }
@@ -647,11 +744,21 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
       item.model.shaderInputs.setProps({
         gpuScene: {
           ...shaderProps,
-          primitiveDepthBias:
-            primitiveRenderPass(item.source.kind) *
-            GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP,
+          primitiveDepthBias: primitiveDepthBias(item.source.kind),
+          semanticRole: semanticRole(item.source.flags),
         },
       });
+      if (
+        this.props.renderMode ===
+          ErdblickVectorRenderMode.SemanticOverlay &&
+        this.semanticSupportTexture
+      ) {
+        item.model.shaderInputs.setProps({
+          gpuSceneSemanticOverlay: {
+            supportGroupTexture: this.semanticSupportTexture,
+          },
+        });
+      }
       // ShaderInputs is only the declarative source. Flush it into Model.bindings
       // now so a deferred picking/mask pass cannot retain the old texture after
       // GpuScene's end-of-frame retirement.
@@ -676,6 +783,7 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
       lookupTextureWidth: this.props.scene.lookupTextureWidth,
       flattenZ: this.props.flattenZ,
       primitiveDepthBias: 0,
+      semanticRole: 0,
       disabledPickIndices: [...this.disabledPickIndices],
     };
     if (!sameSceneShaderProps(this.sceneShaderProps, next)) {
@@ -687,14 +795,21 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
 
   /** Create/rebind only low-cardinality material models after scene mutation. */
   private syncModels(): void {
-    if (!this.initialized ||
-        this.sceneRevision === this.props.scene.presentationRevision) {
+    if (
+      !this.initialized ||
+      this.sceneRevision === this.props.scene.presentationRevision
+    ) {
       return;
     }
     const desired = new Set<bigint>();
     for (const source of this.props.scene.materialStores()) {
-      if (this.props.primitiveKinds &&
-          !this.props.primitiveKinds.includes(source.kind)) {
+      if (!this.acceptsRenderMode(source.flags)) {
+        continue;
+      }
+      if (
+        this.props.primitiveKinds &&
+        !this.props.primitiveKinds.includes(source.kind)
+      ) {
         continue;
       }
       const store = source.store;
@@ -741,20 +856,50 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
     this.sceneRevision = this.props.scene.presentationRevision;
   }
 
+  /** Restrict ordinary and hidden passes to their immutable semantic role. */
+  private acceptsRenderMode(flags: number): boolean {
+    switch (this.props.renderMode ?? ErdblickVectorRenderMode.Visible) {
+      case ErdblickVectorRenderMode.Visible:
+        return (flags & GpuMaterialFlag.SemanticOverlay) === 0;
+      case ErdblickVectorRenderMode.SemanticSupport:
+        return (flags & GpuMaterialFlag.SemanticSupport) !== 0;
+      case ErdblickVectorRenderMode.SemanticOverlay:
+        return (flags & GpuMaterialFlag.SemanticOverlay) !== 0;
+    }
+  }
+
   /** Build one material model whose instance buffer remains scene-owned. */
   private createModel(source: GpuSceneMaterialStore): Model {
     const program = primitiveProgram(source);
+    const mode = this.props.renderMode ?? ErdblickVectorRenderMode.Visible;
+    // Dual-stroke fragments consult Deck's picking state to render their full
+    // casing outside picking passes. Hidden semantic passes are ordinary color
+    // passes too, so they need the module even though they are not pickable.
+    const modules = [
+      project32,
+      picking as never,
+      gpuSceneShaderModule as never,
+    ];
+    if (mode === ErdblickVectorRenderMode.SemanticSupport) {
+      modules.push(gpuSceneSemanticSupportShaderModule as never);
+    } else if (mode === ErdblickVectorRenderMode.SemanticOverlay) {
+      modules.push(gpuSceneSemanticOverlayShaderModule as never);
+    }
     return new Model(this.context.device, {
       ...this.getShaders({
         vs: program.vertexShader,
         fs: program.fragmentShader,
-        modules: [project32, picking, gpuSceneShaderModule as never],
+        modules,
       }),
       id: `${this.props.id}-${source.store.materialKey.toString(16)}`,
       bufferLayout: program.layout,
       geometry: primitiveGeometry(source),
       isInstanced: true,
-      parameters: materialParameters(source.flags),
+      parameters:
+        mode === ErdblickVectorRenderMode.Visible
+          ? materialParameters(source.flags)
+          : SEMANTIC_DEPTH_PARAMETERS,
+      colorAttachmentFormats: ["rgba8unorm"],
     });
   }
 
@@ -789,9 +934,7 @@ export type ErdblickVectorMaskLayerProps = LayerProps & {
  * are the ordinary visible scene buffers; target changes update one compact
  * texture and never copy paths, triangles, points, or arrows.
  */
-export class ErdblickVectorMaskLayer extends Layer<
-  ErdblickVectorMaskLayerProps
-> {
+export class ErdblickVectorMaskLayer extends Layer<ErdblickVectorMaskLayerProps> {
   static override layerName = "ErdblickVectorMaskLayer";
 
   private readonly materialModels = new Map<bigint, MaterialModel>();
@@ -859,7 +1002,9 @@ export class ErdblickVectorMaskLayer extends Layer<
     if (!this.bindShaderProps()) {
       return;
     }
-    for (const item of [...this.materialModels.values()].sort(compareMaterialModels)) {
+    for (const item of [...this.materialModels.values()].sort(
+      compareMaterialModels,
+    )) {
       if (item.source.store.presentedHighWaterRecord <= 0) {
         continue;
       }
@@ -898,9 +1043,8 @@ export class ErdblickVectorMaskLayer extends Layer<
           zIndexTexture,
           lookupTextureWidth: this.props.scene.lookupTextureWidth,
           flattenZ: this.props.flattenZ,
-          primitiveDepthBias:
-            primitiveRenderPass(item.source.kind) *
-            GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP,
+          primitiveDepthBias: primitiveDepthBias(item.source.kind),
+          semanticRole: semanticRole(item.source.flags),
           disabledPickIndices: [],
         },
         gpuSceneMask: {
@@ -982,10 +1126,7 @@ export class ErdblickVectorMaskLayer extends Layer<
   /** Build one mask pipeline over the same unit mesh and interleaved instance layout. */
   private createModel(source: GpuSceneMaterialStore): Model {
     const program = primitiveProgram(source);
-    const parameters =
-      (source.flags & GpuMaterialFlag.DepthTest) !== 0
-        ? MASK_DEPTH_PARAMETERS
-        : MASK_NO_DEPTH_PARAMETERS;
+    const parameters = materialParameters(source.flags, true);
     return new Model(this.context.device, {
       ...this.getShaders({
         vs: gpuSceneMaskVertexShader(program.vertexShader),
@@ -1025,18 +1166,21 @@ export function createErdblickVectorLayers(
   id: string,
   scene: GpuScene,
   flattenZ: boolean,
+  sharedDisabledPickIndices = new Set<number>(),
 ): readonly [ErdblickVectorLayer, ErdblickVectorLayer] {
-  const sharedDisabledPickIndices = new Set<number>();
   const layer = (
     suffix: string,
     primitiveKinds: readonly GpuPrimitiveKind[],
-  ) => new ErdblickVectorLayer({
+    getPolygonOffset: () => [number, number],
+  ) =>
+    new ErdblickVectorLayer({
       id: `${id}-${suffix}`,
       data: [],
       scene,
       flattenZ,
       primitiveKinds,
       sharedDisabledPickIndices,
+      getPolygonOffset,
       coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
       pickable: true,
       drillPickEligible: true,
@@ -1046,12 +1190,16 @@ export function createErdblickVectorLayers(
       markerAnchorEligible: true,
     });
   return [
-    layer("surfaces", [GpuPrimitiveKind.SurfaceTriangle]),
-    layer("vectors", [
-      GpuPrimitiveKind.PathSegment,
-      GpuPrimitiveKind.Point,
-      GpuPrimitiveKind.Arrow,
-      GpuPrimitiveKind.Icon,
-    ]),
+    layer("surfaces", [GpuPrimitiveKind.SurfaceTriangle], NO_POLYGON_OFFSET),
+    layer(
+      "vectors",
+      [
+        GpuPrimitiveKind.PathSegment,
+        GpuPrimitiveKind.Point,
+        GpuPrimitiveKind.Arrow,
+        GpuPrimitiveKind.Icon,
+      ],
+      VECTOR_POLYGON_OFFSET,
+    ),
   ];
 }

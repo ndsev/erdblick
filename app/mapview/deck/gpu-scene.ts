@@ -18,22 +18,24 @@ import { GpuRangeAllocator, type GpuRecordRange } from "./gpu-range-allocator";
 const LOOKUP_TEXTURE_WIDTH = 1024;
 const MAX_PICKING_INDEX = 0x00ff_fffe;
 const MAX_ACTIVATION_TOKEN = 0x00ff_ffff;
-// Keep adjacent semantic depth slots farther apart than one 24-bit depth-buffer
-// unit. The former 0.001 budget collapsed dense BMD ranks at distant cameras.
-const MAX_CLIP_SPACE_BIAS = 0.005;
 const TARGET_DEPTH_STEPS = 1024;
 // Keep synchronized with kGpuDepthTieBucketCount: packets retain exactly the
 // hash bits consumed by this power-of-two allocator.
 const MAX_TIE_BUCKETS = 32;
-/** Depth interval reserved for each semantic primitive pass. */
-export const GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP =
-  MAX_CLIP_SPACE_BIAS / 5;
-const MAX_LOCAL_CLIP_SPACE_BIAS =
-  GPU_SCENE_PRIMITIVE_DEPTH_BIAS_STEP * 0.8;
+// Keep authored ordering local. Primitive kinds use draw order rather than a
+// fixed clip-space interval so lower-deck paths cannot cross upper surfaces.
+const MAX_LOCAL_CLIP_SPACE_BIAS = 0.0008;
 
 interface DepthRankAllocation {
   firstSlot: number;
   tieBucketCount: number;
+}
+
+interface NormalizedZIndexEntry {
+  value: number;
+  tieBreaker: number;
+  semanticGroup: number;
+  authored: boolean;
 }
 
 /**
@@ -48,7 +50,7 @@ interface DepthRankAllocation {
 function allocateDepthRanks(
   orderedZIndices: readonly number[],
   tieBreakersByZIndex: ReadonlyMap<number, ReadonlySet<number>>,
-): {allocations: Map<number, DepthRankAllocation>; slotCount: number} {
+): { allocations: Map<number, DepthRankAllocation>; slotCount: number } {
   const bucketCounts = new Map<number, number>(
     orderedZIndices.map((value) => [value, 1]),
   );
@@ -60,18 +62,23 @@ function allocateDepthRanks(
         rank,
         tieCount: tieBreakersByZIndex.get(value)?.size ?? 0,
       }))
-      .filter(({tieCount}) => tieCount > 1);
-    for (let nextBucketCount = 2;
+      .filter(({ tieCount }) => tieCount > 1);
+    for (
+      let nextBucketCount = 2;
       nextBucketCount <= MAX_TIE_BUCKETS;
-      nextBucketCount *= 2) {
-      candidates.sort((left, right) =>
-        right.tieCount - left.tieCount || left.rank - right.rank,
+      nextBucketCount *= 2
+    ) {
+      candidates.sort(
+        (left, right) =>
+          right.tieCount - left.tieCount || left.rank - right.rank,
       );
       for (const candidate of candidates) {
         const currentBucketCount = bucketCounts.get(candidate.value)!;
-        if (currentBucketCount * 2 !== nextBucketCount
-          || candidate.tieCount <= currentBucketCount
-          || slotCount + currentBucketCount > TARGET_DEPTH_STEPS) {
+        if (
+          currentBucketCount * 2 !== nextBucketCount ||
+          candidate.tieCount <= currentBucketCount ||
+          slotCount + currentBucketCount > TARGET_DEPTH_STEPS
+        ) {
           continue;
         }
         bucketCounts.set(candidate.value, nextBucketCount);
@@ -84,10 +91,10 @@ function allocateDepthRanks(
   let firstSlot = 0;
   for (const value of orderedZIndices) {
     const tieBucketCount = bucketCounts.get(value)!;
-    allocations.set(value, {firstSlot, tieBucketCount});
+    allocations.set(value, { firstSlot, tieBucketCount });
     firstSlot += tieBucketCount;
   }
-  return {allocations, slotCount: Math.max(1, firstSlot)};
+  return { allocations, slotCount: Math.max(1, firstSlot) };
 }
 
 interface OriginEntry {
@@ -325,9 +332,8 @@ class FloatLookupTable {
     if (slotCount === 0) {
       return;
     }
-    const source = values instanceof Float32Array
-      ? values
-      : Float32Array.from(values);
+    const source =
+      values instanceof Float32Array ? values : Float32Array.from(values);
     this.ensureCapacity(firstSlot + slotCount);
     const valueOffset = firstSlot * valuesPerSlot;
     let texelOffset = firstSlot * this.texelsPerSlot;
@@ -371,11 +377,12 @@ class FloatLookupTable {
         throw new Error(`Lookup range '${this.id}' has an invalid first slot.`);
       }
       if (values.length % valuesPerSlot !== 0) {
-        throw new Error(`Lookup range '${this.id}' has an invalid value count.`);
+        throw new Error(
+          `Lookup range '${this.id}' has an invalid value count.`,
+        );
       }
-      const source = values instanceof Float32Array
-        ? values
-        : Float32Array.from(values);
+      const source =
+        values instanceof Float32Array ? values : Float32Array.from(values);
       requiredSlots = Math.max(
         requiredSlots,
         firstSlot + source.length / valuesPerSlot,
@@ -419,7 +426,9 @@ class FloatLookupTable {
     return {
       commit: () => {
         if (settled) {
-          throw new Error(`Lookup replacement '${this.id}' is already settled.`);
+          throw new Error(
+            `Lookup replacement '${this.id}' is already settled.`,
+          );
         }
         settled = true;
         const previous = this.gpuTexture;
@@ -457,8 +466,8 @@ class FloatLookupTable {
     if (this.renderTexture) {
       textures.add(this.renderTexture);
     }
-    this.retiredTextures.forEach(texture => textures.add(texture));
-    textures.forEach(texture => texture.destroy());
+    this.retiredTextures.forEach((texture) => textures.add(texture));
+    textures.forEach((texture) => texture.destroy());
     this.gpuTexture = null;
     this.renderTexture = null;
     this.retiredTextures.length = 0;
@@ -482,7 +491,7 @@ class FloatLookupTable {
 
   /** Destroy allocations after every model has rebound to the published lookup. */
   releaseRetiredTextures(): void {
-    this.retiredTextures.forEach(texture => texture.destroy());
+    this.retiredTextures.forEach((texture) => texture.destroy());
     this.retiredTextures.length = 0;
   }
 
@@ -640,13 +649,18 @@ export class GpuScene {
   ): GpuSceneRenderReservation {
     this.ensureAlive();
     if (inputs.length !== 1) {
-      throw new Error("A GPU render reservation must own exactly one contribution.");
+      throw new Error(
+        "A GPU render reservation must own exactly one contribution.",
+      );
     }
-    if (inputs.some((input) =>
-      !Number.isSafeInteger(input.styleOrder) ||
-      input.styleOrder < 0 ||
-      input.styleOrder > 0xffff_ffff
-    )) {
+    if (
+      inputs.some(
+        (input) =>
+          !Number.isSafeInteger(input.styleOrder) ||
+          input.styleOrder < 0 ||
+          input.styleOrder > 0xffff_ffff,
+      )
+    ) {
       throw new Error("GPU scene style order is outside its uint32 range.");
     }
     const origin = this.reserveOrigin(originIdentity, originPosition);
@@ -762,7 +776,9 @@ export class GpuScene {
       packet.fragmentIndex !== staged.nextFragmentIndex
     ) {
       this.abortStagedRender(reservation, staged);
-      throw new Error("GPU render packet fragments are missing or out of order.");
+      throw new Error(
+        "GPU render packet fragments are missing or out of order.",
+      );
     }
     const reservedByKey = new Map(
       reservation.contributions.map((item) => [item.key, item]),
@@ -860,10 +876,14 @@ export class GpuScene {
               item.installed.zIndices.some(
                 (entry, index) =>
                   entry.value !== descriptor.zIndices[index].value ||
-                  entry.tieBreaker !== descriptor.zIndices[index].tieBreaker,
+                  entry.tieBreaker !== descriptor.zIndices[index].tieBreaker ||
+                  entry.semanticGroup !==
+                    descriptor.zIndices[index].semanticGroup,
               ))
           ) {
-            throw new Error("GPU render fragments disagree about z-index data.");
+            throw new Error(
+              "GPU render fragments disagree about z-index data.",
+            );
           }
           item.installed.zIndices = [...descriptor.zIndices];
         }
@@ -921,9 +941,10 @@ export class GpuScene {
             "GPU render revision completed with incomplete picking metadata.",
           );
         }
-        item.installed.pickingRange = item.totalPickCount > 0
-          ? this.allocatePickingRange(item.totalPickCount)
-          : null;
+        item.installed.pickingRange =
+          item.totalPickCount > 0
+            ? this.allocatePickingRange(item.totalPickCount)
+            : null;
         item.installed.zIndexRange = item.installed.zIndices.length
           ? this.zIndexRanges.allocate(item.installed.zIndices.length)
           : null;
@@ -983,9 +1004,11 @@ export class GpuScene {
 
   /** Test whether an asynchronous worker result still belongs to this scene. */
   accepts(reservation: GpuSceneRenderReservation): boolean {
-    return !this.destroyed &&
+    return (
+      !this.destroyed &&
       !reservation.released &&
-      reservation.sceneGeneration === this.generation;
+      reservation.sceneGeneration === this.generation
+    );
   }
 
   /** Release in-flight slot references after success, staleness, or failure. */
@@ -1066,11 +1089,11 @@ export class GpuScene {
     }
     const featureIds = selected.featureIds;
     return typeof featureIds === "string"
-      ? [{mapTileKey: selected.mapTileKey, featureId: featureIds}]
+      ? [{ mapTileKey: selected.mapTileKey, featureId: featureIds }]
       : featureIds.map((featureId) => ({
-        mapTileKey: selected.mapTileKey,
-        featureId,
-      }));
+          mapTileKey: selected.mapTileKey,
+          featureId,
+        }));
   }
 
   /** Return the representative physical altitude of one rendered pick. */
@@ -1079,8 +1102,8 @@ export class GpuScene {
     if (cached !== undefined) {
       return cached;
     }
-    const altitude = this.ownedPackedPick(globalPickIndex)
-      ?.record.navigationAltitude;
+    const altitude =
+      this.ownedPackedPick(globalPickIndex)?.record.navigationAltitude;
     return Number.isFinite(altitude) ? altitude : undefined;
   }
 
@@ -1092,15 +1115,19 @@ export class GpuScene {
     let indices = this.pickIndicesByTileAndFeature
       .get(target.mapTileKey)
       ?.get(target.featureId);
-    if (indices === undefined ||
-      !this.pickIndicesIncludeContribution(indices, contributionIdentities)) {
+    if (
+      indices === undefined ||
+      !this.pickIndicesIncludeContribution(indices, contributionIdentities)
+    ) {
       this.findInteractionTarget(contributionIdentities, target);
       indices = this.pickIndicesByTileAndFeature
         .get(target.mapTileKey)
         ?.get(target.featureId);
     }
-    return indices !== undefined &&
-      this.pickIndicesIncludeContribution(indices, contributionIdentities);
+    return (
+      indices !== undefined &&
+      this.pickIndicesIncludeContribution(indices, contributionIdentities)
+    );
   }
 
   /** Resolve exact overlay targets into sparse scene-global picking indices. */
@@ -1113,8 +1140,10 @@ export class GpuScene {
       let indices = this.pickIndicesByTileAndFeature
         .get(target.mapTileKey)
         ?.get(target.featureId);
-      if (indices === undefined ||
-        !this.pickIndicesIncludeContribution(indices, contributionIdentities)) {
+      if (
+        indices === undefined ||
+        !this.pickIndicesIncludeContribution(indices, contributionIdentities)
+      ) {
         this.findInteractionTarget(contributionIdentities, target);
         indices = this.pickIndicesByTileAndFeature
           .get(target.mapTileKey)
@@ -1150,7 +1179,7 @@ export class GpuScene {
     if (!ownedPick) {
       return undefined;
     }
-    const {installed, record} = ownedPick;
+    const { installed, record } = ownedPick;
     return this.cacheScenePick(
       globalPickIndex,
       installed,
@@ -1160,7 +1189,9 @@ export class GpuScene {
   }
 
   /** Resolve one scene-global index to its contribution-owned packed tuple. */
-  private ownedPackedPick(globalPickIndex: number): OwnedPackedPick | undefined {
+  private ownedPackedPick(
+    globalPickIndex: number,
+  ): OwnedPackedPick | undefined {
     if (!Number.isInteger(globalPickIndex) || globalPickIndex < 0) {
       return undefined;
     }
@@ -1170,8 +1201,12 @@ export class GpuScene {
     }
     const installed = this.activeContributionBySlot.get(encodedSlot - 1);
     const range = installed?.pickingRange;
-    if (!installed || !range || globalPickIndex < range.firstRecord ||
-      globalPickIndex >= range.firstRecord + range.recordCount) {
+    if (
+      !installed ||
+      !range ||
+      globalPickIndex < range.firstRecord ||
+      globalPickIndex >= range.firstRecord + range.recordCount
+    ) {
       return undefined;
     }
     return {
@@ -1207,10 +1242,9 @@ export class GpuScene {
     const selected: ScenePickRecord = {
       contributionIdentity: installed.identity,
       mapTileKey: installed.mapTileKey,
-      featureIds: typeof featureIds === "string"
-        ? featureIds
-        : [...new Set(featureIds)],
-      ...(Number.isFinite(navigationAltitude) ? {navigationAltitude} : {}),
+      featureIds:
+        typeof featureIds === "string" ? featureIds : [...new Set(featureIds)],
+      ...(Number.isFinite(navigationAltitude) ? { navigationAltitude } : {}),
     };
     this.picks.set(globalPickIndex, selected);
     installed.resolvedPickIndices.push(globalPickIndex);
@@ -1253,11 +1287,14 @@ export class GpuScene {
       for (let local = 0; local < range.recordCount; ++local) {
         const globalPickIndex = range.firstRecord + local;
         const record = this.packedPick(installed, local);
-        if (!references.some(reference =>
-          reference.channelOrdinal === record.channelOrdinal &&
-          reference.entryOrdinal === record.entryOrdinal &&
-          reference.endpointRole === record.endpointRole
-        )) {
+        if (
+          !references.some(
+            (reference) =>
+              reference.channelOrdinal === record.channelOrdinal &&
+              reference.entryOrdinal === record.entryOrdinal &&
+              reference.endpointRole === record.endpointRole,
+          )
+        ) {
           continue;
         }
         if (!this.picks.has(globalPickIndex)) {
@@ -1455,8 +1492,7 @@ export class GpuScene {
     // order is a separate bounded draw bucket: unlike tiles, it must remain a
     // model boundary because no-depth and translucent records cannot recover
     // authored paint order from clip-space bias alone.
-    const drawMaterialKey =
-      (stream.materialKey << 32n) | BigInt(styleOrder);
+    const drawMaterialKey = (stream.materialKey << 32n) | BigInt(styleOrder);
     const existingLayout = this.streamLayoutByMaterial.get(drawMaterialKey);
     if (
       existingLayout &&
@@ -1525,10 +1561,7 @@ export class GpuScene {
     if (this.activeContributionBySlot.has(installed.contributionSlot)) {
       throw new Error("GPU contribution pick owner is already active.");
     }
-    this.activeContributionBySlot.set(
-      installed.contributionSlot,
-      installed,
-    );
+    this.activeContributionBySlot.set(installed.contributionSlot, installed);
     this.pickOwnerSlots.fill(
       installed.contributionSlot + 1,
       range.firstRecord,
@@ -1586,8 +1619,10 @@ export class GpuScene {
   /** Roll back ranges which were uploaded but never published as active. */
   private discardStaged(installed: InstalledContribution): void {
     this.contributionLookup.clear(installed.contributionSlot);
-    if (this.activeContributionBySlot.get(installed.contributionSlot) ===
-      installed) {
+    if (
+      this.activeContributionBySlot.get(installed.contributionSlot) ===
+      installed
+    ) {
       this.unpublishPickOwner(installed);
     }
     for (const span of installed.spans) {
@@ -1649,16 +1684,13 @@ export class GpuScene {
     }[],
   ): void {
     const startedAt = performance.now();
-    for (const {installed} of staged) {
-      this.contributionLookup.setRange(
-        installed.contributionSlot,
-        [
-          installed.pickingRange?.firstRecord ?? -1,
-          0,
-          installed.activationToken,
-          installed.zIndexRange?.firstRecord ?? -1,
-        ],
-      );
+    for (const { installed } of staged) {
+      this.contributionLookup.setRange(installed.contributionSlot, [
+        installed.pickingRange?.firstRecord ?? -1,
+        0,
+        installed.activationToken,
+        installed.zIndexRange?.firstRecord ?? -1,
+      ]);
       if (installed.zIndexRange) {
         this.zIndexLookup.setRange(
           installed.zIndexRange.firstRecord,
@@ -1680,41 +1712,72 @@ export class GpuScene {
    */
   private prepareSceneOrder(): PreparedSceneOrder {
     const startedAt = performance.now();
-    const active = [...this.contributionByIdentity.values()]
-      .flatMap((entry) => entry.active ? [entry.active] : []);
+    const active = [...this.contributionByIdentity.values()].flatMap((entry) =>
+      entry.active ? [entry.active] : [],
+    );
     const normalizedByContribution = new Map<
       InstalledContribution,
-      GpuZIndexEntryView[]
+      NormalizedZIndexEntry[]
     >();
     const uniqueZIndices = new Set<number>();
     const tieBreakersByZIndex = new Map<number, Set<number>>();
+    const semanticGroups = new Set<number>();
+    const semanticEntriesByGroup = new Map<number, Set<number>>();
     let hasAuthoredZIndex = false;
     for (const installed of active) {
       const normalized = installed.zIndices.map((entry) => {
-        hasAuthoredZIndex ||= Number.isFinite(entry.value);
-        const result = Number.isFinite(entry.value) ? entry.value : 0;
+        const authored = Number.isFinite(entry.value);
+        hasAuthoredZIndex ||= authored;
+        const result = authored ? entry.value : 0;
         const value = result === 0 ? 0 : result;
         const tieBreaker = entry.tieBreaker >>> 0;
+        const semanticGroup = entry.semanticGroup >>> 0;
         uniqueZIndices.add(value);
-        let tieBreakers = tieBreakersByZIndex.get(value);
-        if (!tieBreakers) {
-          tieBreakers = new Set<number>();
-          tieBreakersByZIndex.set(value, tieBreakers);
+        if (authored) {
+          let tieBreakers = tieBreakersByZIndex.get(value);
+          if (!tieBreakers) {
+            tieBreakers = new Set<number>();
+            tieBreakersByZIndex.set(value, tieBreakers);
+          }
+          tieBreakers.add(tieBreaker);
         }
-        tieBreakers.add(tieBreaker);
+        if (semanticGroup !== 0) {
+          semanticGroups.add(semanticGroup);
+          const groupEntries =
+            semanticEntriesByGroup.get(semanticGroup) ?? new Set<number>();
+          groupEntries.add(value);
+          semanticEntriesByGroup.set(semanticGroup, groupEntries);
+        }
         return {
           value,
           tieBreaker,
+          semanticGroup,
+          authored,
         };
       });
       normalizedByContribution.set(installed, normalized);
     }
-    const orderedZIndices = [...uniqueZIndices]
-      .sort((left, right) => left - right);
-    const depthRanks = allocateDepthRanks(
-      orderedZIndices,
-      tieBreakersByZIndex,
+    const orderedZIndices = [...uniqueZIndices].sort(
+      (left, right) => left - right,
     );
+    const depthRanks = allocateDepthRanks(orderedZIndices, tieBreakersByZIndex);
+    const compactSemanticGroups = new Map(
+      [...semanticGroups]
+        .sort((left, right) => left - right)
+        .map((group, index) => [group, index + 1]),
+    );
+    const semanticDepthByGroup = new Map<number, Map<number, number>>();
+    for (const [group, entries] of semanticEntriesByGroup) {
+      const ordered = [...entries].sort((left, right) => left - right);
+      const depths = new Map<number, number>();
+      ordered.forEach((value, rank) => {
+        depths.set(
+          value,
+          1 - (rank + 1) / (ordered.length + 1),
+        );
+      });
+      semanticDepthByGroup.set(group, depths);
+    }
     const step = hasAuthoredZIndex
       ? MAX_LOCAL_CLIP_SPACE_BIAS / depthRanks.slotCount
       : 0;
@@ -1729,12 +1792,12 @@ export class GpuScene {
         ],
       }),
     );
-    contributionUpdates.push(...this.presentationReleases.map(
-      (installed) => ({
+    contributionUpdates.push(
+      ...this.presentationReleases.map((installed) => ({
         firstSlot: installed.contributionSlot,
         values: [0, 0, 0, 0],
-      }),
-    ));
+      })),
+    );
     const zIndexUpdates: FloatLookupUpdate[] = [];
     for (const installed of active) {
       if (!installed.zIndexRange) {
@@ -1750,8 +1813,18 @@ export class GpuScene {
         // The renderer puts a Morton tile phase in the low bits. Power-of-two
         // masking preserves that spatial coloring instead of randomly letting
         // neighboring tile-edge geometry collide in the same depth bucket.
-        const tieOrdinal = entry.tieBreaker & (allocation.tieBucketCount - 1);
+        const tieOrdinal = entry.authored
+          ? entry.tieBreaker & (allocation.tieBucketCount - 1)
+          : 0;
         values[offset] = (allocation.firstSlot + tieOrdinal) * step;
+        if (entry.semanticGroup !== 0) {
+          values[offset + 1] =
+            compactSemanticGroups.get(entry.semanticGroup) ?? 0;
+          values[offset + 2] =
+            semanticDepthByGroup
+              .get(entry.semanticGroup)
+              ?.get(entry.value) ?? 0.5;
+        }
       });
       zIndexUpdates.push({
         firstSlot: installed.zIndexRange.firstRecord,
@@ -1763,7 +1836,7 @@ export class GpuScene {
     try {
       const zIndex = this.zIndexLookup.prepareReplacement(zIndexUpdates);
       this.lastZIndexUpdateMs = performance.now() - startedAt;
-      return {contribution, zIndex};
+      return { contribution, zIndex };
     } catch (error) {
       contribution.discard();
       throw error;
@@ -1776,12 +1849,11 @@ export class GpuScene {
     if (!selected) {
       return;
     }
-    const featureIds = typeof selected.featureIds === "string"
-      ? [selected.featureIds]
-      : selected.featureIds;
-    const byFeature = this.pickIndicesByTileAndFeature.get(
-      selected.mapTileKey,
-    );
+    const featureIds =
+      typeof selected.featureIds === "string"
+        ? [selected.featureIds]
+        : selected.featureIds;
+    const byFeature = this.pickIndicesByTileAndFeature.get(selected.mapTileKey);
     for (const featureId of featureIds) {
       if (!featureId || !byFeature) {
         continue;
@@ -1834,9 +1906,10 @@ export class GpuScene {
     selected: ScenePickRecord,
     globalPickIndex: number,
   ): string {
-    const featureIds = typeof selected.featureIds === "string"
-      ? selected.featureIds
-      : selected.featureIds.join("\n");
+    const featureIds =
+      typeof selected.featureIds === "string"
+        ? selected.featureIds
+        : selected.featureIds.join("\n");
     return featureIds
       ? `${selected.mapTileKey}\u0000${featureIds}`
       : String(globalPickIndex);
@@ -1854,8 +1927,10 @@ export class GpuScene {
   ): boolean {
     for (const index of this.pickIndices(indices)) {
       const selected = this.picks.get(index);
-      if (selected &&
-        contributionIdentities.has(selected.contributionIdentity)) {
+      if (
+        selected &&
+        contributionIdentities.has(selected.contributionIdentity)
+      ) {
         return true;
       }
     }

@@ -12,8 +12,14 @@ export const DECK_MAP_DEFAULT_ALTITUDE = 1.5;
 /** deck.gl's default vertical map FOV, shared by rendering and camera-state conversion. */
 export const DECK_MAP_FOV_DEGREES = altitudeToFovy(DECK_MAP_DEFAULT_ALTITUDE);
 
-/** Near-plane scale retained by Erdblick's rendering contract. */
-export const DECK_MAP_NEAR_Z_MULTIPLIER = 0.0005;
+/**
+ * Near-plane scale that preserves depth precision while still allowing close inspection.
+ *
+ * Values much smaller than this collapse the 24-bit depth buffer at long, grazing views and
+ * make coplanar vector overlays flicker. The navigation constraint already stops anchored zooms
+ * before the target crosses this plane, so moving it closer does not improve navigation safety.
+ */
+export const DECK_MAP_NEAR_Z_MULTIPLIER = 0.01;
 
 /** deck.gl's horizon-aware far-plane scale. */
 export const DECK_MAP_FAR_Z_MULTIPLIER = 1.01;

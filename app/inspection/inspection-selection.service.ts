@@ -58,6 +58,7 @@ export class InspectionSelectionService {
     remoteHoverHighlightAllowed = false;
 
     private selectionConversionRevision = 0;
+    private readonly pendingFeatureLoads = new Map<string, Promise<FeatureWrapper[]>>();
     private readonly inspectionExpiryOwners =
         new Map<string, InspectionExpiryOwner>();
 
@@ -74,52 +75,46 @@ export class InspectionSelectionService {
 
     /** Wires app-state selection projection once the tile stream can serve feature loads. */
     initialize(): void {
-        this.stateService.selectionState.subscribe(async selected => {
+        this.stateService.selectionState.subscribe(selected => {
             this.ngZone.run(() => this.selectionIdsTopic.next(selected));
             const revision = ++this.selectionConversionRevision;
-            const convertedSelections: InspectionPanelModel<FeatureWrapper>[] = [];
+            const pendingSelections: InspectionPanelModel<FeatureWrapper>[] = [];
             const pendingPanelUpdates: Array<{
                 panel: InspectionPanelModel<FeatureWrapper>,
                 selection: InspectionPanelModel<TileFeatureId>
             }> = [];
             const existingPanels = new Map(this.selectionTopic.getValue().map(panel => [panel.id, panel]));
+            const featureLoads: Array<Promise<{
+                selection: InspectionPanelModel<TileFeatureId>;
+                features: FeatureWrapper[];
+            } | null>> = [];
             for (const selection of selected) {
                 const existing = existingPanels.get(selection.id);
                 if (existing && featureSetsEqual(selection.features, existing.features) && deepEquals(existing.sourceData, selection.sourceData)) {
-                    convertedSelections.push(existing);
+                    pendingSelections.push(existing);
                     pendingPanelUpdates.push({panel: existing, selection});
                     continue;
                 }
-                let features: FeatureWrapper[];
-                try {
-                    features = await this.tileStream.loadFeatures(selection.features);
-                } catch (error) {
-                    console.error(`Failed to resolve inspection selection for panel ${selection.id}.`, error);
+
+                if (selection.sourceData || !selection.features.length) {
+                    pendingSelections.push(this.runtimePanel(selection, []));
                     continue;
                 }
-                if (revision !== this.selectionConversionRevision) {
-                    return;
-                }
-                if (selection.features.length && !features.length && !selection.sourceData) {
-                    continue;
-                }
-                convertedSelections.push({
-                    id: selection.id,
-                    locked: selection.locked,
-                    focused: selection.focused,
-                    size: selection.size,
-                    features: features,
-                    sourceData: selection.sourceData,
-                    color: selection.color,
-                    undocked: selection.undocked ?? false
-                });
+
+                pendingSelections.push(this.runtimePanel(selection, [], true));
+                featureLoads.push(this.loadFeaturesOnce(selection.features)
+                    .then(features => ({selection, features}))
+                    .catch(error => {
+                        console.error(
+                            `Failed to resolve inspection selection for panel ${selection.id}.`,
+                            error
+                        );
+                        return null;
+                    }));
             }
-            if (revision !== this.selectionConversionRevision) {
-                return;
-            }
-            // Restricted feature loading can complete from a transport
-            // callback outside Angular. Publish the resolved model in-zone so
-            // both docked and floating inspection views are checked.
+
+            // Publish panel shells before restricted feature loads finish so
+            // docked and floating hosts can show progress immediately.
             this.ngZone.run(() => {
                 pendingPanelUpdates.forEach(update => {
                     update.panel.locked = update.selection.locked;
@@ -128,17 +123,49 @@ export class InspectionSelectionService {
                     update.panel.size = update.selection.size;
                     update.panel.undocked = update.selection.undocked ?? false;
                 });
-                this.selectionIdsTopic.next(convertedSelections.map(panel => ({
-                    id: panel.id,
-                    locked: panel.locked,
-                    focused: panel.focused,
-                    size: panel.size,
-                    features: panel.features.map(feature => feature.key()),
-                    sourceData: panel.sourceData,
-                    color: panel.color,
-                    undocked: panel.undocked
-                })));
-                this.selectionTopic.next(convertedSelections);
+                this.selectionIdsTopic.next(
+                    this.selectionIdsForRuntime(selected, pendingSelections)
+                );
+                this.selectionTopic.next(pendingSelections);
+            });
+
+            if (!featureLoads.length) {
+                return;
+            }
+            void Promise.all(featureLoads).then(results => {
+                if (revision !== this.selectionConversionRevision) {
+                    return;
+                }
+                const resolvedByPanelId = new Map(results
+                    .filter((result): result is NonNullable<typeof result> => result !== null)
+                    .map(result => [result.selection.id, result]));
+                const convertedSelections: InspectionPanelModel<FeatureWrapper>[] = [];
+                for (const selection of selected) {
+                    const existing = existingPanels.get(selection.id);
+                    if (existing && featureSetsEqual(selection.features, existing.features) &&
+                        deepEquals(existing.sourceData, selection.sourceData)) {
+                        convertedSelections.push(existing);
+                        continue;
+                    }
+                    if (selection.sourceData || !selection.features.length) {
+                        convertedSelections.push(this.runtimePanel(selection, []));
+                        continue;
+                    }
+                    const resolved = resolvedByPanelId.get(selection.id);
+                    if (resolved?.features.length) {
+                        convertedSelections.push(this.runtimePanel(selection, resolved.features));
+                    }
+                }
+
+                // Restricted feature loading can complete from a transport
+                // callback outside Angular. Publish the resolved model in-zone
+                // so both docked and floating inspection views are checked.
+                this.ngZone.run(() => {
+                    this.selectionIdsTopic.next(
+                        this.selectionIdsForRuntime(selected, convertedSelections)
+                    );
+                    this.selectionTopic.next(convertedSelections);
+                });
             });
         });
         this.selectionTopic.subscribe(selectedPanels => {
@@ -161,6 +188,70 @@ export class InspectionSelectionService {
                 this.hoverIdsTopic.next(hoverIds);
             }
         });
+    }
+
+    /** Builds the transient presentation model for one persisted selection panel. */
+    private runtimePanel(
+        selection: InspectionPanelModel<TileFeatureId>,
+        features: FeatureWrapper[],
+        loading = false
+    ): InspectionPanelModel<FeatureWrapper> {
+        return {
+            id: selection.id,
+            locked: selection.locked,
+            focused: selection.focused,
+            size: selection.size,
+            features,
+            sourceData: selection.sourceData,
+            color: selection.color,
+            undocked: selection.undocked ?? false,
+            loading
+        };
+    }
+
+    /** Projects runtime wrappers back to interaction ids while preserving ids for loading shells. */
+    private selectionIdsForRuntime(
+        selected: InspectionPanelModel<TileFeatureId>[],
+        runtimePanels: InspectionPanelModel<FeatureWrapper>[]
+    ): InspectionPanelModel<TileFeatureId>[] {
+        const runtimeById = new Map(runtimePanels.map(panel => [panel.id, panel]));
+        return selected.flatMap(selection => {
+            const runtime = runtimeById.get(selection.id);
+            if (!runtime) {
+                return [];
+            }
+            return [{
+                id: runtime.id,
+                locked: runtime.locked,
+                focused: runtime.focused,
+                size: runtime.size,
+                features: runtime.loading
+                    ? selection.features
+                    : runtime.features.map(feature => feature.key()),
+                sourceData: runtime.sourceData,
+                color: runtime.color,
+                undocked: runtime.undocked
+            }];
+        });
+    }
+
+    /** Shares one in-flight restricted load across rapid panel-state emissions. */
+    private loadFeaturesOnce(featureIds: TileFeatureId[]): Promise<FeatureWrapper[]> {
+        const key = featureIds
+            .map(feature => `${feature.mapTileKey}\u0000${feature.featureId}`)
+            .sort()
+            .join("\u0001");
+        const pending = this.pendingFeatureLoads.get(key);
+        if (pending) {
+            return pending;
+        }
+        const request = this.tileStream.loadFeatures(featureIds).finally(() => {
+            if (this.pendingFeatureLoads.get(key) === request) {
+                this.pendingFeatureLoads.delete(key);
+            }
+        });
+        this.pendingFeatureLoads.set(key, request);
+        return request;
     }
 
     /**
@@ -363,12 +454,12 @@ export class InspectionSelectionService {
     /** Refreshes one still-retained tile and atomically replaces matching wrappers. */
     private async renewInspectionOwner(
         owner: InspectionExpiryOwner,
-        tokens: ReadonlyArray<{tileId: number; deliveryEpoch: number}>
+        tokens: ReadonlyArray<{tileId: number; valueVersion: number}>
     ): Promise<void> {
         if (this.inspectionExpiryOwners.get(owner.key) !== owner ||
             !tokens.some(token =>
                 token.tileId === owner.tileId &&
-                token.deliveryEpoch === owner.epoch
+                token.valueVersion === owner.epoch
             )) {
             return;
         }

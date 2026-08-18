@@ -588,6 +588,7 @@ void TileSubsetLayerRenderer::resetForNextTile()
     attributeOffsetSlotsByTransitionLeg_.clear();
     transitionOffsetScaleGroups_.clear();
     subsetMapDepthSeed_ = 0U;
+    subsetSemanticGroupSeed_ = 0U;
     currentDepthIdentity_ = 0U;
     subsetDepthPhase_ = 0U;
     gpuIconResources_.clear();
@@ -698,6 +699,11 @@ void TileSubsetLayerRenderer::addTileSubsetContribution(
     subset_ = subset.model_;
     subsetMapDepthSeed_ = mapget::Hash{}
         .mix(subset_->mapId())
+        .value();
+    auto const layerInfo = subset_->layerInfo();
+    subsetSemanticGroupSeed_ = mapget::Hash{}
+        .mix(subset_->mapId())
+        .mix(layerInfo ? layerInfo->layerId_ : std::string{})
         .value();
     // Classic effectiveRenderOrder values repeat their source-list fraction in
     // every tile. Keep neighboring tiles on distinct stable depth phases so
@@ -1290,6 +1296,9 @@ bool TileSubsetLayerRenderer::canFuseFeatureRulePair(
         outerRule.flat() != innerRule.flat() ||
         outerRule.billboard() != innerRule.billboard() ||
         outerRule.depthTest() != innerRule.depthTest() ||
+        outerRule.zIndexRole() != innerRule.zIndexRole() ||
+        outerRule.zIndexGroupExpression() !=
+            innerRule.zIndexGroupExpression() ||
         outerRule.lateralOffsetUnit() != innerRule.lateralOffsetUnit() ||
         innerRule.lateralOffsetUnit() !=
             FeatureStyleRule::LateralOffsetUnit::Meter ||
@@ -1803,6 +1812,7 @@ bool TileSubsetLayerRenderer::renderGeometry(
                     offset),
                 geometry->gltfNodeAabbSize(),
                 rule,
+                evalFun,
                 *color,
                 zIndex,
                 pick);
@@ -1817,6 +1827,7 @@ bool TileSubsetLayerRenderer::renderGeometry(
                 offset),
             geometry->aabbSize(),
             rule,
+            evalFun,
             *color,
             zIndex,
             pick);
@@ -1925,6 +1936,7 @@ bool TileSubsetLayerRenderer::renderGeometry(
             appendPath(
                 *projected,
                 rule,
+                evalFun,
                 *color,
                 zIndex,
                 pick,
@@ -1938,6 +1950,7 @@ bool TileSubsetLayerRenderer::renderGeometry(
             appendPath(
                 *projected,
                 rule,
+                evalFun,
                 *color,
                 zIndex,
                 pick,
@@ -1957,12 +1970,13 @@ bool TileSubsetLayerRenderer::renderGeometry(
             *projected,
             transformed.polygonRingStarts_,
             rule,
+            evalFun,
             *color,
             zIndex,
             pick);
         break;
     case mapget::GeomType::Mesh:
-        appendMesh(*projected, rule, *color, zIndex, pick);
+        appendMesh(*projected, rule, evalFun, *color, zIndex, pick);
         break;
     case mapget::GeomType::AABB:
     case mapget::GeomType::GltfNodeIndex:
@@ -2493,6 +2507,7 @@ bool TileSubsetLayerRenderer::renderTransitionLine(
     auto const gpuHandle = appendPath(
         path,
         rule,
+        evalFun,
         *color,
         zIndex,
         pick,
@@ -2619,6 +2634,7 @@ bool TileSubsetLayerRenderer::renderSegmentStackedLine(
     appendPath(
         projected,
         rule,
+        evalFun,
         *color,
         zIndex,
         pick,
@@ -2653,14 +2669,17 @@ void TileSubsetLayerRenderer::renderRelationLine(
 {
     std::optional<mapget::Point> sourceCenter;
     std::optional<mapget::Point> targetCenter;
+    auto screenLengthAnchor = GpuScreenLengthAnchor::None;
+    auto coincidentPointPair = false;
 
-    if (rule.relationLineGeometry() ==
-        FeatureStyleRule::RelationLineGeometry::NearestEndpoints)
+    auto const lineGeometry = rule.relationLineGeometry();
+    if (lineGeometry ==
+        FeatureStyleRule::RelationLineGeometry::ConnectionStubs)
     {
         struct EndpointCandidate {
             mapget::Point wgs;
             mapget::Point local;
-            bool lineEndpoint = false;
+            bool point = false;
         };
         auto candidates = [&](mapget::model_ptr<mapget::GeometryCollection> const& collection) {
             std::vector<EndpointCandidate> result;
@@ -2676,22 +2695,22 @@ void TileSubsetLayerRenderer::renderRelationLine(
                     if (value.points_.empty()) {
                         return true;
                     }
-                    auto append = [&](mapget::Point const& point, bool lineEndpoint) {
+                    auto append = [&](mapget::Point const& point, bool isPoint) {
                         result.push_back({
                             .wgs = point,
                             .local = projectWgsPoint(point),
-                            .lineEndpoint = lineEndpoint,
+                            .point = isPoint,
                         });
                     };
                     if (geometry->geomType() == mapget::GeomType::Line) {
-                        append(value.points_.front(), true);
+                        append(value.points_.front(), false);
                         if (value.points_.size() > 1U) {
-                            append(value.points_.back(), true);
+                            append(value.points_.back(), false);
                         }
                     }
                     else if (geometry->geomType() == mapget::GeomType::Points) {
                         for (auto const& point : value.points_) {
-                            append(point, false);
+                            append(point, true);
                         }
                     }
                     else {
@@ -2711,46 +2730,10 @@ void TileSubsetLayerRenderer::renderRelationLine(
         auto const targetCandidates = candidatesWithFallback(
             targetGeometry,
             targetFeatureGeometry);
-        std::optional<std::pair<EndpointCandidate, EndpointCandidate>> nearest;
-        auto nearestDistanceSquared = std::numeric_limits<double>::infinity();
-        for (auto const& source : sourceCandidates) {
-            for (auto const& target : targetCandidates) {
-                auto const dx = target.local.x - source.local.x;
-                auto const dy = target.local.y - source.local.y;
-                auto const distanceSquared = dx * dx + dy * dy;
-                if (distanceSquared < nearestDistanceSquared) {
-                    nearestDistanceSquared = distanceSquared;
-                    nearest = {source, target};
-                }
-            }
-        }
-        if (nearest) {
-            auto source = nearest->first;
-            auto target = nearest->second;
-            if (source.lineEndpoint && target.lineEndpoint) {
-                auto const distance = std::sqrt(nearestDistanceSquared);
-                if (distance > 1.0e-6) {
-                    // A short gap keeps ordinary lane endpoints legible. Point
-                    // endpoints represent zero-length lanes and remain exact.
-                    auto const trim = std::min(1.5, distance * 0.25);
-                    auto const dx = (target.local.x - source.local.x) / distance;
-                    auto const dy = (target.local.y - source.local.y) / distance;
-                    source.local.x += dx * trim;
-                    source.local.y += dy * trim;
-                    target.local.x -= dx * trim;
-                    target.local.y -= dy * trim;
-                    source.wgs = unprojectLocalPoint(source.local);
-                    target.wgs = unprojectLocalPoint(target.local);
-                }
-            }
-            sourceCenter = source.wgs;
-            targetCenter = target.wgs;
-        }
 
-        // Some relation carriers, notably NDS.Classic LaneConnector features,
-        // intentionally have no geometry. Their endpoint validity still gives
-        // the exact lane endpoint; draw a short stub into the target feature so
-        // the relation remains visible without inventing a carrier position.
+        // Walk from the nearest full-feature line endpoint toward its interior.
+        // Effective relation geometry supplies the exact connection, while the
+        // full geometry supplies the local tangent and physical stub length.
         auto inwardPoint = [&](mapget::model_ptr<mapget::GeometryCollection> const& collection,
                                mapget::Point const& anchor) -> std::optional<mapget::Point> {
             constexpr auto stubLengthMeters = 8.0;
@@ -2818,11 +2801,62 @@ void TileSubsetLayerRenderer::renderRelationLine(
                 });
             return result;
         };
+
+        std::optional<std::pair<EndpointCandidate, EndpointCandidate>> nearest;
+        auto nearestDistanceSquared = std::numeric_limits<double>::infinity();
+        for (auto const& source : sourceCandidates) {
+            for (auto const& target : targetCandidates) {
+                auto const dx = target.local.x - source.local.x;
+                auto const dy = target.local.y - source.local.y;
+                auto const distanceSquared = dx * dx + dy * dy;
+                if (distanceSquared < nearestDistanceSquared) {
+                    nearestDistanceSquared = distanceSquared;
+                    nearest = {source, target};
+                }
+            }
+        }
+        if (nearest) {
+            auto source = nearest->first;
+            auto target = nearest->second;
+            auto const sourceInterior = inwardPoint(
+                sourceFeatureGeometry,
+                source.wgs);
+            auto const targetInterior = inwardPoint(
+                targetFeatureGeometry,
+                target.wgs);
+            auto const dx = target.local.x - source.local.x;
+            auto const dy = target.local.y - source.local.y;
+            auto const dz = target.local.z - source.local.z;
+            // A point-only pair has no tangent from which a direction can be
+            // recovered. At exact coincidence, render a topology glyph instead
+            // of asking the minimum-length shader to expand a zero vector.
+            coincidentPointPair =
+                source.point && target.point &&
+                !sourceInterior && !targetInterior &&
+                dx * dx + dy * dy + dz * dz <= 1.0e-12;
+            sourceCenter = sourceInterior.value_or(source.wgs);
+            targetCenter = targetInterior.value_or(target.wgs);
+            if (!sourceInterior && targetInterior) {
+                screenLengthAnchor = GpuScreenLengthAnchor::Start;
+            }
+            else if (sourceInterior && !targetInterior) {
+                screenLengthAnchor = GpuScreenLengthAnchor::End;
+            }
+            else {
+                screenLengthAnchor = GpuScreenLengthAnchor::Center;
+            }
+        }
+
+        // Some relation carriers, notably NDS.Classic LaneConnector features,
+        // intentionally have no geometry. Their endpoint validity still gives
+        // the exact lane endpoint; draw a short stub into the target feature so
+        // the relation remains visible without inventing a carrier position.
         if (!sourceCenter && !targetCandidates.empty()) {
             auto const endpoint = targetCandidates.front().wgs;
             if (auto const interior = inwardPoint(targetFeatureGeometry, endpoint)) {
                 sourceCenter = endpoint;
                 targetCenter = *interior;
+                screenLengthAnchor = GpuScreenLengthAnchor::Start;
             }
         }
         else if (!targetCenter && !sourceCandidates.empty()) {
@@ -2830,6 +2864,7 @@ void TileSubsetLayerRenderer::renderRelationLine(
             if (auto const interior = inwardPoint(sourceFeatureGeometry, endpoint)) {
                 sourceCenter = *interior;
                 targetCenter = endpoint;
+                screenLengthAnchor = GpuScreenLengthAnchor::End;
             }
         }
     }
@@ -2855,26 +2890,60 @@ void TileSubsetLayerRenderer::renderRelationLine(
     auto const arrow = rule.arrow(evalFun);
     if (color && width > 0.0f && rule.supports(mapget::GeomType::Line))
     {
-        auto line = applyPresentationTransform(
-            mapget::SelfContainedGeometry{
-                {liftedSource, liftedTarget},
-                {},
-                mapget::GeomType::Line,
-            },
-            rule,
-            rule.offset());
-        std::vector<mapget::Point> projected;
-        for (auto const& point : line.points_) {
-            projected.push_back(projectWgsPoint(point));
+        auto const zIndex = resolvedZIndex(rule, evalFun);
+        if (coincidentPointPair) {
+            auto ring = applyPresentationTransform(
+                mapget::SelfContainedGeometry{
+                    {{
+                        (liftedSource.x + liftedTarget.x) * 0.5,
+                        (liftedSource.y + liftedTarget.y) * 0.5,
+                        (liftedSource.z + liftedTarget.z) * 0.5,
+                    }},
+                    {},
+                    mapget::GeomType::Points,
+                },
+                rule,
+                rule.offset());
+            if (!ring.points_.empty()) {
+                appendPointRing(
+                    projectWgsPoint(ring.points_.front()),
+                    std::max(12.0F, width * 3.0F),
+                    rule,
+                    evalFun,
+                    *color,
+                    zIndex,
+                    pick);
+            }
         }
-        appendPath(
-            projected,
-            rule,
-            *color,
-            resolvedZIndex(rule, evalFun),
-            pick,
-            width,
-            arrow);
+        else {
+            auto line = applyPresentationTransform(
+                mapget::SelfContainedGeometry{
+                    {liftedSource, liftedTarget},
+                    {},
+                    mapget::GeomType::Line,
+                },
+                rule,
+                rule.offset());
+            std::vector<mapget::Point> projected;
+            for (auto const& point : line.points_) {
+                projected.push_back(projectWgsPoint(point));
+            }
+            appendPath(
+                projected,
+                rule,
+                evalFun,
+                *color,
+                zIndex,
+                pick,
+                width,
+                arrow,
+                {},
+                {},
+                0.0F,
+                true,
+                std::nullopt,
+                screenLengthAnchor);
+        }
     }
 
     auto marker = rule.relationLineEndMarkerStyle();
@@ -2920,6 +2989,7 @@ void TileSubsetLayerRenderer::renderRelationLine(
                 appendPath(
                     projected,
                     markerRule,
+                    evalFun,
                     *markerColor,
                     resolvedZIndex(markerRule, evalFun),
                     pick,
@@ -3125,10 +3195,32 @@ void TileSubsetLayerRenderer::appendPoint(
         GpuPointRecordData{
             .position = point,
             .radius = radius,
-            .style = gpuRecordStyle(rule, color, zIndex, pick),
+            .style = gpuRecordStyle(rule, evalFun, color, zIndex, pick),
         },
         rule.billboard().value_or(false),
         rule.depthTest());
+    ++vertexCount_;
+}
+
+void TileSubsetLayerRenderer::appendPointRing(
+    mapget::Point const& point,
+    float radius,
+    FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun,
+    glm::fvec4 const& color,
+    double zIndex,
+    uint32_t pick)
+{
+    recordPickNavigationAltitude(pick, std::span{&point, size_t{1U}});
+    gpuPacketBuilder_.appendPoint(
+        GpuPointRecordData{
+            .position = point,
+            .radius = std::max(0.0F, radius),
+            .style = gpuRecordStyle(rule, evalFun, color, zIndex, pick),
+        },
+        true,
+        rule.depthTest(),
+        true);
     ++vertexCount_;
 }
 
@@ -3168,7 +3260,7 @@ void TileSubsetLayerRenderer::appendIcon(
             .uv = resource->second.uv,
             .atlasPage = resource->second.atlasPage,
             .flags = 0U,
-            .style = gpuRecordStyle(rule, color, zIndex, pick),
+            .style = gpuRecordStyle(rule, evalFun, color, zIndex, pick),
         },
         rule.billboard().value_or(true),
         rule.depthTest());
@@ -3179,6 +3271,7 @@ void TileSubsetLayerRenderer::appendSurface(
     std::vector<mapget::Point> const& points,
     std::vector<uint32_t> const& ringStarts,
     FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun,
     glm::fvec4 const& color,
     double zIndex,
     uint32_t pick)
@@ -3190,7 +3283,7 @@ void TileSubsetLayerRenderer::appendSurface(
     gpuPacketBuilder_.appendSurface(
         points,
         ringStarts,
-        gpuRecordStyle(rule, color, zIndex, pick),
+        gpuRecordStyle(rule, evalFun, color, zIndex, pick),
         rule.depthTest());
     vertexCount_ += static_cast<uint32_t>(points.size());
 }
@@ -3198,6 +3291,7 @@ void TileSubsetLayerRenderer::appendSurface(
 void TileSubsetLayerRenderer::appendMesh(
     std::vector<mapget::Point> const& points,
     FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun,
     glm::fvec4 const& color,
     double zIndex,
     uint32_t pick)
@@ -3207,6 +3301,7 @@ void TileSubsetLayerRenderer::appendMesh(
             {points[index], points[index + 1], points[index + 2]},
             {},
             rule,
+            evalFun,
             color,
             zIndex,
             pick);
@@ -3216,6 +3311,7 @@ void TileSubsetLayerRenderer::appendMesh(
 GpuPathRecordHandle TileSubsetLayerRenderer::appendPath(
     std::vector<mapget::Point> const& points,
     FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun,
     glm::fvec4 const& color,
     double zIndex,
     uint32_t pick,
@@ -3225,7 +3321,8 @@ GpuPathRecordHandle TileSubsetLayerRenderer::appendPath(
     std::span<glm::fvec2 const> lateralOffsetVectorsPx,
     float lateralOffsetScaleThreshold,
     bool simplificationApplied,
-    std::optional<GpuPathOverlay> pathOverlay)
+    std::optional<GpuPathOverlay> pathOverlay,
+    GpuScreenLengthAnchor screenLengthAnchor)
 {
     width = std::max(0.0F, width);
     if (points.size() < 2 || width <= 0.0f) {
@@ -3234,8 +3331,11 @@ GpuPathRecordHandle TileSubsetLayerRenderer::appendPath(
     auto const hasOffsetVectors =
         lateralOffsetVectorsPx.size() >= points.size();
     auto const dashed = rule.isDashed();
-    auto const dashLength =
-        static_cast<float>(std::max(1, rule.dashLength()));
+    auto const dashUnitsMeters =
+        rule.dashUnit() == FeatureStyleRule::LengthUnit::Meter;
+    auto const minimumDashLength = dashUnitsMeters ? 0.001F : 1.0F;
+    auto const dashLength = std::max(minimumDashLength, rule.dashLength());
+    auto const dashGap = std::max(0.0F, rule.dashGap());
     auto renderedPoints = std::span<mapget::Point const>{points};
     if (!simplificationApplied &&
         lineSimplificationToleranceMeters_ > 0.0 &&
@@ -3254,7 +3354,8 @@ GpuPathRecordHandle TileSubsetLayerRenderer::appendPath(
             .lateralOffsetVectorsPx = lateralOffsetVectorsPx,
             .width = width,
             .dashLength = dashed ? dashLength : 1.0F,
-            .dashGap = dashed ? dashLength : 0.0F,
+            .dashGap = dashed ? dashGap : 0.0F,
+            .dashUnitsMeters = dashed && dashUnitsMeters,
             .lateralOffsetScaleThreshold = hasOffsetVectors
                 ? std::max(0.0F, lateralOffsetScaleThreshold)
                 : 0.0F,
@@ -3264,8 +3365,9 @@ GpuPathRecordHandle TileSubsetLayerRenderer::appendPath(
             .backwardArrow =
                 arrow == FeatureStyleRule::BackwardArrow ||
                 arrow == FeatureStyleRule::DoubleArrow,
+            .screenLengthAnchor = screenLengthAnchor,
             .overlay = std::move(pathOverlay),
-            .style = gpuRecordStyle(rule, color, zIndex, pick),
+            .style = gpuRecordStyle(rule, evalFun, color, zIndex, pick),
         },
         rule.billboard().value_or(false),
         rule.depthTest());
@@ -3387,6 +3489,7 @@ void TileSubsetLayerRenderer::appendAabb(
     mapget::Point const& origin,
     mapget::Point const& size,
     FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun,
     glm::fvec4 const& color,
     double zIndex,
     uint32_t pick)
@@ -3432,6 +3535,7 @@ void TileSubsetLayerRenderer::appendAabb(
             },
             {},
             rule,
+            evalFun,
             color,
             zIndex,
             pick);
@@ -3688,6 +3792,7 @@ uint32_t TileSubsetLayerRenderer::gpuPickIndex(
 
 GpuRecordStyle TileSubsetLayerRenderer::gpuRecordStyle(
     FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun,
     glm::fvec4 const& color,
     double zIndex,
     uint32_t legacyPickIndex) const
@@ -3706,6 +3811,29 @@ GpuRecordStyle TileSubsetLayerRenderer::gpuRecordStyle(
         .localPickIndex = gpuPickIndex(legacyPickIndex),
         .renderOrder = rule.renderIndex(),
     };
+    switch (rule.zIndexRole()) {
+    case FeatureStyleRule::ZIndexRole::None:
+        break;
+    case FeatureStyleRule::ZIndexRole::Support:
+        result.semanticZIndexRole = GpuSemanticZIndexRole::Support;
+        break;
+    case FeatureStyleRule::ZIndexRole::Overlay:
+        result.semanticZIndexRole = GpuSemanticZIndexRole::Overlay;
+        break;
+    }
+    if (result.semanticZIndexRole != GpuSemanticZIndexRole::None) {
+        if (auto const group = rule.zIndexGroup(evalFun)) {
+            auto const scoped = mapget::Hash{}
+                .mix(subsetSemanticGroupSeed_)
+                .mix(*group)
+                .value();
+            result.semanticGroup = static_cast<uint32_t>(
+                scoped ^ (scoped >> 32U));
+            if (result.semanticGroup == 0U) {
+                result.semanticGroup = 1U;
+            }
+        }
+    }
     if (auto const& glow = rule.glow();
         glow && glow->radius > 0.0F && glow->opacity > 0.0F)
     {

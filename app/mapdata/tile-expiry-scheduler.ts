@@ -1,7 +1,7 @@
 /** Identity retained with one finite-lifetime tile while it is in the shared heap. */
 export interface TileExpiryToken {
     tileId: number;
-    deliveryEpoch: number;
+    valueVersion: number;
 }
 
 interface HeapEntry<Owner extends object> extends TileExpiryToken {
@@ -39,7 +39,7 @@ export class TileExpiryScheduler<Owner extends object> {
     schedule(
         owner: Owner,
         tileId: number,
-        deliveryEpoch: number,
+        valueVersion: number,
         expiresAtMs: number
     ): void {
         const previousHeadDeadline = this.heap[0]?.expiresAtMs;
@@ -58,7 +58,7 @@ export class TileExpiryScheduler<Owner extends object> {
         const entry: HeapEntry<Owner> = {
             owner,
             tileId: Math.trunc(tileId),
-            deliveryEpoch: Math.max(0, Math.trunc(deliveryEpoch)),
+            valueVersion: Math.max(0, Math.trunc(valueVersion)),
             expiresAtMs,
             heapIndex: this.heap.length
         };
@@ -150,7 +150,7 @@ export class TileExpiryScheduler<Owner extends object> {
             }
             due.push({
                 tileId: entry.tileId,
-                deliveryEpoch: entry.deliveryEpoch
+                valueVersion: entry.valueVersion
             });
             drained++;
         }

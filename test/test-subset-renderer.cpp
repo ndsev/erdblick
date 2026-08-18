@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "erdblick/gpu-render-packet.h"
@@ -144,7 +145,7 @@ public:
             for (uint32_t index = 0U; index < stream.count; ++index) {
                 auto const record = stream.dataOffset + index * stream.stride;
                 auto const flags = read<uint32_t>(
-                    record + (simple ? 48U : compact ? 72U : 140U));
+                    record + (simple ? 48U : compact ? 72U : 144U));
                 auto const starts = (flags & static_cast<uint32_t>(
                     GpuPathRecordFlag::StartCap)) != 0U;
                 auto const ends = (flags & static_cast<uint32_t>(
@@ -1213,7 +1214,7 @@ rules:
   - type: Road
     scope: relation
     relation-type: outgoingLane
-    relation-line-geometry: nearest-endpoints
+    relation-line-geometry: connection-stubs
     geometry: line
     color: "#ffffff"
     width: 2
@@ -1241,6 +1242,192 @@ rules:
     REQUIRE(second.x > first.x);
     REQUIRE(second.distanceTo(first) > 7.9);
     REQUIRE(second.distanceTo(first) < 8.1);
+}
+
+TEST_CASE(
+    "TileSubsetLayerRenderer anchors a visible connection stub at a point lane",
+    "[erdblick.subset-renderer][relation]")
+{
+    auto info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>(
+        "SubsetRendererConnectionStubPool");
+    auto tileId = mapget::TileId::fromWgs84(11.0, 48.0, 13);
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        tileId,
+        "SubsetRendererConnectionStubPool",
+        "TestMap",
+        info,
+        strings,
+        "relations",
+        1);
+    subset->setGeometryAnchor({11.0, 48.0, 0.0});
+
+    auto laneGeometry = lineGeometryWithPoints(
+        *subset,
+        "centerline",
+        std::array{
+            mapget::Point{11.0, 48.0, 0.0},
+            mapget::Point{11.001, 48.0, 0.0},
+        });
+    auto pointGeometry = subset->newGeometryCollection(1, true);
+    auto point = subset->newGeometry(mapget::GeomType::Points, 1, true);
+    point->append({11.001, 48.0, 0.0});
+    pointGeometry->addGeometry(point);
+
+    auto sourceId = subset->newFeatureId("Road", {{"roadId", int64_t{1}}});
+    auto targetId = subset->newFeatureId("Road", {{"roadId", int64_t{2}}});
+    auto channel = subset->newChannel(
+        "style-rule:0",
+        mapget::Scope::Relation,
+        1U << static_cast<uint8_t>(mapget::GeomType::Line),
+        std::nullopt);
+    auto source = channel->newFeatureEntry(sourceId, laneGeometry, {});
+    auto target = channel->newFeatureEntry(targetId, pointGeometry, {});
+    channel->newRelationEntry(
+        "Road.1/nextLane/0",
+        "nextLane",
+        "stored",
+        mapget::RelationDirection::Forward,
+        false,
+        source,
+        target,
+        laneGeometry,
+        pointGeometry);
+
+    auto style = rendererStyle(R"yaml(
+name: ConnectionStub
+version: 2
+rules:
+  - type: Road
+    scope: relation
+    relation-type: nextLane
+    relation-line-geometry: connection-stubs
+    geometry: line
+    color: "#ffffff"
+    width: 2
+    arrow: forward
+)yaml");
+    REQUIRE(style.isValid());
+
+    TileSubsetLayerRenderer renderer(
+        0,
+        "Features:TestMap:Road:0",
+        style,
+        static_cast<int>(FeatureStyleRule::NoHighlight),
+        static_cast<int>(FeatureStyleRule::AnyFidelity));
+    renderer.setCoordinateOrigin(11.0, 48.0, 0.0);
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+
+    RendererPacketView packet(renderer);
+    auto const paths = packet.paths();
+    REQUIRE(paths.size() == 1U);
+    REQUIRE(paths.front().points.size() == 2U);
+    REQUIRE(paths.front().points.back().distanceTo(
+        paths.front().points.front()) == Catch::Approx(8.0).margin(0.1));
+
+    auto const pathStreams = packet.streams(GpuPrimitiveKind::PathSegment);
+    REQUIRE(pathStreams.size() == 1U);
+    REQUIRE((pathStreams.front().flags & static_cast<uint16_t>(
+        GpuMaterialFlag::ScreenLengthEndAnchor)) != 0U);
+    auto const arrowStreams = packet.streams(GpuPrimitiveKind::Arrow);
+    REQUIRE(arrowStreams.size() == 1U);
+    REQUIRE((arrowStreams.front().flags & static_cast<uint16_t>(
+        GpuMaterialFlag::ScreenLengthEndAnchor)) != 0U);
+}
+
+TEST_CASE(
+    "TileSubsetLayerRenderer rings a coincident point-to-point connection",
+    "[erdblick.subset-renderer][relation]")
+{
+    auto info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>(
+        "SubsetRendererCoincidentConnectionPool");
+    auto tileId = mapget::TileId::fromWgs84(11.0, 48.0, 13);
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        tileId,
+        "SubsetRendererCoincidentConnectionPool",
+        "TestMap",
+        info,
+        strings,
+        "relations",
+        1);
+    subset->setGeometryAnchor({11.0, 48.0, 0.0});
+
+    auto makePointGeometry = [&] {
+        auto collection = subset->newGeometryCollection(1, true);
+        auto point = subset->newGeometry(mapget::GeomType::Points, 1, true);
+        point->append({11.0, 48.0, 0.0});
+        collection->addGeometry(point);
+        return collection;
+    };
+    auto sourceGeometry = makePointGeometry();
+    auto targetGeometry = makePointGeometry();
+    auto sourceId = subset->newFeatureId("Road", {{"roadId", int64_t{1}}});
+    auto targetId = subset->newFeatureId("Road", {{"roadId", int64_t{2}}});
+    auto channel = subset->newChannel(
+        "style-rule:0",
+        mapget::Scope::Relation,
+        1U << static_cast<uint8_t>(mapget::GeomType::Line),
+        std::nullopt);
+    auto source = channel->newFeatureEntry(sourceId, sourceGeometry, {});
+    auto target = channel->newFeatureEntry(targetId, targetGeometry, {});
+    channel->newRelationEntry(
+        "Road.1/nextLane/0",
+        "nextLane",
+        "stored",
+        mapget::RelationDirection::Forward,
+        false,
+        source,
+        target,
+        sourceGeometry,
+        targetGeometry);
+
+    auto style = rendererStyle(R"yaml(
+name: CoincidentConnection
+version: 2
+rules:
+  - type: Road
+    scope: relation
+    relation-type: nextLane
+    relation-line-geometry: connection-stubs
+    relation-line-height-offset: 4
+    geometry: line
+    billboard: true
+    color: "#ffffff"
+    width: 2.5
+    arrow: forward
+    glow: {color: "#000000", radius: 3, opacity: 0.5}
+)yaml");
+    REQUIRE(style.isValid());
+
+    TileSubsetLayerRenderer renderer(
+        0,
+        "Features:TestMap:Road:0",
+        style,
+        static_cast<int>(FeatureStyleRule::NoHighlight),
+        static_cast<int>(FeatureStyleRule::AnyFidelity));
+    renderer.setCoordinateOrigin(11.0, 48.0, 0.0);
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+
+    RendererPacketView packet(renderer);
+    REQUIRE(packet.paths().empty());
+    REQUIRE(packet.arrows().empty());
+    auto const pointStreams = packet.streams(GpuPrimitiveKind::Point);
+    REQUIRE(pointStreams.size() == 1U);
+    auto const& ring = pointStreams.front();
+    REQUIRE(ring.count == 1U);
+    REQUIRE(ring.stride == kGpuPointRecordBytes);
+    REQUIRE((ring.flags & static_cast<uint16_t>(
+        GpuMaterialFlag::Billboard)) != 0U);
+    REQUIRE((ring.flags & static_cast<uint16_t>(
+        GpuMaterialFlag::PointRing)) != 0U);
+    REQUIRE(ring.glowRadius == Catch::Approx(3.0F));
+    REQUIRE(packet.read<float>(ring.dataOffset + 12U) ==
+        Catch::Approx(12.0F));
+    REQUIRE(packet.read<float>(ring.dataOffset + 8U) ==
+        Catch::Approx(4.0F));
 }
 
 TEST_CASE(

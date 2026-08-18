@@ -31,6 +31,7 @@ enum class GpuPathRecordFlag : uint32_t {
     Dashed = 1U << 4U,
     TrimStart = 1U << 5U,
     TrimEnd = 1U << 6U,
+    DashMeters = 1U << 7U,
 };
 
 /** Per-instance branches consumed by the arrow shader. */
@@ -40,6 +41,13 @@ enum class GpuArrowRecordFlag : uint32_t {
     VariableOffset = 1U << 1U,
 };
 
+/** Stream-level function in the semantic support/overlay render pipeline. */
+enum class GpuSemanticZIndexRole {
+    None,
+    Support,
+    Overlay,
+};
+
 /** Style values common to point, path, arrow, and surface records. */
 struct GpuRecordStyle {
     std::array<uint8_t, 4> color{};
@@ -47,6 +55,8 @@ struct GpuRecordStyle {
     float glowRadius = 0.0F;
     double zIndex = 0.0;
     uint32_t depthTieKey = 0U;
+    uint32_t semanticGroup = 0U;
+    GpuSemanticZIndexRole semanticZIndexRole = GpuSemanticZIndexRole::None;
     uint32_t localPickIndex = kGpuUnselectable;
     uint32_t renderOrder = 0U;
 };
@@ -64,6 +74,14 @@ struct GpuPathOverlay {
     std::array<uint8_t, 4> color{};
 };
 
+/** Pins one end or the midpoint while a short path is enlarged in screen space. */
+enum class GpuScreenLengthAnchor {
+    None,
+    Start,
+    End,
+    Center,
+};
+
 /** Path-wide values copied into each independently drawable segment record. */
 struct GpuPathRecordData {
     std::span<mapget::Point const> points;
@@ -72,9 +90,11 @@ struct GpuPathRecordData {
     float width = 0.0F;
     float dashLength = 1.0F;
     float dashGap = 0.0F;
+    bool dashUnitsMeters = false;
     float lateralOffsetScaleThreshold = 0.0F;
     bool forwardArrow = false;
     bool backwardArrow = false;
+    GpuScreenLengthAnchor screenLengthAnchor = GpuScreenLengthAnchor::None;
     std::optional<GpuPathOverlay> overlay;
     GpuRecordStyle style;
 };
@@ -88,6 +108,7 @@ struct GpuArrowRecordData {
     float width = 0.0F;
     float lateralOffsetScaleThreshold = 0.0F;
     bool variableOffset = false;
+    GpuScreenLengthAnchor screenLengthAnchor = GpuScreenLengthAnchor::None;
     GpuRecordStyle style;
 };
 
@@ -153,7 +174,8 @@ public:
     void appendPoint(
         GpuPointRecordData const& point,
         bool billboard,
-        bool depthTest);
+        bool depthTest,
+        bool ring = false);
 
     /** Expand one directed polyline into final adjacency segment and arrow records. */
     [[nodiscard]] GpuPathRecordHandle appendPath(

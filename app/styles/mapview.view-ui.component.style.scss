@@ -1,3 +1,5 @@
+@use "./inspection-value-bubble.presentation" as value-bubble;
+
 .view-ui-container {
   display: flex;
   gap: 0.25em;
@@ -208,9 +210,7 @@
 }
 
 .hover-label-surface {
-  background: color-mix(in srgb, var(--p-content-background) 68%, transparent);
-  border-color: color-mix(in srgb, var(--p-content-border-color) 70%, transparent);
-  backdrop-filter: blur(2px);
+  background: var(--erdblick-card-bg);
 }
 
 .feature-hover-hud {
@@ -222,52 +222,75 @@
   z-index: 30040;
   pointer-events: none;
   width: max-content;
-  max-width: min(32em, calc(100% - 1rem));
+  max-width: min(70em, calc(100% - 1rem));
   padding: 0.25em 0.5em;
   transform: translateX(-50%);
-  border: 1px solid;
-  border-radius: 6px;
+  border: none;
+  border-radius: var(--p-button-border-radius);
   font-size: 0.9em;
   line-height: 1.25;
   background: var(--erdblick-card-bg);
-  box-shadow: none;
+  box-shadow: var(--p-card-shadow);
 
   &::after {
     content: "";
     position: absolute;
     top: 100%;
     left: 50%;
-    width: 0.65em;
-    height: 0.65em;
-    background: inherit;
-    border-right: 1px solid;
-    border-bottom: 1px solid;
-    border-color: inherit;
-    transform: translate(-50%, -50%) rotate(45deg);
+    width: 0;
+    height: 0;
+    border-left: 0.45em solid transparent;
+    border-right: 0.45em solid transparent;
+    border-top: 0.45em solid var(--erdblick-card-bg);
+    transform: translateX(-50%);
+    filter: drop-shadow(0 1px 1px rgb(0 0 0 / 18%));
   }
 
   .hover-label-feature + .hover-label-feature {
-    margin-top: 0.2em;
-    padding-top: 0.2em;
+    margin-top: 0.25em;
+    padding-top: 0.25em;
     border-top: 1px solid var(--p-content-border-color);
   }
 
-  .hover-label-row {
-    display: grid;
-    grid-template-columns: minmax(5em, auto) minmax(0, 1fr);
-    gap: 0.5em;
+  .hover-label-feature {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25em 0.45em;
     max-width: 100%;
-
-    span {
-      overflow: hidden;
-      color: var(--p-text-muted-color);
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    strong {
-      overflow-wrap: anywhere;
-      font-weight: 600;
-    }
   }
+
+  .hover-label-feature-id {
+    font-weight: 400;
+    overflow-wrap: anywhere;
+  }
+
+  .hover-label-field {
+    @include value-bubble.base;
+
+    align-items: center;
+    display: inline-flex;
+    min-width: 0;
+    padding: 0;
+  }
+
+  .hover-label-key {
+    background: color-mix(in srgb, var(--inspection-value-bubble-color) 16%, transparent);
+    font-weight: 600;
+    padding: 0.08em 0.38em;
+    white-space: nowrap;
+  }
+
+  .hover-label-value {
+    border-left: 1px solid color-mix(
+      in srgb,
+      var(--inspection-value-bubble-color) 46%,
+      var(--p-content-border-color)
+    );
+    font-weight: 400;
+    overflow-wrap: anywhere;
+    padding: 0.08em 0.38em;
+  }
+
+  @include value-bubble.variants;
 }
