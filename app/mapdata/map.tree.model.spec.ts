@@ -449,8 +449,12 @@ describe("layer presets in the map tree", () => {
         const {tree} = presetTreeFixture();
         const layer = tree.getFeatureLayer("Map", "Example")!;
         const presetNode = layerPresetNode(layer)!;
-        presetNode.presets = [];
-        presetNode.selectOptions = [{label: "Custom options", value: ""}];
+        presetNode.presets.splice(0);
+        presetNode.selectOptions.splice(
+            0,
+            presetNode.selectOptions.length,
+            {label: "Custom options", value: ""}
+        );
         layer.projectPresetOnly[0] = true;
 
         const projected = filterMapTreeNodes(tree.nodes, "", 0)[0].children?.[0];

@@ -6,7 +6,13 @@ import {
     Output,
     SimpleChanges
 } from "@angular/core";
+import {FormsModule} from "@angular/forms";
+import {ButtonModule} from "primeng/button";
+import {InputTextModule} from "primeng/inputtext";
+import {MultiSelectModule} from "primeng/multiselect";
+import {ToggleSwitch} from "primeng/toggleswitch";
 
+import {AppDialogComponent} from "../shared/app-dialog.component";
 import type {SearchStyleSaveOptions} from "./search-style-sheet.converter";
 
 interface LayerAffinityOption {
@@ -83,7 +89,15 @@ interface LayerAffinityOption {
             </div>
         </app-dialog>
     `,
-    standalone: false
+    standalone: true,
+    imports: [
+        AppDialogComponent,
+        ButtonModule,
+        FormsModule,
+        InputTextModule,
+        MultiSelectModule,
+        ToggleSwitch
+    ]
 })
 /** Presentational dialog for naming and scoping a saved search stylesheet. */
 export class SearchStyleSaveDialogComponent implements OnChanges {
