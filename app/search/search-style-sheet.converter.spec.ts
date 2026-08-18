@@ -4,11 +4,14 @@ import {beforeAll, describe, expect, it} from "vitest";
 import {coreLib, initializeLibrary, uint8ArrayToWasm} from "../integrations/wasm";
 import type {FeatureSearchStyleRule} from "../shared/feature-search-state";
 import {
+    canonicalLayerAffinityExpression,
     canonicalSearchStyleFilename,
     convertSearchStyleRulesToYaml,
+    decodeCanonicalLayerAffinity,
     projectStyleSourceForSearch,
     projectStyleSourceToQuick,
-    updateStyleSourceFromQuick
+    updateStyleSourceFromQuick,
+    updateStyleSourceMetadata
 } from "./search-style-sheet.converter";
 
 describe("search style sheet codec", () => {
@@ -143,6 +146,42 @@ describe("search style sheet codec", () => {
         style.delete();
     });
 
+    it("projects and losslessly updates Quick name and layer affinity metadata", () => {
+        const exactIds = [" roads ", "lane[0]", "pipe|slash\\value"];
+        const exactExpression = canonicalLayerAffinityExpression(exactIds);
+        const source = `# retained root comment
+name: Original
+layer: ${JSON.stringify(exactExpression)}
+custom-root: retained
+rules:
+  - geometry: [line] # retained rule comment
+    color: "#ff0000"
+`;
+        const projection = projectStyleSourceToQuick(source);
+
+        expect(projection.name).toBe("Original");
+        expect(projection.layerAffinity).toEqual({
+            kind: "exact",
+            layerIds: [...exactIds].sort()
+        });
+        expect(decodeCanonicalLayerAffinity(exactExpression)).toEqual([...exactIds].sort());
+        expect(decodeCanonicalLayerAffinity("Road.*")).toBeUndefined();
+
+        const renamed = updateStyleSourceMetadata(source, {name: "Renamed: Style"});
+        const cleared = updateStyleSourceMetadata(renamed, {layerAffinity: {kind: "any"}});
+        const parsed = load(cleared) as any;
+        expect(cleared).toContain("# retained root comment");
+        expect(cleared).toContain("# retained rule comment");
+        expect(parsed.name).toBe("Renamed: Style");
+        expect(parsed).not.toHaveProperty("layer");
+        expect(parsed["custom-root"]).toBe("retained");
+
+        const custom = projectStyleSourceToQuick(source.replace(
+            JSON.stringify(exactExpression),
+            JSON.stringify("Road.*")));
+        expect(custom.layerAffinity).toEqual({kind: "custom", expression: "Road.*"});
+    });
+
     it("applies only effective compatible rules and reports every omission", () => {
         const source = `
 name: Mixed/Search
@@ -198,6 +237,11 @@ rules:
         expect(projection.category).toBe("base");
         expect(projection.readOnlyRuleIndices).toEqual([1]);
         expect(projection.warnings.map(warning => warning.code)).toContain("unsupported-property");
+        expect(projection.warnings.every(warning => Number.isInteger(warning.sourceIndex))).toBe(true);
+        expect(projection.warnings.find(warning => warning.code === "unsupported-property")?.sourceIndex)
+            .toBe(0);
+        expect(projection.warnings.find(warning => warning.code === "branch-rule")?.sourceIndex)
+            .toBe(1);
     });
 
     it("encodes unsafe stylesheet names only in the download filename", () => {

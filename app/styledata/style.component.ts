@@ -33,7 +33,8 @@ import {
     QuickStyleProjection,
     QuickStyleWarning,
     projectStyleSourceToQuick,
-    updateStyleSourceFromQuick
+    updateStyleSourceFromQuick,
+    updateStyleSourceMetadata
 } from "../search/search-style-sheet.converter";
 import {
     FeatureSearchStyleRuleDraft,
@@ -365,10 +366,34 @@ interface QuickPresetOption {
         </app-dialog>
         <p-menu #styleMenu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
-        <app-dialog header="Style Editor" [(visible)]="styleEditorVisible" [modal]="false" #editorDialog
+        <app-dialog [(visible)]="styleEditorVisible" [modal]="false" #editorDialog
                   data-testid="style-editor-dialog" class="editor-dialog"
                   [persistLayout]="true" [layoutId]="styleEditorDialogLayoutId"
                   (onShow)="onEditorDialogShow()" (onHide)="onEditorDialogHide()">
+            <ng-template #header>
+                <div class="style-editor-header">
+                    <span class="style-editor-header-title">Style Editor
+                        @if (stateService.styleEditorTargetId; as styleId) {
+                            <span> — {{ styleId }}</span>
+                        }
+                    </span>
+                    @if (currentEditorStyle(); as style) {
+                        <span class="style-editor-header-toggle"
+                              (pointerdown)="$event.stopPropagation()"
+                              (mousedown)="$event.stopPropagation()"
+                              (click)="$event.stopPropagation()">
+                            <p-toggleswitch inputId="style-editor-enabled"
+                                            data-testid="style-editor-enabled"
+                                            [ngModel]="style.visible"
+                                            (ngModelChange)="toggleEditorStyle($event)"
+                                            [pTooltip]="style.visible ? 'Disable style sheet' : 'Enable style sheet'"
+                                            tooltipPosition="bottom"
+                                            aria-label="Enable style sheet">
+                            </p-toggleswitch>
+                        </span>
+                    }
+                </div>
+            </ng-template>
             <p-tabs [(value)]="styleEditorTab" class="style-editor-tabs" data-testid="style-editor-tabs">
                 <p-tablist>
                     @if (styleEditorQuickAvailable) {
@@ -386,6 +411,66 @@ interface QuickPresetOption {
                                         Quick is read-only until Advanced contains valid YAML: {{ quickProjectionError }}
                                     </div>
                                 }
+                                <div class="style-editor-quick-metadata">
+                                    <div class="style-editor-quick-field">
+                                        <label for="style-editor-quick-name">Name</label>
+                                        <input id="style-editor-quick-name"
+                                               data-testid="style-editor-quick-name"
+                                               pInputText
+                                               autocomplete="off"
+                                               [ngModel]="quickStyleName"
+                                               (ngModelChange)="onQuickStyleNameChange($event)"
+                                               [disabled]="quickProjectionStale">
+                                        @if (quickStyleNameIssue(); as issue) {
+                                            <small class="style-editor-quick-error" role="alert">{{ issue }}</small>
+                                        }
+                                    </div>
+                                    <div class="style-editor-quick-field style-editor-quick-affinity">
+                                        <label for="style-editor-quick-layers">Layer affinity</label>
+                                        @if (quickLayerAffinityKind === 'custom' && !quickReplacingCustomAffinity) {
+                                            <div class="style-editor-custom-affinity" data-testid="style-editor-custom-affinity">
+                                                <span [pTooltip]="quickCustomLayerAffinity">
+                                                    Custom affinity — edit in Advanced or replace
+                                                </span>
+                                                <p-button label="Choose exact layers"
+                                                          size="small"
+                                                          severity="secondary"
+                                                          [outlined]="true"
+                                                          [disabled]="quickProjectionStale"
+                                                          (click)="beginReplacingQuickAffinity()"/>
+                                                <p-button label="Any layer"
+                                                          size="small"
+                                                          severity="secondary"
+                                                          [text]="true"
+                                                          [disabled]="quickProjectionStale"
+                                                          (click)="setQuickAffinityAny()"/>
+                                            </div>
+                                        } @else {
+                                            <p-multiSelect inputId="style-editor-quick-layers"
+                                                           data-testid="style-editor-quick-layers"
+                                                           [options]="quickLayerOptions"
+                                                           [ngModel]="quickLayerAffinityIds"
+                                                           (ngModelChange)="onQuickLayerAffinityChange($event)"
+                                                           optionLabel="label"
+                                                           optionValue="value"
+                                                           placeholder="Any layer"
+                                                           [filter]="true"
+                                                           [showToggleAll]="true"
+                                                           [maxSelectedLabels]="3"
+                                                           [disabled]="quickProjectionStale"
+                                                           appendTo="body">
+                                            </p-multiSelect>
+                                            <small>No selection means any layer.</small>
+                                            @if (quickReplacingCustomAffinity) {
+                                                <p-button label="Clear custom affinity to Any"
+                                                          size="small"
+                                                          severity="secondary"
+                                                          [text]="true"
+                                                          (click)="setQuickAffinityAny()"/>
+                                            }
+                                        }
+                                    </div>
+                                </div>
                                 <search-style-rule-editor
                                     [drafts]="quickRuleDrafts"
                                     (draftsChange)="onQuickRuleDraftsChange($event)"
@@ -395,18 +480,9 @@ interface QuickPresetOption {
                                     [showRuleNames]="false"
                                     [sourceRuleIndices]="quickRuleSourceIndicesByDraftId"
                                     [readOnlyRuleIndices]="quickReadOnlyRuleIndices"
+                                    [notesBySourceIndex]="quickWarningsBySourceIndex"
                                     [canRefreshValueSummaries]="false">
                                 </search-style-rule-editor>
-                                @if (quickWarnings.length) {
-                                    <div class="style-editor-quick-warnings">
-                                        <h3>Quick editing notes</h3>
-                                        <ul>
-                                            @for (warning of quickWarnings; track warning.path + ':' + warning.code) {
-                                                <li><code>{{ warning.path }}</code> — {{ warning.message }}</li>
-                                            }
-                                        </ul>
-                                    </div>
-                                }
                             </div>
                         </p-tabpanel>
                     }
@@ -422,7 +498,7 @@ interface QuickPresetOption {
                         (click)="saveOrApplyEditedStyle()"
                         [label]="canSaveCurrentStyleToSource() ? 'Save to Source' : 'Apply'"
                         [icon]="canSaveCurrentStyleToSource() ? 'pi pi-save' : 'pi pi-check'"
-                        [disabled]="canSaveCurrentStyleToSource() ? !currentStyleHasSourceChanges() : !sourceWasModified"
+                        [disabled]="!!quickStyleNameIssue() || (canSaveCurrentStyleToSource() ? !currentStyleHasSourceChanges() : !sourceWasModified)"
                         [pTooltip]="canSaveCurrentStyleToSource() ? styleSourceSaveTooltip() : ''"></p-button>
                     <p-button data-testid="style-editor-close-button" (click)="closeEditorDialog($event)"
                               [label]='sourceWasModified ? "Discard" : "Close"'
@@ -578,7 +654,14 @@ export class StyleComponent implements OnDestroy {
     styleEditorQuickAvailable = false;
     quickRuleDrafts: FeatureSearchStyleRuleDraft[] = [];
     quickWarnings: QuickStyleWarning[] = [];
+    quickWarningsBySourceIndex: Record<number, readonly QuickStyleWarning[]> = {};
     quickReadOnlyRuleIndices: number[] = [];
+    quickStyleName = "";
+    quickLayerAffinityKind: "any" | "exact" | "custom" = "any";
+    quickLayerAffinityIds: string[] = [];
+    quickCustomLayerAffinity = "";
+    quickReplacingCustomAffinity = false;
+    quickLayerOptions: Array<{label: string; value: string}> = [];
     quickProjectionStale = false;
     quickProjectionError = "";
     private quickProjection?: QuickStyleProjection;
@@ -655,6 +738,9 @@ export class StyleComponent implements OnDestroy {
         this.presetMapSubscription = this.mapInfoService.maps$.subscribe(() => {
             if (this.quickPresetFormVisible) {
                 this.refreshQuickPresetOptions();
+            }
+            if (this.styleEditorQuickAvailable) {
+                this.refreshQuickLayerOptions();
             }
         });
     }
@@ -1184,7 +1270,14 @@ export class StyleComponent implements OnDestroy {
         this.quickProjection = undefined;
         this.quickRuleDrafts = [];
         this.quickWarnings = [];
+        this.quickWarningsBySourceIndex = {};
         this.quickReadOnlyRuleIndices = [];
+        this.quickStyleName = "";
+        this.quickLayerAffinityKind = "any";
+        this.quickLayerAffinityIds = [];
+        this.quickCustomLayerAffinity = "";
+        this.quickReplacingCustomAffinity = false;
+        this.quickLayerOptions = [];
         this.quickRuleSourceIndices.clear();
         this.quickRuleSourceIndicesByDraftId = {};
         this.styleEditorSourceSubscription.unsubscribe();
@@ -1275,7 +1368,22 @@ export class StyleComponent implements OnDestroy {
             this.quickProjection = projection;
             this.quickRuleDrafts = drafts;
             this.quickWarnings = projection.warnings;
+            const warningsBySourceIndex: Record<number, QuickStyleWarning[]> = {};
+            for (const warning of projection.warnings) {
+                (warningsBySourceIndex[warning.sourceIndex] ??= []).push(warning);
+            }
+            this.quickWarningsBySourceIndex = warningsBySourceIndex;
             this.quickReadOnlyRuleIndices = projection.readOnlyRuleIndices;
+            this.quickStyleName = projection.name;
+            this.quickLayerAffinityKind = projection.layerAffinity.kind;
+            this.quickLayerAffinityIds = projection.layerAffinity.kind === "exact"
+                ? [...projection.layerAffinity.layerIds]
+                : [];
+            this.quickCustomLayerAffinity = projection.layerAffinity.kind === "custom"
+                ? projection.layerAffinity.expression
+                : "";
+            this.quickReplacingCustomAffinity = false;
+            this.refreshQuickLayerOptions();
             this.quickProjectionStale = false;
             this.quickProjectionError = "";
         } catch (error) {
@@ -1313,16 +1421,105 @@ export class StyleComponent implements OnDestroy {
             }));
             const currentSource = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, "");
             const updatedSource = updateStyleSourceFromQuick(currentSource, projection, updates);
-            this.updatingSourceFromQuick = true;
-            this.editorService.updateSessionSource(this.styleEditorSessionId, updatedSource);
-            this.updatingSourceFromQuick = false;
-            this.refreshQuickProjection(updatedSource);
+            this.commitQuickSource(updatedSource);
         } catch (error) {
-            this.updatingSourceFromQuick = false;
             this.messageService.showError(
                 `Could not apply the Quick style change: ${error instanceof Error ? error.message : String(error)}`);
             this.refreshQuickProjection(this.editorService.getSessionSource(this.styleEditorSessionId));
         }
+    }
+
+    /** Returns the currently persisted style controlled by the editor header. */
+    protected currentEditorStyle(): ErdblickStyle | undefined {
+        const styleId = this.stateService.styleEditorTargetId;
+        return styleId ? this.styleService.styles.get(styleId) : undefined;
+    }
+
+    /** Applies header visibility through the ordinary persisted style lifecycle. */
+    protected toggleEditorStyle(enabled: boolean): void {
+        const styleId = this.stateService.styleEditorTargetId;
+        if (styleId) {
+            this.styleService.toggleStyle(styleId, enabled, true);
+        }
+    }
+
+    /** Reports the immediate Quick-name validity used to gate Apply. */
+    protected quickStyleNameIssue(): string {
+        if (!this.quickStyleName.trim()) {
+            return "A style name is required.";
+        }
+        const conflict = this.styleService.styleIdentityConflict(this.quickStyleName);
+        return conflict && conflict.id !== this.stateService.styleEditorTargetId
+            ? `A style named or resolved by “${this.quickStyleName}” already exists.`
+            : "";
+    }
+
+    /** Patches the root YAML name immediately, preserving every unrelated AST node. */
+    protected onQuickStyleNameChange(name: string): void {
+        this.quickStyleName = name ?? "";
+        this.updateQuickMetadata({name: this.quickStyleName});
+    }
+
+    /** Replaces Any/custom affinity with a deterministic set of exact layer IDs. */
+    protected onQuickLayerAffinityChange(layerIds: string[] | null): void {
+        const selected = [...(layerIds ?? [])];
+        this.updateQuickMetadata({
+            layerAffinity: selected.length
+                ? {kind: "exact", layerIds: selected}
+                : {kind: "any"}
+        });
+    }
+
+    /** Enters an explicit replacement state without mutating a custom regex. */
+    protected beginReplacingQuickAffinity(): void {
+        this.quickReplacingCustomAffinity = true;
+        this.quickLayerAffinityIds = [];
+    }
+
+    /** Explicitly deletes the root layer expression. */
+    protected setQuickAffinityAny(): void {
+        this.updateQuickMetadata({layerAffinity: {kind: "any"}});
+    }
+
+    /** Applies one metadata patch through the same guarded Advanced-source session. */
+    private updateQuickMetadata(patch: Parameters<typeof updateStyleSourceMetadata>[1]): void {
+        if (!this.quickProjection || this.quickProjectionStale) {
+            return;
+        }
+        try {
+            const currentSource = this.editorService
+                .getSessionSource(this.styleEditorSessionId)
+                .replace(/\n+$/, "");
+            this.commitQuickSource(updateStyleSourceMetadata(currentSource, patch));
+        } catch (error) {
+            this.messageService.showError(
+                `Could not apply the Quick metadata change: ${error instanceof Error ? error.message : String(error)}`);
+            this.refreshQuickProjection(this.editorService.getSessionSource(this.styleEditorSessionId));
+        }
+    }
+
+    /** Updates CodeMirror synchronously while suppressing its delayed projection refresh. */
+    private commitQuickSource(updatedSource: string): void {
+        this.updatingSourceFromQuick = true;
+        try {
+            this.editorService.updateSessionSource(this.styleEditorSessionId, updatedSource);
+        } finally {
+            this.updatingSourceFromQuick = false;
+        }
+        this.refreshQuickProjection(updatedSource);
+    }
+
+    /** Merges live map layer IDs with exact source-only affinity selections. */
+    private refreshQuickLayerOptions(): void {
+        const ids = new Set(this.quickLayerAffinityIds);
+        for (const layer of this.mapInfoService.maps.allFeatureLayers()) {
+            if (layer.id) {
+                ids.add(layer.id);
+            }
+        }
+        this.quickLayerOptions = [...ids]
+            .sort((left, right) => left.localeCompare(right))
+            .map(value => ({label: value, value}));
     }
 
     /** Opens the style-definition documentation in a new browser tab. */

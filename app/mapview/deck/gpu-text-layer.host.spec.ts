@@ -132,16 +132,24 @@ describe("GpuTextLayerHost", () => {
             flattenZ: false
         });
         const [layer] = host.renderLayers();
+        const props = layer.props as unknown as {
+            collisionEnabled: boolean;
+            collisionGroup: string;
+            characterSet: string;
+            getCollisionPriority: (datum: unknown, info: unknown) => number;
+            data: readonly unknown[];
+            extensions: readonly unknown[];
+        };
 
-        expect(layer.props.collisionEnabled).toBe(true);
-        expect(layer.props.collisionGroup).toBe("text-labels");
-        expect(layer.props.characterSet).toBe("auto");
-        expect(layer.props.getCollisionPriority(layer.props.data[0], {} as never))
+        expect(props.collisionEnabled).toBe(true);
+        expect(props.collisionGroup).toBe("text-labels");
+        expect(props.characterSet).toBe("auto");
+        expect(props.getCollisionPriority(props.data[0], {}))
             .toBe(17);
         // Collision renders labels through a separate picking-color pass.
         // Depth-free labels must not inject the independent z-index shader
         // hook into that pass, or the collision map rejects every label.
-        expect(layer.props.extensions).toHaveLength(1);
+        expect(props.extensions).toHaveLength(1);
     });
 
     it("retains label order below Float32 precision", () => {
@@ -198,8 +206,12 @@ describe("GpuTextLayerHost", () => {
             flattenZ: true
         });
         const [layer] = host.renderLayers();
+        const props = layer.props as unknown as {
+            getPosition: (datum: unknown, info: unknown) => unknown;
+            data: readonly unknown[];
+        };
 
-        expect(layer.props.getPosition(layer.props.data[0], {} as never))
+        expect(props.getPosition(props.data[0], {}))
             .toEqual([11, 48, 0]);
     });
 

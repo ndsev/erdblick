@@ -526,12 +526,29 @@ search-style-rule-editor {
   }
 
   .search-style-rule-editor-read-only-placeholder {
+    align-items: center;
     border: 1px dashed var(--p-content-border-color);
     border-radius: 6px;
     color: var(--p-text-muted-color);
     flex: 0 0 auto;
     margin-bottom: 0.5em;
     padding: 0.75em;
+    display: flex;
+    gap: 0.4em;
+  }
+
+  .search-style-rule-help {
+    color: var(--p-primary-color);
+    cursor: help;
+    flex: 0 0 auto;
+    font-size: 1.15rem;
+    font-weight: 400;
+  }
+
+  .search-style-rule-help:focus-visible {
+    border-radius: 50%;
+    outline: 2px solid var(--p-focus-ring-color);
+    outline-offset: 2px;
   }
 
   .feature-search-saved-style-select {
@@ -1407,4 +1424,9 @@ search-style-rule-editor {
   .p-colorpicker-preview {
     border-radius: 50%;
   }
+}
+
+.search-style-rule-help-tooltip .p-tooltip-text {
+  max-width: min(34rem, calc(100vw - 2rem));
+  white-space: pre-line;
 }

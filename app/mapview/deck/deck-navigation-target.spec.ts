@@ -3,11 +3,10 @@ import {describe, expect, it, vi} from "vitest";
 import {addMetersToLngLat} from "@math.gl/web-mercator";
 
 import type {
-    NavigationAnchor,
-    NavigationVisualTarget
+    NavigationAnchor
 } from "./navigation/feature-navigation.types";
 import {createDeckMapViewport} from "./navigation/web-mercator-feature-navigation";
-import {projectNavigationTarget} from "./deck-navigation-target";
+import {NavigationTargetOverlay, projectNavigationTarget} from "./deck-navigation-target";
 import {DeckMapView3D} from "./deck-view3d";
 
 interface DeckViewTestInternals {
@@ -59,18 +58,6 @@ interface CameraPersistenceTestInternals {
     pushViewStateToAppState(): void;
 }
 
-interface GestureTargetTestInternals {
-    pointerNavigationTarget: NavigationVisualTarget | null;
-    hoverNavigationTargetNear: ReturnType<typeof vi.fn>;
-    groundNavigationTarget: ReturnType<typeof vi.fn>;
-    setHoverNavigationPivot: ReturnType<typeof vi.fn>;
-    resolveControllerNavigationTarget(screenPosition: [number, number]): NavigationVisualTarget | null;
-    onControllerNavigationTargetChange(
-        target: NavigationVisualTarget,
-        active: boolean
-    ): void;
-}
-
 /** Creates a 3D deck view with service collaborators outside the focused unit scope. */
 function createView(): DeckMapView3D {
     return new DeckMapView3D(
@@ -117,62 +104,27 @@ function installDeckMock(
 }
 
 describe("Deck navigation target and layout", () => {
-    it("retains the exact pointer-down target while drag recognition queries repeatedly", () => {
-        const view = createView();
-        const internals = view as unknown as GestureTargetTestInternals;
-        const target = {position: [11, 48, 120] as NavigationAnchor};
-        internals.pointerNavigationTarget = target;
-        internals.hoverNavigationTargetNear = vi.fn();
-        internals.groundNavigationTarget = vi.fn();
-        internals.setHoverNavigationPivot = vi.fn();
+    it("exposes stable hover, active, and clear states on the overlay", () => {
+        const container = document.createElement("div");
+        const viewport = createDeckMapViewport({
+            longitude: 11,
+            latitude: 48,
+            zoom: 17,
+            pitch: 55,
+            bearing: 30
+        }, 1000, 700, false);
+        const overlay = new NavigationTargetOverlay(container);
+        const svg = container.querySelector("[data-testid='navigation-target-overlay']");
 
-        expect(internals.resolveControllerNavigationTarget([540, 380]))
-            .toEqual(target);
-        expect(internals.resolveControllerNavigationTarget([620, 410]))
-            .toEqual(target);
-        expect(internals.pointerNavigationTarget).toBe(target);
-        expect(internals.setHoverNavigationPivot).toHaveBeenCalledTimes(2);
-    });
-
-    it("does not let release of an older controller target erase a fresh pointer-down target", () => {
-        const view = createView();
-        const internals = view as unknown as GestureTargetTestInternals;
-        const frozen = {position: [11, 48, 120] as NavigationAnchor};
-        const released = {position: [12, 49, 0] as NavigationAnchor};
-        internals.pointerNavigationTarget = frozen;
-
-        internals.onControllerNavigationTargetChange(released, false);
-
-        expect(internals.pointerNavigationTarget).toBe(frozen);
-    });
-
-    it("reuses a local prepared hover target without a gesture-time GPU readback", () => {
-        const view = createView();
-        const internals = view as unknown as GestureTargetTestInternals;
-        const target = {position: [11, 48, 120] as NavigationAnchor};
-        internals.pointerNavigationTarget = null;
-        internals.hoverNavigationTargetNear = vi.fn(() => target);
-        internals.groundNavigationTarget = vi.fn();
-        internals.setHoverNavigationPivot = vi.fn();
-
-        expect(internals.resolveControllerNavigationTarget([500, 350]))
-            .toEqual(target);
-        expect(internals.groundNavigationTarget).not.toHaveBeenCalled();
-        expect(internals.setHoverNavigationPivot).toHaveBeenCalledWith(target);
-    });
-
-    it("uses the exact gesture ground target when no feature target is available", () => {
-        const view = createView();
-        const internals = view as unknown as GestureTargetTestInternals;
-        const groundTarget = {position: [11, 48, 0] as NavigationAnchor};
-        internals.pointerNavigationTarget = null;
-        internals.hoverNavigationTargetNear = vi.fn(() => null);
-        internals.groundNavigationTarget = vi.fn(() => groundTarget);
-        internals.setHoverNavigationPivot = vi.fn();
-
-        expect(internals.resolveControllerNavigationTarget([500, 350])).toEqual(groundTarget);
-        expect(internals.groundNavigationTarget).toHaveBeenCalledWith({x: 500, y: 350});
-        expect(internals.setHoverNavigationPivot).toHaveBeenCalledWith(groundTarget);
+        expect(svg?.getAttribute("data-navigation-state")).toBe("clear");
+        overlay.update({position: [11, 48, 120]}, viewport, "hover");
+        expect(svg?.getAttribute("data-navigation-state")).toBe("hover");
+        overlay.update({position: [11, 48, 120]}, viewport, "active");
+        expect(svg?.getAttribute("data-navigation-state")).toBe("active");
+        overlay.clear();
+        expect(svg?.getAttribute("data-navigation-state")).toBe("clear");
+        overlay.destroy();
+        expect(container.childElementCount).toBe(0);
     });
 
     it("projects a vertical surface target with a fixed eight-pixel major radius", () => {

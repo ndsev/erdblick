@@ -18,7 +18,7 @@ State written from server defaults is tracked as config-owned in browser storage
 
 ## What Gets Stored in the URL?
 
-- Camera state: latitude, longitude, altitude, orientation (heading, pitch, roll), and the numeric map-centre offset required by target-relative 3D navigation for each view.
+- Camera state: latitude, longitude, altitude, orientation (heading, pitch, roll), and backward-compatible numeric map-centre offset fields for each view.
 - Number of map views, which view is focused, view sync flags (position/movement/projection/layers), and 2D/3D projection mode per view.
 - Active maps and the complete layer matrix: which layers are visible in which view and their zoom levels, plus per-view tile-border visibility.
 - Background-layer settings: selected background id (or off) plus opacity per view.
@@ -41,7 +41,7 @@ The table below lists all query parameters used by erdblick when encoding or res
 | `n` | Global | Number of active map views (1 for single view, 2 for split view). |
 | `lon`, `lat`, `alt` | Per view | Camera destination (degrees and meters). Values are encoded per view; with multiple views they are stored as colon-separated lists. |
 | `h`, `p`, `r` | Per view | Camera orientation in radians (heading, pitch, roll), encoded in the same way as `lon`/`lat`/`alt`. |
-| `px`, `py`, `pz` | Per view | Local map-centre offset in metres. Canonical target-relative 3D navigation may use a nonzero offset; legacy links that omit these fields use zero. |
+| `px`, `py`, `pz` | Per view | Optional local map-centre offset in metres accepted for backward-compatible/exact input. Active target navigation may transiently use a nonzero offset, but ordinary settled state is re-expressed as an equivalent ground-centred camera with zero offset. Legacy links that omit these fields also use zero. |
 | `m2d` | Per view | 2D projection mode flag for each view. |
 | `f` | Global | Index of the focused view (0-based), which receives keyboard focus and search-driven camera moves. |
 | `sync` | Global | Enabled view synchronisation flags. Contains a subset of `pos`, `mov`, `proj`, and `lay`. |
@@ -68,7 +68,7 @@ When running the visualization-only build or embedding erdblick without UI panel
 | --- | --- |
 | `lon`, `lat`, `alt` | Center position in degrees and altitude in meters. |
 | `h`, `p`, `r` | Camera orientation (radians: heading, pitch, roll). |
-| `px`, `py`, `pz` | Optional map-centre offset in metres for an exact target-relative 3D camera pose. |
+| `px`, `py`, `pz` | Optional map-centre offset in metres for backward-compatible/exact camera input. The viewer canonicalizes an equivalent settled pose to a zero offset. |
 | `bg` | Background layer id and opacity, encoded as `<layerId>~<opacity>` per view. |
 | `tll` | Maximum number of tiles to load, per view. |
 

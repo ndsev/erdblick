@@ -192,6 +192,27 @@
 }
 
 .editor-dialog {
+  .style-editor-header {
+    align-items: center;
+    display: flex;
+    gap: 0.75em;
+    justify-content: space-between;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .style-editor-header-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .style-editor-header-toggle {
+    align-items: center;
+    display: inline-flex;
+    flex: 0 0 auto;
+  }
+
   .spinner {
     display: flex;
     flex: 1 1 auto;
@@ -294,8 +315,52 @@
     }
   }
 
-  .style-editor-quick-stale,
-  .style-editor-quick-warnings {
+  .style-editor-quick-metadata {
+    display: grid;
+    flex: 0 0 auto;
+    gap: 0.65em 0.9em;
+    grid-template-columns: minmax(10em, 1fr) minmax(14em, 1.5fr);
+    padding: 0.25em;
+  }
+
+  .style-editor-quick-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3em;
+    min-width: 0;
+
+    > input,
+    > p-multiselect,
+    > .p-multiselect {
+      width: 100%;
+    }
+
+    > small {
+      color: var(--p-text-muted-color);
+    }
+  }
+
+  .style-editor-quick-error {
+    color: var(--p-message-error-color, #dc2626) !important;
+  }
+
+  .style-editor-custom-affinity {
+    align-items: center;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: var(--p-border-radius-md);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4em;
+    min-height: 2.25em;
+    padding: 0.35em 0.5em;
+
+    > span {
+      color: var(--p-text-muted-color);
+      flex: 1 1 12em;
+    }
+  }
+
+  .style-editor-quick-stale {
     border: 1px solid var(--p-content-border-color);
     border-radius: 4px;
     flex: 0 0 auto;
@@ -306,19 +371,10 @@
     color: var(--p-message-error-color, #dc2626);
   }
 
-  .style-editor-quick-warnings {
-    color: var(--p-text-muted-color);
-  }
-
-  .style-editor-quick-warnings h3 {
-    color: var(--p-text-color);
-    font-size: 1em;
-    margin: 0 0 0.4em;
-  }
-
-  .style-editor-quick-warnings ul {
-    margin: 0;
-    padding-left: 1.25em;
+  @container editor-dialog-content (max-width: 36em) {
+    .style-editor-quick-metadata {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 
   .cm-editor {

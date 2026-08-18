@@ -1,3 +1,4 @@
+import "@angular/compiler";
 import {SimpleChange} from "@angular/core";
 import {describe, expect, it, vi} from "vitest";
 
@@ -11,16 +12,16 @@ describe("SearchStyleSaveDialogComponent", () => {
         });
     };
 
-    it("resets to Off and Any whenever it opens", () => {
+    it("resets to enabled and Any whenever it opens", () => {
         const component = new SearchStyleSaveDialogComponent();
         component.name = "Old";
-        component.defaultEnabled = true;
+        component.enableUponSave = false;
         component.selectedLayerIds = ["roads"];
 
         open(component);
 
         expect(component.name).toBe("Search Style");
-        expect(component.defaultEnabled).toBe(false);
+        expect(component.enableUponSave).toBe(true);
         expect(component.selectedLayerIds).toEqual([]);
     });
 
@@ -43,19 +44,34 @@ describe("SearchStyleSaveDialogComponent", () => {
         component.saveRequested.subscribe(value => payload = value);
         open(component);
         component.name = "  Exact Name  ";
-        component.defaultEnabled = true;
+        component.enableUponSave = true;
         component.selectedLayerIds = ["roads", "lane[0]"];
 
         component.submit();
         component.selectedLayerIds.push("later");
 
         expect(payload).toEqual({
-            name: "  Exact Name  ",
-            defaultEnabled: true,
-            layerIds: ["roads", "lane[0]"]
+            action: "save",
+            options: {
+                name: "  Exact Name  ",
+                defaultEnabled: true,
+                layerIds: ["roads", "lane[0]"]
+            }
         });
         expect(Object.isFrozen(payload)).toBe(true);
-        expect(Object.isFrozen(payload.layerIds)).toBe(true);
+        expect(Object.isFrozen(payload.options)).toBe(true);
+        expect(Object.isFrozen(payload.options.layerIds)).toBe(true);
+    });
+
+    it("distinguishes Save and Open from the default Save action", () => {
+        const component = new SearchStyleSaveDialogComponent();
+        const emitted = vi.fn();
+        component.saveRequested.subscribe(emitted);
+        open(component);
+
+        component.submit("save-and-open");
+
+        expect(emitted.mock.calls[0][0].action).toBe("save-and-open");
     });
 
     it("prevents duplicate submit while a save is pending and supports cancel", () => {
@@ -69,6 +85,7 @@ describe("SearchStyleSaveDialogComponent", () => {
 
         component.submit();
         component.cancel();
+        component.onVisibleChange(false);
         expect(save).not.toHaveBeenCalled();
         expect(visible).not.toHaveBeenCalled();
 

@@ -5,7 +5,6 @@ import type {
 } from "@deck.gl/core";
 import type {
     NavigationAnchor,
-    NavigationScreenPosition,
     NavigationVisualTarget
 } from "./feature-navigation.types";
 import {isNavigationAnchorUsable} from "./web-mercator-feature-navigation";
@@ -14,7 +13,7 @@ import {isNavigationAnchorUsable} from "./web-mercator-feature-navigation";
 export interface ErdblickTargetNavigationAdapterOptions {
     viewId: string;
     resolveTarget: (
-        screenPosition: NavigationScreenPosition
+        context: Readonly<MapInteractionTargetContext>
     ) => NavigationVisualTarget | null;
     getRetainedTarget: () => NavigationVisualTarget | null;
     onTargetChange: (target: NavigationVisualTarget, active: boolean) => void;
@@ -44,15 +43,12 @@ export class ErdblickTargetNavigationAdapter {
             return null;
         }
 
-        const requestedPosition: NavigationScreenPosition = context.screenPosition
-            ? [...context.screenPosition]
-            : [context.viewport.width / 2, context.viewport.height / 2];
         const retainedTarget = context.screenPosition
             ? null
             : this.options.getRetainedTarget();
         const target = retainedTarget && this.isUsable(retainedTarget.position, context)
             ? retainedTarget
-            : this.options.resolveTarget(requestedPosition);
+            : this.options.resolveTarget(context);
         if (!target) {
             return null;
         }
@@ -137,7 +133,10 @@ function sameAnchor(
     first: readonly number[],
     second: readonly number[]
 ): boolean {
-    return Math.abs(first[0] - second[0]) <= 1e-10
+    const longitudeDelta = Math.abs(
+        ((first[0] - second[0] + 540) % 360) - 180
+    );
+    return longitudeDelta <= 1e-10
         && Math.abs(first[1] - second[1]) <= 1e-10
         && Math.abs(first[2] - second[2]) <= 1e-4;
 }

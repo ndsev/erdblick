@@ -78,6 +78,7 @@ import {
     isDeckInteractionMaskLayer
 } from "./deck-interaction-outline.service";
 import {NavigationTargetOverlay} from "./deck-navigation-target";
+import {planarPanViewState} from "./deck-planar-pan";
 import {environment} from "../../environments/environment";
 import {coreLib} from "../../integrations/wasm";
 import {
@@ -282,7 +283,6 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly GPU_SCENE_REDRAW_QUIET_MS = 50;
     private static readonly GPU_SCENE_REDRAW_MAX_LATENCY_MS = 1_000;
     private static readonly TILE_GRID_DATA_REFRESH_DEBOUNCE_MS = 250;
-    private static readonly MIN_NAVIGATION_GESTURE_TARGET_REUSE_RADIUS_PX = 12;
     private static readonly NAVIGATION_COMMAND_STEP_PX = 64;
     private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
     private static readonly TILE_STATE_EMPTY_COLOR: [number, number, number, number] = [122, 126, 133, 64];
@@ -350,8 +350,6 @@ export abstract class DeckMapView implements IRenderView {
     private isHoveringFeature = false;
     private hoverNavigationPivot: NavigationAnchor | null = null;
     private hoverNavigationSurfaceNormal: NavigationSurfaceNormal | null = null;
-    private hoverNavigationSamplePosition: [number, number] | null = null;
-    private pointerNavigationTarget: NavigationVisualTarget | null = null;
     private activeNavigationPivot: NavigationAnchor | null = null;
     private activeNavigationSurfaceNormal: NavigationSurfaceNormal | null = null;
     private retainedNavigationPivot: NavigationAnchor | null = null;
@@ -392,30 +390,9 @@ export abstract class DeckMapView implements IRenderView {
         if (!this.allowPitchAndBearing || this.firstPersonSession) {
             return;
         }
-        const position = {x: event.offsetX, y: event.offsetY};
-        // Rotation is the one gesture where a stale representative hover
-        // target is visibly wrong. Pay for one filtered top-object depth read
-        // exactly at right-button down; ordinary pan/click gestures remain
-        // free of synchronous GPU readback.
         if (event.button === 2) {
             event.preventDefault();
         }
-        this.pointerNavigationTarget = (event.button === 2
-            ? this.pickPointerNavigationTarget(position)
-            : null)
-            ?? this.hoverNavigationTargetNear([position.x, position.y])
-            ?? this.groundNavigationTarget(position);
-        this.setHoverNavigationPivot(this.pointerNavigationTarget);
-    };
-    private readonly deckCanvasPointerUp = () => {
-        // Let Mjolnir/deck consume the release first. A click never enters the
-        // public interaction lifecycle, while a completed drag clears the same
-        // snapshot in onInteractionStateChange().
-        queueMicrotask(() => {
-            if (!this.isCameraInteracting) {
-                this.pointerNavigationTarget = null;
-            }
-        });
     };
     private readonly deckCanvasContextMenu = (event: MouseEvent) => {
         event.preventDefault();
@@ -500,8 +477,8 @@ export abstract class DeckMapView implements IRenderView {
         this.canvasId = canvasId;
         this.targetNavigationAdapter = new ErdblickTargetNavigationAdapter({
             viewId: `deck-view-${id}`,
-            resolveTarget: screenPosition =>
-                this.resolveControllerNavigationTarget(screenPosition),
+            resolveTarget: context =>
+                this.resolveControllerNavigationTarget(context),
             getRetainedTarget: () => this.retainedNavigationPivot
                 ? (this.retainedNavigationSurfaceNormal
                     ? {
@@ -556,12 +533,9 @@ export abstract class DeckMapView implements IRenderView {
         const canvas = this.createDeckCanvas(container);
         canvas.addEventListener("pointerenter", this.deckCanvasPointerEnter);
         canvas.addEventListener("pointermove", this.deckCanvasPointerMove);
-        // Freeze the target before Mjolnir's bubble-phase pointer handler asks
-        // the controller to begin a gesture. Capture phase prevents a delayed
-        // drag threshold from resolving a different target than pointer-down.
+        // Cancel deferred hover work before Mjolnir begins classifying the gesture.
+        // The controller's synchronous provider owns target acquisition.
         canvas.addEventListener("pointerdown", this.deckCanvasPointerDown, true);
-        canvas.addEventListener("pointerup", this.deckCanvasPointerUp);
-        canvas.addEventListener("pointercancel", this.deckCanvasPointerUp);
         canvas.addEventListener("contextmenu", this.deckCanvasContextMenu);
         canvas.addEventListener("pointerleave", this.deckCanvasPointerLeave);
         this.navigationTargetOverlay = new NavigationTargetOverlay(container);
@@ -779,14 +753,6 @@ export abstract class DeckMapView implements IRenderView {
                 "pointerdown",
                 this.deckCanvasPointerDown,
                 true
-            );
-            this.deck.getCanvas()?.removeEventListener(
-                "pointerup",
-                this.deckCanvasPointerUp
-            );
-            this.deck.getCanvas()?.removeEventListener(
-                "pointercancel",
-                this.deckCanvasPointerUp
             );
             this.deck.getCanvas()?.removeEventListener(
                 "contextmenu",
@@ -1173,9 +1139,9 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Resolves a finite visible point on the zero-height ground plane as the universal fallback pivot. */
     private groundNavigationTarget(
-        screenPos: {x: number; y: number}
+        screenPos: {x: number; y: number},
+        viewport: WebMercatorViewport | null | undefined = this.createWebMercatorViewport()
     ): NavigationVisualTarget | null {
-        const viewport = this.createWebMercatorViewport();
         if (!viewport) {
             return null;
         }
@@ -1192,19 +1158,24 @@ export abstract class DeckMapView implements IRenderView {
             : null;
     }
 
-    /** Resolve the exact physical surface under a right-button rotation start. */
-    private pickPointerNavigationTarget(
-        screenPos: {x: number; y: number}
+    /** Resolves one exact eligible physical surface for a controller acquisition. */
+    private pickControllerNavigationTarget(
+        context: Readonly<MapInteractionTargetContext>,
+        screenPosition: [number, number]
     ): NavigationVisualTarget | null {
         const layerIds = this.navigationPickLayerIds();
         if (!this.deck || !layerIds.length) {
             return null;
         }
         const radius = Math.max(0, Math.trunc(this.stateService.drillPickRadius));
+        const canvasPosition = [
+            context.viewport.x + screenPosition[0],
+            context.viewport.y + screenPosition[1]
+        ];
         try {
             const picked = this.deck.pickObject({
-                x: screenPos.x,
-                y: screenPos.y,
+                x: canvasPosition[0],
+                y: canvasPosition[1],
                 radius,
                 layerIds,
                 unproject3D: true
@@ -1212,12 +1183,13 @@ export abstract class DeckMapView implements IRenderView {
             return picked
                 ? navigationTargetFromPickingInfo({
                     ...picked,
-                    x: screenPos.x,
-                    y: screenPos.y
+                    x: canvasPosition[0],
+                    y: canvasPosition[1],
+                    viewport: context.viewport
                 }, radius, true)
                 : null;
         } catch (error) {
-            console.error("Navigation pointer-down picking failed.", error);
+            console.error("Navigation controller picking failed.", error);
             return null;
         }
     }
@@ -1499,7 +1471,7 @@ export abstract class DeckMapView implements IRenderView {
         return this.firstPersonViewActive.getValue();
     }
 
-    /** Pans north in view-local space. */
+    /** Pans toward the top of the current view. */
     moveUp(): void {
         if (this.firstPersonSession) {
             return;
@@ -1507,7 +1479,7 @@ export abstract class DeckMapView implements IRenderView {
         this.applyPan(0, 1);
     }
 
-    /** Pans south in view-local space. */
+    /** Pans toward the bottom of the current view. */
     moveDown(): void {
         if (this.firstPersonSession) {
             return;
@@ -1515,7 +1487,7 @@ export abstract class DeckMapView implements IRenderView {
         this.applyPan(0, -1);
     }
 
-    /** Pans west in view-local space. */
+    /** Pans toward the left side of the current view. */
     moveLeft(): void {
         if (this.firstPersonSession) {
             return;
@@ -1523,7 +1495,7 @@ export abstract class DeckMapView implements IRenderView {
         this.applyPan(-1, 0);
     }
 
-    /** Pans east in view-local space. */
+    /** Pans toward the right side of the current view. */
     moveRight(): void {
         if (this.firstPersonSession) {
             return;
@@ -1823,7 +1795,6 @@ export abstract class DeckMapView implements IRenderView {
         this.noteCameraInteraction(interactionState);
         this.targetNavigationAdapter.handleInteractionState(interactionState);
         if (wasCameraInteracting && !this.isCameraInteracting) {
-            this.pointerNavigationTarget = null;
             this.flushPendingViewStatePush();
             this.scheduleViewportUpdate();
             this.scheduleTileGridOverlayUpdate();
@@ -1849,17 +1820,16 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.navigationTargetOverlay?.update(
             surfaceNormal ? {position, surfaceNormal} : {position},
-            viewport
+            viewport,
+            this.activeNavigationPivot ? "active" : "hover"
         );
     }
 
     /** Clears all transient navigation-pivot phases and removes their shared overlay. */
     private clearNavigationPivots(): void {
         this.targetNavigationAdapter.reset(false);
-        this.pointerNavigationTarget = null;
         this.hoverNavigationPivot = null;
         this.hoverNavigationSurfaceNormal = null;
-        this.hoverNavigationSamplePosition = null;
         this.activeNavigationPivot = null;
         this.activeNavigationSurfaceNormal = null;
         this.retainedNavigationPivot = null;
@@ -1868,47 +1838,24 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Replaces the current hover candidate and refreshes the shared pivot overlay. */
-    private setHoverNavigationPivot(
-        target: NavigationVisualTarget | null,
-        samplePosition: [number, number] | null = null
-    ): void {
+    private setHoverNavigationPivot(target: NavigationVisualTarget | null): void {
         this.hoverNavigationPivot = target?.position ?? null;
         this.hoverNavigationSurfaceNormal = target?.surfaceNormal ?? null;
-        this.hoverNavigationSamplePosition = target ? samplePosition : null;
         this.updateNavigationPivotOverlay();
     }
 
-    /** Resolves every controller query in one pointer gesture to its frozen pointer-down target. */
+    /** Resolves one fresh physical or forward-ground target at controller acquisition time. */
     private resolveControllerNavigationTarget(
-        screenPosition: [number, number]
+        context: Readonly<MapInteractionTargetContext>
     ): NavigationVisualTarget | null {
-        const target = this.pointerNavigationTarget
-            ?? this.hoverNavigationTargetNear(screenPosition)
-            ?? this.groundNavigationTarget({
-                x: screenPosition[0],
-                y: screenPosition[1]
-            });
-        this.setHoverNavigationPivot(target);
-        return target;
-    }
-
-    /** Reuses a still-local hover sample only when a close pick is temporarily unavailable. */
-    private hoverNavigationTargetNear(screenPosition: [number, number]): NavigationVisualTarget | null {
-        if (!this.hoverNavigationPivot || !this.hoverNavigationSamplePosition) {
-            return null;
-        }
-        if (Math.hypot(
-            this.hoverNavigationSamplePosition[0] - screenPosition[0],
-            this.hoverNavigationSamplePosition[1] - screenPosition[1]
-        ) > Math.max(
-                DeckMapView.MIN_NAVIGATION_GESTURE_TARGET_REUSE_RADIUS_PX,
-                this.stateService.drillPickRadius
-            )) {
-            return null;
-        }
-        return this.hoverNavigationSurfaceNormal
-            ? {position: this.hoverNavigationPivot, surfaceNormal: this.hoverNavigationSurfaceNormal}
-            : {position: this.hoverNavigationPivot};
+        const screenPosition: [number, number] = context.screenPosition
+            ? [...context.screenPosition]
+            : [context.viewport.width / 2, context.viewport.height / 2];
+        return this.pickControllerNavigationTarget(context, screenPosition)
+            ?? this.groundNavigationTarget(
+                {x: screenPosition[0], y: screenPosition[1]},
+                context.viewport
+            );
     }
 
     /** Tracks the frozen gesture pivot and retains successful targets for pointerless commands. */
@@ -1924,7 +1871,6 @@ export abstract class DeckMapView implements IRenderView {
         this.retainedNavigationSurfaceNormal = surfaceNormal;
         this.hoverNavigationPivot = active ? null : [...pivot];
         this.hoverNavigationSurfaceNormal = active ? null : surfaceNormal;
-        this.hoverNavigationSamplePosition = null;
         this.updateNavigationPivotOverlay();
     }
 
@@ -2102,8 +2048,7 @@ export abstract class DeckMapView implements IRenderView {
                         x: position.x,
                         y: position.y
                     }, radius)
-                    : null) ?? this.groundNavigationTarget(position),
-                [position.x, position.y]
+                    : null) ?? this.groundNavigationTarget(position)
             );
         } catch (error) {
             if (deck === this.deck && generation === this.hoverPickGeneration) {
@@ -2189,7 +2134,7 @@ export abstract class DeckMapView implements IRenderView {
                         radius
                     );
                     if (target) {
-                        this.setHoverNavigationPivot(target, [position.x, position.y]);
+                        this.setHoverNavigationPivot(target);
                         break;
                     }
                 }
@@ -2535,6 +2480,7 @@ export abstract class DeckMapView implements IRenderView {
         }
         return {
             type: MapController,
+            inertia: false,
             keyboard: {zoomSpeed: keyboardZoomSpeed},
             scrollZoom: {speed: scrollZoomSpeed},
             _targetNavigation: true,
@@ -4086,16 +4032,32 @@ export abstract class DeckMapView implements IRenderView {
         this.pushViewStateToAppState();
     }
 
-    /** Moves the camera in view-local screen space while retaining the shared 3D anchor. */
+    /** Moves the camera parallel to the map plane in view-local screen space. */
     private applyPan(xFactor: number, yFactor: number): void {
         this.stateService.focusedView = this._viewIndex;
-        this.applyAnchoredMapViewState(
-            this.viewState,
-            [
-                -xFactor * DeckMapView.NAVIGATION_COMMAND_STEP_PX,
-                yFactor * DeckMapView.NAVIGATION_COMMAND_STEP_PX
-            ]
-        );
+        const pixelOffset: [number, number] = [
+            -xFactor * DeckMapView.NAVIGATION_COMMAND_STEP_PX,
+            yFactor * DeckMapView.NAVIGATION_COMMAND_STEP_PX
+        ];
+        if (this.useOrthographicProjection) {
+            this.applyAnchoredMapViewState(this.viewState, pixelOffset);
+            return;
+        }
+
+        const viewport = this.createWebMercatorViewport();
+        if (!viewport) {
+            return;
+        }
+        const next = planarPanViewState(viewport, pixelOffset);
+        if (!next) {
+            return;
+        }
+        this.updateViewState({
+            ...this.viewState,
+            ...next,
+            position: [...next.position]
+        }, true, true);
+        this.pushViewStateToAppState();
     }
 
     /** RAF tick loop used by compass updates and temporary overlay animations. */

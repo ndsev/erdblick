@@ -26,6 +26,7 @@ import {
     searchStyleRuleDisplayItems,
     SearchStyleRuleDraftCodec
 } from "./search-style-rule-editor.model";
+import type {QuickStyleWarning} from "./search-style-sheet.converter";
 
 /** Search-independent editor UI for canonical high-fidelity search style rules. */
 @Component({
@@ -69,6 +70,18 @@ import {
                                                (mousedown)="$event.stopPropagation()">
                                     } @else {
                                         <span class="feature-search-style-rule-label">Rule {{ item.sourceIndex + 1 }}</span>
+                                    }
+                                    @if (notesFor(item.sourceIndex).length) {
+                                        <span class="material-symbols-outlined search-style-rule-help"
+                                              tabindex="0"
+                                              role="img"
+                                              [attr.data-testid]="'quick-rule-help-' + item.sourceIndex"
+                                              [attr.aria-label]="'Quick editing notes for rule ' + (item.sourceIndex + 1)"
+                                              [pTooltip]="noteTooltip(item.sourceIndex)"
+                                              tooltipStyleClass="search-style-rule-help-tooltip"
+                                              tooltipPosition="bottom"
+                                              (click)="$event.stopPropagation()"
+                                              (mousedown)="$event.stopPropagation()">help</span>
                                     }
                                     <div class="feature-search-style-rule-summary" aria-hidden="true">
                                         @for (chip of summaryChips(rule); track chip) {
@@ -310,7 +323,19 @@ import {
                     </p-accordion-panel>
                   } @else {
                     <div class="search-style-rule-editor-read-only-placeholder">
-                        Rule {{ item.sourceIndex + 1 }} is preserved and editable in Advanced only.
+                        <span>Rule {{ item.sourceIndex + 1 }} is preserved and editable in Advanced only.</span>
+                        @if (notesFor(item.sourceIndex).length) {
+                            <span class="material-symbols-outlined search-style-rule-help"
+                                  tabindex="0"
+                                  role="img"
+                                  [attr.data-testid]="'quick-rule-help-' + item.sourceIndex"
+                                  [attr.aria-label]="'Why rule ' + (item.sourceIndex + 1) + ' is Advanced-only'"
+                                  [pTooltip]="noteTooltip(item.sourceIndex)"
+                                  tooltipStyleClass="search-style-rule-help-tooltip"
+                                  tooltipPosition="bottom"
+                                  (click)="$event.stopPropagation()"
+                                  (mousedown)="$event.stopPropagation()">help</span>
+                        }
                     </div>
                   }
                 }
@@ -335,6 +360,7 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
     /** Source indices let Quick retain the authoritative YAML rule ordering. */
     @Input() sourceRuleIndices: Record<number, number> = {};
     @Input() readOnlyRuleIndices: number[] = [];
+    @Input() notesBySourceIndex: Record<number, readonly QuickStyleWarning[]> = {};
     @Output() draftsChange = new EventEmitter<FeatureSearchStyleRuleDraft[]>();
     @Output() updateFromDataRequested = new EventEmitter<void>();
 
@@ -371,6 +397,18 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
             this.sourceRuleIndices,
             this.readOnlyRuleIndices
         );
+    }
+
+    /** Returns notes owned by one authoritative YAML rule. */
+    protected notesFor(sourceIndex: number): readonly QuickStyleWarning[] {
+        return this.notesBySourceIndex[sourceIndex] ?? [];
+    }
+
+    /** Formats all preserved/read-only details for one compact tooltip. */
+    protected noteTooltip(sourceIndex: number): string {
+        return this.notesFor(sourceIndex)
+            .map(note => `${note.path}: ${note.message}`)
+            .join("\n");
     }
 
     /** Refreshes schema hints and identity allocation when host inputs change. */

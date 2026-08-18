@@ -333,8 +333,20 @@ describe("Deck rendered-feature picking", () => {
         expect(target.position[2]).toBeCloseTo(expected[2], 7);
     });
 
-    it("samples the exact top surface when right-button rotation starts", () => {
+    it("samples one exact top surface from the controller's view-local acquisition", () => {
         const view = create3DView() as any;
+        const viewport = new WebMercatorViewport({
+            id: "deck-view-0",
+            x: 40,
+            y: 60,
+            width: 1000,
+            height: 700,
+            longitude: 11,
+            latitude: 48,
+            zoom: 17,
+            pitch: 55,
+            bearing: 30
+        });
         const depthCoordinate: [number, number, number] = [11.25, 48.5, 123];
         const baseLayer = {
             id: "gpu-vector",
@@ -350,35 +362,36 @@ describe("Deck rendered-feature picking", () => {
             props: {layers: [baseLayer]},
             pickObject
         };
-        view.setHoverNavigationPivot = vi.fn();
         view.groundNavigationTarget = vi.fn();
         const preventDefault = vi.fn();
 
         view.deckCanvasPointerDown({
             button: 2,
-            offsetX: 12,
-            offsetY: 24,
             preventDefault
+        });
+        const target = view.resolveControllerNavigationTarget({
+            viewId: "deck-view-0",
+            operation: "rotate",
+            source: "pointer",
+            screenPosition: [12, 24],
+            viewport
         });
 
         expect(preventDefault).toHaveBeenCalledOnce();
         expect(pickObject).toHaveBeenCalledWith({
-            x: 12,
-            y: 24,
+            x: 52,
+            y: 84,
             radius: 6,
             layerIds: ["gpu-vector"],
             unproject3D: true
         });
-        expect(view.pointerNavigationTarget).toEqual({
-            position: depthCoordinate
-        });
-        expect(view.setHoverNavigationPivot).toHaveBeenCalledWith({
+        expect(target).toEqual({
             position: depthCoordinate
         });
         expect(view.groundNavigationTarget).not.toHaveBeenCalled();
     });
 
-    it("uses the pointer-down pixel with physical vector altitude", () => {
+    it("uses the provider pixel with physical vector altitude", () => {
         const view = create3DView() as any;
         const viewport = new WebMercatorViewport({
             width: 1000,
@@ -408,20 +421,20 @@ describe("Deck rendered-feature picking", () => {
             props: {layers: [baseLayer]},
             pickObject
         };
-        view.setHoverNavigationPivot = vi.fn();
         view.groundNavigationTarget = vi.fn();
 
-        view.deckCanvasPointerDown({
-            button: 2,
-            offsetX: 12,
-            offsetY: 24,
-            preventDefault: vi.fn()
+        const target = view.resolveControllerNavigationTarget({
+            viewId: "deck-view-0",
+            operation: "rotate",
+            source: "pointer",
+            screenPosition: [12, 24],
+            viewport
         });
 
         const expected = viewport.unproject([12, 24], {targetZ: 500});
-        expect(view.pointerNavigationTarget.position[0]).toBeCloseTo(expected[0], 10);
-        expect(view.pointerNavigationTarget.position[1]).toBeCloseTo(expected[1], 10);
-        expect(view.pointerNavigationTarget.position[2]).toBeCloseTo(500, 7);
+        expect(target.position[0]).toBeCloseTo(expected[0], 10);
+        expect(target.position[1]).toBeCloseTo(expected[1], 10);
+        expect(target.position[2]).toBeCloseTo(500, 7);
     });
 
     it("keeps a representative feature pivot without another depth readback", async () => {

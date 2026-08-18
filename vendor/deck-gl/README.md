@@ -2,8 +2,12 @@
 
 These packages are a temporary, vendored CI snapshot of
 [`Klebert-Engineering/deck.gl`](https://github.com/Klebert-Engineering/deck.gl)
-at commit `1adb58c3f919d280ad56bb115e80e7602a2c750a` on branch
-`codex/target-navigation`.
+on branch `codex/target-navigation`, based on commit
+`1adb58c3f919d280ad56bb115e80e7602a2c750a`. The planar-pan update is the
+reviewed local working-tree patch whose package-source diff has SHA-256
+`f8ea6f31e4090e413e9ea87e4dac837b15453173de1ca2f8e695e11618cf7c4b`.
+Replace this base-plus-patch identifier with the upstream commit id once the
+change is committed.
 
 The snapshot contains the complete deck.gl package set consumed by Erdblick:
 
@@ -13,17 +17,11 @@ The snapshot contains the complete deck.gl package set consumed by Erdblick:
 - `@deck.gl/layers`
 - `@deck.gl/mesh-layers`
 
-All packages were produced with Node.js 22.22.0 and deck.gl's canonical
-`corepack yarn build`, then packed with npm. The core package also includes the
-source-level declaration fix in
-`modules/core/src/shaderlib/picking/picking.ts` that preserves its new uniform
-types as shader-type literals for external TypeScript consumers. This fix is
-currently an uncommitted change on top of the source commit and must be included
-when publishing the pkg.pr.new replacement.
-
-The source branch currently has stale deck.gl peer ranges in its alpha package
-manifests, so the staged package manifests were adjusted to require the matching
-`9.4.0-alpha.2` snapshot.
+All packages were produced with Node.js 24.11.0 and deck.gl's canonical
+`corepack yarn build`, then packed with npm. The source patch includes both the
+`picking.ts` shader-literal declaration fix and the matching alpha dependency
+ranges in the five package manifests; neither fix is now applied only to a
+staged tarball.
 
 The tarballs are intentionally referenced with `file:` dependencies so that
 `npm ci` is deterministic and needs no package-registry credentials. Replace
@@ -33,9 +31,9 @@ available; mixing this snapshot with deck.gl 9.3 packages is unsupported.
 ## SHA-256
 
 ```text
-aaf59bf5f879d9545f81a74bcee797f30decc3e6a3c93fe997ff9d0c7b692292  deck.gl-core-9.4.0-alpha.2-target-navigation-1adb58c3.tgz
-7021839150a86d83ac48ec05d49efdd63f68a2a4485bb9212144dd66e21591e8  deck.gl-extensions-9.4.0-alpha.2-target-navigation-1adb58c3.tgz
-cdf1952ccde5d17afc3ddb581583f1d6cc59744f9b71797bb144b1957b685f7f  deck.gl-geo-layers-9.4.0-alpha.2-target-navigation-1adb58c3.tgz
-efd5e33c4b310168cc687e7a744ab0a0ea8981e2387881f429f7f9e6394ebb4a  deck.gl-layers-9.4.0-alpha.2-target-navigation-1adb58c3.tgz
-d3e395e72826f5c69ab030b904d209834f21595092e9a30bbe272c28bd940584  deck.gl-mesh-layers-9.4.0-alpha.2-target-navigation-1adb58c3.tgz
+d6dcb16e6f82c71b3c5810db8feea26b865c0187353710f4af209e1eb0776d7f  deck.gl-core-9.4.0-alpha.2-target-navigation-planar-pan-1adb58c3.tgz
+4cfdb3ca96e90dc11a53e180ab694f127f9ba77e660b5cbb8cea7a72f3c0ed14  deck.gl-extensions-9.4.0-alpha.2-target-navigation-planar-pan-1adb58c3.tgz
+61391328a064ffbc072911347023fc5f6b43a0ad1767f329e704e469b7d30131  deck.gl-geo-layers-9.4.0-alpha.2-target-navigation-planar-pan-1adb58c3.tgz
+a830e9c0f2872868e0b985ea96083267987f4ad39126d3722a399bd4bb95cb53  deck.gl-layers-9.4.0-alpha.2-target-navigation-planar-pan-1adb58c3.tgz
+8013bd161ec1368a53a6770fdebf6cffe061b3f47c69bb830deee10205bdacbd  deck.gl-mesh-layers-9.4.0-alpha.2-target-navigation-planar-pan-1adb58c3.tgz
 ```

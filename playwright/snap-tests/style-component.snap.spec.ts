@@ -41,6 +41,9 @@ test.describe('Snapshot – style component', () => {
         await editButton.click();
         const editorDialog = page.getByTestId('style-editor-dialog').locator('.p-dialog').first();
         await expect(editorDialog).toBeVisible();
+        await expect(editorDialog.getByTestId('style-editor-enabled')).toBeVisible();
+        await expect(editorDialog.getByTestId('style-editor-quick-name')).toBeVisible();
+        await expect(editorDialog.getByTestId('style-editor-custom-affinity')).toBeVisible();
 
         await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('style-component-editor.png', {
@@ -68,6 +71,18 @@ test.describe('Snapshot – style component', () => {
             {
                 locator: stylesDialog.getByTestId('styles-close-button'),
                 label: 'Close dialog'
+            },
+            {
+                locator: editorDialog.getByTestId('style-editor-enabled'),
+                label: 'Enable or disable style'
+            },
+            {
+                locator: editorDialog.getByTestId('style-editor-quick-name'),
+                label: 'Edit style name'
+            },
+            {
+                locator: editorDialog.getByTestId('style-editor-custom-affinity'),
+                label: 'Preserve or replace custom affinity'
             },
             {
                 locator: editorDialog.getByTestId('style-editor-apply-button'),

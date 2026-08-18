@@ -8,9 +8,9 @@ import {
 } from "@angular/core";
 import {FormsModule} from "@angular/forms";
 import {ButtonModule} from "primeng/button";
+import {CheckboxModule} from "primeng/checkbox";
 import {InputTextModule} from "primeng/inputtext";
 import {MultiSelectModule} from "primeng/multiselect";
-import {ToggleSwitch} from "primeng/toggleswitch";
 
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import type {SearchStyleSaveOptions} from "./search-style-sheet.converter";
@@ -18,6 +18,13 @@ import type {SearchStyleSaveOptions} from "./search-style-sheet.converter";
 interface LayerAffinityOption {
     label: string;
     value: string;
+}
+
+export type SearchStyleSaveAction = "save" | "save-and-open";
+
+export interface SearchStyleSaveRequest {
+    options: Readonly<SearchStyleSaveOptions>;
+    action: SearchStyleSaveAction;
 }
 
 @Component({
@@ -28,6 +35,8 @@ interface LayerAffinityOption {
                     [style]="{width: '28rem', maxWidth: 'calc(100vw - 2rem)'}"
                     [modal]="true"
                     [resizable]="false"
+                    [closable]="!saving"
+                    [closeOnEscape]="!saving"
                     [visible]="visible"
                     (visibleChange)="onVisibleChange($event)">
             <div class="search-style-save-content" data-testid="search-style-save-dialog">
@@ -37,20 +46,11 @@ interface LayerAffinityOption {
                        pInputText
                        autocomplete="off"
                        [(ngModel)]="name"
-                       (keydown.enter)="submit()"
+                       (keydown.enter)="submit('save')"
                        [disabled]="saving" />
                 @if (showNameError) {
                     <small class="search-style-save-error" role="alert">A style name is required.</small>
                 }
-
-                <div class="search-style-save-toggle-row">
-                    <p-toggleswitch inputId="search-style-save-default"
-                                    data-testid="search-style-save-default"
-                                    [(ngModel)]="defaultEnabled"
-                                    [disabled]="saving">
-                    </p-toggleswitch>
-                    <label for="search-style-save-default">Enabled by default</label>
-                </div>
 
                 <label for="search-style-save-layers">Layer affinity</label>
                 <p-multiSelect inputId="search-style-save-layers"
@@ -70,6 +70,16 @@ interface LayerAffinityOption {
                     No selection means any layer. A layer ID shared by maps applies to every map.
                 </small>
 
+                <div class="search-style-save-toggle-row">
+                    <p-checkbox inputId="search-style-save-enabled"
+                                data-testid="search-style-save-enabled"
+                                [(ngModel)]="enableUponSave"
+                                [binary]="true"
+                                [disabled]="saving">
+                    </p-checkbox>
+                    <label for="search-style-save-enabled">Enable this style upon save</label>
+                </div>
+
                 <div class="search-style-save-actions">
                     <p-button label="Cancel"
                               severity="secondary"
@@ -83,7 +93,14 @@ interface LayerAffinityOption {
                               data-testid="search-style-save-confirm"
                               [loading]="saving"
                               [disabled]="saving"
-                              (click)="submit()">
+                              (click)="submit('save')">
+                    </p-button>
+                    <p-button label="Save and Open"
+                              icon="pi pi-external-link"
+                              data-testid="search-style-save-and-open"
+                              [loading]="saving"
+                              [disabled]="saving"
+                              (click)="submit('save-and-open')">
                     </p-button>
                 </div>
             </div>
@@ -93,10 +110,10 @@ interface LayerAffinityOption {
     imports: [
         AppDialogComponent,
         ButtonModule,
+        CheckboxModule,
         FormsModule,
         InputTextModule,
-        MultiSelectModule,
-        ToggleSwitch
+        MultiSelectModule
     ]
 })
 /** Presentational dialog for naming and scoping a saved search stylesheet. */
@@ -105,10 +122,10 @@ export class SearchStyleSaveDialogComponent implements OnChanges {
     @Output() visibleChange = new EventEmitter<boolean>();
     @Input() layerIds: readonly string[] = [];
     @Input() saving = false;
-    @Output() saveRequested = new EventEmitter<Readonly<SearchStyleSaveOptions>>();
+    @Output() saveRequested = new EventEmitter<Readonly<SearchStyleSaveRequest>>();
 
     name = "Search Style";
-    defaultEnabled = false;
+    enableUponSave = true;
     selectedLayerIds: string[] = [];
     showNameError = false;
     layerOptions: LayerAffinityOption[] = [];
@@ -123,7 +140,7 @@ export class SearchStyleSaveDialogComponent implements OnChanges {
     }
 
     /** Emits an immutable value object; persistence and collision checks stay with the host. */
-    submit(): void {
+    submit(action: SearchStyleSaveAction = "save"): void {
         if (this.saving) {
             return;
         }
@@ -132,11 +149,12 @@ export class SearchStyleSaveDialogComponent implements OnChanges {
             return;
         }
         this.showNameError = false;
-        this.saveRequested.emit(Object.freeze({
+        const options = Object.freeze({
             name: this.name,
-            defaultEnabled: this.defaultEnabled,
+            defaultEnabled: this.enableUponSave,
             layerIds: Object.freeze([...this.selectedLayerIds])
-        }));
+        });
+        this.saveRequested.emit(Object.freeze({options, action}));
     }
 
     cancel(): void {
@@ -146,13 +164,16 @@ export class SearchStyleSaveDialogComponent implements OnChanges {
     }
 
     onVisibleChange(visible: boolean): void {
+        if (this.saving && !visible) {
+            return;
+        }
         this.visible = visible;
         this.visibleChange.emit(visible);
     }
 
     private reset(): void {
         this.name = "Search Style";
-        this.defaultEnabled = false;
+        this.enableUponSave = true;
         this.selectedLayerIds = [];
         this.showNameError = false;
     }

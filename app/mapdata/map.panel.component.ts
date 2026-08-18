@@ -561,10 +561,10 @@ const MAP_FILTER_DELAY_MS = 300;
                                         <span class="checkbox-entry oblique"
                                               [ngClass]="{'disabled': !mapService.maps.getMapLayerVisibility(index, node.mapId, node.layerId)}">
                                             <p-checkbox
+                                                    [attr.data-testid]="styleOptionCheckboxTestId(node, index)"
                                                     [(ngModel)]="node.value[index]"
                                                     (ngModelChange)="updateStyleOption(node, index)"
                                                     [binary]="true"
-                                                    [disabled]="isLayerPresetOwned(node, index)"
                                                     [inputId]="index + '_' + node.key"
                                                     [name]="index + '_' + node.key"/>
                                             <label [for]="index + '_' + node.key">{{ node.info.label }}</label>
@@ -1259,6 +1259,13 @@ export class MapPanelComponent {
         return `style-option-edit-${viewIndex}-${suffix}`;
     }
 
+    /** Returns a stable selector for one concrete option checkbox. */
+    styleOptionCheckboxTestId(node: StyleOptionNode, viewIndex: number): string {
+        const suffix = `${node.mapId}-${node.layerId}-${node.styleId}-${node.id}`
+            .replace(/[^a-zA-Z0-9_-]+/g, "-");
+        return `style-option-${viewIndex}-${suffix}`;
+    }
+
     /** Applies a manually chosen layer level and disables auto-level for that layer. */
     onLayerLevelChanged(level: number | null, viewIndex: number, mapName: string, layerName: string) {
         if (level === null || !Number.isFinite(level)) {
@@ -1412,7 +1419,7 @@ export class MapPanelComponent {
         });
     }
 
-    /** Toggles projection of read-only options owned by the current preset. */
+    /** Toggles projection of editable options owned by the current preset. */
     toggleStylePresetOptions(event: Event, node: LayerPresetNode, viewIndex: number): void {
         event.preventDefault();
         event.stopPropagation();
@@ -1428,15 +1435,6 @@ export class MapPanelComponent {
     isMapPresetProjection(node: LayerPresetNode, viewIndex: number): boolean {
         return this.mapService.maps.getFeatureLayer(node.mapId, node.layerId)
             ?.projectPresetOnly[viewIndex] === true;
-    }
-
-    /** Returns whether the selected preset owns and therefore locks one option. */
-    isLayerPresetOwned(node: StyleOptionNode, viewIndex: number): boolean {
-        const layer = this.mapService.maps.getFeatureLayer(node.mapId, node.layerId);
-        const presetNode = layer ? layerPresetNode(layer) : undefined;
-        const preset = presetNode?.presets.find(candidate =>
-            candidate.key === presetNode.selectedPresetKeys[viewIndex]);
-        return !!preset && this.mapPresetService.ownsOption(preset, node);
     }
 
     /** Returns the distinct style sheets owned by the selected preset for editor shortcuts. */

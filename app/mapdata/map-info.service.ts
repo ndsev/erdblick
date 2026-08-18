@@ -7,6 +7,7 @@ import {
     isDataSourceCatalogEntryReady,
     MapInfoItem,
     MapLayerTree,
+    layerPresetInferenceKey,
     sortDataSourceCatalogEntries,
     StyleOptionNode
 } from "./map.tree.model";
@@ -665,7 +666,7 @@ export class MapInfoService {
         const directNodes = optionNodes.filter(optionNode => optionNode.value.length > viewIndex);
         const sourceLayers = new Set(directNodes.map(optionNode =>
             `${optionNode.mapId}\u0000${optionNode.layerId}`));
-        this.applyStyleOptionTransaction(directNodes, viewIndex, sourceLayers);
+        this.applyStyleOptionTransaction(directNodes, viewIndex, sourceLayers, true);
     }
 
     /** Applies preset-owned changes while synchronizing every component source layer once. */
@@ -678,14 +679,16 @@ export class MapInfoService {
         this.applyStyleOptionTransaction(
             directNodes,
             viewIndex,
-            new Set(sourceLayers.map(source => `${source.mapId}\u0000${source.layerId}`)));
+            new Set(sourceLayers.map(source => `${source.mapId}\u0000${source.layerId}`)),
+            false);
     }
 
     /** Executes one option transaction across direct, layer-synced, and view-synced targets. */
     private applyStyleOptionTransaction(
         directNodes: StyleOptionNode[],
         viewIndex: number,
-        sourceLayers: Set<string>
+        sourceLayers: Set<string>,
+        inferPresets: boolean
     ): void {
         const changes: StyleOptionChange[] = directNodes.map(optionNode => ({optionNode, viewIndex}));
         if (this.isSyncOptionsForViewEnabled(viewIndex)) {
@@ -705,7 +708,7 @@ export class MapInfoService {
             })));
         }
         if (changes.length) {
-            this.persistAndPublishStyleOptionChanges(changes);
+            this.persistAndPublishStyleOptionChanges(changes, inferPresets);
         } else {
             this.maps.reconcilePresetSelections();
         }
@@ -715,7 +718,10 @@ export class MapInfoService {
     }
 
     /** Writes changed option arrays once and publishes one deduplicated render transaction. */
-    private persistAndPublishStyleOptionChanges(changes: StyleOptionChange[]): void {
+    private persistAndPublishStyleOptionChanges(
+        changes: StyleOptionChange[],
+        inferPresets = true
+    ): void {
         if (!changes.length) {
             return;
         }
@@ -730,7 +736,13 @@ export class MapInfoService {
             optionId: optionNode.id,
             values: optionNode.value
         })));
-        this.maps.reconcilePresetSelections();
+        const inferenceTargets = inferPresets
+            ? new Set(changes.map(change => layerPresetInferenceKey(
+                change.viewIndex,
+                change.optionNode.mapId,
+                change.optionNode.layerId)))
+            : new Set<string>();
+        this.maps.reconcilePresetSelections(inferenceTargets);
         this.publishStyleOptionChanges(changes);
     }
 

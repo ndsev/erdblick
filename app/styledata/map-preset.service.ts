@@ -155,11 +155,6 @@ export class MapPresetService {
             preset.styleId === ref.styleId && preset.id === ref.presetId);
     }
 
-    ownsOption(preset: ResolvedLayerPreset, option: LayerPresetOptionCandidate): boolean {
-        return preset.styleId === option.styleId
-            && preset.values.some(value => value.optionId === option.id);
-    }
-
     matchesPresetValues(
         preset: ResolvedLayerPreset,
         options: readonly LayerPresetOptionCandidate[],

@@ -2,11 +2,13 @@ import "@angular/compiler";
 import {describe, expect, it, vi} from 'vitest';
 import {BehaviorSubject} from "rxjs";
 import {
+    bestMatchingLayerPreset,
     dataSourceCatalogStatus,
     dataSourceProgressPercent,
     filterMapTreeNodes,
     GroupTreeNode,
     isDataSourceCatalogEntryReady,
+    layerPresetInferenceKey,
     layerPresetNode,
     layerStyleOptions,
     LayerInfoItem,
@@ -24,6 +26,7 @@ import type {
     StyleService
 } from "../styledata/style.service";
 import type {MapPresetService} from "../styledata/map-preset.service";
+import type {ResolvedLayerPreset} from "../styledata/map-preset.service";
 
 function source(mapId: string, configIndex?: number, status?: string): MapInfoItem {
     return {
@@ -317,6 +320,39 @@ describe("style option groups", () => {
 });
 
 describe("layer presets in the map tree", () => {
+    it("chooses only a deterministic most-specific matching preset", () => {
+        const optionA = new StyleOptionNode(
+            "Map", "Example", styleOption("a", "A"), "Style", "Style", true);
+        const optionB = new StyleOptionNode(
+            "Map", "Example", styleOption("b", "B"), "Style", "Style", false);
+        optionA.value = [true];
+        optionB.value = [false];
+        const preset = (
+            id: string,
+            values: Array<{optionId: string; value: boolean}>
+        ): ResolvedLayerPreset => ({
+            id,
+            name: id,
+            styleId: "Style",
+            ref: {styleId: "Style", presetId: id},
+            key: id,
+            values
+        });
+        const broad = preset("broad", [{optionId: "a", value: true}]);
+        const exact = preset("exact", [
+            {optionId: "a", value: true},
+            {optionId: "b", value: false}
+        ]);
+        const duplicate = preset("duplicate", [...exact.values]);
+
+        expect(bestMatchingLayerPreset([broad, exact], [optionA, optionB], 0, ""))
+            .toBe(exact);
+        expect(bestMatchingLayerPreset([exact, duplicate], [optionA, optionB], 0, ""))
+            .toBeUndefined();
+        expect(bestMatchingLayerPreset([exact, duplicate], [optionA, optionB], 0, exact.key))
+            .toBe(exact);
+    });
+
     /** Builds a two-view layer with one owned and one unowned Boolean option. */
     function presetTreeFixture() {
         const ready = new BehaviorSubject(true);
@@ -475,6 +511,33 @@ describe("layer presets in the map tree", () => {
             .toEqual(["layer-preset"]);
         expect(ownedResult[0].children?.[0].children?.map(child => child.id))
             .toEqual(["owned"]);
+    });
+
+    it("infers only affected layer/view identities and preserves custom values", () => {
+        const {tree, stateService} = presetTreeFixture();
+        const layer = tree.getFeatureLayer("Map", "Example")!;
+        const presetNode = layerPresetNode(layer)!;
+        const owned = layerStyleOptions(layer).find(option => option.id === "owned")!;
+
+        owned.value[0] = true;
+        tree.reconcilePresetSelections(new Set([
+            layerPresetInferenceKey(0, "Map", "Example")
+        ]));
+        expect(presetNode.selectedPresetKeys[0]).toBe(presetNode.presets[0].key);
+        expect(presetNode.expandedPresetOptions[0]).toBe(true);
+
+        owned.value[0] = false;
+        tree.reconcilePresetSelections(new Set([
+            layerPresetInferenceKey(0, "Map", "Example")
+        ]));
+        expect(presetNode.selectedPresetKeys[0]).toBe("");
+        expect(owned.value[0]).toBe(false);
+        expect(stateService.setLayerPresetSelection).toHaveBeenLastCalledWith(
+            0, "Map", "Example", null);
+
+        owned.value[1] = true;
+        tree.reconcilePresetSelections();
+        expect(presetNode.selectedPresetKeys[1]).toBe("");
     });
 });
 

@@ -49,11 +49,17 @@ export interface SearchStyleSaveOptions {
 }
 
 export interface QuickStyleWarning {
+    sourceIndex: number;
     path: string;
     code: string;
     message: string;
     effect: "preserved" | "rule-read-only" | "quick-disabled" | "omitted-from-search";
 }
+
+export type QuickStyleLayerAffinity =
+    | {kind: "any"}
+    | {kind: "exact"; layerIds: readonly string[]}
+    | {kind: "custom"; expression: string};
 
 export interface QuickStyleProjectedRule {
     sourceIndex: number;
@@ -63,11 +69,18 @@ export interface QuickStyleProjectedRule {
 }
 
 export interface QuickStyleProjection {
+    name: string;
+    layerAffinity: QuickStyleLayerAffinity;
     category: StyleSheetCategory;
     totalRuleCount: number;
     editableRules: QuickStyleProjectedRule[];
     readOnlyRuleIndices: number[];
     warnings: QuickStyleWarning[];
+}
+
+export interface QuickStyleMetadataPatch {
+    name?: string;
+    layerAffinity?: {kind: "any"} | {kind: "exact"; layerIds: readonly string[]};
 }
 
 export interface QuickStyleRuleUpdate {
@@ -111,7 +124,7 @@ export function convertSearchStyleRulesToYaml(
         rules: rules.map(rule => featureSearchRuleToStyleRule(rule))
     };
     if (layerIds.length) {
-        document["layer"] = `^(${layerIds.map(escapeRegexLiteral).join("|")})$`;
+        document["layer"] = canonicalLayerAffinityExpression(layerIds);
     }
     return {
         styleId: name,
@@ -135,6 +148,57 @@ export function normalizedLayerAffinity(layerIds: readonly string[]): string[] {
 /** Escapes one exact layer ID for the native ECMAScript regular-expression matcher. */
 function escapeRegexLiteral(value: string): string {
     return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+}
+
+/** Encodes exact layer IDs into the only regex form Quick treats as losslessly editable. */
+export function canonicalLayerAffinityExpression(layerIds: readonly string[]): string {
+    const normalized = normalizedLayerAffinity(layerIds);
+    if (!normalized.length) {
+        throw new SearchStyleConversionError(["At least one exact layer ID is required."]);
+    }
+    return `^(${normalized.map(escapeRegexLiteral).join("|")})$`;
+}
+
+/** Decodes only Erdblick's canonical exact-ID regex; arbitrary expressions remain custom. */
+export function decodeCanonicalLayerAffinity(expression: string): string[] | undefined {
+    if (!expression.startsWith("^(") || !expression.endsWith(")$")) {
+        return undefined;
+    }
+    const body = expression.slice(2, -2);
+    if (!body) {
+        return undefined;
+    }
+    const values: string[] = [];
+    let value = "";
+    const escapable = new Set("\\^$.*+?()[]{}|");
+    for (let index = 0; index < body.length; ++index) {
+        const character = body[index];
+        if (character === "|") {
+            values.push(value);
+            value = "";
+            continue;
+        }
+        if (character !== "\\") {
+            value += character;
+            continue;
+        }
+        const escaped = body[++index];
+        if (escaped === undefined || !escapable.has(escaped)) {
+            return undefined;
+        }
+        value += escaped;
+    }
+    values.push(value);
+    if (values.some(candidate => candidate.length === 0)) {
+        return undefined;
+    }
+    try {
+        return canonicalLayerAffinityExpression(values) === expression
+            ? normalizedLayerAffinity(values)
+            : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 /** Returns a transport-safe filename without changing the stylesheet's exact YAML name. */
@@ -199,6 +263,16 @@ export function projectStyleSourceToQuick(source: string): QuickStyleProjection 
     const root = parsed.root;
     const category = root["category"] === "search" ? "search" : "base";
     const rawRules = root["rules"];
+    if (typeof root["name"] !== "string") {
+        throw new SearchStyleConversionError(["The stylesheet name property must be a string."]);
+    }
+    const rawLayer = root["layer"];
+    if (rawLayer !== undefined && typeof rawLayer !== "string") {
+        throw new SearchStyleConversionError(["The stylesheet layer property must be a string."]);
+    }
+    const exactLayerIds = typeof rawLayer === "string"
+        ? decodeCanonicalLayerAffinity(rawLayer)
+        : undefined;
     if (!Array.isArray(rawRules)) {
         throw new SearchStyleConversionError(["The stylesheet rules property must be a list."]);
     }
@@ -221,12 +295,35 @@ export function projectStyleSourceToQuick(source: string): QuickStyleProjection 
         }
     });
     return {
+        name: root["name"],
+        layerAffinity: rawLayer === undefined
+            ? {kind: "any"}
+            : exactLayerIds
+                ? {kind: "exact", layerIds: exactLayerIds}
+                : {kind: "custom", expression: rawLayer},
         category,
         totalRuleCount: rawRules.length,
         editableRules,
         readOnlyRuleIndices,
         warnings
     };
+}
+
+/** Patches root Quick metadata without regenerating or normalizing unrelated YAML. */
+export function updateStyleSourceMetadata(
+    source: string,
+    patch: QuickStyleMetadataPatch
+): string {
+    const {document} = parseStyleDocument(source);
+    if (patch.name !== undefined) {
+        document.set("name", patch.name);
+    }
+    if (patch.layerAffinity?.kind === "any") {
+        document.delete("layer");
+    } else if (patch.layerAffinity?.kind === "exact") {
+        document.set("layer", canonicalLayerAffinityExpression(patch.layerAffinity.layerIds));
+    }
+    return document.toString({lineWidth: 120});
 }
 
 /** Creates the detached Feature Search copy and reports every rule that was omitted. */
@@ -359,53 +456,53 @@ interface ProjectedRuleResult {
 function projectRule(rawValue: unknown, sourceIndex: number): ProjectedRuleResult {
     const path = `rules[${sourceIndex}]`;
     if (!isRecord(rawValue)) {
-        return readOnlyRule(path, "rule-not-map", "is not a rule map.");
+        return readOnlyRule(sourceIndex, path, "rule-not-map", "is not a rule map.");
     }
     const raw = rawValue;
     if ("first-of" in raw || "all-of" in raw) {
         const branch = "first-of" in raw ? "first-of" : "all-of";
-        return readOnlyRule(`${path}.${branch}`, "branch-rule", `uses ${branch}; nested rule trees are read-only in Quick.`);
+        return readOnlyRule(sourceIndex, `${path}.${branch}`, "branch-rule", `uses ${branch}; nested rule trees are read-only in Quick.`);
     }
     if (raw["scope"] === "relation") {
-        return readOnlyRule(`${path}.scope`, "relation-scope", "uses relation scope, which is read-only in Quick.");
+        return readOnlyRule(sourceIndex, `${path}.scope`, "relation-scope", "uses relation scope, which is read-only in Quick.");
     }
 
     const label = typeof raw["label-text-expression"] === "string";
     if (label && !String(raw["label-text-expression"]).trim()) {
-        return readOnlyRule(`${path}.label-text-expression`, "empty-label-expression", "uses an empty label expression.");
+        return readOnlyRule(sourceIndex, `${path}.label-text-expression`, "empty-label-expression", "uses an empty label expression.");
     }
     const geometry = label ? "label" : geometryFromStyle(raw["geometry"]);
     if (!geometry) {
-        return readOnlyRule(`${path}.geometry`, "unsupported-geometry", "uses a geometry combination that Quick cannot represent.");
+        return readOnlyRule(sourceIndex, `${path}.geometry`, "unsupported-geometry", "uses a geometry combination that Quick cannot represent.");
     }
     if ((raw["width"] !== undefined && !isFiniteNumber(raw["width"]))
         || (raw["opacity"] !== undefined && !isFiniteNumber(raw["opacity"]))
         || (raw["label-opacity"] !== undefined && !isFiniteNumber(raw["label-opacity"]))) {
-        return readOnlyRule(path, "dynamic-number", "uses a non-literal width or opacity.");
+        return readOnlyRule(sourceIndex, path, "dynamic-number", "uses a non-literal width or opacity.");
     }
     const widthLimit = label ? 96 : geometry === "point" ? 128 : 32;
     if (isFiniteNumber(raw["width"]) && (raw["width"] < 1 || raw["width"] > widthLimit)) {
-        return readOnlyRule(`${path}.width`, "width-outside-quick-range", "uses a width outside the current Quick control range.");
+        return readOnlyRule(sourceIndex, `${path}.width`, "width-outside-quick-range", "uses a width outside the current Quick control range.");
     }
     for (const colorKey of ["label-color", "label-background-color"] as const) {
         if (raw[colorKey] !== undefined
             && (typeof raw[colorKey] !== "string" || !normalizeHexLiteral(raw[colorKey]))) {
-            return readOnlyRule(`${path}.${colorKey}`, "unsupported-color", "uses a color the current picker cannot represent.");
+            return readOnlyRule(sourceIndex, `${path}.${colorKey}`, "unsupported-color", "uses a color the current picker cannot represent.");
         }
     }
     if (raw["filter"] !== undefined && typeof raw["filter"] !== "string") {
-        return readOnlyRule(`${path}.filter`, "dynamic-filter", "uses a non-scalar feature filter.");
+        return readOnlyRule(sourceIndex, `${path}.filter`, "dynamic-filter", "uses a non-scalar feature filter.");
     }
     if (raw["attribute-filter"] !== undefined && typeof raw["attribute-filter"] !== "string") {
-        return readOnlyRule(`${path}.attribute-filter`, "dynamic-filter", "uses a non-scalar attribute filter.");
+        return readOnlyRule(sourceIndex, `${path}.attribute-filter`, "dynamic-filter", "uses a non-scalar attribute filter.");
     }
     if (raw["filter"] !== undefined && raw["attribute-filter"] !== undefined) {
-        return readOnlyRule(path, "multiple-filters", "defines both filter and attribute-filter.");
+        return readOnlyRule(sourceIndex, path, "multiple-filters", "defines both filter and attribute-filter.");
     }
 
     const color = colorFromStyle(raw);
     if (!color) {
-        return readOnlyRule(path, "unsupported-color", "uses a dynamic or malformed color representation.");
+        return readOnlyRule(sourceIndex, path, "unsupported-color", "uses a dynamic or malformed color representation.");
     }
     const filterExpression = raw["attribute-filter"] ?? raw["filter"];
     const width = isFiniteNumber(raw["width"])
@@ -439,11 +536,12 @@ function projectRule(rawValue: unknown, sourceIndex: number): ProjectedRuleResul
     const warnings: QuickStyleWarning[] = [];
     for (const key of Object.keys(raw)) {
         if (!SUPPORTED_RULE_KEYS.has(key)) {
-            warnings.push(preservedWarning(path, key));
+            warnings.push(preservedWarning(sourceIndex, path, key));
         }
     }
     if (raw["scope"] !== undefined) {
         warnings.push({
+            sourceIndex,
             path: `${path}.scope`,
             code: "scope-preserved",
             message: `${path}.scope is not editable in Quick and will be preserved.`,
@@ -624,6 +722,7 @@ function labelCompatibilityWarnings(
     ]) {
         if (raw[key] !== undefined && !same(raw[key], expected[key])) {
             warnings.push({
+                sourceIndex,
                 path: `${path}.${key}`,
                 code: "custom-label-property",
                 message: `${path}.${key} is outside the current Quick controls and will be preserved.`,
@@ -634,9 +733,15 @@ function labelCompatibilityWarnings(
     return warnings;
 }
 
-function readOnlyRule(path: string, code: string, reason: string): ProjectedRuleResult {
+function readOnlyRule(
+    sourceIndex: number,
+    path: string,
+    code: string,
+    reason: string
+): ProjectedRuleResult {
     return {
         warnings: [{
+            sourceIndex,
             path,
             code,
             message: `${path} ${reason}`,
@@ -646,8 +751,9 @@ function readOnlyRule(path: string, code: string, reason: string): ProjectedRule
     };
 }
 
-function preservedWarning(path: string, key: string): QuickStyleWarning {
+function preservedWarning(sourceIndex: number, path: string, key: string): QuickStyleWarning {
     return {
+        sourceIndex,
         path: `${path}.${key}`,
         code: "unsupported-property",
         message: `${path}.${key} is not editable in Quick and will be preserved.`,
@@ -658,6 +764,7 @@ function preservedWarning(path: string, key: string): QuickStyleWarning {
 function omission(sourceIndex: number, code: string, reason: string): QuickStyleWarning {
     const path = `rules[${sourceIndex}]`;
     return {
+        sourceIndex,
         path,
         code,
         message: `${path} ${reason}`,

@@ -49,8 +49,9 @@ describe("ErdblickTargetNavigationAdapter", () => {
             onTargetChange
         });
 
-        const resolved = adapter.resolveInteractionTarget(context([324, 282]));
-        expect(resolveTarget).toHaveBeenCalledWith([324, 282]);
+        const acquisitionContext = context([324, 282]);
+        const resolved = adapter.resolveInteractionTarget(acquisitionContext);
+        expect(resolveTarget).toHaveBeenCalledWith(acquisitionContext);
         expect(resolved).toEqual({
             coordinate: richTarget.position,
             screenPosition: expect.any(Array)
@@ -92,9 +93,10 @@ describe("ErdblickTargetNavigationAdapter", () => {
             getRetainedTarget: () => ({position: [0, 89, 0]}),
             onTargetChange: vi.fn()
         });
-        expect(unavailable.resolveInteractionTarget(context(null))?.coordinate)
+        const pointerlessContext = context(null);
+        expect(unavailable.resolveInteractionTarget(pointerlessContext)?.coordinate)
             .toEqual(centerTarget.position);
-        expect(resolveTarget).toHaveBeenCalledWith([500, 350]);
+        expect(resolveTarget).toHaveBeenCalledWith(pointerlessContext);
     });
 
     it("treats null and mismatched views as authoritative fallback and resets lifecycle", () => {
@@ -123,5 +125,31 @@ describe("ErdblickTargetNavigationAdapter", () => {
         expect(onTargetChange).toHaveBeenLastCalledWith(richTarget, false);
         adapter.reset();
         expect(onTargetChange).toHaveBeenCalledTimes(2);
+    });
+
+    it("correlates equivalent antimeridian world copies with pending metadata", () => {
+        const richTarget = targetAt([320, 280]);
+        const onTargetChange = vi.fn();
+        const adapter = new ErdblickTargetNavigationAdapter({
+            viewId: VIEW_ID,
+            resolveTarget: () => richTarget,
+            getRetainedTarget: () => null,
+            onTargetChange
+        });
+        const resolved = adapter.resolveInteractionTarget(context([320, 280]))!;
+
+        adapter.handleInteractionState({
+            viewId: VIEW_ID,
+            interactionTargetPosition: [
+                resolved.coordinate[0] + 360,
+                resolved.coordinate[1],
+                resolved.coordinate[2]
+            ]
+        });
+
+        expect(onTargetChange).toHaveBeenCalledWith(
+            expect.objectContaining({surfaceNormal: richTarget.surfaceNormal}),
+            true
+        );
     });
 });

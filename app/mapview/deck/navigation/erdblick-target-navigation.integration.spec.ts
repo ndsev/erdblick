@@ -114,11 +114,16 @@ describe("Erdblick target navigation integration", () => {
         ) as never);
         const viewport = makeViewport(controller.controllerState.getViewportProps());
         const projected = viewport.project(richTarget.position);
+        const nextProps = controller.controllerState.getViewportProps();
         controller.handleEvent(gestureEvent("panend", endPixel) as never);
 
         expect(resolveTarget).toHaveBeenCalledTimes(1);
         expect(Math.abs(projected[0] - endPixel[0])).toBeLessThanOrEqual(0.1);
         expect(Math.abs(projected[1] - endPixel[1])).toBeLessThanOrEqual(0.1);
+        expect(nextProps.bearing).toBe(initialViewState.bearing);
+        expect(nextProps.pitch).toBe(initialViewState.pitch);
+        expect(nextProps.zoom).toBe(initialViewState.zoom);
+        expect(viewport.center[2]).toBeCloseTo(initialViewport.center[2], 9);
         expect(targetChanges).toEqual([
             {target: richTarget, active: true},
             {target: richTarget, active: false}

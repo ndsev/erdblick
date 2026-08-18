@@ -996,7 +996,8 @@ describe("GpuScene contribution lifecycle", () => {
         scene.finishRender(reservation);
         scene.publishPresentation();
 
-        expect(result.labelsChanged).toBe(true);
+        expect(result).not.toBeNull();
+        expect(result!.labelsChanged).toBe(true);
         expect(scene.labels()).toMatchObject([{
             text: "Main Street",
             styleOrder: 0

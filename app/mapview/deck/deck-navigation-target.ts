@@ -36,6 +36,8 @@ export class NavigationTargetOverlay {
     constructor(container: HTMLElement) {
         this.svg = document.createElementNS(SVG_NAMESPACE, "svg");
         this.svg.setAttribute("aria-hidden", "true");
+        this.svg.setAttribute("data-testid", "navigation-target-overlay");
+        this.svg.setAttribute("data-navigation-state", "clear");
         Object.assign(this.svg.style, {
             position: "absolute",
             inset: "0",
@@ -63,7 +65,11 @@ export class NavigationTargetOverlay {
     }
 
     /** Projects and displays a target, or hides it when it is outside the clip volume. */
-    update(target: NavigationVisualTarget, viewport: WebMercatorViewport): void {
+    update(
+        target: NavigationVisualTarget,
+        viewport: WebMercatorViewport,
+        state: "hover" | "active" = "hover"
+    ): void {
         const projection = projectNavigationTarget(target, viewport);
         if (!projection) {
             this.clear();
@@ -72,11 +78,13 @@ export class NavigationTargetOverlay {
         this.ring.setAttribute("d", closedSvgPath(projection.ring));
         this.center.setAttribute("cx", projection.center[0].toString());
         this.center.setAttribute("cy", projection.center[1].toString());
+        this.svg.setAttribute("data-navigation-state", state);
         this.svg.style.display = "block";
     }
 
     /** Hides the target without removing its reusable DOM nodes. */
     clear(): void {
+        this.svg.setAttribute("data-navigation-state", "clear");
         this.svg.style.display = "none";
     }
 

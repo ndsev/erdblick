@@ -21,14 +21,16 @@ Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand
 
 You can move around the map using a mix of mouse gestures, keyboard shortcuts, and on-screen controls:
 
-- **Mouse**: left drag pans, right drag tilts, scroll zooms.
+- **Mouse**: left drag translates the camera parallel to the map plane, right drag rotates around the acquired point under the gesture origin, and scroll zooms.
 - **Keyboard**: `WASD` pans, `Q/E` zoom, `Ctrl+K` focuses search, `Ctrl+J` zooms to the focused inspection panel, and `M` toggles the Maps & Layers panel.
-- **Compass widget**: click to reset heading or drag to rotate.
+- **Compass widget**: click to reset heading and pitch.
 - **Camera control buttons**: use the arrow and plus/minus buttons near the compass for simple pan/zoom actions.
 - **2D / 3D toggle**: switch between flat Web Mercator-style rendering and the full 3D view.
 - **Focus buttons**: use the target icon in **Maps & Layers** to jump to a map or layer coverage area advertised by the backend.
 
-In 3D mode, pan, zoom, rotation, and tilt can stay anchored to an eligible rendered feature under the pointer. The cyan ring and centre dot show that navigation anchor while it is available or in active use. Path anchors snap to the source centreline, and point anchors use the feature position rather than the billboard surface. GLTF content uses its interaction proxy, so the indicated point can follow the proxy rather than the exact visible mesh surface.
+In 3D mode, panning is a world-parallel translation: bearing, pitch, zoom, and the camera's Web Mercator height remain unchanged instead of orbiting around the grabbed point. `WASD` and the arrow buttons use the same screen-local motion on the ground plane. Right drag and Deck's modifier-assisted pointer rotation acquire a fresh eligible physical point—or the ground intersection—at the gesture origin and keep that point's projected pixel fixed. A valid acquired target takes precedence over the legacy centre/2D/3D rotation-pivot setting.
+
+The cyan ring and centre dot show a navigation target while it is available or active. Path anchors may snap to the source centreline, so the ring marks the acquired point rather than fabricating the raw pointer pixel. Point anchors use the feature position rather than a billboard surface, and GLTF content uses its interaction proxy. At high pitch, an empty-sky pixel may have neither a physical point nor a forward ground intersection; that mathematically undefined case uses Deck's configured fallback pivot rather than inventing a hidden focal distance.
 
 In [split view](erdblick-split.md), navigation targets the currently focused pane. The focused view is outlined in blue. Use `Ctrl+Left` / `Ctrl+Right` to move focus explicitly.
 

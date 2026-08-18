@@ -46,9 +46,10 @@ describe("tile-grid visibility helpers", () => {
         const canonicalCount = vi.spyOn(
             coreLib as any,
             "getNumTileIdsForCanonicalCamera"
-        ).mockImplementation((_altitude: number, level: number) =>
-            level > 9 ? 65 : 64
-        );
+        ).mockImplementation((...args: unknown[]) => {
+            const level = args[1] as number;
+            return level > 9 ? 65 : 64;
+        });
         try {
             expect(autoTileGridLevel(12_345, mode)).toBe(9);
             expect(canonicalCount).toHaveBeenCalledWith(12_345, 9);

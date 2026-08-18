@@ -87,11 +87,12 @@ import {
     SearchStyleRuleDraftCodec
 } from "./search-style-rule-editor.model";
 import {ErdblickStyle, StyleService} from "../styledata/style.service";
+import {StyleEditorRequestService} from "../styledata/style-editor-request.service";
+import type {SearchStyleSaveRequest} from "./search-style-save.dialog.component";
 import {
     convertSearchStyleRulesToYaml,
     projectStyleSourceForSearch,
-    SearchStyleApplicationProjection,
-    type SearchStyleSaveOptions
+    SearchStyleApplicationProjection
 } from "./search-style-sheet.converter";
 
 interface FeatureSearchGroupingOption {
@@ -511,6 +512,7 @@ interface FeatureSearchResultTreeItem {
                                                 </ng-template>
                                             </p-select>
                                             <p-button class="feature-search-save-style-button"
+                                                      data-testid="feature-search-save-style"
                                                       icon="pi pi-save"
                                                       label="Save"
                                                       size="small"
@@ -916,6 +918,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 public mapService: MapInfoService,
                 private readonly searchSchema: FeatureSearchSchemaService,
                 private readonly styleService: StyleService,
+                private readonly styleEditorRequestService: StyleEditorRequestService,
                 private readonly inspectionSelection: InspectionSelectionService,
                 public stateService: AppStateService,
                 private infoMessageService: InfoMessageService,
@@ -1735,10 +1738,11 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     }
 
     /** Persists one dialog payload through the ordinary transactional style import path. */
-    protected confirmSearchStyleSave(options: Readonly<SearchStyleSaveOptions>): void {
+    protected confirmSearchStyleSave(request: Readonly<SearchStyleSaveRequest>): void {
         if (this.searchStyleSavePending || !this.searchStyleSaveVisible) {
             return;
         }
+        const {options, action} = request;
         const conflict = this.styleService.styleIdentityConflict(options.name);
         if (conflict) {
             this.infoMessageService.showError(
@@ -1760,6 +1764,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.infoMessageService.showSuccess(`Saved search stylesheet “${importedStyleId}”.`);
             this.searchStyleSaveVisible = false;
             this.pendingSearchStyleRules = [];
+            if (action === "save-and-open") {
+                queueMicrotask(() => this.styleEditorRequestService.open(importedStyleId));
+            }
         } catch (error) {
             this.infoMessageService.showError(error instanceof Error ? error.message : String(error));
         } finally {

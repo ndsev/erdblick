@@ -168,6 +168,40 @@ export class LayerPresetNode {
     }
 }
 
+/** Controls how a reconciled preset association changes the compact option projection. */
+export type LayerPresetPresentation = "collapse" | "expand" | "preserve";
+
+/** Identifies one concrete layer in one view for post-transaction preset inference. */
+export function layerPresetInferenceKey(viewIndex: number, mapId: string, layerId: string): string {
+    return `${viewIndex}\u0000${mapId}\u0000${layerId}`;
+}
+
+/**
+ * Selects the unique most-specific preset matching the current option state.
+ * A current preset wins only an equal-specificity tie; catalog order never breaks ambiguity.
+ */
+export function bestMatchingLayerPreset(
+    presets: readonly ResolvedLayerPreset[],
+    options: readonly StyleOptionNode[],
+    viewIndex: number,
+    currentKey: string
+): ResolvedLayerPreset | undefined {
+    const matches = presets.filter(preset => preset.values.every(value => {
+        const option = options.find(candidate =>
+            candidate.styleId === preset.styleId && candidate.id === value.optionId);
+        return option?.value[viewIndex] === value.value;
+    }));
+    if (!matches.length) {
+        return undefined;
+    }
+    const mostSpecificCount = Math.max(...matches.map(preset => preset.values.length));
+    const mostSpecific = matches.filter(preset => preset.values.length === mostSpecificCount);
+    if (mostSpecific.length === 1) {
+        return mostSpecific[0];
+    }
+    return mostSpecific.find(preset => preset.key === currentKey);
+}
+
 export type LayerTreeChildNode = LayerPresetNode | StyleOptionNode;
 
 /** Narrows a layer child to an actual style option rather than its preset control row. */
@@ -1007,7 +1041,8 @@ export class MapLayerTree {
         viewIndex: number,
         mapId: string,
         layerId: string,
-        ref: LayerPresetRef | null
+        ref: LayerPresetRef | null,
+        presentation: LayerPresetPresentation = "collapse"
     ): void {
         const layer = this.getFeatureLayer(mapId, layerId);
         const presetNode = layer ? layerPresetNode(layer) : undefined;
@@ -1018,7 +1053,11 @@ export class MapLayerTree {
             preset.styleId === ref.styleId && preset.id === ref.presetId) : undefined;
         const normalizedKey = selectedPreset?.key ?? NO_PRESET_ID;
         if (presetNode.selectedPresetKeys[viewIndex] !== normalizedKey) {
-            presetNode.expandedPresetOptions[viewIndex] = false;
+            if (presentation === "collapse") {
+                presetNode.expandedPresetOptions[viewIndex] = false;
+            } else if (presentation === "expand") {
+                presetNode.expandedPresetOptions[viewIndex] = true;
+            }
         }
         presetNode.selectedPresetKeys[viewIndex] = normalizedKey;
         this.stateService.setLayerPresetSelection(
@@ -1053,8 +1092,11 @@ export class MapLayerTree {
         this.stateService.setMapPresetSelection(viewIndex, mapId, selected?.id ?? null);
     }
 
-    /** Demotes layer and map associations whose definitions or owned values no longer match. */
-    reconcilePresetSelections(): void {
+    /**
+     * Validates every stored association and infers layer presets only for explicitly affected
+     * layer/view identities after their complete option transaction has settled.
+     */
+    reconcilePresetSelections(inferenceTargets: ReadonlySet<string> = new Set()): void {
         const viewCount = this.stateService.numViewsState.getValue();
         for (const layer of this.allFeatureLayers()) {
             const presetNode = layerPresetNode(layer);
@@ -1067,11 +1109,35 @@ export class MapLayerTree {
                 const selectedPreset = presetNode.presets.find(preset =>
                     preset.key === presetNode.selectedPresetKeys[viewIndex]
                     || (preset.styleId === storedRef?.styleId && preset.id === storedRef?.presetId));
-                if (selectedPreset
-                    && this.mapPresetService.matchesPresetValues(
-                        selectedPreset,
+                const shouldInfer = inferenceTargets.has(
+                    layerPresetInferenceKey(viewIndex, layer.mapId, layer.id));
+                if (shouldInfer) {
+                    const matched = bestMatchingLayerPreset(
+                        presetNode.presets,
                         options,
-                        viewIndex)) {
+                        viewIndex,
+                        selectedPreset?.key ?? NO_PRESET_ID);
+                    if (matched) {
+                        this.setLayerPresetSelection(
+                            viewIndex,
+                            layer.mapId,
+                            layer.id,
+                            matched.ref,
+                            "expand");
+                    } else {
+                        this.setLayerPresetSelection(
+                            viewIndex,
+                            layer.mapId,
+                            layer.id,
+                            null,
+                            "preserve");
+                    }
+                    continue;
+                }
+                if (selectedPreset && this.mapPresetService.matchesPresetValues(
+                    selectedPreset,
+                    options,
+                    viewIndex)) {
                     presetNode.selectedPresetKeys[viewIndex] = selectedPreset.key;
                     continue;
                 }

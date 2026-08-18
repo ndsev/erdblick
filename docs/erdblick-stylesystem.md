@@ -35,7 +35,7 @@ Category is metadata independent of whether a style is built in, additional,
 modified, imported, or visible.
 
 Feature Search saves reusable high-fidelity rules as ordinary imported YAML
-with `category: search`, an explicit user-selected `default`, and optional exact
+with `category: search`, a checked-by-default **Enable this style upon save** choice, and optional exact
 layer-ID affinity. Empty affinity applies to any layer. The source is added directly to
 the Styles tree, marked with a **Search** tag, persisted through the normal
 imported-style mechanism, and exported through the normal style action. Its
@@ -44,11 +44,15 @@ separate JSON-library identity. Its optional `layer` metadata affects ordinary
 rendering but is not copied into a detached Feature Search rule template.
 
 The Style Editor has **Quick** and **Advanced** tabs for every loaded base or
-search style. Quick exposes exactly the rule properties supported by the
-current controls and updates the authoritative Advanced YAML on every change.
-Unsupported properties and rules are preserved and listed below Quick; use
-Advanced for constructs that cannot be represented safely. Applying either
-view updates the same stylesheet source.
+search style. Its header switch controls the loaded style's current visible
+state directly and intentionally does not rewrite the YAML `default`. Quick
+exposes the root name, exact layer-affinity IDs, and the rule properties
+supported by the current controls, updating the authoritative Advanced YAML on
+every change. No selected affinity means Any. A noncanonical regular expression
+is presented as Custom and is preserved until the user explicitly replaces it
+with exact IDs or clears it. Unsupported properties and rules remain in the
+YAML; rule-local help icons explain what Quick preserves or leaves Advanced-only.
+Applying either view updates the same stylesheet source.
 
 ## Document shape
 
@@ -512,7 +516,7 @@ Preset IDs and names are unique within the style sheet. Every `optionId` must id
 
 `FeatureLayerStyle` parses `options` and `presets` in the same native YAML pass and exposes both through the generated WASM bindings. This keeps source locations, validation reports, imports, edits, and style replacement on one parser lifecycle instead of reparsing preset metadata in TypeScript.
 
-The Maps panel shows eligible embedded presets in each layer's dropdown. Layer presets have no separate management form: edit them only as part of the complete style YAML. The **Map Presets** tab manages higher-level compositions that refer to these style-owned layer-preset definitions.
+The Maps panel shows eligible embedded presets in each layer's dropdown. Expand a selected preset to edit its Boolean options directly. After the complete option/synchronization transaction, the panel selects the unique most-specific preset matching the resulting values; an equal-specificity ambiguity retains the current matching preset, otherwise it becomes **Custom options** without discarding the edited values. Explicitly choosing **Custom options** remains Custom until the next real option edit, and explicitly choosing a named preset is not replaced during its own apply transaction. Layer preset definitions still have no separate management form: edit them only as part of the complete style YAML. The **Map Presets** tab manages higher-level compositions that refer to these style-owned layer-preset definitions.
 
 ## Point grouping and `$mergeCount`
 
