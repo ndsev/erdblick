@@ -314,6 +314,7 @@ void interaction_over(
 void main(void) {
   ivec4 centerId = interaction_object_id(coordinate);
   bool centerHasObject = interaction_has_object(centerId);
+  float centerIdentityAlpha = texture(interactionIdentityTexture, coordinate).a;
   bool haloOnly = interactionOutlinePhase.haloOnly > 0.5;
   vec3 softFields = texture(interactionBlurTexture, coordinate).rgb;
   float softCoverage = softFields.r;
@@ -332,6 +333,13 @@ void main(void) {
     interactionOutline.hasInteriorHalo < 0.5 &&
     interactionOutline.hasTint < 0.5 &&
     interactionOutline.hasStripe < 0.5;
+
+  // Avoid hard identity quantization at anti-aliased boundaries for pure
+  // exterior style glows, which otherwise carve staircase-like notches into
+  // the halo perimeter.
+  if (haloOnly && styleGlowOnly && centerIdentityAlpha > 0.0) {
+    discard;
+  }
 
   if (centerHasObject && !(haloOnly && styleGlowOnly)) {
     float stableInterior = smoothstep(0.9, 0.99, softCoverage);
