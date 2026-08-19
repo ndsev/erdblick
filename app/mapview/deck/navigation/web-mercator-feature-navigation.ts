@@ -1,9 +1,15 @@
 import {
+    MapView,
+    type MapViewProps,
     type MapInteractionTargetViewStateContext,
     WebMercatorViewport,
     type WebMercatorTargetViewState
 } from "@deck.gl/core";
-import {altitudeToFovy} from "@math.gl/web-mercator";
+import {
+    altitudeToFovy,
+    getProjectionParameters,
+    unitsPerMeter
+} from "@math.gl/web-mercator";
 import type {NavigationAnchor, NavigationScreenPosition} from "./feature-navigation.types";
 
 /** deck.gl's normalized default map-camera altitude, made explicit for Erdblick's camera contract. */
@@ -21,8 +27,24 @@ export const DECK_MAP_FOV_DEGREES = altitudeToFovy(DECK_MAP_DEFAULT_ALTITUDE);
  */
 export const DECK_MAP_NEAR_Z_MULTIPLIER = 0.01;
 
-/** deck.gl's horizon-aware far-plane scale. */
-export const DECK_MAP_FAR_Z_MULTIPLIER = 1.01;
+/**
+ * Horizon-aware far-plane scale with clearance for below-sea-level geometry.
+ *
+ * deck.gl derives the unscaled far plane from where the top view ray meets the z=0 plane. A
+ * multiplier close to one therefore clips negative-altitude geometry across the upper part of a
+ * pitched viewport. The extra half-distance keeps that geometry visible while the comparatively
+ * conservative near plane retains useful depth precision.
+ */
+export const DECK_MAP_FAR_Z_MULTIPLIER = 1.5;
+
+/** Lowest ordinary map altitude that the perspective clip volume keeps visible. */
+export const DECK_MAP_MINIMUM_ALTITUDE_METERS = -100;
+
+/** Camera-distance cap used when a pitched map view reaches the flat-map horizon. */
+export const DECK_MAP_HORIZON_DISTANCE_MULTIPLIER = 100;
+
+/** math.gl's internal camera-distance horizon cap. */
+const MATH_GL_HORIZON_DISTANCE_MULTIPLIER = 10;
 
 /** Relative margin that prevents a target from reaching or crossing the near plane. */
 export const NAVIGATION_TARGET_NEAR_RELATIVE_EPSILON = 1e-6;
@@ -49,6 +71,98 @@ export interface DeckMapCameraState {
     position?: [number, number, number];
 }
 
+/** Projection state needed to reproduce math.gl's horizon-aware far-plane calculation. */
+interface DeckMapProjectionState {
+    latitude?: number;
+    zoom?: number;
+    pitch?: number;
+    position?: number[];
+}
+
+/**
+ * Calculates the map far plane while replacing math.gl's short fixed horizon cap.
+ *
+ * math.gl computes `min(surfaceDistance * farMultiplier, cameraDistance * 10)`. Calling it with
+ * the far multiplier divided by the desired cap expansion and scaling the result afterwards gives
+ * the same surface-distance branch while changing only the cap to `cameraDistance * 100`.
+ */
+export function deckMapFarZ(
+    state: DeckMapProjectionState,
+    width: number,
+    height: number
+): number {
+    const horizonExpansion = DECK_MAP_HORIZON_DISTANCE_MULTIPLIER /
+        MATH_GL_HORIZON_DISTANCE_MULTIPLIER;
+    const latitude = state.latitude ?? 0;
+    const position = state.position;
+    const centerAltitudeMeters = position?.[2] ?? 0;
+    const commonProjectionOptions = {
+        width: Math.max(1, width),
+        height: Math.max(1, height),
+        scale: Math.pow(2, state.zoom ?? 0),
+        pitch: state.pitch ?? 0,
+        fovy: DECK_MAP_FOV_DEGREES,
+        nearZMultiplier: DECK_MAP_NEAR_Z_MULTIPLIER
+    };
+    const projection = getProjectionParameters({
+        ...commonProjectionOptions,
+        center: [0, 0, centerAltitudeMeters * unitsPerMeter(latitude)],
+        farZMultiplier: DECK_MAP_FAR_Z_MULTIPLIER / horizonExpansion
+    });
+    const horizonAwareFar = projection.far * horizonExpansion;
+
+    // A scalar ground-plane margin cannot guarantee a useful physical depth: at close zooms the
+    // same multiplier may reach only a few metres below z=0. Re-run the surface calculation with
+    // the configured altitude floor as its reference plane. The ordinary math.gl horizon cap
+    // keeps grazing views bounded; the longer Erdblick cap remains owned by the z=0 calculation.
+    const minimumAltitudeFar = getProjectionParameters({
+        ...commonProjectionOptions,
+        center: [
+            0,
+            0,
+            (centerAltitudeMeters - DECK_MAP_MINIMUM_ALTITUDE_METERS) *
+                unitsPerMeter(latitude)
+        ],
+        farZMultiplier: 1.01
+    }).far;
+    return Math.max(horizonAwareFar, minimumAltitudeFar);
+}
+
+type DeckWebMercatorViewportOptions = NonNullable<
+    ConstructorParameters<typeof WebMercatorViewport>[0]
+>;
+
+/** Web Mercator viewport that applies Erdblick's complete projection contract. */
+class ErdblickWebMercatorViewport extends WebMercatorViewport {
+    constructor(options: DeckWebMercatorViewportOptions = {}) {
+        const width = options.width || 1;
+        const height = options.height || 1;
+        super({
+            ...options,
+            fovy: DECK_MAP_FOV_DEGREES,
+            nearZMultiplier: DECK_MAP_NEAR_Z_MULTIPLIER,
+            farZMultiplier: DECK_MAP_FAR_Z_MULTIPLIER,
+            farZ: deckMapFarZ(options, width, height)
+        });
+    }
+}
+
+/** Deck map view whose render viewport shares Erdblick's projection contract. */
+export class ErdblickMapView extends MapView {
+    constructor(props: MapViewProps = {}) {
+        super({
+            ...props,
+            fovy: DECK_MAP_FOV_DEGREES,
+            nearZMultiplier: DECK_MAP_NEAR_Z_MULTIPLIER,
+            farZMultiplier: DECK_MAP_FAR_Z_MULTIPLIER
+        });
+    }
+
+    override getViewportType(): typeof WebMercatorViewport {
+        return ErdblickWebMercatorViewport;
+    }
+}
+
 /** Creates a Web Mercator viewport using Erdblick's single map-projection contract. */
 export function createDeckMapViewport(
     state: DeckMapCameraState,
@@ -56,7 +170,7 @@ export function createDeckMapViewport(
     height: number,
     orthographic: boolean
 ): WebMercatorViewport {
-    return new WebMercatorViewport({
+    return new ErdblickWebMercatorViewport({
         width,
         height,
         longitude: state.longitude,
@@ -65,10 +179,7 @@ export function createDeckMapViewport(
         pitch: state.pitch,
         bearing: state.bearing,
         position: state.position,
-        orthographic,
-        fovy: DECK_MAP_FOV_DEGREES,
-        nearZMultiplier: DECK_MAP_NEAR_Z_MULTIPLIER,
-        farZMultiplier: DECK_MAP_FAR_Z_MULTIPLIER
+        orthographic
     });
 }
 

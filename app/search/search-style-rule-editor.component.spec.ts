@@ -8,6 +8,10 @@ import {
 import {SearchStyleRuleEditorComponent} from "./search-style-rule-editor.component";
 
 describe("SearchStyleRuleEditorComponent", () => {
+    it("uses OnPush change detection to prune the idle editor tree", () => {
+        expect((SearchStyleRuleEditorComponent as any).ɵcmp.onPush).toBe(true);
+    });
+
     it("interleaves Advanced-only placeholders in authoritative YAML order", () => {
         const codec = new SearchStyleRuleDraftCodec();
         const first = codec.createRule();

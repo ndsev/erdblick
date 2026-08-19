@@ -6,7 +6,10 @@ import {
     DECK_MAP_DEFAULT_ALTITUDE,
     DECK_MAP_FAR_Z_MULTIPLIER,
     DECK_MAP_FOV_DEGREES,
+    DECK_MAP_HORIZON_DISTANCE_MULTIPLIER,
+    DECK_MAP_MINIMUM_ALTITUDE_METERS,
     DECK_MAP_NEAR_Z_MULTIPLIER,
+    ErdblickMapView,
     isNavigationAnchorUsable,
     longitudeInNearestWorld,
     NAVIGATION_TARGET_NEAR_RELATIVE_EPSILON,
@@ -40,9 +43,82 @@ describe("Web Mercator feature navigation", () => {
         expect(DECK_MAP_DEFAULT_ALTITUDE).toBe(1.5);
         expect(DECK_MAP_FOV_DEGREES).toBeCloseTo(36.86989764584402, 12);
         expect(DECK_MAP_NEAR_Z_MULTIPLIER).toBe(0.01);
-        expect(DECK_MAP_FAR_Z_MULTIPLIER).toBe(1.01);
+        expect(DECK_MAP_FAR_Z_MULTIPLIER).toBe(1.5);
+        expect(DECK_MAP_MINIMUM_ALTITUDE_METERS).toBe(-100);
+        expect(DECK_MAP_HORIZON_DISTANCE_MULTIPLIER).toBe(100);
         expect(viewport.fovy).toBe(DECK_MAP_FOV_DEGREES);
         expect(viewport.altitude).toBeCloseTo(DECK_MAP_DEFAULT_ALTITUDE, 12);
+    });
+
+    it("keeps below-sea-level geometry inside the far plane in a pitched view", () => {
+        const viewport = createDeckMapViewport({
+            longitude: -122.41060029,
+            latitude: 37.73457529,
+            zoom: 22,
+            pitch: 35.87486923,
+            bearing: 34.87500019,
+            position: [0, 0, 0]
+        }, 1905, 2053, false);
+        const belowSeaLevelPoint = viewport.unproject(
+            [viewport.width / 2, 0],
+            {targetZ: -12.37103367}
+        );
+
+        expect(viewport.project(belowSeaLevelPoint)[2]).toBeLessThan(1);
+    });
+
+    it("keeps the subsurface altitude floor visible in a close pitched view", () => {
+        const viewport = createDeckMapViewport({
+            longitude: -122.40031115,
+            latitude: 37.77900803,
+            zoom: 22,
+            pitch: 49.94008871,
+            bearing: 204.18749963,
+            position: [0, 0, 0]
+        }, 1905, 2053, false);
+        const subsurfacePoint = viewport.unproject(
+            [viewport.width / 2, 0],
+            {targetZ: DECK_MAP_MINIMUM_ALTITUDE_METERS}
+        );
+
+        expect(viewport.project(subsurfacePoint)[2]).toBeLessThan(1);
+    });
+
+    it("keeps distant ground inside the far plane near the flat-map horizon", () => {
+        const state: DeckMapCameraState = {
+            longitude: -122.40739031,
+            latitude: 37.73602083,
+            zoom: 22,
+            pitch: 82.52418133,
+            bearing: 150.67968734,
+            position: [0, 0, 0]
+        };
+        const viewport = createDeckMapViewport(state, 1905, 2053, false);
+        const distantGroundPoint = viewport.unproject(
+            [viewport.width / 2, 650],
+            {targetZ: 0}
+        );
+
+        expect(viewport.project(distantGroundPoint)[2]).toBeLessThan(1);
+    });
+
+    it("uses the same projection contract in Deck's rendered MapView", () => {
+        const renderedView = new ErdblickMapView({id: "projection-contract"});
+        const renderedViewport = renderedView.makeViewport({
+            width: VIEWPORT_WIDTH,
+            height: VIEWPORT_HEIGHT,
+            viewState: BASE_CAMERA
+        });
+        const directViewport = createDeckMapViewport(
+            BASE_CAMERA,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false
+        );
+
+        expect(renderedViewport).not.toBeNull();
+        expect(Array.from(renderedViewport!.projectionMatrix))
+            .toEqual(Array.from(directViewport.projectionMatrix));
     });
 
     it("turns a high target plane into the equivalent coarse ground zoom", () => {

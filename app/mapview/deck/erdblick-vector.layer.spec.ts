@@ -7,6 +7,7 @@ import {
 } from "./erdblick-vector.layer";
 import {
   ARROW_BILLBOARD_VERTEX_SHADER,
+  ARROW_WORLD_VERTEX_SHADER,
   DUAL_COMPACT_PATH_FRAGMENT_SHADER,
   DUAL_SIMPLE_PATH_FRAGMENT_SHADER,
   GpuSceneMaskMode,
@@ -123,6 +124,21 @@ describe("ErdblickVectorLayer model order", () => {
     );
     expect(ICON_BILLBOARD_VERTEX_SHADER).toContain(
       "project_pixel_size_to_clipspace(pixelPosition) * gl_Position.w",
+    );
+  });
+
+  it("displaces world arrow heads to the same side as their path shafts", () => {
+    expect(PATH_WORLD_VERTEX_SHADER).toContain(
+      "vec2(direction.y, -direction.x) / directionLength",
+    );
+    expect(ARROW_WORLD_VERTEX_SHADER).toContain(
+      "vec2 offsetNormal = vec2(tangent.y, -tangent.x);",
+    );
+    expect(ARROW_WORLD_VERTEX_SHADER).toContain(
+      "offsetNormal * project_pixel_size(instanceArrowStyle.x)",
+    );
+    expect(ARROW_WORLD_VERTEX_SHADER).toContain(
+      "normal * positions.x * arrowSize",
     );
   });
 

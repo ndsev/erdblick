@@ -17,7 +17,9 @@ import type {TileSubsetInteractionOverlay} from
 
 const TARGET_TEXTURE_WIDTH = 1024;
 const VECTOR_SOURCE_ID = "scene-vector";
-const STYLE_GLOW_ORDER = 300;
+// Composite after both persistent vector shells (350/400). Destination-over
+// blending still places the halo behind their accumulated framebuffer content.
+const STYLE_GLOW_COMPOSITE_ORDER = 401;
 const SCENE_RECONCILE_DEBOUNCE_MS = 50;
 const INTERACTION_RECONCILE_DELAY_MS = 0;
 
@@ -349,7 +351,7 @@ export class GpuSceneMaskController {
                 group = {
                     groupId,
                     effect,
-                    order: STYLE_GLOW_ORDER,
+                    order: STYLE_GLOW_COMPOSITE_ORDER,
                     stripeAnchor: [...anchor],
                     mode: GpuSceneMaskMode.Union,
                     materialKeys: new Set<bigint>(),
@@ -358,7 +360,7 @@ export class GpuSceneMaskController {
                         groupId,
                         "style-glow-union",
                         effect,
-                        STYLE_GLOW_ORDER
+                        STYLE_GLOW_COMPOSITE_ORDER
                     )
                 };
                 result.set(groupId, group);

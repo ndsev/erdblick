@@ -76,4 +76,28 @@ describe("deck viewport coverage", () => {
             height: 170.10225756
         });
     });
+
+    it("covers visible ground near the horizon without producing an unbounded request", () => {
+        const camera: DeckMapCameraState = {
+            longitude: -122.40739031,
+            latitude: 37.73602083,
+            zoom: 22,
+            pitch: 82.52418133,
+            bearing: 150.67968734,
+            position: [0, 0, 0]
+        };
+        const viewport = createDeckMapViewport(camera, 1905, 2053, false);
+        const bounds = clippedGeographicBounds(viewport, camera.longitude, 0.05);
+        const [visibleLongitude, visibleLatitude] = viewport.unproject(
+            [viewport.width / 2, 650],
+            {targetZ: 0}
+        );
+
+        expect(visibleLongitude).toBeGreaterThanOrEqual(bounds.west);
+        expect(visibleLongitude).toBeLessThanOrEqual(bounds.west + bounds.width);
+        expect(visibleLatitude).toBeGreaterThanOrEqual(bounds.south);
+        expect(visibleLatitude).toBeLessThanOrEqual(bounds.south + bounds.height);
+        expect(bounds.width).toBeLessThan(0.1);
+        expect(bounds.height).toBeLessThan(0.1);
+    });
 });

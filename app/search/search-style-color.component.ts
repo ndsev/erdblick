@@ -1,4 +1,5 @@
 import {
+    ChangeDetectionStrategy,
     Component,
     EventEmitter,
     Input,
@@ -33,6 +34,7 @@ import {
 
 @Component({
     selector: "search-style-color",
+    changeDetection: ChangeDetectionStrategy.OnPush,
     template: `
         <div class="search-style-color">
             <div class="search-style-color-mode-row">
@@ -254,6 +256,7 @@ export class SearchStyleColorComponent implements OnChanges {
 
     protected viewDraft = defaultSearchStyleColorDraft("");
     protected colorWarning = "";
+    protected categoryValueOptions: Array<{label: string; value: string}> = [];
     private currentModeFieldOptions: SearchStyleFieldOption[] = [];
     private dataColorWarning = "";
     private pendingUpdateFromData = false;
@@ -293,10 +296,6 @@ export class SearchStyleColorComponent implements OnChanges {
 
     protected get fieldOptionsForCurrentMode(): SearchStyleFieldOption[] {
         return this.currentModeFieldOptions;
-    }
-
-    protected get categoryValueOptions(): Array<{label: string; value: string}> {
-        return (this.selectedFieldOption()?.enumValues ?? []).map(value => ({label: value, value}));
     }
 
     protected get categoryValueInputType(): string {
@@ -340,6 +339,7 @@ export class SearchStyleColorComponent implements OnChanges {
             return;
         }
         this.viewDraft = this.autoInitializedDraft({...this.viewDraft, field, customField: false});
+        this.refreshCurrentModeFieldOptions();
         this.updateColorWarning();
         this.emitChange();
     }
@@ -352,12 +352,14 @@ export class SearchStyleColorComponent implements OnChanges {
                 customField: true,
                 categoryValueKind: undefined
             };
+            this.refreshCurrentModeFieldOptions();
             this.updateColorWarning();
             this.emitChange();
             return;
         }
         if (this.fieldOptions.length === 0) {
             this.viewDraft = {...this.viewDraft, customField: false};
+            this.refreshCurrentModeFieldOptions();
             this.updateColorWarning();
             this.emitChange();
             return;
@@ -374,6 +376,7 @@ export class SearchStyleColorComponent implements OnChanges {
             }
         }
         this.viewDraft = this.autoInitializedDraft({...this.viewDraft, customField: false, field: nextField});
+        this.refreshCurrentModeFieldOptions();
         this.updateColorWarning();
         this.emitChange();
     }
@@ -393,6 +396,7 @@ export class SearchStyleColorComponent implements OnChanges {
                 ? undefined
                 : this.viewDraft.categoryValueKind
         };
+        this.refreshCurrentModeFieldOptions();
         this.updateColorWarning();
         this.emitChange();
     }
@@ -577,12 +581,21 @@ export class SearchStyleColorComponent implements OnChanges {
         return this.fieldOptionsForCurrentMode[0]?.value ?? "";
     }
 
-    /** Avoids filtering thousands of schema options on every Angular change-detection pass. */
+    /** Keeps picker inputs referentially stable between actual field/schema changes. */
     private refreshCurrentModeFieldOptions(): void {
         this.currentModeFieldOptions = this.viewDraft.mode === "gradient"
             ? this.fieldOptions.filter(option =>
                 isNumericStyleValueKind(option.valueKind))
             : this.fieldOptions;
+        const enumValues = this.selectedFieldOption()?.enumValues ?? [];
+        if (this.categoryValueOptions.length !== enumValues.length ||
+            enumValues.some((value, index) =>
+                this.categoryValueOptions[index]?.value !== value)) {
+            this.categoryValueOptions = enumValues.map(value => ({
+                label: value,
+                value
+            }));
+        }
     }
 
     private fieldExists(field: string): boolean {

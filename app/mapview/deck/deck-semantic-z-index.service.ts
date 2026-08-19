@@ -15,7 +15,8 @@ import {DeckLayerRegistry} from "./deck-layer-registry";
 import {
     ErdblickVectorLayer,
     ErdblickVectorRenderMode,
-    NO_POLYGON_OFFSET
+    NO_POLYGON_OFFSET,
+    VECTOR_POLYGON_OFFSET_DEPTH_UNITS
 } from "./erdblick-vector.layer";
 import type {GpuScene} from "./gpu-scene";
 
@@ -25,6 +26,15 @@ const PICKING_LAYER_ID = "builtin/semantic-z-index-picking";
 const SUPPORT_LAYER_ID = `${PASS_LAYER_PREFIX}support`;
 const OVERLAY_LAYER_ID = `${PASS_LAYER_PREFIX}overlay`;
 const MAX_DISABLED_PICK_INDICES = 64;
+/**
+ * Normalized fixed-depth bias shared by the visible and picking composites.
+ *
+ * Ordinary vector paths receive this clearance through polygon offset. WebGL
+ * ignores polygon offset when a fullscreen fragment writes `gl_FragDepth`, so
+ * the semantic compositor must apply the fixed-depth component explicitly.
+ */
+export const SEMANTIC_COMPOSITE_DEPTH_BIAS =
+    VECTOR_POLYGON_OFFSET_DEPTH_UNITS / 0x00ff_ffff;
 
 interface SemanticCompositeLayerState {
     model: ClipSpace | null;
@@ -59,7 +69,8 @@ void main(void) {
   if (overlay.a <= 0.0) {
     discard;
   }
-  gl_FragDepth = texture(semanticSupportDepthTexture, coordinate).r;
+  float supportDepth = texture(semanticSupportDepthTexture, coordinate).r;
+  gl_FragDepth = max(0.0, supportDepth - ${SEMANTIC_COMPOSITE_DEPTH_BIAS});
   fragColor = overlay;
 }
 `;
@@ -86,14 +97,14 @@ void main(void) {
     semanticSupportDepthTexture,
     semanticCoordinate,
     0).r;
-  gl_FragDepth = supportDepth;
+  gl_FragDepth = max(0.0, supportDepth - ${SEMANTIC_COMPOSITE_DEPTH_BIAS});
   fragColor = picking.isAttribute > 0.5
     ? vec4(supportDepth * 2.0 - 1.0, 0.0, 0.0, 1.0)
     : resolvedPick;
 }
 `;
 
-/** Composite resolved semantic overlays back at their support surface's physical depth. */
+/** Composite semantic overlays at their support depth plus coplanar clearance. */
 class SemanticCompositeLayer extends Layer<SemanticCompositeLayerProps> {
     static override layerName = "SemanticCompositeLayer";
 
@@ -199,7 +210,7 @@ class SemanticPickingLayer extends Layer<SemanticPickingLayerProps> {
         return model ? [model] : [];
     }
 
-    /** Draw the winning semantic identity at its physical support depth. */
+    /** Draw the winning identity with the same coplanar clearance as its visible overlay. */
     override draw({renderPass}: {renderPass: unknown}): void {
         const model = (this.state as unknown as SemanticCompositeLayerState).model;
         const input = this.props.service.compositeInput();

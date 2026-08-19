@@ -1771,8 +1771,9 @@ void main(void) {
       tipCommon,
       instanceOffsetVector * offsetScale);
   } else {
+    vec2 offsetNormal = vec2(tangent.y, -tangent.x);
     commonOffset = vec3(
-      normal * project_pixel_size(instanceArrowStyle.x),
+      offsetNormal * project_pixel_size(instanceArrowStyle.x),
       0.0);
   }
   previousCommon.xyz += commonOffset;

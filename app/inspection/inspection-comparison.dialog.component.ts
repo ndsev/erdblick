@@ -1,4 +1,14 @@
-import {Component, effect, input, OnDestroy, QueryList, Renderer2, ViewChild, ViewChildren} from '@angular/core';
+import {
+    ChangeDetectorRef,
+    Component,
+    effect,
+    input,
+    OnDestroy,
+    QueryList,
+    Renderer2,
+    ViewChild,
+    ViewChildren
+} from '@angular/core';
 import {ContextMenu} from 'primeng/contextmenu';
 import {MenuItem} from 'primeng/api';
 import {Subscription} from 'rxjs';
@@ -157,7 +167,8 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
                 private inspectionSelection: InspectionSelectionService,
                 private stateService: AppStateService,
                 private dialogStack: DialogStackService,
-                private renderer: Renderer2) {
+                private renderer: Renderer2,
+                private readonly cdr: ChangeDetectorRef) {
         effect(() => {
             const model = this.comparison();
             this.selectedCompareIds = [model.base.panelId, ...model.others.map(entry => entry.panelId)];
@@ -167,6 +178,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         this.selectionTopicSubscription = this.inspectionSelection.selectionTopic.subscribe(() => {
             this.refreshCompareOptions();
             this.refreshColumnSelectionColors();
+            this.cdr.markForCheck();
         });
     }
 
@@ -360,6 +372,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
                 nextColumns[index] = updated;
                 this.columns = nextColumns;
                 this.reconcileComparisonExpiries(updated, revision);
+                this.cdr.markForCheck();
             });
         });
     }
@@ -464,6 +477,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         next[index] = updated;
         this.columns = next;
         this.reconcileComparisonExpiries(updated, owner.revision);
+        this.cdr.markForCheck();
     }
 
     private clearComparisonExpiries(): void {

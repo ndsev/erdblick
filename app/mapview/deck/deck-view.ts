@@ -118,9 +118,8 @@ import {
 import {ViewLayerController} from "../view-layer.controller";
 import {
     createDeckMapViewport,
-    DECK_MAP_FAR_Z_MULTIPLIER,
     DECK_MAP_FOV_DEGREES,
-    DECK_MAP_NEAR_Z_MULTIPLIER,
+    ErdblickMapView,
     isNavigationAnchorUsable,
     longitudeInNearestWorld,
     constrainErdblickTargetNavigationViewState,
@@ -382,7 +381,7 @@ export abstract class DeckMapView implements IRenderView {
     private gpuSceneRedrawBurstStartedAtMs = 0;
     private gpuSceneRedrawReason = "GPU scene changed";
     private gpuSceneRetiredResourcesPending = false;
-    private cameraStatePushTimer: ReturnType<typeof setTimeout> | null = null;
+    private liveCameraSyncRaf: number | null = null;
     private cameraStatePushPending = false;
     private readonly deckCanvasPointerEnter = () => {
         this.deckCanvasPointerInside = true;
@@ -459,7 +458,6 @@ export abstract class DeckMapView implements IRenderView {
         return !isGltfPickProxyLayer;
     };
     private static readonly DEFAULT_DECK_SCROLL_ZOOM_SPEED = 0.01;
-    private static readonly LIVE_CAMERA_SYNC_INTERVAL_MS = 100;
 
     get viewIndex() {
         return this._viewIndex;
@@ -511,13 +509,10 @@ export abstract class DeckMapView implements IRenderView {
         controller?: DeckProps<DeckView>["controller"],
         idSuffix = ""
     ): DeckMercatorView {
-        return new DeckMercatorView({
+        return new ErdblickMapView({
             id: `deck-view-${this._viewIndex}${idSuffix}`,
             repeat: true,
             orthographic: this.useOrthographicProjection,
-            fovy: DECK_MAP_FOV_DEGREES,
-            nearZMultiplier: DECK_MAP_NEAR_Z_MULTIPLIER,
-            farZMultiplier: DECK_MAP_FAR_Z_MULTIPLIER,
             controller
         });
     }
@@ -1399,6 +1394,11 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Maps persisted app-state camera data into the controlled deck view state. */
     setViewFromState(cameraData: CameraViewState): void {
+        this.applyCameraViewState(cameraData, true);
+    }
+
+    /** Applies persisted or renderer-local camera data with explicit coverage ownership. */
+    private applyCameraViewState(cameraData: CameraViewState, updateViewport: boolean): void {
         if (this.firstPersonSession) {
             this.exitFirstPersonView();
         }
@@ -1419,7 +1419,7 @@ export abstract class DeckMapView implements IRenderView {
                 : [...(cameraData.position ?? [0, 0, 0])]
         };
         const groundCentered = this.groundCenteredViewState(next);
-        this.updateViewState(groundCentered, true, true);
+        this.updateViewState(groundCentered, true, updateViewport);
         if (!this.deck && groundCentered !== next) {
             this.pushViewStateToAppState();
         }
@@ -1624,6 +1624,17 @@ export abstract class DeckMapView implements IRenderView {
                     }
                     this.setViewFromState(cameraViewData);
                 })
+        );
+
+        this.subscriptions.push(
+            this.mapViewState.liveCameraViewStateTopic.subscribe(update => {
+                if (update.targetView !== this._viewIndex) {
+                    return;
+                }
+                // Live split-view motion stays in Deck. The settled AppState update
+                // owns tile coverage, persistence, URL state, and Angular UI work.
+                this.applyCameraViewState(update.cameraViewData, false);
+            })
         );
 
         this.subscriptions.push(
@@ -2438,20 +2449,17 @@ export abstract class DeckMapView implements IRenderView {
         if (!this.isCameraInteracting && groundCentered !== this.viewState) {
             this.updateViewState(groundCentered, true, true);
         }
+        const cameraViewData = this.cameraViewData(groundCentered);
         this.ignoreNextCamAppStateUpdate = true;
         this.stateService.setView(
             this._viewIndex,
             Cartographic.fromDegrees(
-                groundCentered.longitude,
-                groundCentered.latitude,
-                this.zoomToAltitude(groundCentered.zoom, groundCentered.latitude)
+                cameraViewData.destination.lon,
+                cameraViewData.destination.lat,
+                cameraViewData.destination.alt
             ),
-            {
-                heading: GeoMath.toRadians(groundCentered.bearing),
-                pitch: GeoMath.toRadians(groundCentered.pitch - 90),
-                roll: 0
-            },
-            groundCentered.position
+            cameraViewData.orientation,
+            cameraViewData.position
         );
     }
 
@@ -2462,22 +2470,25 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
         this.cameraStatePushPending = true;
-        if (!this.liveCameraSyncEnabled() ||
-            this.cameraStatePushTimer !== null) {
+        if (!this.liveCameraSyncEnabled() || this.liveCameraSyncRaf !== null) {
             return;
         }
-        this.cameraStatePushTimer = setTimeout(
-            () => this.flushPendingViewStatePush(),
-            DeckMapView.LIVE_CAMERA_SYNC_INTERVAL_MS
-        );
+        this.liveCameraSyncRaf = window.requestAnimationFrame(() => {
+            this.liveCameraSyncRaf = null;
+            if (!this.isCameraInteracting || !this.liveCameraSyncEnabled()) {
+                return;
+            }
+            const groundCentered = this.groundCenteredViewState(this.viewState);
+            this.mapViewState.publishLiveCameraViewState(
+                this._viewIndex,
+                this.cameraViewData(groundCentered)
+            );
+        });
     }
 
     /** Publishes the newest local camera state after interaction settles. */
     private flushPendingViewStatePush(force = false): void {
-        if (this.cameraStatePushTimer !== null) {
-            clearTimeout(this.cameraStatePushTimer);
-            this.cameraStatePushTimer = null;
-        }
+        this.cancelLiveCameraSyncScheduling();
         if (!force && !this.cameraStatePushPending) {
             return;
         }
@@ -2485,11 +2496,37 @@ export abstract class DeckMapView implements IRenderView {
         this.pushViewStateToAppState();
     }
 
-    /** Retains bounded live camera motion only when another view consumes it. */
+    /** Cancels a renderer-local camera preview that has not reached the next frame yet. */
+    private cancelLiveCameraSyncScheduling(): void {
+        if (this.liveCameraSyncRaf === null) {
+            return;
+        }
+        window.cancelAnimationFrame(this.liveCameraSyncRaf);
+        this.liveCameraSyncRaf = null;
+    }
+
+    /** Retains renderer-local live camera motion only when another view consumes it. */
     private liveCameraSyncEnabled(): boolean {
         return this.stateService.numViews > 1 &&
             (this.stateService.viewSync.includes(VIEW_SYNC_POSITION) ||
                 this.stateService.viewSync.includes(VIEW_SYNC_MOVEMENT));
+    }
+
+    /** Converts one Deck camera pose into the renderer-neutral synchronization model. */
+    private cameraViewData(state: DeckCameraState): CameraViewState {
+        return {
+            destination: {
+                lon: state.longitude,
+                lat: state.latitude,
+                alt: this.zoomToAltitude(state.zoom, state.latitude)
+            },
+            orientation: {
+                heading: GeoMath.toRadians(state.bearing),
+                pitch: GeoMath.toRadians(state.pitch - 90),
+                roll: 0
+            },
+            position: [...state.position]
+        };
     }
 
     /** Builds the deck controller options from the current view mode and persisted zoom-speed preference. */

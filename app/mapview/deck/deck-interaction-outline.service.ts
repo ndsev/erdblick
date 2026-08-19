@@ -6,13 +6,14 @@ import {
     type PreRenderOptions,
     _LayersPass as LayersPass
 } from "@deck.gl/core";
-import type {Framebuffer, Texture} from "@luma.gl/core";
+import type {Framebuffer, RenderPipelineParameters, Texture} from "@luma.gl/core";
 import {ClipSpace} from "@luma.gl/engine";
 import type {ShaderModule} from "@luma.gl/shadertools";
 import type {DeckInteractionEffect, DeckRgba} from "./deck-interaction-effect";
 import {DeckLayerRegistry} from "./deck-layer-registry";
 
 const MASK_LAYER_PREFIX = "builtin/interaction-mask/";
+const HALO_LAYER_PREFIX = "builtin/interaction-halo/";
 const SCREEN_LAYER_PREFIX = "builtin/interaction-outline/";
 const MAX_BLUR_RADIUS_PX = 12;
 const GAUSSIAN_SAMPLE_EXTENT = 3.2307692308;
@@ -65,7 +66,12 @@ interface OutlineLayerState {
 type OutlineLayerProps = LayerProps & {
     groupId: string;
     service: DeckInteractionOutlineService;
+    haloOnly: boolean;
 };
+
+interface OutlinePhaseShaderProps {
+    haloOnly: number;
+}
 
 const outlineShaderModule = {
     name: "interactionOutline",
@@ -114,6 +120,51 @@ uniform interactionOutlineUniforms {
         hasStripe: "f32"
     }
 } as const satisfies ShaderModule<OutlineShaderProps>;
+
+const outlinePhaseShaderModule = {
+    name: "interactionOutlinePhase",
+    fs: `\
+uniform interactionOutlinePhaseUniforms {
+  float haloOnly;
+} interactionOutlinePhase;
+`,
+    uniformTypes: {
+        haloOnly: "f32"
+    }
+} as const satisfies ShaderModule<OutlinePhaseShaderProps>;
+
+const SOURCE_OVER_PARAMETERS: RenderPipelineParameters = {
+    depthWriteEnabled: false,
+    depthCompare: "always",
+    cullMode: "none",
+    blend: true,
+    blendColorOperation: "add",
+    blendColorSrcFactor: "one",
+    blendColorDstFactor: "one-minus-src-alpha",
+    blendAlphaOperation: "add",
+    blendAlphaSrcFactor: "one",
+    blendAlphaDstFactor: "one-minus-src-alpha"
+};
+
+const DESTINATION_OVER_PARAMETERS: RenderPipelineParameters = {
+    depthWriteEnabled: false,
+    depthCompare: "always",
+    cullMode: "none",
+    blend: true,
+    blendColorOperation: "add",
+    blendColorSrcFactor: "one-minus-dst-alpha",
+    blendColorDstFactor: "one",
+    blendAlphaOperation: "add",
+    blendAlphaSrcFactor: "one-minus-dst-alpha",
+    blendAlphaDstFactor: "one"
+};
+
+/** Select the premultiplied Porter-Duff operator for one compositor phase. */
+export function deckInteractionOutlineBlendParameters(
+    haloOnly: boolean
+): RenderPipelineParameters {
+    return haloOnly ? DESTINATION_OVER_PARAMETERS : SOURCE_OVER_PARAMETERS;
+}
 
 interface BlurShaderProps {
     haloSampleStep: [number, number];
@@ -263,6 +314,7 @@ void interaction_over(
 void main(void) {
   ivec4 centerId = interaction_object_id(coordinate);
   bool centerHasObject = interaction_has_object(centerId);
+  bool haloOnly = interactionOutlinePhase.haloOnly > 0.5;
   vec3 softFields = texture(interactionBlurTexture, coordinate).rgb;
   float softCoverage = softFields.r;
   float softHaloBoundary = softFields.g;
@@ -276,7 +328,12 @@ void main(void) {
     semanticEdgeThreshold + edgeBoundaryAa,
     softEdgeBoundary);
 
-  if (centerHasObject) {
+  bool styleGlowOnly = interactionOutline.hasHalo > 0.5 &&
+    interactionOutline.hasInteriorHalo < 0.5 &&
+    interactionOutline.hasTint < 0.5 &&
+    interactionOutline.hasStripe < 0.5;
+
+  if (centerHasObject && !(haloOnly && styleGlowOnly)) {
     float stableInterior = smoothstep(0.9, 0.99, softCoverage);
     vec3 rgb = vec3(0.0);
     float alpha = 0.0;
@@ -353,7 +410,7 @@ void main(void) {
   // The near part of the continuous field extends the tint through the
   // silhouette by a fractional pixel. The rest is one smooth shadow/glow.
   float borderSignal = edgeSignal;
-  float borderAlpha = interactionOutline.hasTint > 0.5
+  float borderAlpha = !haloOnly && interactionOutline.hasTint > 0.5
     ? borderSignal
       * interactionOutline.tintMix
       * interactionOutline.tintColor.a
@@ -365,9 +422,15 @@ void main(void) {
   float haloSignal = interactionOutline.hasInteriorHalo > 0.5
     ? smoothstep(0.001, 0.24, softHaloBoundary)
     : clamp(softHaloBoundary * 2.0, 0.0, 1.0);
-  float haloAlpha = interactionOutline.hasHalo > 0.5
+  // Only an interaction tint needs a reserved antialiased edge band. Authored
+  // style glows have no foreground fill for that band; carving it out would
+  // leave a transparent moat between the source geometry and its own glow.
+  float haloEdgeFactor = interactionOutline.hasTint > 0.5
+    ? 1.0 - smoothstep(0.0, 0.85, borderSignal)
+    : 1.0;
+  float haloAlpha = haloOnly && interactionOutline.hasHalo > 0.5
     ? haloSignal
-      * (1.0 - smoothstep(0.0, 0.85, borderSignal))
+      * haloEdgeFactor
       * interactionOutline.haloColor.a
       * interactionOutline.haloOpacity
       * interactionOutline.opacity
@@ -487,19 +550,8 @@ class DeckInteractionOutlineLayer extends Layer<Required<OutlineLayerProps>> {
         const model = new ClipSpace(this.context.device, {
             id: String(this.props.id),
             fs: OUTLINE_FRAGMENT_SHADER,
-            modules: [outlineShaderModule],
-            parameters: {
-                depthWriteEnabled: false,
-                depthCompare: "always",
-                cullMode: "none",
-                blend: true,
-                blendColorOperation: "add",
-                blendColorSrcFactor: "one",
-                blendColorDstFactor: "one-minus-src-alpha",
-                blendAlphaOperation: "add",
-                blendAlphaSrcFactor: "one",
-                blendAlphaDstFactor: "one-minus-src-alpha"
-            }
+            modules: [outlineShaderModule, outlinePhaseShaderModule],
+            parameters: deckInteractionOutlineBlendParameters(this.props.haloOnly)
         });
         this.setState({model} satisfies OutlineLayerState);
     }
@@ -531,7 +583,12 @@ class DeckInteractionOutlineLayer extends Layer<Required<OutlineLayerProps>> {
             interactionIdentityTexture: input.identityTexture,
             interactionBlurTexture: input.blurTexture
         });
-        model.shaderInputs.setProps({interactionOutline: input.uniforms});
+        model.shaderInputs.setProps({
+            interactionOutline: input.uniforms,
+            interactionOutlinePhase: {
+                haloOnly: this.props.haloOnly ? 1 : 0
+            }
+        });
         if (!model.draw(renderPass as never)) {
             this.setNeedsRedraw();
         }
@@ -611,7 +668,7 @@ export class DeckInteractionOutlineService implements Effect {
         const group = this.ensureGroup(groupId, effect, order);
         group.stripeAnchor = [...stripeAnchor];
         if (group.maskLayerKeys.size > 0) {
-            this.upsertScreenLayer(groupId, order);
+            this.upsertScreenLayers(groupId, group);
         }
     }
 
@@ -629,7 +686,7 @@ export class DeckInteractionOutlineService implements Effect {
         const layerKey = maskLayerKey(groupId, sourceId);
         group.maskLayerKeys.set(sourceId, layerKey);
         this.layerRegistry.upsert(layerKey, buildLayer(layerKey), -100_000);
-        this.upsertScreenLayer(groupId, order);
+        this.upsertScreenLayers(groupId, group);
     }
 
     /** Removes one visualization's mask and releases the whole group once it becomes empty. */
@@ -646,6 +703,7 @@ export class DeckInteractionOutlineService implements Effect {
         this.layerRegistry.remove(layerKey);
         if (group.maskLayerKeys.size === 0) {
             this.layerRegistry.remove(screenLayerKey(groupId));
+            this.layerRegistry.remove(haloLayerKey(groupId));
             this.destroyGroup(groupId, group);
         }
         return true;
@@ -767,15 +825,37 @@ export class DeckInteractionOutlineService implements Effect {
         return group;
     }
 
-    /** Publish the fullscreen compositor at the group's current authored order. */
-    private upsertScreenLayer(groupId: string, order: number): void {
+    /**
+     * Publish the halo behind the existing framebuffer and foreground deltas above it.
+     * Both passes stay at the authored order; their blend operators, not a redraw of
+     * later geometry, establish the compositing relationship.
+     */
+    private upsertScreenLayers(groupId: string, group: OutlineGroup): void {
+        const haloKey = haloLayerKey(groupId);
+        if (hasExteriorHalo(group.effect)) {
+            this.layerRegistry.upsert(haloKey, new DeckInteractionOutlineLayer({
+                id: haloKey,
+                groupId,
+                service: this,
+                haloOnly: true,
+                pickable: false
+            }), group.order);
+        } else {
+            this.layerRegistry.remove(haloKey);
+        }
+
         const screenKey = screenLayerKey(groupId);
-        this.layerRegistry.upsert(screenKey, new DeckInteractionOutlineLayer({
-            id: screenKey,
-            groupId,
-            service: this,
-            pickable: false
-        }), order);
+        if (hasForegroundMaterial(group.effect)) {
+            this.layerRegistry.upsert(screenKey, new DeckInteractionOutlineLayer({
+                id: screenKey,
+                groupId,
+                service: this,
+                haloOnly: false,
+                pickable: false
+            }), group.order);
+        } else {
+            this.layerRegistry.remove(screenKey);
+        }
     }
 
     /** Lazily allocate and resize full-resolution identity and blur targets. */
@@ -979,6 +1059,29 @@ function maskLayerKey(groupId: string, sourceId: string): string {
 /** Build the stable registry key for one group's fullscreen compositor. */
 function screenLayerKey(groupId: string): string {
     return `${SCREEN_LAYER_PREFIX}${encodeURIComponent(groupId)}`;
+}
+
+/** Build the stable registry key for one destination-over halo pass. */
+function haloLayerKey(groupId: string): string {
+    return `${HALO_LAYER_PREFIX}${encodeURIComponent(groupId)}`;
+}
+
+/** Return whether an effect contributes a non-empty exterior halo. */
+function hasExteriorHalo(effect: DeckInteractionEffect): boolean {
+    return Boolean(effect.haloColor && effect.haloColor[3] > 0 &&
+        effect.haloRadius > 0 && effect.haloOpacity > 0 && effect.opacity > 0);
+}
+
+/** Return whether an effect contributes tint, hatch, or a semantic inner halo. */
+function hasForegroundMaterial(effect: DeckInteractionEffect): boolean {
+    const tint = Boolean(effect.tint && effect.tint[3] > 0 &&
+        effect.tintMix > 0 && effect.opacity > 0);
+    const stripeColor = effect.stripeColor ?? effect.tint;
+    const stripe = Boolean(stripeColor && stripeColor[3] > 0 &&
+        effect.stripeSpacing > 0 && effect.stripeWidth > 0 &&
+        effect.stripeOpacity > 0 && effect.opacity > 0);
+    const interiorHalo = effect.interiorHalo !== false && hasExteriorHalo(effect);
+    return tint || stripe || interiorHalo;
 }
 
 /** Convert optional byte RGBA into shader-ready normalized channels. */

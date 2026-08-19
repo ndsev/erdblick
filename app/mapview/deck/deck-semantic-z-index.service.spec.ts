@@ -2,12 +2,21 @@ import {describe, expect, it, vi} from "vitest";
 
 import {
     DeckSemanticZIndexService,
+    SEMANTIC_COMPOSITE_DEPTH_BIAS,
     isSemanticZIndexPassLayer,
     isSemanticZIndexPickingLayer
 } from "./deck-semantic-z-index.service";
-import {ErdblickVectorRenderMode} from "./erdblick-vector.layer";
+import {
+    ErdblickVectorRenderMode,
+    VECTOR_POLYGON_OFFSET_DEPTH_UNITS
+} from "./erdblick-vector.layer";
 
 describe("DeckSemanticZIndexService", () => {
+    it("retains the established fixed-depth clearance above support surfaces", () => {
+        expect(SEMANTIC_COMPOSITE_DEPTH_BIAS * 0x00ff_ffff)
+            .toBe(VECTOR_POLYGON_OFFSET_DEPTH_UNITS);
+    });
+
     it("registers a pick-only compositor backed by the semantic overlay source", () => {
         const registry = {
             upsert: vi.fn(),

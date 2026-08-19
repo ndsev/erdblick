@@ -1,4 +1,5 @@
 import {
+    ChangeDetectionStrategy,
     Component,
     EventEmitter,
     Input,
@@ -31,6 +32,7 @@ import type {QuickStyleWarning} from "./search-style-sheet.converter";
 /** Search-independent editor UI for canonical high-fidelity search style rules. */
 @Component({
     selector: "search-style-rule-editor",
+    changeDetection: ChangeDetectionStrategy.OnPush,
     template: `
         <div class="feature-search-style-rule-editor">
             @if (showAddButton) {

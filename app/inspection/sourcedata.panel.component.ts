@@ -1,4 +1,12 @@
-import {Component, output, input, effect, ViewChild, OnDestroy} from "@angular/core";
+import {
+    ChangeDetectorRef,
+    Component,
+    effect,
+    input,
+    OnDestroy,
+    output,
+    ViewChild
+} from "@angular/core";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {TreeTableNode} from "primeng/api";
@@ -104,7 +112,8 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
 
     constructor(private mapService: MapInfoService,
                 public stateService: AppStateService,
-                private tileStream: MapTileStreamService) {
+                private tileStream: MapTileStreamService,
+                private readonly cdr: ChangeDetectorRef) {
         effect(() => {
             const sourceData = this.panel().sourceData;
             const revision = ++this.loadRevision;
@@ -198,6 +207,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             loaded?.layer.delete();
             if (revision === this.loadRevision) {
                 this.loading = false;
+                this.cdr.markForCheck();
             }
         }
     }

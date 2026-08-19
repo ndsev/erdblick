@@ -73,15 +73,21 @@ interface MaskRegistration {
 class FakeOutlineService {
   readonly masks = new Map<string, MaskRegistration>();
   readonly removals: string[] = [];
+  readonly configurations = new Map<
+    string,
+    { order: number }
+  >();
   private nextIdentity = 1;
 
   /** Accept dynamic compositor metadata just like the production service. */
   configureGroup(
-    _groupId: string,
+    groupId: string,
     _effect: DeckInteractionEffect,
-    _order: number,
+    order: number,
     _stripeAnchor: [number, number, number],
-  ): void {}
+  ): void {
+    this.configurations.set(groupId, { order });
+  }
 
   /** Return a stable nonzero color for one semantic identity. */
   identityColor(
@@ -215,6 +221,9 @@ describe("GpuSceneMaskController", () => {
     flush();
 
     expect(outline.masks.size).toBe(1);
+    expect(outline.configurations.get("gpu-interaction/selection")).toEqual({
+      order: 11,
+    });
     expect([...outline.masks.values()].map((mask) => mask.sourceId)).toEqual([
       "scene-vector",
     ]);
@@ -251,14 +260,17 @@ describe("GpuSceneMaskController", () => {
     expect(device.textures[0].destroyed).toBe(true);
   });
 
-  it("groups equal style glows and filters their union by material key", () => {
+  it("groups equal style glows behind the completed vector framebuffer", () => {
     const device = new FakeDevice();
     const scene = new FakeScene();
     const outline = new FakeOutlineService();
-    const material = (materialKey: bigint): GpuSceneMaterialStore => ({
+    const material = (
+      materialKey: bigint,
+      styleOrder: number,
+    ): GpuSceneMaterialStore => ({
       kind: 1,
       flags: 0,
-      styleOrder: 0,
+      styleOrder,
       renderOrder: 0,
       glowColor: [255, 32, 16, 255],
       glowRadius: 4,
@@ -268,7 +280,7 @@ describe("GpuSceneMaskController", () => {
         activeRecordCount: 3,
       } as GpuSceneMaterialStore["store"],
     });
-    scene.materials = [material(1n), material(2n)];
+    scene.materials = [material(1n, 7), material(2n, 7), material(3n, 2)];
     scene.pickingHighWater = 1_000_000;
     const controller = new GpuSceneMaskController(
       device as unknown as Device,
@@ -281,6 +293,7 @@ describe("GpuSceneMaskController", () => {
     flush();
 
     expect(outline.masks.size).toBe(1);
+    expect([...outline.configurations.values()]).toContainEqual({order: 401});
     const vector = [...outline.masks.values()].find(
       (mask) => mask.sourceId === "scene-vector",
     )!.layer as ErdblickVectorMaskLayer;
@@ -293,7 +306,7 @@ describe("GpuSceneMaskController", () => {
       }
     ).configuration;
     expect(configuration.mode).toBe(GpuSceneMaskMode.Union);
-    expect(configuration.materialKeys).toEqual(new Set([1n, 2n]));
+    expect(configuration.materialKeys).toEqual(new Set([1n, 2n, 3n]));
     expect(device.textures[0].height).toBe(1);
     controller.destroy();
     expect(outline.masks.size).toBe(0);

@@ -2,7 +2,14 @@ import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {coreLib} from "../integrations/wasm";
-import {AppStateService, TileGridMode, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
+import {
+    AppStateService,
+    CameraViewState,
+    TileGridMode,
+    VIEW_SYNC_LAYERS,
+    VIEW_SYNC_MOVEMENT,
+    VIEW_SYNC_POSITION
+} from "../shared/appstate.service";
 import {RenderRectangle} from "./render-view.model";
 import {ViewVisualizationState} from "./view.visualization.model";
 import {Viewport} from "../../build/libs/core/erdblick-core";
@@ -28,6 +35,13 @@ export enum ViewRecalculationReason {
     Visibility = "visibility"
 }
 
+/** One renderer-local camera preview routed from the focused view to a sibling. */
+export interface LiveCameraViewStateUpdate {
+    sourceView: number;
+    targetView: number;
+    cameraViewData: CameraViewState;
+}
+
 /**
  * Owns camera/view state and the unified per-view `ViewVisualizationState` instances.
  */
@@ -40,6 +54,7 @@ export class MapViewStateService {
     readonly moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number, z?: number }>();
     readonly moveToRectangleTopic = new Subject<{ targetView: number, rectangle: RenderRectangle }>();
     readonly showLocationLabelTopic = new Subject<{ targetView: number, x: number, y: number, label: string }>();
+    readonly liveCameraViewStateTopic = new Subject<LiveCameraViewStateUpdate>();
     readonly viewVisualizationState: ViewVisualizationState[] = [];
 
     constructor(
@@ -67,6 +82,51 @@ export class MapViewStateService {
     /** Returns the mutable visualization state for one view, if it exists. */
     viewStateFor(viewIndex: number): ViewVisualizationState | undefined {
         return this.viewVisualizationState[viewIndex];
+    }
+
+    /**
+     * Routes a transient camera pose to synchronized sibling renderers without
+     * touching persisted AppState, storage, URL state, or Angular-bound consumers.
+     */
+    publishLiveCameraViewState(sourceView: number, sourceState: CameraViewState): void {
+        if (this.stateService.numViews < 2 ||
+            sourceView !== this.stateService.focusedView ||
+            sourceView < 0 || sourceView >= this.stateService.numViews) {
+            return;
+        }
+
+        const syncPosition = this.stateService.viewSync.includes(VIEW_SYNC_POSITION);
+        const syncMovement = this.stateService.viewSync.includes(VIEW_SYNC_MOVEMENT);
+        if (!syncPosition && !syncMovement) {
+            return;
+        }
+
+        const persistedSource = this.stateService.cameraViewDataState.getValue(sourceView);
+        const longitudeDelta = sourceState.destination.lon - persistedSource.destination.lon;
+        const latitudeDelta = sourceState.destination.lat - persistedSource.destination.lat;
+
+        for (let targetView = 0; targetView < this.stateService.numViews; targetView++) {
+            if (targetView === sourceView) {
+                continue;
+            }
+            const targetState = this.stateService.cameraViewDataState.getValue(targetView);
+            const cameraViewData: CameraViewState = syncPosition
+                ? {
+                    destination: {...sourceState.destination},
+                    orientation: {...sourceState.orientation},
+                    position: [...(sourceState.position ?? [0, 0, 0])]
+                }
+                : {
+                    destination: {
+                        lon: targetState.destination.lon + longitudeDelta,
+                        lat: targetState.destination.lat + latitudeDelta,
+                        alt: targetState.destination.alt
+                    },
+                    orientation: {...targetState.orientation},
+                    position: [...(targetState.position ?? [0, 0, 0])]
+                };
+            this.liveCameraViewStateTopic.next({sourceView, targetView, cameraViewData});
+        }
     }
 
     /** Updates one view's viewport snapshot and schedules dependent stream/render refreshes. */

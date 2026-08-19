@@ -1,4 +1,11 @@
-import {Component, ElementRef, OnDestroy, Renderer2, ViewChild} from "@angular/core";
+import {
+    ChangeDetectorRef,
+    Component,
+    ElementRef,
+    OnDestroy,
+    Renderer2,
+    ViewChild
+} from "@angular/core";
 import {InspectionSelectionService} from "./inspection-selection.service";
 import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
@@ -60,7 +67,8 @@ export class InspectionContainerComponent implements OnDestroy {
 
     constructor(private stateService: AppStateService,
                 private mapService: InspectionSelectionService,
-                private renderer: Renderer2) {
+                private renderer: Renderer2,
+                private readonly cdr: ChangeDetectorRef) {
         this.dockDrag = new DockedPanelDragController<number>({
             renderer: this.renderer,
             baseFontSize: () => this.stateService.baseFontSize,
@@ -90,6 +98,10 @@ export class InspectionContainerComponent implements OnDestroy {
                 this.stateService.hasDockedSurface();
             this.stateService.isDockOpen = this.stateService.isDockOpen &&
                 (!this.stateService.isDockAutoCollapsible || hasDockedPanels);
+            // Angular 21 bootstraps NgModules with zoneless change detection.
+            // RxJS emissions therefore need an explicit render notification;
+            // NgZone.run() in the publisher is not one.
+            this.cdr.markForCheck();
         }));
     }
 

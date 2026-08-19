@@ -405,8 +405,12 @@ function semanticRole(flags: number): number {
 /** Neutralize Deck's layer-index bias because scene materials own depth ordering. */
 export const NO_POLYGON_OFFSET = () => [0, 0] as [number, number];
 
+/** Fixed-depth component of the established coplanar vector polygon offset. */
+export const VECTOR_POLYGON_OFFSET_DEPTH_UNITS = 80;
+
 /** Pull vector triangles over supporting surfaces with slope-aware hardware depth bias. */
-export const VECTOR_POLYGON_OFFSET = () => [-2, -80] as [number, number];
+export const VECTOR_POLYGON_OFFSET = () =>
+  [-2, -VECTOR_POLYGON_OFFSET_DEPTH_UNITS] as [number, number];
 
 /** Builds the immutable six-vertex mesh expanded into one path segment. */
 function pathGeometry(): Geometry {

@@ -3,6 +3,7 @@ import {DeckLayerRegistry} from "./deck-layer-registry";
 import {
     DeckInteractionOutlineService,
     deckInteractionHaloUsesCoverage,
+    deckInteractionOutlineBlendParameters,
     deckInteractionOutlineUniforms,
     deckInteractionStripeOrigin,
     isDeckInteractionMaskLayer
@@ -101,6 +102,53 @@ describe("DeckInteractionOutlineService", () => {
             .toBe(0);
         expect(deckInteractionHaloUsesCoverage(styleGlow)).toBe(true);
         expect(deckInteractionHaloUsesCoverage(effect)).toBe(false);
+    });
+
+    it("places halo behind destination pixels and foreground deltas above them", () => {
+        expect(deckInteractionOutlineBlendParameters(true)).toMatchObject({
+            blendColorSrcFactor: "one-minus-dst-alpha",
+            blendColorDstFactor: "one",
+            blendAlphaSrcFactor: "one-minus-dst-alpha",
+            blendAlphaDstFactor: "one"
+        });
+        expect(deckInteractionOutlineBlendParameters(false)).toMatchObject({
+            blendColorSrcFactor: "one",
+            blendColorDstFactor: "one-minus-src-alpha",
+            blendAlphaSrcFactor: "one",
+            blendAlphaDstFactor: "one-minus-src-alpha"
+        });
+    });
+
+    it("publishes halo and foreground phases at one authored paint order", () => {
+        const setProps = vi.fn();
+        const registry = new DeckLayerRegistry(
+            {setProps} as never,
+            () => 1,
+            () => undefined
+        );
+        const service = new DeckInteractionOutlineService(registry);
+        service.upsertMask(
+            "selection",
+            "scene-vector",
+            effect,
+            2_001,
+            [11, 48, 0],
+            id => ({id} as never)
+        );
+
+        registry.flush();
+
+        const layers = setProps.mock.calls.at(-1)?.[0].layers as Array<{
+            id: string;
+            props?: {haloOnly?: boolean};
+        }>;
+        expect(layers.map(layer => layer.id)).toEqual([
+            "builtin/interaction-mask/selection/scene-vector",
+            "builtin/interaction-halo/selection",
+            "builtin/interaction-outline/selection"
+        ]);
+        expect(layers[1].props?.haloOnly).toBe(true);
+        expect(layers[2].props?.haloOnly).toBe(false);
     });
 
     it("allocates stable, distinct non-zero identities within one group", () => {
