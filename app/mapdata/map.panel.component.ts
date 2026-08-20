@@ -393,6 +393,7 @@ const MAP_FILTER_DELAY_MS = 300;
                                             </p-listbox>
                                         </p-popover>
                                         <div class="flex-container map-tree-row"
+                                             [class.has-map-presets]="node.mapPresets.length > 0"
                                              [ngClass]="{'has-datasource-status': dataSourceStatus(node.info) !== 'ready'}">
                                             <span class="checkbox-entry map-tree-title">
                                                 @if (dataSourceStatus(node.info) !== 'ready') {

@@ -34,6 +34,25 @@ test.describe('Style feedback workflows', () => {
         await saveStyle.click();
         const saveDialog = page.getByTestId('search-style-save-dialog');
         await expect(saveDialog).toBeVisible();
+        const saveDialogShell = page.locator('.p-dialog.app-dialog-compact.search-style-save-dialog').first();
+        await expect(saveDialogShell).toBeVisible();
+        const saveDialogSpacing = await saveDialogShell.evaluate(element => {
+            const header = element.querySelector(':scope > .p-dialog-header');
+            const content = element.querySelector(':scope > .p-dialog-content');
+            if (!(header instanceof HTMLElement) || !(content instanceof HTMLElement)) {
+                throw new Error('Expected direct PrimeNG dialog header and content children');
+            }
+            const headerStyle = getComputedStyle(header);
+            const contentStyle = getComputedStyle(content);
+            return {
+                headerPaddingTop: Number.parseFloat(headerStyle.paddingTop),
+                headerFontSize: Number.parseFloat(headerStyle.fontSize),
+                contentPaddingTop: Number.parseFloat(contentStyle.paddingTop),
+                contentFontSize: Number.parseFloat(contentStyle.fontSize)
+            };
+        });
+        expect(saveDialogSpacing.headerPaddingTop / saveDialogSpacing.headerFontSize).toBeCloseTo(0.75, 2);
+        expect(saveDialogSpacing.contentPaddingTop / saveDialogSpacing.contentFontSize).toBeCloseTo(0.5, 2);
         const enabled = saveDialog.getByTestId('search-style-save-enabled').locator('input');
         await expect(enabled).toBeChecked();
         await saveDialog.getByTestId('search-style-save-name').fill('Playwright/Plain Save');
@@ -87,5 +106,21 @@ test.describe('Style feedback workflows', () => {
             .toHaveValue('Playwright/Save and Open');
         await expect(editor.getByTestId('style-editor-quick-layers')).toBeVisible();
         await expect(editor.getByTestId('style-editor-enabled').locator('input')).not.toBeChecked();
+        const editorTabs = editor.locator('.style-editor-tabs .p-tab');
+        await expect(editorTabs).toHaveCount(2);
+        const tabSpacing = await editorTabs.evaluateAll(elements => elements.map(element => {
+            const style = getComputedStyle(element);
+            const fontSize = Number.parseFloat(style.fontSize);
+            return {
+                blockRatio: Number.parseFloat(style.paddingTop) / fontSize,
+                inlineRatio: Number.parseFloat(style.paddingLeft) / fontSize,
+                marginTop: Number.parseFloat(style.marginTop)
+            };
+        }));
+        for (const spacing of tabSpacing) {
+            expect(spacing.blockRatio).toBeCloseTo(0.25, 2);
+            expect(spacing.inlineRatio).toBeCloseTo(1, 2);
+            expect(spacing.marginTop).toBe(0);
+        }
     });
 });

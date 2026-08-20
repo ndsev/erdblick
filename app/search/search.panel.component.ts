@@ -73,6 +73,17 @@ interface ParsedNdsCoordinateLabel {
     level?: number;
 }
 
+interface SearchResizeSession {
+    pointerId: number;
+    startPointerX: number;
+    startWidth: number;
+    minWidth: number;
+    maxWidth: number;
+    handle: HTMLElement;
+    bodyCursor: string;
+    bodyUserSelect: string;
+}
+
 @Component({
     selector: 'search-panel',
     template: `
@@ -164,6 +175,18 @@ interface ParsedNdsCoordinateLabel {
                         </div>
                     </div>
                 </app-dialog>
+                @if (searchService.showFeatureSearchDialog) {
+                    <div class="app-resize-handle app-resize-handle-se app-resize-horizontal search-resize-handle"
+                         data-testid="search-resize-handle"
+                         aria-hidden="true"
+                         [style.z-index]="searchResizeHandleZIndex"
+                         (pointerdown)="beginSearchResize($event)"
+                         (pointermove)="continueSearchResize($event)"
+                         (pointerup)="finishSearchResize($event)"
+                         (pointercancel)="finishSearchResize($event)"
+                         (lostpointercapture)="finishSearchResize($event)">
+                    </div>
+                }
             </div>
         </div>
         
@@ -183,6 +206,7 @@ interface ParsedNdsCoordinateLabel {
 export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 130000;
     readonly searchActionsBaseZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX;
+    readonly searchResizeHandleZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 1000;
 
     searchItems: Array<SearchTarget> = [];
     private locationSearchItems: Array<SearchTarget> = [];
@@ -218,12 +242,14 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     private acceptedCompletionCandidate: CompletionCandidate | null = null;
     private dismissedCompletionSignature: string | null = null;
     private destroyed = false;
+    private searchResizeSession?: SearchResizeSession;
 
     mapSelectionVisible: boolean = false;
     mapSelection: Array<string> = [];
 
     @ViewChild('textarea') textarea!: ElementRef<HTMLTextAreaElement>;
     @ViewChild('actionsdialog') dialog!: AppDialogComponent;
+    @ViewChild('searchcontrols') private searchControls?: ElementRef<HTMLElement>;
 
     cursorPosition: number = 0;
 
@@ -537,10 +563,90 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     /** Releases subscriptions and global shortcuts when the responsive shell replaces the panel. */
     ngOnDestroy() {
         this.destroyed = true;
+        this.cancelSearchResize();
         this.keyboardService.unregisterShortcut("Ctrl+k", this.searchShortcutHandler);
         this.subscriptions.unsubscribe();
         this.searchInputChanged.complete();
         this.locationSearchQueryChanged.complete();
+    }
+
+    /** Starts a pointer-captured, width-only resize of the search actions pane. */
+    protected beginSearchResize(event: PointerEvent): void {
+        if (event.button !== 0 || this.searchResizeSession) {
+            return;
+        }
+        const container = this.searchControls?.nativeElement;
+        const handle = event.currentTarget;
+        if (!container || !(handle instanceof HTMLElement)) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        const bounds = container.getBoundingClientRect();
+        const styles = getComputedStyle(container);
+        const viewportMaximum = Math.max(1, window.innerWidth - bounds.left);
+        const minimum = this.cssPixelValue(styles.minWidth, 1);
+        const maximum = Math.max(
+            minimum,
+            Math.min(this.cssPixelValue(styles.maxWidth, viewportMaximum), viewportMaximum)
+        );
+        const body = document.body;
+        this.searchResizeSession = {
+            pointerId: event.pointerId,
+            startPointerX: event.clientX,
+            startWidth: bounds.width,
+            minWidth: minimum,
+            maxWidth: maximum,
+            handle,
+            bodyCursor: body.style.cursor,
+            bodyUserSelect: body.style.userSelect
+        };
+        container.style.width = `${bounds.width}px`;
+        body.style.cursor = getComputedStyle(handle).cursor || 'col-resize';
+        body.style.userSelect = 'none';
+        handle.setPointerCapture(event.pointerId);
+    }
+
+    /** Updates the search pane width while its resize pointer remains captured. */
+    protected continueSearchResize(event: PointerEvent): void {
+        const session = this.searchResizeSession;
+        const container = this.searchControls?.nativeElement;
+        if (!session || !container || event.pointerId !== session.pointerId) {
+            return;
+        }
+        event.preventDefault();
+        const requestedWidth = session.startWidth + event.clientX - session.startPointerX;
+        const width = Math.min(session.maxWidth, Math.max(session.minWidth, requestedWidth));
+        container.style.width = `${width}px`;
+    }
+
+    /** Finishes search-pane resizing and restores page-level pointer styles. */
+    protected finishSearchResize(event: PointerEvent): void {
+        if (!this.searchResizeSession || event.pointerId !== this.searchResizeSession.pointerId) {
+            return;
+        }
+        this.cancelSearchResize();
+    }
+
+    /** Converts a computed CSS length to pixels, falling back for non-numeric values such as `none`. */
+    private cssPixelValue(value: string, fallback: number): number {
+        const parsed = Number.parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    /** Cancels any active search resize and releases its pointer capture. */
+    private cancelSearchResize(): void {
+        const session = this.searchResizeSession;
+        if (!session) {
+            return;
+        }
+        this.searchResizeSession = undefined;
+        if (session.handle.hasPointerCapture(session.pointerId)) {
+            session.handle.releasePointerCapture(session.pointerId);
+        }
+        document.body.style.cursor = session.bodyCursor;
+        document.body.style.userSelect = session.bodyUserSelect;
     }
 
     /** Executes a resolved omnibox action and closes the action dialog if it is currently available. */

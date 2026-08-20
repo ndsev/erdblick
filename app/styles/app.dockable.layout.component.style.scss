@@ -330,15 +330,9 @@
 
 .app-panel-stack.app-panel-resize-vertical .app-panel-content-resizable {
   border-bottom: solid 0.1em var(--p-form-field-border-color);
-  direction: rtl;
   max-height: calc(100vh - 6em);
   min-height: 15em;
   overflow: hidden;
   padding-bottom: 0.5em;
-  resize: vertical;
+  position: relative;
 }
-
-.app-panel-stack.app-panel-resize-vertical .app-panel-content-resizable > * {
-  direction: ltr;
-}
-

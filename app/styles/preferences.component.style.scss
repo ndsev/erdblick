@@ -247,6 +247,12 @@
     overflow: hidden;
     width: 100%;
 
+    .p-tab {
+      padding: 0.25em 1em;
+      margin: 0;
+      font-size: 0.9em;
+    }
+
     > .p-tablist {
       flex: 0 0 auto;
     }

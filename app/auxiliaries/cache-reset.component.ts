@@ -19,7 +19,7 @@ import {InfoMessageService} from "../shared/info.service";
     selector: "cache-reset-dialog",
     template: `
         <app-dialog header="Cache Reset"
-                    class="cache-reset-dialog"
+                    styleClass="app-dialog-compact cache-reset-dialog"
                     data-testid="cache-reset-dialog"
                     [(visible)]="dialogVisible"
                     [modal]="false"

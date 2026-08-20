@@ -31,7 +31,7 @@ export interface SearchStyleSaveRequest {
     selector: "search-style-save-dialog",
     template: `
         <app-dialog header="Save Search Style"
-                    styleClass="search-style-save-dialog"
+                    styleClass="app-dialog-compact search-style-save-dialog"
                     [style]="{width: '28rem', maxWidth: 'calc(100vw - 2rem)'}"
                     [modal]="true"
                     [resizable]="false"

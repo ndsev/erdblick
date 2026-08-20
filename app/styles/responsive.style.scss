@@ -76,8 +76,11 @@
       max-height: calc(100vh - 11.5em);;
       border-radius: 0;
       margin-left: -3em;
-      resize: none;
       left: 3em;
+    }
+
+    .search-resize-handle {
+      display: none;
     }
 
     .p-dialog {
