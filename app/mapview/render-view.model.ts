@@ -17,12 +17,21 @@ export interface RenderVector3 {
     z: number;
 }
 
+/** Semantic source of a physical navigation target. */
+export type RenderNavigationTargetOrigin =
+    | "feature"
+    | "path"
+    | "gltf-proxy"
+    | "ground"
+    | "unknown";
+
 /** Physical surface used as a 3D navigation or first-person camera target. */
 export interface RenderNavigationTarget {
     position: [longitude: number, latitude: number, altitude: number];
     /** Application identities represented by the surface; empty for ground or identity-less geometry. */
     featureIds: TileFeatureId[];
     surfaceNormal?: [east: number, north: number, up: number];
+    origin?: RenderNavigationTargetOrigin;
 }
 
 /** Logical feature result returned by bounded rendered-object picking operations. */

@@ -122,9 +122,8 @@ import {
     ErdblickMapView,
     isNavigationAnchorUsable,
     longitudeInNearestWorld,
-    constrainErdblickTargetNavigationViewState,
     viewStateKeepingAnchor,
-    viewStateKeepingSafeNavigationAnchor,
+    viewStateKeepingNavigationAnchor,
     viewStateWithGroundCenter
 } from "./navigation/web-mercator-feature-navigation";
 import {clippedGeographicBounds} from "./deck-viewport-coverage";
@@ -132,6 +131,7 @@ import {ErdblickTargetNavigationAdapter} from "./navigation/erdblick-target-navi
 import type {
     NavigationAnchor,
     NavigationSurfaceNormal,
+    NavigationTargetOrigin,
     NavigationVisualTarget
 } from "./navigation/feature-navigation.types";
 import {
@@ -357,10 +357,13 @@ export abstract class DeckMapView implements IRenderView {
     private isHoveringFeature = false;
     private hoverNavigationPivot: NavigationAnchor | null = null;
     private hoverNavigationSurfaceNormal: NavigationSurfaceNormal | null = null;
+    private hoverNavigationOrigin: NavigationTargetOrigin | null = null;
     private activeNavigationPivot: NavigationAnchor | null = null;
     private activeNavigationSurfaceNormal: NavigationSurfaceNormal | null = null;
+    private activeNavigationOrigin: NavigationTargetOrigin | null = null;
     private retainedNavigationPivot: NavigationAnchor | null = null;
     private retainedNavigationSurfaceNormal: NavigationSurfaceNormal | null = null;
+    private retainedNavigationOrigin: NavigationTargetOrigin | null = null;
     private readonly targetNavigationAdapter: ErdblickTargetNavigationAdapter;
     private firstPersonSession: FirstPersonSession | null = null;
     private hoverAnchorPickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -492,13 +495,16 @@ export abstract class DeckMapView implements IRenderView {
             resolveTarget: context =>
                 this.resolveControllerNavigationTarget(context),
             getRetainedTarget: () => this.retainedNavigationPivot
-                ? (this.retainedNavigationSurfaceNormal
-                    ? {
-                        position: this.retainedNavigationPivot,
-                        surfaceNormal: this.retainedNavigationSurfaceNormal
-                    }
-                    : {position: this.retainedNavigationPivot})
+                ? {
+                    position: this.retainedNavigationPivot,
+                    ...(this.retainedNavigationSurfaceNormal
+                        ? {surfaceNormal: this.retainedNavigationSurfaceNormal}
+                        : {}),
+                    origin: this.retainedNavigationOrigin ?? "unknown"
+                }
                 : null,
+            getMinimumTargetDistance: target =>
+                this.minimumTargetDistanceForOrigin(target.origin),
             onTargetChange: (target, active) =>
                 this.onControllerNavigationTargetChange(target, active)
         });
@@ -1151,10 +1157,10 @@ export abstract class DeckMapView implements IRenderView {
             layerIds.length ? layerIds : undefined
         );
         if (picked) {
-            const {position, surfaceNormal, value: featureIds} = picked;
+            const {position, surfaceNormal, origin, value: featureIds} = picked;
             return surfaceNormal
-                ? {position, surfaceNormal, featureIds}
-                : {position, featureIds};
+                ? {position, surfaceNormal, origin, featureIds}
+                : {position, origin, featureIds};
         }
         return undefined;
     }
@@ -1176,7 +1182,7 @@ export abstract class DeckMapView implements IRenderView {
         }
         const position: NavigationAnchor = [ground[0], ground[1], ground[2]];
         return isNavigationAnchorUsable(viewport, position, true)
-            ? {position}
+            ? {position, origin: "ground"}
             : null;
     }
 
@@ -1847,6 +1853,9 @@ export abstract class DeckMapView implements IRenderView {
         const surfaceNormal = this.activeNavigationPivot
             ? this.activeNavigationSurfaceNormal
             : this.hoverNavigationSurfaceNormal;
+        const origin = this.activeNavigationPivot
+            ? this.activeNavigationOrigin
+            : this.hoverNavigationOrigin;
         if (!this.allowPitchAndBearing || this.firstPersonSession || !position) {
             this.navigationTargetOverlay?.clear();
             return;
@@ -1857,7 +1866,11 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
         this.navigationTargetOverlay?.update(
-            surfaceNormal ? {position, surfaceNormal} : {position},
+            {
+                position,
+                ...(surfaceNormal ? {surfaceNormal} : {}),
+                origin: origin ?? "unknown"
+            },
             viewport,
             this.activeNavigationPivot ? "active" : "hover"
         );
@@ -1868,10 +1881,13 @@ export abstract class DeckMapView implements IRenderView {
         this.targetNavigationAdapter.reset(false);
         this.hoverNavigationPivot = null;
         this.hoverNavigationSurfaceNormal = null;
+        this.hoverNavigationOrigin = null;
         this.activeNavigationPivot = null;
         this.activeNavigationSurfaceNormal = null;
+        this.activeNavigationOrigin = null;
         this.retainedNavigationPivot = null;
         this.retainedNavigationSurfaceNormal = null;
+        this.retainedNavigationOrigin = null;
         this.updateNavigationPivotOverlay();
     }
 
@@ -1879,6 +1895,7 @@ export abstract class DeckMapView implements IRenderView {
     private setHoverNavigationPivot(target: NavigationVisualTarget | null): void {
         this.hoverNavigationPivot = target?.position ?? null;
         this.hoverNavigationSurfaceNormal = target?.surfaceNormal ?? null;
+        this.hoverNavigationOrigin = target?.origin ?? null;
         this.updateNavigationPivotOverlay();
     }
 
@@ -1903,12 +1920,16 @@ export abstract class DeckMapView implements IRenderView {
     ): void {
         const pivot = target.position;
         const surfaceNormal = target.surfaceNormal ?? null;
+        const origin = target.origin ?? "unknown";
         this.activeNavigationPivot = active ? [...pivot] : null;
         this.activeNavigationSurfaceNormal = active ? surfaceNormal : null;
+        this.activeNavigationOrigin = active ? origin : null;
         this.retainedNavigationPivot = [...pivot];
         this.retainedNavigationSurfaceNormal = surfaceNormal;
+        this.retainedNavigationOrigin = origin;
         this.hoverNavigationPivot = active ? null : [...pivot];
         this.hoverNavigationSurfaceNormal = active ? null : surfaceNormal;
+        this.hoverNavigationOrigin = active ? null : origin;
         this.updateNavigationPivotOverlay();
     }
 
@@ -1923,6 +1944,7 @@ export abstract class DeckMapView implements IRenderView {
             || interactionState.isRotating
             || interactionState.isZooming
             || interactionState.inTransition
+            || interactionState.interactionTargetPosition
         );
         if (cameraInteracting !== this.isCameraInteracting) {
             this.isCameraInteracting = cameraInteracting;
@@ -2549,9 +2571,7 @@ export abstract class DeckMapView implements IRenderView {
             scrollZoom: {speed: scrollZoomSpeed},
             _targetNavigation: true,
             getInteractionTarget: (context: Readonly<MapInteractionTargetContext>) =>
-                this.targetNavigationAdapter.resolveInteractionTarget(context),
-            constrainInteractionTargetViewState:
-                constrainErdblickTargetNavigationViewState
+                this.targetNavigationAdapter.resolveInteractionTarget(context)
         };
     }
 
@@ -4017,7 +4037,7 @@ export abstract class DeckMapView implements IRenderView {
     private commandNavigationAnchor(): {
         pivot: NavigationAnchor;
         pixel: [number, number];
-        feature: boolean;
+        origin: NavigationTargetOrigin;
     } | null {
         const viewport = this.createWebMercatorViewport();
         if (!viewport) {
@@ -4034,17 +4054,22 @@ export abstract class DeckMapView implements IRenderView {
                 return {
                     pivot: localPivot,
                     pixel: [projected[0], projected[1]],
-                    feature: true
+                    origin: this.retainedNavigationOrigin ?? "unknown"
                 };
             }
             this.retainedNavigationPivot = null;
             this.retainedNavigationSurfaceNormal = null;
+            this.retainedNavigationOrigin = null;
         }
         const centerPixel: [number, number] = [viewport.width / 2, viewport.height / 2];
         const centerFeature = this.pickNavigationTarget({x: centerPixel[0], y: centerPixel[1]});
         if (centerFeature) {
             this.onControllerNavigationTargetChange(centerFeature, false);
-            return {pivot: centerFeature.position, pixel: centerPixel, feature: true};
+            return {
+                pivot: centerFeature.position,
+                pixel: centerPixel,
+                origin: centerFeature.origin ?? "unknown"
+            };
         }
         const groundPosition = viewport.unproject(centerPixel, {targetZ: 0});
         if (groundPosition.length < 3 || !groundPosition.every(Number.isFinite)) {
@@ -4053,7 +4078,7 @@ export abstract class DeckMapView implements IRenderView {
         return {
             pivot: [groundPosition[0], groundPosition[1], groundPosition[2]],
             pixel: centerPixel,
-            feature: false
+            origin: "ground"
         };
     }
 
@@ -4072,15 +4097,16 @@ export abstract class DeckMapView implements IRenderView {
                     anchor.pixel[0] + pixelOffset[0],
                     anchor.pixel[1] + pixelOffset[1]
                 ];
-                anchoredState = anchor.feature
-                    ? viewStateKeepingSafeNavigationAnchor(
+                anchoredState = this.isFeatureNavigationOrigin(anchor.origin)
+                    ? viewStateKeepingNavigationAnchor(
                         this.viewState,
                         sanitizedNext,
                         anchor.pivot,
                         targetPixel,
                         viewport.width,
                         viewport.height,
-                        this.useOrthographicProjection
+                        this.useOrthographicProjection,
+                        this.stateService.featureZoomClearanceMeters
                     )
                     : viewStateKeepingAnchor(
                         sanitizedNext,
@@ -4094,6 +4120,22 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.updateViewState(anchoredState, true, true);
         this.pushViewStateToAppState();
+    }
+
+    /** Returns whether a semantic target is an actual rendered feature rather than ground. */
+    private isFeatureNavigationOrigin(origin: NavigationTargetOrigin | undefined): boolean {
+        return origin === "feature" || origin === "path" || origin === "gltf-proxy";
+    }
+
+    /** Samples the current feature clearance once when deck.gl acquires a target session. */
+    private minimumTargetDistanceForOrigin(
+        origin: NavigationTargetOrigin | undefined
+    ): number | undefined {
+        if (!this.isFeatureNavigationOrigin(origin)) {
+            return undefined;
+        }
+        const clearance = this.stateService.featureZoomClearanceMeters;
+        return clearance > 0 ? clearance : undefined;
     }
 
     /** Moves the camera parallel to the map plane in view-local screen space. */

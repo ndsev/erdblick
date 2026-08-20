@@ -16,6 +16,9 @@ export interface ErdblickTargetNavigationAdapterOptions {
         context: Readonly<MapInteractionTargetContext>
     ) => NavigationVisualTarget | null;
     getRetainedTarget: () => NavigationVisualTarget | null;
+    getMinimumTargetDistance: (
+        target: Readonly<NavigationVisualTarget>
+    ) => number | undefined;
     onTargetChange: (target: NavigationVisualTarget, active: boolean) => void;
 }
 
@@ -60,14 +63,23 @@ export class ErdblickTargetNavigationAdapter {
         }
 
         const position: NavigationAnchor = [...info.target];
-        this.pendingTarget = target.surfaceNormal
-            ? {position, surfaceNormal: [...target.surfaceNormal]}
-            : {position};
+        this.pendingTarget = {
+            position,
+            ...(target.surfaceNormal
+                ? {surfaceNormal: [...target.surfaceNormal]}
+                : {}),
+            origin: target.origin ?? "unknown"
+        };
+        const minimumTargetDistance =
+            this.options.getMinimumTargetDistance(this.pendingTarget);
         return {
             coordinate: [...position],
             // Erdblick anchors can be snapped from a pick proxy or path ribbon. Preserve the
             // snapped coordinate's actual projected pixel rather than claiming the raw pointer.
-            screenPosition: [info.projectedPosition[0], info.projectedPosition[1]]
+            screenPosition: [info.projectedPosition[0], info.projectedPosition[1]],
+            ...(minimumTargetDistance === undefined || minimumTargetDistance === 0
+                ? {}
+                : {minimumTargetDistance})
         };
     };
 
@@ -100,7 +112,10 @@ export class ErdblickTargetNavigationAdapter {
         const pending = this.pendingTarget;
         const active = pending && sameAnchor(pending.position, coordinate)
             ? pending
-            : {position: [...coordinate] as NavigationAnchor};
+            : {
+                position: [...coordinate] as NavigationAnchor,
+                origin: "unknown" as const
+            };
         this.pendingTarget = null;
         this.activeTarget = active;
         this.options.onTargetChange(active, true);

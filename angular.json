@@ -21,6 +21,7 @@
             "index": "app/index.html",
             "browser": "app/main.ts",
             "polyfills": [
+              "app/zone-flags.ts",
               "zone.js"
             ],
             "tsConfig": "tsconfig.app.json",

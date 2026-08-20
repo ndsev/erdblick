@@ -325,6 +325,53 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('persists bounded feature zoom clearance without adding it to shared URLs', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        expect(service.featureZoomClearanceMeters).toBe(20);
+
+        service.featureZoomClearanceMeters = 37.5;
+        expect(service.featureZoomClearanceMeters).toBe(37.5);
+
+        service.featureZoomClearanceMeters = -1;
+        expect(service.featureZoomClearanceMeters).toBe(0);
+
+        service.featureZoomClearanceMeters = 101;
+        expect(service.featureZoomClearanceMeters).toBe(100);
+        expect(service.exportSnapshot()).toHaveProperty(
+            'featureZoomClearanceMeters',
+            100
+        );
+        expect((service as any).serializeUrlV2()).not.toHaveProperty(
+            'featureZoomClearanceMeters'
+        );
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it.each([
+        ['-5', 0],
+        ['120', 100],
+        ['"not-a-number"', 20]
+    ])('normalizes persisted feature zoom clearance %s to %s', async (stored, expected) => {
+        localStorage.setItem('featureZoomClearanceMeters', stored);
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const routerStub = createRouterStub();
+        const service = new AppStateService(
+            routerStub as unknown as Router,
+            infoServiceStub()
+        );
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.featureZoomClearanceMeters).toBe(expected);
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('enables deck antialiasing by default', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = {
@@ -2450,13 +2497,17 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
-        const errors = service.seedConfigDefaultState({marker: true}, "cfg-hash-1");
+        const errors = service.seedConfigDefaultState({
+            marker: true,
+            featureZoomClearanceMeters: 35
+        }, "cfg-hash-1");
         expect(errors).toEqual([]);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
         expect(service.markerState.getValue()).toBe(true);
+        expect(service.featureZoomClearanceMeters).toBe(35);
 
         service.ngOnDestroy();
         routerStub.events.complete();

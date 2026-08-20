@@ -5,10 +5,13 @@ import {MapViewStateService, ViewRecalculationReason} from "../mapview/map-view-
 import {StyleService} from "../styledata/style.service";
 import {
     ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID,
+    clampFeatureZoomClearanceMeters,
     clampMapZoomStep,
     DEFAULT_DRILL_PICK_RADIUS,
+    DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS,
     DEFAULT_MAP_ZOOM_STEP,
     MAX_DRILL_PICK_RADIUS,
+    MAX_FEATURE_ZOOM_CLEARANCE_METERS,
     MAX_MAP_ZOOM_STEP,
     MAX_NUM_TILES_TO_LOAD,
     MAX_SIMULTANEOUS_INSPECTIONS,
@@ -17,6 +20,7 @@ import {
     PREFERENCES_DIALOG_LAYOUT_ID,
     MIN_MAP_ZOOM_STEP,
     MIN_DRILL_PICK_RADIUS,
+    MIN_FEATURE_ZOOM_CLEARANCE_METERS,
     AppStateService,
     defaultHoverLabelFieldKey,
     DEFAULT_LOW_FI_TILE_THRESHOLD,
@@ -82,6 +86,38 @@ import type {
                                           label=""
                                           icon="pi pi-check"
                                           [disabled]="!mapZoomStepChanged"></p-button>
+                            </div>
+                        </div>
+                        <p-divider></p-divider>
+                        <div class="slider-container">
+                            <label for="feature-zoom-clearance-input">
+                                3D Feature Zoom Clearance (m)
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Minimum camera distance from a picked 3D feature while zooming. Increase it to stop farther away; set it to 0 to disable the limit."
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <div class="slider-controls">
+                                <div style="display: inline-block">
+                                    <input id="feature-zoom-clearance-input"
+                                           data-testid="feature-zoom-clearance-input"
+                                           class="tiles-input w-full"
+                                           type="text"
+                                           pInputText
+                                           [(ngModel)]="featureZoomClearanceMetersInput"
+                                           (ngModelChange)="onFeatureZoomClearanceInputChange($event)"
+                                           (keydown.enter)="applyFeatureZoomClearance()"/>
+                                    <p-slider [(ngModel)]="featureZoomClearanceMetersInput"
+                                              (ngModelChange)="onFeatureZoomClearanceSliderChange($event)"
+                                              class="w-full"
+                                              [min]="MIN_FEATURE_ZOOM_CLEARANCE_METERS"
+                                              [max]="MAX_FEATURE_ZOOM_CLEARANCE_METERS"
+                                              [step]="1"></p-slider>
+                                </div>
+                                <p-button (click)="applyFeatureZoomClearance()"
+                                          data-testid="apply-feature-zoom-clearance"
+                                          label=""
+                                          icon="pi pi-check"
+                                          [disabled]="!featureZoomClearanceMetersChanged"></p-button>
                             </div>
                         </div>
                         <p-divider></p-divider>
@@ -465,6 +501,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     renderWorkerCountInput: number | string =
         AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
     mapZoomStepInput: number | string = DEFAULT_MAP_ZOOM_STEP;
+    featureZoomClearanceMetersInput: number | string =
+        DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS;
     tilesToLoadChanged: boolean = false;
     inspectionsLimitChanged: boolean = false;
     drillPickRadiusChanged: boolean = false;
@@ -472,6 +510,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     lowFiTileThresholdChanged: boolean = false;
     renderWorkerCountChanged: boolean = false;
     mapZoomStepChanged: boolean = false;
+    featureZoomClearanceMetersChanged: boolean = false;
     toggleOptions = [
         {label: 'Off', value: false},
         {label: 'On', value: true}
@@ -550,6 +589,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.subscriptions.push(this.stateService.mapZoomStepState.subscribe(step => {
             this.mapZoomStepInput = step;
         }));
+        this.subscriptions.push(
+            this.stateService.featureZoomClearanceMetersState.subscribe(clearance => {
+                this.featureZoomClearanceMetersInput = clearance;
+            })
+        );
         this.subscriptions.push(this.stateService.inspectionValueVaryColorsState.subscribe(() => {
             this.syncInspectionValuePresentationSelection();
         }));
@@ -641,6 +685,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.drillPickRadiusInput = this.stateService.drillPickRadius;
         this.locationSearchResultLimitInput = this.stateService.locationSearchResultLimit;
         this.mapZoomStepInput = this.stateService.mapZoomStep;
+        this.featureZoomClearanceMetersInput =
+            this.stateService.featureZoomClearanceMeters;
         this.lowFiTileThresholdInput = this.stateService.lowFiTileThreshold;
         this.renderWorkerCountInput =
             this.stateService.tileSubsetRenderWorkerCount;
@@ -651,6 +697,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.lowFiTileThresholdChanged = false;
         this.renderWorkerCountChanged = false;
         this.mapZoomStepChanged = false;
+        this.featureZoomClearanceMetersChanged = false;
         this.refreshHoverLabelFieldOptions();
         this.dialogStack.bringToFront(this.preferencesDialog);
     }
@@ -849,6 +896,28 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.mapZoomStepChanged = false;
     }
 
+    /** Applies the minimum metric camera distance used for picked 3D feature navigation. */
+    applyFeatureZoomClearance() {
+        if (!this.featureZoomClearanceMetersChanged) {
+            return;
+        }
+        const clearance = Number(this.featureZoomClearanceMetersInput);
+        if (!Number.isFinite(clearance)
+            || clearance < MIN_FEATURE_ZOOM_CLEARANCE_METERS
+            || clearance > MAX_FEATURE_ZOOM_CLEARANCE_METERS) {
+            this.messageService.showError(
+                `Please enter a 3D feature zoom clearance between ` +
+                `${MIN_FEATURE_ZOOM_CLEARANCE_METERS} and ` +
+                `${MAX_FEATURE_ZOOM_CLEARANCE_METERS} metres.`
+            );
+            return;
+        }
+        const clampedClearance = clampFeatureZoomClearanceMeters(clearance);
+        this.featureZoomClearanceMetersInput = clampedClearance;
+        this.stateService.featureZoomClearanceMeters = clampedClearance;
+        this.featureZoomClearanceMetersChanged = false;
+    }
+
     /** Persists the dark-mode preference and updates the root document class immediately. */
     setDarkMode(setting: 'off' | 'on' | 'auto') {
         this.darkModeSetting = setting;
@@ -971,6 +1040,15 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.stateService.mapZoomStep);
     }
 
+    /** Tracks slider edits for the 3D feature zoom clearance. */
+    protected onFeatureZoomClearanceSliderChange(value: number) {
+        this.featureZoomClearanceMetersInput = value;
+        this.featureZoomClearanceMetersChanged = this.hasPendingNumericChange(
+            value,
+            this.stateService.featureZoomClearanceMeters
+        );
+    }
+
     /** Tracks slider edits for the low-fi tile threshold. */
     protected onLowFiTileThresholdSliderChange(value: number) {
         this.lowFiTileThresholdInput = value;
@@ -1011,6 +1089,15 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected onMapZoomStepInputChange(value: number | string) {
         this.mapZoomStepInput = value;
         this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.stateService.mapZoomStep);
+    }
+
+    /** Tracks free-form edits for the 3D feature zoom clearance. */
+    protected onFeatureZoomClearanceInputChange(value: number | string) {
+        this.featureZoomClearanceMetersInput = value;
+        this.featureZoomClearanceMetersChanged = this.hasPendingNumericChange(
+            value,
+            this.stateService.featureZoomClearanceMeters
+        );
     }
 
     /** Tracks free-form edits for the low-fi tile threshold. */
@@ -1067,6 +1154,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected readonly MAX_LOCATION_SEARCH_RESULT_LIMIT = MAX_LOCATION_SEARCH_RESULT_LIMIT;
     protected readonly MIN_MAP_ZOOM_STEP = MIN_MAP_ZOOM_STEP;
     protected readonly MAX_MAP_ZOOM_STEP = MAX_MAP_ZOOM_STEP;
+    protected readonly MIN_FEATURE_ZOOM_CLEARANCE_METERS =
+        MIN_FEATURE_ZOOM_CLEARANCE_METERS;
+    protected readonly MAX_FEATURE_ZOOM_CLEARANCE_METERS =
+        MAX_FEATURE_ZOOM_CLEARANCE_METERS;
     protected readonly MIN_LOW_FI_TILE_THRESHOLD = MIN_LOW_FI_TILE_THRESHOLD;
     protected readonly MAX_LOW_FI_TILE_THRESHOLD = MAX_LOW_FI_TILE_THRESHOLD;
     protected readonly AUTO_TILE_SUBSET_RENDER_WORKER_COUNT =

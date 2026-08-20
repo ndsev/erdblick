@@ -76,7 +76,8 @@ describe("Erdblick target navigation integration", () => {
                 START_PIXEL,
                 {targetZ: 120}
             ) as NavigationAnchor,
-            surfaceNormal: [0, 0, 1]
+            surfaceNormal: [0, 0, 1],
+            origin: "feature"
         };
         const resolveTarget = vi.fn(() => richTarget);
         const targetChanges: Array<{target: NavigationVisualTarget; active: boolean}> = [];
@@ -84,6 +85,7 @@ describe("Erdblick target navigation integration", () => {
             viewId: VIEW_ID,
             resolveTarget,
             getRetainedTarget: () => null,
+            getMinimumTargetDistance: () => 20,
             onTargetChange: (target, active) => targetChanges.push({target, active})
         });
         let controller!: MapController;
@@ -162,12 +164,14 @@ describe("Erdblick target navigation integration", () => {
             position: initialViewport.unproject(
                 START_PIXEL,
                 {targetZ: 120}
-            ) as NavigationAnchor
+            ) as NavigationAnchor,
+            origin: "feature"
         };
         const adapter = new ErdblickTargetNavigationAdapter({
             viewId: VIEW_ID,
             resolveTarget: () => richTarget,
             getRetainedTarget: () => null,
+            getMinimumTargetDistance: () => 20,
             onTargetChange: vi.fn()
         });
         let controller!: MapController;

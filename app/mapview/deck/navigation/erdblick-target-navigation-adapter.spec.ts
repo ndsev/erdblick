@@ -33,7 +33,8 @@ function targetAt(
 ): NavigationVisualTarget {
     return {
         position: viewport.unproject(screenPosition, {targetZ: altitude}) as NavigationAnchor,
-        surfaceNormal: [0, 0, 1]
+        surfaceNormal: [0, 0, 1],
+        origin: "feature"
     };
 }
 
@@ -42,10 +43,12 @@ describe("ErdblickTargetNavigationAdapter", () => {
         const richTarget = targetAt([320, 280]);
         const resolveTarget = vi.fn(() => richTarget);
         const onTargetChange = vi.fn();
+        const getMinimumTargetDistance = vi.fn(() => 20);
         const adapter = new ErdblickTargetNavigationAdapter({
             viewId: VIEW_ID,
             resolveTarget,
             getRetainedTarget: () => null,
+            getMinimumTargetDistance,
             onTargetChange
         });
 
@@ -54,8 +57,13 @@ describe("ErdblickTargetNavigationAdapter", () => {
         expect(resolveTarget).toHaveBeenCalledWith(acquisitionContext);
         expect(resolved).toEqual({
             coordinate: richTarget.position,
-            screenPosition: expect.any(Array)
+            screenPosition: expect.any(Array),
+            minimumTargetDistance: 20
         });
+        expect(getMinimumTargetDistance).toHaveBeenCalledOnce();
+        expect(getMinimumTargetDistance).toHaveBeenCalledWith(
+            expect.objectContaining({origin: "feature"})
+        );
         expect(Math.abs(resolved!.screenPosition[0] - 320)).toBeLessThan(0.1);
         expect(Math.abs(resolved!.screenPosition[1] - 280)).toBeLessThan(0.1);
         expect(resolved).not.toHaveProperty("surfaceNormal");
@@ -76,21 +84,40 @@ describe("ErdblickTargetNavigationAdapter", () => {
         const retained = targetAt([430, 310]);
         const centerTarget = targetAt([500, 350], 0);
         const resolveTarget = vi.fn(() => centerTarget);
+        let clearance = 20;
+        const getMinimumTargetDistance = vi.fn(() => clearance);
         const adapter = new ErdblickTargetNavigationAdapter({
             viewId: VIEW_ID,
             resolveTarget,
             getRetainedTarget: () => retained,
+            getMinimumTargetDistance,
             onTargetChange: vi.fn()
         });
 
         const resolved = adapter.resolveInteractionTarget(context(null));
         expect(resolved?.coordinate).toEqual(retained.position);
+        expect(resolved?.minimumTargetDistance).toBe(20);
         expect(resolveTarget).not.toHaveBeenCalled();
+
+        adapter.handleInteractionState({
+            viewId: VIEW_ID,
+            interactionTargetPosition: resolved!.coordinate
+        });
+        adapter.handleInteractionState({
+            viewId: VIEW_ID,
+            interactionTargetPosition: undefined
+        });
+        clearance = 35;
+        expect(
+            adapter.resolveInteractionTarget(context(null))?.minimumTargetDistance
+        ).toBe(35);
+        expect(getMinimumTargetDistance).toHaveBeenCalledTimes(2);
 
         const unavailable = new ErdblickTargetNavigationAdapter({
             viewId: VIEW_ID,
             resolveTarget,
             getRetainedTarget: () => ({position: [0, 89, 0]}),
+            getMinimumTargetDistance: () => undefined,
             onTargetChange: vi.fn()
         });
         const pointerlessContext = context(null);
@@ -106,6 +133,7 @@ describe("ErdblickTargetNavigationAdapter", () => {
             viewId: VIEW_ID,
             resolveTarget: () => richTarget,
             getRetainedTarget: () => null,
+            getMinimumTargetDistance: () => undefined,
             onTargetChange
         });
 
@@ -134,6 +162,7 @@ describe("ErdblickTargetNavigationAdapter", () => {
             viewId: VIEW_ID,
             resolveTarget: () => richTarget,
             getRetainedTarget: () => null,
+            getMinimumTargetDistance: () => undefined,
             onTargetChange
         });
         const resolved = adapter.resolveInteractionTarget(context([320, 280]))!;

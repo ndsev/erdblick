@@ -5,6 +5,7 @@ import type {
     NavigationAnchor,
     NavigationScreenPosition,
     NavigationSurfaceNormal,
+    NavigationTargetOrigin,
     NavigationVisualTarget
 } from "./feature-navigation.types";
 
@@ -39,6 +40,7 @@ export interface DeckFeaturePickLayerProps {
 export interface NavigationAnchorPick<ValueT> {
     position: NavigationAnchor;
     surfaceNormal?: NavigationSurfaceNormal;
+    origin?: NavigationTargetOrigin;
     value: ValueT;
 }
 
@@ -116,7 +118,24 @@ export function navigationTargetFromPickingInfo(
         return null;
     }
     const surfaceNormal = surfaceNormalFromPickingInfo(picked, layerProps);
-    return surfaceNormal ? {position, surfaceNormal} : {position};
+    const origin = navigationTargetOrigin(picked, layerProps);
+    return surfaceNormal
+        ? {position, surfaceNormal, origin}
+        : {position, origin};
+}
+
+/** Classifies renderer-owned pick proxies without exposing that metadata to deck.gl. */
+function navigationTargetOrigin(
+    picked: PickingInfo,
+    layerProps: DeckFeaturePickLayerProps
+): NavigationTargetOrigin {
+    if (layerProps.pathCenterline) {
+        return "path";
+    }
+    if (String(picked.layer?.id ?? "").includes("/gltf-pick-proxy")) {
+        return "gltf-proxy";
+    }
+    return "feature";
 }
 
 /** Returns the finite physical coordinate of an eligible persistent-marker layer. */

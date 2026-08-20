@@ -74,6 +74,9 @@ export const MAX_LOCATION_SEARCH_RESULT_LIMIT = 50;
 export const DEFAULT_MAP_ZOOM_STEP = 0.5;
 export const MIN_MAP_ZOOM_STEP = 0.001;
 export const MAX_MAP_ZOOM_STEP = 1.0;
+export const DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS = 20;
+export const MIN_FEATURE_ZOOM_CLEARANCE_METERS = 0;
+export const MAX_FEATURE_ZOOM_CLEARANCE_METERS = 100;
 export const DEFAULT_TILE_GRID_LEVEL = 13;
 export const DEFAULT_TILE_GRID_COLOR = "f5f5f5";
 export const DEFAULT_TILE_GRID_OPACITY = 39;
@@ -401,6 +404,17 @@ export function clampMapZoomStep(value: number): number {
         return DEFAULT_MAP_ZOOM_STEP;
     }
     return Math.min(MAX_MAP_ZOOM_STEP, Math.max(MIN_MAP_ZOOM_STEP, value));
+}
+
+/** Clamps the persisted minimum feature-navigation camera distance. */
+export function clampFeatureZoomClearanceMeters(value: number): number {
+    if (!Number.isFinite(value)) {
+        return DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS;
+    }
+    return Math.min(
+        MAX_FEATURE_ZOOM_CLEARANCE_METERS,
+        Math.max(MIN_FEATURE_ZOOM_CLEARANCE_METERS, value)
+    );
 }
 
 /** Produces a detached clone suitable for app-state snapshots and comparisons. */
@@ -735,6 +749,13 @@ export class AppStateService implements OnDestroy {
         defaultValue: DEFAULT_MAP_ZOOM_STEP,
         schema: z.coerce.number(),
         fromStorage: value => clampMapZoomStep(Number(value))
+    });
+
+    readonly featureZoomClearanceMetersState = this.createState<number>({
+        name: 'featureZoomClearanceMeters',
+        defaultValue: DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS,
+        schema: z.coerce.number(),
+        fromStorage: value => clampFeatureZoomClearanceMeters(Number(value))
     });
 
     readonly layerSyncOptionsState = this.createMapViewState<boolean>({
@@ -2282,6 +2303,14 @@ export class AppStateService implements OnDestroy {
     set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);};
     get mapZoomStep() {return this.mapZoomStepState.getValue();}
     set mapZoomStep(val: number) {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));};
+    get featureZoomClearanceMeters() {
+        return this.featureZoomClearanceMetersState.getValue();
+    }
+    set featureZoomClearanceMeters(val: number) {
+        this.featureZoomClearanceMetersState.next(
+            clampFeatureZoomClearanceMeters(Number(val))
+        );
+    }
     get locationSearchResultLimit() {return this.locationSearchResultLimitState.getValue();}
     set locationSearchResultLimit(val: number) {this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val));};
     get marker() {return this.markerState.getValue();}

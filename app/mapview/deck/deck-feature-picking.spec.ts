@@ -386,7 +386,8 @@ describe("Deck rendered-feature picking", () => {
             unproject3D: true
         });
         expect(target).toEqual({
-            position: depthCoordinate
+            position: depthCoordinate,
+            origin: "feature"
         });
         expect(view.groundNavigationTarget).not.toHaveBeenCalled();
     });
@@ -503,6 +504,42 @@ describe("Deck rendered-feature picking", () => {
         expect(view.queueHoverPicks).not.toHaveBeenCalled();
     });
 
+    it("keeps camera interaction active while a wheel target is retained between packets", () => {
+        const view = create3DView() as any;
+        view.layerController = {setCameraInteracting: vi.fn()};
+        view.cancelHoverPickScheduling = vi.fn();
+        view.queueHoverPicks = vi.fn();
+        view.latestHoverPosition = {x: 12, y: 24};
+
+        view.noteCameraInteraction({
+            interactionTargetPosition: [11, 48, 120]
+        });
+
+        expect(view.isCameraInteracting).toBe(true);
+        expect(view.layerController.setCameraInteracting).toHaveBeenCalledWith(true);
+        expect(view.queueHoverPicks).not.toHaveBeenCalled();
+
+        view.noteCameraInteraction({interactionTargetPosition: undefined});
+
+        expect(view.isCameraInteracting).toBe(false);
+        expect(view.layerController.setCameraInteracting).toHaveBeenLastCalledWith(false);
+        expect(view.queueHoverPicks).toHaveBeenCalledWith({x: 12, y: 24});
+    });
+
+    it("applies feature clearance only to renderer feature origins", () => {
+        const view = create3DView() as any;
+        view.stateService = {featureZoomClearanceMeters: 20};
+
+        expect(view.minimumTargetDistanceForOrigin("feature")).toBe(20);
+        expect(view.minimumTargetDistanceForOrigin("path")).toBe(20);
+        expect(view.minimumTargetDistanceForOrigin("gltf-proxy")).toBe(20);
+        expect(view.minimumTargetDistanceForOrigin("ground")).toBeUndefined();
+        expect(view.minimumTargetDistanceForOrigin("unknown")).toBeUndefined();
+
+        view.stateService.featureZoomClearanceMeters = 0;
+        expect(view.minimumTargetDistanceForOrigin("feature")).toBeUndefined();
+    });
+
     it("waits for pointer idle before starting the deep hover query", async () => {
         vi.useFakeTimers();
         try {
@@ -577,6 +614,7 @@ describe("Deck rendered-feature picking", () => {
         expect(target?.position[0]).toBeCloseTo(expected[0], 7);
         expect(target?.position[1]).toBeCloseTo(expected[1], 7);
         expect(target?.position[2]).toBeCloseTo(expected[2], 7);
+        expect(target?.origin).toBe("path");
         expect(pickMultipleObjects).toHaveBeenCalledWith({
             x: cursor[0],
             y: cursor[1],
@@ -790,6 +828,7 @@ describe("Deck rendered-feature picking", () => {
         expect(target?.surfaceNormal?.[0]).toBe(0);
         expect(target?.surfaceNormal?.[1]).toBeCloseTo(-Math.SQRT1_2, 6);
         expect(target?.surfaceNormal?.[2]).toBeCloseTo(Math.SQRT1_2, 6);
+        expect(target?.origin).toBe("feature");
     });
 
     it("reconstructs a GPU vector anchor at its physical altitude instead of biased render depth", () => {

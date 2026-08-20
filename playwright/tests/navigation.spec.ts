@@ -27,6 +27,88 @@ async function activeTargetPixel(page: Page): Promise<[number, number]> {
 }
 
 test.describe('3D navigation', () => {
+    test('wheel stays cancelable when Zone and mjolnir are loaded together', async ({page}) => {
+        const passiveListenerErrors: string[] = [];
+        page.on('console', message => {
+            const text = message.text();
+            if (message.type() === 'error' && /passive|preventDefault/i.test(text)) {
+                passiveListenerErrors.push(text);
+            }
+        });
+
+        await navigateToRoot(page);
+        const canvas = page.getByTestId('mapViewContainer-0').locator('canvas').first();
+        await expect(canvas).toBeVisible();
+
+        const zoneEvents = await page.evaluate(() =>
+            (globalThis as typeof globalThis & {
+                __zone_symbol__UNPATCHED_EVENTS?: string[];
+            }).__zone_symbol__UNPATCHED_EVENTS
+        );
+        expect(zoneEvents).toContain('wheel');
+
+        // Reproduce the listener ordering that caused Zone to merge mjolnir's passive observer
+        // and cancelable wheel handler under one passive native listener.
+        const mixedListenerProbe = await page.evaluate(() => {
+            const element = document.createElement('div');
+            let passiveCalls = 0;
+            let activeCalls = 0;
+            element.addEventListener('wheel', () => passiveCalls++, {passive: true});
+            element.addEventListener('wheel', event => {
+                activeCalls++;
+                event.preventDefault();
+            }, {passive: false});
+            document.body.appendChild(element);
+            const event = new WheelEvent('wheel', {
+                bubbles: true,
+                cancelable: true,
+                deltaY: -120
+            });
+            const dispatchResult = element.dispatchEvent(event);
+            element.remove();
+            return {
+                activeCalls,
+                passiveCalls,
+                defaultPrevented: event.defaultPrevented,
+                dispatchResult
+            };
+        });
+        expect(mixedListenerProbe).toEqual({
+            activeCalls: 1,
+            passiveCalls: 1,
+            defaultPrevented: true,
+            dispatchResult: false
+        });
+
+        const bounds = await canvas.boundingBox();
+        if (!bounds) {
+            throw new Error('Map canvas has no bounds.');
+        }
+        await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+        const cameraBeforeWheel = await camera(page);
+        await page.evaluate(() => {
+            const result = {calls: 0, defaultPrevented: false};
+            (globalThis as typeof globalThis & {
+                __erdblickWheelSmoke?: typeof result;
+            }).__erdblickWheelSmoke = result;
+            document.addEventListener('wheel', event => {
+                result.calls++;
+                result.defaultPrevented = event.defaultPrevented;
+            }, {once: true, passive: true});
+        });
+        await page.mouse.wheel(0, -120);
+
+        await expect.poll(async () => (await camera(page)).position.join(','))
+            .not.toBe(cameraBeforeWheel.position.join(','));
+        const wheelResult = await page.evaluate(() =>
+            (globalThis as typeof globalThis & {
+                __erdblickWheelSmoke?: {calls: number; defaultPrevented: boolean};
+            }).__erdblickWheelSmoke
+        );
+        expect(wheelResult).toEqual({calls: 1, defaultPrevented: true});
+        expect(passiveListenerErrors).toEqual([]);
+    });
+
     test('pan is world-planar and pointer rotation keeps the acquired cursor target', async ({page}) => {
         await navigateToRoot(page);
         const container = page.getByTestId('mapViewContainer-0');

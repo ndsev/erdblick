@@ -1,7 +1,5 @@
-import type {MapInteractionTargetViewStateContext} from "@deck.gl/core";
 import {describe, expect, it} from "vitest";
 import {
-    constrainErdblickTargetNavigationViewState,
     createDeckMapViewport,
     DECK_MAP_DEFAULT_ALTITUDE,
     DECK_MAP_FAR_Z_MULTIPLIER,
@@ -15,7 +13,7 @@ import {
     NAVIGATION_TARGET_NEAR_RELATIVE_EPSILON,
     type DeckMapCameraState,
     viewStateKeepingAnchor,
-    viewStateKeepingSafeNavigationAnchor,
+    viewStateKeepingNavigationAnchor,
     viewStateWithGroundCenter
 } from "./web-mercator-feature-navigation";
 import type {NavigationAnchor} from "./feature-navigation.types";
@@ -275,7 +273,7 @@ describe("Web Mercator feature navigation", () => {
         expect(reprojectedAnchor[1]).toBeCloseTo(pixel[1], 2);
     });
 
-    it("stops an anchored zoom at the last safe state before crossing an elevated anchor", () => {
+    it("stops an anchored feature command at the configured metric clearance", () => {
         const currentState = {...BASE_CAMERA, zoom: 14, pitch: 55};
         const before = createDeckMapViewport(
             currentState,
@@ -285,15 +283,18 @@ describe("Web Mercator feature navigation", () => {
         );
         const pixel: [number, number] = [480, 310];
         const anchor = before.unproject(pixel, {targetZ: 500}) as NavigationAnchor;
+        const startDistance = before.getTargetInfo(anchor)!.targetDistance;
+        const minimumTargetDistance = startDistance / 4;
 
-        const requestedState = viewStateKeepingSafeNavigationAnchor(
+        const requestedState = viewStateKeepingNavigationAnchor(
             currentState,
             {...currentState, zoom: 100},
             anchor,
             pixel,
             VIEWPORT_WIDTH,
             VIEWPORT_HEIGHT,
-            false
+            false,
+            minimumTargetDistance
         );
         const after = createDeckMapViewport(
             requestedState,
@@ -307,6 +308,7 @@ describe("Web Mercator feature navigation", () => {
         expect(requestedState.zoom).toBeLessThan(100);
         expect(isNavigationAnchorUsable(after, anchor)).toBe(true);
         const targetInfo = after.getTargetInfo(anchor)!;
+        expect(targetInfo.targetDistance).toBeCloseTo(minimumTargetDistance, 4);
         expect(targetInfo.cameraDepth).toBeGreaterThanOrEqual(
             targetInfo.near * (1 + NAVIGATION_TARGET_NEAR_RELATIVE_EPSILON)
         );
@@ -314,55 +316,37 @@ describe("Web Mercator feature navigation", () => {
         expect(Math.abs(projected[1] - pixel[1])).toBeLessThan(1);
     });
 
-    it("applies the same maximal-safe zoom policy through deck.gl's controller hook", () => {
-        const currentState = {...BASE_CAMERA, zoom: 14, pitch: 55, position: [0, 0, 0] as [number, number, number]};
-        const sourceViewport = createDeckMapViewport(
+    it("does not move outwards when a feature command starts inside the clearance", () => {
+        const currentState = {...BASE_CAMERA, zoom: 14, pitch: 55};
+        const before = createDeckMapViewport(
             currentState,
             VIEWPORT_WIDTH,
             VIEWPORT_HEIGHT,
             false
         );
-        const requestedPixel: [number, number] = [480, 310];
-        const target = sourceViewport.unproject(
-            requestedPixel,
-            {targetZ: 500}
-        ) as NavigationAnchor;
-        const info = sourceViewport.getTargetInfo(target)!;
-        const pixel: [number, number] = [
-            info.projectedPosition[0],
-            info.projectedPosition[1]
-        ];
-        const requestedViewState = sourceViewport.getTargetViewState({
-            target,
-            screenPosition: pixel,
-            zoom: 44
-        })!;
-        const context: MapInteractionTargetViewStateContext = {
-            viewId: "deck-view-0",
-            operation: "zoom",
-            source: "wheel",
-            target: {coordinate: target, screenPosition: pixel},
-            sourceViewport,
-            currentViewState: currentState,
-            requestedViewState
-        };
+        const pixel: [number, number] = [480, 310];
+        const anchor = before.unproject(pixel, {targetZ: 500}) as NavigationAnchor;
+        const startDistance = before.getTargetInfo(anchor)!.targetDistance;
 
-        const constrained = constrainErdblickTargetNavigationViewState(context)!;
-        const viewport = createDeckMapViewport(
-            constrained,
+        const next = viewStateKeepingNavigationAnchor(
+            currentState,
+            {...currentState, zoom: currentState.zoom + 8},
+            anchor,
+            pixel,
+            VIEWPORT_WIDTH,
+            VIEWPORT_HEIGHT,
+            false,
+            startDistance * 2
+        );
+        const after = createDeckMapViewport(
+            next,
             VIEWPORT_WIDTH,
             VIEWPORT_HEIGHT,
             false
         );
-        const constrainedInfo = viewport.getTargetInfo(target)!;
 
-        expect(constrained.zoom).toBeGreaterThan(currentState.zoom);
-        expect(constrained.zoom).toBeLessThan(requestedViewState.zoom);
-        expect(isNavigationAnchorUsable(viewport, target)).toBe(true);
-        expect(Math.hypot(
-            constrainedInfo.projectedPosition[0] - pixel[0],
-            constrainedInfo.projectedPosition[1] - pixel[1]
-        )).toBeLessThanOrEqual(0.1);
+        expect(next.zoom).toBeCloseTo(currentState.zoom, 8);
+        expect(after.getTargetInfo(anchor)!.targetDistance).toBeCloseTo(startDistance, 4);
     });
 
     it("does not reject a visible feature based on an arbitrary clip-depth fraction", () => {
@@ -382,14 +366,15 @@ describe("Web Mercator feature navigation", () => {
         const anchor = viewport.unproject([900, 500, 0.2]) as NavigationAnchor;
         const projected = viewport.project(anchor);
         const pixel: [number, number] = [projected[0], projected[1]];
-        const next = viewStateKeepingSafeNavigationAnchor(
+        const next = viewStateKeepingNavigationAnchor(
             currentState,
             {...currentState, zoom: currentState.zoom + 0.2},
             anchor,
             pixel,
             1280,
             720,
-            false
+            false,
+            0
         );
 
         expect(projected[2]).toBeCloseTo(0.2, 6);
@@ -423,14 +408,15 @@ describe("Web Mercator feature navigation", () => {
         const pixel: [number, number] = [480, 310];
         const anchor = before.unproject(pixel, {targetZ: 500}) as NavigationAnchor;
 
-        const zoomedOut = viewStateKeepingSafeNavigationAnchor(
+        const zoomedOut = viewStateKeepingNavigationAnchor(
             currentState,
             {...currentState, zoom: 13},
             anchor,
             pixel,
             VIEWPORT_WIDTH,
             VIEWPORT_HEIGHT,
-            false
+            false,
+            20
         );
         const after = createDeckMapViewport(
             zoomedOut,

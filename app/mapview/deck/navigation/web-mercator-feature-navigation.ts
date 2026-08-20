@@ -1,9 +1,7 @@
 import {
     MapView,
     type MapViewProps,
-    type MapInteractionTargetViewStateContext,
-    WebMercatorViewport,
-    type WebMercatorTargetViewState
+    WebMercatorViewport
 } from "@deck.gl/core";
 import {
     altitudeToFovy,
@@ -49,9 +47,7 @@ const MATH_GL_HORIZON_DISTANCE_MULTIPLIER = 10;
 /** Relative margin that prevents a target from reaching or crossing the near plane. */
 export const NAVIGATION_TARGET_NEAR_RELATIVE_EPSILON = 1e-6;
 
-const SAFE_ZOOM_SEARCH_STEPS = 24;
 const TARGET_ALIGNMENT_STEPS = 3;
-const TARGET_PIXEL_TOLERANCE = 0.1;
 
 /** Returns a longitude in the world copy nearest to the supplied reference. */
 export function longitudeInNearestWorld(longitude: number, reference: number): number {
@@ -305,21 +301,21 @@ export function isNavigationAnchorUsable(
 }
 
 /**
- * Applies Erdblick's product-specific maximal-safe zoom policy around a selected feature.
+ * Reconstructs a feature-relative command through deck.gl's minimum-distance contract.
  *
- * Every probe delegates camera reconstruction to deck.gl. Erdblick owns only the scalar search
- * between current and requested zoom, and accepts the furthest state that remains numerically in
- * front of the near plane. Orthographic MapView retains the stock anchored-pan behavior because
- * the first canonical target-navigation phase is perspective-only.
+ * Orthographic MapView retains the stock anchored-pan behavior because target navigation is
+ * perspective-only. In perspective mode deck.gl owns both the inverse camera transform and the
+ * metric clearance clamp; Erdblick only supplies the product preference sampled for this command.
  */
-export function viewStateKeepingSafeNavigationAnchor<StateT extends DeckMapCameraState>(
+export function viewStateKeepingNavigationAnchor<StateT extends DeckMapCameraState>(
     currentState: StateT,
     requestedState: StateT,
     anchor: NavigationAnchor,
     pixel: NavigationScreenPosition,
     width: number,
     height: number,
-    orthographic: boolean
+    orthographic: boolean,
+    minimumTargetDistance: number
 ): StateT {
     if (orthographic) {
         return viewStateKeepingAnchor(
@@ -332,178 +328,15 @@ export function viewStateKeepingSafeNavigationAnchor<StateT extends DeckMapCamer
         );
     }
 
-    const requested = resolveTargetViewState(
+    return resolveTargetViewState(
         currentState,
         requestedState,
         anchor,
         pixel,
         width,
-        height
-    );
-    if (requestedState.zoom <= currentState.zoom) {
-        return requested ?? currentState;
-    }
-    if (requested && isTargetAlignedAndUsable(
-        createDeckMapViewport(requested, width, height, false),
-        anchor,
-        pixel
-    )) {
-        return requested;
-    }
-
-    const current = resolveTargetViewState(
-        currentState,
-        {...requestedState, zoom: currentState.zoom},
-        anchor,
-        pixel,
-        width,
-        height
-    );
-    if (!current || !isTargetAlignedAndUsable(
-        createDeckMapViewport(current, width, height, false),
-        anchor,
-        pixel
-    )) {
-        return currentState;
-    }
-
-    let safeFraction = 0;
-    let unsafeFraction = 1;
-    let safeState = current;
-    for (let step = 0; step < SAFE_ZOOM_SEARCH_STEPS; step++) {
-        const fraction = (safeFraction + unsafeFraction) / 2;
-        const candidate = resolveTargetViewState(
-            currentState,
-            {
-                ...requestedState,
-                zoom: currentState.zoom
-                    + (requestedState.zoom - currentState.zoom) * fraction
-            },
-            anchor,
-            pixel,
-            width,
-            height
-        );
-        if (candidate && isTargetAlignedAndUsable(
-            createDeckMapViewport(candidate, width, height, false),
-            anchor,
-            pixel
-        )) {
-            safeFraction = fraction;
-            safeState = candidate;
-        } else {
-            unsafeFraction = fraction;
-        }
-    }
-    return safeState;
-}
-
-/**
- * Applies Erdblick's selected-feature close-stop policy to a canonical controller candidate.
- *
- * deck.gl supplies the frozen target acquisition viewport and direct-inverse candidate. Erdblick
- * searches only the scalar zoom interval; every camera reconstruction remains delegated to the
- * public viewport inverse, and core subsequently applies its own constraints and validation.
- */
-export function constrainErdblickTargetNavigationViewState(
-    context: Readonly<MapInteractionTargetViewStateContext>
-): WebMercatorTargetViewState | null {
-    const requested = copyTargetViewState(context.requestedViewState);
-    if (requested.zoom <= context.currentViewState.zoom) {
-        return requested;
-    }
-
-    const target = context.target.coordinate as NavigationAnchor;
-    const pixel = context.target.screenPosition as NavigationScreenPosition;
-    if (canonicalTargetViewStateIsUsable(context, requested, target, pixel)) {
-        return requested;
-    }
-
-    const currentCandidate = context.sourceViewport.getTargetViewState({
-        target,
-        screenPosition: pixel,
-        bearing: requested.bearing,
-        pitch: requested.pitch,
-        zoom: context.currentViewState.zoom
-    });
-    if (!currentCandidate
-        || !canonicalTargetViewStateIsUsable(
-            context,
-            currentCandidate,
-            target,
-            pixel
-        )) {
-        return null;
-    }
-
-    let safeFraction = 0;
-    let unsafeFraction = 1;
-    let safeState = currentCandidate;
-    for (let step = 0; step < SAFE_ZOOM_SEARCH_STEPS; step++) {
-        const fraction = (safeFraction + unsafeFraction) / 2;
-        const zoom = context.currentViewState.zoom
-            + (requested.zoom - context.currentViewState.zoom) * fraction;
-        const candidate = context.sourceViewport.getTargetViewState({
-            target,
-            screenPosition: pixel,
-            bearing: requested.bearing,
-            pitch: requested.pitch,
-            zoom
-        });
-        if (candidate
-            && canonicalTargetViewStateIsUsable(context, candidate, target, pixel)) {
-            safeFraction = fraction;
-            safeState = candidate;
-        } else {
-            unsafeFraction = fraction;
-        }
-    }
-    return copyTargetViewState(safeState);
-}
-
-/** Combines generic visibility with deck.gl's accepted target-to-pixel tolerance. */
-function isTargetAlignedAndUsable(
-    viewport: WebMercatorViewport,
-    anchor: NavigationAnchor,
-    pixel: NavigationScreenPosition
-): boolean {
-    const info = viewport.getTargetInfo(anchor);
-    return isNavigationAnchorUsable(viewport, anchor)
-        && Boolean(info)
-        && Math.hypot(
-            info!.projectedPosition[0] - pixel[0],
-            info!.projectedPosition[1] - pixel[1]
-        ) <= TARGET_PIXEL_TOLERANCE;
-}
-
-/** Validates a canonical candidate against Erdblick's known perspective MapView contract. */
-function canonicalTargetViewStateIsUsable(
-    context: Readonly<MapInteractionTargetViewStateContext>,
-    candidate: Readonly<WebMercatorTargetViewState>,
-    target: NavigationAnchor,
-    pixel: NavigationScreenPosition
-): boolean {
-    const viewport = createDeckMapViewport(
-        candidate,
-        context.sourceViewport.width,
-        context.sourceViewport.height,
-        false
-    );
-    return isTargetAlignedAndUsable(viewport, target, pixel);
-}
-
-/** Returns an unfrozen numeric result accepted by the public controller hook. */
-function copyTargetViewState(
-    state: Readonly<WebMercatorTargetViewState>
-): WebMercatorTargetViewState {
-    return {
-        longitude: state.longitude,
-        latitude: state.latitude,
-        zoom: state.zoom,
-        bearing: state.bearing,
-        pitch: state.pitch,
-        position: [...state.position]
-    };
+        height,
+        minimumTargetDistance
+    ) ?? currentState;
 }
 
 /** Resolves one perspective pose via the public viewport inverse, preserving extra app fields. */
@@ -513,7 +346,8 @@ function resolveTargetViewState<StateT extends DeckMapCameraState>(
     anchor: NavigationAnchor,
     pixel: NavigationScreenPosition,
     width: number,
-    height: number
+    height: number,
+    minimumTargetDistance: number
 ): StateT | null {
     const alignedState = viewStateKeepingAnchor(
         currentState,
@@ -533,7 +367,8 @@ function resolveTargetViewState<StateT extends DeckMapCameraState>(
         screenPosition: pixel,
         bearing: requestedState.bearing,
         pitch: requestedState.pitch,
-        zoom: requestedState.zoom
+        zoom: requestedState.zoom,
+        minimumTargetDistance
     });
     return result ? {...requestedState, ...result} : null;
 }
