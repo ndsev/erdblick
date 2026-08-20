@@ -64,16 +64,14 @@ interface QuickPresetOption {
             <p-tabs [(value)]="stylesDialogTab" class="style-sheets-tabs" data-testid="style-sheets-tabs">
                 <p-tablist>
                     <p-tab value="styles">Styles</p-tab>
-                    @if (presetService.enabled) {
-                        <p-tab value="presets" data-testid="style-presets-tab">
-                            <span>Map Presets </span>
-                            @if (presetService.issues$ | async; as presetIssues) {
-                                @if (presetIssues.length) {
-                                    <p-badge [value]="presetIssues.length"/>
-                                }
+                    <p-tab value="presets" data-testid="style-presets-tab">
+                        <span>Map Presets </span>
+                        @if (presetService.issues$ | async; as presetIssues) {
+                            @if (presetIssues.length) {
+                                <p-badge [value]="presetIssues.length"/>
                             }
-                        </p-tab>
-                    }
+                        }
+                    </p-tab>
                     <p-tab value="errors">
                         <span>Errors </span>
                         @if (styleValidationReportService.reports$ | async; as styleIssues) {
@@ -198,9 +196,13 @@ interface QuickPresetOption {
                             }
                         </div>
                     </p-tabpanel>
-                    @if (presetService.enabled) {
                     <p-tabpanel value="presets">
                         <div class="style-presets-tab" data-testid="style-presets-panel">
+                            @if (presetService.disabledReason; as disabledReason) {
+                                <p-message severity="info"
+                                           data-testid="style-presets-disabled-message"
+                                           [text]="disabledReason"/>
+                            } @else {
                             <div class="style-presets-toolbar">
                                 <p-button label="Add" icon="pi pi-plus"
                                           data-testid="style-preset-add-button"
@@ -283,9 +285,9 @@ interface QuickPresetOption {
                                     <div class="styles-empty">No map presets configured.</div>
                                 }
                             </div>
+                            }
                         </div>
                     </p-tabpanel>
-                    }
                     <p-tabpanel value="errors">
                         @if (styleValidationReportService.reports$ | async; as styleIssues) {
                             <div class="style-errors-tab">

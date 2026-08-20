@@ -12,11 +12,11 @@ const configured: MapPresetDefinition[] = [{
     layerPresets: [{layerId: "Lane", styleId: "Lanes", presetId: "topology"}]
 }];
 
-function createService(write = true) {
+function createService(write = true, enabled = true) {
     const config: any = {
         snapshot: {
             mapPresets: structuredClone(configured),
-            mapPresetsEnabled: true,
+            mapPresetsEnabled: enabled,
             mapPresetConfig: {
                 configured: true,
                 valid: true,
@@ -118,6 +118,20 @@ describe("MapPresetService", () => {
         expect(await service.applyOverrideSource("- id: invalid")).toBe(false);
         expect(await service.setAvailable("network", false)).toBe(false);
         expect(service.presets).toEqual(configured);
+        expect(http.put).not.toHaveBeenCalled();
+    });
+
+    it("disables runtime presets and reports explicit server disablement", async () => {
+        const {service, http} = createService(true, false);
+
+        expect(service.enabled).toBe(false);
+        expect(service.presets).toEqual([]);
+        expect(service.canWrite).toBe(false);
+        expect(service.disabledReason).toBe(
+            "Map presets are currently disabled. Modify the configuration to enable them."
+        );
+        expect(service.readOnlyReason).toBe(service.disabledReason);
+        expect(await service.addPreset(configured[0])).toBe(false);
         expect(http.put).not.toHaveBeenCalled();
     });
 });

@@ -160,6 +160,7 @@ export interface RawAppConfig {
     defaultBackgroundLayerId?: string | null;
     locationSearch?: RawLocationSearchConfig;
     externalViewers?: unknown[];
+    mapPresetsEnabled?: boolean;
     mapPresets?: unknown[];
     /** Internal parser marker preserving present-but-malformed static/server input. */
     _mapPresetsInvalid?: boolean;
@@ -364,6 +365,7 @@ const RAW_APP_CONFIG_SCHEMA = z.object({
     defaultBackgroundLayerId: z.string().nullable().optional(),
     locationSearch: LOCATION_SEARCH_SCHEMA.optional(),
     externalViewers: z.array(z.unknown()).optional(),
+    mapPresetsEnabled: z.boolean().optional(),
     mapPresets: z.array(z.unknown()).max(200).optional().catch(undefined),
     "coordinates-enabled": z.boolean().optional(),
     "coordinates-legal-terms": z.string().min(1).optional()
@@ -427,7 +429,7 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     locationSearch: DEFAULT_LOCATION_SEARCH_CONFIG,
     externalViewers: [],
     mapPresets: [],
-    mapPresetsEnabled: false,
+    mapPresetsEnabled: true,
     mapPresetConfig: {...DEFAULT_SERVER_CONFIG_STATUS.mapPresets},
     coordinates: {
         enabledByDefault: true,
@@ -814,6 +816,9 @@ export class AppConfigService {
         if (Array.isArray(serverErdblickConfig.externalViewers)) {
             merged.externalViewers = [...serverErdblickConfig.externalViewers];
         }
+        if (typeof serverErdblickConfig.mapPresetsEnabled === "boolean") {
+            merged.mapPresetsEnabled = serverErdblickConfig.mapPresetsEnabled;
+        }
         if (Array.isArray(serverErdblickConfig.mapPresets)) {
             // Presence replaces the static list; an explicit empty array deliberately clears it.
             merged.mapPresets = [...serverErdblickConfig.mapPresets];
@@ -879,7 +884,8 @@ export class AppConfigService {
         const extensionModules = this.normalizeExtensionModules(rawConfig.extensionModules);
         const legalTermsUrl = rawConfig["coordinates-legal-terms"]?.trim() || null;
         const enabledByDefault = legalTermsUrl ? false : rawConfig["coordinates-enabled"] ?? true;
-        const mapPresetsEnabled = rawConfig.mapPresets !== undefined;
+        const mapPresetsEnabled = rawConfig.mapPresetsEnabled ?? true;
+        const mapPresetsConfigured = rawConfig.mapPresets !== undefined;
         const parsedMapPresets = parseMapPresetDefinitions(rawConfig.mapPresets ?? []);
         const localPresetIssues = rawConfig._mapPresetsInvalid
             ? [{message: "mapPresets must be a list with at most 200 entries."}, ...parsedMapPresets.issues]
@@ -890,12 +896,11 @@ export class AppConfigService {
         const state = {...normalizedState, coordinatesEnabled: enabledByDefault};
         const serverPresetStatus = serverConfig.mapPresets;
         const mapPresetConfig: MapPresetConfigStatus = {
-            configured: mapPresetsEnabled,
+            configured: mapPresetsConfigured,
             valid: localPresetIssues.length === 0
-                && (!serverPresetStatus.configured || serverPresetStatus.valid),
+                && serverPresetStatus.valid,
             write: mapPresetsEnabled
                 && localPresetIssues.length === 0
-                && serverPresetStatus.configured
                 && serverPresetStatus.valid
                 && serverPresetStatus.write,
             endpoint: serverPresetStatus.endpoint,

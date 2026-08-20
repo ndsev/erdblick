@@ -286,7 +286,7 @@ describe("AppConfigService", () => {
         expect(config.state).not.toHaveProperty("mapPresets");
     });
 
-    it("keeps the map-preset feature gated off when both config sources omit it", async () => {
+    it("defaults map presets to an enabled empty catalog when both config sources omit it", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {
             if (url === "/static-config/config.json") {
@@ -298,12 +298,87 @@ describe("AppConfigService", () => {
         const config = await service.load();
 
         expect(config.mapPresets).toEqual([]);
-        expect(config.mapPresetsEnabled).toBe(false);
+        expect(config.mapPresetsEnabled).toBe(true);
         expect(config.mapPresetConfig).toMatchObject({
             configured: false,
             valid: true,
             write: false
         });
+    });
+
+    it("allows an omitted server catalog to be materialized when write capability is available", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "/static-config/config.json") {
+                return of({});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    capabilities: {
+                        mapPresets: {
+                            configured: false,
+                            valid: true,
+                            write: true,
+                            endpoint: "/config/erdblick/map-presets",
+                            revision: "revision-1",
+                            ephemeral: false,
+                            issues: []
+                        }
+                    },
+                    erdblick: {mapPresetsEnabled: true}
+                } satisfies ServerConfigResponse
+            }));
+        });
+
+        const config = await service.load();
+
+        expect(config.mapPresets).toEqual([]);
+        expect(config.mapPresetsEnabled).toBe(true);
+        expect(config.mapPresetConfig).toMatchObject({
+            configured: false,
+            valid: true,
+            write: true,
+            endpoint: "/config/erdblick/map-presets",
+            revision: "revision-1"
+        });
+    });
+
+    it("lets an explicit server flag disable map presets without hiding configured data", async () => {
+        const {service, httpClient} = createService();
+        const staticPreset = {
+            id: "static",
+            name: "Static",
+            layerPresets: [{layerId: "Lane", styleId: "Lanes", presetId: "topology"}]
+        };
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "/static-config/config.json") {
+                return of({mapPresets: [staticPreset]});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    capabilities: {
+                        mapPresets: {
+                            configured: false,
+                            valid: true,
+                            write: false,
+                            endpoint: "/config/erdblick/map-presets",
+                            revision: "revision-1",
+                            ephemeral: false,
+                            issues: []
+                        }
+                    },
+                    erdblick: {mapPresetsEnabled: false}
+                } satisfies ServerConfigResponse
+            }));
+        });
+
+        const config = await service.load();
+
+        expect(config.mapPresets).toEqual([{...staticPreset, enabled: true}]);
+        expect(config.mapPresetsEnabled).toBe(false);
+        expect(config.mapPresetConfig).toMatchObject({valid: true, write: false});
     });
 
     it("normalizes the server map-preset capability and revision", async () => {

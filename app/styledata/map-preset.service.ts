@@ -15,6 +15,8 @@ import {
 import {StyleService} from "./style.service";
 
 export const NO_PRESET_ID = "";
+export const MAP_PRESETS_DISABLED_MESSAGE =
+    "Map presets are currently disabled. Modify the configuration to enable them.";
 
 /** One embedded layer preset resolved together with its owning active style. */
 export interface ResolvedLayerPreset extends LayerPresetDefinition {
@@ -83,14 +85,21 @@ export class MapPresetService {
     }
 
     get canWrite(): boolean {
-        return this.configService.snapshot.mapPresetConfig.write && !this.writePending;
+        return this.enabled && this.configService.snapshot.mapPresetConfig.write && !this.writePending;
     }
 
     get writePending(): boolean {
         return this.writePendingSubject.getValue();
     }
 
+    get disabledReason(): string | null {
+        return this.enabled ? null : MAP_PRESETS_DISABLED_MESSAGE;
+    }
+
     get readOnlyReason(): string | null {
+        if (this.disabledReason) {
+            return this.disabledReason;
+        }
         const status = this.configService.snapshot.mapPresetConfig;
         if (!status.valid) {
             return "The server map-preset configuration is invalid; repair the YAML before editing.";
@@ -215,7 +224,9 @@ export class MapPresetService {
     /** Adopts only catalog values that have passed the shared AppConfig boundary. */
     private adoptConfigSnapshot(): void {
         const config = this.configService.snapshot;
-        this.presetsSubject.next(config.mapPresets.map(preset => this.copyPreset(preset)));
+        this.presetsSubject.next(config.mapPresetsEnabled
+            ? config.mapPresets.map(preset => this.copyPreset(preset))
+            : []);
         this.effectiveIssues = config.mapPresetConfig.issues.map(issue => ({...issue}));
         this.issuesSubject.next(this.effectiveIssues);
     }
@@ -223,7 +234,7 @@ export class MapPresetService {
     /** Writes one complete catalog under the current config revision. */
     private async persistDefinitions(definitions: readonly MapPresetDefinition[]): Promise<boolean> {
         const status = this.configService.snapshot.mapPresetConfig;
-        if (this.writePending || !status.write || !status.endpoint || !status.revision) {
+        if (!this.enabled || this.writePending || !status.write || !status.endpoint || !status.revision) {
             this.issuesSubject.next([{
                 message: this.writePending
                     ? "A map-preset update is already in progress."
