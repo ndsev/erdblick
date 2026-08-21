@@ -14,6 +14,11 @@ import {
 } from "./map-preset.model";
 import {StyleService} from "./style.service";
 
+const MAP_PRESETS_CONFIGURATION_DISABLED_MESSAGE =
+    "Configuring map presets is not allowed. Modify the server configuration to allow access";
+const STATIC_MAP_PRESETS_READ_ONLY_MESSAGE =
+    "Using static configuration. Modify the configuration to update map presets";
+
 export const NO_PRESET_ID = "";
 /** One embedded layer preset resolved together with its owning active style. */
 export interface ResolvedLayerPreset extends LayerPresetDefinition {
@@ -96,8 +101,18 @@ export class MapPresetService {
             return "No map presets configured.";
         }
         return this.hasServerMapPresetContract
-            ? "Configuring map presets is not allowed. Modify the server configuration to allow access"
+            ? MAP_PRESETS_CONFIGURATION_DISABLED_MESSAGE
             : "No map presets configured. Please, add map presets in the configuration";
+    }
+
+    /** Explains why a populated catalog cannot be edited in this deployment. */
+    get readOnlyCatalogMessage(): string | null {
+        if (this.presets.length === 0 || this.configService.snapshot.mapPresetConfig.write) {
+            return null;
+        }
+        return this.hasServerMapPresetContract
+            ? MAP_PRESETS_CONFIGURATION_DISABLED_MESSAGE
+            : STATIC_MAP_PRESETS_READ_ONLY_MESSAGE;
     }
 
     get readOnlyReason(): string | null {

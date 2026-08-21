@@ -213,6 +213,12 @@ interface QuickPresetOption {
                                 }
                             </div>
 
+                            @if (presetService.readOnlyCatalogMessage; as catalogMessage) {
+                                <p-message severity="info"
+                                           data-testid="style-presets-read-only-message"
+                                           [text]="catalogMessage"/>
+                            }
+
                             @if (quickPresetFormVisible) {
                                 <div class="quick-preset-form" data-testid="style-preset-add-form">
                                     <p-iftalabel>

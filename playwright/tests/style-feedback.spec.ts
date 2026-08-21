@@ -25,7 +25,57 @@ test.describe('Style feedback workflows', () => {
         await expect(stylesDialog.getByTestId('style-presets-empty-message')).toHaveText(
             'No map presets configured. Please, add map presets in the configuration'
         );
+        await expect(stylesDialog.getByTestId('style-presets-read-only-message')).toHaveCount(0);
         await expect(stylesDialog.getByTestId('style-preset-add-button').locator('button')).toBeDisabled();
+    });
+
+    test('explains a populated static-only map preset catalog', async ({page}) => {
+        await page.route('**/static-config/config.json', async route => {
+            const response = await route.fetch();
+            const config = await response.json();
+            await route.fulfill({
+                response,
+                json: {
+                    ...config,
+                    mapPresets: [{
+                        id: 'static-network',
+                        name: 'Static Network',
+                        enabled: true,
+                        layerPresets: [{
+                            layerId: 'Lane',
+                            styleId: 'NDS.Live/Lanes',
+                            presetId: 'standard'
+                        }]
+                    }]
+                }
+            });
+        });
+
+        await navigateToStateSnapshotRoot(page);
+        const stylesDialog = await openStylesDialog(page);
+        await stylesDialog.getByTestId('style-presets-tab').click();
+
+        const notice = stylesDialog.getByTestId('style-presets-read-only-message');
+        await expect(notice).toHaveText(
+            'Using static configuration. Modify the configuration to update map presets'
+        );
+        await expect(stylesDialog.getByTestId('style-preset-definition-static-network')).toContainText(
+            'Static Network'
+        );
+        await expect(stylesDialog.getByTestId('style-presets-empty-message')).toHaveCount(0);
+
+        const placement = await stylesDialog.getByTestId('style-presets-panel').evaluate(panel => {
+            const toolbar = panel.querySelector('.style-presets-toolbar');
+            const message = panel.querySelector('[data-testid="style-presets-read-only-message"]');
+            const list = panel.querySelector('.style-preset-list');
+            return {
+                afterToolbar: !!toolbar && !!message
+                    && !!(toolbar.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING),
+                beforeList: !!message && !!list
+                    && !!(message.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING)
+            };
+        });
+        expect(placement).toEqual({afterToolbar: true, beforeList: true});
     });
 
     test('search styles support Save and Save and Open with matching visibility', async ({page, request}) => {

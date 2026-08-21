@@ -191,6 +191,18 @@ describe("MapPresetService", () => {
         expect(staticOnly.readOnlyReason).toBe(staticOnly.emptyCatalogMessage);
     });
 
+    it("explains populated read-only catalogs according to their deployment", () => {
+        expect(createService(false, true, true).service.readOnlyCatalogMessage).toBe(
+            "Configuring map presets is not allowed. Modify the server configuration to allow access"
+        );
+        expect(createService(false, true, false).service.readOnlyCatalogMessage).toBe(
+            "Using static configuration. Modify the configuration to update map presets"
+        );
+        expect(createService(true, true, true).service.readOnlyCatalogMessage).toBeNull();
+        expect(createService(false, false, true, []).service.readOnlyCatalogMessage).toBeNull();
+        expect(createService(false, false, false, []).service.readOnlyCatalogMessage).toBeNull();
+    });
+
     it("validates the complete catalog immediately before PATCH", async () => {
         const {service, http} = createService();
         const invalid = structuredClone(configured);
