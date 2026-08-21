@@ -106,13 +106,13 @@ export default defineConfig({
                         MOZ_WEBRENDER: '1',
                         MOZ_WEBRENDER_SOFTWARE: '1',
                         ...inheritedEnv
+                    },
+                    firefoxUserPrefs: {
+                        'webgl.disabled': false,
+                        'webgl.force-enabled': true,
+                        'layers.acceleration.force-enabled': true,
+                        'gfx.webrender.all': true
                     }
-                },
-                firefoxUserPrefs: {
-                    'webgl.disabled': false,
-                    'webgl.force-enabled': true,
-                    'layers.acceleration.force-enabled': true,
-                    'gfx.webrender.all': true
                 }
             }
         },
