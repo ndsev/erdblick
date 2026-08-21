@@ -699,6 +699,16 @@ export abstract class DeckMapView implements IRenderView {
             400
         );
         this.layerRegistry.upsert(
+            this.gpuVectorLayers[2].id,
+            this.gpuVectorLayers[2],
+            4_000
+        );
+        this.layerRegistry.upsert(
+            this.gpuVectorLayers[3].id,
+            this.gpuVectorLayers[3],
+            4_001
+        );
+        this.layerRegistry.upsert(
             this.gpuTextLayerHost.id,
             this.gpuTextLayerHost,
             475

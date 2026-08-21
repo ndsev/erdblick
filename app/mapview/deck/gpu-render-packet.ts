@@ -109,6 +109,7 @@ export interface GpuPickRecordView {
   channelOrdinal: number;
   entryOrdinal: number;
   endpointRole: number;
+  /** Finite only after this semantic row materialized visible presentation. */
   navigationAltitude: number;
 }
 

@@ -737,7 +737,7 @@ std::vector<FeatureStyleRule const*> TileSubsetLayerRenderer::rulesForChannel(
     for (auto const sourceIndex : channelRuleIndices(channelId)) {
         for (auto const& rule : style_.rules()) {
             if (rule.index() == sourceIndex &&
-                rule.mode() == highlightMode_ &&
+                rule.supportsMode(highlightMode_) &&
                 fidelityMatches(fidelity_, rule.fidelity()))
             {
                 result.push_back(&rule);
@@ -793,7 +793,7 @@ TileSubsetLayerRenderer::bindingFor(
             [&](FeatureStyleRule const& rule) {
                 return std::ranges::find(sourceIndices, rule.index()) !=
                         sourceIndices.end() &&
-                    rule.mode() == highlightMode_;
+                    rule.supportsMode(highlightMode_);
             });
         // A bundle planned with AnyFidelity intentionally contains both
         // fidelity variants so the view can switch without a refetch.
@@ -3598,6 +3598,7 @@ void TileSubsetLayerRenderer::appendGltf(
         projectWgsPoint({origin.x, origin.y + size.y, origin.z + size.z}),
         projectWgsPoint({origin.x + size.x, origin.y + size.y, origin.z + size.z}),
     }};
+    recordPickNavigationAltitude(pick, projected);
     static constexpr std::array<std::array<size_t, 3>, 12> triangles{{
         {0, 1, 3}, {0, 3, 2},
         {4, 6, 7}, {4, 7, 5},
@@ -3639,6 +3640,7 @@ void TileSubsetLayerRenderer::appendLabel(
             return;
         }
     }
+    recordPickNavigationAltitude(pick, std::span{&point, size_t{1U}});
     auto const absolutePosition = unprojectLocalPoint(point);
     auto const font = parseLabelFont(rule.labelFont());
     auto labelFlags = static_cast<uint32_t>(GpuLabelFlag::None);

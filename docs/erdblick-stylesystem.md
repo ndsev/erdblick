@@ -143,7 +143,7 @@ Common admission fields:
 |---|---|
 | `type` | Feature type name or accepted type pattern. |
 | `filter` | SIMFIL feature-root filter. |
-| `mode` | Regular, `hover`, or `selection` pass. |
+| `mode` | One pass, or a list of passes: `none`, `hover`, and `selection`. |
 | `fidelity` | `low`, `high`, or any presentation fidelity. |
 | `geometry` | One type or list: point, line, polygon, mesh, etc. |
 | `geometry-name` | Exact semantic name, or `*`/omission for wildcard. |
@@ -620,7 +620,7 @@ opposite-heading cross-road legs retain the ordinary fillet.
 ```yaml
 - type: LaneGroup
   scope: relation
-  mode: selection
+  mode: [hover, selection]
   filter: "showTopology"
   relation-type: "nextLaneGroup|prevLaneGroup"
   relation-recursive: true
@@ -666,6 +666,16 @@ Relation expressions can use the relation root plus `$source`, `$target`, and
 `$twoway`. Endpoint styles may independently select semantic geometry.
 `RelationEntry` carries source/target feature entries and explicit source and
 target geometry collections.
+
+Use a mode list when hover and selection intentionally share identical
+relation geometry. The planner emits the same authored channel independently
+for each interaction pass. Interaction planning admits a relation channel only
+for an exact relation-row target and adds that row's restriction; selecting its
+host feature does not activate sibling relation rules. If that exact target is
+already present in a regular or search presentation, the local interaction
+compositor highlights it instead. Authored relation geometry is requested only
+as a fallback while the target is absent, and this choice is reconciled again
+when style changes materialize or remove regular geometry.
 
 Generic bidirectional display uses permanent south-west ownership. If that
 owner is outside current coverage, the pair is not rendered. Selection

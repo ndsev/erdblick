@@ -1178,9 +1178,17 @@ NativeJsValue TileSubsetLayer::findPickReferences(
                             ? std::optional<uint32_t>{}
                             : relationIndexForSource(
                                 entry->relationId(), sourceString);
+                        auto const requestedEndpoint =
+                            matches(sourceId) ||
+                            (entry->twoway() && matches(targetId));
+                        auto const requestedRelationIndex = requestedEndpoint
+                            ? relationIndexForSource(
+                                entry->relationId(), featureId)
+                            : std::optional<uint32_t>{};
                         if (scope == "relation" && entryIndex >= 0 &&
-                            sourceString == featureId && relationIndex &&
-                            *relationIndex == static_cast<uint32_t>(entryIndex))
+                            requestedRelationIndex &&
+                            *requestedRelationIndex ==
+                                static_cast<uint32_t>(entryIndex))
                         {
                             append(currentChannel, currentEntry, 0U);
                             append(currentChannel, currentEntry, 1U);

@@ -54,6 +54,7 @@ import {
   SURFACE_VERTEX_SHADER,
 } from "./erdblick-vector.shaders";
 import { gpuIconAtlasService } from "./gpu-icon-atlas.service";
+import { INTERACTION_STYLE_ORDER_BASE } from "./tile-subset-interaction.model";
 
 const DEPTH_PARAMETERS: RenderPipelineParameters = {
   depthCompare: "less-equal",
@@ -287,6 +288,8 @@ export type ErdblickVectorLayerProps = LayerProps & {
   navigationAltitudeResolver?: (globalPickIndex: number) => number | undefined;
   markerAnchorEligible?: boolean;
   renderMode?: ErdblickVectorRenderMode;
+  minimumStyleOrder?: number;
+  maximumStyleOrderExclusive?: number;
 };
 
 /** Select the visible, support-prepass, or overlay-resolution material subset. */
@@ -810,6 +813,9 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
       if (!this.acceptsRenderMode(source.flags)) {
         continue;
       }
+      if (!this.acceptsStyleOrder(source.styleOrder)) {
+        continue;
+      }
       if (
         this.props.primitiveKinds &&
         !this.props.primitiveKinds.includes(source.kind)
@@ -870,6 +876,16 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
       case ErdblickVectorRenderMode.SemanticOverlay:
         return (flags & GpuMaterialFlag.SemanticOverlay) !== 0;
     }
+  }
+
+  /** Partition ordinary and transient materials into stable physical Deck passes. */
+  private acceptsStyleOrder(styleOrder: number): boolean {
+    return (
+      (this.props.minimumStyleOrder === undefined ||
+        styleOrder >= this.props.minimumStyleOrder) &&
+      (this.props.maximumStyleOrderExclusive === undefined ||
+        styleOrder < this.props.maximumStyleOrderExclusive)
+    );
   }
 
   /** Build one material model whose instance buffer remains scene-owned. */
@@ -1159,23 +1175,34 @@ export class ErdblickVectorMaskLayer extends Layer<ErdblickVectorMaskLayerProps>
 }
 
 /**
- * Construct the two stable vector pass shells associated with one Deck view.
+ * Construct the stable ordinary and interaction vector pass shells for one
+ * Deck view.
  *
  * Surfaces stay below GLTF and tile-state overlays while paths, points,
- * arrows, and icons retain their legacy position above those layers. Both
- * shells share drill-pick suppression so one semantic object cannot be
- * returned twice merely because it contributes to both passes.
+ * arrows, and icons retain their legacy position above those layers.
+ * Transient authored hover/selection geometry is physically drawn after the
+ * shader interaction compositor. Every shell shares drill-pick suppression.
  */
 export function createErdblickVectorLayers(
   id: string,
   scene: GpuScene,
   flattenZ: boolean,
   sharedDisabledPickIndices = new Set<number>(),
-): readonly [ErdblickVectorLayer, ErdblickVectorLayer] {
+): readonly [
+  ErdblickVectorLayer,
+  ErdblickVectorLayer,
+  ErdblickVectorLayer,
+  ErdblickVectorLayer,
+] {
   const layer = (
     suffix: string,
     primitiveKinds: readonly GpuPrimitiveKind[],
     getPolygonOffset: () => [number, number],
+    styleOrderRange: {
+      minimumStyleOrder?: number;
+      maximumStyleOrderExclusive?: number;
+    },
+    parameters?: RenderPipelineParameters,
   ) =>
     new ErdblickVectorLayer({
       id: `${id}-${suffix}`,
@@ -1183,6 +1210,8 @@ export function createErdblickVectorLayers(
       scene,
       flattenZ,
       primitiveKinds,
+      ...styleOrderRange,
+      ...(parameters ? { parameters } : {}),
       sharedDisabledPickIndices,
       getPolygonOffset,
       coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
@@ -1194,7 +1223,12 @@ export function createErdblickVectorLayers(
       markerAnchorEligible: true,
     });
   return [
-    layer("surfaces", [GpuPrimitiveKind.SurfaceTriangle], NO_POLYGON_OFFSET),
+    layer(
+      "surfaces",
+      [GpuPrimitiveKind.SurfaceTriangle],
+      NO_POLYGON_OFFSET,
+      { maximumStyleOrderExclusive: INTERACTION_STYLE_ORDER_BASE },
+    ),
     layer(
       "vectors",
       [
@@ -1204,6 +1238,26 @@ export function createErdblickVectorLayers(
         GpuPrimitiveKind.Icon,
       ],
       VECTOR_POLYGON_OFFSET,
+      { maximumStyleOrderExclusive: INTERACTION_STYLE_ORDER_BASE },
+    ),
+    layer(
+      "interaction-surfaces",
+      [GpuPrimitiveKind.SurfaceTriangle],
+      NO_POLYGON_OFFSET,
+      { minimumStyleOrder: INTERACTION_STYLE_ORDER_BASE },
+      NO_DEPTH_PARAMETERS,
+    ),
+    layer(
+      "interaction-vectors",
+      [
+        GpuPrimitiveKind.PathSegment,
+        GpuPrimitiveKind.Point,
+        GpuPrimitiveKind.Arrow,
+        GpuPrimitiveKind.Icon,
+      ],
+      VECTOR_POLYGON_OFFSET,
+      { minimumStyleOrder: INTERACTION_STYLE_ORDER_BASE },
+      NO_DEPTH_PARAMETERS,
     ),
   ];
 }

@@ -68,6 +68,9 @@ export class MapTileStreamService {
         new Map<string, FilterSubscriptionRef>();
     private nextFilterSubscriptionId = 0;
     private updateTimer: ReturnType<typeof setTimeout> | null = null;
+    private acknowledgementTimer: ReturnType<typeof setTimeout> | null = null;
+    private acknowledgementPending = false;
+    private acknowledgementBurstStartedAt = 0;
     private updatePending = false;
     private updateInProgress = false;
     private updateRequestedWhilePaused = false;
@@ -77,6 +80,8 @@ export class MapTileStreamService {
             (owner, tokens) => owner.expireTiles(tokens)
         );
     private readonly updateDebounceMs = 25;
+    private readonly acknowledgementQuietMs = 100;
+    private readonly acknowledgementMaxLatencyMs = 500;
     private lastUpdateAt = 0;
     private backendRequestProgress: BackendRequestProgress = {
         done: 0,
@@ -214,8 +219,12 @@ export class MapTileStreamService {
     ): void {
         if (!ref.released &&
             this.filterSubscriptionsById.get(ref.filterId) === ref) {
-            this.forceNextUpdate ||= force;
-            this.scheduleUpdate();
+            if (force) {
+                this.forceNextUpdate = true;
+                this.scheduleUpdate();
+            } else {
+                this.scheduleAcknowledgementUpdate();
+            }
         }
     }
 
@@ -682,7 +691,12 @@ export class MapTileStreamService {
             clearTimeout(this.updateTimer);
             this.updateTimer = null;
         }
-        this.updateRequestedWhilePaused ||= this.updatePending;
+        if (this.acknowledgementTimer) {
+            clearTimeout(this.acknowledgementTimer);
+            this.acknowledgementTimer = null;
+        }
+        this.updateRequestedWhilePaused ||=
+            this.updatePending || this.acknowledgementPending;
         this.tileStream?.setFrameProcessingPaused(true);
         this.showInfo("Tile pipeline paused");
         console.info(`Tile pipeline paused (${source})`);
@@ -777,6 +791,12 @@ export class MapTileStreamService {
     }
 
     private scheduleUpdate(): void {
+        if (this.acknowledgementTimer) {
+            clearTimeout(this.acknowledgementTimer);
+            this.acknowledgementTimer = null;
+        }
+        this.acknowledgementPending = false;
+        this.acknowledgementBurstStartedAt = 0;
         this.updatePending = true;
         if (this.tilePipelinePaused) {
             this.updateRequestedWhilePaused = true;
@@ -794,6 +814,35 @@ export class MapTileStreamService {
                 this.updateTimer = null;
                 void this.runUpdate();
             }, delay)
+        );
+    }
+
+    /** Coalesce acceptance-only omission snapshots without delaying forced work. */
+    private scheduleAcknowledgementUpdate(): void {
+        this.acknowledgementPending = true;
+        if (this.tilePipelinePaused) {
+            this.updateRequestedWhilePaused = true;
+            return;
+        }
+        const now = Date.now();
+        if (!this.acknowledgementBurstStartedAt) {
+            this.acknowledgementBurstStartedAt = now;
+        }
+        const dueAt = Math.min(
+            now + this.acknowledgementQuietMs,
+            this.acknowledgementBurstStartedAt +
+                this.acknowledgementMaxLatencyMs
+        );
+        if (this.acknowledgementTimer) {
+            clearTimeout(this.acknowledgementTimer);
+        }
+        this.acknowledgementTimer = this.ngZone.runOutsideAngular(() =>
+            setTimeout(() => {
+                this.acknowledgementTimer = null;
+                this.acknowledgementPending = false;
+                this.acknowledgementBurstStartedAt = 0;
+                this.scheduleUpdate();
+            }, Math.max(0, dueAt - now))
         );
     }
 

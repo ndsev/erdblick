@@ -136,6 +136,7 @@ interface PacketOptions {
   featureId?: string;
   label?: string;
   materialKey?: bigint;
+  navigationAltitude?: number;
   pointByte?: number;
   zIndex?: number;
   depthTieKey?: number;
@@ -251,6 +252,11 @@ function pointPacket(
     view.setUint32(pickOffset + 8, 0, true);
     view.setUint32(pickOffset + 12, 0, true);
     view.setUint32(pickOffset + 16, 0, true);
+    view.setFloat32(
+      pickOffset + 20,
+      options.navigationAltitude ?? 0,
+      true,
+    );
   }
   if (labelCount) {
     view.setUint32(labelOffset, 0, true);
@@ -1228,6 +1234,99 @@ describe("GpuScene contribution lifecycle", () => {
     ]);
     scene.publishPresentation();
     expect(scene.resolvePick(0)).toEqual([]);
+  });
+
+  it("excludes a retiring same-identity pick from interaction presence", () => {
+    const { scene } = createScene();
+    const input = [{
+      identity: "tile",
+      mapTileKey: "Features:Map:Layer:1:0",
+      styleOrder: 0,
+    }];
+    const target = {
+      mapTileKey: "Features:Map:Layer:1:0",
+      featureId: "Road.1:relation#2",
+    };
+    const identities = new Set(["tile"]);
+    const initial = scene.prepareRender("origin", [11, 48, 0], input);
+    scene.applyPacket(
+      pointPacket(initial, { featureId: target.featureId }),
+      initial,
+    );
+    scene.finishRender(initial);
+    scene.publishPresentation();
+
+    expect(scene.hasInteractionTarget(identities, target)).toBe(true);
+    expect(scene.interactionPicks(identities, [target])).toHaveLength(1);
+
+    const replacement = scene.prepareRender("origin", [11, 48, 0], input);
+    scene.applyPacket(pointPacket(replacement), replacement);
+    scene.finishRender(replacement);
+
+    // The predecessor remains retained until presentation publication, but
+    // semantic presence already follows the newly active contribution.
+    expect(scene.hasInteractionTarget(identities, target)).toBe(false);
+    expect(scene.interactionPicks(identities, [target])).toEqual([]);
+  });
+
+  it("aliases a merged relation row without changing ordinary pick semantics", () => {
+    const { scene } = createScene();
+    const canonical = "Lane.1:relation#3";
+    const reverse = "Lane.2:relation#7";
+    const target = {
+      mapTileKey: "Features:Map:Layer:1:0",
+      featureId: reverse,
+    };
+    const input = [{
+      identity: "tile",
+      mapTileKey: target.mapTileKey,
+      styleOrder: 0,
+    }];
+    const reservation = scene.prepareRender("origin", [11, 48, 0], input);
+    const packet = pointPacket(reservation, { featureId: canonical });
+    reservation.contributions[0].findPickReferences = (featureId) =>
+      featureId === reverse
+        ? [{ channelOrdinal: 0, entryOrdinal: 0, endpointRole: 0 }]
+        : [];
+    scene.applyPacket(packet, reservation);
+    scene.finishRender(reservation);
+
+    const identities = new Set(["tile"]);
+    expect(scene.hasInteractionTarget(identities, target)).toBe(true);
+    expect(scene.interactionPicks(identities, [target])).toHaveLength(1);
+    expect(scene.resolvePick(0)).toEqual([{
+      mapTileKey: target.mapTileKey,
+      featureId: canonical,
+    }]);
+
+    scene.removeContribution("tile");
+    scene.publishPresentation();
+    expect(scene.hasInteractionTarget(identities, target)).toBe(false);
+  });
+
+  it("excludes admitted source rows which emitted no primitive", () => {
+    const { scene } = createScene();
+    const target = {
+      mapTileKey: "Features:Map:Layer:1:0",
+      featureId: "Lane.1",
+    };
+    const input = [{
+      identity: "tile",
+      mapTileKey: target.mapTileKey,
+      styleOrder: 0,
+    }];
+    const reservation = scene.prepareRender("origin", [11, 48, 0], input);
+    scene.applyPacket(
+      pointPacket(reservation, {
+        featureId: target.featureId,
+        navigationAltitude: Number.NaN,
+      }),
+      reservation,
+    );
+    scene.finishRender(reservation);
+
+    expect(scene.hasInteractionTarget(new Set(["tile"]), target)).toBe(false);
+    expect(scene.interactionPicks(new Set(["tile"]), [target])).toEqual([]);
   });
 
   it("removes a coverage delta with one scene revision and redraw", () => {

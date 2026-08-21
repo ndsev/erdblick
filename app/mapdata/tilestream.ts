@@ -685,7 +685,7 @@ export class MapTileStreamClient {
         return chunks.map(chunk => JSON.stringify(chunk));
     }
 
-    /** Bisects one request group while keeping every tile-indexed side array aligned. */
+    /** Splits one request group while keeping every tile-indexed side array aligned. */
     private splitRequestGroupForTransport(
         request: any,
         stringPoolOffsets: unknown,
@@ -713,48 +713,75 @@ export class MapTileStreamClient {
             return [request];
         }
 
-        const midpoint = Math.ceil(tileIds.length / 2);
-        const left = this.sliceRequestGroup(request, tileIds.slice(0, midpoint));
-        const right = this.sliceRequestGroup(request, tileIds.slice(midpoint));
-        return [
-            ...this.splitRequestGroupForTransport(
-                left,
-                stringPoolOffsets,
-                requestId
-            ),
-            ...this.splitRequestGroupForTransport(
-                right,
+        // Estimate a slightly conservative number of leaf pieces from the
+        // already measured payload. Partition every tile-indexed side array in
+        // one pass instead of filtering the complete arrays at every level of
+        // a recursive bisection (which was O(n log n) for large viewports).
+        const encodedBytes = this.byteLength(encoded);
+        const targetBytes = TARGET_TILE_REQUEST_CHUNK_BYTES * 0.85;
+        const pieceCount = Math.min(
+            tileIds.length,
+            Math.max(2, Math.ceil(encodedBytes / targetBytes))
+        );
+        return this.partitionRequestGroup(request, pieceCount).flatMap(piece =>
+            this.splitRequestGroupForTransport(
+                piece,
                 stringPoolOffsets,
                 requestId
             )
-        ];
+        );
     }
 
-    /** Copies one request for a tile subset and filters all known per-tile fields. */
-    private sliceRequestGroup(request: any, tileIds: any[]): any {
-        const membership = new Set(tileIds.map(tileId => String(tileId)));
-        const containsTile = (value: unknown): boolean =>
-            membership.has(String(value));
-        const result: Record<string, any> = {
-            ...request,
-            tileIds
-        };
-        for (const field of [
+    /** Partitions one request and all tile-indexed side arrays in linear time. */
+    private partitionRequestGroup(request: any, pieceCount: number): any[] {
+        const tileIds = Array.isArray(request?.tileIds)
+            ? request.tileIds
+            : [];
+        const tileCountPerPiece = Math.ceil(tileIds.length / pieceCount);
+        const pieces: Array<Record<string, any>> = Array.from(
+            {length: pieceCount},
+            (_, index) => ({
+                ...request,
+                tileIds: tileIds.slice(
+                    index * tileCountPerPiece,
+                    Math.min(tileIds.length, (index + 1) * tileCountPerPiece)
+                )
+            })
+        ).filter(piece => piece["tileIds"].length > 0);
+
+        const indexedFields = [
             "priorityTileIds",
             "roots",
             "featureIds"
-        ]) {
+        ] as const;
+        if (!indexedFields.some(field => Array.isArray(request?.[field]))) {
+            return pieces;
+        }
+        const pieceByTileId = new Map<string, number>();
+        pieces.forEach((piece, pieceIndex) => {
+            for (const tileId of piece["tileIds"]) {
+                pieceByTileId.set(String(tileId), pieceIndex);
+            }
+        });
+        for (const field of indexedFields) {
             const values = request?.[field];
             if (!Array.isArray(values)) {
                 continue;
             }
-            result[field] = values.filter((value: any) =>
-                field === "priorityTileIds"
-                    ? containsTile(value)
-                    : containsTile(value?.tileId)
-            );
+            for (const piece of pieces) {
+                piece[field] = [];
+            }
+            for (const value of values) {
+                const tileId = field === "priorityTileIds"
+                    ? value
+                    : value?.tileId;
+                const pieceIndex = pieceByTileId.get(String(tileId));
+                if (pieceIndex !== undefined) {
+                    pieces[pieceIndex][field].push(value);
+                }
+            }
         }
-        return result;
+        return pieces;
     }
 
     /** Measures the UTF-8 payload size that matters for websocket message limits. */

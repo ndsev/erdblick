@@ -140,7 +140,10 @@ describe("DeckInteractionOutlineService", () => {
 
         const layers = setProps.mock.calls.at(-1)?.[0].layers as Array<{
             id: string;
-            props?: {haloOnly?: boolean};
+            props?: {
+                haloOnly?: boolean;
+                parameters?: Record<string, unknown>;
+            };
         }>;
         expect(layers.map(layer => layer.id)).toEqual([
             "builtin/interaction-mask/selection/scene-vector",
@@ -149,6 +152,18 @@ describe("DeckInteractionOutlineService", () => {
         ]);
         expect(layers[1].props?.haloOnly).toBe(true);
         expect(layers[2].props?.haloOnly).toBe(false);
+        expect(layers[1].props?.parameters).toMatchObject({
+            depthWriteEnabled: false,
+            depthCompare: "always",
+            blendColorSrcFactor: "one-minus-dst-alpha",
+            blendColorDstFactor: "one"
+        });
+        expect(layers[2].props?.parameters).toMatchObject({
+            depthWriteEnabled: false,
+            depthCompare: "always",
+            blendColorSrcFactor: "one",
+            blendColorDstFactor: "one-minus-src-alpha"
+        });
     });
 
     it("allocates stable, distinct non-zero identities within one group", () => {

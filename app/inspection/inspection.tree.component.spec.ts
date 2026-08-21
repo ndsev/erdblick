@@ -1,7 +1,8 @@
-import {describe, expect, it} from "vitest";
+import {describe, expect, it, vi} from "vitest";
 import type {TreeTableNode} from "primeng/api";
 import {inspectionSearchNumberLiteral} from "./inspection-search.util";
 import {expandPathToFirstHighlightedRow} from "./inspection-tree-highlight";
+import {InspectionTreeComponent} from "./inspection.tree.component";
 
 describe("inspectionSearchNumberLiteral", () => {
     it("keeps BigInt inspection integers as unquoted Simfil numeric literals", () => {
@@ -50,5 +51,23 @@ describe("expandPathToFirstHighlightedRow", () => {
 
         expect(expandPathToFirstHighlightedRow(nodes)).toBeUndefined();
         expect(nodes[0].expanded).toBe(false);
+    });
+});
+
+describe("inspection map-hover ownership", () => {
+    it("does not let a delayed leave clear a re-entered target", async () => {
+        const component = Object.create(InspectionTreeComponent.prototype) as any;
+        component.destroyed = false;
+        component.mapHoverEpoch = 0;
+        component.cdr = {markForCheck: vi.fn()};
+        const transition = vi.fn();
+
+        component.claimMapHover("row:X");
+        component.deferMapHoverTransition("row:X", transition);
+        component.claimMapHover("row:X");
+        await Promise.resolve();
+
+        expect(transition).not.toHaveBeenCalled();
+        expect(component.activeMapHoverOwner).toBe("row:X");
     });
 });

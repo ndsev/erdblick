@@ -266,6 +266,8 @@ interface ScenePickRecord {
   contributionIdentity: string;
   mapTileKey: string;
   featureIds: string | readonly string[];
+  /** Exact persisted targets which resolve to this canonical merged scene row. */
+  interactionAliases?: Set<string>;
   navigationAltitude?: number;
 }
 
@@ -1153,11 +1155,11 @@ export class GpuScene {
         continue;
       }
       for (const globalPickIndex of this.pickIndices(indices)) {
-        const selected = this.picks.get(globalPickIndex);
-        if (
-          !selected ||
-          !contributionIdentities.has(selected.contributionIdentity)
-        ) {
+        const selected = this.currentContributionPick(
+          globalPickIndex,
+          contributionIdentities,
+        );
+        if (!selected) {
           continue;
         }
         result.set(globalPickIndex, {
@@ -1287,6 +1289,12 @@ export class GpuScene {
       for (let local = 0; local < range.recordCount; ++local) {
         const globalPickIndex = range.firstRecord + local;
         const record = this.packedPick(installed, local);
+        // Native filtering retains source-row tuples even when an admitted
+        // rule emits no primitive. Only materialized rows receive the finite
+        // navigation-altitude sentinel while the primitive is appended.
+        if (!Number.isFinite(record.navigationAltitude)) {
+          continue;
+        }
         if (
           !references.some(
             (reference) =>
@@ -1297,12 +1305,26 @@ export class GpuScene {
         ) {
           continue;
         }
-        if (!this.picks.has(globalPickIndex)) {
+        const selected = this.picks.get(globalPickIndex) ??
           this.cacheScenePick(
             globalPickIndex,
             installed,
             installed.resolvePick(record),
             record.navigationAltitude,
+          );
+        if (!selected) {
+          continue;
+        }
+        const canonicalTarget = typeof selected.featureIds === "string"
+          ? selected.featureIds === target.featureId
+          : selected.featureIds.includes(target.featureId);
+        if (!canonicalTarget &&
+            !selected.interactionAliases?.has(target.featureId)) {
+          (selected.interactionAliases ??= new Set()).add(target.featureId);
+          this.addPickIndex(
+            selected.mapTileKey,
+            target.featureId,
+            globalPickIndex,
           );
         }
       }
@@ -1849,10 +1871,13 @@ export class GpuScene {
     if (!selected) {
       return;
     }
-    const featureIds =
+    const canonicalFeatureIds =
       typeof selected.featureIds === "string"
         ? [selected.featureIds]
         : selected.featureIds;
+    const featureIds = selected.interactionAliases
+      ? [...canonicalFeatureIds, ...selected.interactionAliases]
+      : canonicalFeatureIds;
     const byFeature = this.pickIndicesByTileAndFeature.get(selected.mapTileKey);
     for (const featureId of featureIds) {
       if (!featureId || !byFeature) {
@@ -1926,15 +1951,31 @@ export class GpuScene {
     contributionIdentities: ReadonlySet<string>,
   ): boolean {
     for (const index of this.pickIndices(indices)) {
-      const selected = this.picks.get(index);
-      if (
-        selected &&
-        contributionIdentities.has(selected.contributionIdentity)
-      ) {
+      if (this.currentContributionPick(index, contributionIdentities)) {
         return true;
       }
     }
     return false;
+  }
+
+  /** Reject sparse picks retained only for an atomically retiring revision. */
+  private currentContributionPick(
+    globalPickIndex: number,
+    contributionIdentities: ReadonlySet<string>,
+  ): ScenePickRecord | undefined {
+    const selected = this.picks.get(globalPickIndex);
+    if (!selected ||
+        !contributionIdentities.has(selected.contributionIdentity)) {
+      return undefined;
+    }
+    const active = this.contributionByIdentity
+      .get(selected.contributionIdentity)?.active;
+    const range = active?.pickingRange;
+    return range &&
+      globalPickIndex >= range.firstRecord &&
+      globalPickIndex < range.firstRecord + range.recordCount
+      ? selected
+      : undefined;
   }
 
   /** Reserve one stable origin slot and upload its float64 high/low decomposition. */

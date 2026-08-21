@@ -59,6 +59,58 @@ rules:
 }
 
 TEST_CASE(
+    "One style rule can serve hover and selection highlight passes",
+    "[erdblick.style-plan]")
+{
+    auto parsed = style(R"yaml(
+name: Shared interaction rule
+version: 2
+rules:
+  - type: Road
+    scope: attribute
+    mode: [hover, selection]
+    geometry: line
+    color: "#ff0000"
+)yaml");
+    REQUIRE(parsed.isValid());
+    REQUIRE(parsed.supportsHighlightMode(FeatureStyleRule::HoverHighlight));
+    REQUIRE(parsed.supportsHighlightMode(FeatureStyleRule::SelectionHighlight));
+    REQUIRE_FALSE(parsed.supportsHighlightMode(FeatureStyleRule::NoHighlight));
+
+    auto const hover = planStyleFilter(
+        parsed,
+        *plannerLayerInfo(),
+        FeatureStyleRule::HoverHighlight,
+        FeatureStyleRule::AnyFidelity);
+    auto const selection = planStyleFilter(
+        parsed,
+        *plannerLayerInfo(),
+        FeatureStyleRule::SelectionHighlight,
+        FeatureStyleRule::AnyFidelity);
+
+    REQUIRE(hover.valid);
+    REQUIRE(selection.valid);
+    REQUIRE(hover.channels.size() == 1);
+    REQUIRE(selection.channels.size() == 1);
+    REQUIRE(hover.channels[0].channelId_ == "style-rule:0");
+    REQUIRE(selection.channels[0].channelId_ == "style-rule:0");
+}
+
+TEST_CASE(
+    "Highlight mode lists reject unsupported values",
+    "[erdblick.style-plan]")
+{
+    auto parsed = style(R"yaml(
+name: Invalid shared interaction rule
+version: 2
+rules:
+  - mode: [hover, sometimes]
+    geometry: line
+)yaml");
+    REQUIRE_FALSE(parsed.isValid());
+}
+
+TEST_CASE(
     "Flat search styles retain one planner channel per top-level rule",
     "[erdblick.style-plan]")
 {

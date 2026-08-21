@@ -846,6 +846,10 @@ export class DeckInteractionOutlineService implements Effect {
                 groupId,
                 service: this,
                 haloOnly: true,
+                // Deck applies pipeline state at the Layer boundary. The raw
+                // ClipSpace model is drawn inside Deck's already-open pass, so
+                // model-local parameters alone cannot prevent depth writes.
+                parameters: deckInteractionOutlineBlendParameters(true),
                 pickable: false
             }), group.order);
         } else {
@@ -859,6 +863,7 @@ export class DeckInteractionOutlineService implements Effect {
                 groupId,
                 service: this,
                 haloOnly: false,
+                parameters: deckInteractionOutlineBlendParameters(false),
                 pickable: false
             }), group.order);
         } else {

@@ -194,7 +194,7 @@ describe("ErdblickVectorLayer model order", () => {
   it("keeps vector hits eligible for camera and marker anchoring", () => {
     const layers = createErdblickVectorLayers("vector", {} as never, false);
 
-    expect(layers).toHaveLength(2);
+    expect(layers).toHaveLength(4);
     for (const layer of layers) {
       expect(layer.props.navigationAnchorEligible).toBe(true);
       expect(layer.props.markerAnchorEligible).toBe(true);
@@ -206,6 +206,18 @@ describe("ErdblickVectorLayer model order", () => {
     expect(layers[1].props.getPolygonOffset?.({ layerIndex: 37 })).toEqual([
       -2, -80,
     ]);
+    expect(layers[0].props.maximumStyleOrderExclusive).toBe(2_000);
+    expect(layers[1].props.maximumStyleOrderExclusive).toBe(2_000);
+    expect(layers[2].props.minimumStyleOrder).toBe(2_000);
+    expect(layers[3].props.minimumStyleOrder).toBe(2_000);
+    expect(layers[2].props.parameters).toMatchObject({
+      depthCompare: "always",
+      depthWriteEnabled: false,
+    });
+    expect(layers[3].props.parameters).toMatchObject({
+      depthCompare: "always",
+      depthWriteEnabled: false,
+    });
   });
 
   it("draws semantic primitive passes independently of packet arrival order", () => {

@@ -5,6 +5,7 @@ import type {StyleFilterPlan} from
     "../mapdata/styled-mapget-layer.model";
 import {
     hasAuthoredInteractionHighlight,
+    interactionTargetKey,
     planRemoteInteractionHighlight,
     type InteractionHighlightTarget
 } from "./interaction-highlight-plan";
@@ -42,7 +43,11 @@ const plan = (...channels: FilterChannelDefinition[]): StyleFilterPlan => ({
 describe("remote interaction highlight planning", () => {
     it("does not activate attribute channels for a bare feature target", () => {
         const result = planRemoteInteractionHighlight(
-            plan(channel("feature"), channel("attribute")),
+            plan(
+                channel("feature"),
+                channel("attribute"),
+                channel("relation")
+            ),
             [target("Road.7")]
         );
 
@@ -111,21 +116,53 @@ describe("remote interaction highlight planning", () => {
         }]);
     });
 
-    it("does not over-restrict recursive relations when any bare root remains", () => {
+    it("does not activate relation channels for bare feature targets", () => {
         const result = planRemoteInteractionHighlight(
             plan(channel("relation", {
                 entryFilter: "isTopology"
             })),
-            [
-                target("Intersection.1", 91),
-                target("Intersection.2:relation#3", 92)
-            ]
+            [target("Intersection.1", 91)]
         );
 
-        expect(result?.plan.channels[0].entryFilter).toBe("isTopology");
-        expect(result?.roots).toEqual([
-            {tileId: 91, featureId: "Intersection.1"},
-            {tileId: 92, featureId: "Intersection.2"}
-        ]);
+        expect(result).toBeNull();
+    });
+
+    it("omits locally rendered exact targets from every channel scope", () => {
+        const localFeature = target("Road.7", 91);
+        const localAttribute = target("Road.8:attribute#2", 92);
+        const localRelation = target("Intersection.1:relation#3", 93);
+        const remoteRelation = target("Intersection.2:relation#4", 94);
+        const result = planRemoteInteractionHighlight(
+            plan(
+                channel("feature"),
+                channel("attribute"),
+                channel("relation")
+            ),
+            [
+                localFeature,
+                localAttribute,
+                localRelation,
+                remoteRelation
+            ],
+            {localTargetKeys: new Set([
+                interactionTargetKey(localFeature),
+                interactionTargetKey(localAttribute),
+                interactionTargetKey(localRelation)
+            ])}
+        );
+
+        expect(result?.plan.channels.map(item => item.scope))
+            .toEqual(["relation"]);
+        expect(result?.plan.channels[0].featureFilter).toBe(
+            'id == "Intersection.2"'
+        );
+        expect(result?.plan.channels[0].entryFilter).toBe(
+            '($source.id == "Intersection.2" and $relationIndex == 4)'
+        );
+        expect(result?.tileIds).toEqual([94]);
+        expect(result?.roots).toEqual([{
+            tileId: 94,
+            featureId: "Intersection.2"
+        }]);
     });
 });

@@ -18,6 +18,11 @@ export interface RemoteInteractionHighlightPlan {
     roots: Array<{tileId: number; featureId: string}>;
 }
 
+/** Exact targets already represented by regular/search scene geometry. */
+export interface RemoteInteractionHighlightOptions {
+    localTargetKeys?: ReadonlySet<string>;
+}
+
 interface ResolvedInteractionTarget extends InteractionHighlightTarget {
     inspectionTarget: FeatureInspectionTarget;
 }
@@ -82,7 +87,6 @@ function channelTargets(
     }
     if (channel.scope === "relation") {
         return targets.filter(target =>
-            target.inspectionTarget.scope === "feature" ||
             target.inspectionTarget.scope === "relation");
     }
     return [...targets];
@@ -91,8 +95,8 @@ function channelTargets(
 /**
  * Reports whether authored geometry exists for the exact target scope.
  *
- * Relation channels on a bare feature are additive topology presentation and
- * therefore do not replace the local host-feature interaction effect.
+ * Authored interaction channels only own targets of their exact semantic
+ * scope; sibling entity scopes never replace one another.
  */
 export function hasAuthoredInteractionHighlight(
     plan: StyleFilterPlan,
@@ -106,10 +110,10 @@ export function hasAuthoredInteractionHighlight(
 function restrictChannel(
     channel: FilterChannelDefinition,
     targets: readonly ResolvedInteractionTarget[]
-): boolean {
+): ResolvedInteractionTarget[] {
     const remoteTargets = channelTargets(channel, targets);
     if (!remoteTargets.length) {
-        return false;
+        return [];
     }
 
     const backendFeatureIds = [...new Set(remoteTargets.map(target =>
@@ -136,9 +140,6 @@ function restrictChannel(
             entryRestriction
         );
     } else if (channel.scope === "relation") {
-        // A bare root intentionally permits recursive terminal relations. If
-        // any such root is present, an entry-wide relation restriction would
-        // incorrectly discard its discovered edges.
         const exactRelationTargets = remoteTargets.filter(
             (target): target is ResolvedInteractionTarget & {
                 inspectionTarget: Extract<FeatureInspectionTarget, {
@@ -146,17 +147,15 @@ function restrictChannel(
                 }>;
             } => target.inspectionTarget.scope === "relation"
         );
-        if (exactRelationTargets.length === remoteTargets.length) {
-            const entryRestriction = exactRelationTargets
-                .map(relationEntryRestriction)
-                .join(" or ");
-            channel.entryFilter = restrictExpression(
-                channel.entryFilter,
-                entryRestriction
-            );
-        }
+        const entryRestriction = exactRelationTargets
+            .map(relationEntryRestriction)
+            .join(" or ");
+        channel.entryFilter = restrictExpression(
+            channel.entryFilter,
+            entryRestriction
+        );
     }
-    return true;
+    return remoteTargets;
 }
 
 /**
@@ -167,30 +166,52 @@ function restrictChannel(
  */
 export function planRemoteInteractionHighlight(
     rawPlan: StyleFilterPlan,
-    features: readonly InteractionHighlightTarget[]
+    features: readonly InteractionHighlightTarget[],
+    options: RemoteInteractionHighlightOptions = {}
 ): RemoteInteractionHighlightPlan | null {
-    const targets: ResolvedInteractionTarget[] = features.map(feature => ({
-        ...feature,
-        inspectionTarget: parseFeatureInspectionTarget(feature.featureId)
-    }));
+    const targets: ResolvedInteractionTarget[] = features
+        .filter(feature => !options.localTargetKeys?.has(
+            interactionTargetKey(feature)))
+        .map(feature => ({
+            ...feature,
+            inspectionTarget: parseFeatureInspectionTarget(feature.featureId)
+        }));
+    if (!targets.length) {
+        return null;
+    }
     const plan = structuredClone(rawPlan);
-    plan.channels = plan.channels.filter(channel =>
-        restrictChannel(channel, targets));
+    const admittedTargetKeys = new Set<string>();
+    plan.channels = plan.channels.filter(channel => {
+        const admittedTargets = restrictChannel(channel, targets);
+        admittedTargets.forEach(target =>
+            admittedTargetKeys.add(interactionTargetKey(target)));
+        return admittedTargets.length > 0;
+    });
     if (!plan.channels.length) {
         return null;
     }
 
-    const tileIds = [...new Set(targets.map(target => target.tileId))];
+    const admittedTargets = targets.filter(target =>
+        admittedTargetKeys.has(interactionTargetKey(target)));
+    const tileIds = [...new Set(admittedTargets.map(target => target.tileId))];
     const needsRoots = plan.channels.some(channel =>
         channel.scope === "relation");
+    const roots = new Map<string, {tileId: number; featureId: string}>();
+    if (needsRoots) {
+        for (const target of admittedTargets) {
+            if (target.inspectionTarget.scope !== "relation") {
+                continue;
+            }
+            const root = {
+                tileId: target.tileId,
+                featureId: target.inspectionTarget.baseFeatureId
+            };
+            roots.set(`${root.tileId}\n${root.featureId}`, root);
+        }
+    }
     return {
         plan,
         tileIds,
-        roots: needsRoots
-            ? targets.map(target => ({
-                tileId: target.tileId,
-                featureId: target.inspectionTarget.baseFeatureId
-            }))
-            : []
+        roots: [...roots.values()]
     };
 }

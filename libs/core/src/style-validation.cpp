@@ -120,6 +120,62 @@ bool validateEnumValue(
     return false;
 }
 
+/** Accept one enum scalar or a non-empty sequence of enum scalars. */
+bool validateEnumValues(
+    YAML::Node const& parent,
+    std::string const& property,
+    std::set<std::string> const& allowed,
+    std::string const& rulePath,
+    StyleValidationReport& report,
+    std::optional<uint32_t> ruleIndex)
+{
+    auto const node = parent[property];
+    if (!node.IsDefined()) {
+        return true;
+    }
+    if (node.IsScalar()) {
+        return validateEnumValue(
+            parent,
+            property,
+            allowed,
+            rulePath,
+            report,
+            ruleIndex);
+    }
+
+    auto reject = [&](std::string message, YAML::Node const& location) {
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            std::move(message),
+            locationForNode(location));
+        issue.ruleIndex = ruleIndex;
+        issue.rulePath = rulePath;
+        issue.property = property;
+        return false;
+    };
+    if (!node.IsSequence() || node.size() == 0U) {
+        return reject(
+            property + " must be a value or a non-empty list of values.",
+            node);
+    }
+    for (auto const& item : node) {
+        if (!item.IsScalar()) {
+            return reject(
+                property + " list entries must be scalar values.",
+                item);
+        }
+        auto const value = item.Scalar();
+        if (!allowed.contains(value)) {
+            return reject(
+                "Unsupported " + property + " value '" + value + "'.",
+                item);
+        }
+    }
+    return true;
+}
+
 bool isStyleOptionIdentifier(std::string const& value)
 {
     if (value.empty()) {
@@ -1280,7 +1336,7 @@ bool validateStyleRuleYamlImpl(
 
     markInvalid(validateGeometry(ruleYaml, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "scope", {"feature", "relation", "attribute"}, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(ruleYaml, "mode", {"none", "hover", "selection"}, rulePath, report, sourceRuleIndex));
+    markInvalid(validateEnumValues(ruleYaml, "mode", {"none", "hover", "selection"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "fidelity", {"any", "high", "low"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "arrow", {"none", "forward", "backward", "double"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(

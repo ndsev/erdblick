@@ -624,7 +624,7 @@ StyleFilterPlan planStyleFilter(
     }
 
     for (auto const& rule : style.rules()) {
-        if (rule.mode() != highlightMode ||
+        if (!rule.supportsMode(highlightMode) ||
             !fidelityMatches(fidelity, rule.fidelity()))
         {
             continue;

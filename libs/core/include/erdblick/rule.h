@@ -149,8 +149,10 @@ public:
     [[nodiscard]] std::vector<FeatureStyleRule> const& subRules() const;
     /** Return the rule's target scope. */
     [[nodiscard]] Scope scope() const;
-    /** Return the highlight pass this rule belongs to. */
-    [[nodiscard]] HighlightMode mode() const;
+    /** Report whether this rule participates in one highlight pass. */
+    [[nodiscard]] bool supportsMode(HighlightMode mode) const;
+    /** Return the bit mask of all highlight passes this rule participates in. */
+    [[nodiscard]] uint32_t highlightModesMask() const;
     /** Return the fidelity mode requested by the rule. */
     [[nodiscard]] Fidelity fidelity() const;
     /** Report whether geometry emitted by this rule may be selected in the UI. */
@@ -359,7 +361,7 @@ public:
 
 private:
     Scope scope_ = Feature;
-    HighlightMode mode_ = NoHighlight;
+    uint32_t highlightModesMask_ = 1U << NoHighlight;
     Fidelity fidelity_ = AnyFidelity;
     bool selectable_ = true;
     uint32_t geometryTypes_ = 0;  // bitfield from GeomType enum

@@ -64,6 +64,37 @@ describe("MapTileStreamService viewport timing", () => {
 });
 
 describe("MapTileStreamService TTL expiry scheduling", () => {
+    it("coalesces acceptance-only omission snapshots behind a bounded delay", () => {
+        vi.useFakeTimers();
+        try {
+            const service = new MapTileStreamService(
+                {tilePullCompressionEnabledState: new Subject<boolean>()} as any,
+                {dataSourceInfoChanged: new Subject<void>()} as any,
+                {} as any,
+                {
+                    run: (callback: () => unknown) => callback(),
+                    runOutsideAngular: (callback: () => unknown) => callback()
+                } as any
+            );
+            const internal = service as any;
+            const ref = {filterId: "filter", released: false};
+            internal.filterSubscriptionsById.set(ref.filterId, ref);
+            internal.scheduleUpdate = vi.fn();
+
+            service.updateFilterSubscription(ref as any, false);
+            vi.advanceTimersByTime(75);
+            service.updateFilterSubscription(ref as any, false);
+            vi.advanceTimersByTime(75);
+            service.updateFilterSubscription(ref as any, false);
+
+            expect(internal.scheduleUpdate).not.toHaveBeenCalled();
+            vi.advanceTimersByTime(100);
+            expect(internal.scheduleUpdate).toHaveBeenCalledOnce();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("does not immediately reschedule expired retained values", () => {
         const service = Object.create(
             MapTileStreamService.prototype

@@ -1147,7 +1147,7 @@ rules:
 }
 
 TEST_CASE(
-    "TileSubsetLayerRenderer draws a short relation stub for a geometry-less carrier",
+    "TileSubsetLayerRenderer draws a shared interaction relation stub for both modes",
     "[erdblick.subset-renderer][relation]")
 {
     auto info = rendererLayerInfo();
@@ -1197,11 +1197,12 @@ TEST_CASE(
         laneGeometry,
         {});
     channel->newRelationEntry(
-        "Road.1/outgoingLane/0",
+        "Features:TestMap:Road:0:Road.1#3<->"
+        "Features:TestMap:Road:0:Road.2#7",
         "outgoingLane",
         "stored",
         mapget::RelationDirection::Forward,
-        false,
+        true,
         connector,
         lane,
         emptyGeometry,
@@ -1213,6 +1214,7 @@ version: 2
 rules:
   - type: Road
     scope: relation
+    mode: [hover, selection]
     relation-type: outgoingLane
     relation-line-geometry: connection-stubs
     geometry: line
@@ -1222,26 +1224,54 @@ rules:
 )yaml");
     REQUIRE(style.isValid());
 
-    TileSubsetLayerRenderer renderer(
-        0,
-        "Features:TestMap:Road:0",
-        style,
-        static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
-    renderer.setCoordinateOrigin(11.0, 48.0, 0.0);
-    installSubset(renderer, TileSubsetLayer(subset));
-    renderer.run();
+    for (auto const mode : {
+             FeatureStyleRule::HoverHighlight,
+             FeatureStyleRule::SelectionHighlight})
+    {
+        TileSubsetLayerRenderer renderer(
+            0,
+            "Features:TestMap:Road:0",
+            style,
+            static_cast<int>(mode),
+            static_cast<int>(FeatureStyleRule::AnyFidelity));
+        renderer.setCoordinateOrigin(11.0, 48.0, 0.0);
+        installSubset(renderer, TileSubsetLayer(subset));
+        renderer.run();
 
-    auto const paths = RendererPacketView(renderer).paths();
-    REQUIRE(paths.size() == 1U);
-    REQUIRE(paths.front().points.size() == 2U);
-    auto const& first = paths.front().points.front();
-    auto const& second = paths.front().points.back();
-    REQUIRE(std::hypot(first.x, first.y) < 0.01);
-    REQUIRE(std::abs(second.z - first.z) < 1.0e-6);
-    REQUIRE(second.x > first.x);
-    REQUIRE(second.distanceTo(first) > 7.9);
-    REQUIRE(second.distanceTo(first) < 8.1);
+        auto const paths = RendererPacketView(renderer).paths();
+        REQUIRE(paths.size() == 1U);
+        REQUIRE(paths.front().points.size() == 2U);
+        auto const& first = paths.front().points.front();
+        auto const& second = paths.front().points.back();
+        REQUIRE(std::hypot(first.x, first.y) < 0.01);
+        REQUIRE(std::abs(second.z - first.z) < 1.0e-6);
+        REQUIRE(second.x > first.x);
+        REQUIRE(second.distanceTo(first) > 7.9);
+        REQUIRE(second.distanceTo(first) < 8.1);
+    }
+
+    auto const expectedReferences = nlohmann::json::array({
+        {
+            {"channelOrdinal", 0U},
+            {"entryOrdinal", 0U},
+            {"endpointRole", 0U},
+        },
+        {
+            {"channelOrdinal", 0U},
+            {"entryOrdinal", 0U},
+            {"endpointRole", 1U},
+        },
+        {
+            {"channelOrdinal", 0U},
+            {"entryOrdinal", 0U},
+            {"endpointRole", 2U},
+        },
+    });
+    TileSubsetLayer pickLayer(subset);
+    REQUIRE(pickLayer.findPickReferences(
+        "Road.1", "relation", 3, -1) == expectedReferences);
+    REQUIRE(pickLayer.findPickReferences(
+        "Road.2", "relation", 7, -1) == expectedReferences);
 }
 
 TEST_CASE(
@@ -1509,6 +1539,85 @@ rules:
     REQUIRE(paths[0].points.back().z == 0.0);
     REQUIRE(paths[1].points.front().z == 5.0);
     REQUIRE(paths[1].points.back().z == 5.0);
+}
+
+TEST_CASE(
+    "Shared interaction rules render complete attributes with double arrows",
+    "[erdblick.subset-renderer]")
+{
+    auto info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>(
+        "SubsetRendererCompleteValidityPool");
+    auto tileId = mapget::TileId::fromWgs84(11.0, 48.0, 13);
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        tileId,
+        "SubsetRendererCompleteValidityPool",
+        "TestMap",
+        info,
+        strings,
+        "validities",
+        1);
+    subset->setGeometryAnchor({11.0, 48.0, 0.0});
+
+    std::string const arrowExpression =
+        "$hasValidity and (((validity[$validityIndex].direction == 'POSITIVE' or "
+        "validity[$validityIndex].direction == 'NEGATIVE') and 'forward') or "
+        "'double') or 'none'";
+    std::vector<std::string> entryFields{arrowExpression};
+    auto channel = subset->newChannel(
+        "style-rule:0",
+        mapget::Scope::Attribute,
+        1U << static_cast<uint8_t>(mapget::GeomType::Line),
+        "centerline",
+        {},
+        entryFields);
+    auto featureId = subset->newFeatureId(
+        "Road",
+        {{"roadId", int64_t{12}}});
+    std::vector<simfil::ModelNode::Ptr> entryValues{
+        subset->newValue("double"),
+    };
+    channel->newAttributeValidityEntry(
+        featureId,
+        lineGeometry(*subset, "centerline"),
+        0,
+        true,
+        0,
+        1,
+        {},
+        entryValues,
+        "rules",
+        "CURVATURE");
+
+    auto style = rendererStyle(R"yaml(
+name: Complete validity arrows
+version: 2
+rules:
+  - type: Road
+    scope: attribute
+    mode: [hover, selection]
+    geometry: line
+    geometry-name: centerline
+    color: "#ffffff"
+    arrow-expression: "$hasValidity and (((validity[$validityIndex].direction == 'POSITIVE' or validity[$validityIndex].direction == 'NEGATIVE') and 'forward') or 'double') or 'none'"
+)yaml");
+    REQUIRE(style.isValid());
+
+    for (auto const mode : {
+             FeatureStyleRule::HoverHighlight,
+             FeatureStyleRule::SelectionHighlight})
+    {
+        TileSubsetLayerRenderer renderer(
+            0,
+            "Features:TestMap:Road:0",
+            style,
+            static_cast<int>(mode),
+            static_cast<int>(FeatureStyleRule::AnyFidelity));
+        installSubset(renderer, TileSubsetLayer(subset));
+        renderer.run();
+
+        REQUIRE(RendererPacketView(renderer).arrows().size() == 2U);
+    }
 }
 
 TEST_CASE(

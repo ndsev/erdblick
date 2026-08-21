@@ -304,19 +304,31 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         }
     }
     if (yaml["mode"].IsDefined()) {
-        // Parse the feature aspect that is covered by this rule.
-        auto modeStr = yaml["mode"].as<std::string>();
-        if (modeStr == "none") {
-            mode_ = NoHighlight;
-        }
-        else if (modeStr == "hover") {
-            mode_ = HoverHighlight;
-        }
-        else if (modeStr == "selection") {
-            mode_ = SelectionHighlight;
+        // A rule may be shared by multiple interaction passes. An explicitly
+        // authored value replaces, rather than augments, an inherited mode.
+        highlightModesMask_ = 0U;
+        auto addMode = [this](YAML::Node const& modeYaml) {
+            auto const modeStr = modeYaml.as<std::string>();
+            if (modeStr == "none") {
+                highlightModesMask_ |= 1U << NoHighlight;
+            }
+            else if (modeStr == "hover") {
+                highlightModesMask_ |= 1U << HoverHighlight;
+            }
+            else if (modeStr == "selection") {
+                highlightModesMask_ |= 1U << SelectionHighlight;
+            }
+            else {
+                std::cout << "Unsupported mode: " << modeStr << std::endl;
+            }
+        };
+        if (yaml["mode"].IsSequence()) {
+            for (auto const& modeYaml : yaml["mode"]) {
+                addMode(modeYaml);
+            }
         }
         else {
-            std::cout << "Unsupported mode: " << modeStr << std::endl;
+            addMode(yaml["mode"]);
         }
     }
     if (yaml["fidelity"].IsDefined()) {
@@ -1453,9 +1465,14 @@ bool FeatureStyleRule::selectable() const
     return selectable_;
 }
 
-FeatureStyleRule::HighlightMode FeatureStyleRule::mode() const
+bool FeatureStyleRule::supportsMode(HighlightMode mode) const
 {
-    return mode_;
+    return (highlightModesMask_ & (1U << mode)) != 0U;
+}
+
+uint32_t FeatureStyleRule::highlightModesMask() const
+{
+    return highlightModesMask_;
 }
 
 FeatureStyleRule::Fidelity FeatureStyleRule::fidelity() const

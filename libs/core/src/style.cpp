@@ -544,21 +544,26 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
 
     for (uint32_t runtimeRuleIndex = 0; runtimeRuleIndex < rules_.size(); ++runtimeRuleIndex) {
         auto const& rule = rules_[runtimeRuleIndex];
-        auto modeIndex = highlightModeIndex(rule.mode());
         auto const highFidelityIndex = fidelityIndex(FeatureStyleRule::HighFidelity);
         auto const lowFidelityIndex = fidelityIndex(FeatureStyleRule::LowFidelity);
-        if (rule.fidelity() == FeatureStyleRule::AnyFidelity ||
-            rule.fidelity() == FeatureStyleRule::HighFidelity) {
-            ruleIndicesByModeAndFidelity_[modeIndex][highFidelityIndex].push_back(runtimeRuleIndex);
-        }
-        if (rule.fidelity() == FeatureStyleRule::AnyFidelity ||
-            rule.fidelity() == FeatureStyleRule::LowFidelity) {
-            ruleIndicesByModeAndFidelity_[modeIndex][lowFidelityIndex].push_back(runtimeRuleIndex);
+        for (size_t modeIndex = 0; modeIndex < kHighlightModeCount; ++modeIndex) {
+            auto const mode = static_cast<FeatureStyleRule::HighlightMode>(modeIndex);
+            if (!rule.supportsMode(mode)) {
+                continue;
+            }
+            if (rule.fidelity() == FeatureStyleRule::AnyFidelity ||
+                rule.fidelity() == FeatureStyleRule::HighFidelity) {
+                ruleIndicesByModeAndFidelity_[modeIndex][highFidelityIndex].push_back(runtimeRuleIndex);
+            }
+            if (rule.fidelity() == FeatureStyleRule::AnyFidelity ||
+                rule.fidelity() == FeatureStyleRule::LowFidelity) {
+                ruleIndicesByModeAndFidelity_[modeIndex][lowFidelityIndex].push_back(runtimeRuleIndex);
+            }
+            highlightModeMask_ |= (1u << modeIndex);
         }
         if (rule.fidelity() == FeatureStyleRule::LowFidelity) {
             hasExplicitLowFidelityRules_ = true;
         }
-        highlightModeMask_ |= (1u << modeIndex);
     }
 
     validationReport_.loadedRuleCount = static_cast<uint32_t>(rules_.size());
@@ -648,7 +653,7 @@ bool FeatureLayerStyle::hasExplicitLowFidelityRules() const
 bool FeatureLayerStyle::hasRelationRules(FeatureStyleRule::HighlightMode mode) const
 {
     return std::ranges::any_of(rules_, [mode](auto const& rule) {
-        return rule.mode() == mode && rule.scope() == FeatureStyleRule::Relation;
+        return rule.supportsMode(mode) && rule.scope() == FeatureStyleRule::Relation;
     });
 }
 

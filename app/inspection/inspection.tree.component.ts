@@ -207,8 +207,8 @@ export class FeatureFilterOptions {
                                                     <span class="inspection-value-bubble-group">
                                                         @for (child of bubble.children; track child.targetNodeId + ':' + child.label + ':' + $index) {
                                                             <span class="inspection-value-bubble-frame"
-                                                                  (mouseenter)="onValueBubbleHover(child)"
-                                                                  (mouseleave)="onValueBubbleHoverExit(rowData)">
+                                                                  (mouseenter)="onValueBubbleHover(child, rowData)"
+                                                                  (mouseleave)="onValueBubbleHoverExit(child, rowData)">
                                                                 <button type="button"
                                                                         class="inspection-value-bubble"
                                                                         [ngClass]="valueBubbleClasses(child)"
@@ -225,8 +225,8 @@ export class FeatureFilterOptions {
                                                     </span>
                                                 } @else {
                                                     <span class="inspection-value-bubble-frame"
-                                                          (mouseenter)="onValueBubbleHover(bubble)"
-                                                          (mouseleave)="onValueBubbleHoverExit(rowData)">
+                                                          (mouseenter)="onValueBubbleHover(bubble, rowData)"
+                                                          (mouseleave)="onValueBubbleHoverExit(bubble, rowData)">
                                                         <button type="button"
                                                                 class="inspection-value-bubble"
                                                                 [ngClass]="valueBubbleClasses(bubble)"
@@ -358,6 +358,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private activeStrongHoverGroupId?: string;
     private activeFeatureIdNodeId?: string;
     private activeValueBubbleTargetNodeId?: string;
+    private activeMapHoverOwner?: string;
+    private mapHoverEpoch = 0;
 
     @ViewChild('tt') table!: TreeTable;
     @ViewChild('filterPanel') filterPanel!: Popover;
@@ -1093,7 +1095,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     }
 
     /** Activates the same map hover behavior as the row represented by a bubble. */
-    protected onValueBubbleHover(bubble: any): void {
+    protected onValueBubbleHover(bubble: any, rowData: any): void {
         const hoverTargetNodeId = typeof bubble?.hoverTargetNodeId === "string" && bubble.hoverTargetNodeId.length
             ? bubble.hoverTargetNodeId
             : bubble?.targetNodeId;
@@ -1101,6 +1103,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (!targetRow) {
             return;
         }
+        this.claimMapHover(this.valueBubbleHoverOwner(bubble, rowData));
         if (this.isFeatureIdValueRow(targetRow)) {
             this.activeFeatureIdNodeId = typeof targetRow?.["nodeId"] === "string"
                 ? targetRow["nodeId"]
@@ -1112,9 +1115,13 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     }
 
     /** Restores the owning row hover state after leaving a bubble. */
-    protected onValueBubbleHoverExit(rowData: any): void {
-        this.activeFeatureIdNodeId = undefined;
-        this.highlightRowHoverTarget(rowData);
+    protected onValueBubbleHoverExit(bubble: any, rowData: any): void {
+        const owner = this.valueBubbleHoverOwner(bubble, rowData);
+        this.deferMapHoverTransition(owner, () => {
+            this.activeFeatureIdNodeId = undefined;
+            this.activeMapHoverOwner = this.rowHoverOwner(rowData);
+            this.highlightRowHoverTarget(rowData);
+        });
     }
 
     /** Shows the inline copy button only for leaf rows with a non-empty value cell. */
@@ -1368,6 +1375,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Activates row-based soft or strong hover highlighting while the pointer is over a row. */
     onRowHover(rowData: any) {
+        this.claimMapHover(this.rowHoverOwner(rowData));
         this.activeSoftHoverGroupId = typeof rowData?.["softHoverGroupId"] === "string"
             ? rowData["softHoverGroupId"]
             : undefined;
@@ -1380,19 +1388,23 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Clears any hover highlight emitted from row-level annotations. */
     onRowHoverExit(rowData: any) {
-        this.activeSoftHoverGroupId = undefined;
-        this.activeStrongHoverGroupId = undefined;
-        this.activeFeatureIdNodeId = undefined;
-        if (!rowData.hasOwnProperty("type") &&
-            !rowData.hasOwnProperty("hoverId") &&
-            !rowData.hasOwnProperty("softHoverGroupId")) {
-            return;
-        }
-        if (rowData["type"] === this.InspectionValueType.FEATUREID.value ||
-            rowData["hoverId"] ||
-            rowData["softHoverGroupId"]) {
-            this.mapService.setHoveredFeatures([]);
-        }
+        const owner = this.rowHoverOwner(rowData);
+        this.deferMapHoverTransition(owner, () => {
+            this.activeMapHoverOwner = undefined;
+            this.activeSoftHoverGroupId = undefined;
+            this.activeStrongHoverGroupId = undefined;
+            this.activeFeatureIdNodeId = undefined;
+            if (!rowData.hasOwnProperty("type") &&
+                !rowData.hasOwnProperty("hoverId") &&
+                !rowData.hasOwnProperty("softHoverGroupId")) {
+                return;
+            }
+            if (rowData["type"] === this.InspectionValueType.FEATUREID.value ||
+                rowData["hoverId"] ||
+                rowData["softHoverGroupId"]) {
+                this.mapService.setHoveredFeatures([]);
+            }
+        }, true);
     }
 
     /** Highlights feature-id values independently from the row hover group. */
@@ -1400,6 +1412,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (colKey !== "value" || !this.isFeatureIdValueRow(rowData)) {
             return;
         }
+        this.claimMapHover(this.featureValueHoverOwner(rowData, colKey));
         this.activeFeatureIdNodeId = typeof rowData?.["nodeId"] === "string"
             ? rowData["nodeId"]
             : undefined;
@@ -1411,8 +1424,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (colKey !== "value" || !this.isFeatureIdValueRow(rowData)) {
             return;
         }
-        this.activeFeatureIdNodeId = undefined;
-        this.highlightRowHoverTarget(rowData);
+        const owner = this.featureValueHoverOwner(rowData, colKey);
+        this.deferMapHoverTransition(owner, () => {
+            this.activeFeatureIdNodeId = undefined;
+            this.activeMapHoverOwner = this.rowHoverOwner(rowData);
+            this.highlightRowHoverTarget(rowData);
+        });
     }
 
     /** Chooses the strongest available hover target annotation for a tree row and forwards it to the map. */
@@ -1434,14 +1451,68 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.mapService.setHoveredFeatures([{mapTileKey, featureId: hoverId}], true);
     }
 
-    /** Highlights a referenced feature only within the already loaded tile, without issuing a locate request. */
+    /** Highlights a referenced feature locally when present and permits the authored remote fallback otherwise. */
     private highlightVisibleFeatureReference(rowData: any): void {
         const mapTileKey = rowData?.["mapTileKey"];
         const featureId = rowData?.["value"];
         const valid = typeof mapTileKey === "string" && typeof featureId === "string";
         this.mapService.setHoveredFeatures(valid && mapTileKey && featureId
             ? [{mapTileKey, featureId}]
-            : []);
+            : [], true);
+    }
+
+    /** Stable DOM-independent owner identity for one tree row hover. */
+    private rowHoverOwner(rowData: any): string {
+        return `row:${String(rowData?.["nodeId"] ?? "")}`;
+    }
+
+    /** Stable owner identity for a FeatureId value cell nested inside a row. */
+    private featureValueHoverOwner(rowData: any, colKey: string): string {
+        return `feature:${String(rowData?.["nodeId"] ?? "")}:${colKey}`;
+    }
+
+    /** Stable owner identity for a propagated value bubble. */
+    private valueBubbleHoverOwner(bubble: any, rowData: any): string {
+        return `bubble:${String(rowData?.["nodeId"] ?? "")}:${String(
+            bubble?.hoverTargetNodeId ?? bubble?.targetNodeId ?? ""
+        )}`;
+    }
+
+    /** Claims map-hover ownership and invalidates every previously deferred leave. */
+    private claimMapHover(owner: string): void {
+        this.mapHoverEpoch += 1;
+        this.activeMapHoverOwner = owner;
+    }
+
+    /** Ignore a delayed leave after another row or nested value has taken ownership. */
+    private deferMapHoverTransition(
+        owner: string,
+        transition: () => void,
+        acceptNestedOwner = false
+    ): void {
+        const ownerMatches = (): boolean => {
+            const currentOwner = this.activeMapHoverOwner;
+            return currentOwner === owner ||
+                (acceptNestedOwner && currentOwner?.startsWith(
+                    `feature:${owner.slice("row:".length)}:`
+                )) ||
+                (acceptNestedOwner && currentOwner?.startsWith(
+                    `bubble:${owner.slice("row:".length)}:`
+                )) || false;
+        };
+        if (!ownerMatches()) {
+            return;
+        }
+        const transitionEpoch = ++this.mapHoverEpoch;
+        queueMicrotask(() => {
+            if (this.destroyed ||
+                transitionEpoch !== this.mapHoverEpoch ||
+                !ownerMatches()) {
+                return;
+            }
+            transition();
+            this.cdr.markForCheck();
+        });
     }
     /** Returns whether a row's value column stores a FeatureId rather than a plain scalar. */
     protected isFeatureIdValueRow(rowData: any): boolean {

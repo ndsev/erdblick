@@ -55,6 +55,8 @@ import type {RuleFidelity} from "../../build/libs/core/erdblick-core";
 import type {HoverDetailService} from "../mapdata/hover-detail.service";
 import {NgZone} from "@angular/core";
 import type {GpuSceneSnapshot} from "./deck/gpu-scene";
+import {INTERACTION_STYLE_ORDER_BASE} from
+    "./deck/tile-subset-interaction.model";
 
 export type ViewTileOccupancy = "unknown" | "empty" | "non-empty" | "error";
 
@@ -714,6 +716,7 @@ export class ViewLayerController {
 
     /** Releases every render and attachment resource while retaining the transport owner. */
     private clearOwnedVisualizations(owned: OwnedStyledLayer): void {
+        const hadInstalledVisualizations = owned.visualizations.size > 0;
         for (const tileId of [...owned.pendingTiles.keys()]) {
             this.discardPendingTile(owned, tileId);
         }
@@ -726,6 +729,9 @@ export class ViewLayerController {
         }
         owned.visualizations.clear();
         owned.visualizationKeyByTileId.clear();
+        if (hadInstalledVisualizations) {
+            this.scheduleInteractionPresenceReconcile(owned.layer);
+        }
     }
 
     /** Keeps one fully rendered regular owner as the visual replacement fallback. */
@@ -931,26 +937,11 @@ export class ViewLayerController {
                 features: Array<TileFeatureId & {tileId: number}>;
             }>();
             for (const feature of group.features) {
-                const parsed = this.parseFeatureTileId(feature);
-                if (!parsed) {
+                const resolved = this.resolveInteractionTargetLayer(feature);
+                if (!resolved) {
                     continue;
                 }
-                const {mapId, layerId, tileId} = parsed;
-                const mapgetLayer = this.mapInfo.mapgetLayer(mapId, layerId);
-                if (!mapgetLayer ||
-                    !this.mapInfo.maps.getMapLayerVisibility(
-                        this.viewIndex,
-                        mapId,
-                        layerId
-                    ) ||
-                    Number(coreLib.getTileLevel(tileId)) !==
-                        this.viewState.getEffectiveMapLayerLevel(
-                            this.viewIndex,
-                            mapId,
-                            layerId
-                        )) {
-                    continue;
-                }
+                const {mapgetLayer, tileId} = resolved;
                 let entry = byLayer.get(mapgetLayer.key);
                 if (!entry) {
                     entry = {mapgetLayer, features: []};
@@ -991,6 +982,23 @@ export class ViewLayerController {
                     const optionsSignature = sipHash64Hex(
                         JSON.stringify(options)
                     );
+                    const effect = this.interactionEffect(
+                        style,
+                        group.mode,
+                        options,
+                        optionsSignature
+                    );
+                    const localTargetKeys = new Set(
+                        effect
+                            ? features
+                                .filter(feature =>
+                                    this.hasLocalInteractionTarget(
+                                        mapgetLayer,
+                                        feature
+                                    ))
+                                .map(interactionTargetKey)
+                            : []
+                    );
                     let rawPlan: StyleFilterPlan | null = null;
                     let remotePlan: ReturnType<
                         typeof planRemoteInteractionHighlight
@@ -1004,16 +1012,11 @@ export class ViewLayerController {
                         if (rawPlan) {
                             remotePlan = planRemoteInteractionHighlight(
                                 rawPlan,
-                                features
+                                features,
+                                {localTargetKeys}
                             );
                         }
                     }
-                    const effect = this.interactionEffect(
-                        style,
-                        group.mode,
-                        options,
-                        optionsSignature
-                    );
                     if (effect) {
                         const overlayId = [
                             group.kind,
@@ -1028,15 +1031,18 @@ export class ViewLayerController {
                             localOverlaysByLayer.set(mapgetLayer.key, byId);
                         }
                         for (const feature of features) {
-                            // Routine map/search hover always stays local. For
-                            // selection and inspection hover, authored rules
-                            // own exact attribute/relation geometry; the local
-                            // compositor remains the fallback for scopes that
-                            // have no matching authored channel.
-                            if (rawPlan && hasAuthoredInteractionHighlight(
-                                rawPlan,
-                                feature
-                            )) {
+                            // An exact target already materialized by a regular
+                            // or search presentation uses the local compositor.
+                            // Authored geometry is the fallback only while that
+                            // target is absent from the retained scene.
+                            if (rawPlan &&
+                                hasAuthoredInteractionHighlight(
+                                    rawPlan,
+                                    feature
+                                ) &&
+                                !localTargetKeys.has(
+                                    interactionTargetKey(feature)
+                                )) {
                                 continue;
                             }
                             const existing = byId.get(overlayId);
@@ -1056,7 +1062,9 @@ export class ViewLayerController {
                                     targets: [feature],
                                     effect,
                                     order: styleIndex +
-                                        (group.kind === "hover" ? 3_000 : 2_000)
+                                        (group.kind === "hover"
+                                            ? INTERACTION_STYLE_ORDER_BASE + 1_000
+                                            : INTERACTION_STYLE_ORDER_BASE)
                                 });
                             }
                         }
@@ -1064,11 +1072,13 @@ export class ViewLayerController {
                     if (!remotePlan) {
                         continue;
                     }
+                    // StyledMapgetLayer plans are immutable. Presence changes
+                    // must therefore replace the remote owner even when the
+                    // interaction targets and style options did not change.
                     const identitySignature = sipHash64Hex(JSON.stringify({
-                        features: features.map(feature => [
-                            feature.mapTileKey,
-                            feature.featureId
-                        ]),
+                        filterPlan: remotePlan.plan,
+                        tileIds: remotePlan.tileIds,
+                        roots: remotePlan.roots,
                         options
                     }));
                     const presentationId = [
@@ -1093,7 +1103,9 @@ export class ViewLayerController {
                         tileIds: remotePlan.tileIds,
                         roots: remotePlan.roots,
                         styleOrder: styleIndex +
-                            (group.kind === "hover" ? 3000 : 2000)
+                            (group.kind === "hover"
+                                ? INTERACTION_STYLE_ORDER_BASE + 1_000
+                                : INTERACTION_STYLE_ORDER_BASE)
                     });
                 }
             }
@@ -1341,6 +1353,89 @@ export class ViewLayerController {
         return result;
     }
 
+    /** Resolve one exact interaction target independently of base-layer visibility. */
+    private resolveInteractionTargetLayer(feature: TileFeatureId): {
+        mapgetLayer: MapgetLayer;
+        tileId: number;
+    } | null {
+        const parsed = this.parseFeatureTileId(feature);
+        if (!parsed) {
+            return null;
+        }
+        const {mapId, layerId, tileId} = parsed;
+        const mapgetLayer = this.mapInfo.mapgetLayer(mapId, layerId);
+        if (!mapgetLayer ||
+            Number(coreLib.getTileLevel(tileId)) !==
+                this.viewState.getEffectiveMapLayerLevel(
+                    this.viewIndex,
+                    mapId,
+                    layerId
+                )) {
+            return null;
+        }
+        // A hidden ordinary layer has no local contribution by definition;
+        // its exact selected/hovered tile is therefore authored-fallback
+        // demand, not ineligible interaction demand.
+        return {mapgetLayer, tileId};
+    }
+
+    /** Test exact entity presence in any regular/search contribution for this map layer. */
+    private hasLocalInteractionTarget(
+        mapgetLayer: MapgetLayer,
+        target: TileFeatureId
+    ): boolean {
+        const parsed = this.parseFeatureTileId(target);
+        if (!parsed || parsed.mapId !== mapgetLayer.mapId ||
+            parsed.layerId !== mapgetLayer.layerId) {
+            return false;
+        }
+        const matches = (owned: OwnedStyledLayer): boolean => {
+            const kind = owned.layer.identity.presentationKind;
+            if ((kind !== "regular" && kind !== "search") ||
+                owned.layer.mapgetLayer.key !== mapgetLayer.key) {
+                return false;
+            }
+            const visualizationKey =
+                owned.visualizationKeyByTileId.get(parsed.tileId);
+            const visualization = visualizationKey
+                ? owned.visualizations.get(visualizationKey)
+                : undefined;
+            return visualization?.hasLocalInteractionTarget(target) ?? false;
+        };
+        for (const owned of this.styledLayers.values()) {
+            if (matches(owned)) {
+                return true;
+            }
+        }
+        return [...this.retiringRegularLayers.values()]
+            .some(({owned}) => matches(owned));
+    }
+
+    /** Re-evaluate local-versus-authored highlighting after scene geometry changes. */
+    private scheduleInteractionPresenceReconcile(
+        layer: StyledMapgetLayer,
+        tileId?: number
+    ): void {
+        const kind = layer.identity.presentationKind;
+        if (kind !== "regular" && kind !== "search") {
+            return;
+        }
+        const matchesChangedPresentation = (target: TileFeatureId) => {
+            const parsed = this.parseFeatureTileId(target);
+            return parsed?.mapId === layer.mapgetLayer.mapId &&
+                parsed.layerId === layer.mapgetLayer.layerId &&
+                (tileId === undefined || parsed.tileId === tileId);
+        };
+        const relevantTargetExists =
+            this.inspection.selectionIdsTopic.getValue().some(panel =>
+                panel.features.some(matchesChangedPresentation)) ||
+            this.inspection.hoverIdsTopic.getValue()
+                .some(matchesChangedPresentation);
+        if (relevantTargetExists) {
+            this.scheduleInteractionReconcile();
+        }
+    }
+
     /** Decode a semantic target through the authoritative WASM MapTileKey parser. */
     private parseFeatureTileId(feature: TileFeatureId): {
         mapId: string;
@@ -1508,6 +1603,7 @@ export class ViewLayerController {
                 this.sceneHandle,
                 pending.preservedContributionIdentity
             );
+            this.scheduleInteractionPresenceReconcile(owned.layer, tileId);
         }
     }
 
@@ -1624,6 +1720,7 @@ export class ViewLayerController {
         this.pendingVisualizationRenders.delete(visualization);
         this.localInteractionVisualizationsWithOverlays.delete(visualization);
         visualization.destroy(this.sceneHandle);
+        this.scheduleInteractionPresenceReconcile(owned.layer, tileId);
     }
 
     /** Remove one coverage delta as a single scene and diagnostics transaction. */
@@ -1654,6 +1751,9 @@ export class ViewLayerController {
             visualizations,
             this.sceneHandle
         );
+        if (visualizations.length) {
+            this.scheduleInteractionPresenceReconcile(owned.layer);
+        }
     }
 
     /** Replace one tile owner while retaining its installed contribution until admission. */
@@ -1680,6 +1780,12 @@ export class ViewLayerController {
             this.sceneHandle,
             preserve
         );
+        if (!preservedContributionIdentity) {
+            this.scheduleInteractionPresenceReconcile(
+                owned.layer,
+                state?.tileId
+            );
+        }
         if (preserve && state) {
             this.enqueueTile(
                 owned,
@@ -1716,6 +1822,10 @@ export class ViewLayerController {
                     this.releaseRegularFallbackWhenReady(owned);
                 }
                 this.applyLocalInteractionOverlays(visualization);
+                this.scheduleInteractionPresenceReconcile(
+                    visualization.owner,
+                    visualization.state.tileId
+                );
                 this.diagnostics.notifyChanged();
             })
             .catch(error =>

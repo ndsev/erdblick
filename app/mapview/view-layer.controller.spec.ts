@@ -64,6 +64,7 @@ describe("ViewLayerController", () => {
         controller.diagnostics = {notifyChanged: vi.fn()};
         controller.pendingVisualizationRenders = new Set();
         controller.localInteractionVisualizationsWithOverlays = new Set();
+        controller.scheduleInteractionPresenceReconcile = vi.fn();
 
         const owned = (
             mapId: string,
@@ -124,11 +125,13 @@ describe("ViewLayerController", () => {
             ViewLayerController.prototype
         ) as any;
         controller.sceneHandle = {scene: {}};
+        controller.scheduleInteractionPresenceReconcile = vi.fn();
         const retireContribution = vi.spyOn(
             TileSubsetLayerVisualization,
             "retireContribution"
         ).mockImplementation(() => undefined);
         const owned = {
+            layer: {identity: {presentationKind: "regular"}},
             pendingTiles: new Map([[7, {
                 state: {},
                 fidelity: 1,
@@ -143,6 +146,8 @@ describe("ViewLayerController", () => {
             controller.sceneHandle,
             "retained-contribution"
         );
+        expect(controller.scheduleInteractionPresenceReconcile)
+            .toHaveBeenCalledWith(owned.layer, 7);
     });
 
     it("keeps inherited contribution ownership across pending state updates", () => {
@@ -269,12 +274,14 @@ describe("ViewLayerController", () => {
             ViewLayerController.prototype
         ) as any;
         const visualization = {
-            owner: {},
+            owner: {identity: {presentationKind: "regular"}},
+            state: {tileId: 7},
             render: vi.fn().mockResolvedValue(true)
         };
         controller.sceneHandle = {scene: {}};
         controller.styledLayers = new Map();
         controller.applyLocalInteractionOverlays = vi.fn();
+        controller.scheduleInteractionPresenceReconcile = vi.fn();
         controller.diagnostics = {notifyChanged: vi.fn()};
         controller.releaseRegularFallbackWhenReady = vi.fn();
 
@@ -286,7 +293,63 @@ describe("ViewLayerController", () => {
 
         expect(controller.applyLocalInteractionOverlays)
             .toHaveBeenCalledWith(visualization);
+        expect(controller.scheduleInteractionPresenceReconcile)
+            .toHaveBeenCalledWith(visualization.owner, 7);
         expect(controller.diagnostics.notifyChanged).toHaveBeenCalledOnce();
+    });
+
+    it("reconciles authored fallback demand after local geometry is removed", () => {
+        const controller = Object.create(
+            ViewLayerController.prototype
+        ) as any;
+        const visualization = {destroy: vi.fn()};
+        const owned = {
+            layer: {identity: {presentationKind: "regular"}},
+            pendingTiles: new Map(),
+            visualizations: new Map([["tile-7", visualization]]),
+            visualizationKeyByTileId: new Map([[7, "tile-7"]])
+        };
+        controller.sceneHandle = {scene: {}};
+        controller.pendingVisualizationRenders = new Set([visualization]);
+        controller.localInteractionVisualizationsWithOverlays =
+            new Set([visualization]);
+        controller.scheduleInteractionPresenceReconcile = vi.fn();
+
+        controller.removeTileVisualization(owned, 7);
+
+        expect(visualization.destroy)
+            .toHaveBeenCalledWith(controller.sceneHandle);
+        expect(controller.scheduleInteractionPresenceReconcile)
+            .toHaveBeenCalledWith(owned.layer, 7);
+    });
+
+    it("reconciles presence only for interaction targets in the changed tile", () => {
+        const controller = Object.create(
+            ViewLayerController.prototype
+        ) as any;
+        const layer = {
+            identity: {presentationKind: "regular"},
+            mapgetLayer: {mapId: "Map", layerId: "Road"}
+        };
+        controller.inspection = {
+            selectionIdsTopic: {getValue: () => [{features: [{
+                mapTileKey: "tile-7",
+                featureId: "Road.1:relation#2"
+            }]}]},
+            hoverIdsTopic: {getValue: () => []}
+        };
+        controller.parseFeatureTileId = vi.fn(target => ({
+            mapId: "Map",
+            layerId: "Road",
+            tileId: target.mapTileKey === "tile-7" ? 7 : 8
+        }));
+        controller.scheduleInteractionReconcile = vi.fn();
+
+        controller.scheduleInteractionPresenceReconcile(layer, 8);
+        expect(controller.scheduleInteractionReconcile).not.toHaveBeenCalled();
+
+        controller.scheduleInteractionPresenceReconcile(layer, 7);
+        expect(controller.scheduleInteractionReconcile).toHaveBeenCalledOnce();
     });
 
     it("filters retained interaction targets against one local contribution", () => {
@@ -356,6 +419,74 @@ describe("ViewLayerController", () => {
 
         expect(controller.localInteractionVisualizations(overlays))
             .toEqual(new Set([matching]));
+    });
+
+    it("detects an exact relation already present in regular presentation", () => {
+        const controller = Object.create(
+            ViewLayerController.prototype
+        ) as any;
+        const target = {
+            mapTileKey: "tile",
+            featureId: "Road.7:relation#2"
+        };
+        const visualization = {
+            hasLocalInteractionTarget: vi.fn(() => true)
+        };
+        controller.parseFeatureTileId = vi.fn(() => ({
+            mapId: "Map",
+            layerId: "Road",
+            tileId: 7
+        }));
+        controller.styledLayers = new Map([["regular", {
+            layer: {
+                identity: {presentationKind: "regular"},
+                mapgetLayer: {key: "Map/Road"}
+            },
+            visualizations: new Map([["tile-7", visualization]]),
+            visualizationKeyByTileId: new Map([[7, "tile-7"]])
+        }]]);
+        controller.retiringRegularLayers = new Map();
+
+        expect(controller.hasLocalInteractionTarget({
+            key: "Map/Road",
+            mapId: "Map",
+            layerId: "Road"
+        }, target)).toBe(true);
+        expect(visualization.hasLocalInteractionTarget)
+            .toHaveBeenCalledWith(target);
+    });
+
+    it("keeps exact interaction fallback eligible when the base layer is hidden", () => {
+        const controller = Object.create(
+            ViewLayerController.prototype
+        ) as any;
+        const mapgetLayer = {
+            key: "Islands/Island-6-Local/Lane",
+            mapId: "Islands/Island-6-Local",
+            layerId: "Lane"
+        };
+        controller.viewIndex = 0;
+        controller.parseFeatureTileId = vi.fn(() => ({
+            mapId: mapgetLayer.mapId,
+            layerId: mapgetLayer.layerId,
+            tileId: 545379780
+        }));
+        controller.mapInfo = {
+            mapgetLayer: vi.fn(() => mapgetLayer),
+            maps: {
+                getMapLayerVisibility: vi.fn(() => false)
+            }
+        };
+        controller.viewState = {
+            getEffectiveMapLayerLevel: vi.fn(() => 13)
+        };
+
+        expect(controller.resolveInteractionTargetLayer({
+            mapTileKey: "Features:Islands/Island-6-Local:Lane:545379780:0",
+            featureId: "Lane.545379780.75"
+        })).toEqual({mapgetLayer, tileId: 545379780});
+        expect(controller.mapInfo.maps.getMapLayerVisibility)
+            .not.toHaveBeenCalled();
     });
 
     it("reuses immutable interaction planning across hover targets", () => {
