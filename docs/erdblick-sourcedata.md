@@ -19,6 +19,11 @@ You can open SourceData from several entry points:
 The metadata action opens a height-bounded, searchable list so maps with large
 metadata catalogs remain usable on smaller screens.
 
+For example, filtering an Island-2 metadata list for `ServiceDefinition`
+narrows it to the corresponding metadata entry:
+
+![Map metadata list filtered to Metadata-ServiceDefinition](screenshots/03-metadata-search.png)
+
 ![Shortcut from inspector to SourceData](screenshots/goto-sourcedata.png)
 
 ## Dedicated SourceData Panels
@@ -65,6 +70,11 @@ source per row.
 When SourceData is opened from a feature node, erdblick preselects the matching
 address range, reopens its ancestor path even if that path was collapsed during
 an earlier visit, and scrolls the raw tree to the first matching row.
+
+The selected source range remains aligned with its feature inspection while
+the optional Address and Type columns expose the raw record boundaries:
+
+![Selected SourceData range with Address and Type columns](screenshots/28c-source-data-reference.png)
 
 ## Hints for Efficient Debugging
 

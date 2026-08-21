@@ -2,8 +2,6 @@
 
 Erdblick exposes loading, rendering, backend, and logging state directly in the UI. Use these tools when you need to understand why tiles are slow, incomplete, empty, or inconsistent.
 
-![diagnostics](screenshots/diagnostics.png)
-
 ## Status at a Glance
 
 The top-right side of the main bar contains the diagnostics indicator:
@@ -51,6 +49,8 @@ the currently filtered loaded tiles:
 - **Min** shows the newest (lowest) conversion age.
 
 The Peak, Average, and Min columns are available for every performance metric.
+
+![Performance statistics with Age, Peak, Average, and Min](screenshots/16-performance-age-min.png)
 
 Use it when:
 

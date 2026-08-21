@@ -26,6 +26,16 @@ focusing an option highlights the contiguous group supplied by the same style
 sheet. The first visible row in that group has a brush button which opens the
 sheet in the editor.
 
+The **Edit -> Styles** submenu provides a direct path to a loaded style sheet,
+without first opening the complete configurator:
+
+![Direct main-bar path to a loaded style sheet](screenshots/12a-mainbar-direct-style-menu.png)
+
+From **Maps & Layers**, hover or focus an option group and use the brush on its
+first row to edit the owning sheet directly:
+
+![Direct style action from a Maps and Layers option group](screenshots/12b-maps-direct-style-action.png)
+
 ## YAML Styles and Search Result Styles
 
 YAML style sheets are persistent project-wide rules loaded from the bundle,
@@ -532,6 +542,44 @@ Preset IDs and names are unique within the style sheet. Every `optionId` must id
 `FeatureLayerStyle` parses `options` and `presets` in the same native YAML pass and exposes both through the generated WASM bindings. This keeps source locations, validation reports, imports, edits, and style replacement on one parser lifecycle instead of reparsing preset metadata in TypeScript.
 
 The Maps panel shows eligible embedded presets in each layer's dropdown. Expand a selected preset to edit its Boolean options directly. After the complete option/synchronization transaction, the panel selects the unique most-specific preset matching the resulting values; an equal-specificity ambiguity retains the current matching preset, otherwise it becomes **Custom options** without discarding the edited values. Explicitly choosing **Custom options** remains Custom until the next real option edit, and explicitly choosing a named preset is not replaced during its own apply transaction. Layer preset definitions still have no separate management form: edit them only as part of the complete style YAML. The **Map Presets** tab manages higher-level compositions that refer to these style-owned layer-preset definitions.
+
+The road example below shows a map-level preset selector together with the
+embedded **Surface Colors** layer preset and its expanded Boolean option:
+
+![Road layer and map-level presets](screenshots/05a-road-and-map-presets.png)
+
+Grid building and intersection layers expose their own preset families:
+
+![Grid building and intersection presets](screenshots/05b-grid-building-intersection-presets.png)
+
+The generic geometry sheet offers separate presets for lines, points, surfaces,
+and all geometry together:
+
+![Generic geometry preset selector with All Geometry active](screenshots/05c-generic-geometry-presets.png)
+
+Datasource-specific style sheets expose named combinations through the same
+layer preset control. The examples below show named selections and their
+rendered states for existing datasource layers.
+
+![NDS.Live Lane Cinematic and Topology presets in split view](screenshots/31a-live-lanes-cinematic-topology.png)
+
+![NDS.Live Display 2D Features and 3D Boxes presets in split view](screenshots/33-live-display-2d-3d.png)
+
+![NDS.Classic BMD layer with the All Features preset selected](screenshots/34-classic-bmd-all-features.png)
+
+The BMD frame uses the repository's minimal anonymized Classic fixture. It
+documents the **All Features** preset and semantic rule family, not the visual
+density of a production map.
+
+![NDS.Classic Lane Topology and Routing Travel Direction presets in split view](screenshots/35a-classic-lane-routing-topology.png)
+
+Changing an option reconciles the selector to the unique preset matching the
+new values. These two frames keep the camera and panel geometry fixed while
+switching from **Surface Colors** to **Uniform Roads**:
+
+![Road preset with surface colors](screenshots/06a-road-preset-surface.png)
+
+![Road preset reconciled to uniform roads](screenshots/06b-road-preset-uniform.png)
 
 ## Point grouping and `$mergeCount`
 

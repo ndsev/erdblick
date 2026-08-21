@@ -9,8 +9,10 @@ import * as http from 'http';
  *
  * Starts a `mapget` server instance before the test suite runs, waits until
  * the backend exposes a `/sources` endpoint, and writes the process id and
- * resolved base URL to `playwright/.cache/global-state.json` so teardown can
- * later terminate the process.
+ * resolved base URL to `playwright/.cache/global-state-<port>.json` so teardown can
+ * later terminate the process. The state filename is scoped by app port so
+ * independent Playwright suites can run in parallel without stealing each
+ * other's backend PID.
  *
  * The port and base URL can be overridden via `EB_APP_PORT` and `EB_APP_URL`,
  * the config via `EB_MAPGET_CONFIG`, and the `mapget` binary via `MAPGET_BIN`.
@@ -84,7 +86,7 @@ async function waitForSources(baseURL: string, timeoutMs: number): Promise<void>
  *
  * Verifies that the integration `mapget` configuration exists, spawns a
  * `mapget serve` process configured to serve the built Angular bundle, and
- * stores its pid and base URL in `playwright/.cache/global-state.json`. The
+ * stores its pid and base URL in `playwright/.cache/global-state-<port>.json`. The
  * helper then waits for `/sources` to become available before returning.
  */
 async function globalSetup(config: FullConfig): Promise<void> {
@@ -112,14 +114,18 @@ async function globalSetup(config: FullConfig): Promise<void> {
         '--config',
         mapgetConfigPath,
         'serve',
-        '--allow-post-config',
+    ];
+    if (process.env["EB_MAPGET_ALLOW_POST_CONFIG"] !== '0') {
+        args.push('--allow-post-config');
+    }
+    args.push(
         '--port',
         port,
         '--cache-type',
         cacheType,
         '--webapp',
         '/:static/browser'
-    ];
+    );
 
     console.log(`[playwright] Starting mapget backend: ${mapgetExecutable} ${args.join(' ')}`);
 
@@ -148,7 +154,7 @@ async function globalSetup(config: FullConfig): Promise<void> {
     // Persist pid / URL so `global-teardown` can cleanly shut down the process.
     const stateDir = path.join(projectRoot, 'playwright', '.cache');
     fs.mkdirSync(stateDir, { recursive: true });
-    const statePath = path.join(stateDir, 'global-state.json');
+    const statePath = path.join(stateDir, `global-state-${port}.json`);
     fs.writeFileSync(statePath, JSON.stringify(state), { encoding: 'utf-8' });
 
     console.log(`[playwright] Waiting for mapget /sources at ${baseURL}`);
