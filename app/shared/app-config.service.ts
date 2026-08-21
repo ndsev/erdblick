@@ -160,7 +160,6 @@ export interface RawAppConfig {
     defaultBackgroundLayerId?: string | null;
     locationSearch?: RawLocationSearchConfig;
     externalViewers?: unknown[];
-    mapPresetsEnabled?: boolean;
     mapPresets?: unknown[];
     /** Internal parser marker preserving present-but-malformed static/server input. */
     _mapPresetsInvalid?: boolean;
@@ -204,6 +203,8 @@ export interface MapPresetConfigStatus {
     valid: boolean;
     write: boolean;
     endpoint: string | null;
+    method: string | null;
+    path: string | null;
     revision: string | null;
     ephemeral: boolean;
     issues: MapPresetIssue[];
@@ -221,7 +222,6 @@ export interface AppConfig {
     locationSearch: LocationSearchConfig;
     externalViewers: ExternalViewerConfig[];
     mapPresets: MapPresetDefinition[];
-    mapPresetsEnabled: boolean;
     mapPresetConfig: MapPresetConfigStatus;
     coordinates: CoordinatesConfig;
     serverConfig: AppServerConfigStatus;
@@ -365,7 +365,6 @@ const RAW_APP_CONFIG_SCHEMA = z.object({
     defaultBackgroundLayerId: z.string().nullable().optional(),
     locationSearch: LOCATION_SEARCH_SCHEMA.optional(),
     externalViewers: z.array(z.unknown()).optional(),
-    mapPresetsEnabled: z.boolean().optional(),
     mapPresets: z.array(z.unknown()).max(200).optional().catch(undefined),
     "coordinates-enabled": z.boolean().optional(),
     "coordinates-legal-terms": z.string().min(1).optional()
@@ -398,6 +397,8 @@ const DEFAULT_SERVER_CONFIG_STATUS: AppServerConfigStatus = {
         valid: true,
         write: false,
         endpoint: null,
+        method: null,
+        path: null,
         revision: null,
         ephemeral: false,
         issues: []
@@ -429,7 +430,6 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     locationSearch: DEFAULT_LOCATION_SEARCH_CONFIG,
     externalViewers: [],
     mapPresets: [],
-    mapPresetsEnabled: true,
     mapPresetConfig: {...DEFAULT_SERVER_CONFIG_STATUS.mapPresets},
     coordinates: {
         enabledByDefault: true,
@@ -586,13 +586,15 @@ export class AppConfigService {
         if (!serverResult.serverConfig.available) {
             return null;
         }
-        const merged = this.mergeServerErdblickConfig(this.staticRawConfig, serverResult.erdblickConfig);
+        const merged = this.mergeServerErdblickConfig(
+            this.staticRawConfig,
+            serverResult.erdblickConfig,
+            serverResult.serverConfig);
         const normalized = this.normalizeConfig(merged, serverResult.serverConfig);
         const previous = this.snapshot;
         const refreshed: AppConfig = {
             ...previous,
             mapPresets: normalized.mapPresets,
-            mapPresetsEnabled: normalized.mapPresetsEnabled,
             mapPresetConfig: normalized.mapPresetConfig,
             serverConfig: normalized.serverConfig
         };
@@ -600,7 +602,7 @@ export class AppConfigService {
         return refreshed;
     }
 
-    /** Commits a canonical successful PUT response to the shared config snapshot. */
+    /** Commits a canonical successful PATCH response to the shared config snapshot. */
     applyCanonicalMapPresets(definitions: unknown, revision: string): boolean {
         const parsed = parseMapPresetDefinitions(definitions);
         if (parsed.issues.length || !Array.isArray(definitions)
@@ -619,7 +621,6 @@ export class AppConfigService {
         this.configSubject.next({
             ...previous,
             mapPresets: parsed.presets,
-            mapPresetsEnabled: true,
             mapPresetConfig,
             serverConfig: {
                 ...previous.serverConfig,
@@ -656,7 +657,10 @@ export class AppConfigService {
         const staticRawConfig = await this.loadStaticConfig();
         this.staticRawConfig = staticRawConfig;
         const serverResult = await this.loadServerConfig();
-        const mergedRawConfig = this.mergeServerErdblickConfig(staticRawConfig, serverResult.erdblickConfig);
+        const mergedRawConfig = this.mergeServerErdblickConfig(
+            staticRawConfig,
+            serverResult.erdblickConfig,
+            serverResult.serverConfig);
         const normalized = this.normalizeConfig(mergedRawConfig, serverResult.serverConfig);
         const resolved = await this.loadCoordinatesLegalTerms(normalized);
         this.configSubject.next(resolved);
@@ -710,16 +714,30 @@ export class AppConfigService {
                 ? payload.capabilities["mapPresets"]
                 : undefined;
             if (isPlainObject(capabilities)) {
+                const endpoint = typeof capabilities["endpoint"] === "string"
+                    ? capabilities["endpoint"]
+                    : null;
+                const method = typeof capabilities["method"] === "string"
+                    ? capabilities["method"]
+                    : null;
+                const path = typeof capabilities["path"] === "string"
+                    ? capabilities["path"]
+                    : null;
+                const revision = typeof capabilities["revision"] === "string"
+                    ? capabilities["revision"]
+                    : null;
                 serverConfig.mapPresets = {
                     configured: capabilities["configured"] === true,
                     valid: capabilities["valid"] !== false,
-                    write: capabilities["write"] === true,
-                    endpoint: typeof capabilities["endpoint"] === "string"
-                        ? capabilities["endpoint"]
-                        : null,
-                    revision: typeof capabilities["revision"] === "string"
-                        ? capabilities["revision"]
-                        : null,
+                    write: capabilities["write"] === true
+                        && endpoint === "/config"
+                        && method === "PATCH"
+                        && path === "/erdblick/mapPresets"
+                        && !!revision,
+                    endpoint,
+                    method,
+                    path,
+                    revision,
                     ephemeral: capabilities["ephemeral"] === true,
                     issues: Array.isArray(capabilities["issues"])
                         ? capabilities["issues"]
@@ -775,7 +793,8 @@ export class AppConfigService {
     /** Merges server erdblick settings into the active config. */
     private mergeServerErdblickConfig(
         staticConfig: RawAppConfig,
-        serverErdblickConfig: Partial<RawAppConfig>
+        serverErdblickConfig: Partial<RawAppConfig>,
+        serverConfig: AppServerConfigStatus
     ): RawAppConfig {
         const merged: RawAppConfig = {
             ...staticConfig,
@@ -816,13 +835,18 @@ export class AppConfigService {
         if (Array.isArray(serverErdblickConfig.externalViewers)) {
             merged.externalViewers = [...serverErdblickConfig.externalViewers];
         }
-        if (typeof serverErdblickConfig.mapPresetsEnabled === "boolean") {
-            merged.mapPresetsEnabled = serverErdblickConfig.mapPresetsEnabled;
-        }
         if (Array.isArray(serverErdblickConfig.mapPresets)) {
             // Presence replaces the static list; an explicit empty array deliberately clears it.
             merged.mapPresets = [...serverErdblickConfig.mapPresets];
             merged._mapPresetsInvalid = serverErdblickConfig._mapPresetsInvalid;
+        } else if (!serverConfig.mapPresets.valid) {
+            // An invalid authoritative server section must not reveal a static fallback catalog.
+            merged.mapPresets = [];
+            merged._mapPresetsInvalid = false;
+        } else if (!serverConfig.mapPresets.configured && serverConfig.mapPresets.write) {
+            // A durable writable server owns an omitted catalog without copying static definitions.
+            merged.mapPresets = [];
+            merged._mapPresetsInvalid = false;
         }
         if (serverErdblickConfig.locationSearch && isPlainObject(serverErdblickConfig.locationSearch)) {
             const mergedLocationSearch: RawLocationSearchConfig = {
@@ -884,7 +908,6 @@ export class AppConfigService {
         const extensionModules = this.normalizeExtensionModules(rawConfig.extensionModules);
         const legalTermsUrl = rawConfig["coordinates-legal-terms"]?.trim() || null;
         const enabledByDefault = legalTermsUrl ? false : rawConfig["coordinates-enabled"] ?? true;
-        const mapPresetsEnabled = rawConfig.mapPresetsEnabled ?? true;
         const mapPresetsConfigured = rawConfig.mapPresets !== undefined;
         const parsedMapPresets = parseMapPresetDefinitions(rawConfig.mapPresets ?? []);
         const localPresetIssues = rawConfig._mapPresetsInvalid
@@ -899,11 +922,12 @@ export class AppConfigService {
             configured: mapPresetsConfigured,
             valid: localPresetIssues.length === 0
                 && serverPresetStatus.valid,
-            write: mapPresetsEnabled
-                && localPresetIssues.length === 0
+            write: localPresetIssues.length === 0
                 && serverPresetStatus.valid
                 && serverPresetStatus.write,
             endpoint: serverPresetStatus.endpoint,
+            method: serverPresetStatus.method,
+            path: serverPresetStatus.path,
             revision: serverPresetStatus.revision,
             ephemeral: serverPresetStatus.ephemeral,
             issues: [...serverPresetStatus.issues, ...localPresetIssues]
@@ -931,7 +955,6 @@ export class AppConfigService {
             locationSearch,
             externalViewers,
             mapPresets: parsedMapPresets.presets,
-            mapPresetsEnabled,
             mapPresetConfig,
             coordinates: {
                 enabledByDefault,

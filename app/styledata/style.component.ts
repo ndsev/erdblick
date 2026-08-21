@@ -198,11 +198,6 @@ interface QuickPresetOption {
                     </p-tabpanel>
                     <p-tabpanel value="presets">
                         <div class="style-presets-tab" data-testid="style-presets-panel">
-                            @if (presetService.disabledReason; as disabledReason) {
-                                <p-message severity="info"
-                                           data-testid="style-presets-disabled-message"
-                                           [text]="disabledReason"/>
-                            } @else {
                             <div class="style-presets-toolbar">
                                 <p-button label="Add" icon="pi pi-plus"
                                           data-testid="style-preset-add-button"
@@ -282,10 +277,11 @@ interface QuickPresetOption {
                                                [rounded]="true"/>
                                     </div>
                                 } @empty {
-                                    <div class="styles-empty">No map presets configured.</div>
+                                    <p-message severity="info"
+                                               data-testid="style-presets-empty-message"
+                                               [text]="presetService.emptyCatalogMessage"/>
                                 }
                             </div>
-                            }
                         </div>
                     </p-tabpanel>
                     <p-tabpanel value="errors">

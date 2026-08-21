@@ -12,19 +12,41 @@ const configured: MapPresetDefinition[] = [{
     layerPresets: [{layerId: "Lane", styleId: "Lanes", presetId: "topology"}]
 }];
 
-function createService(write = true, enabled = true) {
+function createService(
+    write = true,
+    catalogConfigured = true,
+    serverContract = true,
+    definitions: MapPresetDefinition[] = configured
+) {
+    const endpoint = serverContract ? "/config" : null;
+    const method = serverContract ? "PATCH" : null;
+    const path = serverContract ? "/erdblick/mapPresets" : null;
     const config: any = {
         snapshot: {
-            mapPresets: structuredClone(configured),
-            mapPresetsEnabled: enabled,
+            mapPresets: structuredClone(definitions),
             mapPresetConfig: {
-                configured: true,
+                configured: catalogConfigured,
                 valid: true,
                 write,
-                endpoint: "/config/erdblick/map-presets",
+                endpoint,
+                method,
+                path,
                 revision: "rev-1",
                 ephemeral: false,
                 issues: []
+            },
+            serverConfig: {
+                mapPresets: {
+                    configured: catalogConfigured,
+                    valid: true,
+                    write,
+                    endpoint,
+                    method,
+                    path,
+                    revision: "rev-1",
+                    ephemeral: false,
+                    issues: []
+                }
             }
         },
         applyCanonicalMapPresets: vi.fn((definitions: MapPresetDefinition[], revision: string) => {
@@ -34,7 +56,7 @@ function createService(write = true, enabled = true) {
         }),
         refreshMapPresetConfig: vi.fn(async () => config.snapshot)
     };
-    const http = {put: vi.fn()};
+    const http = {patch: vi.fn()};
     const styles = new Map<string, any>([["Lanes", {
         id: "Lanes",
         visible: true,
@@ -66,22 +88,26 @@ describe("MapPresetService", () => {
     it("publishes only the canonical response from a revision-guarded write", async () => {
         const {service, config, http} = createService();
         const canonical = [{...configured[0], enabled: false}];
-        http.put.mockReturnValue(of(new HttpResponse({
+        http.patch.mockReturnValue(of(new HttpResponse({
             status: 200,
-            body: {mapPresets: canonical, revision: "rev-2"}
+            body: {path: "/erdblick/mapPresets", value: canonical, revision: "rev-2"}
         })));
 
         expect(await service.setAvailable("network", false)).toBe(true);
         expect(service.presets).toEqual(canonical);
         expect(config.applyCanonicalMapPresets).toHaveBeenCalledWith(canonical, "rev-2");
-        const options = http.put.mock.calls[0][2] as {headers: HttpHeaders};
+        expect(http.patch.mock.calls[0][1]).toEqual({
+            path: "/erdblick/mapPresets",
+            value: canonical
+        });
+        const options = http.patch.mock.calls[0][2] as {headers: HttpHeaders};
         expect(options.headers.get("If-Match")).toBe('"rev-1"');
     });
 
     it("allows only one complete-catalog write in flight", async () => {
         const {service, http} = createService();
         const pending = new Subject<HttpResponse<unknown>>();
-        http.put.mockReturnValue(pending);
+        http.patch.mockReturnValue(pending);
 
         const first = service.setAvailable("network", false);
         expect(service.writePending).toBe(true);
@@ -93,7 +119,11 @@ describe("MapPresetService", () => {
         })).toBe(false);
         pending.next(new HttpResponse({
             status: 200,
-            body: {mapPresets: [{...configured[0], enabled: false}], revision: "rev-2"}
+            body: {
+                path: "/erdblick/mapPresets",
+                value: [{...configured[0], enabled: false}],
+                revision: "rev-2"
+            }
         }));
         pending.complete();
         expect(await first).toBe(true);
@@ -101,7 +131,7 @@ describe("MapPresetService", () => {
 
     it("refetches the authoritative catalog after a stale revision", async () => {
         const {service, config, http} = createService();
-        http.put.mockReturnValue(throwError(() => new HttpErrorResponse({status: 412})));
+        http.patch.mockReturnValue(throwError(() => new HttpErrorResponse({status: 412})));
         config.refreshMapPresetConfig.mockImplementation(async () => {
             config.snapshot.mapPresets = [{...configured[0], name: "Server version"}];
             config.snapshot.mapPresetConfig.revision = "rev-2";
@@ -118,20 +148,55 @@ describe("MapPresetService", () => {
         expect(await service.applyOverrideSource("- id: invalid")).toBe(false);
         expect(await service.setAvailable("network", false)).toBe(false);
         expect(service.presets).toEqual(configured);
-        expect(http.put).not.toHaveBeenCalled();
+        expect(http.patch).not.toHaveBeenCalled();
     });
 
-    it("disables runtime presets and reports explicit server disablement", async () => {
+    it("explains whether an effective read-only catalog comes from static or server config", () => {
+        const staticCatalog = createService(false);
+        staticCatalog.config.snapshot.serverConfig.mapPresets.configured = false;
+        expect(staticCatalog.service.readOnlyReason).toBe(
+            "These map presets come from the static Erdblick configuration and are read-only."
+        );
+
+        const serverCatalog = createService(false);
+        expect(serverCatalog.service.readOnlyReason).toBe(
+            "Map presets are read-only because configuration writes are disabled."
+        );
+    });
+
+    it("keeps a totally omitted catalog unavailable without a writable server target", async () => {
         const {service, http} = createService(true, false);
 
-        expect(service.enabled).toBe(false);
+        expect(service.configured).toBe(false);
         expect(service.presets).toEqual([]);
         expect(service.canWrite).toBe(false);
-        expect(service.disabledReason).toBe(
-            "Map presets are currently disabled. Modify the configuration to enable them."
-        );
-        expect(service.readOnlyReason).toBe(service.disabledReason);
         expect(await service.addPreset(configured[0])).toBe(false);
-        expect(http.put).not.toHaveBeenCalled();
+        expect(http.patch).not.toHaveBeenCalled();
+    });
+
+    it("distinguishes writable, locked MapViewer, and static-only empty catalogs", () => {
+        expect(createService(true, true, true, []).service.emptyCatalogMessage).toBe(
+            "No map presets configured."
+        );
+        const lockedMapViewer = createService(false, false, true, []).service;
+        expect(lockedMapViewer.emptyCatalogMessage).toBe(
+            "Configuring map presets is not allowed. Modify the server configuration to allow access"
+        );
+        expect(lockedMapViewer.readOnlyReason).toBe(lockedMapViewer.emptyCatalogMessage);
+
+        const staticOnly = createService(false, false, false, []).service;
+        expect(staticOnly.emptyCatalogMessage).toBe(
+            "No map presets configured. Please, add map presets in the configuration"
+        );
+        expect(staticOnly.readOnlyReason).toBe(staticOnly.emptyCatalogMessage);
+    });
+
+    it("validates the complete catalog immediately before PATCH", async () => {
+        const {service, http} = createService();
+        const invalid = structuredClone(configured);
+        invalid[0].layerPresets.push({...invalid[0].layerPresets[0]});
+
+        expect(await service.applyDefinitions(invalid)).toBe(false);
+        expect(http.patch).not.toHaveBeenCalled();
     });
 });

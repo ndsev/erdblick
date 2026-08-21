@@ -60,7 +60,7 @@ declare let window: DebugWindow;
             <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
             <p-toast position="top-center" key="backend-connection" [baseZIndex]="9600"></p-toast>
             <p-toast position="top-center" key="backend-protocol" [baseZIndex]="9700"></p-toast>
-            <p-toast position="top-center" key="source-style-editing" [baseZIndex]="9800"></p-toast>
+            <p-toast position="top-center" key="configuration-editing" [baseZIndex]="9800"></p-toast>
         }
         <legal-dialog></legal-dialog>
         <about-dialog></about-dialog>
@@ -117,12 +117,16 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         this.keyboardService.registerShortcut("Ctrl+x", this.openStatistics.bind(this), true);
     }
 
-    /** Presents the source-editing warning after the global toast host has subscribed. */
+    /** Presents configuration-editing notices after the global toast host has subscribed. */
     ngAfterViewInit() {
         queueMicrotask(() => {
-            if (this.configService.snapshot.serverConfig.styleEditingEnabled) {
-                this.infoMessageService.showSourceStyleEditingWarning(
-                    this.configService.snapshot.serverConfig.styleEditingDirectory);
+            const serverConfig = this.configService.snapshot.serverConfig;
+            if (serverConfig.styleEditingEnabled || serverConfig.mapPresets.write) {
+                this.infoMessageService.showConfigurationEditingNotices(
+                    serverConfig.styleEditingEnabled
+                        ? serverConfig.styleEditingDirectory ?? ""
+                        : null,
+                    serverConfig.mapPresets.write);
             }
         });
     }

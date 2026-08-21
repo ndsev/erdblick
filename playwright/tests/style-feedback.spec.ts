@@ -15,6 +15,19 @@ const SEARCH_QUERY = '**.layerId == "Road"';
 test.use({stateSnapshot: 'style_editor_state'});
 
 test.describe('Style feedback workflows', () => {
+    test('keeps Map Presets discoverable in a static-only deployment', async ({page}) => {
+        await navigateToStateSnapshotRoot(page);
+        const stylesDialog = await openStylesDialog(page);
+
+        const presetsTab = stylesDialog.getByTestId('style-presets-tab');
+        await expect(presetsTab).toBeVisible();
+        await presetsTab.click();
+        await expect(stylesDialog.getByTestId('style-presets-empty-message')).toHaveText(
+            'No map presets configured. Please, add map presets in the configuration'
+        );
+        await expect(stylesDialog.getByTestId('style-preset-add-button').locator('button')).toBeDisabled();
+    });
+
     test('search styles support Save and Save and Open with matching visibility', async ({page, request}) => {
         await requireMapSource(request, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0]);
         await navigateToStateSnapshotRoot(page);

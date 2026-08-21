@@ -15,9 +15,6 @@ import {
 import {StyleService} from "./style.service";
 
 export const NO_PRESET_ID = "";
-export const MAP_PRESETS_DISABLED_MESSAGE =
-    "Map presets are currently disabled. Modify the configuration to enable them.";
-
 /** One embedded layer preset resolved together with its owning active style. */
 export interface ResolvedLayerPreset extends LayerPresetDefinition {
     styleId: string;
@@ -38,7 +35,8 @@ export function layerPresetRefKey(ref: LayerPresetRef): string {
 }
 
 interface MapPresetWriteResponse {
-    mapPresets?: unknown;
+    path?: unknown;
+    value?: unknown;
     revision?: unknown;
 }
 
@@ -80,35 +78,50 @@ export class MapPresetService {
         return this.serializeDefinitions(this.presets);
     }
 
-    get enabled(): boolean {
-        return this.configService.snapshot.mapPresetsEnabled;
+    get configured(): boolean {
+        return this.configService.snapshot.mapPresetConfig.configured;
     }
 
     get canWrite(): boolean {
-        return this.enabled && this.configService.snapshot.mapPresetConfig.write && !this.writePending;
+        return this.configured && this.configService.snapshot.mapPresetConfig.write && !this.writePending;
     }
 
     get writePending(): boolean {
         return this.writePendingSubject.getValue();
     }
 
-    get disabledReason(): string | null {
-        return this.enabled ? null : MAP_PRESETS_DISABLED_MESSAGE;
+    /** Explains an empty catalog according to whether MapViewer manages it server-side. */
+    get emptyCatalogMessage(): string {
+        if (this.configService.snapshot.mapPresetConfig.write) {
+            return "No map presets configured.";
+        }
+        return this.hasServerMapPresetContract
+            ? "Configuring map presets is not allowed. Modify the server configuration to allow access"
+            : "No map presets configured. Please, add map presets in the configuration";
     }
 
     get readOnlyReason(): string | null {
-        if (this.disabledReason) {
-            return this.disabledReason;
-        }
         const status = this.configService.snapshot.mapPresetConfig;
         if (!status.valid) {
+            if (this.configService.snapshot.serverConfig.mapPresets.valid) {
+                return "The static map-preset configuration is invalid; repair config.json before editing.";
+            }
             return "The server map-preset configuration is invalid; repair the YAML before editing.";
         }
         if (status.ephemeral) {
             return "This launcher uses a temporary config, so map presets are read-only.";
         }
+        if (!this.configured) {
+            return this.emptyCatalogMessage;
+        }
         if (!status.write) {
-            return "Map presets are read-only in this deployment.";
+            if (!this.configService.snapshot.serverConfig.mapPresets.configured) {
+                return "These map presets come from the static Erdblick configuration and are read-only.";
+            }
+            if (status.endpoint && status.method && status.path && status.revision) {
+                return "Map presets are read-only because configuration writes are disabled.";
+            }
+            return "Server map-preset editing is unavailable in this deployment.";
         }
         return null;
     }
@@ -221,10 +234,18 @@ export class MapPresetService {
         return {...preset, layerPresets: preset.layerPresets.map(component => ({...component}))};
     }
 
+    /** Identifies the narrow MapViewer-owned field contract without inventing a legacy endpoint. */
+    private get hasServerMapPresetContract(): boolean {
+        const status = this.configService.snapshot.serverConfig.mapPresets;
+        return status.endpoint === "/config"
+            && status.method === "PATCH"
+            && status.path === "/erdblick/mapPresets";
+    }
+
     /** Adopts only catalog values that have passed the shared AppConfig boundary. */
     private adoptConfigSnapshot(): void {
         const config = this.configService.snapshot;
-        this.presetsSubject.next(config.mapPresetsEnabled
+        this.presetsSubject.next(config.mapPresetConfig.configured
             ? config.mapPresets.map(preset => this.copyPreset(preset))
             : []);
         this.effectiveIssues = config.mapPresetConfig.issues.map(issue => ({...issue}));
@@ -234,7 +255,18 @@ export class MapPresetService {
     /** Writes one complete catalog under the current config revision. */
     private async persistDefinitions(definitions: readonly MapPresetDefinition[]): Promise<boolean> {
         const status = this.configService.snapshot.mapPresetConfig;
-        if (!this.enabled || this.writePending || !status.write || !status.endpoint || !status.revision) {
+        const parsed = parseMapPresetDefinitions(definitions);
+        if (parsed.issues.length || parsed.presets.length !== definitions.length) {
+            this.issuesSubject.next(parsed.issues.length
+                ? parsed.issues
+                : [{message: "The complete map-preset catalog is invalid."}]);
+            return false;
+        }
+        if (!this.configured || this.writePending || !status.write
+            || status.endpoint !== "/config"
+            || status.method !== "PATCH"
+            || status.path !== "/erdblick/mapPresets"
+            || !status.revision) {
             this.issuesSubject.next([{
                 message: this.writePending
                     ? "A map-preset update is already in progress."
@@ -245,9 +277,12 @@ export class MapPresetService {
 
         this.writePendingSubject.next(true);
         try {
-            const response = await firstValueFrom(this.httpClient.put<MapPresetWriteResponse>(
+            const response = await firstValueFrom(this.httpClient.patch<MapPresetWriteResponse>(
                 status.endpoint,
-                definitions.map(preset => this.copyPreset(preset)),
+                {
+                    path: status.path,
+                    value: parsed.presets.map(preset => this.copyPreset(preset))
+                },
                 {
                     headers: new HttpHeaders({"If-Match": `"${status.revision}"`}),
                     observe: "response"
@@ -257,8 +292,8 @@ export class MapPresetService {
             const revision = typeof body?.revision === "string"
                 ? body.revision
                 : response.headers.get("ETag")?.replace(/^(?:W\/)?"|"$/g, "") ?? "";
-            if (!body || !Array.isArray(body.mapPresets) || !revision
-                || !this.configService.applyCanonicalMapPresets(body.mapPresets, revision)) {
+            if (!body || body.path !== status.path || !Array.isArray(body.value) || !revision
+                || !this.configService.applyCanonicalMapPresets(body.value, revision)) {
                 throw new Error("The server returned an invalid canonical map-preset response.");
             }
             this.adoptConfigSnapshot();
