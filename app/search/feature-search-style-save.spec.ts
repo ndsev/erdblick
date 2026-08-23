@@ -10,7 +10,7 @@ import type {SearchStyleSaveRequest} from "./search-style-save.dialog.component"
 void AppModule;
 
 const RULES: FeatureSearchStyleRule[] = [{
-    geometry: "line",
+    geometry: ["line"],
     filter: [],
     color: {mode: "solid", color: "#ff0000"},
     width: 4
@@ -41,6 +41,32 @@ function request(action: SearchStyleSaveRequest["action"], enabled: boolean): Se
 }
 
 describe("Feature Search style save lifecycle", () => {
+    it("initializes layer affinity from the search's selected layers", () => {
+        const component = fixture();
+        component.searchStyleSaveVisible = false;
+        component.serializeStyleRuleDrafts = vi.fn(() => RULES);
+        component.mapService = {maps: {
+            allFeatureLayers: vi.fn(() => [
+                {id: "Road"},
+                {id: "Lane"},
+                {id: "RoadSurface"}
+            ])
+        }};
+        component.selectedSearchMapLayers = vi.fn(() => [
+            {mapId: "Map A", layerId: "Road"},
+            {mapId: "Map B", layerId: "Road"},
+            {mapId: "Map B", layerId: "Lane"}
+        ]);
+
+        component.saveSearchStyle();
+
+        expect(component.searchStyleSaveLayerIds)
+            .toEqual(["Lane", "Road", "RoadSurface"]);
+        expect(component.searchStyleSaveInitialLayerIds)
+            .toEqual(["Lane", "Road"]);
+        expect(component.searchStyleSaveVisible).toBe(true);
+    });
+
     it("saves enabled YAML without opening the editor for plain Save", async () => {
         const component = fixture();
 

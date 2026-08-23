@@ -12,17 +12,19 @@ describe("SearchStyleSaveDialogComponent", () => {
         });
     };
 
-    it("resets to enabled and Any whenever it opens", () => {
+    it("resets to enabled and the supplied search layer affinity", () => {
         const component = new SearchStyleSaveDialogComponent();
+        component.layerIds = ["Lane", "Road"];
+        component.initialLayerIds = ["Road", "Road", "Unavailable"];
         component.name = "Old";
         component.enableUponSave = false;
-        component.selectedLayerIds = ["roads"];
+        component.selectedLayerIds = ["Lane"];
 
         open(component);
 
         expect(component.name).toBe("Search Style");
         expect(component.enableUponSave).toBe(true);
-        expect(component.selectedLayerIds).toEqual([]);
+        expect(component.selectedLayerIds).toEqual(["Road"]);
     });
 
     it("rejects a whitespace-only name", () => {

@@ -228,12 +228,13 @@ export function featureSearchRuleToStyleRule(
     rule: FeatureSearchStyleRule,
     scope?: "feature" | "attribute"
 ): Record<string, unknown> {
-    const label = rule.geometry === "label";
+    const label = hasOnlyGeometry(rule, "label");
+    const point = hasOnlyGeometry(rule, "point");
     const opacity = clamp(Number(rule.opacity ?? 1), 0, 1);
     const width = Math.max(1, Number(
         label
             ? rule.width ?? 22
-            : rule.geometry === "point"
+            : point
                 ? rule.pointRadius ?? rule.width ?? 4
                 : rule.width ?? 4
     ));
@@ -513,7 +514,7 @@ function projectRule(
     if (label && !String(raw["label-text-expression"]).trim()) {
         return readOnlyRule(sourceIndex, `${path}.label-text-expression`, "empty-label-expression", "uses an empty label expression.");
     }
-    const geometry = label ? "label" : geometryFromStyle(raw["geometry"]);
+    const geometry = label ? ["label"] as FeatureSearchGeometryKind[] : geometryFromStyle(raw["geometry"]);
     if (!geometry) {
         return readOnlyRule(sourceIndex, `${path}.geometry`, "unsupported-geometry", "uses a geometry combination that Quick cannot represent.");
     }
@@ -522,7 +523,8 @@ function projectRule(
         || (raw["label-opacity"] !== undefined && !isFiniteNumber(raw["label-opacity"]))) {
         return readOnlyRule(sourceIndex, path, "dynamic-number", "uses a non-literal width or opacity.");
     }
-    const widthLimit = label ? 96 : geometry === "point" ? 128 : 32;
+    const point = geometry.length === 1 && geometry[0] === "point";
+    const widthLimit = label ? 96 : point ? 128 : 32;
     if (isFiniteNumber(raw["width"]) && (raw["width"] < 1 || raw["width"] > widthLimit)) {
         return readOnlyRule(sourceIndex, `${path}.width`, "width-outside-quick-range", "uses a width outside the current Quick control range.");
     }
@@ -564,7 +566,7 @@ function projectRule(
             : [],
         color,
         width,
-        ...(geometry === "point" ? {pointRadius: width} : {}),
+        ...(point ? {pointRadius: width} : {}),
         opacity,
         ...(label ? {
             labelExpression: String(raw["label-text-expression"]),
@@ -624,9 +626,9 @@ function patchProjectedRule(
         }
     };
 
-    if (original.geometry !== updated.geometry) {
+    if (!same(original.geometry, updated.geometry)) {
         sync(["geometry"]);
-        if (original.geometry === "label" || updated.geometry === "label") {
+        if (hasOnlyGeometry(original, "label") || hasOnlyGeometry(updated, "label")) {
             sync([
                 "opacity",
                 "label-text-expression",
@@ -647,13 +649,13 @@ function patchProjectedRule(
     }
     if (!same(original.color, updated.color)) {
         sync(["color", "color-scale"]);
-        if (updated.geometry === "label") {
+        if (hasOnlyGeometry(updated, "label")) {
             sync(["label-color"]);
         }
     }
     if (styleWidth(original) !== styleWidth(updated)) {
         sync(["width"]);
-        if (updated.geometry === "label") {
+        if (hasOnlyGeometry(updated, "label")) {
             sync(["label-scale"]);
         }
     }
@@ -795,12 +797,12 @@ function colorFromStyle(raw: Record<string, unknown>): FeatureSearchColorMode | 
     };
 }
 
-function geometryFromStyle(value: unknown): FeatureSearchGeometryKind | undefined {
+function geometryFromStyle(value: unknown): FeatureSearchGeometryKind[] | undefined {
     if (value === undefined) {
-        return "any";
+        return ["any"];
     }
     if (value === "point" || value === "line") {
-        return value;
+        return [value];
     }
     if (!Array.isArray(value) || !value.every(item => typeof item === "string")) {
         return undefined;
@@ -808,13 +810,30 @@ function geometryFromStyle(value: unknown): FeatureSearchGeometryKind | undefine
     const actual = new Set(value);
     const matches = (expected: readonly string[]) =>
         actual.size === expected.length && expected.every(item => actual.has(item));
-    if (matches(["point"])) return "point";
-    if (matches(["line"])) return "line";
-    if (matches(["polygon", "mesh", "aabb", "gltf"])) return "surface";
-    if (matches(["polygon", "aabb"])) return "polygon";
-    if (matches(["mesh", "gltf"])) return "mesh";
-    if (matches(ALL_GEOMETRY_TYPES)) return "any";
-    return undefined;
+    if (matches(ALL_GEOMETRY_TYPES)) return ["any"];
+
+    const geometries: FeatureSearchGeometryKind[] = [];
+    if (actual.delete("point")) geometries.push("point");
+    if (actual.delete("line")) geometries.push("line");
+    const includes = (types: readonly string[]) => types.every(type => actual.has(type));
+    const remove = (types: readonly string[]) => types.forEach(type => actual.delete(type));
+    const surfaceTypes = ["polygon", "mesh", "aabb", "gltf"];
+    if (includes(surfaceTypes)) {
+        geometries.push("surface");
+        remove(surfaceTypes);
+    } else {
+        const polygonTypes = ["polygon", "aabb"];
+        const meshTypes = ["mesh", "gltf"];
+        if (includes(polygonTypes)) {
+            geometries.push("polygon");
+            remove(polygonTypes);
+        }
+        if (includes(meshTypes)) {
+            geometries.push("mesh");
+            remove(meshTypes);
+        }
+    }
+    return geometries.length > 0 && actual.size === 0 ? geometries : undefined;
 }
 
 function labelCompatibilityWarnings(
@@ -822,7 +841,7 @@ function labelCompatibilityWarnings(
     sourceIndex: number,
     rule: FeatureSearchStyleRule
 ): QuickStyleWarning[] {
-    if (rule.geometry !== "label") {
+    if (!hasOnlyGeometry(rule, "label")) {
         return [];
     }
     const path = `rules[${sourceIndex}]`;
@@ -968,17 +987,21 @@ function simfilLiteral(value: unknown): string {
     return JSON.stringify(String(value ?? ""));
 }
 
-function geometryTypes(kind: FeatureSearchGeometryKind): string[] {
-    switch (kind) {
-        case "point": return ["point"];
-        case "line": return ["line"];
-        case "surface": return ["polygon", "mesh", "aabb", "gltf"];
-        case "polygon": return ["polygon", "aabb"];
-        case "mesh": return ["mesh", "gltf"];
-        case "label":
-        case "any":
-            return [...ALL_GEOMETRY_TYPES];
+function geometryTypes(kinds: readonly FeatureSearchGeometryKind[]): string[] {
+    const result = new Set<string>();
+    for (const kind of kinds) {
+        switch (kind) {
+            case "point": result.add("point"); break;
+            case "line": result.add("line"); break;
+            case "surface": ["polygon", "mesh", "aabb", "gltf"].forEach(type => result.add(type)); break;
+            case "polygon": ["polygon", "aabb"].forEach(type => result.add(type)); break;
+            case "mesh": ["mesh", "gltf"].forEach(type => result.add(type)); break;
+            case "label":
+            case "any":
+                return [...ALL_GEOMETRY_TYPES];
+        }
     }
+    return ALL_GEOMETRY_TYPES.filter(type => result.has(type));
 }
 
 function labelColor(color: FeatureSearchColorMode): string {
@@ -987,7 +1010,11 @@ function labelColor(color: FeatureSearchColorMode): string {
 }
 
 function styleWidth(rule: FeatureSearchStyleRule): number {
-    return Number(rule.geometry === "point" ? rule.pointRadius ?? rule.width ?? 4 : rule.width ?? 4);
+    return Number(hasOnlyGeometry(rule, "point") ? rule.pointRadius ?? rule.width ?? 4 : rule.width ?? 4);
+}
+
+function hasOnlyGeometry(rule: FeatureSearchStyleRule, geometry: FeatureSearchGeometryKind): boolean {
+    return rule.geometry.length === 1 && rule.geometry[0] === geometry;
 }
 
 function isSearchStyleScalar(value: unknown): value is string | number | boolean | null {

@@ -1,12 +1,13 @@
 import {describe, expect, it} from "vitest";
 
+import type {FeatureSearchStyleRule} from "../shared/feature-search-state";
 import {SearchStyleRuleDraftCodec} from "./search-style-rule-editor.model";
 
 describe("SearchStyleRuleDraftCodec", () => {
     it("round-trips high-fidelity geometry, point radius and expression intent", () => {
         const codec = new SearchStyleRuleDraftCodec();
-        const rules = [{
-            geometry: "mesh" as const,
+        const rules: FeatureSearchStyleRule[] = [{
+            geometry: ["line", "mesh"],
             filter: [{
                 field: "speed * 2 > 10",
                 op: "=",
@@ -27,7 +28,7 @@ describe("SearchStyleRuleDraftCodec", () => {
         const roundTrip = codec.fromDrafts(codec.toDrafts(rules));
 
         expect(roundTrip[0]).toMatchObject({
-            geometry: "mesh",
+            geometry: ["line", "mesh"],
             width: 3,
             pointRadius: 11,
             opacity: 0.35
@@ -39,7 +40,7 @@ describe("SearchStyleRuleDraftCodec", () => {
     it("does not invent a point radius for a rule that never stored one", () => {
         const codec = new SearchStyleRuleDraftCodec();
         const roundTrip = codec.fromDrafts(codec.toDrafts([{
-            geometry: "line",
+            geometry: ["line"],
             filter: [],
             color: {mode: "solid", color: "#123456"},
             width: 4,

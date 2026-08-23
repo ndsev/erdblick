@@ -121,6 +121,7 @@ export class SearchStyleSaveDialogComponent implements OnChanges {
     @Input() visible = false;
     @Output() visibleChange = new EventEmitter<boolean>();
     @Input() layerIds: readonly string[] = [];
+    @Input() initialLayerIds: readonly string[] = [];
     @Input() saving = false;
     @Output() saveRequested = new EventEmitter<Readonly<SearchStyleSaveRequest>>();
 
@@ -174,7 +175,9 @@ export class SearchStyleSaveDialogComponent implements OnChanges {
     private reset(): void {
         this.name = "Search Style";
         this.enableUponSave = true;
-        this.selectedLayerIds = [];
+        const availableLayerIds = new Set(this.layerIds);
+        this.selectedLayerIds = Array.from(new Set(this.initialLayerIds))
+            .filter(layerId => availableLayerIds.has(layerId));
         this.showNameError = false;
     }
 }

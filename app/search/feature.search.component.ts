@@ -59,7 +59,6 @@ import {
     normalizeFeatureSearchFeatureTypes
 } from "../shared/feature-search-state";
 import type {
-    FeatureSearchGeometryKind,
     FeatureSearchMapLayerRef,
     FeatureSearchRenderStrategy,
     FeatureSearchScope,
@@ -496,6 +495,7 @@ interface FeatureSearchResultTreeItem {
                                                       [options]="searchStyleOptions"
                                                       [ngModel]="selectedSearchStyleId"
                                                       (ngModelChange)="applySearchStyle($event)"
+                                                      size="small"
                                                       optionLabel="label"
                                                       optionValue="value"
                                                       optionDisabled="disabled"
@@ -530,9 +530,6 @@ interface FeatureSearchResultTreeItem {
                                                       [outlined]="true"
                                                       (click)="addStyleRule()">
                                             </p-button>
-                                            @if (styleAttributeOptionsLoading) {
-                                                <span class="feature-search-style-loading">Updating fields...</span>
-                                            }
                                         </div>
                                     </div>
                                     <div class="feature-search-highfi-grid">
@@ -736,6 +733,7 @@ interface FeatureSearchResultTreeItem {
             [visible]="searchStyleSaveVisible"
             (visibleChange)="onSearchStyleSaveVisibleChange($event)"
             [layerIds]="searchStyleSaveLayerIds"
+            [initialLayerIds]="searchStyleSaveInitialLayerIds"
             [saving]="searchStyleSavePending"
             (saveRequested)="confirmSearchStyleSave($event)">
         </search-style-save-dialog>
@@ -802,14 +800,6 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         {label: '<', value: '<'},
         {label: 'contains', value: 'contains'}
     ];
-    styleVisualizationOptions: FeatureSearchStyleOption[] = [
-        {label: 'Any geometry', value: 'any'},
-        {label: 'Line', value: 'line'},
-        {label: 'Polygon/Mesh', value: 'surface'},
-        {label: 'Point', value: 'point'},
-        {label: 'Label', value: 'label'}
-    ];
-    private readonly defaultSearchLabelSize = 22;
     private nextStyleRuleId = 1;
     private nextStyleConditionId = 1;
     private nextStyleColorStopId = 1;
@@ -822,6 +812,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     protected searchStyleSaveVisible = false;
     protected searchStyleSavePending = false;
     protected searchStyleSaveLayerIds: string[] = [];
+    protected searchStyleSaveInitialLayerIds: string[] = [];
     private pendingSearchStyleRules: FeatureSearchStyleRule[] = [];
     protected readonly featureSearchColorPickerOverlayOptions: OverlayOptions = {
         styleClass: "feature-search-colorpicker-overlay"
@@ -1016,7 +1007,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             const colorField = rule.color.mode === "gradient" || rule.color.mode === "categories"
                 ? rule.color.field.trim()
                 : "";
-            const labelField = rule.geometry === "label" ? (rule.labelExpression ?? "").trim() : "";
+            const labelField = rule.geometry.length === 1 && rule.geometry[0] === "label"
+                ? (rule.labelExpression ?? "").trim()
+                : "";
             const filterFields = (rule.filter ?? []).map(filter => filter.field.trim());
             return [colorField, labelField, ...filterFields].includes(trimmedExpression);
         });
@@ -1222,9 +1215,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             id,
             name: "",
             filters: [],
-            visualization: 'any',
+            visualization: ['any'],
             lineWidth: 5,
-            pointRadius: 7.5,
+            pointRadius: 20,
             opacity: 60,
             labelExpression: fieldOption?.value ?? this.defaultStyleField(),
             labelCustomExpression: false,
@@ -1354,96 +1347,6 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     /** Returns an isolated completion owner id for one custom style filter expression. */
     protected styleFilterCompletionOwnerId(filter: FeatureSearchStyleFilterDraft): string {
         return `feature-search-style-filter:${this.searchId}:${filter.id}`;
-    }
-
-    /** Returns the size control label for the currently selected visualization kind. */
-    protected styleRuleSizeLabel(rule: FeatureSearchStyleRuleDraft): string {
-        return this.styleRuleIsLabel(rule) ? "Size" : "Width";
-    }
-
-    /** Returns whether the rule renders text labels instead of geometry. */
-    protected styleRuleIsLabel(rule: FeatureSearchStyleRuleDraft): boolean {
-        return rule.visualization === "label";
-    }
-
-    /** Applies geometry selector changes and initializes label text from the preferred field. */
-    protected setStyleRuleVisualization(rule: FeatureSearchStyleRuleDraft, value: string): void {
-        const wasLabel = this.styleRuleIsLabel(rule);
-        rule.visualization = this.geometryFromUiValue(value ?? "any");
-        if (this.styleRuleIsLabel(rule) && this.fieldNeedsDefault(rule.labelExpression)) {
-            rule.labelExpression = this.defaultStyleField();
-            rule.labelCustomExpression = false;
-        }
-        if (!wasLabel && this.styleRuleIsLabel(rule) && rule.lineWidth <= 5) {
-            rule.lineWidth = this.defaultSearchLabelSize;
-        }
-        this.markStyleRuleEdited(rule);
-    }
-
-    /** Switches label text between schema-field selection and custom SIMFIL expression. */
-    protected toggleStyleLabelExpressionMode(rule: FeatureSearchStyleRuleDraft): void {
-        rule.labelCustomExpression = !rule.labelCustomExpression;
-        if (!rule.labelCustomExpression
-            && (this.fieldNeedsDefault(rule.labelExpression) || this.fieldMissingFromPicker(rule.labelExpression))) {
-            rule.labelExpression = this.defaultStyleField();
-        }
-        this.markStyleRuleEdited(rule);
-    }
-
-    /** Persists the label text expression selected or typed by the user. */
-    protected setStyleLabelExpression(rule: FeatureSearchStyleRuleDraft, expression: string): void {
-        rule.labelExpression = expression ?? "";
-        this.markStyleRuleEdited(rule);
-    }
-
-    /** Updates the Deck text-background color for label search-result rules. */
-    protected setStyleLabelBackgroundColor(rule: FeatureSearchStyleRuleDraft, color: string): void {
-        rule.labelBackgroundColor = normalizeHexColor(color, DEFAULT_FEATURE_SEARCH_LABEL_BACKGROUND_COLOR);
-        this.markStyleRuleEdited(rule);
-    }
-
-    /** Returns an isolated completion owner for one label expression editor. */
-    protected styleLabelCompletionOwnerId(rule: FeatureSearchStyleRuleDraft): string {
-        return `feature-search-style-label:${this.searchId}:${rule.id}`;
-    }
-
-    /** Returns the compact summary chips shown in collapsed style-rule headers. */
-    protected styleRuleSummaryChips(rule: FeatureSearchStyleRuleDraft): string[] {
-        const filterChip = rule.filters.length > 0
-            ? `${rule.filters.length} Filter${rule.filters.length === 1 ? "" : "s"}`
-            : "No filter";
-        return [
-            filterChip,
-            this.styleVisualizationLabel(rule.visualization),
-            this.styleColorModeLabel(rule.color.mode)
-        ];
-    }
-
-    /** Returns up to ten configured colors for the rule-header color preview. */
-    protected styleRuleColorPreviewColors(rule: FeatureSearchStyleRuleDraft): string[] {
-        const color = rule.color;
-        if (color.mode === "solid") {
-            return [normalizeHexColor(color.solidColor)];
-        }
-        const stops = color.mode === "gradient"
-            ? color.gradientStops
-            : color.categoryStops;
-        return stops.slice(0, 10).map(stop => normalizeHexColor(stop.color, color.fallbackColor || color.solidColor));
-    }
-
-    /** Converts a visualization selector value into a short user-facing label. */
-    private styleVisualizationLabel(value: string): string {
-        if (value === "polygon" || value === "mesh") {
-            return "Polygon/Mesh";
-        }
-        return this.styleVisualizationOptions.find(option => option.value === value)?.label ?? "Any geometry";
-    }
-
-    /** Converts a color mode id into a short user-facing label. */
-    private styleColorModeLabel(mode: SearchStyleColorDraft["mode"]): string {
-        return mode === "gradient"
-            ? "Gradient"
-            : (mode === "categories" ? "Categories" : "Solid");
     }
 
     /** Refreshes the compact scope label from the same schema metadata used by the style field picker. */
@@ -1734,6 +1637,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.searchStyleSaveLayerIds = Array.from(new Set(
             Array.from(this.mapService.maps.allFeatureLayers(), layer => layer.id)
                 .filter(layerId => layerId.length > 0)
+        )).sort();
+        this.searchStyleSaveInitialLayerIds = Array.from(new Set(
+            this.selectedSearchMapLayers().map(layer => layer.layerId)
         )).sort();
         this.searchStyleSaveVisible = true;
     }
@@ -2147,15 +2053,35 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         return true;
     }
 
-    /** Creates differentiated auto rules when possible, otherwise a generic rule matching the search color. */
+    /**
+     * Creates point and non-point variants for each differentiated auto style,
+     * or two generic variants matching the search color when no field is safe.
+     */
     private createAutoStyleRules(session: FeatureSearchSession, existingIds: number[] = []): FeatureSearchStyleRuleDraft[] {
         const fieldOptions = this.autoStyleFieldOptions(session);
-        if (fieldOptions.length === 0
-            || !searchAutoStyleFieldOptionsArePortable(fieldOptions, session.schemaAnalysis)) {
-            return [this.createSolidAutoStyleRule(existingIds[0] ?? this.nextStyleRuleId++, session)];
+        const portableFieldOptions = fieldOptions.length > 0
+            && searchAutoStyleFieldOptionsArePortable(fieldOptions, session.schemaAnalysis)
+            ? fieldOptions
+            : [null];
+        const rules: FeatureSearchStyleRuleDraft[] = [];
+        for (const fieldOption of portableFieldOptions) {
+            const pointRule = fieldOption
+                ? this.createAutoStyleRule(existingIds[rules.length] ?? this.nextStyleRuleId++, fieldOption)
+                : this.createSolidAutoStyleRule(existingIds[rules.length] ?? this.nextStyleRuleId++, session);
+            pointRule.name += " (points)";
+            pointRule.visualization = ["point"];
+            pointRule.pointRadius = 20;
+            rules.push(pointRule);
+
+            const geometryRule = fieldOption
+                ? this.createAutoStyleRule(existingIds[rules.length] ?? this.nextStyleRuleId++, fieldOption)
+                : this.createSolidAutoStyleRule(existingIds[rules.length] ?? this.nextStyleRuleId++, session);
+            geometryRule.name += " (lines/surfaces)";
+            geometryRule.visualization = ["line", "surface"];
+            geometryRule.lineWidth = 5;
+            rules.push(geometryRule);
         }
-        return fieldOptions.map((fieldOption, index) =>
-            this.createAutoStyleRule(existingIds[index] ?? this.nextStyleRuleId++, fieldOption));
+        return rules;
     }
 
     /** Creates one generic auto-generated rule that does not depend on schema field enumeration. */
@@ -3009,7 +2935,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 rule.color.mode = "categories";
                 changed = true;
             }
-            if (rule.visualization === "label" && !rule.labelCustomExpression) {
+            if (rule.visualization.length === 1
+                && rule.visualization[0] === "label"
+                && !rule.labelCustomExpression) {
                 if (this.fieldNeedsDefault(rule.labelExpression)) {
                     rule.labelExpression = field;
                     changed = true;
@@ -3036,18 +2964,6 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             }
         }
         return changed;
-    }
-
-    /** Maps the UI geometry selector value to the persisted search-style geometry kind. */
-    private geometryFromUiValue(value: string): FeatureSearchGeometryKind {
-        return ["any", "point", "line", "surface", "polygon", "mesh", "label"].includes(value)
-            ? value as FeatureSearchGeometryKind
-            : "any";
-    }
-
-    /** Keeps every persisted geometry kind independently editable. */
-    private geometryToUiValue(value: FeatureSearchGeometryKind): FeatureSearchGeometryKind {
-        return value;
     }
 
     /** Parses and clamps one numeric UI value, keeping a stable fallback for incomplete form edits. */

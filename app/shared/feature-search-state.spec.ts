@@ -61,9 +61,29 @@ describe("FeatureSearchState", () => {
 
         expect(entry).not.toHaveProperty("searchStyleConfigurationId");
         expect(entry).not.toHaveProperty("searchStyleConfigurationRevision");
-        expect(entry.searchStyleRules[0].geometry).toBe("mesh");
+        expect(entry.searchStyleRules[0].geometry).toEqual(["mesh"]);
         expect(entry.searchStyleRules[0].filter[0].customExpression).toBe(true);
         expect(entry.searchStyleRules[0].color).toMatchObject({customField: true});
+    });
+
+    it("normalizes multi-geometry rules while retaining legacy scalar values", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "true",
+            searchStyleRules: [{
+                geometry: ["mesh", "line", "mesh"],
+                filter: [],
+                color: {mode: "solid", color: "#123456"}
+            }, {
+                geometry: "point",
+                filter: [],
+                color: {mode: "solid", color: "#654321"}
+            }]
+        }]);
+
+        expect(entry.searchStyleRules.map(rule => rule.geometry)).toEqual([
+            ["line", "mesh"],
+            ["point"]
+        ]);
     });
 
     it("defaults selected views from visible selected map layers", () => {

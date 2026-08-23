@@ -27,7 +27,7 @@ export function featureSearchResultFields(
             color.field.trim()) {
             fields.add(color.field.trim());
         }
-        if (rule.geometry === "label" && rule.labelExpression?.trim()) {
+        if (rule.geometry.length === 1 && rule.geometry[0] === "label" && rule.labelExpression?.trim()) {
             fields.add(rule.labelExpression.trim());
         }
     }

@@ -58,4 +58,20 @@ describe("SearchStyleRuleEditorComponent", () => {
         component.ngOnChanges({expansionContext: {}});
         expect(component.accordionValue).toEqual([String(first.id), String(second.id)]);
     });
+
+    it("supports combined geometry groups while keeping Any and Label exclusive", () => {
+        const codec = new SearchStyleRuleDraftCodec();
+        const rule = codec.createRule();
+        const component = new SearchStyleRuleEditorComponent() as any;
+
+        component.setVisualization(rule, ["any", "line"]);
+        expect(rule.visualization).toEqual(["line"]);
+        component.setVisualization(rule, ["line", "surface"]);
+        expect(rule.visualization).toEqual(["line", "surface"]);
+        component.setVisualization(rule, ["line", "surface", "label"]);
+        expect(rule.visualization).toEqual(["label"]);
+        component.setVisualization(rule, ["point"]);
+        expect(component.sizeValue(rule)).toBe(20);
+        expect(component.sizeLabel(rule)).toBe("Radius");
+    });
 });

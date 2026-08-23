@@ -11,8 +11,10 @@ import {OverlayOptions} from "primeng/api";
 
 import {
     DEFAULT_FEATURE_SEARCH_LABEL_BACKGROUND_COLOR,
+    FeatureSearchGeometryKind,
     FeatureSearchMapLayerRef,
-    FeatureSearchScope
+    FeatureSearchScope,
+    normalizeFeatureSearchGeometry
 } from "../shared/feature-search-state";
 import type {SearchValueSummariesState, SearchValueSummary} from "./search.model";
 import {
@@ -220,14 +222,19 @@ import type {QuickStyleWarning} from "./search-style-sheet.converter";
                                 <div class="feature-search-style-section-rail">Geom</div>
                                 <div class="feature-search-style-section-body">
                                     <div class="feature-search-style-visualization-row">
-                                        <p-select class="feature-search-style-visualization"
-                                                  [options]="visualizationOptions"
-                                                  [ngModel]="rule.visualization"
-                                                  (ngModelChange)="setVisualization(rule, $event)"
-                                                  optionLabel="label"
-                                                  optionValue="value"
-                                                  appendTo="body">
-                                        </p-select>
+                                        <p-multiSelect class="feature-search-style-visualization"
+                                                       [options]="visualizationOptions"
+                                                       [ngModel]="rule.visualization"
+                                                       (ngModelChange)="setVisualization(rule, $event)"
+                                                       optionLabel="label"
+                                                       optionValue="value"
+                                                       [filter]="false"
+                                                       [showToggleAll]="false"
+                                                       [maxSelectedLabels]="1"
+                                                       selectedItemsLabel="{0} geometry types"
+                                                       placeholder="Any geometry"
+                                                       appendTo="body">
+                                        </p-multiSelect>
                                         <label [for]="'feature-search-style-width-' + rule.id">
                                             {{ sizeLabel(rule) }}
                                         </label>
@@ -236,7 +243,7 @@ import type {QuickStyleWarning} from "./search-style-sheet.converter";
                                                        [ngModel]="sizeValue(rule)"
                                                        (ngModelChange)="setSizeValue(rule, $event)"
                                                        [min]="1"
-                                                       [max]="rule.visualization === 'point' ? 128 : (isLabel(rule) ? 96 : 32)">
+                                                       [max]="maximumSize(rule)">
                                         </p-inputNumber>
                                     </div>
                                     @if (isLabel(rule)) {
@@ -507,10 +514,20 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
         this.markEdited(rule);
     }
 
-    /** Changes geometry kind while applying only a label-size UI default. */
-    protected setVisualization(rule: FeatureSearchStyleRuleDraft, value: FeatureSearchStyleRuleDraft["visualization"]): void {
+    /** Changes geometry kinds while keeping the exclusive Any and Label modes intuitive. */
+    protected setVisualization(
+        rule: FeatureSearchStyleRuleDraft,
+        value: FeatureSearchGeometryKind[] | null | undefined
+    ): void {
         const wasLabel = this.isLabel(rule);
-        rule.visualization = value ?? "any";
+        const selected = value ?? [];
+        const added = selected.find(geometry => !rule.visualization.includes(geometry));
+        const combinable = selected.filter(geometry => geometry !== "any" && geometry !== "label");
+        rule.visualization = normalizeFeatureSearchGeometry(
+            added === "any" || added === "label"
+                ? [added]
+                : combinable
+        );
         if (!wasLabel && this.isLabel(rule) && rule.lineWidth <= 5) {
             rule.lineWidth = 22;
         }
@@ -519,14 +536,14 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
 
     /** Returns the geometry-kind-specific size shown in the shared control. */
     protected sizeValue(rule: FeatureSearchStyleRuleDraft): number {
-        return rule.visualization === "point"
+        return this.isPoint(rule)
             ? rule.pointRadius ?? Math.max(3, rule.lineWidth * 1.5)
             : rule.lineWidth;
     }
 
     /** Writes width or point radius without conflating their persisted values. */
     protected setSizeValue(rule: FeatureSearchStyleRuleDraft, value: number): void {
-        if (rule.visualization === "point") {
+        if (this.isPoint(rule)) {
             rule.pointRadius = Number(value);
         } else {
             rule.lineWidth = Number(value);
@@ -596,12 +613,22 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
 
     /** Returns whether a rule uses label geometry. */
     protected isLabel(rule: FeatureSearchStyleRuleDraft): boolean {
-        return rule.visualization === "label";
+        return rule.visualization.length === 1 && rule.visualization[0] === "label";
+    }
+
+    /** Returns whether a rule targets only points and therefore exposes radius. */
+    protected isPoint(rule: FeatureSearchStyleRuleDraft): boolean {
+        return rule.visualization.length === 1 && rule.visualization[0] === "point";
+    }
+
+    /** Returns the safe upper bound for the active geometry size control. */
+    protected maximumSize(rule: FeatureSearchStyleRuleDraft): number {
+        return this.isPoint(rule) ? 128 : this.isLabel(rule) ? 96 : 32;
     }
 
     /** Returns the geometry-specific size-control label. */
     protected sizeLabel(rule: FeatureSearchStyleRuleDraft): string {
-        if (rule.visualization === "point") {
+        if (this.isPoint(rule)) {
             return "Radius";
         }
         return this.isLabel(rule) ? "Size" : "Width";
@@ -616,7 +643,7 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
     protected summaryChips(rule: FeatureSearchStyleRuleDraft): string[] {
         return [
             rule.filters.length ? `${rule.filters.length} Filter${rule.filters.length === 1 ? "" : "s"}` : "No filter",
-            this.visualizationOptions.find(option => option.value === rule.visualization)?.label ?? "Any geometry",
+            this.visualizationLabel(rule.visualization),
             rule.color.mode === "gradient" ? "Gradient" : rule.color.mode === "categories" ? "Categories" : "Solid"
         ];
     }
@@ -646,6 +673,13 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
     /** Delegates optional live-value lookup to the host. */
     protected valueSummary(expression: string): SearchValueSummary | undefined {
         return this.valueSummaryForExpression?.(expression);
+    }
+
+    /** Formats one or more selected geometry groups for the collapsed rule summary. */
+    private visualizationLabel(geometries: readonly FeatureSearchGeometryKind[]): string {
+        const labels = geometries.map(geometry =>
+            this.visualizationOptions.find(option => option.value === geometry)?.label ?? geometry);
+        return labels.join(" + ") || "Any geometry";
     }
 
     /** Resolves transient schema metadata for one expression. */

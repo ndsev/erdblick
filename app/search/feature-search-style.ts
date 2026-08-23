@@ -207,7 +207,7 @@ function conjunction(left: string | undefined, right: string | undefined): strin
 
 function invisiblePlaceholderRule(): FeatureSearchStyleRule {
     return {
-        geometry: "any",
+        geometry: ["any"],
         filter: [{field: "false", op: "=", value: true, customExpression: true}],
         color: {mode: "solid", color: "#000000"},
         opacity: 0

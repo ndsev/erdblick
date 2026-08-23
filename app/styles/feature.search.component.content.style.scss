@@ -355,6 +355,7 @@ search-style-rule-editor {
 
     p-button,
     p-select,
+    p-multiselect,
     p-inputnumber,
     p-colorpicker {
       align-items: center;
@@ -364,6 +365,7 @@ search-style-rule-editor {
 
     .p-button,
     .p-select,
+    .p-multiselect,
     .p-inputnumber-input,
     .p-inputtext,
     .feature-search-style-value-input,
@@ -376,6 +378,7 @@ search-style-rule-editor {
     }
 
     .p-select,
+    .p-multiselect,
     .p-inputnumber-input {
       max-height: var(--feature-search-style-control-height);
     }
@@ -390,16 +393,21 @@ search-style-rule-editor {
       max-height: var(--feature-search-style-control-height);
     }
 
-    .p-select-label {
+    .p-select-label,
+    .p-multiselect-label {
       align-items: center;
       display: flex;
       font-size: var(--feature-search-style-control-font-size);
       min-height: 0;
+      overflow: hidden;
       padding-block: 0;
       padding-inline: 0.45em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
-    .p-select-dropdown {
+    .p-select-dropdown,
+    .p-multiselect-dropdown {
       width: var(--feature-search-style-icon-size);
     }
 
@@ -414,6 +422,7 @@ search-style-rule-editor {
 
     .p-button-label,
     .p-select-label,
+    .p-multiselect-label,
     .p-inputnumber-input,
     .feature-search-style-value-input,
     .feature-search-style-rule-name,
@@ -549,11 +558,6 @@ search-style-rule-editor {
     border-radius: 50%;
     outline: 2px solid var(--p-focus-ring-color);
     outline-offset: 2px;
-  }
-
-  .feature-search-saved-style-select {
-    min-width: 9em;
-    width: min(14em, 28vw);
   }
 
   .feature-search-style-panel {
@@ -825,7 +829,6 @@ search-style-rule-editor {
     min-width: 7em;
   }
 
-  .feature-search-style-loading,
   .feature-search-query-dirty,
   .feature-search-values-waiting,
   .search-style-color-warning {
@@ -994,6 +997,11 @@ search-style-rule-editor {
 }
 
 .feature-search-tabs {
+  .feature-search-saved-style-select {
+    min-width: 9em;
+    width: min(14em, 28vw);
+  }
+
   .feature-search-style-rules {
     display: flex;
     flex: 1 1 auto;
