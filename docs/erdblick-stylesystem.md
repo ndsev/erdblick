@@ -541,7 +541,13 @@ Preset IDs and names are unique within the style sheet. Every `optionId` must id
 
 `FeatureLayerStyle` parses `options` and `presets` in the same native YAML pass and exposes both through the generated WASM bindings. This keeps source locations, validation reports, imports, edits, and style replacement on one parser lifecycle instead of reparsing preset metadata in TypeScript.
 
-The Maps panel shows eligible embedded presets in each layer's dropdown. Expand a selected preset to edit its Boolean options directly. After the complete option/synchronization transaction, the panel selects the unique most-specific preset matching the resulting values; an equal-specificity ambiguity retains the current matching preset, otherwise it becomes **Custom options** without discarding the edited values. Explicitly choosing **Custom options** remains Custom until the next real option edit, and explicitly choosing a named preset is not replaced during its own apply transaction. Layer preset definitions still have no separate management form: edit them only as part of the complete style YAML. The **Map Presets** tab manages higher-level compositions that refer to these style-owned layer-preset definitions.
+The Maps panel shows eligible embedded presets in each layer's dropdown. Expand a selected preset to edit its Boolean options directly. During hydration and after a complete option/synchronization transaction, the panel selects the unique most-specific preset matching the resulting values; an equal-specificity ambiguity retains the current matching preset, otherwise it becomes **Custom options** without discarding the edited values. Explicitly choosing **Custom options** remains Custom until the next real option edit in the current session, and explicitly choosing a named preset is not replaced during its own apply transaction. Layer preset definitions still have no separate management form: edit them only as part of the complete style YAML. The **Map Presets** tab manages higher-level compositions that refer to these style-owned layer-preset definitions. A map-level selector likewise infers a preset during hydration only when exactly one available composition matches the hydrated layer values.
+
+A map preset applies the subset of its component layers present on the current
+map; at least one component must resolve. A reference to a preset that is
+missing from an existing component layer rejects the composition for that map.
+Equivalent partial compositions are shown only once. Selecting a map preset
+never filters unrelated layers or options from the Maps panel.
 
 The road example below shows a map-level preset selector together with the
 embedded **Surface Colors** layer preset and its expanded Boolean option:
@@ -561,17 +567,17 @@ Datasource-specific style sheets expose named combinations through the same
 layer preset control. The examples below show named selections and their
 rendered states for existing datasource layers.
 
-![NDS.Live Lane Cinematic and Topology presets in split view](screenshots/31a-live-lanes-cinematic-topology.png)
+![NDS.Live Lane Cinematic and Lane Topology presets in split view](screenshots/31a-live-lanes-cinematic-topology.png)
 
 ![NDS.Live Display 2D Features and 3D Boxes presets in split view](screenshots/33-live-display-2d-3d.png)
 
-![NDS.Classic BMD layer with the All Features preset selected](screenshots/34-classic-bmd-all-features.png)
+![NDS.Classic BMD layer with the All preset selected](screenshots/34-classic-bmd-all-features.png)
 
 The BMD frame uses the repository's minimal anonymized Classic fixture. It
-documents the **All Features** preset and semantic rule family, not the visual
+documents the **All** preset and semantic rule family, not the visual
 density of a production map.
 
-![NDS.Classic Lane Topology and Routing Travel Direction presets in split view](screenshots/35a-classic-lane-routing-topology.png)
+![NDS.Classic Lane Group Topology and Routing Travel Direction presets in split view](screenshots/35a-classic-lane-routing-topology.png)
 
 Changing an option reconciles the selector to the unique preset matching the
 new values. These two frames keep the camera and panel geometry fixed while

@@ -523,20 +523,18 @@ const MAP_FILTER_DELAY_MS = 300;
                                                       [disabled]="node.presets.length === 0"
                                                       [attr.aria-label]="'Layer preset for ' + node.layerId"/>
                                             @if (node.selectedPresetKeys[index]) {
-                                                @if (!isMapPresetProjection(node, index)) {
-                                                    <p-button onEnterClick
-                                                              class="style-preset-expand-button"
-                                                              [attr.data-testid]="stylePresetExpandTestId(node, index)"
-                                                              [pTooltip]="node.expandedPresetOptions[index]
-                                                                  ? 'Hide preset options'
-                                                                  : 'Show preset options'"
-                                                              tooltipPosition="bottom"
-                                                              (click)="toggleStylePresetOptions($event, node, index)">
-                                                        <span class="material-symbols-outlined">
-                                                            {{ node.expandedPresetOptions[index] ? "unfold_less" : "unfold_more" }}
-                                                        </span>
-                                                    </p-button>
-                                                }
+                                                <p-button onEnterClick
+                                                          class="style-preset-expand-button"
+                                                          [attr.data-testid]="stylePresetExpandTestId(node, index)"
+                                                          [pTooltip]="node.expandedPresetOptions[index]
+                                                              ? 'Hide preset options'
+                                                              : 'Show preset options'"
+                                                          tooltipPosition="bottom"
+                                                          (click)="toggleStylePresetOptions($event, node, index)">
+                                                    <span class="material-symbols-outlined">
+                                                        {{ node.expandedPresetOptions[index] ? "unfold_less" : "unfold_more" }}
+                                                    </span>
+                                                </p-button>
                                                 @for (styleId of selectedPresetStyleIds(node, index); track styleId) {
                                                     <p-button onEnterClick
                                                               class="style-option-edit-button"
@@ -1430,12 +1428,6 @@ export class MapPanelComponent {
             node.layerId,
             !node.expandedPresetOptions[viewIndex]);
         this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
-    }
-
-    /** Returns whether a parent map preset is intentionally projecting only this row. */
-    isMapPresetProjection(node: LayerPresetNode, viewIndex: number): boolean {
-        return this.mapService.maps.getFeatureLayer(node.mapId, node.layerId)
-            ?.projectPresetOnly[viewIndex] === true;
     }
 
     /** Returns the distinct style sheets owned by the selected preset for editor shortcuts. */

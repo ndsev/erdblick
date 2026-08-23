@@ -233,7 +233,6 @@ export class LayerTreeNode {
     key: string;
     viewConfig: LayerViewConfig[] = [];  // This is an array, because the values are stored per MapView.
     children: LayerTreeChildNode[] = [];
-    projectPresetOnly: boolean[] = [];
     expanded: boolean = true;
 
     /** Wraps raw layer metadata into the structure consumed by the map tree. */
@@ -378,9 +377,6 @@ function mapTreeNodeChildren(
         if (!presetNode || presetNode.presets.length === 0) {
             return options;
         }
-        if (node.projectPresetOnly[viewIndex]) {
-            return [presetNode];
-        }
         const selectedPreset = presetNode.presets.find(
             preset => preset.key === presetNode.selectedPresetKeys[viewIndex]);
         if (!selectedPreset || presetNode.expandedPresetOptions[viewIndex]) {
@@ -395,12 +391,6 @@ function mapTreeNodeChildren(
         ];
     }
     if (node instanceof MapTreeNode) {
-        const selectedPreset = node.mapPresets.find(
-            preset => preset.id === node.selectedMapPresetIds[viewIndex]);
-        if (selectedPreset) {
-            const componentLayers = new Set(selectedPreset.layerPresets.map(component => component.layerId));
-            return node.children.filter(layer => componentLayers.has(layer.id));
-        }
         return [...node.children];
     }
     if (node instanceof GroupTreeNode) {
@@ -666,9 +656,24 @@ export class MapLayerTree {
                     : [];
                 layer.children = [presetNode, ...options];
             }
-            map.mapPresets = this.mapPresetService.presets.filter(preset =>
-                this.mapPresetService.isAvailable(preset)
-                && this.resolveMapPresetComponents(map, preset) !== undefined);
+            // Partial compositions can become equivalent on maps that omit one of their layers.
+            const resolvedSignatures = new Set<string>();
+            map.mapPresets = this.mapPresetService.presets.filter(preset => {
+                if (!this.mapPresetService.isAvailable(preset)) {
+                    return false;
+                }
+                const components = this.resolveMapPresetComponents(map, preset);
+                if (!components) {
+                    return false;
+                }
+                const signature = components.map(component =>
+                    `${component.layer.id}\u0000${component.preset.key}`).sort().join("\u0001");
+                if (resolvedSignatures.has(signature)) {
+                    return false;
+                }
+                resolvedSignatures.add(signature);
+                return true;
+            });
             map.mapPresetOptions = [
                 {label: "Custom options", value: NO_PRESET_ID},
                 ...map.mapPresets.map(preset => ({label: preset.name, value: preset.id}))
@@ -676,7 +681,7 @@ export class MapLayerTree {
         }
     }
 
-    /** Resolves every component of a map preset or rejects the whole preset for this map. */
+    /** Resolves components present on a map and rejects broken references on existing layers. */
     resolveMapPresetComponents(
         map: MapTreeNode,
         preset: MapPresetDefinition
@@ -688,7 +693,7 @@ export class MapLayerTree {
         for (const definition of preset.layerPresets) {
             const layer = map.onlyFeatureLayers.find(candidate => candidate.id === definition.layerId);
             if (!layer) {
-                return undefined;
+                continue;
             }
             const resolvedPreset = this.mapPresetService.resolveLayerPreset(
                 layer.id,
@@ -699,7 +704,7 @@ export class MapLayerTree {
             }
             result.push({definition, layer, preset: resolvedPreset});
         }
-        return result;
+        return result.length ? result : undefined;
     }
 
     /** Returns whether layer synchronization would force two component assignments to disagree. */
@@ -723,7 +728,7 @@ export class MapLayerTree {
     }
 
     /**
-     * Reapplies persisted per-view layer configuration and style option values to the tree.
+     * Reapplies persisted per-view state and infers unambiguous presets from hydrated option values.
      * This is called after map/style changes and when the number of views changes.
      */
     configureTreeParameters() {
@@ -752,7 +757,6 @@ export class MapLayerTree {
                 const presetNode = layerPresetNode(featureLayer);
                 if (presetNode) {
                     const viewCount = this.stateService.numViewsState.getValue();
-                    featureLayer.projectPresetOnly = Array.from({length: viewCount}, () => false);
                     presetNode.selectedPresetKeys = Array.from({length: viewCount}, (_, viewIndex) => {
                         const selectedRef = this.stateService.getLayerPresetSelection(
                             viewIndex,
@@ -777,6 +781,19 @@ export class MapLayerTree {
                             }
                             return selectedPreset.key;
                         }
+                        const inferredPreset = bestMatchingLayerPreset(
+                            presetNode.presets,
+                            options,
+                            viewIndex,
+                            selectedPreset?.key ?? NO_PRESET_ID);
+                        if (inferredPreset) {
+                            this.stateService.setLayerPresetSelection(
+                                viewIndex,
+                                featureLayer.mapId,
+                                featureLayer.id,
+                                inferredPreset.ref);
+                            return inferredPreset.key;
+                        }
                         if (selectedRef) {
                             this.stateService.setLayerPresetSelection(
                                 viewIndex,
@@ -798,24 +815,25 @@ export class MapLayerTree {
         const viewCount = this.stateService.numViewsState.getValue();
         for (const map of this.maps.values()) {
             map.selectedMapPresetIds = Array.from({length: viewCount}, (_, viewIndex) => {
-                const selectedId = this.stateService.getMapPresetSelection(viewIndex, map.id);
-                const selectedPreset = map.mapPresets.find(preset => preset.id === selectedId);
-                const components = selectedPreset
-                    ? this.resolveMapPresetComponents(map, selectedPreset)
-                    : undefined;
-                const matches = components?.every(component => {
-                    const presetNode = layerPresetNode(component.layer);
-                    return presetNode?.selectedPresetKeys[viewIndex] === component.preset.key
-                        && this.mapPresetService.matchesPresetValues(
+                const matchingPresets = map.mapPresets.filter(preset => {
+                    const components = this.resolveMapPresetComponents(map, preset);
+                    return components?.every(component =>
+                        this.mapPresetService.matchesPresetValues(
                             component.preset,
                             layerStyleOptions(component.layer),
-                            viewIndex);
-                }) === true;
-                if (selectedPreset && components && matches) {
-                    for (const component of components) {
-                        component.layer.projectPresetOnly[viewIndex] = true;
-                    }
+                            viewIndex)) === true;
+                });
+                const selectedId = this.stateService.getMapPresetSelection(viewIndex, map.id);
+                const selectedPreset = matchingPresets.find(preset => preset.id === selectedId);
+                if (selectedPreset) {
                     return selectedPreset.id;
+                }
+                if (matchingPresets.length === 1) {
+                    this.stateService.setMapPresetSelection(
+                        viewIndex,
+                        map.id,
+                        matchingPresets[0].id);
+                    return matchingPresets[0].id;
                 }
                 if (selectedId) {
                     this.stateService.setMapPresetSelection(viewIndex, map.id, null);
@@ -1148,9 +1166,6 @@ export class MapLayerTree {
         }
 
         for (const map of this.maps.values()) {
-            for (const layer of map.onlyFeatureLayers) {
-                layer.projectPresetOnly = Array.from({length: viewCount}, () => false);
-            }
             for (let viewIndex = 0; viewIndex < viewCount; viewIndex++) {
                 const selectedId = map.selectedMapPresetIds[viewIndex]
                     || this.stateService.getMapPresetSelection(viewIndex, map.id);
@@ -1164,9 +1179,6 @@ export class MapLayerTree {
                         viewIndex)) === true;
                 if (selected && components && matches) {
                     map.selectedMapPresetIds[viewIndex] = selected.id;
-                    for (const component of components) {
-                        component.layer.projectPresetOnly[viewIndex] = true;
-                    }
                 } else if (selectedId) {
                     this.setMapPresetSelection(viewIndex, map.id, null);
                 }

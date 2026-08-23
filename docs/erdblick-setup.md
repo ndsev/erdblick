@@ -67,7 +67,7 @@ The `config/` directory used to build or host erdblick controls UI-side metadata
 - `config/config.json` lists built-in style bundles and optional extension modules. Common keys:
   - `styles`: array of `{ "id": "...", "url": "<file>.yaml" }`; plain filenames are requested from `/static-config/styles/` and this list defines the base style set.
   - `additionalStyles`: optional array of extra style entries appended after the base style set. Entries use the same string or `{ "id": "...", "url": "..." }` shape as `styles`, but are tagged as additional in the UI.
-  - `mapPresets`: optional inline array of map-agnostic compositions. Each entry has `id`, `name`, optional `enabled`, and a non-empty `layerPresets` list whose entries identify an exact `layerId`, owning `styleId`, and embedded `presetId`. There is no external preset file or URL.
+  - `mapPresets`: optional inline array of map-agnostic compositions. Each entry has `id`, `name`, optional `enabled`, and a non-empty `layerPresets` list whose entries identify an exact `layerId`, owning `styleId`, and embedded `presetId`. A map uses the components for layers it actually has, requires at least one matching component, and rejects references that are broken for a layer it does have. There is no external preset file or URL.
   - `extensionModules.distribVersions`: JavaScript file to display version provenance in the footer.
   - `extensionModules.jumpTargets`: JavaScript file that supplies additional jump-to shortcuts.
   - `surveys`: optional array configuring the in-app survey banner (`id`, `link`, `linkHtml`, optional `start`/`end` dates, `emoji`, and `background`); omit or leave empty to disable surveys.

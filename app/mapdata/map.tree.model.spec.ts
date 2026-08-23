@@ -354,7 +354,7 @@ describe("layer presets in the map tree", () => {
     });
 
     /** Builds a two-view layer with one owned and one unowned Boolean option. */
-    function presetTreeFixture() {
+    function presetTreeFixture(ownedValues = [false, false]) {
         const ready = new BehaviorSubject(true);
         const numViewsState = new BehaviorSubject(2);
         const selections: Array<Record<string, Record<string, {styleId: string; presetId: string}>>> = [{}, {}];
@@ -366,7 +366,7 @@ describe("layer presets in the map tree", () => {
                 {autoLevel: true, level: 13, visible: true}
             ]),
             styleOptionValues: vi.fn((_mapId, _layerId, _styleId, optionId) =>
-                optionId === "owned" ? [true, false] : [false, false]),
+                optionId === "owned" ? ownedValues : [false, false]),
             getLayerPresetSelection: vi.fn((viewIndex: number, mapId: string, layerId: string) =>
                 selections[viewIndex][mapId]?.[layerId] ?? null),
             setLayerPresetSelection: vi.fn((
@@ -481,6 +481,15 @@ describe("layer presets in the map tree", () => {
         ]);
     });
 
+    it("infers a unique preset from clean hydrated option defaults", () => {
+        const {tree, stateService} = presetTreeFixture([true, false]);
+        const presetNode = layerPresetNode(tree.getFeatureLayer("Map", "Example")!)!;
+
+        expect(presetNode.selectedPresetKeys).toEqual([presetNode.presets[0].key, ""]);
+        expect(stateService.setLayerPresetSelection).toHaveBeenCalledWith(
+            0, "Map", "Example", presetNode.presets[0].ref);
+    });
+
     it("keeps an empty preset node for reconciliation but omits it from presentation", () => {
         const {tree} = presetTreeFixture();
         const layer = tree.getFeatureLayer("Map", "Example")!;
@@ -491,7 +500,6 @@ describe("layer presets in the map tree", () => {
             presetNode.selectOptions.length,
             {label: "Custom options", value: ""}
         );
-        layer.projectPresetOnly[0] = true;
 
         const projected = filterMapTreeNodes(tree.nodes, "", 0)[0].children?.[0];
 
@@ -542,7 +550,7 @@ describe("layer presets in the map tree", () => {
 });
 
 describe("map presets in the map tree", () => {
-    it("offers a complete composition and projects its layer-preset rows", () => {
+    it("offers present components without hiding unrelated map layers", () => {
         const ref = {styleId: "Example/Style", presetId: "focused"};
         const resolvedPreset = {
             id: "focused",
@@ -556,16 +564,31 @@ describe("map presets in the map tree", () => {
             id: "overview",
             name: "Overview",
             enabled: true,
-            layerPresets: [{layerId: "Example", styleId: ref.styleId, presetId: ref.presetId}]
+            layerPresets: [
+                {layerId: "Example", styleId: ref.styleId, presetId: ref.presetId},
+                {layerId: "Missing", styleId: ref.styleId, presetId: ref.presetId}
+            ]
+        };
+        const duplicatePreset = {
+            ...mapPreset,
+            id: "duplicate",
+            name: "Duplicate",
+            layerPresets: [mapPreset.layerPresets[0]]
+        };
+        const brokenPreset = {
+            ...mapPreset,
+            id: "broken",
+            name: "Broken",
+            layerPresets: [{layerId: "Unrelated", styleId: ref.styleId, presetId: ref.presetId}]
         };
         const stateService = {
             ready: new BehaviorSubject(true),
             numViewsState: new BehaviorSubject(1),
             mapLayerConfig: vi.fn(() => [{autoLevel: true, level: 13, visible: true}]),
             styleOptionValues: vi.fn(() => [true]),
-            getLayerPresetSelection: vi.fn(() => ref),
+            getLayerPresetSelection: vi.fn(() => null),
             setLayerPresetSelection: vi.fn(),
-            getMapPresetSelection: vi.fn(() => "overview"),
+            getMapPresetSelection: vi.fn(() => null),
             setMapPresetSelection: vi.fn(),
             prune: vi.fn()
         };
@@ -582,19 +605,24 @@ describe("map presets in the map tree", () => {
             styleGroups: new BehaviorSubject([])
         };
         const presetService = {
-            presets: [mapPreset],
-            presets$: new BehaviorSubject([mapPreset]),
+            presets: [mapPreset, duplicatePreset, brokenPreset],
+            presets$: new BehaviorSubject([mapPreset, duplicatePreset, brokenPreset]),
             isAvailable: () => true,
             presetsForLayer: () => [resolvedPreset],
-            resolveLayerPreset: (_layerId: string, candidate: typeof ref) =>
-                candidate.styleId === ref.styleId && candidate.presetId === ref.presetId
+            resolveLayerPreset: (layerId: string, candidate: typeof ref) =>
+                layerId === "Example"
+                    && candidate.styleId === ref.styleId
+                    && candidate.presetId === ref.presetId
                     ? resolvedPreset
                     : undefined,
             matchesPresetValues: (_preset: typeof resolvedPreset, options: StyleOptionNode[], viewIndex: number) =>
                 options.find(option => option.id === "owned")?.value[viewIndex] === true
         };
         const map = source("Map");
-        map.layers = {Example: featureLayer("Example")};
+        map.layers = {
+            Example: featureLayer("Example"),
+            Unrelated: featureLayer("Unrelated")
+        };
 
         const tree = new MapLayerTree(
             [map],
@@ -610,6 +638,11 @@ describe("map presets in the map tree", () => {
             {label: "Overview", value: "overview"}
         ]);
         expect(mapNode.selectedMapPresetIds).toEqual(["overview"]);
+        expect(stateService.setLayerPresetSelection).toHaveBeenCalledWith(
+            0, "Map", "Example", ref);
+        expect(stateService.setMapPresetSelection).toHaveBeenCalledWith(
+            0, "Map", "overview");
+        expect(renderedMap.children?.map(child => child.id)).toEqual(["Example", "Unrelated"]);
         expect(renderedMap.children?.[0].children?.map(child => child.id)).toEqual(["layer-preset"]);
     });
 });
