@@ -1,3 +1,10 @@
+.p-dialog-enter-active,
+.p-dialog-leave-active {
+  // Firefox can flash compositor-animated dialogs against the WebGPU canvas.
+  // Showing and hiding immediately still lets PrimeNG complete its lifecycle.
+  animation: none !important;
+}
+
 .p-dialog .app-dialog-resize-handle,
 .app-resize-handle {
   --app-resize-hit-depth: 0.5em;
