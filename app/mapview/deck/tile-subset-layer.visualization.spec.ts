@@ -7,8 +7,10 @@ import {
     deckSubsetInteractionProps,
     remapGltfPickContributions
 } from "./deck-subset-picking";
+import {TileSubsetLayerVisualization} from
+    "./tile-subset-layer.visualization";
 
-describe("TileSubsetLayerVisualization picking integration", () => {
+describe("TileSubsetLayerVisualization", () => {
     it("makes only ordinary map layers eligible for drill picking", () => {
         expect(deckSubsetInteractionProps(
             "regular",
@@ -76,5 +78,51 @@ describe("TileSubsetLayerVisualization picking integration", () => {
         expect(remapped.pickResolver(1)[0].featureId).toBe("b");
         expect(firstResolver).toHaveBeenCalledWith(7);
         expect(secondResolver).toHaveBeenCalledWith(7);
+    });
+
+    it("retains the semantic mask while an atomic successor owns the contribution", () => {
+        const maskController = {removeOwner: vi.fn()};
+        const gpuScene = {removeContributions: vi.fn()};
+        const sceneHandle = {
+            scene: {gpuMaskController: maskController, gpuScene}
+        } as any;
+        const visualization = Object.assign(
+            Object.create(TileSubsetLayerVisualization.prototype),
+            {
+                disposed: false,
+                state: {mapTileKey: "Features:Map:Road:7:0"},
+                owner: {
+                    ownerId: "regular-owner",
+                    releaseTileState: vi.fn()
+                },
+                viewIndex: 2,
+                visualizationId: "render-specific-owner",
+                renderService: {cancel: vi.fn()},
+                gltfPresentation: {destroy: vi.fn()},
+                interactionGltf: null,
+                contributionIdentities: new Set<string>(),
+                interactionOverlays: [],
+                gltfPickResults: [],
+                pickSubset: null,
+                pickSubsetValueVersion: -1,
+                pendingIconUris: new Set<string>(),
+                failedIconUris: new Set<string>(),
+                sceneHandle
+            }
+        ) as TileSubsetLayerVisualization;
+
+        const identity = visualization.destroy(sceneHandle, true);
+
+        expect(identity).toBe(
+            "regular-owner\u0000view-2\u0000Features:Map:Road:7:0"
+        );
+        expect(maskController.removeOwner).not.toHaveBeenCalled();
+        expect(gpuScene.removeContributions).not.toHaveBeenCalled();
+
+        TileSubsetLayerVisualization.retireContribution(sceneHandle, identity!);
+        expect(maskController.removeOwner).toHaveBeenCalledWith(
+            `interaction-mask\u0000${identity}`
+        );
+        expect(gpuScene.removeContributions).toHaveBeenCalledWith([identity]);
     });
 });

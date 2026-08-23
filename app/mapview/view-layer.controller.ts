@@ -1364,13 +1364,7 @@ export class ViewLayerController {
         }
         const {mapId, layerId, tileId} = parsed;
         const mapgetLayer = this.mapInfo.mapgetLayer(mapId, layerId);
-        if (!mapgetLayer ||
-            Number(coreLib.getTileLevel(tileId)) !==
-                this.viewState.getEffectiveMapLayerLevel(
-                    this.viewIndex,
-                    mapId,
-                    layerId
-                )) {
+        if (!mapgetLayer) {
             return null;
         }
         // A hidden ordinary layer has no local contribution by definition;
@@ -1454,7 +1448,7 @@ export class ViewLayerController {
         }
     }
 
-    /** Track only viewport-derived state that changes target eligibility. */
+    /** Track viewport-derived state that can switch targets between local and authored rendering. */
     private interactionViewportSignature(): string {
         const layers = new Map<string, {mapId: string; layerId: string}>();
         const features = [

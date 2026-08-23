@@ -209,7 +209,7 @@ export class GpuSceneMaskController {
         private readonly flattenZ: boolean
     ) {}
 
-    /** Replace one visualization's exact local targets and schedule one reconciliation. */
+    /** Replace one stable scene owner's exact local targets and schedule reconciliation. */
     setOverlays(
         ownerId: string,
         contributionIdentities: ReadonlySet<string>,
@@ -231,7 +231,7 @@ export class GpuSceneMaskController {
         this.scheduleReconcile(INTERACTION_RECONCILE_DELAY_MS);
     }
 
-    /** Remove every transient mask contribution associated with one visualization. */
+    /** Remove every transient mask contribution associated with one scene owner. */
     removeOwner(ownerId: string): void {
         if (this.owners.delete(ownerId)) {
             this.scheduleReconcile(INTERACTION_RECONCILE_DELAY_MS);

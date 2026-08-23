@@ -456,7 +456,7 @@ describe("ViewLayerController", () => {
             .toHaveBeenCalledWith(target);
     });
 
-    it("keeps exact interaction fallback eligible when the base layer is hidden", () => {
+    it("keeps exact fallback eligible across visibility and level changes", () => {
         const controller = Object.create(
             ViewLayerController.prototype
         ) as any;
@@ -478,7 +478,7 @@ describe("ViewLayerController", () => {
             }
         };
         controller.viewState = {
-            getEffectiveMapLayerLevel: vi.fn(() => 13)
+            getEffectiveMapLayerLevel: vi.fn(() => 12)
         };
 
         expect(controller.resolveInteractionTargetLayer({
@@ -486,6 +486,8 @@ describe("ViewLayerController", () => {
             featureId: "Lane.545379780.75"
         })).toEqual({mapgetLayer, tileId: 545379780});
         expect(controller.mapInfo.maps.getMapLayerVisibility)
+            .not.toHaveBeenCalled();
+        expect(controller.viewState.getEffectiveMapLayerLevel)
             .not.toHaveBeenCalled();
     });
 

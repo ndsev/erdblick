@@ -151,7 +151,7 @@ export class TileSubsetLayerVisualization {
             return;
         }
         this.maskController(this.sceneHandle)?.setOverlays(
-            this.visualizationId,
+            this.interactionMaskOwnerId(),
             this.contributionIdentities,
             this.coordinateOrigin,
             overlays
@@ -448,9 +448,14 @@ export class TileSubsetLayerVisualization {
         if (!sceneHandle) {
             return;
         }
-        const scene = (sceneHandle.scene as DeckScene | undefined)
-            ?.gpuScene ?? null;
-        scene?.removeContributions(identities);
+        const retiredIdentities = [...identities];
+        const scene = sceneHandle.scene as DeckScene | undefined;
+        for (const identity of retiredIdentities) {
+            scene?.gpuMaskController?.removeOwner(
+                this.interactionMaskOwnerId(identity)
+            );
+        }
+        scene?.gpuScene?.removeContributions(retiredIdentities);
     }
 
     /** Permanently retire many independent tile owners as one GPU mutation. */
@@ -502,9 +507,6 @@ export class TileSubsetLayerVisualization {
             : null;
         this.renderService.cancel(this.visualizationId);
         const registry = sceneHandle ? this.registry(sceneHandle) : null;
-        if (sceneHandle) {
-            this.maskController(sceneHandle)?.removeOwner(this.visualizationId);
-        }
         this.gltfPresentation.destroy(registry);
         this.interactionGltf = null;
         if (sceneHandle) {
@@ -546,7 +548,7 @@ export class TileSubsetLayerVisualization {
         this.requestMissingIcons(applied.resourceRequests);
         const maskController = this.maskController(sceneHandle);
         maskController?.setOverlays(
-            this.visualizationId,
+            this.interactionMaskOwnerId(),
             this.contributionIdentities,
             this.coordinateOrigin,
             this.interactionOverlays
@@ -798,6 +800,18 @@ export class TileSubsetLayerVisualization {
             `view-${this.viewIndex}`,
             state.mapTileKey
         ].join("\u0000");
+    }
+
+    /** Keep the semantic mask attached while render-key-specific owners are replaced. */
+    private interactionMaskOwnerId(): string {
+        return TileSubsetLayerVisualization.interactionMaskOwnerId(
+            this.contributionIdentity(this.state)
+        );
+    }
+
+    /** Derive the mask owner from the contribution identity shared by atomic replacements. */
+    private static interactionMaskOwnerId(contributionIdentity: string): string {
+        return `interaction-mask\u0000${contributionIdentity}`;
     }
 
 }
