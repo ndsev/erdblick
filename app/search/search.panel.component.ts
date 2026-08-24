@@ -206,7 +206,7 @@ interface SearchResizeSession {
 export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 130000;
     readonly searchActionsBaseZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX;
-    readonly searchResizeHandleZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 1000;
+    searchResizeHandleZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 1;
 
     searchItems: Array<SearchTarget> = [];
     private locationSearchItems: Array<SearchTarget> = [];
@@ -504,7 +504,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 textarea === document.activeElement;
 
             if (length > 0 && focusValid) {
-                this.refreshCompletionZIndex();
+                this.refreshSearchOverlayZIndices();
             }
             this.completion.visible = length > 0 && focusValid;
             this.changeDetectorRef.markForCheck();
@@ -525,7 +525,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
 
             this.completion.pending = pending && focusValid;
             if (this.completion.pending) {
-                this.refreshCompletionZIndex();
+                this.refreshSearchOverlayZIndices();
                 this.updateCursor();
             } else if (this.completionItems.length === 0) {
                 this.completion.visible = false;
@@ -549,7 +549,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.subscriptions.add(this.dialog.onShow.subscribe(() => {
             setTimeout(() => {
                 this.expandTextarea();
-                this.refreshCompletionZIndex();
+                this.refreshSearchOverlayZIndices();
             }, 10);
         }));
 
@@ -1212,27 +1212,24 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.updateCursor();
         this.searchService.showFeatureSearchDialog = true;
         this.setSearchValue(this.searchInputValue);
-        this.refreshCompletionZIndex();
+        this.refreshSearchOverlayZIndices();
     }
 
     /**
      * Keeps the completion popup just above the PrimeNG search-actions dialog without hardcoding a global z-index.
      */
-    private refreshCompletionZIndex() {
+    private refreshSearchOverlayZIndices() {
         const container = this.dialog?.container();
-        if (!container) {
-            this.completion.zIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 2000;
-            return;
-        }
-
-        const inlineZIndex = Number.parseInt(container.style.zIndex, 10);
-        const computedZIndex = Number.parseInt(window.getComputedStyle(container).zIndex, 10);
+        const inlineZIndex = container ? Number.parseInt(container.style.zIndex, 10) : Number.NaN;
+        const computedZIndex = container
+            ? Number.parseInt(window.getComputedStyle(container).zIndex, 10)
+            : Number.NaN;
         const dialogZIndex = Number.isFinite(inlineZIndex)
             ? inlineZIndex
-            : (Number.isFinite(computedZIndex)
-                ? computedZIndex
-                : SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX);
+            : (Number.isFinite(computedZIndex) ? computedZIndex : SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX);
+        this.searchResizeHandleZIndex = dialogZIndex + 1;
         this.completion.zIndex = dialogZIndex + 2000;
+        this.changeDetectorRef.markForCheck();
     }
 
     /**
