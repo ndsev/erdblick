@@ -11,6 +11,7 @@ import {
   DUAL_COMPACT_PATH_FRAGMENT_SHADER,
   DUAL_SIMPLE_PATH_FRAGMENT_SHADER,
   GpuSceneMaskMode,
+  gpuSceneMaskShaderModule,
   gpuSceneShaderModule,
   gpuSceneSemanticOverlayShaderModule,
   gpuSceneMaskFragmentShader,
@@ -67,6 +68,21 @@ describe("ErdblickVectorLayer model order", () => {
     expect(source).toContain("uniform highp sampler2D gpuSceneZIndexTexture;");
     expect(source).toContain(
       "vec4 gpuScene_lookup(highp sampler2D lookupTexture, uint texelIndex)",
+    );
+  });
+
+  it("fades ordinary records across fractional LOD while masks stay opaque", () => {
+    const source = gpuSceneShaderModule.vs as string;
+    expect(source).toContain("float gpuScene_lodOpacity");
+    expect(source).toContain("return smoothstep(");
+    expect(source).toContain(
+      "gpuScene_lodOpacityValue = gpuScene_lodOpacity(localZIndex, contribution)",
+    );
+    expect(gpuSceneShaderModule.inject["vs:DECKGL_FILTER_COLOR"]).toContain(
+      "color.a *= gpuScene_lodOpacityValue",
+    );
+    expect(gpuSceneMaskShaderModule.vs).toContain(
+      "gpuScene_lodOpacityValue = 1.0",
     );
   });
 

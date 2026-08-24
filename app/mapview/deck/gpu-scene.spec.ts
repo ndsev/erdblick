@@ -1364,15 +1364,15 @@ describe("GpuScene contribution lifecycle", () => {
     scene.publishPresentation();
 
     expect(scene.labels()).toEqual([]);
-    expect(scene.setContributionLod("tile", 4)).toBe(true);
+    expect(scene.setContributionLod("tile", 3.5)).toBe(true);
     expect(scene.labels()).toMatchObject([{ text: "Detailed", minLod: 4 }]);
     expect(redraw).toHaveBeenCalledWith("GPU contribution LOD changed");
 
     scene.publishPresentation();
     const table = activeTexture(device, "erdblick-gpu-contribution-table");
     const values = table.writes.at(-1)!.data as Float32Array;
-    expect(values[reservation.contributions[0].slot * 4 + 1]).toBe(4);
-    expect(scene.setContributionLod("tile", 4)).toBe(false);
+    expect(values[reservation.contributions[0].slot * 4 + 1]).toBe(3.5);
+    expect(scene.setContributionLod("tile", 3.5)).toBe(false);
   });
 
   it("excludes a retiring same-identity pick from interaction presence", () => {

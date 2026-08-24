@@ -419,8 +419,8 @@ export class ViewLayerController {
     /**
      * Exact cheap signature for presentation demand affected by viewport
      * motion. Regular coverage is versioned by ViewVisualizationState, while
-     * style LOD is represented explicitly because density may change without
-     * changing the exact visible tile set.
+     * integer planning and quantized presentation LOD are explicit because
+     * density may change without changing the exact visible tile set.
      * search coverage is versioned by its StyledMapgetLayer and its density
      * decision is represented once per occupied source level.
      */
@@ -448,14 +448,22 @@ export class ViewLayerController {
                 if (style.featureLayerStyle.hasLayerAffinity(
                     mapgetLayer.layerId
                 )) {
-                    parts.push(
-                        mapgetLayer.key,
-                        style.id,
-                        String(this.viewState.styleLod(
+                    const plannedLod = this.viewState.styleLod(
+                        this.viewIndex,
+                        level,
+                        style.featureLayerStyle
+                    );
+                    const presentationLod =
+                        this.viewState.stylePresentationLod(
                             this.viewIndex,
                             level,
                             style.featureLayerStyle
-                        ))
+                        );
+                    parts.push(
+                        mapgetLayer.key,
+                        style.id,
+                        String(plannedLod),
+                        String(presentationLod)
                     );
                 }
             }
@@ -1910,7 +1918,7 @@ export class ViewLayerController {
             );
     }
 
-    /** Resolve the current GPU LOD independently of an owner's immutable filter plan. */
+    /** Resolve continuous GPU LOD independently of an owner's integer filter plan. */
     private presentationLod(
         layer: StyledMapgetLayer,
         state: FilterTileState
@@ -1918,7 +1926,7 @@ export class ViewLayerController {
         if (layer.identity.presentationKind !== "regular") {
             return MAX_STYLE_LOD;
         }
-        return this.viewState.styleLod(
+        return this.viewState.stylePresentationLod(
             this.viewIndex,
             Number(coreLib.getTileLevel(state.tileId)),
             layer.featureLayerStyle

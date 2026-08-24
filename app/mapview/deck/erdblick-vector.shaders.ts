@@ -53,6 +53,7 @@ uniform highp sampler2D gpuSceneZIndexTexture;
 
 flat out float gpuScene_vSemanticGroup;
 flat out float gpuScene_vSemanticDepth;
+float gpuScene_lodOpacityValue;
 
 layout(std140) uniform gpuSceneUniforms {
   float lookupTextureWidth;
@@ -228,6 +229,17 @@ bool gpuScene_isOwned(uint recordWord, vec4 contribution) {
     activationToken == uint(contribution.z + 0.5);
 }
 
+float gpuScene_lodOpacity(uint localZIndex, vec4 contribution) {
+  uint minimumLod = localZIndex >> GPU_SCENE_MINIMUM_LOD_SHIFT;
+  if (minimumLod == 0u) {
+    return 1.0;
+  }
+  return smoothstep(
+    float(minimumLod - 1u),
+    float(minimumLod),
+    contribution.y);
+}
+
 bool gpuScene_isActive(
     uint recordWord,
     uint localZIndex,
@@ -235,9 +247,9 @@ bool gpuScene_isActive(
     uint localPickIndex) {
   // localPickIndex is part of the common signature because mask variants use
   // it for sparse target lookup. Ordinary rendering deliberately ignores it.
-  uint minimumLod = localZIndex >> GPU_SCENE_MINIMUM_LOD_SHIFT;
+  gpuScene_lodOpacityValue = gpuScene_lodOpacity(localZIndex, contribution);
   return gpuScene_isOwned(recordWord, contribution) &&
-    uint(contribution.y + 0.5) >= minimumLod;
+    gpuScene_lodOpacityValue > 0.0;
 }
 
 vec4 gpuScene_zIndexMetadata(
@@ -289,6 +301,9 @@ export const gpuSceneShaderModule = {
   name: "gpuScene",
   vs: GPU_SCENE_VERTEX_SOURCE,
   fs: GPU_SCENE_FRAGMENT_SOURCE,
+  inject: {
+    "vs:DECKGL_FILTER_COLOR": "color.a *= gpuScene_lodOpacityValue;",
+  },
   uniformTypes: {
     lookupTextureWidth: "f32",
     flattenZ: "f32",
@@ -463,6 +478,7 @@ bool gpuSceneMask_isActive(
     uint localPickIndex) {
   // Explicit interaction masks remain visible even when the base record's
   // data-driven minimum LOD is above the current view LOD.
+  gpuScene_lodOpacityValue = 1.0;
   if (!gpuScene_isOwned(recordWord, contribution)) {
     return false;
   }

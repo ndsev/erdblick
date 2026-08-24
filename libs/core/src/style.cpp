@@ -687,6 +687,58 @@ uint8_t FeatureLayerStyle::lodForVisibleTileCount(
     return FeatureStyleRule::kMaximumLod;
 }
 
+double FeatureLayerStyle::presentationLodForVisibleTileCount(
+    uint32_t visibleTileCount,
+    uint32_t defaultLod3TileThreshold) const
+{
+    auto const thresholds = lodThresholds_.value_or(
+        defaultLodThresholds(defaultLod3TileThreshold));
+    if (visibleTileCount >= thresholds.front()) {
+        return FeatureStyleRule::kMinimumLod;
+    }
+
+    auto const interpolate = [visibleTileCount](
+        double upperThreshold,
+        double lowerThreshold,
+        double lowerLod)
+    {
+        auto const count = std::clamp(
+            static_cast<double>(visibleTileCount),
+            lowerThreshold,
+            upperThreshold);
+        auto const progress = std::log(upperThreshold / count) /
+            std::log(upperThreshold / lowerThreshold);
+        return lowerLod + progress;
+    };
+    for (size_t index = 1U; index < thresholds.size(); ++index) {
+        if (visibleTileCount >= thresholds[index]) {
+            return interpolate(
+                thresholds[index - 1U],
+                thresholds[index],
+                static_cast<double>(index - 1U));
+        }
+    }
+    if (visibleTileCount == 0U || thresholds.back() == 1U) {
+        return FeatureStyleRule::kMaximumLod;
+    }
+
+    // Continue the final density ratio for the otherwise unbounded LOD 6->7
+    // interval. This keeps custom non-geometric threshold ladders smooth.
+    auto const lastThreshold = static_cast<double>(thresholds.back());
+    auto const precedingThreshold = static_cast<double>(
+        thresholds[thresholds.size() - 2U]);
+    auto const finalThreshold = std::max(
+        1.0,
+        lastThreshold * lastThreshold / precedingThreshold);
+    if (visibleTileCount <= finalThreshold) {
+        return FeatureStyleRule::kMaximumLod;
+    }
+    return interpolate(
+        lastThreshold,
+        finalThreshold,
+        FeatureStyleRule::kMaximumLod - 1U);
+}
+
 bool FeatureLayerStyle::hasRelationRules(FeatureStyleRule::HighlightMode mode) const
 {
     return std::ranges::any_of(rules_, [mode](auto const& rule) {

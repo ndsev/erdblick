@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "erdblick/style-filter-plan.h"
@@ -6,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 using namespace erdblick;
 
@@ -182,6 +184,13 @@ rules:
     CHECK(defaults.lodForVisibleTileCount(127U, 128U) == 3U);
     CHECK(defaults.lodForVisibleTileCount(8U, 128U) == 6U);
     CHECK(defaults.lodForVisibleTileCount(7U, 128U) == 7U);
+    CHECK(defaults.presentationLodForVisibleTileCount(512U, 128U) == 0.0);
+    CHECK(defaults.presentationLodForVisibleTileCount(256U, 128U) == 1.0);
+    CHECK(defaults.presentationLodForVisibleTileCount(192U, 128U) ==
+        Catch::Approx(std::log2(512.0 / 192.0)));
+    CHECK(defaults.presentationLodForVisibleTileCount(8U, 128U) == 6.0);
+    CHECK(defaults.presentationLodForVisibleTileCount(4U, 128U) == 7.0);
+    CHECK(defaults.presentationLodForVisibleTileCount(0U, 128U) == 7.0);
 
     auto overridden = style(R"yaml(
 name: CustomThresholds
@@ -193,6 +202,9 @@ rules:
     REQUIRE(overridden.isValid());
     CHECK(overridden.lodForVisibleTileCount(450U, 128U) == 3U);
     CHECK(overridden.lodForVisibleTileCount(99U, 128U) == 7U);
+    CHECK(overridden.presentationLodForVisibleTileCount(450U, 128U) ==
+        Catch::Approx(2.0 + std::log(500.0 / 450.0) /
+            std::log(500.0 / 400.0)));
 }
 
 TEST_CASE(

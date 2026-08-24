@@ -1,6 +1,7 @@
 import {describe, expect, it} from "vitest";
 import {
     clampLod3TileThreshold,
+    clampPresentationLod,
     clampStyleLod,
     DEFAULT_LOD3_TILE_THRESHOLD,
     MAX_LOD3_TILE_THRESHOLD,
@@ -23,5 +24,11 @@ describe("style LOD policy", () => {
         expect(clampStyleLod(-1)).toBe(MIN_STYLE_LOD);
         expect(clampStyleLod(4.9)).toBe(4);
         expect(clampStyleLod(99)).toBe(MAX_STYLE_LOD);
+    });
+
+    it("preserves the fractional GPU presentation LOD", () => {
+        expect(clampPresentationLod(-1)).toBe(MIN_STYLE_LOD);
+        expect(clampPresentationLod(4.9)).toBe(4.90625);
+        expect(clampPresentationLod(99)).toBe(MAX_STYLE_LOD);
     });
 });

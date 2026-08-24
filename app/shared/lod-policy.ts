@@ -3,6 +3,7 @@ export const MAX_STYLE_LOD = 7;
 export const DEFAULT_LOD3_TILE_THRESHOLD = 128;
 export const MIN_LOD3_TILE_THRESHOLD = 16;
 export const MAX_LOD3_TILE_THRESHOLD = 4096;
+const PRESENTATION_LOD_STEPS_PER_LEVEL = 64;
 
 /** Clamp the visible-tile boundary between style LOD 2 and LOD 3. */
 export function clampLod3TileThreshold(
@@ -29,4 +30,18 @@ export function clampStyleLod(value: unknown): number {
         MAX_STYLE_LOD,
         Math.max(MIN_STYLE_LOD, Math.trunc(numeric))
     );
+}
+
+/** Clamp and finely quantize GPU LOD to bound presentation-table updates while fading. */
+export function clampPresentationLod(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return MIN_STYLE_LOD;
+    }
+    const clamped = Math.min(
+        MAX_STYLE_LOD,
+        Math.max(MIN_STYLE_LOD, numeric)
+    );
+    return Math.round(clamped * PRESENTATION_LOD_STEPS_PER_LEVEL) /
+        PRESENTATION_LOD_STEPS_PER_LEVEL;
 }

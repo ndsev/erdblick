@@ -705,7 +705,7 @@ export class GpuScene {
     if (
       inputs.some(
         (input) =>
-          !Number.isInteger(input.lod) || input.lod < 0 || input.lod > 7,
+          !Number.isFinite(input.lod) || input.lod < 0 || input.lod > 7,
       )
     ) {
       throw new Error("GPU scene LOD is outside its 0..7 range.");
@@ -1126,7 +1126,7 @@ export class GpuScene {
 
   /** Change one active producer's GPU and label LOD without regenerating geometry. */
   setContributionLod(identity: string, lod: number): boolean {
-    if (!Number.isInteger(lod) || lod < 0 || lod > 7) {
+    if (!Number.isFinite(lod) || lod < 0 || lod > 7) {
       throw new Error("GPU scene LOD is outside its 0..7 range.");
     }
     const entry = this.contributionByIdentity.get(identity);
@@ -1402,7 +1402,7 @@ export class GpuScene {
             if (active) {
                 result.push(
                     ...active.labels.filter(
-                        (label) => label.minLod <= active.lod,
+                        (label) => label.minLod <= Math.ceil(active.lod),
                     ),
                 );
             }

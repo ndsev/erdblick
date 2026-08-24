@@ -165,6 +165,10 @@ public:
     [[nodiscard]] uint8_t lodForVisibleTileCount(
         uint32_t visibleTileCount,
         uint32_t defaultLod3TileThreshold) const;
+    /** Interpolate the density ladder for smooth GPU presentation transitions. */
+    [[nodiscard]] double presentationLodForVisibleTileCount(
+        uint32_t visibleTileCount,
+        uint32_t defaultLod3TileThreshold) const;
     /** Check whether any rule for the given highlight mode targets relations. */
     [[nodiscard]] bool hasRelationRules(FeatureStyleRule::HighlightMode mode) const;
     /**

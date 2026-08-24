@@ -21,7 +21,10 @@ import {
     coarsenedTileLevel,
     tileGridVisibleCellCount
 } from "./tile-grid-visibility";
-import {clampStyleLod} from "../shared/lod-policy";
+import {
+    clampPresentationLod,
+    clampStyleLod
+} from "../shared/lod-policy";
 
 export enum ViewRecalculationReason {
     AutoLevel = "auto-level",
@@ -183,16 +186,33 @@ export class MapViewStateService {
         level: number,
         style: FeatureLayerStyle
     ): number {
-        const state = this.viewVisualizationState[viewIndex];
-        const altitude = state?.canonicalCameraAltitudeMeters ??
-            this.stateService.cameraViewDataState
-                .getValue(viewIndex).destination.alt;
-        const tileCount = state?.canonicalVisibleTileCountPerLevel.get(level) ??
-            Number(coreLib.getNumTileIdsForCanonicalCamera(altitude, level));
+        const tileCount = this.styleVisibleTileCount(viewIndex, level);
         return clampStyleLod(style.lodForVisibleTileCount(
             tileCount,
             this.stateService.lod3TileThreshold
         ));
+    }
+
+    /** Resolve the continuous GPU LOD used to fade retained style records. */
+    stylePresentationLod(
+        viewIndex: number,
+        level: number,
+        style: FeatureLayerStyle
+    ): number {
+        return clampPresentationLod(style.presentationLodForVisibleTileCount(
+            this.styleVisibleTileCount(viewIndex, level),
+            this.stateService.lod3TileThreshold
+        ));
+    }
+
+    /** Return the canonical density shared by planning and GPU presentation LOD. */
+    private styleVisibleTileCount(viewIndex: number, level: number): number {
+        const state = this.viewVisualizationState[viewIndex];
+        const altitude = state?.canonicalCameraAltitudeMeters ??
+            this.stateService.cameraViewDataState
+                .getValue(viewIndex).destination.alt;
+        return state?.canonicalVisibleTileCountPerLevel.get(level) ??
+            Number(coreLib.getNumTileIdsForCanonicalCamera(altitude, level));
     }
 
     /** Returns whether search-result geometry should be rendered for one visible source tile. */
