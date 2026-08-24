@@ -147,7 +147,10 @@ interface PreparedContextMenuPosition {
             <erdblick-view-ui [mapView]="mapView!" [is2D]="is2DMode"></erdblick-view-ui>
         }
         @if (hoverDetailsContent.length) {
-            <div class="feature-hover-hud hover-label-surface" role="tooltip">
+            <div class="feature-hover-hud hover-label-surface"
+                 role="tooltip"
+                 [style.left.px]="hoverHudCenterX"
+                 [style.--hover-hud-layout-width]="hoverHudMaxWidth + 'px'">
                 @for (feature of hoverDetailsContent; track feature.featureId) {
                     <div class="hover-label-feature">
                         @if (feature.showFeatureId) {
@@ -210,6 +213,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private viewerPointerCancelCapture?: (_event: PointerEvent) => void;
     private viewerContextMenuCapture?: (event: MouseEvent) => void;
     private layoutResizePrepareListener?: (event: Event) => void;
+    private hoverHudLayoutObserver?: ResizeObserver;
     private viewerSetupGeneration = 0;
     private viewerSetupQueue: Promise<void> = Promise.resolve();
     private layerController?: ViewLayerController;
@@ -217,6 +221,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     @ViewChild('viewerContextMenu') viewerContextMenu?: ContextMenu;
     hoverDetailsContent: HoverFeatureDetails[] = [];
+    hoverHudCenterX = 0;
+    hoverHudMaxWidth = 0;
     private lastHoverFeatureIds: TileFeatureId[] = [];
 
     /**
@@ -352,6 +358,18 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     /** Creates or recreates the renderer once app state is ready and the 2D/3D mode is known. */
     ngAfterViewInit() {
+        const viewerLayout = this.viewerElement.nativeElement.closest<HTMLElement>(".viewer-layout");
+        if (viewerLayout) {
+            const updateHoverHudBounds = () => {
+                const rect = viewerLayout.getBoundingClientRect();
+                this.hoverHudCenterX = rect.left + rect.width / 2;
+                this.hoverHudMaxWidth = Math.max(0, rect.width - 16);
+                this.cdr.markForCheck();
+            };
+            this.hoverHudLayoutObserver = new ResizeObserver(updateHoverHudBounds);
+            this.hoverHudLayoutObserver.observe(viewerLayout);
+            updateHoverHudBounds();
+        }
         this.setupViewerContextMenuHandling();
         this.modeSubscription = combineLatest([
             this.stateService.ready.pipe(filter(ready => ready)),
@@ -472,6 +490,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             window.removeEventListener(MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT, this.layoutResizePrepareListener);
             this.layoutResizePrepareListener = undefined;
         }
+        this.hoverHudLayoutObserver?.disconnect();
+        this.hoverHudLayoutObserver = undefined;
         this.modeSubscription?.unsubscribe();
         this.hoverSubscription?.unsubscribe();
         this.firstPersonViewActiveSubscription?.unsubscribe();

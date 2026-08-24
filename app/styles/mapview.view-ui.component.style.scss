@@ -210,26 +210,25 @@
 }
 
 .hover-label-surface {
-  background: var(--erdblick-card-bg);
+  background: var(--p-content-background);
 }
 
 .feature-hover-hud {
-  position: absolute;
-  left: 50%;
-  // Match the view-local coordinate card instead of the browser viewport. This
-  // keeps one HUD centered correctly inside every split view.
+  position: fixed;
+  // The component supplies the center and available width of viewer-layout,
+  // which is also the coordinate panel's containing block.
   bottom: 2.25rem;
   z-index: 30040;
   pointer-events: none;
   width: max-content;
-  max-width: min(70em, calc(100% - 1rem));
+  max-width: min(70em, var(--hover-hud-layout-width));
   padding: 0.25em 0.5em;
   transform: translateX(-50%);
   border: none;
   border-radius: var(--p-button-border-radius);
   font-size: 0.9em;
   line-height: 1.25;
-  background: var(--erdblick-card-bg);
+  background: var(--p-content-background);
   box-shadow: var(--p-card-shadow);
 
   &::after {
@@ -241,7 +240,7 @@
     height: 0;
     border-left: 0.45em solid transparent;
     border-right: 0.45em solid transparent;
-    border-top: 0.45em solid var(--erdblick-card-bg);
+    border-top: 0.45em solid var(--p-content-background);
     transform: translateX(-50%);
     filter: drop-shadow(0 1px 1px rgb(0 0 0 / 18%));
   }
