@@ -19,6 +19,7 @@ const LOOKUP_TEXTURE_WIDTH = 1024;
 const MAX_PICKING_INDEX = 0x00ff_fffe;
 const MAX_ACTIVATION_TOKEN = 0x00ff_ffff;
 const TARGET_DEPTH_STEPS = 1024;
+const PREFERRED_TIER_GAP_STEPS = 8;
 // Keep synchronized with kGpuDepthTieBucketCount: packets retain exactly the
 // hash bits consumed by this power-of-two allocator.
 const MAX_TIE_BUCKETS = 32;
@@ -53,8 +54,10 @@ function allocateDepthRanks(
 ): { allocations: Map<number, DepthRankAllocation>; slotCount: number } {
   if (orderedZIndices.length > TARGET_DEPTH_STEPS) {
     // A 24-bit depth buffer cannot represent an unbounded exact lattice inside
-    // the deliberately tiny local bias interval. Keep one slot per integral
-    // authored tier, then distribute the rest across each tier's fractions.
+    // the deliberately tiny local bias interval. Reserve several slots at
+    // integral authored-tier boundaries before distributing the remainder
+    // across fractions. This keeps independently styled semantic bands apart
+    // even when thousands of source-order fractions share one tier.
     let tierCount = 1;
     for (let index = 1; index < orderedZIndices.length; ++index) {
       if (
@@ -65,7 +68,14 @@ function allocateDepthRanks(
       }
     }
     const preserveTiers = tierCount <= TARGET_DEPTH_STEPS;
-    const ordinalSlots = TARGET_DEPTH_STEPS - (preserveTiers ? tierCount : 1);
+    const tierTransitions = preserveTiers ? tierCount - 1 : 0;
+    const tierGap = tierTransitions > 0
+      ? Math.min(
+          PREFERRED_TIER_GAP_STEPS,
+          Math.floor((TARGET_DEPTH_STEPS - 1) / tierTransitions),
+        )
+      : 0;
+    const ordinalSlots = TARGET_DEPTH_STEPS - 1 - tierTransitions * tierGap;
     const allocations = new Map<number, DepthRankAllocation>();
     let tier = 0;
     orderedZIndices.forEach((value, index) => {
@@ -77,7 +87,7 @@ function allocateDepthRanks(
       }
       allocations.set(value, {
         firstSlot:
-          (preserveTiers ? tier : 0) +
+          (preserveTiers ? tier * tierGap : 0) +
           Math.floor((index * ordinalSlots) / (orderedZIndices.length - 1)),
         tieBucketCount: 1,
       });

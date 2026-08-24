@@ -798,6 +798,48 @@ describe("GpuScene contribution lifecycle", () => {
     expect(offsets.at(-1)).toBeGreaterThan(offsets[2]);
   });
 
+  it("reserves depth separation between dense integral tiers", () => {
+    const { device, scene } = createScene();
+    const lowTier = Array.from(
+      { length: 1025 },
+      (_, index) => index * 0.0001,
+    );
+    const zIndices = [...lowTier, 65536];
+    zIndices.forEach((zIndex, index) => {
+      const reservation = scene.prepareRender(
+        "origin",
+        [11, 48, 0],
+        [
+          {
+            identity: `tier-${index}`,
+            mapTileKey: `Features:Map:Layer:${index}:0`,
+            styleOrder: 0,
+            lod: 7,
+          },
+        ],
+      );
+      scene.applyPacket(pointPacket(reservation, { zIndex }), reservation);
+      scene.finishRender(reservation);
+    });
+
+    scene.publishPresentation();
+    const ranked = activeTexture(
+      device,
+      "erdblick-gpu-z-index-table",
+    ).writes.at(-1)!.data as Float32Array;
+    const offsets = zIndices.map((_, index) => ranked[index * 4]);
+    const distinctOffsets = [...new Set(offsets)].sort(
+      (left, right) => left - right,
+    );
+    const spacings = distinctOffsets
+      .slice(1)
+      .map((offset, index) => offset - distinctOffsets[index]);
+    const minimumSpacing = Math.min(...spacings);
+    const tierSpacing =
+      offsets[lowTier.length] - offsets[lowTier.length - 1];
+    expect(tierSpacing / minimumSpacing).toBeGreaterThanOrEqual(7.9);
+  });
+
   it("keeps contribution and z-index lookups unchanged until publication", () => {
     const { device, scene } = createScene();
     const install = (identity: string, tileId: number) => {
