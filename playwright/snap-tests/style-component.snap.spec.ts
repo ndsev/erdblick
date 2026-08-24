@@ -10,7 +10,7 @@ import {
 
 const MAP_INDEX = 0;
 const LAYER_INDEX = 0;
-const CONFIGURED_STYLE_TEST_ID = 'nds-live-display';
+const CONFIGURED_STYLE_TEST_ID = 'default-style';
 test.use({ stateSnapshot: 'style_editor_state' });
 
 test.describe('Snapshot – style component', () => {
@@ -45,7 +45,7 @@ test.describe('Snapshot – style component', () => {
             .toBeVisible();
         await expect(editorDialog.getByTestId('style-editor-enabled')).toBeVisible();
         await expect(editorDialog.getByTestId('style-editor-quick-name')).toBeVisible();
-        await expect(editorDialog.getByTestId('style-editor-custom-affinity')).toBeVisible();
+        await expect(editorDialog.getByTestId('style-editor-quick-layers')).toBeVisible();
 
         await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('style-component-editor.png', {
@@ -83,8 +83,8 @@ test.describe('Snapshot – style component', () => {
                 label: 'Edit style name'
             },
             {
-                locator: editorDialog.getByTestId('style-editor-custom-affinity'),
-                label: 'Preserve or replace custom affinity'
+                locator: editorDialog.getByTestId('style-editor-quick-layers'),
+                label: 'Set layer affinity'
             },
             {
                 locator: editorDialog.getByTestId('style-editor-apply-button'),

@@ -5,24 +5,7 @@
   "coordinates-enabled": true,
   "surveys": [],
   "styles": [
-    {"url": "nds_live_display.yaml"},
-    {"url": "nds_live_drivepath.yaml"},
-    {"url": "nds_live_lanes.yaml"},
-    {"url": "nds_live_roadsurface.yaml"},
-    {"url": "nds_live_localization.yaml"},
-    {"url": "nds_live_pois.yaml"},
-    {"url": "nds_live_roads.yaml"},
-    {"url": "nds_classic_bmd.yaml"},
-       {"url": "nds_classic_landmarks.yaml"},
-       {"url": "nds_classic_lane.yaml"},
-       {"url": "nds_classic_poi.yaml"},
-       {"url": "nds_classic_routing.yaml"},
-    {"url": "geojson.yaml"},
-    {"url": "highlights.yaml" },
-    {"url": "generic.yaml"},
-    {"url": "devsrc_buildings.yaml"},
-    {"url": "devsrc_intersections.yaml"},
-    {"url": "devsrc_roads.yaml"}
+    {"id": "Default Style", "url": "default-style.yaml"}
   ],
   "externalViewers": [
     {
