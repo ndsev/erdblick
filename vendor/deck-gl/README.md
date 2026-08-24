@@ -3,12 +3,10 @@
 These packages are a temporary, vendored CI snapshot of
 [`Klebert-Engineering/deck.gl`](https://github.com/Klebert-Engineering/deck.gl)
 on branch `codex/target-navigation`, based on commit
-`e0a863145b9f116ef8f89e776d63ec0f501e4ab0`. The minimum target-distance
-contract is the reviewed local working-tree patch whose package-source diff
-has SHA-256
-`cbc0934479d029da526bc41a25f636428ffdb8c9488cfdcd06a1d1a9c2707bbd`.
-Replace this base-plus-patch identifier with the upstream commit id once the
-change is committed.
+`2aec3cb24870adce6a14314116618b7627fd0d21`. This commit includes the target
+navigation controller, planar target panning, target-distance clearance, and
+the follow-up zoom corrections; no uncommitted deck.gl source patch is part of
+the snapshot.
 
 The snapshot contains the complete deck.gl package set consumed by Erdblick:
 
@@ -18,13 +16,12 @@ The snapshot contains the complete deck.gl package set consumed by Erdblick:
 - `@deck.gl/layers`
 - `@deck.gl/mesh-layers`
 
-All packages were produced with Node.js 24.11.0 and deck.gl's canonical
-`corepack yarn build`, then packed with npm. The source patch adds the generic
-`minimumTargetDistance` contract to target acquisition, viewport
-reconstruction, controller validation, and target-aware transitions. The base
-commit already contains the planar-pan implementation, the `picking.ts`
-shader-literal declaration fix, and matching alpha dependency ranges in the
-five package manifests.
+The deck.gl tree was built with Node.js 22.22.0 using its canonical
+`corepack yarn build`; the resulting package directories were packed with npm
+11.16.0 under Node.js 24.11.0. During packaging only, stale internal
+`@deck.gl/*` peer ranges in the four satellite manifests were replaced with the
+exact snapshot version `9.4.0-alpha.2`. This keeps strict `npm ci` resolution
+coherent without changing the fork's tracked source.
 
 The tarballs are intentionally referenced with `file:` dependencies so that
 `npm ci` is deterministic and needs no package-registry credentials. Replace
@@ -34,9 +31,9 @@ available; mixing this snapshot with deck.gl 9.3 packages is unsupported.
 ## SHA-256
 
 ```text
-7aceed7c70e0f5d1d60ca5ffc9e18c800de7d6e188ad9fefe1b272f7eb0697f6  deck.gl-core-9.4.0-alpha.2-target-navigation-clearance-e0a86314.tgz
-1eb9e5180b7611ae2ffde76a50d7262f962e402a56a6ea1381303fc7bb6cf9a5  deck.gl-extensions-9.4.0-alpha.2-target-navigation-clearance-e0a86314.tgz
-5bb7634139f33207ef7211c43b861a860d52a276dab8e08aa762f9b4dca00732  deck.gl-geo-layers-9.4.0-alpha.2-target-navigation-clearance-e0a86314.tgz
-ac81ce8f198d1bf541d1c55fe68536a342ec8d20afc7456104bf94de6e0c8189  deck.gl-layers-9.4.0-alpha.2-target-navigation-clearance-e0a86314.tgz
-608c71a5cf7ae63fac676ae9fe125ad24f09c95c3da7bb2e74e30c300328e4d3  deck.gl-mesh-layers-9.4.0-alpha.2-target-navigation-clearance-e0a86314.tgz
+b78922a4faa563ca58a04c33a59c50d3cc28ec327464524af91ab47ac6a61f4f  deck.gl-core-9.4.0-alpha.2-target-navigation-2aec3cb2.tgz
+76c193e0ba33d33864776d12ab0c4ac6a0e2af830af8ec940903244aafebe8d1  deck.gl-extensions-9.4.0-alpha.2-target-navigation-2aec3cb2.tgz
+0024d15ca7d4987c17db262b8e22169d7a4c70bee6b72257eb0ce5ae5febeb40  deck.gl-geo-layers-9.4.0-alpha.2-target-navigation-2aec3cb2.tgz
+a4fb4e051b704c6738a1655da267c1c67cc9d6bb119d9f9bd737b0b286ba3087  deck.gl-layers-9.4.0-alpha.2-target-navigation-2aec3cb2.tgz
+600c68e7f0dfa3c7fc0691272cda866bf4385345aff11b2019f5d55bfa5b275f  deck.gl-mesh-layers-9.4.0-alpha.2-target-navigation-2aec3cb2.tgz
 ```
