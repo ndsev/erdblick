@@ -82,6 +82,7 @@ import {
     isSemanticZIndexPassLayer,
     isSemanticZIndexPickingLayer
 } from "./deck-semantic-z-index.service";
+import {DeckContactShadingService} from "./deck-contact-shading.service";
 import {NavigationTargetOverlay} from "./deck-navigation-target";
 import {planarPanViewState} from "./deck-planar-pan";
 import {environment} from "../../environments/environment";
@@ -331,6 +332,8 @@ export abstract class DeckMapView implements IRenderView {
     private readonly tickCallbacks = new Set<() => void>();
     private tickHandle: number | null = null;
     private deckDevice: Device | null = null;
+    private contactShadingService: DeckContactShadingService | null = null;
+    private contactShadingEnabled = true;
     private navigationTargetOverlay: NavigationTargetOverlay | null = null;
     private canvasResizeTimer: ReturnType<typeof setTimeout> | null = null;
     private lastCanvasCssSize?: {width: number; height: number};
@@ -383,7 +386,7 @@ export abstract class DeckMapView implements IRenderView {
     private gpuSceneRedrawTimer: ReturnType<typeof setTimeout> | null = null;
     private gpuSceneRedrawBurstStartedAtMs = 0;
     private gpuSceneRedrawReason = "GPU scene changed";
-    private gpuSceneRetiredResourcesPending = false;
+    private gpuSceneRetirementFramesRemaining = 0;
     private liveCameraSyncRaf: number | null = null;
     private cameraStatePushPending = false;
     private readonly deckCanvasPointerEnter = () => {
@@ -558,6 +561,7 @@ export abstract class DeckMapView implements IRenderView {
         this.setCanvasDrawingBufferSize(canvas, container.clientWidth, container.clientHeight);
         this.lastCanvasCssSize = this.normalizedCanvasCssSize(container.clientWidth, container.clientHeight);
         const gl = this.createWebGl2Context(canvas, container);
+        this.contactShadingEnabled = this.stateService.contactShadingEnabled;
 
         this.setViewFromState(this.stateService.cameraViewDataState.getValue(this._viewIndex));
 
@@ -579,6 +583,7 @@ export abstract class DeckMapView implements IRenderView {
                 this.semanticZIndexService,
                 this.interactionOutlineService
             ],
+            onBeforeRender: () => this.updateContactShadingTarget(),
             controller: false,
             pickingRadius: NAVIGATION_PICK_RADIUS_PIXELS,
             layerFilter: this.deckLayerFilter,
@@ -602,6 +607,12 @@ export abstract class DeckMapView implements IRenderView {
             onInteractionStateChange: (interactionState) => this.onInteractionStateChange(interactionState),
             onClick: (info, event) => this.onClick(info, event),
             onAfterRender: () => {
+                if (this.contactShadingEnabled && this.contactShadingService) {
+                    const viewport = this.deck?.getViewports()[0];
+                    if (viewport) {
+                        this.contactShadingService.render(viewport);
+                    }
+                }
                 const completedAtMs = performance.now();
                 const frameIntervalMs = this.deckPreviousFrameCompletedAtMs > 0
                     ? completedAtMs - this.deckPreviousFrameCompletedAtMs
@@ -613,9 +624,12 @@ export abstract class DeckMapView implements IRenderView {
                 if (frameIntervalMs > 0 && frameIntervalMs <= 2000) {
                     this.layerController.recordDeckFrameTime(frameIntervalMs);
                 }
-                if (this.gpuSceneRetiredResourcesPending) {
-                    this.gpuSceneRetiredResourcesPending = false;
-                    this.gpuScene?.releaseRetiredPresentationResources();
+                if (this.gpuSceneRetirementFramesRemaining > 0) {
+                    if (--this.gpuSceneRetirementFramesRemaining === 0) {
+                        this.gpuScene?.releaseRetiredPresentationResources();
+                    } else {
+                        this.requestRender("Rebind GPU scene before resource retirement");
+                    }
                 }
                 this.gpuMaskController?.releaseRetiredResources();
             }
@@ -629,6 +643,13 @@ export abstract class DeckMapView implements IRenderView {
         // parse/upload assets and an immutable handle containing `null` would
         // otherwise strand those tiles as pick proxies only.
         await deckDeviceReady;
+        if (this.sceneMode !== SceneMode.SCENE2D) {
+            this.contactShadingService = new DeckContactShadingService(
+                this.deckDevice!,
+                gl
+            );
+            this.updateContactShadingTarget();
+        }
         // This pinned Deck snapshot speculatively renders a full picking pass on every
         // pointer-down. Erdblick performs its explicit drill pick only after a click has won over
         // a drag, so keep that private bookkeeping handler off the latency-critical drag path.
@@ -766,6 +787,11 @@ export abstract class DeckMapView implements IRenderView {
             this.layerRegistry.remove(this.gpuTextLayerHost.id);
         }
         this.layerRegistry.destroy();
+        if (this.deck) {
+            this.deck.props._framebuffer = null;
+        }
+        this.contactShadingService?.destroy();
+        this.contactShadingService = null;
         // Persistent scene buffers and lookup textures belong to the same
         // device as Deck's models. Retire them while that device is alive;
         // after finalize(), WebGL context-loss teardown can no longer do so.
@@ -879,7 +905,10 @@ export abstract class DeckMapView implements IRenderView {
         this.gpuTextLayerHost?.sceneChanged();
         this.gpuMaskController?.sceneChanged();
         this.semanticZIndexService.sceneChanged();
-        this.gpuSceneRetiredResourcesPending = true;
+        // Keep the previous lookup generation alive through one complete
+        // follow-up frame. Optional post-processing can make Deck draw again
+        // before every retained model has observed the new presentation.
+        this.gpuSceneRetirementFramesRemaining = 2;
         this.requestRender(this.gpuSceneRedrawReason);
     }
 
@@ -1625,6 +1654,19 @@ export abstract class DeckMapView implements IRenderView {
         this.viewportUpdateRaf = null;
     }
 
+    /** Keeps Deck's screen target aligned without scheduling a nested redraw during rendering. */
+    private updateContactShadingTarget(): void {
+        if (!this.deck) {
+            return;
+        }
+        const target = this.contactShadingEnabled
+            ? this.contactShadingService?.prepare() ?? null
+            : null;
+        if (this.deck.props._framebuffer !== target) {
+            this.deck.props._framebuffer = target;
+        }
+    }
+
     /**
      * Installs every subscription that keeps the renderer synchronized with app state, search, and tile data.
      * Most subscriptions only schedule overlay work so rapid bursts collapse into one frame.
@@ -1681,6 +1723,16 @@ export abstract class DeckMapView implements IRenderView {
                     controller: false
                 });
             })
+        );
+
+        this.subscriptions.push(
+            this.stateService.contactShadingEnabledState
+                .pipe(distinctUntilChanged())
+                .subscribe(enabled => {
+                    this.contactShadingEnabled = enabled;
+                    this.updateContactShadingTarget();
+                    this.requestRender("Contact shading setting changed");
+                })
         );
 
         this.subscriptions.push(

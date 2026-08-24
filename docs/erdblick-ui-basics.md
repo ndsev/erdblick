@@ -181,6 +181,7 @@ Open **Edit -> Preferences** to access the main viewer preferences:
 - **Hover Labels** controls which feature fields appear above the coordinate readout; each value can use a short display key, which defaults to the final segment of its field expression, and its joined key/value pill follows the inspection value-bubble color, outline, and striping preferences
 - **Tile pull compression** toggles compressed tile downloads
 - **WebGL antialiasing** controls multisample rendering when the browser/device supports it
+- **Contact shading** uses final scene depth to darken nearby lower surfaces and can be disabled on slower GPUs
 - **High/Low-Fi Tile Threshold** controls the visible-tile-count cutoff between high- and low-fidelity rendering
 - **Dark Mode** switches between on, off, and automatic
 - **Collapse Dock automatically** controls the inspection dock behavior

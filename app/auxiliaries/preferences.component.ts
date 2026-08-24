@@ -394,6 +394,18 @@ import type {
                                             optionValue="value"
                                             (ngModelChange)="setDeckAntialiasingEnabled($event)"></p-selectButton>
                         </div>
+                        <div class="button-container">
+                            <label>Contact shading
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Darkens nearby lower surfaces using final scene depth. Disable on slower GPUs."
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <p-selectButton [options]="toggleOptions"
+                                            [(ngModel)]="contactShadingEnabledSetting"
+                                            optionLabel="label"
+                                            optionValue="value"
+                                            (ngModelChange)="setContactShadingEnabled($event)"></p-selectButton>
+                        </div>
                         <div class="slider-container">
                             <label for="low-fi-tile-threshold-input">High/Low-Fi Tile Threshold
                                 <i class="pi pi-info-circle"
@@ -497,6 +509,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     locationSearchResultLimitInput: number | string = DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
     tilePullCompressionEnabledSetting: boolean = false;
     deckAntialiasingEnabledSetting: boolean = true;
+    contactShadingEnabledSetting: boolean = true;
     lowFiTileThresholdInput: number | string = DEFAULT_LOW_FI_TILE_THRESHOLD;
     renderWorkerCountInput: number | string =
         AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
@@ -573,6 +586,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.deckAntialiasingEnabledState.subscribe(enabled => {
             this.deckAntialiasingEnabledSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.contactShadingEnabledState.subscribe(enabled => {
+            this.contactShadingEnabledSetting = enabled;
         }));
         this.subscriptions.push(this.stateService.lowFiTileThresholdState.subscribe(threshold => {
             this.lowFiTileThresholdInput = threshold;
@@ -838,6 +854,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     setDeckAntialiasingEnabled(enabled: boolean) {
         this.deckAntialiasingEnabledSetting = enabled;
         this.stateService.deckAntialiasingEnabled = enabled;
+    }
+
+    /** Enables or disables the final-depth screen-space contact shading pass. */
+    setContactShadingEnabled(enabled: boolean) {
+        this.contactShadingEnabledSetting = enabled;
+        this.stateService.contactShadingEnabled = enabled;
     }
 
     /** Applies the pending low-fi tile threshold after validating the input. */

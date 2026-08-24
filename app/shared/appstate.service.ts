@@ -722,6 +722,12 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly contactShadingEnabledState = this.createState<boolean>({
+        name: 'contactShadingEnabled',
+        defaultValue: true,
+        schema: Boolish
+    });
+
     readonly lowFiTileThresholdState = this.createState<number>({
         name: 'lowFiTileThreshold',
         defaultValue: DEFAULT_LOW_FI_TILE_THRESHOLD,
@@ -2287,6 +2293,8 @@ export class AppStateService implements OnDestroy {
     };
     get deckAntialiasingEnabled() {return this.deckAntialiasingEnabledState.getValue();}
     set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
+    get contactShadingEnabled() {return this.contactShadingEnabledState.getValue();}
+    set contactShadingEnabled(val: boolean) {this.contactShadingEnabledState.next(!!val);}
     get lowFiTileThreshold() {return this.lowFiTileThresholdState.getValue();}
     set lowFiTileThreshold(val: number) {
         this.lowFiTileThresholdState.next(clampLowFiTileThreshold(val, DEFAULT_LOW_FI_TILE_THRESHOLD));

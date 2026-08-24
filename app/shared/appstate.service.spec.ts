@@ -372,7 +372,7 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('enables deck antialiasing by default', () => {
+    it('enables optional rendering quality effects by default', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = {
             showError: vi.fn(),
@@ -384,6 +384,7 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
         expect(service.deckAntialiasingEnabled).toBe(true);
+        expect(service.contactShadingEnabled).toBe(true);
 
         service.ngOnDestroy();
         routerStub.events.complete();
