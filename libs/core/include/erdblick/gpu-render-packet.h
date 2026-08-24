@@ -12,7 +12,7 @@ namespace erdblick
 {
 
 /** Binary ABI version understood by the persistent GPU renderer. */
-inline constexpr uint16_t kGpuRenderPacketAbiVersion = 15U;
+inline constexpr uint16_t kGpuRenderPacketAbiVersion = 16U;
 
 /** Little-endian integer whose bytes spell `ERGP`. */
 inline constexpr uint32_t kGpuRenderPacketMagic = 0x50475245U;
@@ -90,6 +90,9 @@ enum class GpuLabelFlag : uint32_t {
     Collision = 1U << 3U,
 };
 
+inline constexpr uint32_t kGpuLabelMinimumLodShift = 8U;
+inline constexpr uint32_t kGpuLabelMinimumLodMask = 7U << kGpuLabelMinimumLodShift;
+
 /** Scene-assigned origin metadata shared by every vector record in a packet. */
 struct GpuPacketOrigin {
     uint32_t slot = 0U;
@@ -164,6 +167,7 @@ struct GpuLabelRecord {
     float outlineWidth = 0.0F;
     std::array<float, 2> backgroundPadding{};
     uint32_t flags = 0U;
+    uint8_t minimumLod = 0U;
     int32_t horizontalOrigin = 0;
     int32_t verticalOrigin = 0;
     uint32_t renderOrder = 0U;

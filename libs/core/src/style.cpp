@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <regex>
 #include <set>
 
@@ -19,9 +20,27 @@ constexpr size_t highlightModeIndex(FeatureStyleRule::HighlightMode mode) {
     return static_cast<size_t>(mode);
 }
 
-/** Collapse fidelity into the two cache buckets used by `FeatureLayerStyle`. */
-constexpr size_t fidelityIndex(FeatureStyleRule::Fidelity fidelity) {
-    return fidelity == FeatureStyleRule::LowFidelity ? 1U : 0U;
+/** Clamp an externally supplied LOD before indexing fixed rule caches. */
+constexpr size_t lodIndex(uint8_t lod) {
+    return std::min<size_t>(lod, FeatureStyleRule::kMaximumLod);
+}
+
+/** Derive the default seven density boundaries around the LOD-3 threshold. */
+std::array<uint32_t, 7> defaultLodThresholds(uint32_t lod3Threshold)
+{
+    auto const threshold = std::clamp(
+        lod3Threshold,
+        16U,
+        std::numeric_limits<uint32_t>::max() / 4U);
+    return {
+        threshold * 4U,
+        threshold * 2U,
+        threshold,
+        threshold / 2U,
+        threshold / 4U,
+        threshold / 8U,
+        threshold / 16U,
+    };
 }
 
 /** Shared empty vector returned when no rule candidates apply. */
@@ -174,6 +193,16 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
 
     if (!validateTopLevelStyleYaml(styleYaml, validationReport_)) {
         return;
+    }
+
+    if (auto const thresholds = styleYaml["lod-thresholds"];
+        thresholds.IsDefined())
+    {
+        std::array<uint32_t, kLodCount - 1U> parsed{};
+        for (size_t index = 0; index < parsed.size(); ++index) {
+            parsed[index] = thresholds[index].as<uint32_t>();
+        }
+        lodThresholds_ = parsed;
     }
 
     if (auto name = styleYaml["name"]) {
@@ -544,25 +573,21 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
 
     for (uint32_t runtimeRuleIndex = 0; runtimeRuleIndex < rules_.size(); ++runtimeRuleIndex) {
         auto const& rule = rules_[runtimeRuleIndex];
-        auto const highFidelityIndex = fidelityIndex(FeatureStyleRule::HighFidelity);
-        auto const lowFidelityIndex = fidelityIndex(FeatureStyleRule::LowFidelity);
         for (size_t modeIndex = 0; modeIndex < kHighlightModeCount; ++modeIndex) {
             auto const mode = static_cast<FeatureStyleRule::HighlightMode>(modeIndex);
             if (!rule.supportsMode(mode)) {
                 continue;
             }
-            if (rule.fidelity() == FeatureStyleRule::AnyFidelity ||
-                rule.fidelity() == FeatureStyleRule::HighFidelity) {
-                ruleIndicesByModeAndFidelity_[modeIndex][highFidelityIndex].push_back(runtimeRuleIndex);
-            }
-            if (rule.fidelity() == FeatureStyleRule::AnyFidelity ||
-                rule.fidelity() == FeatureStyleRule::LowFidelity) {
-                ruleIndicesByModeAndFidelity_[modeIndex][lowFidelityIndex].push_back(runtimeRuleIndex);
+            for (uint8_t lod = FeatureStyleRule::kMinimumLod;
+                 lod <= FeatureStyleRule::kMaximumLod;
+                 ++lod)
+            {
+                if (rule.supportsLod(lod)) {
+                    ruleIndicesByModeAndLod_[modeIndex][lod].push_back(
+                        runtimeRuleIndex);
+                }
             }
             highlightModeMask_ |= (1u << modeIndex);
-        }
-        if (rule.fidelity() == FeatureStyleRule::LowFidelity) {
-            hasExplicitLowFidelityRules_ = true;
         }
     }
 
@@ -645,9 +670,21 @@ NativeJsValue FeatureLayerStyle::interactionEffect(
     return interactionEffects_[*index]->toJsValue(options);
 }
 
-bool FeatureLayerStyle::hasExplicitLowFidelityRules() const
+uint8_t FeatureLayerStyle::lodForVisibleTileCount(
+    uint32_t visibleTileCount,
+    uint32_t defaultLod3TileThreshold) const
 {
-    return hasExplicitLowFidelityRules_;
+    auto const thresholds = lodThresholds_.value_or(
+        defaultLodThresholds(defaultLod3TileThreshold));
+    for (uint8_t lod = FeatureStyleRule::kMinimumLod;
+         lod < FeatureStyleRule::kMaximumLod;
+         ++lod)
+    {
+        if (visibleTileCount >= thresholds[lod]) {
+            return lod;
+        }
+    }
+    return FeatureStyleRule::kMaximumLod;
 }
 
 bool FeatureLayerStyle::hasRelationRules(FeatureStyleRule::HighlightMode mode) const
@@ -659,25 +696,25 @@ bool FeatureLayerStyle::hasRelationRules(FeatureStyleRule::HighlightMode mode) c
 
 std::vector<uint32_t> const& FeatureLayerStyle::candidateRuleIndices(
     FeatureStyleRule::HighlightMode mode,
-    FeatureStyleRule::Fidelity fidelity,
+    uint8_t lod,
     std::string_view featureTypeId) const
 {
     auto modeIndex = highlightModeIndex(mode);
-    auto fidelityIdx = fidelityIndex(fidelity);
+    auto const activeLodIndex = lodIndex(lod);
     if (!supportsHighlightMode(mode)) {
         return kEmptyRuleIndices;
     }
     if (featureTypeId.empty()) {
-        return ruleIndicesByModeAndFidelity_[modeIndex][fidelityIdx];
+        return ruleIndicesByModeAndLod_[modeIndex][activeLodIndex];
     }
 
     auto cacheIt = ruleIndicesByTypeCache_.find(featureTypeId);
     if (cacheIt == ruleIndicesByTypeCache_.end()) {
         RuleIndexCacheEntry entry{};
         for (size_t cacheModeIndex = 0; cacheModeIndex < kHighlightModeCount; ++cacheModeIndex) {
-            for (size_t cacheFidelityIndex = 0; cacheFidelityIndex < kFidelityCount; ++cacheFidelityIndex) {
-                auto const& ruleIndices = ruleIndicesByModeAndFidelity_[cacheModeIndex][cacheFidelityIndex];
-                auto& filtered = entry.byModeAndFidelity[cacheModeIndex][cacheFidelityIndex];
+            for (size_t cacheLodIndex = 0; cacheLodIndex < kLodCount; ++cacheLodIndex) {
+                auto const& ruleIndices = ruleIndicesByModeAndLod_[cacheModeIndex][cacheLodIndex];
+                auto& filtered = entry.byModeAndLod[cacheModeIndex][cacheLodIndex];
                 filtered.reserve(ruleIndices.size());
                 for (auto ruleIndex : ruleIndices) {
                     if (rules_[ruleIndex].maybeMatchesType(featureTypeId)) {
@@ -690,7 +727,7 @@ std::vector<uint32_t> const& FeatureLayerStyle::candidateRuleIndices(
         cacheIt = insertIt;
     }
 
-    return cacheIt->second.byModeAndFidelity[modeIndex][fidelityIdx];
+    return cacheIt->second.byModeAndLod[modeIndex][activeLodIndex];
 }
 
 FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)

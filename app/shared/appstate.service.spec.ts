@@ -265,7 +265,7 @@ describe('AppStateService', () => {
         ));
     });
 
-    it('clamps the low-fi tile threshold', () => {
+    it('clamps the LOD 3 tile threshold', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = {
             showError: vi.fn(),
@@ -276,13 +276,13 @@ describe('AppStateService', () => {
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
-        expect(service.lowFiTileThreshold).toBe(128);
+        expect(service.lod3TileThreshold).toBe(128);
 
-        service.lowFiTileThreshold = 1024;
-        expect(service.lowFiTileThreshold).toBe(1024);
+        service.lod3TileThreshold = 1024;
+        expect(service.lod3TileThreshold).toBe(1024);
 
-        service.lowFiTileThreshold = 9999;
-        expect(service.lowFiTileThreshold).toBe(4096);
+        service.lod3TileThreshold = 9999;
+        expect(service.lod3TileThreshold).toBe(4096);
 
         service.ngOnDestroy();
         routerStub.events.complete();

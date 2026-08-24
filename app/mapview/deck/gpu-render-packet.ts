@@ -1,4 +1,4 @@
-export const GPU_RENDER_PACKET_ABI_VERSION = 15;
+export const GPU_RENDER_PACKET_ABI_VERSION = 16;
 export const GPU_RENDER_PACKET_HEADER_BYTES = 160;
 // One oversized packet is still admitted by itself, so this ceiling is also
 // the maximum unavoidable geometry upload burst from one worker task.
@@ -50,6 +50,9 @@ export enum GpuLabelFlag {
   Background = 1 << 2,
   Collision = 1 << 3,
 }
+
+const GPU_LABEL_MINIMUM_LOD_SHIFT = 8;
+const GPU_LABEL_MINIMUM_LOD_MASK = 7 << GPU_LABEL_MINIMUM_LOD_SHIFT;
 
 /** Browser resource categories emitted by native packet generation. */
 export enum GpuResourceKind {
@@ -305,6 +308,7 @@ export interface GpuLabelRecordView {
   outlineWidth: number;
   backgroundPadding: [number, number];
   flags: number;
+  minLod: number;
   horizontalOrigin: number;
   verticalOrigin: number;
   renderOrder: number;
@@ -709,7 +713,11 @@ export class GpuRenderPacketView {
     ];
     return Array.from({ length: table.count }, (_, index) => {
       const offset = table.offset + index * LABEL_RECORD_BYTES;
-      const flags = this.u32(offset + 96);
+      const packedFlags = this.u32(offset + 96);
+      const flags = packedFlags & 0x0f;
+      const minLod =
+        (packedFlags & GPU_LABEL_MINIMUM_LOD_MASK) >>>
+        GPU_LABEL_MINIMUM_LOD_SHIFT;
       const fontWeight = this.u32(offset + 112);
       const collisionPriority = this.i32(offset + 116);
       if (
@@ -717,12 +725,13 @@ export class GpuRenderPacketView {
         fontWeight > 1000 ||
         collisionPriority < -1000 ||
         collisionPriority > 1000 ||
-        (flags &
+        (packedFlags &
           ~(
             GpuLabelFlag.Billboard |
             GpuLabelFlag.DepthTest |
             GpuLabelFlag.Background |
-            GpuLabelFlag.Collision
+            GpuLabelFlag.Collision |
+            GPU_LABEL_MINIMUM_LOD_MASK
           )) !==
           0
       ) {
@@ -748,6 +757,7 @@ export class GpuRenderPacketView {
         outlineWidth: this.f32(offset + 84),
         backgroundPadding: [this.f32(offset + 88), this.f32(offset + 92)],
         flags,
+        minLod,
         horizontalOrigin: this.i32(offset + 100),
         verticalOrigin: this.i32(offset + 104),
         renderOrder: this.u32(offset + 108),

@@ -23,13 +23,13 @@ import {
     MIN_FEATURE_ZOOM_CLEARANCE_METERS,
     AppStateService,
     defaultHoverLabelFieldKey,
-    DEFAULT_LOW_FI_TILE_THRESHOLD,
+    DEFAULT_LOD3_TILE_THRESHOLD,
     MAX_TILE_SUBSET_RENDER_WORKER_COUNT,
-    MAX_LOW_FI_TILE_THRESHOLD,
-    MIN_LOW_FI_TILE_THRESHOLD,
+    MAX_LOD3_TILE_THRESHOLD,
+    MIN_LOD3_TILE_THRESHOLD,
     AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
     clampTileSubsetRenderWorkerCount,
-    clampLowFiTileThreshold,
+    clampLod3TileThreshold,
     type HoverLabelFieldConfig
 } from "../shared/appstate.service";
 import {
@@ -407,30 +407,30 @@ import type {
                                             (ngModelChange)="setContactShadingEnabled($event)"></p-selectButton>
                         </div>
                         <div class="slider-container">
-                            <label for="low-fi-tile-threshold-input">High/Low-Fi Tile Threshold
+                            <label for="lod3-tile-threshold-input">LOD 3 Tile Threshold
                                 <i class="pi pi-info-circle"
-                                   pTooltip="Visible tile count where the view switches from high-fi to low-fi rendering. Higher values preserve detailed rendering longer but can cost more."
+                                   pTooltip="Visible-tile boundary between style LOD 2 and LOD 3. Higher values preserve more detailed LODs over larger viewports but can cost more."
                                    tooltipPosition="top"></i>
                             </label>
                             <div class="slider-controls">
                                 <div style="display: inline-block">
-                                    <input id="low-fi-tile-threshold-input"
+                                    <input id="lod3-tile-threshold-input"
                                            class="tiles-input w-full"
                                            type="text"
                                            pInputText
-                                           [(ngModel)]="lowFiTileThresholdInput"
-                                           (ngModelChange)="onLowFiTileThresholdInputChange($event)"
-                                           (keydown.enter)="applyLowFiTileThreshold()"/>
-                                    <p-slider [(ngModel)]="lowFiTileThresholdInput"
-                                              (ngModelChange)="onLowFiTileThresholdSliderChange($event)"
+                                           [(ngModel)]="lod3TileThresholdInput"
+                                           (ngModelChange)="onLod3TileThresholdInputChange($event)"
+                                           (keydown.enter)="applyLod3TileThreshold()"/>
+                                    <p-slider [(ngModel)]="lod3TileThresholdInput"
+                                              (ngModelChange)="onLod3TileThresholdSliderChange($event)"
                                               class="w-full"
-                                              [min]="MIN_LOW_FI_TILE_THRESHOLD"
-                                              [max]="MAX_LOW_FI_TILE_THRESHOLD"></p-slider>
+                                              [min]="MIN_LOD3_TILE_THRESHOLD"
+                                              [max]="MAX_LOD3_TILE_THRESHOLD"></p-slider>
                                 </div>
-                                <p-button (click)="applyLowFiTileThreshold()"
+                                <p-button (click)="applyLod3TileThreshold()"
                                           label=""
                                           icon="pi pi-check"
-                                          [disabled]="!lowFiTileThresholdChanged"></p-button>
+                                          [disabled]="!lod3TileThresholdChanged"></p-button>
                             </div>
                         </div>
                         <p-divider></p-divider>
@@ -510,7 +510,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     tilePullCompressionEnabledSetting: boolean = false;
     deckAntialiasingEnabledSetting: boolean = true;
     contactShadingEnabledSetting: boolean = true;
-    lowFiTileThresholdInput: number | string = DEFAULT_LOW_FI_TILE_THRESHOLD;
+    lod3TileThresholdInput: number | string = DEFAULT_LOD3_TILE_THRESHOLD;
     renderWorkerCountInput: number | string =
         AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
     mapZoomStepInput: number | string = DEFAULT_MAP_ZOOM_STEP;
@@ -520,7 +520,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     inspectionsLimitChanged: boolean = false;
     drillPickRadiusChanged: boolean = false;
     locationSearchResultLimitChanged: boolean = false;
-    lowFiTileThresholdChanged: boolean = false;
+    lod3TileThresholdChanged: boolean = false;
     renderWorkerCountChanged: boolean = false;
     mapZoomStepChanged: boolean = false;
     featureZoomClearanceMetersChanged: boolean = false;
@@ -590,9 +590,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.subscriptions.push(this.stateService.contactShadingEnabledState.subscribe(enabled => {
             this.contactShadingEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.stateService.lowFiTileThresholdState.subscribe(threshold => {
-            this.lowFiTileThresholdInput = threshold;
-            this.updateLowFiTileThresholdChangeState();
+        this.subscriptions.push(this.stateService.lod3TileThresholdState.subscribe(threshold => {
+            this.lod3TileThresholdInput = threshold;
+            this.updateLod3TileThresholdChangeState();
         }));
         this.subscriptions.push(
             this.stateService.tileSubsetRenderWorkerCountState.subscribe(
@@ -703,14 +703,14 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.mapZoomStepInput = this.stateService.mapZoomStep;
         this.featureZoomClearanceMetersInput =
             this.stateService.featureZoomClearanceMeters;
-        this.lowFiTileThresholdInput = this.stateService.lowFiTileThreshold;
+        this.lod3TileThresholdInput = this.stateService.lod3TileThreshold;
         this.renderWorkerCountInput =
             this.stateService.tileSubsetRenderWorkerCount;
         this.tilesToLoadChanged = false;
         this.inspectionsLimitChanged = false;
         this.drillPickRadiusChanged = false;
         this.locationSearchResultLimitChanged = false;
-        this.lowFiTileThresholdChanged = false;
+        this.lod3TileThresholdChanged = false;
         this.renderWorkerCountChanged = false;
         this.mapZoomStepChanged = false;
         this.featureZoomClearanceMetersChanged = false;
@@ -862,22 +862,22 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.stateService.contactShadingEnabled = enabled;
     }
 
-    /** Applies the pending low-fi tile threshold after validating the input. */
-    applyLowFiTileThreshold() {
-        if (!this.lowFiTileThresholdChanged) {
+    /** Applies the pending LOD 3 tile threshold after validating the input. */
+    applyLod3TileThreshold() {
+        if (!this.lod3TileThresholdChanged) {
             return;
         }
-        const threshold = Number(this.lowFiTileThresholdInput);
+        const threshold = Number(this.lod3TileThresholdInput);
         if (!Number.isFinite(threshold)
-            || threshold < MIN_LOW_FI_TILE_THRESHOLD || threshold > MAX_LOW_FI_TILE_THRESHOLD) {
+            || threshold < MIN_LOD3_TILE_THRESHOLD || threshold > MAX_LOD3_TILE_THRESHOLD) {
             this.messageService.showError(
-                `Please enter a tile threshold between ${MIN_LOW_FI_TILE_THRESHOLD} and ${MAX_LOW_FI_TILE_THRESHOLD}.`);
+                `Please enter a tile threshold between ${MIN_LOD3_TILE_THRESHOLD} and ${MAX_LOD3_TILE_THRESHOLD}.`);
             return;
         }
-        const normalized = clampLowFiTileThreshold(threshold);
-        this.lowFiTileThresholdInput = normalized;
-        this.stateService.lowFiTileThreshold = normalized;
-        this.lowFiTileThresholdChanged = false;
+        const normalized = clampLod3TileThreshold(threshold);
+        this.lod3TileThresholdInput = normalized;
+        this.stateService.lod3TileThreshold = normalized;
+        this.lod3TileThresholdChanged = false;
     }
 
     /** Applies zero-for-auto or one explicit subset-render worker count. */
@@ -1071,10 +1071,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         );
     }
 
-    /** Tracks slider edits for the low-fi tile threshold. */
-    protected onLowFiTileThresholdSliderChange(value: number) {
-        this.lowFiTileThresholdInput = value;
-        this.updateLowFiTileThresholdChangeState();
+    /** Tracks slider edits for the LOD 3 tile threshold. */
+    protected onLod3TileThresholdSliderChange(value: number) {
+        this.lod3TileThresholdInput = value;
+        this.updateLod3TileThresholdChangeState();
     }
 
     /** Tracks slider edits for the active render-worker count. */
@@ -1122,10 +1122,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         );
     }
 
-    /** Tracks free-form edits for the low-fi tile threshold. */
-    protected onLowFiTileThresholdInputChange(value: number | string) {
-        this.lowFiTileThresholdInput = value;
-        this.updateLowFiTileThresholdChangeState();
+    /** Tracks free-form edits for the LOD 3 tile threshold. */
+    protected onLod3TileThresholdInputChange(value: number | string) {
+        this.lod3TileThresholdInput = value;
+        this.updateLod3TileThresholdChangeState();
     }
 
     /** Tracks free-form edits for the active render-worker count. */
@@ -1134,16 +1134,16 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.updateRenderWorkerCountChangeState();
     }
 
-    /** Updates the dirty flag for the low-fi threshold control. */
-    private updateLowFiTileThresholdChangeState(): void {
-        const threshold = Number(this.lowFiTileThresholdInput);
+    /** Updates the dirty flag for the LOD 3 threshold control. */
+    private updateLod3TileThresholdChangeState(): void {
+        const threshold = Number(this.lod3TileThresholdInput);
         if (!Number.isFinite(threshold)
-            || threshold < MIN_LOW_FI_TILE_THRESHOLD || threshold > MAX_LOW_FI_TILE_THRESHOLD) {
-            this.lowFiTileThresholdChanged = true;
+            || threshold < MIN_LOD3_TILE_THRESHOLD || threshold > MAX_LOD3_TILE_THRESHOLD) {
+            this.lod3TileThresholdChanged = true;
             return;
         }
-        this.lowFiTileThresholdChanged =
-            clampLowFiTileThreshold(threshold) !== this.stateService.lowFiTileThreshold;
+        this.lod3TileThresholdChanged =
+            clampLod3TileThreshold(threshold) !== this.stateService.lod3TileThreshold;
     }
 
     /** Updates the dirty flag for the subset-render worker control. */
@@ -1180,8 +1180,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         MIN_FEATURE_ZOOM_CLEARANCE_METERS;
     protected readonly MAX_FEATURE_ZOOM_CLEARANCE_METERS =
         MAX_FEATURE_ZOOM_CLEARANCE_METERS;
-    protected readonly MIN_LOW_FI_TILE_THRESHOLD = MIN_LOW_FI_TILE_THRESHOLD;
-    protected readonly MAX_LOW_FI_TILE_THRESHOLD = MAX_LOW_FI_TILE_THRESHOLD;
+    protected readonly MIN_LOD3_TILE_THRESHOLD = MIN_LOD3_TILE_THRESHOLD;
+    protected readonly MAX_LOD3_TILE_THRESHOLD = MAX_LOD3_TILE_THRESHOLD;
     protected readonly AUTO_TILE_SUBSET_RENDER_WORKER_COUNT =
         AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
     protected readonly MAX_TILE_SUBSET_RENDER_WORKER_COUNT =

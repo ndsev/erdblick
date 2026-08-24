@@ -19,6 +19,7 @@ import {
     type StyleFilterPlan,
     type StyledMapgetLayerEvent
 } from "./styled-mapget-layer.model";
+import {MAX_STYLE_LOD} from "../shared/lod-policy";
 
 export type HoverDetailField = {key: string; value: string; colorKey: string};
 export type HoverFeatureDetails = {
@@ -269,7 +270,7 @@ export class HoverDetailService implements OnDestroy {
             this.mapInfo,
             this.tileStream,
             coreLib.HighlightMode.NO_HIGHLIGHT,
-            coreLib.RuleFidelity.ANY,
+            MAX_STYLE_LOD,
             plan
         );
         return {

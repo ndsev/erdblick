@@ -147,6 +147,7 @@ interface ContributionEntry {
   expectedRevision: number;
   inFlightReferences: number;
   desired: boolean;
+  lod: number;
   active: InstalledContribution | null;
 }
 
@@ -162,6 +163,7 @@ interface InstalledContribution {
   activationToken: number;
   mapTileKey: string;
   styleOrder: number;
+  lod: number;
   origin: OriginEntry;
   spans: InstalledSpan[];
   pickingRange: GpuRecordRange | null;
@@ -224,6 +226,7 @@ export interface GpuSceneContributionInput {
   identity: string;
   mapTileKey: string;
   styleOrder: number;
+  lod: number;
   resolvePick?: GpuScenePickResolver;
   findPickReferences?: GpuScenePickFinder;
 }
@@ -699,6 +702,14 @@ export class GpuScene {
     ) {
       throw new Error("GPU scene style order is outside its uint32 range.");
     }
+    if (
+      inputs.some(
+        (input) =>
+          !Number.isInteger(input.lod) || input.lod < 0 || input.lod > 7,
+      )
+    ) {
+      throw new Error("GPU scene LOD is outside its 0..7 range.");
+    }
     const origin = this.reserveOrigin(originIdentity, originPosition);
     origin.inFlightReferences += 1;
     const contributions: ReservedContribution[] = [];
@@ -732,6 +743,7 @@ export class GpuScene {
         });
         entry.inFlightReferences += 1;
         entry.desired = true;
+        this.setContributionLod(input.identity, input.lod);
         entry.expectedRevision = ++entry.nextRevision;
         contributions.push({
           identity: entry.identity,
@@ -861,6 +873,7 @@ export class GpuScene {
               activationToken: descriptor.activationToken,
               mapTileKey: reserved.mapTileKey,
               styleOrder: reserved.styleOrder,
+              lod: entry.lod,
               origin,
               spans: [],
               pickingRange: null,
@@ -996,6 +1009,7 @@ export class GpuScene {
       }
       let labelsChanged = false;
       for (const item of ready) {
+        item.installed.lod = item.entry.lod;
         const previous = item.entry.active;
         if (previous) {
           // Keep the predecessor active until the same publication that raises
@@ -1108,6 +1122,25 @@ export class GpuScene {
       this.requestRedraw("GPU scene contributions removed");
     }
     return labelsChanged;
+  }
+
+  /** Change one active producer's GPU and label LOD without regenerating geometry. */
+  setContributionLod(identity: string, lod: number): boolean {
+    if (!Number.isInteger(lod) || lod < 0 || lod > 7) {
+      throw new Error("GPU scene LOD is outside its 0..7 range.");
+    }
+    const entry = this.contributionByIdentity.get(identity);
+    if (!entry || entry.lod === lod) {
+      return false;
+    }
+    entry.lod = lod;
+    if (!entry.active) {
+      return false;
+    }
+    entry.active.lod = lod;
+    this._revision += 1;
+    this.requestRedraw("GPU contribution LOD changed");
+    return true;
   }
 
   /** Resolve one Deck scene index into exact feature/validity/relation targets. */
@@ -1362,12 +1395,17 @@ export class GpuScene {
   }
 
   /** Return all active labels as one logical snapshot for the bounded TextLayer host. */
-  labels(): GpuSceneLabel[] {
-    const result: GpuSceneLabel[] = [];
-    for (const entry of this.contributionByIdentity.values()) {
-      if (entry.active) {
-        result.push(...entry.active.labels);
-      }
+    labels(): GpuSceneLabel[] {
+        const result: GpuSceneLabel[] = [];
+        for (const entry of this.contributionByIdentity.values()) {
+            const active = entry.active;
+            if (active) {
+                result.push(
+                    ...active.labels.filter(
+                        (label) => label.minLod <= active.lod,
+                    ),
+                );
+            }
     }
     return result;
   }
@@ -1813,7 +1851,7 @@ export class GpuScene {
         firstSlot: installed.contributionSlot,
         values: [
           installed.pickingRange?.firstRecord ?? -1,
-          0,
+          installed.lod,
           installed.activationToken,
           installed.zIndexRange?.firstRecord ?? -1,
         ],
@@ -2044,6 +2082,7 @@ export class GpuScene {
       expectedRevision: 0,
       inFlightReferences: 0,
       desired: false,
+      lod: 0,
       active: null,
     };
     this.contributionByIdentity.set(identity, entry);

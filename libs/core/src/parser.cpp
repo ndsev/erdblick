@@ -1488,7 +1488,7 @@ NativeJsValue TileLayerParser::planStyleFilter(
     std::string const& mapId,
     std::string const& layerId,
     int highlightMode,
-    int fidelity)
+    int lod)
 {
     auto info = resolveMapLayerInfo(mapId, layerId);
     if (!info) {
@@ -1513,17 +1513,13 @@ NativeJsValue TileLayerParser::planStyleFilter(
             {0, "Invalid highlight mode."});
         return plan.toJsValue();
     }
-    if (fidelity <
-            static_cast<int>(
-                FeatureStyleRule::AnyFidelity) ||
-        fidelity >
-            static_cast<int>(
-                FeatureStyleRule::LowFidelity))
+    if (lod < FeatureStyleRule::kMinimumLod ||
+        lod > FeatureStyleRule::kMaximumLod)
     {
         StyleFilterPlan plan;
         plan.valid = false;
         plan.issues.push_back(
-            {0, "Invalid rule fidelity."});
+            {0, "Invalid style LOD."});
         return plan.toJsValue();
     }
     return erdblick::planStyleFilter(
@@ -1531,8 +1527,7 @@ NativeJsValue TileLayerParser::planStyleFilter(
         *info,
         static_cast<FeatureStyleRule::HighlightMode>(
             highlightMode),
-        static_cast<FeatureStyleRule::Fidelity>(
-            fidelity))
+        static_cast<uint8_t>(lod))
         .toJsValue();
 }
 

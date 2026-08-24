@@ -1,8 +1,7 @@
 import {Subject} from "rxjs";
 import type {
     FeatureLayerStyle,
-    HighlightMode,
-    RuleFidelity
+    HighlightMode
 } from "../../build/libs/core/erdblick-core";
 import {coreLib} from "../integrations/wasm";
 import type {ErdblickStyle} from "../styledata/style.service";
@@ -10,6 +9,7 @@ import {sipHash64Hex} from "../styledata/hash";
 import type {MapgetLayer} from "./mapget-layer.model";
 import type {MapInfoService} from "./map-info.service";
 import type {MapTileStreamService} from "./map-tile-stream.service";
+import {MAX_STYLE_LOD} from "../shared/lod-policy";
 import {
     FilterSubscriptionCoverage,
     FilterSubscriptionDefinition,
@@ -91,7 +91,7 @@ export class StyledMapgetLayer {
         readonly mapInfo: MapInfoService,
         private readonly tileStream: MapTileStreamService,
         readonly highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
-        readonly plannedFidelity: RuleFidelity = coreLib.RuleFidelity.ANY,
+        readonly plannedLod: number = MAX_STYLE_LOD,
         filterPlan?: StyleFilterPlan
     ) {
         this.ownerId = [
@@ -108,7 +108,7 @@ export class StyledMapgetLayer {
         this.options = {...options};
         this.filterPlan = filterPlan
             ? structuredClone(filterPlan)
-            : this.plan(style.featureLayerStyle, highlightMode, plannedFidelity);
+            : this.plan(style.featureLayerStyle, highlightMode, plannedLod);
         if (!this.filterPlan.valid) {
             const detail = this.filterPlan.issues.map(issue =>
                 `rule ${issue.ruleIndex}: ${issue.message}`
@@ -333,14 +333,14 @@ export class StyledMapgetLayer {
     private plan(
         style: FeatureLayerStyle,
         highlightMode: HighlightMode,
-        fidelity: RuleFidelity
+        lod: number
     ): StyleFilterPlan {
         return this.mapInfo.planStyleFilter(
             style,
             this.mapgetLayer.mapId,
             this.mapgetLayer.layerId,
             highlightMode.value,
-            fidelity.value
+            lod
         ) as StyleFilterPlan;
     }
 

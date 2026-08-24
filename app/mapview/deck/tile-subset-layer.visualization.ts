@@ -90,7 +90,7 @@ export class TileSubsetLayerVisualization {
     private disposed = false;
     private sceneHandle: IRenderSceneHandle | null = null;
     private sceneRevision = 0;
-    private readonly fidelityValue: number;
+    private lod: number;
     private readonly lineSimplificationToleranceMeters: number;
     private readonly reportedRuntimeIssueIds = new Set<string>();
     private readonly pendingIconUris = new Set<string>();
@@ -106,7 +106,7 @@ export class TileSubsetLayerVisualization {
         private readonly coordinateOrigin: [number, number, number],
         private readonly renderService: TileSubsetLayerRenderService,
         private readonly styleValidationReports: StyleValidationReportService,
-        fidelityValue: number,
+        lod: number,
         lineSimplificationToleranceMeters: number,
         readonly viewIndex: number,
         private readonly requestRerender: (
@@ -122,7 +122,7 @@ export class TileSubsetLayerVisualization {
             owner,
             state
         );
-        this.fidelityValue = fidelityValue;
+        this.lod = lod;
         this.lineSimplificationToleranceMeters =
             lineSimplificationToleranceMeters;
         this.contributionIdentities.add(this.contributionIdentity(state));
@@ -165,13 +165,26 @@ export class TileSubsetLayerVisualization {
     /** Test whether reconciliation can preserve this exact visualization owner. */
     hasSameState(
         state: FilterTileState,
-        fidelityValue: number,
         lineSimplificationToleranceMeters: number
     ): boolean {
-        return this.fidelityValue === fidelityValue &&
-            this.lineSimplificationToleranceMeters ===
+        return this.lineSimplificationToleranceMeters ===
                 lineSimplificationToleranceMeters &&
             state === this.state;
+    }
+
+    /** Update GPU-filtered entry and label visibility without rerendering the subset. */
+    setLod(lod: number): void {
+        if (lod === this.lod) {
+            return;
+        }
+        this.lod = lod;
+        const scene = this.sceneHandle
+            ? this.gpuScene(this.sceneHandle)
+            : null;
+        scene?.setContributionLod(
+            this.contributionIdentity(this.state),
+            lod
+        );
     }
 
     /** Require a complete immutable subset before consuming worker credit. */
@@ -218,7 +231,7 @@ export class TileSubsetLayerVisualization {
         const renderOrigin = this.coordinateOrigin;
         const signature = [
             `${this.state.mapTileKey}:${this.state.valueVersion}`,
-            this.fidelityValue,
+            this.owner.plannedLod,
             this.lineSimplificationToleranceMeters,
             this.owner.style.id,
             this.owner.renderStyleKey,
@@ -241,6 +254,7 @@ export class TileSubsetLayerVisualization {
                 identity: this.contributionIdentity(this.state),
                 mapTileKey: this.state.mapTileKey,
                 styleOrder: this.owner.styleOrder,
+                lod: this.lod,
                 resolvePick: reference =>
                     this.resolveGpuPick(reference),
                 findPickReferences: targetFeatureId =>
@@ -283,7 +297,7 @@ export class TileSubsetLayerVisualization {
                 styleKey: this.owner.renderStyleKey,
                 styleSource: this.owner.style.source,
                 highlightModeValue: this.owner.highlightMode.value,
-                fidelityValue: this.fidelityValue,
+                lod: this.owner.plannedLod,
                 lineSimplificationToleranceMeters:
                     this.lineSimplificationToleranceMeters
             }, packet => {

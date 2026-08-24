@@ -42,21 +42,25 @@ import {
 } from "./url-state-codec";
 import type {UrlV2MapTileKeyFactory} from "./url-state-codec";
 import {
-    clampLowFiTileThreshold,
-    clampTileSubsetRenderWorkerCount,
-    DEFAULT_LOW_FI_TILE_THRESHOLD
+    clampTileSubsetRenderWorkerCount
 } from "./tile-render-policy";
+import {
+    clampLod3TileThreshold,
+    DEFAULT_LOD3_TILE_THRESHOLD
+} from "./lod-policy";
 
 export {
     AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
-    clampLowFiTileThreshold,
     clampTileSubsetRenderWorkerCount,
-    DEFAULT_LOW_FI_TILE_THRESHOLD,
-    MAX_LOW_FI_TILE_THRESHOLD,
     MAX_TILE_SUBSET_RENDER_WORKER_COUNT,
-    MIN_LOW_FI_TILE_THRESHOLD,
     MIN_TILE_SUBSET_RENDER_WORKER_COUNT
 } from "./tile-render-policy";
+export {
+    clampLod3TileThreshold,
+    DEFAULT_LOD3_TILE_THRESHOLD,
+    MAX_LOD3_TILE_THRESHOLD,
+    MIN_LOD3_TILE_THRESHOLD
+} from "./lod-policy";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
@@ -728,12 +732,12 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
-    readonly lowFiTileThresholdState = this.createState<number>({
-        name: 'lowFiTileThreshold',
-        defaultValue: DEFAULT_LOW_FI_TILE_THRESHOLD,
+    readonly lod3TileThresholdState = this.createState<number>({
+        name: 'lod3TileThreshold',
+        defaultValue: DEFAULT_LOD3_TILE_THRESHOLD,
         schema: z.coerce.number().int(),
-        toStorage: value => clampLowFiTileThreshold(value, DEFAULT_LOW_FI_TILE_THRESHOLD),
-        fromStorage: value => clampLowFiTileThreshold(value, DEFAULT_LOW_FI_TILE_THRESHOLD)
+        toStorage: value => clampLod3TileThreshold(value, DEFAULT_LOD3_TILE_THRESHOLD),
+        fromStorage: value => clampLod3TileThreshold(value, DEFAULT_LOD3_TILE_THRESHOLD)
     });
 
     readonly tileSubsetRenderWorkerCountState = this.createState<number>({
@@ -2295,9 +2299,9 @@ export class AppStateService implements OnDestroy {
     set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
     get contactShadingEnabled() {return this.contactShadingEnabledState.getValue();}
     set contactShadingEnabled(val: boolean) {this.contactShadingEnabledState.next(!!val);}
-    get lowFiTileThreshold() {return this.lowFiTileThresholdState.getValue();}
-    set lowFiTileThreshold(val: number) {
-        this.lowFiTileThresholdState.next(clampLowFiTileThreshold(val, DEFAULT_LOW_FI_TILE_THRESHOLD));
+    get lod3TileThreshold() {return this.lod3TileThresholdState.getValue();}
+    set lod3TileThreshold(val: number) {
+        this.lod3TileThresholdState.next(clampLod3TileThreshold(val, DEFAULT_LOD3_TILE_THRESHOLD));
     }
     get tileSubsetRenderWorkerCount() {
         return this.tileSubsetRenderWorkerCountState.getValue();

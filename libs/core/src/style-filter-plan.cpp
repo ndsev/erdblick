@@ -46,15 +46,6 @@ bool containsIdentifier(
     return false;
 }
 
-bool fidelityMatches(
-    FeatureStyleRule::Fidelity requested,
-    FeatureStyleRule::Fidelity rule)
-{
-    return requested == FeatureStyleRule::AnyFidelity ||
-        rule == FeatureStyleRule::AnyFidelity ||
-        requested == rule;
-}
-
 struct Predicate
 {
     /** Empty means the predicate is unconditionally true. */
@@ -613,7 +604,7 @@ StyleFilterPlan planStyleFilter(
     FeatureLayerStyle const& style,
     mapget::LayerInfo const& layerInfo,
     FeatureStyleRule::HighlightMode highlightMode,
-    FeatureStyleRule::Fidelity fidelity)
+    uint8_t lod)
 {
     StyleFilterPlan plan;
     if (!style.isValid()) {
@@ -625,7 +616,7 @@ StyleFilterPlan planStyleFilter(
 
     for (auto const& rule : style.rules()) {
         if (!rule.supportsMode(highlightMode) ||
-            !fidelityMatches(fidelity, rule.fidelity()))
+            !rule.supportsLod(lod))
         {
             continue;
         }

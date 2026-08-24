@@ -346,20 +346,30 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             addMode(yaml["mode"]);
         }
     }
-    if (yaml["fidelity"].IsDefined()) {
-        auto fidelityStr = yaml["fidelity"].as<std::string>();
-        if (fidelityStr == "any") {
-            fidelity_ = AnyFidelity;
+    if (yaml["lod-range"].IsDefined()) {
+        auto const range = yaml["lod-range"].as<std::vector<uint32_t>>();
+        lodRange_ = {
+            static_cast<uint8_t>(range.at(0)),
+            static_cast<uint8_t>(range.at(1)),
+        };
+    }
+    else if (yaml["fidelity"].IsDefined()) {
+        // Fidelity remains authoring shorthand only. Rendering and planning
+        // operate exclusively on the canonical integer LOD range.
+        auto const fidelity = yaml["fidelity"].as<std::string>();
+        if (fidelity == "low") {
+            lodRange_ = {kMinimumLod, 2U};
         }
-        else if (fidelityStr == "high") {
-            fidelity_ = HighFidelity;
-        }
-        else if (fidelityStr == "low") {
-            fidelity_ = LowFidelity;
+        else if (fidelity == "high") {
+            lodRange_ = {3U, kMaximumLod};
         }
         else {
-            std::cout << "Unsupported fidelity: " << fidelityStr << std::endl;
+            lodRange_ = {kMinimumLod, kMaximumLod};
         }
+    }
+    if (yaml["min-lod-expression"].IsDefined()) {
+        minimumLodExpression_ =
+            yaml["min-lod-expression"].as<std::string>();
     }
     if (yaml["geometry-name"].IsDefined()) {
         auto name = yaml["geometry-name"].as<std::string>();
@@ -1038,6 +1048,7 @@ FeatureStyleRule::expressionUses() const
         append("width-scale.expression", widthScale_->expression);
     }
     append("arrow-expression", arrowExpression_);
+    append("min-lod-expression", minimumLodExpression_);
     append("polygon-height-expression", polygonHeightExpression_);
     append("z-index-expression", zIndexExpression_);
     append("z-index-group-expression", zIndexGroupExpression_);
@@ -1529,9 +1540,41 @@ uint32_t FeatureStyleRule::highlightModesMask() const
     return highlightModesMask_;
 }
 
-FeatureStyleRule::Fidelity FeatureStyleRule::fidelity() const
+FeatureStyleRule::LodRange const& FeatureStyleRule::lodRange() const
 {
-    return fidelity_;
+    return lodRange_;
+}
+
+bool FeatureStyleRule::supportsLod(uint8_t lod) const
+{
+    return lod >= lodRange_.minimum && lod <= lodRange_.maximum;
+}
+
+uint8_t FeatureStyleRule::minimumLod(BoundEvalFun const& evalFun) const
+{
+    if (minimumLodExpression_.empty()) {
+        return kMinimumLod;
+    }
+    auto const value = evalFun.evaluate(minimumLodExpression_);
+    if (value.isa(simfil::ValueType::Undef) ||
+        value.isa(simfil::ValueType::Null))
+    {
+        return kMinimumLod;
+    }
+    if (auto const number = finiteNumber(value)) {
+        return static_cast<uint8_t>(std::clamp(
+            std::ceil(*number),
+            static_cast<double>(kMinimumLod),
+            static_cast<double>(kMaximumLod)));
+    }
+    if (evalFun.hasIssueReporter()) {
+        evalFun.reportIssue(
+            "min-lod-expression",
+            minimumLodExpression_,
+            "Expression must evaluate to a finite number; using LOD 0.",
+            index_);
+    }
+    return kMinimumLod;
 }
 
 std::optional<std::regex> const& FeatureStyleRule::relationType() const

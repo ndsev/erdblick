@@ -35,7 +35,7 @@ function createService(cameras: CameraViewState[], viewSync: string[]) {
         viewSync,
         cameraViewDataState: {getValue: (viewIndex: number) => cameras[viewIndex]},
         numViewsState: new Subject<number>(),
-        lowFiTileThresholdState: new Subject<number>()
+        lod3TileThresholdState: new Subject<number>()
     };
     const mapInfo = {
         layerStateChanged: new Subject<string>(),

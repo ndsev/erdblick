@@ -68,6 +68,8 @@ layout(std140) uniform gpuSceneUniforms {
 
 const uint GPU_SCENE_UNSELECTABLE = 0xffffffffu;
 const uint GPU_SCENE_RECORD_FLAG_MASK = 0xffu;
+const uint GPU_SCENE_LOCAL_Z_INDEX_MASK = 0x1fffffffu;
+const uint GPU_SCENE_MINIMUM_LOD_SHIFT = 29u;
 
 ivec2 gpuScene_lookupCoordinate(uint texelIndex) {
   uint width = uint(gpuScene.lookupTextureWidth);
@@ -219,16 +221,23 @@ vec3 gpuScene_pickingColor(uint localPickIndex, vec4 contribution) {
     float((encoded >> 16u) & 255u));
 }
 
-bool gpuScene_isActive(
-    uint recordWord,
-    vec4 contribution,
-    uint localPickIndex) {
-  // localPickIndex is part of the common signature because mask variants use
-  // it for sparse target lookup. Ordinary rendering deliberately ignores it.
+bool gpuScene_isOwned(uint recordWord, vec4 contribution) {
   uint recordFlags = recordWord & GPU_SCENE_RECORD_FLAG_MASK;
   uint activationToken = recordWord >> 8u;
   return (recordFlags & 1u) != 0u &&
     activationToken == uint(contribution.z + 0.5);
+}
+
+bool gpuScene_isActive(
+    uint recordWord,
+    uint localZIndex,
+    vec4 contribution,
+    uint localPickIndex) {
+  // localPickIndex is part of the common signature because mask variants use
+  // it for sparse target lookup. Ordinary rendering deliberately ignores it.
+  uint minimumLod = localZIndex >> GPU_SCENE_MINIMUM_LOD_SHIFT;
+  return gpuScene_isOwned(recordWord, contribution) &&
+    uint(contribution.y + 0.5) >= minimumLod;
 }
 
 vec4 gpuScene_zIndexMetadata(
@@ -237,7 +246,8 @@ vec4 gpuScene_zIndexMetadata(
   if (contribution.w < 0.0) {
     return vec4(0.0);
   }
-  uint zIndexSlot = uint(contribution.w + 0.5) + localZIndex;
+  uint zIndexSlot = uint(contribution.w + 0.5) +
+    (localZIndex & GPU_SCENE_LOCAL_Z_INDEX_MASK);
   return gpuScene_lookup(gpuSceneZIndexTexture, zIndexSlot);
 }
 
@@ -447,10 +457,13 @@ vec4 gpuSceneMask_target(uint localPickIndex, vec4 contribution) {
 }
 
 bool gpuSceneMask_isActive(
-    uint recordFlags,
+    uint recordWord,
+    uint localZIndex,
     vec4 contribution,
     uint localPickIndex) {
-  if (!gpuScene_isActive(recordFlags, contribution, localPickIndex)) {
+  // Explicit interaction masks remain visible even when the base record's
+  // data-driven minimum LOD is above the current view LOD.
+  if (!gpuScene_isOwned(recordWord, contribution)) {
     return false;
   }
   return gpuSceneMask.mode > 1.5 ||
@@ -562,7 +575,7 @@ void main(void) {
     clipPosition);
   vec4 contribution = gpuScene_contribution(instanceMetadata.y);
   bool recordActive = gpuScene_isActive(
-    instanceMetadata.w, contribution, instanceMetadata.z);
+    instanceMetadata.w, instanceZIndex, contribution, instanceMetadata.z);
   geometry.pickingColor = recordActive
     ? gpuScene_pickingColor(instanceMetadata.z, contribution)
     : vec3(0.0);
@@ -681,7 +694,7 @@ void main(void) {
     clipPosition);
   vec4 contribution = gpuScene_contribution(instanceMetadata.y);
   bool recordActive = gpuScene_isActive(
-    instanceMetadata.w, contribution, instanceMetadata.z);
+    instanceMetadata.w, instanceZIndex, contribution, instanceMetadata.z);
   geometry.pickingColor = recordActive
     ? gpuScene_pickingColor(instanceMetadata.z, contribution)
     : vec3(0.0);
@@ -1011,7 +1024,7 @@ void main(void) {
   vPathFlags = flags;
   vec4 contribution = gpuScene_contribution(instanceMetadata.y);
   bool recordActive = gpuScene_isActive(
-    recordWord, contribution, instanceMetadata.z);
+    recordWord, instanceZIndex, contribution, instanceMetadata.z);
   geometry.pickingColor = recordActive
     ? gpuScene_pickingColor(instanceMetadata.z, contribution)
     : vec3(0.0);
@@ -1147,7 +1160,7 @@ void main(void) {
   vPathFlags = flags;
   vec4 contribution = gpuScene_contribution(instanceMetadata.y);
   bool recordActive = gpuScene_isActive(
-    recordWord, contribution, instanceMetadata.z);
+    recordWord, instanceZIndex, contribution, instanceMetadata.z);
   geometry.pickingColor = recordActive
     ? gpuScene_pickingColor(instanceMetadata.z, contribution)
     : vec3(0.0);
@@ -1420,7 +1433,7 @@ void main(void) {
   gpuScene_projectLocal(instanceEnd, instanceMetadata.x, endCommon, endClip);
   vec4 contribution = gpuScene_contribution(instanceMetadata.y);
   bool recordActive = gpuScene_isActive(
-    instanceMetadata.w, contribution, instanceMetadata.z);
+    instanceMetadata.w, instanceZIndex, contribution, instanceMetadata.z);
   geometry.pickingColor = recordActive
     ? gpuScene_pickingColor(instanceMetadata.z, contribution)
     : vec3(0.0);
@@ -1472,7 +1485,7 @@ void main(void) {
   gpuScene_projectLocal(instanceEnd, instanceMetadata.x, endCommon, unusedEnd);
   vec4 contribution = gpuScene_contribution(instanceMetadata.y);
   bool recordActive = gpuScene_isActive(
-    instanceMetadata.w, contribution, instanceMetadata.z);
+    instanceMetadata.w, instanceZIndex, contribution, instanceMetadata.z);
   geometry.pickingColor = recordActive
     ? gpuScene_pickingColor(instanceMetadata.z, contribution)
     : vec3(0.0);
@@ -1665,7 +1678,7 @@ void main(void) {
 #endif
   vec4 contribution = gpuScene_contribution(instanceMetadata.y);
   bool recordActive = gpuScene_isActive(
-    instanceMetadata.w, contribution, instanceMetadata.z);
+    instanceMetadata.w, instanceZIndex, contribution, instanceMetadata.z);
   geometry.pickingColor = recordActive
     ? gpuScene_pickingColor(instanceMetadata.z, contribution)
     : vec3(0.0);
@@ -1752,7 +1765,7 @@ void main(void) {
 #endif
   vec4 contribution = gpuScene_contribution(instanceMetadata.y);
   bool recordActive = gpuScene_isActive(
-    instanceMetadata.w, contribution, instanceMetadata.z);
+    instanceMetadata.w, instanceZIndex, contribution, instanceMetadata.z);
   geometry.pickingColor = recordActive
     ? gpuScene_pickingColor(instanceMetadata.z, contribution)
     : vec3(0.0);
@@ -1853,7 +1866,7 @@ void main(void) {
     localPosition, instanceMetadata.x, commonPosition, clipPosition);
   vec4 contribution = gpuScene_contribution(instanceMetadata.y);
   bool recordActive = gpuScene_isActive(
-    instanceMetadata.w, contribution, instanceMetadata.z);
+    instanceMetadata.w, instanceZIndex, contribution, instanceMetadata.z);
   geometry.pickingColor = recordActive
     ? gpuScene_pickingColor(instanceMetadata.z, contribution)
     : vec3(0.0);

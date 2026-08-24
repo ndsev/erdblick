@@ -44,7 +44,7 @@ YAML. A root `category` may be `base` or `search`; omission means `base`.
 Category is metadata independent of whether a style is built in, additional,
 modified, imported, or visible.
 
-Feature Search saves reusable high-fidelity rules as ordinary imported YAML
+Feature Search saves reusable search-result rules as ordinary imported YAML
 with `category: search`, a checked-by-default **Enable this style upon save** choice, and optional exact
 layer-ID affinity. Empty affinity applies to any layer. The source is added directly to
 the Styles tree, marked with a **Search** tag, persisted through the normal
@@ -107,9 +107,9 @@ rules:
 ```
 
 `version: 2` is required. `category` accepts only `base` or `search` and
-defaults to `base` when absent. The removed `aspect`, `stage`, and `lod` fields
-are validation errors. Use `scope`, semantic `geometry-name`, and explicit
-attribute filters.
+defaults to `base` when absent. The removed `aspect`, `stage`, and scalar `lod`
+fields are validation errors. Use `scope`, semantic `geometry-name`, explicit
+attribute filters, and the stylesheet LOD fields described below.
 
 Options become typed SIMFIL bindings. They can participate in filters and
 presentation expressions without rewriting the stylesheet.
@@ -154,7 +154,8 @@ Common admission fields:
 | `type` | Feature type name or accepted type pattern. |
 | `filter` | SIMFIL feature-root filter. |
 | `mode` | One pass, or a list of passes: `none`, `hover`, and `selection`. |
-| `fidelity` | `low`, `high`, or any presentation fidelity. |
+| `lod-range` | Inclusive `[minimum, maximum]` stylesheet LOD range from 0 through 7. |
+| `fidelity` | Optional shorthand: `low` means `[0, 2]`, `high` means `[3, 7]`, and `any` means `[0, 7]`. |
 | `geometry` | One type or list: point, line, polygon, mesh, etc. |
 | `geometry-name` | Exact semantic name, or `*`/omission for wildcard. |
 | `selectable` | Whether generated primitives participate in selection. |
@@ -165,13 +166,15 @@ Geometry type and name are independent selectors.
 - type: Road
   geometry: line
   geometry-name: topology
-  fidelity: low
+  lod-range: [0, 2]
   filter: "any(properties.layer.**.FUNCTIONAL_ROAD_CLASS.** <= 4)"
 ```
 
-Mapget does not interpret `topology` as low fidelity. Erdblick chose the
-low-fidelity rule; the channel simply asks for a semantic geometry and an
-ordinary feature predicate.
+Mapget does not interpret `topology` as an LOD. Erdblick activates this rule at
+LOD 0 through 2; the channel simply asks for a semantic geometry and an
+ordinary feature predicate. `fidelity` and `lod-range` are alternative
+authoring forms and cannot occur on the same rule. Both gates belong only to a
+top-level rule.
 
 ## Branches
 
@@ -221,6 +224,7 @@ Common primitive fields include:
 - `opacity`;
 - `width` and optional `width-scale`;
 - `polygon-height` and optional `polygon-height-expression`;
+- `min-lod-expression` for per-entry GPU visibility within an active rule;
 - `surface-shading` for restrained matte lighting on polygon and mesh triangles;
 - `offset` and `offset-increment`;
 - `z-index` and optional `z-index-expression`;
@@ -761,15 +765,57 @@ Generic bidirectional display uses permanent south-west ownership. If that
 owner is outside current coverage, the pair is not rendered. Selection
 traversal is root-owned.
 
-## Fidelity
+## Level of detail
 
-`fidelity: low|high` remains a presentation-only rule gate. The current view
-density chooses which set applies. Both use the same complete backend source
-tile and `/filter` evaluator.
+Each style uses an integer level of detail (LOD) from 0 through 7. LOD 0 is the
+coarsest presentation for a dense viewport; LOD 7 is the most detailed. The
+visible tile count at the layer's tile level determines the current LOD. It is
+a presentation decision and does not change mapget geometry names or source
+data semantics.
 
-Do not encode fidelity into mapget geometry names. Choose the semantic
-geometry each rule needs, and use explicit source attributes when a
-presentation should include fewer features.
+By default, the **LOD 3 Tile Threshold** preference supplies a boundary `T`
+between LOD 2 and LOD 3. Its default is 128 visible tiles. The seven descending
+boundaries for LOD 0 through 6 are derived as
+`[4T, 2T, T, T/2, T/4, T/8, T/16]`; a count below the last boundary selects
+LOD 7. A stylesheet can replace those boundaries with exactly seven strictly
+descending positive counts:
+
+```yaml
+lod-thresholds: [512, 256, 128, 64, 32, 16, 8]
+```
+
+Use `lod-range` on a top-level rule when the complete rule, including its
+backend filter channel, should exist only within part of the ladder:
+
+```yaml
+- type: Road
+  lod-range: [0, 3]
+  geometry: line
+  geometry-name: centerline
+```
+
+Crossing a boundary which changes the active rule set replaces the affected
+filter plan. Moving between adjacent LODs with the same rule set keeps the
+existing subset and only updates presentation state.
+
+Use `min-lod-expression` when individual emitted entries should disappear as
+the viewport gets denser without replacing the filter plan or rerendering the
+tile. The expression is projected with the rule's other fields, rounded up,
+and clamped to 0 through 7. The GPU draws the entry only while the current LOD
+is at least that minimum:
+
+```yaml
+- type: Road
+  geometry: line
+  min-lod-expression: attributes.minimumDisplayLod
+```
+
+Explicit hover and selection masks remain visible even when the corresponding
+base entry is hidden by `min-lod-expression`.
+
+`fidelity` is parser shorthand only: `low`, `high`, and `any` become
+`lod-range: [0, 2]`, `[3, 7]`, and `[0, 7]`, respectively. There is no separate
+low/high-fidelity render pass.
 
 ## Validation and planner failures
 
@@ -778,6 +824,8 @@ location. Important hard failures include:
 
 - schema version other than 2;
 - removed `aspect`, `stage`, or `lod`;
+- malformed `lod-thresholds` or `lod-range` declarations;
+- combining `fidelity` with `lod-range`, or putting either gate on a nested rule;
 - descendant scope changes;
 - branches on a top-level relation rule;
 - invalid/mixed color modes;
@@ -791,7 +839,7 @@ no compatible feature types.
 
 ## Picking identity
 
-Presentation choices such as highlight mode, fidelity, options, style
+Presentation choices such as highlight mode, active LOD rule plan, options, style
 identity/order, and rule tree participate in the render signature. Backend
 transport identity is only `filterId + generation + output tile`.
 

@@ -51,12 +51,12 @@ import type {
 import type {
     StyleValidationReportService
 } from "../styledata/style-validation-report.service";
-import type {RuleFidelity} from "../../build/libs/core/erdblick-core";
 import type {HoverDetailService} from "../mapdata/hover-detail.service";
 import {NgZone} from "@angular/core";
 import type {GpuSceneSnapshot} from "./deck/gpu-scene";
 import {INTERACTION_STYLE_ORDER_BASE} from
     "./deck/tile-subset-interaction.model";
+import {MAX_STYLE_LOD} from "../shared/lod-policy";
 
 export type ViewTileOccupancy = "unknown" | "empty" | "non-empty" | "error";
 
@@ -67,7 +67,7 @@ interface OwnedStyledLayer {
     visualizationKeyByTileId: Map<number, string>;
     pendingTiles: Map<number, {
         state: FilterTileState;
-        fidelity: number;
+        lod: number;
         lineSimplificationToleranceMeters: number;
         preservedContributionIdentity: string | null;
     }>;
@@ -418,7 +418,9 @@ export class ViewLayerController {
 
     /**
      * Exact cheap signature for presentation demand affected by viewport
-     * motion. Regular coverage/fidelity is versioned by ViewVisualizationState;
+     * motion. Regular coverage is versioned by ViewVisualizationState, while
+     * style LOD is represented explicitly because density may change without
+     * changing the exact visible tile set.
      * search coverage is versioned by its StyledMapgetLayer and its density
      * decision is represented once per occupied source level.
      */
@@ -427,6 +429,37 @@ export class ViewLayerController {
         const parts = [
             String(viewState?.coverageVersion ?? -1)
         ];
+        const orderedStyles = [...this.styleService.styles.values()]
+            .filter(style => style.visible);
+        for (const mapgetLayer of this.mapInfo.mapgetLayers()) {
+            if (!this.mapInfo.maps.getMapLayerVisibility(
+                this.viewIndex,
+                mapgetLayer.mapId,
+                mapgetLayer.layerId
+            )) {
+                continue;
+            }
+            const level = this.viewState.getEffectiveMapLayerLevel(
+                this.viewIndex,
+                mapgetLayer.mapId,
+                mapgetLayer.layerId
+            );
+            for (const style of orderedStyles) {
+                if (style.featureLayerStyle.hasLayerAffinity(
+                    mapgetLayer.layerId
+                )) {
+                    parts.push(
+                        mapgetLayer.key,
+                        style.id,
+                        String(this.viewState.styleLod(
+                            this.viewIndex,
+                            level,
+                            style.featureLayerStyle
+                        ))
+                    );
+                }
+            }
+        }
         for (const layer of this.featureSearch
             .searchStyledLayersForView(this.viewIndex)) {
             parts.push(layer.ownerId, String(layer.coverageVersion));
@@ -461,7 +494,9 @@ export class ViewLayerController {
             tileIds: readonly number[];
             priorityTileIds: readonly number[];
             options: Record<string, boolean | number | string>;
-            plannedFidelity: RuleFidelity;
+            plannedLod: number;
+            plan: StyleFilterPlan;
+            planSignature: string;
             replacementSlot: string;
         }>();
         const hoverDetailCoverage: Array<{
@@ -485,21 +520,31 @@ export class ViewLayerController {
                 mapgetLayer.layerId
             );
             const visibleTileIds = this.viewState.visibleTileIdsForLevel(this.viewIndex, level);
-            const plannedFidelity =
-                visibleTileIds.length > 0 &&
-                this.fidelityFor(visibleTileIds[0]) ===
-                    coreLib.RuleFidelity.HIGH.value
-                    ? coreLib.RuleFidelity.HIGH
-                    : coreLib.RuleFidelity.LOW;
             for (let styleOrder = 0; styleOrder < orderedStyles.length; ++styleOrder) {
                 const style = orderedStyles[styleOrder];
                 if (!style.featureLayerStyle.hasLayerAffinity(mapgetLayer.layerId)) {
                     continue;
                 }
+                const plannedLod = this.viewState.styleLod(
+                    this.viewIndex,
+                    level,
+                    style.featureLayerStyle
+                );
+                const plan = this.mapInfo.planStyleFilter(
+                    style.featureLayerStyle,
+                    mapgetLayer.mapId,
+                    mapgetLayer.layerId,
+                    coreLib.HighlightMode.NO_HIGHLIGHT.value,
+                    plannedLod
+                ) as StyleFilterPlan;
+                if (!plan.channels.length) {
+                    continue;
+                }
+                const planSignature = this.filterPlanSignature(plan);
                 const key = this.regularKey(
                     mapgetLayer,
                     style,
-                    plannedFidelity
+                    planSignature
                 );
                 const options = this.mapInfo.maps.getLayerStyleOptions(
                     this.viewIndex,
@@ -514,7 +559,9 @@ export class ViewLayerController {
                     tileIds: visibleTileIds,
                     priorityTileIds: visibleTileIds,
                     options,
-                    plannedFidelity,
+                    plannedLod,
+                    plan,
+                    planSignature,
                     replacementSlot: this.regularReplacementSlot(
                         mapgetLayer,
                         style
@@ -528,7 +575,7 @@ export class ViewLayerController {
             });
         }
         this.hoverDetails.reconcileView(this.viewIndex, hoverDetailCoverage);
-        // A fast fidelity reversal can reuse the still-present retiring owner
+        // A fast LOD reversal can reuse the still-present retiring owner
         // before the current successor is retired in the pass below.
         for (const [key, next] of desired) {
             if (this.styledLayers.has(key)) {
@@ -587,7 +634,7 @@ export class ViewLayerController {
                             presentationKind: "regular",
                             presentationInstanceId:
                                 `${next.style.id}:${this.styleVersion(next.style)}` +
-                                `/f${next.plannedFidelity.value}`
+                                `/p${next.planSignature}`
                         },
                         next.mapgetLayer,
                         next.style,
@@ -595,7 +642,8 @@ export class ViewLayerController {
                         this.mapInfo,
                         this.tileStream,
                         coreLib.HighlightMode.NO_HIGHLIGHT,
-                        next.plannedFidelity
+                        next.plannedLod,
+                        next.plan
                     );
                     if (!layer.filterPlan.channels.length) {
                         layer.dispose();
@@ -795,25 +843,23 @@ export class ViewLayerController {
         return true;
     }
 
-    /** Resolve the view's contextual fidelity preference for one tile. */
-    private fidelityFor(tileId: number): number {
-        return this.viewState.prefersHighFidelityForTile(this.viewIndex, tileId)
-            ? coreLib.RuleFidelity.HIGH.value
-            : coreLib.RuleFidelity.LOW.value;
-    }
-
     /** Build the immutable transport-owner key for one regular style incarnation. */
     private regularKey(
         mapgetLayer: MapgetLayer,
         style: ErdblickStyle,
-        fidelity: RuleFidelity
+        planSignature: string
     ): string {
         return [
             mapgetLayer.key,
             "regular",
             `${style.id}:${this.styleVersion(style)}`,
-            `f${fidelity.value}`
+            `p${planSignature}`
         ].join("/");
+    }
+
+    /** Hash one immutable server-filter plan for owner reuse across equivalent LODs. */
+    private filterPlanSignature(plan: StyleFilterPlan): string {
+        return sipHash64Hex(JSON.stringify(plan));
     }
 
     /** Build the stable handover slot shared by successive style incarnations. */
@@ -925,6 +971,7 @@ export class ViewLayerController {
             tileIds: number[];
             roots: Array<{tileId: number; featureId: string}>;
             styleOrder: number;
+            plannedLod: number;
         }>();
         const localOverlaysByLayer = new Map<
             string,
@@ -979,6 +1026,14 @@ export class ViewLayerController {
                     }
                     const remoteAllowed = group.kind !== "hover" ||
                         this.inspection.remoteHoverHighlightAllowed;
+                    const targetLevel = Number(coreLib.getTileLevel(
+                        features[0].tileId
+                    ));
+                    const plannedLod = this.viewState.styleLod(
+                        this.viewIndex,
+                        targetLevel,
+                        style.featureLayerStyle
+                    );
                     const optionsSignature = sipHash64Hex(
                         JSON.stringify(options)
                     );
@@ -1007,7 +1062,8 @@ export class ViewLayerController {
                         rawPlan = this.interactionFilterPlan(
                             style,
                             mapgetLayer,
-                            group.mode
+                            group.mode,
+                            plannedLod
                         );
                         if (rawPlan) {
                             remotePlan = planRemoteInteractionHighlight(
@@ -1105,7 +1161,8 @@ export class ViewLayerController {
                         styleOrder: styleIndex +
                             (group.kind === "hover"
                                 ? INTERACTION_STYLE_ORDER_BASE + 1_000
-                                : INTERACTION_STYLE_ORDER_BASE)
+                                : INTERACTION_STYLE_ORDER_BASE),
+                        plannedLod
                     });
                 }
             }
@@ -1144,7 +1201,7 @@ export class ViewLayerController {
                         this.mapInfo,
                         this.tileStream,
                         next.mode,
-                        coreLib.RuleFidelity.ANY,
+                        next.plannedLod,
                         next.plan
                     );
                     owned = {
@@ -1216,7 +1273,8 @@ export class ViewLayerController {
     private interactionFilterPlan(
         style: ErdblickStyle,
         mapgetLayer: MapgetLayer,
-        mode: typeof coreLib.HighlightMode.SELECTION_HIGHLIGHT
+        mode: typeof coreLib.HighlightMode.SELECTION_HIGHLIGHT,
+        lod: number
     ): StyleFilterPlan | null {
         let byContext = this.interactionFilterPlanCache.get(style);
         if (!byContext) {
@@ -1226,7 +1284,7 @@ export class ViewLayerController {
         const key = [
             mapgetLayer.key,
             mode.value,
-            coreLib.RuleFidelity.ANY.value
+            lod
         ].join("\n");
         if (byContext.has(key)) {
             return byContext.get(key) ?? null;
@@ -1238,7 +1296,7 @@ export class ViewLayerController {
                 mapgetLayer.mapId,
                 mapgetLayer.layerId,
                 mode.value,
-                coreLib.RuleFidelity.ANY.value
+                lod
             ) as StyleFilterPlan;
             if (candidate.valid && candidate.channels.length) {
                 plan = candidate;
@@ -1450,7 +1508,11 @@ export class ViewLayerController {
 
     /** Track viewport-derived state that can switch targets between local and authored rendering. */
     private interactionViewportSignature(): string {
-        const layers = new Map<string, {mapId: string; layerId: string}>();
+        const layers = new Map<string, {
+            mapId: string;
+            layerId: string;
+            tileId: number;
+        }>();
         const features = [
             ...this.inspection.selectionIdsTopic.getValue()
                 .flatMap(panel => panel.features),
@@ -1461,30 +1523,52 @@ export class ViewLayerController {
             if (!parsed) {
                 continue;
             }
-            layers.set(`${parsed.mapId}\n${parsed.layerId}`, parsed);
+            const key = `${parsed.mapId}\n${parsed.layerId}`;
+            if (!layers.has(key)) {
+                layers.set(key, parsed);
+            }
         }
+        const styles = [...this.styleService.styles.values()]
+            .filter(style => style.visible);
         return [...layers.values()]
             .sort((left, right) =>
                 left.mapId.localeCompare(right.mapId) ||
                 left.layerId.localeCompare(right.layerId))
-            .map(({mapId, layerId}) => {
+            .map(({mapId, layerId, tileId}) => {
                 const visible = this.mapInfo.maps.getMapLayerVisibility(
                     this.viewIndex,
                     mapId,
                     layerId
                 );
-                return [
+                const visibleLevel = visible
+                    ? this.viewState.getEffectiveMapLayerLevel(
+                        this.viewIndex,
+                        mapId,
+                        layerId
+                    )
+                    : -1;
+                const targetLevel = Number(coreLib.getTileLevel(tileId));
+                const parts: Array<string | number> = [
                     mapId,
                     layerId,
                     visible ? 1 : 0,
-                    visible
-                        ? this.viewState.getEffectiveMapLayerLevel(
+                    visibleLevel,
+                    targetLevel
+                ];
+                for (const style of styles) {
+                    if (!this.hasInteractionLayerAffinity(style, layerId)) {
+                        continue;
+                    }
+                    parts.push(
+                        style.id,
+                        this.viewState.styleLod(
                             this.viewIndex,
-                            mapId,
-                            layerId
+                            targetLevel,
+                            style.featureLayerStyle
                         )
-                        : -1
-                ].join(":");
+                    );
+                }
+                return parts.join(":");
             })
             .join("|");
     }
@@ -1496,14 +1580,14 @@ export class ViewLayerController {
             const retained =
                 owned.layer.tileStates.get(state.tileId) === state &&
                 this.presentationStillDemanded(owned.layer, state);
-            const fidelity = this.presentationFidelity(owned.layer, state);
+            const lod = this.presentationLod(owned.layer, state);
             const lineSimplificationToleranceMeters =
                 this.lineSimplificationToleranceMeters();
             const terminalIncomplete = state.status === "error";
+            visualization.setLod(lod);
             if (!retained || terminalIncomplete ||
                 !visualization.hasSameState(
                     state,
-                    fidelity,
                     lineSimplificationToleranceMeters
                 )) {
                 this.replaceVisualization(owned, key, true);
@@ -1550,10 +1634,10 @@ export class ViewLayerController {
             this.enqueueTile(owned, state);
             return;
         }
-        const fidelity = this.presentationFidelity(owned.layer, state);
+        const lod = this.presentationLod(owned.layer, state);
+        visualization.setLod(lod);
         if (!visualization.hasSameState(
             state,
-            fidelity,
             this.lineSimplificationToleranceMeters()
         )) {
             this.replaceVisualization(owned, existingKey, true);
@@ -1571,7 +1655,7 @@ export class ViewLayerController {
         const previous = owned.pendingTiles.get(state.tileId);
         owned.pendingTiles.set(state.tileId, {
             state,
-            fidelity: this.presentationFidelity(owned.layer, state),
+            lod: this.presentationLod(owned.layer, state),
             lineSimplificationToleranceMeters:
                 this.lineSimplificationToleranceMeters(),
             preservedContributionIdentity:
@@ -1672,7 +1756,6 @@ export class ViewLayerController {
             owned.pendingTiles.delete(tileId);
             const visualizationKey = [
                 `tile-${tileId}`,
-                `f${pending.fidelity}`,
                 `s${pending.lineSimplificationToleranceMeters}`
             ].join("/");
             const visualization = new TileSubsetLayerVisualization(
@@ -1682,7 +1765,7 @@ export class ViewLayerController {
                 tileCoordinateOrigin(tileId),
                 this.renderService,
                 this.styleValidationReports,
-                pending.fidelity,
+                pending.lod,
                 pending.lineSimplificationToleranceMeters,
                 this.viewIndex,
                 item => this.queueVisualizationRender(item)
@@ -1827,20 +1910,19 @@ export class ViewLayerController {
             );
     }
 
-    /** Resolve the fixed worker fidelity used by one presentation owner. */
-    private presentationFidelity(
+    /** Resolve the current GPU LOD independently of an owner's immutable filter plan. */
+    private presentationLod(
         layer: StyledMapgetLayer,
         state: FilterTileState
     ): number {
-        if (layer.identity.presentationKind === "search") {
-            return coreLib.RuleFidelity.HIGH.value;
+        if (layer.identity.presentationKind !== "regular") {
+            return MAX_STYLE_LOD;
         }
-        if (layer.identity.presentationKind === "regular" &&
-            layer.plannedFidelity.value !==
-                coreLib.RuleFidelity.ANY.value) {
-            return layer.plannedFidelity.value;
-        }
-        return this.fidelityFor(state.tileId);
+        return this.viewState.styleLod(
+            this.viewIndex,
+            Number(coreLib.getTileLevel(state.tileId)),
+            layer.featureLayerStyle
+        );
     }
 
     /** Return the view's quantized line LOD without coupling it to tile state. */

@@ -1,9 +1,5 @@
 import type {Viewport} from "../../build/libs/core/erdblick-core";
 import {coreLib} from "../integrations/wasm";
-import {
-    clampLowFiTileThreshold,
-    DEFAULT_LOW_FI_TILE_THRESHOLD
-} from "../shared/tile-render-policy";
 
 export const DEFAULT_VIEWPORT: Viewport = {
     south: 0,
@@ -14,10 +10,6 @@ export const DEFAULT_VIEWPORT: Viewport = {
     camPosLat: 0,
     orientation: 0
 };
-
-export interface TileRenderPolicy {
-    targetFidelity: "low" | "high";
-}
 
 const LINE_SIMPLIFICATION_ERROR_PIXELS = 0.25;
 const MIN_LINE_SIMPLIFICATION_TOLERANCE_METERS = 0.0625;
@@ -44,18 +36,6 @@ export function lineSimplificationToleranceMeters(
     );
 }
 
-function tileRenderPolicyForCount(
-    tileCount: number,
-    lowFiTileThreshold: number
-): TileRenderPolicy {
-    return {
-        targetFidelity: tileCount <
-            clampLowFiTileThreshold(lowFiTileThreshold)
-            ? "high"
-            : "low"
-    };
-}
-
 function tileIdSetsEqual(
     left: ReadonlySet<number> | undefined,
     right: ReadonlySet<number> | undefined
@@ -65,7 +45,7 @@ function tileIdSetsEqual(
         [...left].every(tileId => right.has(tileId));
 }
 
-/** Per-view visible coverage and stylesheet fidelity decisions. */
+/** Per-view visible coverage and canonical density inputs for stylesheet LOD. */
 export class ViewVisualizationState {
     viewport: Viewport = DEFAULT_VIEWPORT;
     canonicalCameraAltitudeMeters: number | null = null;
@@ -76,20 +56,19 @@ export class ViewVisualizationState {
     visibleTileIdSetsPerLevel = new Map<number, Set<number>>();
     searchVisibleTileIdsPerLevel = new Map<number, number[]>();
     searchVisibleTileIdSetsPerLevel = new Map<number, Set<number>>();
-    tileRenderPolicy = new Map<number, TileRenderPolicy>();
+    canonicalVisibleTileCountPerLevel = new Map<number, number>();
     tileOrder = new Map<number, number>();
     coverageVersion = 0;
 
     recalculateTileIds(
         tileLimit: number,
         levels: Iterable<number>,
-        canonicalCameraAltitudeMeters: number,
-        lowFiTileThreshold = DEFAULT_LOW_FI_TILE_THRESHOLD
+        canonicalCameraAltitudeMeters: number
     ): void {
         const visibleTileIds = new Set<number>();
         const visibleTileIdsPerLevel = new Map<number, number[]>();
         const visibleTileIdSetsPerLevel = new Map<number, Set<number>>();
-        const tileRenderPolicy = new Map<number, TileRenderPolicy>();
+        const canonicalVisibleTileCountPerLevel = new Map<number, number>();
         const tileOrder = new Map<number, number>();
         const nextLineSimplificationToleranceMeters =
             lineSimplificationToleranceMeters(this.metersPerPixel);
@@ -112,12 +91,8 @@ export class ViewVisualizationState {
                     canonicalCameraAltitudeMeters,
                     level
                 );
-            const policy = tileRenderPolicyForCount(
-                canonicalTileCount,
-                lowFiTileThreshold
-            );
+            canonicalVisibleTileCountPerLevel.set(level, canonicalTileCount);
             tileIds.forEach((tileId, order) => {
-                tileRenderPolicy.set(tileId, policy);
                 tileOrder.set(tileId, order);
             });
         }
@@ -129,31 +104,22 @@ export class ViewVisualizationState {
                 !tileIdSetsEqual(
                     tileIds,
                     this.visibleTileIdSetsPerLevel.get(level)
-                ) ||
-                [...tileIds].some(tileId =>
-                    tileRenderPolicy.get(tileId)?.targetFidelity !==
-                    this.tileRenderPolicy.get(tileId)?.targetFidelity
                 )
             );
         this.searchVisibleTileIdsPerLevel = new Map();
         this.searchVisibleTileIdSetsPerLevel = new Map();
+        this.canonicalVisibleTileCountPerLevel =
+            canonicalVisibleTileCountPerLevel;
         if (!coverageChanged) {
             return;
         }
         this.visibleTileIds = visibleTileIds;
         this.visibleTileIdsPerLevel = visibleTileIdsPerLevel;
         this.visibleTileIdSetsPerLevel = visibleTileIdSetsPerLevel;
-        this.tileRenderPolicy = tileRenderPolicy;
         this.tileOrder = tileOrder;
         this.lineSimplificationToleranceMeters =
             nextLineSimplificationToleranceMeters;
         this.coverageVersion += 1;
-    }
-
-    getTileRenderPolicy(tileId: number): TileRenderPolicy {
-        return this.tileRenderPolicy.get(tileId) ?? {
-            targetFidelity: "low"
-        };
     }
 
     getTileOrder(tileId: number): number {

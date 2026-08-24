@@ -29,13 +29,13 @@ namespace erdblick
 class TileSubsetLayerRenderer
 {
 public:
-    /** Bind one immutable style/fidelity context; geometry arrives separately. */
+    /** Bind one immutable style/LOD context; geometry arrives separately. */
     TileSubsetLayerRenderer(
         int viewIndex,
         std::string const& mapTileKey,
         FeatureLayerStyle const& style,
         int highlightMode,
-        int fidelity);
+        int lod);
     /** Release native packet, bridge, and semantic metadata owned by this run. */
     ~TileSubsetLayerRenderer();
 
@@ -499,6 +499,7 @@ private:
         mapget::Point const& point,
         std::string const& text,
         FeatureStyleRule const& rule,
+        BoundEvalFun const& evalFun,
         double zIndex,
         uint32_t pickIndex);
 
@@ -507,7 +508,7 @@ private:
 
     FeatureLayerStyle const& style_;
     FeatureStyleRule::HighlightMode highlightMode_;
-    FeatureStyleRule::Fidelity fidelity_;
+    uint8_t lod_ = FeatureStyleRule::kMinimumLod;
     mapget::TileSubsetLayer::Ptr subset_;
     GpuContributionContext gpuContributionContext_;
     BridgeBuffers bridgeBuffers_;

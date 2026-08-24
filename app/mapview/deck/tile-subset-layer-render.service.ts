@@ -74,7 +74,7 @@ export interface TileSubsetLayerRenderRequest {
     styleKey: string;
     styleSource: string;
     highlightModeValue: number;
-    fidelityValue: number;
+    lod: number;
     lineSimplificationToleranceMeters: number;
 }
 

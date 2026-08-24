@@ -139,7 +139,7 @@ function rendererFor(task: TileSubsetLayerRenderTask): any {
     const key = JSON.stringify([
         task.styleKey,
         task.highlightModeValue,
-        task.fidelityValue
+        task.lod
     ]);
     const cached = rendererCache.get(key);
     if (cached) {
@@ -160,7 +160,7 @@ function rendererFor(task: TileSubsetLayerRenderTask): any {
         task.renderKey,
         styleFor(task.styleKey, task.styleSource),
         task.highlightModeValue,
-        task.fidelityValue
+        task.lod
     );
     rendererCache.set(key, renderer);
     return renderer;

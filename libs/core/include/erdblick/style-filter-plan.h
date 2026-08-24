@@ -43,7 +43,7 @@ StyleFilterPlan planStyleFilter(
     FeatureLayerStyle const& style,
     mapget::LayerInfo const& layerInfo,
     FeatureStyleRule::HighlightMode highlightMode,
-    FeatureStyleRule::Fidelity fidelity);
+    uint8_t lod);
 
 /**
  * Expand Erdblick-only expression conveniences to their generic server form.

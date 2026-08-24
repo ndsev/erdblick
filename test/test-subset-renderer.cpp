@@ -240,6 +240,23 @@ public:
         return result;
     }
 
+    /** Decode the packed minimum style LOD from every logical label. */
+    [[nodiscard]] std::vector<uint8_t> labelMinimumLods() const
+    {
+        auto const table = read<uint32_t>(112U);
+        auto const count = read<uint32_t>(116U);
+        std::vector<uint8_t> result;
+        result.reserve(count);
+        for (uint32_t index = 0U; index < count; ++index) {
+            auto const flags = read<uint32_t>(
+                table + index * 120U + 96U);
+            result.push_back(static_cast<uint8_t>(
+                (flags & kGpuLabelMinimumLodMask) >>
+                kGpuLabelMinimumLodShift));
+        }
+        return result;
+    }
+
     /** Decode parsed font sizes from every logical label. */
     [[nodiscard]] std::vector<float> labelSizes() const
     {
@@ -495,7 +512,11 @@ TEST_CASE(
     auto featureId = subset->newFeatureId(
         "Road",
         {{"roadId", int64_t{7}}});
-    std::vector<std::string> featureFields{"roadClass", "drawOrder"};
+    std::vector<std::string> featureFields{
+        "roadClass",
+        "drawOrder",
+        "detailLod",
+    };
     auto channel = subset->newChannel(
         "style-rule:0",
         mapget::Scope::Feature,
@@ -505,6 +526,7 @@ TEST_CASE(
     std::vector<simfil::ModelNode::Ptr> featureValues{
         subset->newValue(int64_t{2}),
         subset->newValue(int64_t{17}),
+        subset->newValue(4.2),
     };
     channel->newFeatureEntry(
         featureId,
@@ -520,6 +542,7 @@ rules:
     geometry-name: centerline
     width: 4
     z-index-expression: drawOrder
+    min-lod-expression: detailLod
     glow: {color: "#102030", radius: 5, opacity: 0.5}
     color-scale:
       mode: categorical
@@ -543,7 +566,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
@@ -559,7 +582,9 @@ rules:
         GpuMaterialFlag::SimplePath)) != 0U);
     auto const record = pathStream.dataOffset;
     REQUIRE(packet.read<float>(record + 24U) == 6.0F);
-    REQUIRE(packet.read<uint32_t>(record + 36U) == 0U);
+    auto const packedLocalZIndex = packet.read<uint32_t>(record + 28U);
+    REQUIRE((packedLocalZIndex & kGpuLocalZIndexMask) == 0U);
+    REQUIRE((packedLocalZIndex >> kGpuMinimumLodShift) == 5U);
     REQUIRE(packet.zIndices(0U) == std::vector<double>{17.0});
     REQUIRE(packet.read<uint8_t>(record + 32U) == 0U);
     REQUIRE(packet.read<uint8_t>(record + 33U) == 255U);
@@ -591,7 +616,7 @@ rules:
         "z13/d1/p0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     installSubset(duplicateRenderer, TileSubsetLayer(subset));
     REQUIRE_THROWS_AS(
         installSubset(duplicateRenderer, TileSubsetLayer(subset)),
@@ -649,7 +674,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
@@ -713,7 +738,7 @@ rules:
             "Features:TestMap:Road:0",
             style,
             static_cast<int>(FeatureStyleRule::NoHighlight),
-            static_cast<int>(FeatureStyleRule::AnyFidelity));
+            FeatureStyleRule::kMaximumLod);
         renderer.setCoordinateOrigin(
             originLongitude,
             originLatitude,
@@ -816,7 +841,7 @@ rules:
             "Features:TestMap:Road:0",
             style,
             static_cast<int>(FeatureStyleRule::NoHighlight),
-            static_cast<int>(FeatureStyleRule::AnyFidelity));
+            FeatureStyleRule::kMaximumLod);
         installSubset(renderer, TileSubsetLayer(subset));
         renderer.run();
         return RendererPacketView(renderer).depthTieKeys(0U);
@@ -884,7 +909,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
@@ -933,7 +958,7 @@ rules:
         "Features:TestMap:Road:0",
         splitStyle,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     installSubset(splitRenderer, TileSubsetLayer(subset));
     splitRenderer.run();
 
@@ -1017,7 +1042,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     renderer.setCoordinateOrigin(11.0, 48.0, 0.0);
     renderer.setLineSimplificationTolerance(5.0);
     installSubset(renderer, TileSubsetLayer(subset));
@@ -1083,7 +1108,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
@@ -1127,7 +1152,7 @@ TEST_CASE(
     auto road1 = subset->newFeatureId("Road", {{"roadId", int64_t{1}}});
     auto road2 = subset->newFeatureId("Road", {{"roadId", int64_t{2}}});
     auto road3 = subset->newFeatureId("Road", {{"roadId", int64_t{3}}});
-    std::vector<std::string> endpointFields{"endpointLabel"};
+    std::vector<std::string> endpointFields{"endpointLabel", "4"};
     auto channel = subset->newChannel(
         "style-rule:0",
         mapget::Scope::Relation,
@@ -1139,6 +1164,7 @@ TEST_CASE(
                         double longitude) {
         std::vector<simfil::ModelNode::Ptr> values{
             subset->newValue(label),
+            subset->newValue(int64_t{4}),
         };
         return channel->newFeatureEntry(
             featureId,
@@ -1189,6 +1215,7 @@ rules:
       billboard: true
       label-font: "800 7px Helvetica Neue"
       label-text-expression: endpointLabel
+      min-lod-expression: 4
       label-horizontal-origin: LEFT
       label-vertical-origin: ABOVE
     relation-target-style:
@@ -1198,6 +1225,7 @@ rules:
       billboard: true
       label-font: "800 7px Helvetica Neue"
       label-text-expression: endpointLabel
+      min-lod-expression: 4
       label-horizontal-origin: LEFT
       label-vertical-origin: ABOVE
 )yaml");
@@ -1208,7 +1236,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
@@ -1222,6 +1250,7 @@ rules:
     REQUIRE(packet.labelFontFamilies() ==
         std::vector<std::string>(3U, "Helvetica Neue"));
     REQUIRE(packet.labelFontWeights() == std::vector<uint32_t>(3U, 800U));
+    REQUIRE(packet.labelMinimumLods() == std::vector<uint8_t>(3U, 4U));
     REQUIRE(packet.labelOrigins() ==
         std::vector<std::pair<int32_t, int32_t>>(3U, {-1, 1}));
 }
@@ -1313,7 +1342,7 @@ rules:
             "Features:TestMap:Road:0",
             style,
             static_cast<int>(mode),
-            static_cast<int>(FeatureStyleRule::AnyFidelity));
+            FeatureStyleRule::kMaximumLod);
         renderer.setCoordinateOrigin(11.0, 48.0, 0.0);
         installSubset(renderer, TileSubsetLayer(subset));
         renderer.run();
@@ -1424,7 +1453,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     renderer.setCoordinateOrigin(11.0, 48.0, 0.0);
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
@@ -1516,7 +1545,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     renderer.setCoordinateOrigin(11.0, 48.0, 0.0);
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
@@ -1607,7 +1636,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
@@ -1692,7 +1721,7 @@ rules:
             "Features:TestMap:Road:0",
             style,
             static_cast<int>(mode),
-            static_cast<int>(FeatureStyleRule::AnyFidelity));
+            FeatureStyleRule::kMaximumLod);
         installSubset(renderer, TileSubsetLayer(subset));
         renderer.run();
 
@@ -1790,7 +1819,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
@@ -1867,7 +1896,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
@@ -2031,7 +2060,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
     RendererPacketView packet(renderer);
@@ -2166,16 +2195,16 @@ rules:
 }
 
 TEST_CASE(
-    "TileSubsetLayerRenderer silently skips an inactive fidelity channel",
+    "TileSubsetLayerRenderer silently skips an inactive LOD channel",
     "[erdblick.subset-renderer]")
 {
     auto info = rendererLayerInfo();
     auto strings = std::make_shared<mapget::StringPool>(
-        "SubsetRendererFidelityPool");
+        "SubsetRendererLodPool");
     auto tileId = mapget::TileId::fromWgs84(11.0, 48.0, 13);
     auto subset = std::make_shared<mapget::TileSubsetLayer>(
         tileId,
-        "SubsetRendererFidelityPool",
+        "SubsetRendererLodPool",
         "TestMap",
         info,
         strings,
@@ -2196,7 +2225,7 @@ TEST_CASE(
         {});
 
     auto style = rendererStyle(R"yaml(
-name: FidelitySwitch
+name: LodSwitch
 version: 2
 rules:
   - type: Road
@@ -2212,7 +2241,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::HighFidelity));
+        FeatureStyleRule::kMaximumLod);
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 
@@ -2265,7 +2294,7 @@ rules:
         "Features:TestMap:Road:0",
         style,
         static_cast<int>(FeatureStyleRule::NoHighlight),
-        static_cast<int>(FeatureStyleRule::AnyFidelity));
+        FeatureStyleRule::kMaximumLod);
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
 

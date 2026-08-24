@@ -17,6 +17,8 @@ namespace erdblick
 {
 
 inline constexpr uint32_t kGpuUnselectable = 0xffffffffU;
+inline constexpr uint32_t kGpuLocalZIndexMask = 0x1fffffffU;
+inline constexpr uint32_t kGpuMinimumLodShift = 29U;
 // The scene allocator uses power-of-two tie buckets up to this fixed limit.
 // Retaining any higher hash bits in packet metadata cannot affect rendering.
 inline constexpr uint32_t kGpuDepthTieBucketCount = 32U;
@@ -59,6 +61,7 @@ struct GpuRecordStyle {
     GpuSemanticZIndexRole semanticZIndexRole = GpuSemanticZIndexRole::None;
     uint32_t localPickIndex = kGpuUnselectable;
     uint32_t renderOrder = 0U;
+    uint8_t minimumLod = 0U;
 };
 
 /** Final point-instance values before explicit byte packing. */

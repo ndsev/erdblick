@@ -12,17 +12,21 @@ import {
 } from "../shared/appstate.service";
 import {RenderRectangle} from "./render-view.model";
 import {ViewVisualizationState} from "./view.visualization.model";
-import {Viewport} from "../../build/libs/core/erdblick-core";
+import type {
+    FeatureLayerStyle,
+    Viewport
+} from "../../build/libs/core/erdblick-core";
 import {
     autoTileGridLevel,
     coarsenedTileLevel,
     tileGridVisibleCellCount
 } from "./tile-grid-visibility";
+import {clampStyleLod} from "../shared/lod-policy";
 
 export enum ViewRecalculationReason {
     AutoLevel = "auto-level",
     BackgroundSync = "background-sync",
-    FidelityThreshold = "fidelity-threshold",
+    LodThreshold = "lod-threshold",
     HoverPopover = "hover-popover",
     LayerLevel = "layer-level",
     NumViews = "num-views",
@@ -74,8 +78,8 @@ export class MapViewStateService {
             this.mapInfo.reapplySyncOptionsForAllViews();
             this.requestViewRecalculation(ViewRecalculationReason.NumViews);
         });
-        this.stateService.lowFiTileThresholdState.subscribe(() =>
-            this.requestViewRecalculation(ViewRecalculationReason.FidelityThreshold));
+        this.stateService.lod3TileThresholdState.subscribe(() =>
+            this.requestViewRecalculation(ViewRecalculationReason.LodThreshold));
         this.mapInfo.layerStateChanged.subscribe(reason => this.requestViewRecalculation(reason));
     }
 
@@ -168,15 +172,27 @@ export class MapViewStateService {
                 this.visibleFeatureLevelsInView(viewIndex),
                 state.canonicalCameraAltitudeMeters ??
                     this.stateService.cameraViewDataState
-                        .getValue(viewIndex).destination.alt,
-                this.stateService.lowFiTileThreshold
+                        .getValue(viewIndex).destination.alt
             );
         });
     }
 
-    /** Returns whether a view currently wants high-fidelity geometry for a tile id. */
-    prefersHighFidelityForTile(viewIndex: number, tileId: number): boolean {
-        return this.viewVisualizationState[viewIndex]?.getTileRenderPolicy(tileId).targetFidelity === "high";
+    /** Resolve one stylesheet's LOD from canonical viewport density at a tile level. */
+    styleLod(
+        viewIndex: number,
+        level: number,
+        style: FeatureLayerStyle
+    ): number {
+        const state = this.viewVisualizationState[viewIndex];
+        const altitude = state?.canonicalCameraAltitudeMeters ??
+            this.stateService.cameraViewDataState
+                .getValue(viewIndex).destination.alt;
+        const tileCount = state?.canonicalVisibleTileCountPerLevel.get(level) ??
+            Number(coreLib.getNumTileIdsForCanonicalCamera(altitude, level));
+        return clampStyleLod(style.lodForVisibleTileCount(
+            tileCount,
+            this.stateService.lod3TileThreshold
+        ));
     }
 
     /** Returns whether search-result geometry should be rendered for one visible source tile. */

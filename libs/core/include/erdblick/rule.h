@@ -7,6 +7,7 @@
 
 #include "color.h"
 
+#include <cstdint>
 #include <functional>
 #include <regex>
 #include <variant>
@@ -78,11 +79,13 @@ public:
         SelectionHighlight
     };
 
-    /** Restricts the rule to a specific fidelity mode or lets the caller choose. */
-    enum Fidelity {
-        AnyFidelity,
-        HighFidelity,
-        LowFidelity
+    static constexpr uint8_t kMinimumLod = 0U;
+    static constexpr uint8_t kMaximumLod = 7U;
+
+    /** Inclusive stylesheet-level range in which one top-level rule is active. */
+    struct LodRange {
+        uint8_t minimum = kMinimumLod;
+        uint8_t maximum = kMaximumLod;
     };
 
     /** Describes whether polylines should receive directional arrow heads. */
@@ -153,8 +156,12 @@ public:
     [[nodiscard]] bool supportsMode(HighlightMode mode) const;
     /** Return the bit mask of all highlight passes this rule participates in. */
     [[nodiscard]] uint32_t highlightModesMask() const;
-    /** Return the fidelity mode requested by the rule. */
-    [[nodiscard]] Fidelity fidelity() const;
+    /** Return the inclusive LOD range in which this top-level rule participates. */
+    [[nodiscard]] LodRange const& lodRange() const;
+    /** Report whether this rule participates in one integer LOD. */
+    [[nodiscard]] bool supportsLod(uint8_t lod) const;
+    /** Resolve the first integer LOD at which this concrete emitted entry is visible. */
+    [[nodiscard]] uint8_t minimumLod(BoundEvalFun const& evalFun) const;
     /** Report whether geometry emitted by this rule may be selected in the UI. */
     [[nodiscard]] bool selectable() const;
     /** Check whether this rule can emit the given named geometry. */
@@ -366,7 +373,8 @@ public:
 private:
     Scope scope_ = Feature;
     uint32_t highlightModesMask_ = 1U << NoHighlight;
-    Fidelity fidelity_ = AnyFidelity;
+    LodRange lodRange_{};
+    std::string minimumLodExpression_;
     bool selectable_ = true;
     uint32_t geometryTypes_ = 0;  // bitfield from GeomType enum
     std::optional<std::string> geometryName_;

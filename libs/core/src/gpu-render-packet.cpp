@@ -43,7 +43,8 @@ constexpr uint32_t kKnownLabelFlags =
     static_cast<uint32_t>(GpuLabelFlag::Billboard) |
     static_cast<uint32_t>(GpuLabelFlag::DepthTest) |
     static_cast<uint32_t>(GpuLabelFlag::Background) |
-    static_cast<uint32_t>(GpuLabelFlag::Collision);
+    static_cast<uint32_t>(GpuLabelFlag::Collision) |
+    kGpuLabelMinimumLodMask;
 
 /** One validated byte interval inside an untrusted packet. */
 struct PacketRange {
@@ -754,7 +755,15 @@ std::vector<std::byte> GpuRenderPacketCodec::encode(
         writer.put(offset + 84U, label.outlineWidth);
         writer.put(offset + 88U, label.backgroundPadding[0]);
         writer.put(offset + 92U, label.backgroundPadding[1]);
-        writer.put(offset + 96U, label.flags);
+        if (label.minimumLod > 7U) {
+            throw std::invalid_argument(
+                "GpuRenderPacket label minimum LOD is invalid.");
+        }
+        writer.put(
+            offset + 96U,
+            label.flags |
+                (static_cast<uint32_t>(label.minimumLod) <<
+                 kGpuLabelMinimumLodShift));
         writer.put(offset + 100U, label.horizontalOrigin);
         writer.put(offset + 104U, label.verticalOrigin);
         writer.put(offset + 108U, label.renderOrder);

@@ -413,6 +413,22 @@ public:
         return index;
     }
 
+    /** Pack one record's z-index slot and minimum LOD into their shared word. */
+    [[nodiscard]] uint32_t localZIndexWord(GpuRecordStyle const& style)
+    {
+        auto const localZIndex = zIndexSlot(
+            style.zIndex,
+            style.depthTieKey,
+            style.semanticGroup);
+        if (localZIndex > kGpuLocalZIndexMask || style.minimumLod > 7U) {
+            throw std::length_error(
+                "GPU record LOD or local z-index exceeds its packed ABI field.");
+        }
+        return localZIndex |
+            (static_cast<uint32_t>(style.minimumLod) <<
+             kGpuMinimumLodShift);
+    }
+
     /** Pack z-order, color, ownership, picking, and activation fields. */
     void appendCommon(
         std::vector<std::byte>& bytes,
@@ -427,10 +443,7 @@ public:
             throw std::logic_error(
                 "GPU record flags or activation token exceed their packed ABI fields.");
         }
-        appendScalar(bytes, zIndexSlot(
-            style.zIndex,
-            style.depthTieKey,
-            style.semanticGroup));
+        appendScalar(bytes, localZIndexWord(style));
         appendColor(bytes, style.color);
         appendScalar(bytes, packet.origin.slot);
         appendScalar(bytes, contribution().slot);
@@ -691,10 +704,7 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
     auto const trimPixels = std::max(
         0.0F,
         arrowPixels * 0.9375F - kArrowShaftOverlapPixels);
-    auto const zIndexSlot = impl_->zIndexSlot(
-        path.style.zIndex,
-        path.style.depthTieKey,
-        path.style.semanticGroup);
+    auto const localZIndexWord = impl_->localZIndexWord(path.style);
     auto const& contribution = impl_->contribution();
     auto const activationToken = contribution.activationToken;
     if (activationToken == 0U || activationToken > kGpuActivationTokenMax) {
@@ -705,7 +715,7 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
         overwritePoint3(bytes, firstByte, path.points.front());
         overwritePoint3(bytes, firstByte + 12U, path.points.back());
         overwriteScalar(bytes, firstByte + 24U, path.width);
-        overwriteScalar(bytes, firstByte + 28U, zIndexSlot);
+        overwriteScalar(bytes, firstByte + 28U, localZIndexWord);
         std::memcpy(
             bytes.data() + static_cast<std::ptrdiff_t>(firstByte + 32U),
             path.style.color.data(),
@@ -748,7 +758,7 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
                     ? path.points[segment + 2U]
                     : path.points[segment + 1U]);
             overwriteScalar(bytes, start + 48U, path.width);
-            overwriteScalar(bytes, start + 52U, zIndexSlot);
+            overwriteScalar(bytes, start + 52U, localZIndexWord);
             std::memcpy(
                 bytes.data() + static_cast<std::ptrdiff_t>(start + 56U),
                 path.style.color.data(),
@@ -857,7 +867,7 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
         recordFlags |= meterDashes
             ? pathBits(GpuPathRecordFlag::DashMeters)
             : 0U;
-        overwriteScalar(bytes, start + 124U, zIndexSlot);
+        overwriteScalar(bytes, start + 124U, localZIndexWord);
         std::memcpy(
             bytes.data() + static_cast<std::ptrdiff_t>(start + 128U),
             path.style.color.data(),

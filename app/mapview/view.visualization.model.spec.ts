@@ -6,30 +6,24 @@ import {
 } from "./view.visualization.model";
 
 describe("ViewVisualizationState", () => {
-    it("selects stylesheet fidelity from the configured tile threshold", () => {
+    it("retains canonical tile density separately from visible coverage", () => {
         const state = new ViewVisualizationState();
         const getTileIds = vi.spyOn(coreLib as any, "getTileIds")
-            .mockImplementation((...args: unknown[]) =>
-                Number(args[1]) === 4 ? [40] : [50]
-            );
+            .mockReturnValue([40]);
         const getCanonicalCount = vi.spyOn(
             coreLib as any,
             "getNumTileIdsForCanonicalCamera"
-        ).mockImplementation((...args: unknown[]) =>
-            Number(args[1]) === 4 ? 127 : 128
-        );
+        ).mockReturnValueOnce(127).mockReturnValueOnce(128);
         try {
-            state.recalculateTileIds(512, [4, 5], 1234, 128);
+            state.recalculateTileIds(512, [4], 1234);
+            const version = state.coverageVersion;
+            state.recalculateTileIds(512, [4], 1200);
+            expect(state.coverageVersion).toBe(version);
         } finally {
             getTileIds.mockRestore();
             getCanonicalCount.mockRestore();
         }
-        expect(state.getTileRenderPolicy(40)).toEqual({
-            targetFidelity: "high"
-        });
-        expect(state.getTileRenderPolicy(50)).toEqual({
-            targetFidelity: "low"
-        });
+        expect(state.canonicalVisibleTileCountPerLevel.get(4)).toBe(128);
     });
 
     it("deduplicates levels and keeps stable request order", () => {
@@ -72,12 +66,6 @@ describe("ViewVisualizationState", () => {
         }
         expect(state.visibleTileIdsPerLevel.get(6)).toEqual([7, 3]);
         expect(state.getTileOrder(7)).toBe(0);
-    });
-
-    it("uses conservative low fidelity for unknown tiles", () => {
-        expect(new ViewVisualizationState().getTileRenderPolicy(1)).toEqual({
-            targetFidelity: "low"
-        });
     });
 
     it("quantizes sub-pixel line simplification without camera-motion churn", () => {

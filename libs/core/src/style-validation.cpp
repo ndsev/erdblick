@@ -1,11 +1,13 @@
 #include "style-validation.h"
 
 #include "color.h"
+#include "rule.h"
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/simfilutil.h"
 #include "simfil/simfil.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cctype>
 #include <cmath>
@@ -331,6 +333,55 @@ bool validateVectorSize(
         }
     }
     return true;
+}
+
+/** Validate one inclusive two-value integer LOD range. */
+bool validateLodRange(
+    YAML::Node const& parent,
+    std::string const& rulePath,
+    StyleValidationReport& report,
+    uint32_t ruleIndex)
+{
+    auto const node = parent["lod-range"];
+    if (!node.IsDefined()) {
+        return true;
+    }
+    auto reject = [&](std::string message, YAML::Node const& location) {
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            std::move(message),
+            locationForNode(location));
+        issue.ruleIndex = ruleIndex;
+        issue.rulePath = rulePath;
+        issue.property = "lod-range";
+        return false;
+    };
+    if (!node.IsSequence() || node.size() != 2U) {
+        return reject(
+            "lod-range must be an inclusive [minimum, maximum] pair.",
+            node);
+    }
+    std::array<uint32_t, 2> range{};
+    for (size_t index = 0; index < range.size(); ++index) {
+        try {
+            range[index] = node[index].as<uint32_t>();
+        }
+        catch (YAML::Exception const&) {
+            return reject(
+                "lod-range entries must be integers from 0 through 7.",
+                node[index]);
+        }
+        if (range[index] > FeatureStyleRule::kMaximumLod) {
+            return reject(
+                "lod-range entries must be integers from 0 through 7.",
+                node[index]);
+        }
+    }
+    return range[0] <= range[1] || reject(
+        "lod-range minimum must not exceed its maximum.",
+        node);
 }
 
 std::optional<size_t> findScalarOffset(YAML::Node const& node, std::string const& source)
@@ -1075,6 +1126,44 @@ bool validateTopLevelStyleYaml(YAML::Node const& styleYaml, StyleValidationRepor
         }
     }
 
+    auto const lodThresholds = styleYaml["lod-thresholds"];
+    if (lodThresholds.IsDefined()) {
+        auto rejectThresholds = [&](std::string message, YAML::Node const& node) {
+            auto& issue = report.addIssue(
+                "error",
+                "schema",
+                "stylesheet-failed",
+                std::move(message),
+                locationForNode(node));
+            issue.property = "lod-thresholds";
+            report.markStylesheetFailed();
+            return false;
+        };
+        if (!lodThresholds.IsSequence() || lodThresholds.size() != 7U) {
+            return rejectThresholds(
+                "lod-thresholds must contain seven descending positive tile counts.",
+                lodThresholds);
+        }
+        uint32_t previous = std::numeric_limits<uint32_t>::max();
+        for (auto const& threshold : lodThresholds) {
+            uint32_t value = 0U;
+            try {
+                value = threshold.as<uint32_t>();
+            }
+            catch (YAML::Exception const&) {
+                return rejectThresholds(
+                    "lod-thresholds entries must be positive integers.",
+                    threshold);
+            }
+            if (value == 0U || value >= previous) {
+                return rejectThresholds(
+                    "lod-thresholds must be strictly descending positive integers.",
+                    threshold);
+            }
+            previous = value;
+        }
+    }
+
     auto rules = styleYaml["rules"];
     if (!rules || !rules.IsSequence()) {
         report.addIssue(
@@ -1338,6 +1427,7 @@ bool validateStyleRuleYamlImpl(
     markInvalid(validateEnumValue(ruleYaml, "scope", {"feature", "relation", "attribute"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValues(ruleYaml, "mode", {"none", "hover", "selection"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "fidelity", {"any", "high", "low"}, rulePath, report, sourceRuleIndex));
+    markInvalid(validateLodRange(ruleYaml, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(ruleYaml, "arrow", {"none", "forward", "backward", "double"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateEnumValue(
         ruleYaml,
@@ -1378,7 +1468,7 @@ bool validateStyleRuleYamlImpl(
         "stage was removed in style schema version 2; select semantic geometry names with geometry-name.");
     rejectRemoved(
         "lod",
-        "lod was removed in style schema version 2; use an explicit feature attribute filter such as FRC/PRC instead.");
+        "lod was removed in style schema version 2; use lod-range or min-lod-expression instead.");
 
     if (context != RuleValidationContext::TopLevel &&
         ruleYaml["scope"].IsDefined())
@@ -1392,6 +1482,39 @@ bool validateStyleRuleYamlImpl(
         issue.ruleIndex = sourceRuleIndex;
         issue.rulePath = rulePath;
         issue.property = "scope";
+        ok = false;
+    }
+
+    if (ruleYaml["fidelity"].IsDefined() &&
+        ruleYaml["lod-range"].IsDefined())
+    {
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            "fidelity and lod-range are alternative authoring forms and cannot be combined.",
+            locationForNode(ruleYaml["lod-range"]));
+        issue.ruleIndex = sourceRuleIndex;
+        issue.rulePath = rulePath;
+        issue.property = "lod-range";
+        ok = false;
+    }
+    if (context != RuleValidationContext::TopLevel &&
+        (ruleYaml["fidelity"].IsDefined() ||
+         ruleYaml["lod-range"].IsDefined()))
+    {
+        auto const property = ruleYaml["lod-range"].IsDefined()
+            ? "lod-range"
+            : "fidelity";
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            "LOD activation is owned by the top-level style rule and cannot change in a nested style tree.",
+            locationForNode(ruleYaml[property]));
+        issue.ruleIndex = sourceRuleIndex;
+        issue.rulePath = rulePath;
+        issue.property = property;
         ok = false;
     }
 
@@ -1503,6 +1626,7 @@ bool validateStyleRuleYamlImpl(
     markInvalid(validateExpression(ruleYaml, "attribute-filter", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "color-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "arrow-expression", false, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateExpression(ruleYaml, "min-lod-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "polygon-height-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "z-index-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "z-index-group-expression", false, rulePath, source, report, sourceRuleIndex));

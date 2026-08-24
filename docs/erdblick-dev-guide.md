@@ -21,7 +21,7 @@ Erdblick owns presentation:
 - view/catalog/presentation lifecycle;
 - render scheduling and Deck buffers;
 - interaction, search UI, inspection, and diagnostics;
-- high/low fidelity style selection.
+- density-driven stylesheet LOD selection.
 
 Complete source feature tiles are not the default browser rendering substrate.
 They cross into Erdblick only through the explicit feature-restricted
@@ -121,7 +121,7 @@ name, and pending/ready/error state.
 Each logical map view owns one controller. It reconciles:
 
 - visible catalog layers and active styles;
-- style options and high/low fidelity;
+- style options and the current integer stylesheet LOD;
 - ordered viewport coverage;
 - search presentations;
 - hover and selection presentations with exact roots;
@@ -255,7 +255,7 @@ rejected.
 
 `ViewLayerController` assembles canonical half-level Morton-prefix rectangles:
 `1x1`, `2x1`, `2x2`, `4x2`, and `4x4`. It chooses the largest ready block
-whose subsets share fidelity and string-pool identity and whose combined
+whose subsets share style-plan ownership and string-pool identity and whose combined
 stored geometry contains at most 16,384 vertices. The 4x4 limit remains the
 hard spatial ceiling; an individual oversized tile is still rendered as a
 singleton.
@@ -421,16 +421,32 @@ it does not mean the source tile is empty. Halo and foreign relation
 dependencies are ignored. With no active regular subset observation,
 occupancy is `unknown`, not empty.
 
-## Styles and fidelity
+## Styles and level of detail
 
-Stylesheets must use `version: 2`. Backend stages and feature LOD do not exist.
-`fidelity: low|high` is an Erdblick presentation choice selected from current
-view density. Both paths use the same complete source data; their rules choose
-semantic geometry names and explicit feature filters.
+Stylesheets must use `version: 2`. Backend stages and the removed scalar
+feature `lod` field do not exist. Erdblick instead derives one stylesheet LOD
+from 0 through 7 from the canonical visible tile count at each layer level.
+Styles may override the seven density thresholds at the document root.
 
-For example, a low-density road style may select `centerline` and filter
-directly on FRC/PRC. A detailed style may select `ADAS`. Mapget treats both
-names and attributes as ordinary model semantics.
+A top-level rule's `lod-range` controls whether that rule participates in the
+mapget filter plan. The controller keys ownership by the resulting plan rather
+than the raw LOD, so adjacent LODs reuse their subscription and rendered
+subsets when the active rule set is unchanged. A real plan change uses the
+normal transactional owner replacement path.
+
+`min-lod-expression` is evaluated per emitted entry and packed into the GPU
+record. Changing LOD then updates the contribution lookup only: no filter
+request, worker render, or geometry upload is needed. Explicit hover and
+selection masks bypass this per-entry gate so hidden base geometry can still
+be located and highlighted.
+
+`fidelity: low|high|any` remains accepted only as YAML shorthand for the
+canonical ranges `[0, 2]`, `[3, 7]`, and `[0, 7]`. No runtime fidelity enum or
+separate low/high render pass exists.
+
+For example, a coarse road rule may select `centerline` and filter directly on
+FRC/PRC, while a detailed rule may select `ADAS`. Mapget treats both names and
+attributes as ordinary model semantics.
 
 See [Style System](erdblick-stylesystem.md).
 

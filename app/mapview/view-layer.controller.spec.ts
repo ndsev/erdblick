@@ -54,6 +54,71 @@ describe("ViewLayerController", () => {
         expect(controller.regularReplacementIsReady).not.toHaveBeenCalled();
     });
 
+    it("retires regular presentation when the current LOD has no active rules", () => {
+        const controller = Object.create(
+            ViewLayerController.prototype
+        ) as any;
+        const style = {
+            id: "style",
+            visible: true,
+            featureLayerStyle: {hasLayerAffinity: vi.fn(() => true)}
+        };
+        const mapgetLayer = {
+            key: "Map/Road",
+            mapId: "Map",
+            layerId: "Road"
+        };
+        const existingLayer = {
+            identity: {presentationKind: "regular"},
+            dispose: vi.fn()
+        };
+        const existing = {
+            layer: existingLayer,
+            subscription: {unsubscribe: vi.fn()},
+            visualizations: new Map(),
+            visualizationKeyByTileId: new Map(),
+            pendingTiles: new Map(),
+            disposeLayer: true,
+            replacementSlot: "Map/Road/regular/style",
+            replacementTileIds: new Set()
+        };
+        controller.mapInfo = {
+            mapgetLayers: () => [mapgetLayer],
+            maps: {
+                getMapLayerVisibility: () => true
+            },
+            planStyleFilter: vi.fn(() => ({
+                valid: true,
+                channels: [],
+                issues: []
+            }))
+        };
+        controller.viewState = {
+            getEffectiveMapLayerLevel: () => 13,
+            visibleTileIdsForLevel: () => [7],
+            styleLod: () => 2
+        };
+        controller.styleService = {styles: new Map([[style.id, style]])};
+        controller.hoverDetails = {reconcileView: vi.fn()};
+        controller.styledLayers = new Map([["previous-owner", existing]]);
+        controller.retiringRegularLayers = new Map();
+        controller.pendingVisualizationRenders = new Set();
+        controller.localInteractionVisualizationsWithOverlays = new Set();
+        controller.featureSearch = {searchStyledLayersForView: () => []};
+        controller.interactionReconcileRequired = false;
+        controller.lastInteractionViewportSignature = "unchanged";
+        controller.interactionViewportSignature = () => "unchanged";
+        controller.occupancyChanged = {next: vi.fn()};
+        controller.diagnostics = {notifyChanged: vi.fn()};
+
+        controller.reconcile();
+
+        expect(controller.styledLayers.size).toBe(0);
+        expect(existing.subscription.unsubscribe).toHaveBeenCalledOnce();
+        expect(existingLayer.dispose).toHaveBeenCalledOnce();
+        expect(controller.retiringRegularLayers.size).toBe(0);
+    });
+
     it("refreshes only non-search presentations for the selected map", () => {
         const controller = Object.create(
             ViewLayerController.prototype
@@ -134,7 +199,7 @@ describe("ViewLayerController", () => {
             layer: {identity: {presentationKind: "regular"}},
             pendingTiles: new Map([[7, {
                 state: {},
-                fidelity: 1,
+                lod: 1,
                 preservedContributionIdentity: "retained-contribution"
             }]])
         };
@@ -154,7 +219,7 @@ describe("ViewLayerController", () => {
         const controller = Object.create(
             ViewLayerController.prototype
         ) as any;
-        controller.presentationFidelity = vi.fn(() => 2);
+        controller.presentationLod = vi.fn(() => 2);
         controller.lineSimplificationToleranceMeters = vi.fn(() => 4);
         controller.schedulePendingTiles = vi.fn();
         const previousState = {tileId: 7};
@@ -163,7 +228,7 @@ describe("ViewLayerController", () => {
             layer: {},
             pendingTiles: new Map([[7, {
                 state: previousState,
-                fidelity: 1,
+                lod: 1,
                 preservedContributionIdentity: "retained-contribution"
             }]])
         };
@@ -172,7 +237,7 @@ describe("ViewLayerController", () => {
 
         expect(owned.pendingTiles.get(7)).toEqual({
             state: nextState,
-            fidelity: 2,
+            lod: 2,
             lineSimplificationToleranceMeters: 4,
             preservedContributionIdentity: "retained-contribution"
         });

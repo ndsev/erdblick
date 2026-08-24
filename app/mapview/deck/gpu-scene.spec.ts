@@ -141,6 +141,7 @@ interface PacketOptions {
   zIndex?: number;
   depthTieKey?: number;
   renderOrder?: number;
+  minimumLod?: number;
 }
 
 /** Aligns the next packet table or stream to the ABI's eight-byte boundary. */
@@ -266,14 +267,22 @@ function pointPacket(
     view.setUint32(labelOffset + 32, 0, true);
     view.setUint32(labelOffset + 36, labelBytes.length, true);
     view.setFloat32(labelOffset + 48, 12, true);
-    view.setUint32(labelOffset + 96, GpuLabelFlag.Billboard, true);
+    view.setUint32(
+      labelOffset + 96,
+      GpuLabelFlag.Billboard | ((options.minimumLod ?? 0) << 8),
+      true,
+    );
     view.setUint32(labelOffset + 112, 400, true);
   }
   bytes.set(strings, stringOffset);
   view.setFloat64(zIndexOffset, options.zIndex ?? Number.NaN, true);
   view.setUint32(zIndexOffset + 8, options.depthTieKey ?? 0, true);
   bytes.fill(options.pointByte ?? 23, recordOffset, recordOffset + POINT_BYTES);
-  view.setUint32(recordOffset + 16, 0, true);
+  view.setUint32(
+    recordOffset + 16,
+    (options.minimumLod ?? 0) << 29,
+    true,
+  );
   view.setUint32(recordOffset + 24, reservation.origin.slot, true);
   view.setUint32(recordOffset + 28, contribution.slot, true);
   view.setUint32(recordOffset + 32, pickCount ? 0 : 0xffffffff, true);
@@ -324,11 +333,13 @@ describe("GpuScene contribution lifecycle", () => {
             identity: "first",
             mapTileKey: "Features:Map:Layer:1:0",
             styleOrder: 0,
+            lod: 7,
           },
           {
             identity: "second",
             mapTileKey: "Features:Map:Layer:2:0",
             styleOrder: 0,
+            lod: 7,
           },
         ],
       ),
@@ -349,6 +360,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity: "failed",
             mapTileKey: "Features:Map:Layer:1:0",
             styleOrder: 0,
+            lod: 7,
           },
         ],
       ),
@@ -381,6 +393,7 @@ describe("GpuScene contribution lifecycle", () => {
           identity: "fragmented",
           mapTileKey: "Features:Map:Layer:1:0",
           styleOrder: 0,
+          lod: 7,
         },
       ],
     );
@@ -447,6 +460,7 @@ describe("GpuScene contribution lifecycle", () => {
           identity: "fragmented",
           mapTileKey: "Features:Map:Layer:1:0",
           styleOrder: 0,
+          lod: 7,
         },
       ],
     );
@@ -478,6 +492,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity: `tile-${index}`,
             mapTileKey: `Features:Map:Layer:${index}:0`,
             styleOrder: 3,
+            lod: 7,
           },
         ],
       );
@@ -505,6 +520,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity: `style-${styleOrder}`,
             mapTileKey: `Features:Map:Layer:${styleOrder}:0`,
             styleOrder,
+            lod: 7,
           },
         ],
       );
@@ -536,6 +552,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity: `rule-${renderOrder}`,
             mapTileKey: `Features:Map:Layer:${renderOrder}:0`,
             styleOrder: 3,
+            lod: 7,
           },
         ],
       );
@@ -568,6 +585,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity: `z-${index}`,
             mapTileKey: `Features:Map:Layer:${index}:0`,
             styleOrder: 0,
+            lod: 7,
           },
         ],
       );
@@ -594,6 +612,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity: `tile-${tileId}`,
             mapTileKey: `Features:Map:Layer:${tileId}:0`,
             styleOrder: 0,
+            lod: 7,
           },
         ],
       );
@@ -620,8 +639,8 @@ describe("GpuScene contribution lifecycle", () => {
     );
     const contributions = contributionTexture.writes.at(-1)!
       .data as Float32Array;
-    expect(contributions[1]).toBe(0);
-    expect(contributions[5]).toBe(0);
+    expect(contributions[1]).toBe(7);
+    expect(contributions[5]).toBe(7);
   });
 
   it("separates distinct semantic ties at the same authored depth", () => {
@@ -638,6 +657,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity: `tile-${tileId}`,
             mapTileKey: `Features:Map:Layer:${tileId}:0`,
             styleOrder: 0,
+            lod: 7,
           },
         ],
       );
@@ -675,6 +695,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity,
             mapTileKey: `Features:Map:Layer:${tileId}:0`,
             styleOrder: 0,
+            lod: 7,
           },
         ],
       );
@@ -713,6 +734,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity,
             mapTileKey: `Features:Map:Layer:${tileId}:0`,
             styleOrder: 0,
+            lod: 7,
           },
         ],
       );
@@ -756,6 +778,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity: `dense-${index}`,
             mapTileKey: `Features:Map:Layer:${index}:0`,
             styleOrder: 0,
+            lod: 7,
           },
         ],
       );
@@ -786,6 +809,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity,
             mapTileKey: `Features:Map:Layer:${tileId}:0`,
             styleOrder: 0,
+            lod: 7,
           },
         ],
       );
@@ -830,6 +854,7 @@ describe("GpuScene contribution lifecycle", () => {
         identity: "tile",
         mapTileKey: "Features:Map:Layer:1:0",
         styleOrder: 0,
+        lod: 7,
       },
     ];
     const initial = scene.prepareRender("origin", [11, 48, 0], input);
@@ -860,6 +885,7 @@ describe("GpuScene contribution lifecycle", () => {
         identity: "tile",
         mapTileKey: "Features:Map:Layer:1:0",
         styleOrder: 0,
+        lod: 7,
       },
     ];
     const initial = scene.prepareRender("origin", [11, 48, 0], input);
@@ -885,6 +911,7 @@ describe("GpuScene contribution lifecycle", () => {
         identity: "tile",
         mapTileKey: "Features:Map:Layer:1:0",
         styleOrder: 0,
+        lod: 7,
       },
     ];
     const initial = scene.prepareRender("origin", [11, 48, 0], input);
@@ -934,6 +961,7 @@ describe("GpuScene contribution lifecycle", () => {
         identity: "tile",
         mapTileKey: "Features:Map:Layer:1:0",
         styleOrder: 0,
+        lod: 7,
       },
     ];
     const initial = scene.prepareRender("origin", [11, 48, 0], input);
@@ -982,6 +1010,7 @@ describe("GpuScene contribution lifecycle", () => {
         identity: "tile",
         mapTileKey: "Features:Map:Layer:1:0",
         styleOrder: 0,
+        lod: 7,
       },
     ];
     const initial = scene.prepareRender("origin", [11, 48, 0], input);
@@ -1033,6 +1062,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity: `retained-${index}`,
             mapTileKey: `Features:Map:Layer:${index}:0`,
             styleOrder: 0,
+            lod: 7,
           },
         ],
       );
@@ -1055,6 +1085,7 @@ describe("GpuScene contribution lifecycle", () => {
           identity: "staging",
           mapTileKey: "Features:Map:Layer:64:0",
           styleOrder: 0,
+          lod: 7,
         },
       ],
     );
@@ -1090,6 +1121,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity: `tile-${index}`,
             mapTileKey: `Features:Map:Layer:${index}:0`,
             styleOrder: 0,
+            lod: 7,
           },
         ],
       );
@@ -1123,6 +1155,7 @@ describe("GpuScene contribution lifecycle", () => {
           identity: "tile",
           mapTileKey: "Features:Map:Layer:1:0",
           styleOrder: 0,
+          lod: 7,
         },
       ],
     );
@@ -1143,6 +1176,7 @@ describe("GpuScene contribution lifecycle", () => {
           identity: "first-tile",
           mapTileKey: "Features:Map:Layer:1:0",
           styleOrder: 0,
+          lod: 7,
         },
       ],
     );
@@ -1160,6 +1194,7 @@ describe("GpuScene contribution lifecycle", () => {
           identity: "second-tile",
           mapTileKey: "Features:Map:Layer:2:0",
           styleOrder: 0,
+          lod: 7,
         },
       ],
     );
@@ -1184,6 +1219,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity,
             mapTileKey: `Features:Map:Layer:${tileId}:0`,
             styleOrder: 0,
+            lod: 7,
           },
         ],
       );
@@ -1249,6 +1285,7 @@ describe("GpuScene contribution lifecycle", () => {
           identity: "tile",
           mapTileKey: "Features:Map:Layer:1:0",
           styleOrder: 0,
+          lod: 7,
         },
       ],
     );
@@ -1266,6 +1303,7 @@ describe("GpuScene contribution lifecycle", () => {
       {
         text: "Main Street",
         styleOrder: 0,
+        minLod: 0,
       },
     ]);
     expect(
@@ -1301,12 +1339,49 @@ describe("GpuScene contribution lifecycle", () => {
     expect(scene.resolvePick(0)).toEqual([]);
   });
 
+  it("updates data-driven geometry and label LOD without replacing a contribution", () => {
+    const { device, redraw, scene } = createScene();
+    const reservation = scene.prepareRender(
+      "origin",
+      [11, 48, 0],
+      [
+        {
+          identity: "tile",
+          mapTileKey: "Features:Map:Layer:1:0",
+          styleOrder: 0,
+          lod: 2,
+        },
+      ],
+    );
+    scene.applyPacket(
+      pointPacket(reservation, {
+        label: "Detailed",
+        minimumLod: 4,
+      }),
+      reservation,
+    );
+    scene.finishRender(reservation);
+    scene.publishPresentation();
+
+    expect(scene.labels()).toEqual([]);
+    expect(scene.setContributionLod("tile", 4)).toBe(true);
+    expect(scene.labels()).toMatchObject([{ text: "Detailed", minLod: 4 }]);
+    expect(redraw).toHaveBeenCalledWith("GPU contribution LOD changed");
+
+    scene.publishPresentation();
+    const table = activeTexture(device, "erdblick-gpu-contribution-table");
+    const values = table.writes.at(-1)!.data as Float32Array;
+    expect(values[reservation.contributions[0].slot * 4 + 1]).toBe(4);
+    expect(scene.setContributionLod("tile", 4)).toBe(false);
+  });
+
   it("excludes a retiring same-identity pick from interaction presence", () => {
     const { scene } = createScene();
     const input = [{
       identity: "tile",
       mapTileKey: "Features:Map:Layer:1:0",
       styleOrder: 0,
+      lod: 7,
     }];
     const target = {
       mapTileKey: "Features:Map:Layer:1:0",
@@ -1346,6 +1421,7 @@ describe("GpuScene contribution lifecycle", () => {
       identity: "tile",
       mapTileKey: target.mapTileKey,
       styleOrder: 0,
+      lod: 7,
     }];
     const reservation = scene.prepareRender("origin", [11, 48, 0], input);
     const packet = pointPacket(reservation, { featureId: canonical });
@@ -1379,6 +1455,7 @@ describe("GpuScene contribution lifecycle", () => {
       identity: "tile",
       mapTileKey: target.mapTileKey,
       styleOrder: 0,
+      lod: 7,
     }];
     const reservation = scene.prepareRender("origin", [11, 48, 0], input);
     scene.applyPacket(
@@ -1408,6 +1485,7 @@ describe("GpuScene contribution lifecycle", () => {
             identity,
             mapTileKey: `Features:Map:Layer:${tileId}:0`,
             styleOrder: 0,
+            lod: 7,
           },
         ],
       );

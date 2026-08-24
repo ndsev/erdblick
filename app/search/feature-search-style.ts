@@ -8,6 +8,7 @@ import type {MapInfoService} from "../mapdata/map-info.service";
 import type {FilterChannelDefinition} from "../mapdata/filter-subscription.model";
 import type {StyleFilterPlan} from "../mapdata/styled-mapget-layer.model";
 import {featureSearchRuleToStyleRule} from "./search-style-sheet.converter";
+import {MAX_STYLE_LOD} from "../shared/lod-policy";
 
 const ALL_GEOMETRY_TYPES = 0xffffffff;
 export const FEATURE_SEARCH_RESULT_CHANNEL_PREFIX = "search-results:";
@@ -63,7 +64,7 @@ export function compileFeatureSearchStyle(
         mapgetLayer.mapId,
         mapgetLayer.layerId,
         coreLib.HighlightMode.NO_HIGHLIGHT.value,
-        coreLib.RuleFidelity.ANY.value
+        MAX_STYLE_LOD
     ) as StyleFilterPlan;
     if (!nativePlan.valid || nativePlan.channels.length !== runtimeRules.length) {
         featureLayerStyle.delete?.();

@@ -50,7 +50,7 @@ export interface TileSubsetLayerRenderTask {
     /** Present only when this worker has not compiled the style yet. */
     styleSource?: string;
     highlightModeValue: number;
-    fidelityValue: number;
+    lod: number;
     /** World-space RDP tolerance selected from the current view's pixel scale. */
     lineSimplificationToleranceMeters: number;
 }

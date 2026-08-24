@@ -126,7 +126,7 @@ struct FeatureStylePreset
  * Parsed feature-layer style sheet containing rules, options, and quick lookup caches.
  *
  * The class front-loads YAML parsing and precomputes rule index tables so render
- * code can cheaply ask for relevant rules by highlight mode, fidelity, and feature type.
+ * code can cheaply ask for relevant rules by highlight mode, LOD, and feature type.
  */
 class FeatureLayerStyle
 {
@@ -161,8 +161,10 @@ public:
     [[nodiscard]] NativeJsValue interactionEffect(
         FeatureStyleRule::HighlightMode mode,
         NativeJsValue const& options) const;
-    /** Report whether the style differentiates explicitly between low-fi and high-fi rules. */
-    [[nodiscard]] bool hasExplicitLowFidelityRules() const;
+    /** Map one canonical visible-tile count onto the style's integer LOD ladder. */
+    [[nodiscard]] uint8_t lodForVisibleTileCount(
+        uint32_t visibleTileCount,
+        uint32_t defaultLod3TileThreshold) const;
     /** Check whether any rule for the given highlight mode targets relations. */
     [[nodiscard]] bool hasRelationRules(FeatureStyleRule::HighlightMode mode) const;
     /**
@@ -173,17 +175,17 @@ public:
      */
     [[nodiscard]] std::vector<uint32_t> const& candidateRuleIndices(
         FeatureStyleRule::HighlightMode mode,
-        FeatureStyleRule::Fidelity fidelity,
+        uint8_t lod,
         std::string_view featureTypeId) const;
 
 private:
     static constexpr size_t kHighlightModeCount = 3;
-    static constexpr size_t kFidelityCount = 2;
+    static constexpr size_t kLodCount = FeatureStyleRule::kMaximumLod + 1U;
     using RuleIndexList = std::vector<uint32_t>;
 
     /** Cached rule-index tables for one concrete feature type. */
     struct RuleIndexCacheEntry {
-        std::array<std::array<RuleIndexList, kFidelityCount>, kHighlightModeCount> byModeAndFidelity{};
+        std::array<std::array<RuleIndexList, kLodCount>, kHighlightModeCount> byModeAndLod{};
     };
 
     /** Heterogeneous hash for the feature-type cache. */
@@ -223,10 +225,10 @@ private:
     std::string name_;
     StyleCategory category_ = StyleCategory::Base;
     std::optional<std::regex> layerAffinity_;
-    std::array<std::array<RuleIndexList, kFidelityCount>, kHighlightModeCount> ruleIndicesByModeAndFidelity_{};
+    std::array<std::array<RuleIndexList, kLodCount>, kHighlightModeCount> ruleIndicesByModeAndLod_{};
+    std::optional<std::array<uint32_t, kLodCount - 1U>> lodThresholds_;
     uint32_t highlightModeMask_ = 0;
     std::array<std::optional<InteractionEffect>, 2> interactionEffects_{};
-    bool hasExplicitLowFidelityRules_ = false;
     mutable std::unordered_map<std::string, RuleIndexCacheEntry, TransparentStringHash, TransparentStringEqual>
         ruleIndicesByTypeCache_;
 };

@@ -161,7 +161,7 @@ public:
         std::string const& mapId,
         std::string const& layerId,
         int highlightMode,
-        int fidelity);
+        int lod);
 
     /**
      * Set layer info which will be used if the external doesn't fit.

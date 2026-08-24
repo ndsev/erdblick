@@ -59,6 +59,168 @@ rules:
 }
 
 TEST_CASE(
+    "Style fidelity is parsed only as canonical LOD range shorthand",
+    "[erdblick.style-plan][lod]")
+{
+    auto parsed = style(R"yaml(
+name: FidelityShorthand
+version: 2
+rules:
+  - type: Road
+    geometry: line
+    fidelity: low
+  - type: Road
+    geometry: line
+    fidelity: high
+  - type: Road
+    geometry: line
+    fidelity: any
+  - type: Road
+    geometry: line
+)yaml");
+    REQUIRE(parsed.isValid());
+    REQUIRE(parsed.rules().size() == 4U);
+    CHECK(parsed.rules()[0].lodRange().minimum == 0U);
+    CHECK(parsed.rules()[0].lodRange().maximum == 2U);
+    CHECK(parsed.rules()[1].lodRange().minimum == 3U);
+    CHECK(parsed.rules()[1].lodRange().maximum == 7U);
+    CHECK(parsed.rules()[2].lodRange().minimum == 0U);
+    CHECK(parsed.rules()[2].lodRange().maximum == 7U);
+    CHECK(parsed.rules()[3].lodRange().minimum == 0U);
+    CHECK(parsed.rules()[3].lodRange().maximum == 7U);
+}
+
+TEST_CASE(
+    "Style filter ownership changes only at authored LOD range boundaries",
+    "[erdblick.style-plan][lod]")
+{
+    auto parsed = style(R"yaml(
+name: LodRanges
+version: 2
+rules:
+  - type: Road
+    geometry: line
+    lod-range: [0, 2]
+  - type: Road
+    geometry: line
+    lod-range: [3, 7]
+)yaml");
+    REQUIRE(parsed.isValid());
+
+    auto const overview = planStyleFilter(
+        parsed,
+        *plannerLayerInfo(),
+        FeatureStyleRule::NoHighlight,
+        2U);
+    auto const detail = planStyleFilter(
+        parsed,
+        *plannerLayerInfo(),
+        FeatureStyleRule::NoHighlight,
+        3U);
+
+    REQUIRE(overview.valid);
+    REQUIRE(detail.valid);
+    REQUIRE(overview.channels.size() == 1U);
+    REQUIRE(detail.channels.size() == 1U);
+    CHECK(overview.channels[0].channelId_ == "style-rule:0");
+    CHECK(detail.channels[0].channelId_ == "style-rule:1");
+}
+
+TEST_CASE(
+    "Style LOD authoring rejects ambiguous and malformed declarations",
+    "[erdblick.style-plan][lod]")
+{
+    SECTION("fidelity and lod-range") {
+        auto parsed = style(R"yaml(
+name: AmbiguousLod
+version: 2
+rules:
+  - geometry: line
+    fidelity: low
+    lod-range: [0, 2]
+)yaml");
+        CHECK_FALSE(parsed.isValid());
+    }
+    SECTION("nested lod-range") {
+        auto parsed = style(R"yaml(
+name: NestedLod
+version: 2
+rules:
+  - geometry: line
+    all-of:
+      - lod-range: [0, 2]
+        color: red
+)yaml");
+        CHECK_FALSE(parsed.isValid());
+    }
+    SECTION("threshold count") {
+        auto parsed = style(R"yaml(
+name: InvalidThresholds
+version: 2
+lod-thresholds: [512, 256, 128]
+rules:
+  - geometry: line
+)yaml");
+        CHECK_FALSE(parsed.isValid());
+    }
+}
+
+TEST_CASE(
+    "Styles map canonical visible-tile density onto eight LODs",
+    "[erdblick.style-plan][lod]")
+{
+    auto defaults = style(R"yaml(
+name: DefaultThresholds
+version: 2
+rules:
+  - geometry: line
+)yaml");
+    REQUIRE(defaults.isValid());
+    CHECK(defaults.lodForVisibleTileCount(512U, 128U) == 0U);
+    CHECK(defaults.lodForVisibleTileCount(511U, 128U) == 1U);
+    CHECK(defaults.lodForVisibleTileCount(128U, 128U) == 2U);
+    CHECK(defaults.lodForVisibleTileCount(127U, 128U) == 3U);
+    CHECK(defaults.lodForVisibleTileCount(8U, 128U) == 6U);
+    CHECK(defaults.lodForVisibleTileCount(7U, 128U) == 7U);
+
+    auto overridden = style(R"yaml(
+name: CustomThresholds
+version: 2
+lod-thresholds: [700, 600, 500, 400, 300, 200, 100]
+rules:
+  - geometry: line
+)yaml");
+    REQUIRE(overridden.isValid());
+    CHECK(overridden.lodForVisibleTileCount(450U, 128U) == 3U);
+    CHECK(overridden.lodForVisibleTileCount(99U, 128U) == 7U);
+}
+
+TEST_CASE(
+    "Per-entry minimum LOD expressions are projected without changing channels",
+    "[erdblick.style-plan][lod]")
+{
+    auto parsed = style(R"yaml(
+name: DataDrivenLod
+version: 2
+rules:
+  - type: Road
+    geometry: line
+    min-lod-expression: detailLod
+)yaml");
+    REQUIRE(parsed.isValid());
+    auto const plan = planStyleFilter(
+        parsed,
+        *plannerLayerInfo(),
+        FeatureStyleRule::NoHighlight,
+        4U);
+    REQUIRE(plan.valid);
+    REQUIRE(plan.channels.size() == 1U);
+    CHECK(std::ranges::find(
+        plan.channels[0].featureFields_,
+        "detailLod") != plan.channels[0].featureFields_.end());
+}
+
+TEST_CASE(
     "One style rule can serve hover and selection highlight passes",
     "[erdblick.style-plan]")
 {
@@ -81,12 +243,12 @@ rules:
         parsed,
         *plannerLayerInfo(),
         FeatureStyleRule::HoverHighlight,
-        FeatureStyleRule::AnyFidelity);
+        FeatureStyleRule::kMaximumLod);
     auto const selection = planStyleFilter(
         parsed,
         *plannerLayerInfo(),
         FeatureStyleRule::SelectionHighlight,
-        FeatureStyleRule::AnyFidelity);
+        FeatureStyleRule::kMaximumLod);
 
     REQUIRE(hover.valid);
     REQUIRE(selection.valid);
@@ -133,7 +295,7 @@ rules:
         parsed,
         *plannerLayerInfo(),
         FeatureStyleRule::NoHighlight,
-        FeatureStyleRule::AnyFidelity);
+        FeatureStyleRule::kMaximumLod);
 
     REQUIRE(plan.valid);
     REQUIRE(plan.issues.empty());
@@ -189,7 +351,7 @@ rules:
         parsed,
         *plannerLayerInfo(),
         FeatureStyleRule::NoHighlight,
-        FeatureStyleRule::AnyFidelity);
+        FeatureStyleRule::kMaximumLod);
 
     REQUIRE(plan.valid);
     REQUIRE(plan.issues.empty());
@@ -257,7 +419,7 @@ rules:
         parsed,
         *plannerLayerInfo(),
         FeatureStyleRule::NoHighlight,
-        FeatureStyleRule::AnyFidelity);
+        FeatureStyleRule::kMaximumLod);
     REQUIRE_FALSE(plan.valid);
     REQUIRE(plan.channels.empty());
     REQUIRE(plan.issues.size() == 1);
@@ -288,7 +450,7 @@ rules:
         parsed,
         *plannerLayerInfo(),
         FeatureStyleRule::NoHighlight,
-        FeatureStyleRule::AnyFidelity);
+        FeatureStyleRule::kMaximumLod);
 
     REQUIRE(plan.valid);
     REQUIRE(plan.channels.size() == 1);
@@ -321,7 +483,7 @@ rules:
         parsed,
         *plannerLayerInfo(),
         FeatureStyleRule::NoHighlight,
-        FeatureStyleRule::AnyFidelity);
+        FeatureStyleRule::kMaximumLod);
     REQUIRE(plan.valid);
     REQUIRE(plan.channels.size() == 1);
     REQUIRE(plan.channels[0].featureFilter_);
@@ -369,7 +531,7 @@ rules:
         parsed,
         *plannerLayerInfo(),
         FeatureStyleRule::NoHighlight,
-        FeatureStyleRule::AnyFidelity);
+        FeatureStyleRule::kMaximumLod);
     REQUIRE(plan.valid);
     REQUIRE(plan.channels.size() == 1);
 

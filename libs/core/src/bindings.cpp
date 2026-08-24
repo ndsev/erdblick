@@ -172,7 +172,7 @@ bool isFiniteViewport(Viewport const& viewport)
 }
 
 /**
- * Build a deterministic viewport used for zoom/fidelity policy decisions.
+ * Build a deterministic viewport used for zoom and style-LOD policy decisions.
  *
  * The synthetic camera sits at the equator, points straight down, and only varies by altitude.
  */
@@ -288,7 +288,7 @@ uint32_t getNumTileIdsForBounds(double south, double west, double width, double 
 }
 
 /**
- * Returns the tile count for a deterministic canonical camera used for fidelity policy decisions.
+ * Returns the tile count for a deterministic canonical camera used for style-LOD decisions.
  *
  * The canonical camera is fixed at the equator, points straight down, and explicitly uses
  * deck.gl's default 1.5-altitude lens (approximately 36.87 degrees) with a 16:9 aspect ratio.
@@ -670,7 +670,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("category", &FeatureLayerStyle::category)
         .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity)
         .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled)
-        .function("hasExplicitLowFidelityRules", &FeatureLayerStyle::hasExplicitLowFidelityRules)
+        .function("lodForVisibleTileCount", &FeatureLayerStyle::lodForVisibleTileCount)
         .function("hasRelationRules", &FeatureLayerStyle::hasRelationRules)
         .function("supportsHighlightMode", &FeatureLayerStyle::supportsHighlightMode)
         .function("supportsInteractionEffect", &FeatureLayerStyle::supportsInteractionEffect)
@@ -779,11 +779,6 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .value("NO_HIGHLIGHT", FeatureStyleRule::NoHighlight)
         .value("HOVER_HIGHLIGHT", FeatureStyleRule::HoverHighlight)
         .value("SELECTION_HIGHLIGHT", FeatureStyleRule::SelectionHighlight);
-
-    em::enum_<FeatureStyleRule::Fidelity>("RuleFidelity")
-        .value("ANY", FeatureStyleRule::AnyFidelity)
-        .value("HIGH", FeatureStyleRule::HighFidelity)
-        .value("LOW", FeatureStyleRule::LowFidelity);
 
     ////////// TileSubsetLayerRenderer
     em::class_<TileSubsetLayerRenderer>("TileSubsetLayerRenderer")

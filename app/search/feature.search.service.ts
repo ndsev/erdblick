@@ -70,6 +70,7 @@ import {
     type CompiledFeatureSearchStyle
 } from "./feature-search-style";
 import {formatFeatureInspectionTarget} from "../shared/tile-feature-id";
+import {MAX_STYLE_LOD} from "../shared/lod-policy";
 
 export interface FeatureSearchResultEntry {
     label: string;
@@ -1639,7 +1640,7 @@ export class FeatureSearchService {
                 this.mapInfo,
                 this.tileStream,
                 coreLib.HighlightMode.NO_HIGHLIGHT,
-                coreLib.RuleFidelity.ANY,
+                MAX_STYLE_LOD,
                 compiled.filterPlan
             );
         } catch (error) {

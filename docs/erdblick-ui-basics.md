@@ -182,7 +182,7 @@ Open **Edit -> Preferences** to access the main viewer preferences:
 - **Tile pull compression** toggles compressed tile downloads
 - **WebGL antialiasing** controls multisample rendering when the browser/device supports it
 - **Contact shading** uses final scene depth to darken nearby lower surfaces and can be disabled on slower GPUs
-- **High/Low-Fi Tile Threshold** controls the visible-tile-count cutoff between high- and low-fidelity rendering
+- **LOD 3 Tile Threshold** controls the default visible-tile-count boundary between stylesheet LOD 2 and LOD 3; styles can override the full LOD ladder
 - **Dark Mode** switches between on, off, and automatic
 - **Collapse Dock automatically** controls the inspection dock behavior
 - the **Clear** actions reset viewer/search state, imported styles, or modified built-in styles

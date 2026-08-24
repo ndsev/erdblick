@@ -242,15 +242,6 @@ std::vector<uint32_t> channelRuleIndices(std::string_view channelId)
     return result;
 }
 
-bool fidelityMatches(
-    FeatureStyleRule::Fidelity requested,
-    FeatureStyleRule::Fidelity rule)
-{
-    return requested == FeatureStyleRule::AnyFidelity ||
-        rule == FeatureStyleRule::AnyFidelity ||
-        requested == rule;
-}
-
 std::optional<std::string_view> geometryName(
     mapget::model_ptr<mapget::Geometry> const& geometry)
 {
@@ -532,7 +523,7 @@ TileSubsetLayerRenderer::TileSubsetLayerRenderer(
     std::string const& /*mapTileKey*/,
     FeatureLayerStyle const& style,
     int highlightMode,
-    int fidelity)
+    int lod)
     : style_(style),
       highlightMode_(
           highlightMode >= static_cast<int>(FeatureStyleRule::NoHighlight) &&
@@ -540,11 +531,11 @@ TileSubsetLayerRenderer::TileSubsetLayerRenderer(
                   static_cast<int>(FeatureStyleRule::SelectionHighlight)
               ? static_cast<FeatureStyleRule::HighlightMode>(highlightMode)
               : FeatureStyleRule::NoHighlight),
-      fidelity_(
-          fidelity >= static_cast<int>(FeatureStyleRule::AnyFidelity) &&
-              fidelity <= static_cast<int>(FeatureStyleRule::LowFidelity)
-              ? static_cast<FeatureStyleRule::Fidelity>(fidelity)
-              : FeatureStyleRule::AnyFidelity)
+      lod_(
+          lod >= FeatureStyleRule::kMinimumLod &&
+              lod <= FeatureStyleRule::kMaximumLod
+              ? static_cast<uint8_t>(lod)
+              : FeatureStyleRule::kMinimumLod)
 {
     bridgeBuffers_.gltfPickProxies.startIndices.push_back(0);
 }
@@ -738,7 +729,7 @@ std::vector<FeatureStyleRule const*> TileSubsetLayerRenderer::rulesForChannel(
         for (auto const& rule : style_.rules()) {
             if (rule.index() == sourceIndex &&
                 rule.supportsMode(highlightMode_) &&
-                fidelityMatches(fidelity_, rule.fidelity()))
+                rule.supportsLod(lod_))
             {
                 result.push_back(&rule);
                 break;
@@ -795,9 +786,8 @@ TileSubsetLayerRenderer::bindingFor(
                         sourceIndices.end() &&
                     rule.supportsMode(highlightMode_);
             });
-        // A bundle planned with AnyFidelity intentionally contains both
-        // fidelity variants so the view can switch without a refetch.
-        // Skipping the inactive variant is therefore not a style error.
+        // A retained subset may briefly outlive the active LOD plan during an
+        // atomic owner handover. Skipping its inactive rule is not a style error.
         if (!hasInactiveSourceRule) {
             recordRuntimeIssue(
                 "channelId",
@@ -1737,6 +1727,7 @@ bool TileSubsetLayerRenderer::renderGeometryCollection(
                 *labelPosition,
                 text,
                 rule,
+                evalFun,
                 resolvedStyle
                     ? resolvedStyle->zIndex
                     : resolvedZIndex(rule, evalFun),
@@ -2001,6 +1992,7 @@ bool TileSubsetLayerRenderer::renderGeometry(
                 labelPoint,
                 text,
                 rule,
+                evalFun,
                 zIndex,
                 pick);
         }
@@ -2538,6 +2530,7 @@ bool TileSubsetLayerRenderer::renderTransitionLine(
                 path[path.size() / 2],
                 text,
                 rule,
+                evalFun,
                 zIndex,
                 pick);
         }
@@ -2659,6 +2652,7 @@ bool TileSubsetLayerRenderer::renderSegmentStackedLine(
                 projectWgsPoint(geometryCenter(source)),
                 text,
                 rule,
+                evalFun,
                 zIndex,
                 pick);
         }
@@ -3646,6 +3640,7 @@ void TileSubsetLayerRenderer::appendLabel(
     mapget::Point const& point,
     std::string const& text,
     FeatureStyleRule const& rule,
+    BoundEvalFun const& evalFun,
     double zIndex,
     uint32_t pick)
 {
@@ -3704,6 +3699,7 @@ void TileSubsetLayerRenderer::appendLabel(
             static_cast<float>(backgroundPadding.second),
         },
         .flags = labelFlags,
+        .minimumLod = rule.minimumLod(evalFun),
         .horizontalOrigin = labelOriginCode(rule.labelHorizontalOrigin()),
         .verticalOrigin = labelOriginCode(rule.labelVerticalOrigin()),
         .renderOrder = rule.renderIndex(),
@@ -3827,6 +3823,7 @@ GpuRecordStyle TileSubsetLayerRenderer::gpuRecordStyle(
             rule.renderIndex()),
         .localPickIndex = gpuPickIndex(legacyPickIndex),
         .renderOrder = rule.renderIndex(),
+        .minimumLod = rule.minimumLod(evalFun),
     };
     switch (rule.zIndexRole()) {
     case FeatureStyleRule::ZIndexRole::None:

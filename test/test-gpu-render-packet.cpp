@@ -69,6 +69,7 @@ erdblick::GpuRenderPacketData samplePacket()
         .text = "Main Street",
         .fontFamily = "Noto Sans",
         .flags = static_cast<uint32_t>(GpuLabelFlag::Collision),
+        .minimumLod = 5U,
         .renderOrder = 6U,
         .fontWeight = 700U,
         .collisionPriority = 42,
@@ -110,6 +111,15 @@ TEST_CASE("GpuRenderPacket round-trips its validated header and tables")
         bytes.data() + pickTable + 20U,
         sizeof(navigationAltitude));
     CHECK(navigationAltitude == 412.25F);
+    uint32_t labelTable = 0U;
+    std::memcpy(&labelTable, bytes.data() + 112U, sizeof(labelTable));
+    uint32_t labelFlags = 0U;
+    std::memcpy(
+        &labelFlags,
+        bytes.data() + labelTable + 96U,
+        sizeof(labelFlags));
+    CHECK(((labelFlags & erdblick::kGpuLabelMinimumLodMask) >>
+        erdblick::kGpuLabelMinimumLodShift) == 5U);
 }
 
 TEST_CASE("GpuRenderPacket rejects malformed wire data before upload")

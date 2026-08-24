@@ -24,6 +24,7 @@ function label(overrides: Record<string, unknown> = {}) {
         outlineWidth: 1,
         backgroundPadding: [0, 0],
         flags: GpuLabelFlag.Billboard | GpuLabelFlag.DepthTest,
+        minLod: 0,
         horizontalOrigin: 0,
         verticalOrigin: 0,
         renderOrder: 0,

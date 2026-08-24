@@ -125,14 +125,14 @@ export class MapInfoService {
         mapId: string,
         layerId: string,
         highlightMode: number,
-        fidelity: number
+        lod: number
     ): unknown {
         return this.styleParserForMap(mapId).planStyleFilter(
             style,
             mapId,
             layerId,
             highlightMode,
-            fidelity
+            lod
         );
     }
 
