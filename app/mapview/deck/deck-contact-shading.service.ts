@@ -6,7 +6,7 @@ import type {
     Texture,
     TextureFormatDepthStencil
 } from "@luma.gl/core";
-import {ClipSpace} from "@luma.gl/engine";
+import {Model} from "@luma.gl/engine";
 import type {ShaderModule} from "@luma.gl/shadertools";
 
 interface ContactShadingShaderProps {
@@ -50,6 +50,18 @@ const CONTACT_SHADING_PARAMETERS: RenderPipelineParameters = {
     blend: false
 };
 
+const CONTACT_SHADING_VERTEX_SHADER = `\
+#version 300 es
+precision highp float;
+
+void main(void) {
+  vec2 position = vec2(
+    gl_VertexID == 1 ? 3.0 : -1.0,
+    gl_VertexID == 2 ? 3.0 : -1.0);
+  gl_Position = vec4(position, 0.0, 1.0);
+}
+`;
+
 const CONTACT_SHADING_FRAGMENT_SHADER = `\
 #version 300 es
 precision highp float;
@@ -57,7 +69,6 @@ precision highp float;
 uniform highp sampler2D contactDepthTexture;
 uniform highp sampler2D contactColorTexture;
 
-in vec2 coordinate;
 out vec4 fragColor;
 
 float contact_view_depth(float depth) {
@@ -66,23 +77,41 @@ float contact_view_depth(float depth) {
   return abs(contactShading.projectionTerms.y / denominator);
 }
 
-float contact_response(float expectedDepth, float sampledDepth, float centerDepth) {
+float contact_response(
+    float expectedDepth,
+    float sampledDepth,
+    float oppositeDepth,
+    float centerDepth) {
   float relativeDelta = max(expectedDepth - sampledDepth, 0.0) /
     max(centerDepth, 0.000001);
-  float contact = smoothstep(0.00015, 0.0025, relativeDelta);
+  // Perspective depth is curved across steeply sloped surfaces. Suppress that
+  // predictable residual while retaining the much larger discontinuity where
+  // an actual foreground surface meets the sampled receiver.
+  float relativeSpan = abs(sampledDepth - oppositeDepth) /
+    max(centerDepth, 0.000001);
+  float slopeBias = 0.00015 + 0.08 * relativeSpan;
+  float contact = smoothstep(slopeBias, slopeBias + 0.00235, relativeDelta);
   float silhouetteRejection = 1.0 - smoothstep(0.08, 0.25, relativeDelta);
   return contact * silhouetteRejection;
 }
 
-float contact_pair(vec2 pixelOffset, float centerDepth, vec2 texelSize) {
-  vec2 minimumUv = texelSize * 0.5;
-  vec2 maximumUv = vec2(1.0) - minimumUv;
-  float positiveRaw = texture(
+ivec2 contact_sample_coordinate(ivec2 pixel, ivec2 offset, ivec2 textureSize) {
+  return clamp(pixel + offset, ivec2(0), textureSize - ivec2(1));
+}
+
+float contact_pair(
+    ivec2 pixelOffset,
+    ivec2 pixel,
+    ivec2 depthTextureSize,
+    float centerDepth) {
+  float positiveRaw = texelFetch(
     contactDepthTexture,
-    clamp(coordinate + pixelOffset * texelSize, minimumUv, maximumUv)).r;
-  float negativeRaw = texture(
+    contact_sample_coordinate(pixel, pixelOffset, depthTextureSize),
+    0).r;
+  float negativeRaw = texelFetch(
     contactDepthTexture,
-    clamp(coordinate - pixelOffset * texelSize, minimumUv, maximumUv)).r;
+    contact_sample_coordinate(pixel, -pixelOffset, depthTextureSize),
+    0).r;
   bool positiveValid = positiveRaw < 0.999999;
   bool negativeValid = negativeRaw < 0.999999;
   float positiveDepth = positiveValid
@@ -95,33 +124,38 @@ float contact_pair(vec2 pixelOffset, float centerDepth, vec2 texelSize) {
     ? contact_response(
         2.0 * centerDepth - negativeDepth,
         positiveDepth,
+        negativeDepth,
         centerDepth)
     : 0.0;
   float negativeResponse = negativeValid
     ? contact_response(
         2.0 * centerDepth - positiveDepth,
         negativeDepth,
+        positiveDepth,
         centerDepth)
     : 0.0;
   return max(positiveResponse, negativeResponse);
 }
 
 void main(void) {
-  vec4 sceneColor = texture(contactColorTexture, coordinate);
-  float centerRaw = texture(contactDepthTexture, coordinate).r;
+  ivec2 pixel = ivec2(gl_FragCoord.xy);
+  ivec2 depthTextureSize = textureSize(contactDepthTexture, 0);
+  vec4 sceneColor = texelFetch(contactColorTexture, pixel, 0);
+  float centerRaw = texelFetch(contactDepthTexture, pixel, 0).r;
   if (centerRaw >= 0.999999) {
     fragColor = sceneColor;
     return;
   }
   float centerDepth = contact_view_depth(centerRaw);
-  vec2 texelSize = 1.0 / vec2(textureSize(contactDepthTexture, 0));
   float occlusion = 0.0;
-  occlusion += contact_pair(vec2(1.5, 0.0), centerDepth, texelSize);
-  occlusion += contact_pair(vec2(0.0, 1.5), centerDepth, texelSize);
-  occlusion += contact_pair(vec2(1.25, 1.25), centerDepth, texelSize);
-  occlusion += contact_pair(vec2(1.25, -1.25), centerDepth, texelSize);
-  occlusion += 0.65 * contact_pair(vec2(4.5, 0.0), centerDepth, texelSize);
-  occlusion += 0.65 * contact_pair(vec2(0.0, 4.5), centerDepth, texelSize);
+  occlusion += contact_pair(ivec2(2, 0), pixel, depthTextureSize, centerDepth);
+  occlusion += contact_pair(ivec2(0, 2), pixel, depthTextureSize, centerDepth);
+  occlusion += contact_pair(ivec2(1, 1), pixel, depthTextureSize, centerDepth);
+  occlusion += contact_pair(ivec2(1, -1), pixel, depthTextureSize, centerDepth);
+  occlusion += 0.65 * contact_pair(
+    ivec2(5, 0), pixel, depthTextureSize, centerDepth);
+  occlusion += 0.65 * contact_pair(
+    ivec2(0, 5), pixel, depthTextureSize, centerDepth);
   float shadow = 1.0 - exp(-0.7 * occlusion);
   float alpha = contactShading.opacity * smoothstep(0.04, 0.7, shadow);
   fragColor = vec4(sceneColor.rgb * (1.0 - alpha), sceneColor.a);
@@ -134,7 +168,7 @@ void main(void) {
  */
 export class DeckContactShadingService {
     private readonly depthFormat: ContactDepthFormat | null;
-    private readonly model: ClipSpace;
+    private readonly model: Model;
     private sceneFramebuffer: WebGLFramebuffer | null = null;
     private sceneColorBuffer: WebGLRenderbuffer | null = null;
     private sceneDepthBuffer: WebGLRenderbuffer | null = null;
@@ -154,11 +188,14 @@ export class DeckContactShadingService {
         private readonly gl: WebGL2RenderingContext
     ) {
         this.depthFormat = this.readCanvasFormat();
-        this.model = new ClipSpace(device, {
+        this.model = new Model(device, {
             id: "deck-contact-shading",
+            vs: CONTACT_SHADING_VERTEX_SHADER,
             fs: CONTACT_SHADING_FRAGMENT_SHADER,
             modules: [contactShadingShaderModule],
-            parameters: CONTACT_SHADING_PARAMETERS
+            parameters: CONTACT_SHADING_PARAMETERS,
+            topology: "triangle-list",
+            vertexCount: 3
         });
         this.model.predraw(device.commandEncoder);
     }
