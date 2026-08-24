@@ -270,6 +270,36 @@ describe("Deck rendered-feature picking", () => {
         expect(view.inspectionSelection.setHoveredFeatures).toHaveBeenCalledTimes(1);
     });
 
+    it("does not let a fast anchor collapse a settled drill-pick stack", async () => {
+        const view = createView() as any;
+        const baseLayer = {
+            id: "base-path",
+            props: {
+                drillPickEligible: true,
+                navigationAnchorEligible: true,
+                featureAddresses: [7],
+                subsetPickResolver: subsetPickResolver("map/tile")
+            }
+        };
+        const top = {mapTileKey: "map/tile", featureId: "feature-7"};
+        const lower = {mapTileKey: "map/tile", featureId: "feature-8"};
+        view.deckCanvasPointerInside = true;
+        view.latestHoverPosition = {x: 12, y: 24};
+        view.stateService = {drillPickRadius: 6};
+        view.inspectionSelection = {setHoveredFeatures: vi.fn()};
+        view.hoveredFeatureIds.next([top, lower]);
+        view.deck = {
+            props: {layers: [baseLayer]},
+            pickObjectAsync: vi.fn(async () => ({layer: baseLayer, index: 0})),
+            setProps: vi.fn()
+        };
+
+        await view.processHoverAnchorPick({x: 12, y: 24});
+
+        expect(view.hoveredFeatureIds.getValue()).toEqual([top, lower]);
+        expect(view.inspectionSelection.setHoveredFeatures).not.toHaveBeenCalled();
+    });
+
     it("retains representative altitude as a fallback when a depth coordinate is unavailable", async () => {
         const view = create3DView() as any;
         const viewport = new WebMercatorViewport({

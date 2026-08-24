@@ -2158,8 +2158,17 @@ export abstract class DeckMapView implements IRenderView {
             this.topHoverFeatureIds = topFeatureIds;
             this.topHoverFeatureGeneration = generation;
             // Do not make the visible highlight wait for the more expensive drill pass.
-            // The settled query below replaces this with the complete feature stack.
-            this.publishHoveredFeatures(topFeatureIds);
+            // A provisional top pick must not collapse an already settled
+            // drill stack while the cursor still covers one of its objects.
+            const settledFeatureIds = this.hoveredFeatureIds.getValue();
+            const remainsInSettledStack = topFeatureIds.length > 0 &&
+                topFeatureIds.every(topFeature =>
+                    settledFeatureIds.some(settledFeature =>
+                        settledFeature.mapTileKey === topFeature.mapTileKey &&
+                        settledFeature.featureId === topFeature.featureId));
+            this.publishHoveredFeatures(
+                remainsInSettledStack ? settledFeatureIds : topFeatureIds
+            );
             if (!this.allowPitchAndBearing) {
                 return;
             }
