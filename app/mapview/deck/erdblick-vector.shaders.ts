@@ -1826,11 +1826,27 @@ in vec4 instanceColor;
 in uvec4 instanceMetadata;
 
 out vec4 vColor;
+#ifdef ERDBLICK_SURFACE_SHADING
+flat out vec3 vSurfaceNormal;
+#endif
 
 void main(void) {
   vec3 localPosition = positions < 0.5
     ? instancePosition0
     : positions < 1.5 ? instancePosition1 : instancePosition2;
+#ifdef ERDBLICK_SURFACE_SHADING
+  vSurfaceNormal = vec3(0.0);
+  // Semantic support is a material role; support surfaces remain visible.
+  if (gpuScene.flattenZ < 0.5) {
+    vec3 faceNormal = cross(
+      instancePosition1 - instancePosition0,
+      instancePosition2 - instancePosition0);
+    float normalLength = length(faceNormal);
+    if (normalLength > 0.000001) {
+      vSurfaceNormal = faceNormal / normalLength;
+    }
+  }
+#endif
   vec4 commonPosition;
   vec4 clipPosition;
   gpuScene_projectLocal(
@@ -1864,9 +1880,24 @@ export const SURFACE_FRAGMENT_SHADER = `\
 #define SHADER_NAME erdblick-gpu-surface-fragment
 precision highp float;
 in vec4 vColor;
+#ifdef ERDBLICK_SURFACE_SHADING
+flat in vec3 vSurfaceNormal;
+#endif
 layout(location = 0) out vec4 fragColor;
 void main(void) {
+#if defined(ERDBLICK_SURFACE_SHADING) && !defined(ERDBLICK_MASK_RENDER)
+  float light = 1.0;
+  if (dot(vSurfaceNormal, vSurfaceNormal) > 0.5) {
+    vec3 normal = gl_FrontFacing ? vSurfaceNormal : -vSurfaceNormal;
+    vec3 lightDirection = normalize(vec3(-0.45, 0.35, 0.82));
+    float diffuse = max(dot(normal, lightDirection), 0.0);
+    float hemisphere = 0.5 + 0.5 * clamp(normal.z, -1.0, 1.0);
+    light = clamp(0.76 + 0.24 * diffuse + 0.04 * hemisphere, 0.78, 1.0);
+  }
+  fragColor = vec4(vColor.rgb * light, vColor.a);
+#else
   fragColor = vColor;
+#endif
   DECKGL_FILTER_COLOR(fragColor, geometry);
 }
 `;

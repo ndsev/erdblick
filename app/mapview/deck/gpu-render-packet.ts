@@ -1,4 +1,4 @@
-export const GPU_RENDER_PACKET_ABI_VERSION = 14;
+export const GPU_RENDER_PACKET_ABI_VERSION = 15;
 export const GPU_RENDER_PACKET_HEADER_BYTES = 160;
 // One oversized packet is still admitted by itself, so this ceiling is also
 // the maximum unavoidable geometry upload burst from one worker task.
@@ -41,6 +41,7 @@ export enum GpuMaterialFlag {
   SemanticSupport = 1 << 8,
   SemanticOverlay = 1 << 9,
   PointRing = 1 << 10,
+  SurfaceShading = 1 << 11,
 }
 
 export enum GpuLabelFlag {
@@ -465,6 +466,8 @@ export class GpuRenderPacketView {
       const simplePath = (flags & GpuMaterialFlag.SimplePath) !== 0;
       const dualStrokePath = (flags & GpuMaterialFlag.DualStrokePath) !== 0;
       const pointRing = (flags & GpuMaterialFlag.PointRing) !== 0;
+      const surfaceShading =
+        (flags & GpuMaterialFlag.SurfaceShading) !== 0;
       const screenLengthAnchor =
         flags &
         (GpuMaterialFlag.ScreenLengthStartAnchor |
@@ -500,6 +503,7 @@ export class GpuRenderPacketView {
         glowRadius < 0 ||
         this.u32(offset + 44) !== 0 ||
         (pointRing && kind !== GpuPrimitiveKind.Point) ||
+        (surfaceShading && kind !== GpuPrimitiveKind.SurfaceTriangle) ||
         !validScreenLengthAnchor ||
         (screenLengthAnchor !== 0 &&
           ((kind !== GpuPrimitiveKind.PathSegment &&
@@ -518,7 +522,8 @@ export class GpuRenderPacketView {
             GpuMaterialFlag.ScreenLengthCenterAnchor |
             GpuMaterialFlag.SemanticSupport |
             GpuMaterialFlag.SemanticOverlay |
-            GpuMaterialFlag.PointRing
+            GpuMaterialFlag.PointRing |
+            GpuMaterialFlag.SurfaceShading
           )) !==
           0 ||
         ((flags & GpuMaterialFlag.SemanticSupport) !== 0 &&

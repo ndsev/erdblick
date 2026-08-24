@@ -12,7 +12,7 @@ namespace erdblick
 {
 
 /** Binary ABI version understood by the persistent GPU renderer. */
-inline constexpr uint16_t kGpuRenderPacketAbiVersion = 14U;
+inline constexpr uint16_t kGpuRenderPacketAbiVersion = 15U;
 
 /** Little-endian integer whose bytes spell `ERGP`. */
 inline constexpr uint32_t kGpuRenderPacketMagic = 0x50475245U;
@@ -55,6 +55,7 @@ enum class GpuMaterialFlag : uint16_t {
     SemanticSupport = 1U << 8U,
     SemanticOverlay = 1U << 9U,
     PointRing = 1U << 10U,
+    SurfaceShading = 1U << 11U,
 };
 
 /** Mask selecting the mutually exclusive screen-length anchor material flags. */
@@ -63,7 +64,7 @@ inline constexpr uint16_t kGpuScreenLengthAnchorFlags =
     static_cast<uint16_t>(GpuMaterialFlag::ScreenLengthEndAnchor) |
     static_cast<uint16_t>(GpuMaterialFlag::ScreenLengthCenterAnchor);
 
-/** Exact fixed strides associated with each primitive program in ABI v14. */
+/** Exact fixed strides associated with each primitive program in ABI v15. */
 inline constexpr uint32_t kGpuPointRecordBytes = 40U;
 inline constexpr uint32_t kGpuSimplePathSegmentRecordBytes = 52U;
 inline constexpr uint32_t kGpuCompactPathSegmentRecordBytes = 76U;

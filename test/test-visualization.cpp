@@ -1860,6 +1860,42 @@ z-index-expression: drawOrder
     REQUIRE(issues == 2);
 }
 
+TEST_CASE("FeatureStyleRulePolygonHeightExpressionFallback", "[erdblick.style]")
+{
+    auto rule = FeatureStyleRule(YAML::Load(R"yaml(
+type: Building
+geometry: polygon
+surface-shading: true
+polygon-height: 3
+polygon-height-expression: height
+)yaml"), 0);
+    REQUIRE(rule.surfaceShading());
+    auto issues = 0;
+    auto eval = BoundEvalFun{
+        [](std::string const&) { return simfil::Value(int64_t{42}); },
+        [&](auto const&, auto const&, auto const&, auto) { ++issues; }
+    };
+    REQUIRE(rule.polygonHeight(eval) == 42.0);
+
+    eval.eval_ = [](std::string const&) {
+        return simfil::Value(simfil::ValueType::Undef);
+    };
+    REQUIRE(rule.polygonHeight(eval) == 3.0);
+    REQUIRE(issues == 0);
+
+    eval.eval_ = [](std::string const&) {
+        return simfil::Value(-1.0);
+    };
+    REQUIRE(rule.polygonHeight(eval) == 3.0);
+    REQUIRE(issues == 1);
+
+    eval.eval_ = [](std::string const&) {
+        return simfil::Value(std::string{"tall"});
+    };
+    REQUIRE(rule.polygonHeight(eval) == 3.0);
+    REQUIRE(issues == 2);
+}
+
 TEST_CASE("FeatureStyleRuleLateralOffsetUnitAliases", "[erdblick.style]")
 {
     for (auto const& alias : {"pixel", "pixels", "px"}) {

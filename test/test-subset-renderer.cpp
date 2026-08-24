@@ -449,6 +449,23 @@ mapget::model_ptr<mapget::GeometryCollection> lineGeometryWithPoints(
     return collection;
 }
 
+mapget::model_ptr<mapget::GeometryCollection> meshGeometry(
+    mapget::TileSubsetLayer& layer,
+    std::string_view name)
+{
+    auto collection = layer.newGeometryCollection(1, true);
+    auto geometry = layer.newGeometry(mapget::GeomType::Mesh, 6, true);
+    geometry->setName(name);
+    geometry->append({11.0, 48.0, 2.0});
+    geometry->append({11.001, 48.0, 2.0});
+    geometry->append({11.001, 48.001, 2.0});
+    geometry->append({11.0, 48.0, 2.0});
+    geometry->append({11.001, 48.001, 2.0});
+    geometry->append({11.0, 48.001, 2.0});
+    collection->addGeometry(geometry);
+    return collection;
+}
+
 FeatureLayerStyle rendererStyle(std::string_view source)
 {
     return FeatureLayerStyle(
@@ -579,6 +596,69 @@ rules:
     REQUIRE_THROWS_AS(
         installSubset(duplicateRenderer, TileSubsetLayer(subset)),
         std::logic_error);
+}
+
+TEST_CASE(
+    "TileSubsetLayerRenderer extrudes mesh surfaces from projected style fields",
+    "[erdblick.subset-renderer]")
+{
+    auto info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>("SubsetRendererPool");
+    auto tileId = mapget::TileId::fromWgs84(11.0, 48.0, 13);
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        tileId,
+        "SubsetRendererPool",
+        "TestMap",
+        info,
+        strings,
+        "roads",
+        3);
+    subset->setGeometryAnchor({11.0, 48.0, 0.0});
+
+    auto featureId = subset->newFeatureId("Road", {{"roadId", int64_t{7}}});
+    std::vector<std::string> featureFields{"height"};
+    auto channel = subset->newChannel(
+        "style-rule:0",
+        mapget::Scope::Feature,
+        1U << static_cast<uint8_t>(mapget::GeomType::Mesh),
+        "footprint",
+        featureFields);
+    std::vector<simfil::ModelNode::Ptr> featureValues{
+        subset->newValue(12.0),
+    };
+    channel->newFeatureEntry(
+        featureId,
+        meshGeometry(*subset, "footprint"),
+        featureValues);
+
+    auto style = rendererStyle(R"yaml(
+name: PolygonExtrusion
+version: 2
+rules:
+  - type: Road
+    geometry: mesh
+    geometry-name: footprint
+    surface-shading: true
+    polygon-height-expression: height
+    color: "#506070"
+)yaml");
+    REQUIRE(style.isValid());
+
+    TileSubsetLayerRenderer renderer(
+        0,
+        "Features:TestMap:Road:0",
+        style,
+        static_cast<int>(FeatureStyleRule::NoHighlight),
+        static_cast<int>(FeatureStyleRule::AnyFidelity));
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+
+    RendererPacketView packet(renderer);
+    auto const surfaceStreams = packet.streams(GpuPrimitiveKind::SurfaceTriangle);
+    REQUIRE(surfaceStreams.size() == 1);
+    CHECK(surfaceStreams.front().count == 10U);
+    CHECK((surfaceStreams.front().flags & static_cast<uint16_t>(
+        GpuMaterialFlag::SurfaceShading)) != 0U);
 }
 
 TEST_CASE(

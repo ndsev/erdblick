@@ -185,6 +185,10 @@ public:
     [[nodiscard]] float width(BoundEvalFun const& evalFun) const;
     /** Report whether emitted geometry should participate in depth testing. */
     [[nodiscard]] bool depthTest() const;
+    /** Report whether surface triangles should receive restrained matte lighting. */
+    [[nodiscard]] bool surfaceShading() const;
+    /** Resolve the non-negative height in metres used to extrude polygon geometry. */
+    [[nodiscard]] double polygonHeight(BoundEvalFun const& evalFun) const;
     /** Resolve the optional ordinal draw order used to separate coplanar geometry. */
     [[nodiscard]] std::optional<double> zIndex(BoundEvalFun const& evalFun) const;
     /** Hash the optional typed semantic ordering-group expression. */
@@ -378,6 +382,9 @@ private:
     std::optional<WidthScale> widthScale_;
     std::optional<Glow> glow_;
     bool depthTest_ = true;
+    bool surfaceShading_ = false;
+    double polygonHeight_ = 0.0;
+    std::string polygonHeightExpression_;
     std::optional<double> zIndex_;
     std::string zIndexExpression_;
     std::string zIndexGroupExpression_;

@@ -97,7 +97,8 @@ void padRecord(std::vector<std::byte>& bytes, size_t recordStart, size_t stride)
     bool dualStrokePath = false,
     GpuScreenLengthAnchor screenLengthAnchor = GpuScreenLengthAnchor::None,
     GpuSemanticZIndexRole semanticRole = GpuSemanticZIndexRole::None,
-    bool pointRing = false)
+    bool pointRing = false,
+    bool surfaceShading = false)
 {
     if ((compactPath && simplePath) ||
         (dualStrokePath && !compactPath && !simplePath))
@@ -133,6 +134,9 @@ void padRecord(std::vector<std::byte>& bytes, size_t recordStart, size_t stride)
             : 0U) |
         (pointRing
             ? static_cast<uint16_t>(GpuMaterialFlag::PointRing)
+            : 0U) |
+        (surfaceShading
+            ? static_cast<uint16_t>(GpuMaterialFlag::SurfaceShading)
             : 0U));
 }
 
@@ -980,7 +984,9 @@ void GpuRenderPacketBuilder::appendSurface(
     std::span<mapget::Point const> points,
     std::span<uint32_t const> ringStarts,
     GpuRecordStyle const& style,
-    bool depthTest)
+    bool depthTest,
+    double polygonHeight,
+    bool surfaceShading)
 {
     if (points.size() < 3U) {
         return;
@@ -1030,13 +1036,32 @@ void GpuRenderPacketBuilder::appendSurface(
         false,
         false,
         GpuScreenLengthAnchor::None,
-        style.semanticZIndexRole);
+        style.semanticZIndexRole,
+        false,
+        surfaceShading);
     auto const streamIndex = impl_->stream(
         GpuPrimitiveKind::SurfaceTriangle,
         flags,
         kGpuSurfaceTriangleRecordBytes,
         style);
     auto& bytes = impl_->packet.streams[streamIndex].records;
+    auto const height = std::isfinite(polygonHeight)
+        ? std::max(0.0, polygonHeight)
+        : 0.0;
+    auto lifted = [height](mapget::Point point) {
+        point.z += height;
+        return point;
+    };
+    auto appendTriangle = [&](mapget::Point const& first,
+                              mapget::Point const& second,
+                              mapget::Point const& third) {
+        auto const start = bytes.size();
+        appendPoint3(bytes, first);
+        appendPoint3(bytes, second);
+        appendPoint3(bytes, third);
+        impl_->appendCommon(bytes, style, uint32_t{1U});
+        padRecord(bytes, start, kGpuSurfaceTriangleRecordBytes);
+    };
     for (size_t index = 0U; index + 2U < indices.size(); index += 3U) {
         if (indices[index] >= points.size() ||
             indices[index + 1U] >= points.size() ||
@@ -1044,12 +1069,126 @@ void GpuRenderPacketBuilder::appendSurface(
         {
             throw std::runtime_error("Earcut returned an invalid polygon index.");
         }
-        auto const start = bytes.size();
-        appendPoint3(bytes, points[indices[index]]);
-        appendPoint3(bytes, points[indices[index + 1U]]);
-        appendPoint3(bytes, points[indices[index + 2U]]);
-        impl_->appendCommon(bytes, style, uint32_t{1U});
-        padRecord(bytes, start, kGpuSurfaceTriangleRecordBytes);
+        appendTriangle(
+            lifted(points[indices[index]]),
+            lifted(points[indices[index + 1U]]),
+            lifted(points[indices[index + 2U]]));
+    }
+    if (height <= 0.0) {
+        return;
+    }
+    for (size_t ring = 0U; ring + 1U < starts.size(); ++ring) {
+        auto const begin = starts[ring];
+        auto const end = starts[ring + 1U];
+        if (end - begin < 2U) {
+            continue;
+        }
+        for (auto current = begin; current < end; ++current) {
+            auto const next = current + 1U < end ? current + 1U : begin;
+            auto const& lowerCurrent = points[current];
+            auto const& lowerNext = points[next];
+            if (lowerCurrent.x == lowerNext.x &&
+                lowerCurrent.y == lowerNext.y &&
+                lowerCurrent.z == lowerNext.z)
+            {
+                continue;
+            }
+            auto const upperCurrent = lifted(lowerCurrent);
+            auto const upperNext = lifted(lowerNext);
+            appendTriangle(lowerCurrent, lowerNext, upperNext);
+            appendTriangle(lowerCurrent, upperNext, upperCurrent);
+        }
+    }
+}
+
+void GpuRenderPacketBuilder::appendTriangleMesh(
+    std::span<mapget::Point const> points,
+    GpuRecordStyle const& style,
+    bool depthTest,
+    double polygonHeight,
+    bool surfaceShading)
+{
+    if (points.size() < 3U) {
+        return;
+    }
+    auto const height = std::isfinite(polygonHeight)
+        ? std::max(0.0, polygonHeight)
+        : 0.0;
+    auto lifted = [height](mapget::Point point) {
+        point.z += height;
+        return point;
+    };
+
+    using PointKey = std::array<uint64_t, 3>;
+    using EdgeKey = std::array<uint64_t, 6>;
+    using Edge = std::pair<EdgeKey, std::pair<mapget::Point, mapget::Point>>;
+    auto pointKey = [](mapget::Point const& point) {
+        auto bits = [](double value) {
+            return std::bit_cast<uint64_t>(value == 0.0 ? 0.0 : value);
+        };
+        return PointKey{bits(point.x), bits(point.y), bits(point.z)};
+    };
+    auto edge = [&](mapget::Point const& first, mapget::Point const& second) {
+        auto firstKey = pointKey(first);
+        auto secondKey = pointKey(second);
+        if (secondKey < firstKey) {
+            std::swap(firstKey, secondKey);
+        }
+        return Edge{
+            EdgeKey{
+                firstKey[0], firstKey[1], firstKey[2],
+                secondKey[0], secondKey[1], secondKey[2],
+            },
+            {first, second},
+        };
+    };
+
+    std::vector<Edge> edges;
+    if (height > 0.0) {
+        edges.reserve(points.size());
+    }
+    for (size_t index = 0U; index + 2U < points.size(); index += 3U) {
+        std::array<mapget::Point, 3> const roof{
+            lifted(points[index]),
+            lifted(points[index + 1U]),
+            lifted(points[index + 2U]),
+        };
+        appendSurface(roof, {}, style, depthTest, 0.0, surfaceShading);
+        if (height <= 0.0) {
+            continue;
+        }
+        for (size_t vertex = 0U; vertex < roof.size(); ++vertex) {
+            auto const next = (vertex + 1U) % roof.size();
+            auto const& first = points[index + vertex];
+            auto const& second = points[index + next];
+            if (pointKey(first) != pointKey(second)) {
+                edges.push_back(edge(first, second));
+            }
+        }
+    }
+    if (height <= 0.0) {
+        return;
+    }
+
+    std::sort(edges.begin(), edges.end(), [](Edge const& lhs, Edge const& rhs) {
+        return lhs.first < rhs.first;
+    });
+    for (size_t begin = 0U; begin < edges.size();) {
+        auto end = begin + 1U;
+        while (end < edges.size() && edges[end].first == edges[begin].first) {
+            ++end;
+        }
+        if (end - begin == 1U) {
+            auto const& [lowerFirst, lowerSecond] = edges[begin].second;
+            std::array<mapget::Point, 4> const wall{
+                lowerFirst,
+                lowerSecond,
+                lifted(lowerSecond),
+                lifted(lowerFirst),
+            };
+            appendSurface(wall, {}, style, depthTest, 0.0, surfaceShading);
+        }
+        begin = end;
     }
 }
 

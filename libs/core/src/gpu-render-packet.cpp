@@ -34,6 +34,7 @@ constexpr uint16_t kKnownMaterialFlags =
     static_cast<uint16_t>(GpuMaterialFlag::SemanticSupport) |
     static_cast<uint16_t>(GpuMaterialFlag::SemanticOverlay) |
     static_cast<uint16_t>(GpuMaterialFlag::PointRing) |
+    static_cast<uint16_t>(GpuMaterialFlag::SurfaceShading) |
     kGpuScreenLengthAnchorFlags;
 constexpr uint32_t kKnownPacketFlags =
     static_cast<uint32_t>(GpuRenderPacketFlag::RevisionComplete);
@@ -235,6 +236,8 @@ private:
         (flags & static_cast<uint16_t>(GpuMaterialFlag::DualStrokePath)) != 0U;
     auto const pointRing =
         (flags & static_cast<uint16_t>(GpuMaterialFlag::PointRing)) != 0U;
+    auto const surfaceShading =
+        (flags & static_cast<uint16_t>(GpuMaterialFlag::SurfaceShading)) != 0U;
     auto const screenLengthAnchor = static_cast<uint16_t>(
         flags & kGpuScreenLengthAnchorFlags);
     auto const semanticRoles = static_cast<uint16_t>(
@@ -247,6 +250,7 @@ private:
         (dualStrokePath && !compactPath && !simplePath) ||
         (semanticRoles != 0U && !std::has_single_bit(semanticRoles)) ||
         (pointRing && kind != GpuPrimitiveKind::Point) ||
+        (surfaceShading && kind != GpuPrimitiveKind::SurfaceTriangle) ||
         ((compactPath || simplePath) &&
             kind != GpuPrimitiveKind::PathSegment) ||
         !validScreenLengthAnchor ||

@@ -353,11 +353,12 @@ TEST_CASE("GpuRenderPacketBuilder triangulates winding, holes, and vertical surf
 {
     using namespace erdblick;
     auto render = [](std::span<mapget::Point const> points,
-                     std::span<uint32_t const> rings) {
+                     std::span<uint32_t const> rings,
+                     double polygonHeight = 0.0) {
         GpuRenderPacketBuilder builder;
         builder.configure(1U, 1U, 0U, {});
         builder.beginContribution(1U, 1U, 0U, 1U);
-        builder.appendSurface(points, rings, style(), true);
+        builder.appendSurface(points, rings, style(), true, polygonHeight);
         builder.endContribution();
         return builder.build();
     };
@@ -429,6 +430,43 @@ TEST_CASE("GpuRenderPacketBuilder triangulates winding, holes, and vertical surf
             2U);
         CHECK(triangleCount == 2U);
         CHECK(area == 100.0);
+    }
+
+    SECTION("extruded polygon roof and walls") {
+        std::array<mapget::Point, 4> const polygon{{
+            {0.0, 0.0, 2.0}, {10.0, 0.0, 2.0},
+            {10.0, 10.0, 2.0}, {0.0, 10.0, 2.0},
+        }};
+        auto const bytes = render(polygon, {}, 12.0);
+        auto const [triangleCount, roofArea] = surfaceArea(bytes, 0U, 1U);
+        CHECK(triangleCount == 10U);
+        CHECK(roofArea == 100.0);
+
+        auto const streamTable = read<uint32_t>(bytes, 72U);
+        auto const records = read<uint32_t>(bytes, streamTable + 20U);
+        CHECK(read<float>(bytes, records + 8U) == 14.0F);
+        CHECK(read<float>(bytes, records + 20U) == 14.0F);
+        CHECK(read<float>(bytes, records + 32U) == 14.0F);
+    }
+
+    SECTION("extruded mesh excludes its internal diagonal") {
+        std::array<mapget::Point, 6> const mesh{{
+            {0.0, 0.0, 2.0}, {10.0, 0.0, 2.0},
+            {10.0, 10.0, 2.0}, {0.0, 0.0, 2.0},
+            {10.0, 10.0, 2.0}, {0.0, 10.0, 2.0},
+        }};
+        GpuRenderPacketBuilder builder;
+        builder.configure(1U, 1U, 0U, {});
+        builder.beginContribution(1U, 1U, 0U, 1U);
+        builder.appendTriangleMesh(mesh, style(), true, 12.0);
+        builder.endContribution();
+
+        auto const [triangleCount, roofArea] = surfaceArea(
+            builder.build(),
+            0U,
+            1U);
+        CHECK(triangleCount == 10U);
+        CHECK(roofArea == 100.0);
     }
 }
 

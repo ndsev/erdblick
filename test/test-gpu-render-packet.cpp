@@ -223,6 +223,14 @@ TEST_CASE("GpuRenderPacket rejects invalid logical references while encoding")
             erdblick::GpuRenderPacketCodec::encode(packet),
             std::invalid_argument);
     }
+    SECTION("surface shading on a non-surface stream") {
+        auto packet = samplePacket();
+        packet.streams.front().flags |= static_cast<uint16_t>(
+            erdblick::GpuMaterialFlag::SurfaceShading);
+        CHECK_THROWS_AS(
+            erdblick::GpuRenderPacketCodec::encode(packet),
+            std::invalid_argument);
+    }
     SECTION("invalid contribution span") {
         auto packet = samplePacket();
         packet.contributions.front().spans.front().recordCount = 3U;

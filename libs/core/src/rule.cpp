@@ -172,6 +172,21 @@ std::optional<double> numericColorScaleKey(
     return std::nullopt;
 }
 
+/** Convert a SIMFIL integer or float into a finite double. */
+std::optional<double> finiteNumber(simfil::Value const& value)
+{
+    if (value.isa(simfil::ValueType::Int)) {
+        return static_cast<double>(value.as<simfil::ValueType::Int>());
+    }
+    if (value.isa(simfil::ValueType::Float)) {
+        auto const number = value.as<simfil::ValueType::Float>();
+        return std::isfinite(number)
+            ? std::optional<double>{number}
+            : std::nullopt;
+    }
+    return std::nullopt;
+}
+
 /** Build an allocation-bounded direct lookup when every category is integral. */
 template<typename Stop, typename Result, typename Project>
 std::optional<FeatureStyleRule::DenseIntegerScale<Result>>
@@ -469,6 +484,16 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["depth-test"].IsDefined()) {
         depthTest_ = yaml["depth-test"].as<bool>();
+    }
+    if (yaml["surface-shading"].IsDefined()) {
+        surfaceShading_ = yaml["surface-shading"].as<bool>();
+    }
+    if (yaml["polygon-height"].IsDefined()) {
+        polygonHeight_ = yaml["polygon-height"].as<double>();
+    }
+    if (yaml["polygon-height-expression"].IsDefined()) {
+        polygonHeightExpression_ =
+            yaml["polygon-height-expression"].as<std::string>();
     }
     if (yaml["z-index"].IsDefined()) {
         zIndex_ = yaml["z-index"].as<double>();
@@ -1013,6 +1038,7 @@ FeatureStyleRule::expressionUses() const
         append("width-scale.expression", widthScale_->expression);
     }
     append("arrow-expression", arrowExpression_);
+    append("polygon-height-expression", polygonHeightExpression_);
     append("z-index-expression", zIndexExpression_);
     append("z-index-group-expression", zIndexGroupExpression_);
     append("icon-url-expression", iconUrlExpression_);
@@ -1244,6 +1270,41 @@ bool FeatureStyleRule::depthTest() const
     return depthTest_;
 }
 
+bool FeatureStyleRule::surfaceShading() const
+{
+    return surfaceShading_;
+}
+
+double FeatureStyleRule::polygonHeight(BoundEvalFun const& evalFun) const
+{
+    auto const fallback = std::isfinite(polygonHeight_) && polygonHeight_ >= 0.0
+        ? polygonHeight_
+        : 0.0;
+    if (polygonHeightExpression_.empty()) {
+        return fallback;
+    }
+
+    auto const value = evalFun.evaluate(polygonHeightExpression_);
+    if (value.isa(simfil::ValueType::Undef) ||
+        value.isa(simfil::ValueType::Null))
+    {
+        return fallback;
+    }
+    auto const number = finiteNumber(value);
+    if (number && *number >= 0.0) {
+        return *number;
+    }
+
+    if (evalFun.hasIssueReporter()) {
+        evalFun.reportIssue(
+            "polygon-height-expression",
+            polygonHeightExpression_,
+            "Expression must evaluate to a finite non-negative number; using the literal polygon-height fallback.",
+            index_);
+    }
+    return fallback;
+}
+
 std::optional<double> FeatureStyleRule::zIndex(
     BoundEvalFun const& evalFun) const
 {
@@ -1257,15 +1318,8 @@ std::optional<double> FeatureStyleRule::zIndex(
     {
         return zIndex_;
     }
-    std::optional<double> number;
-    if (value.isa(simfil::ValueType::Int)) {
-        number = static_cast<double>(
-            value.as<simfil::ValueType::Int>());
-    }
-    else if (value.isa(simfil::ValueType::Float)) {
-        number = value.as<simfil::ValueType::Float>();
-    }
-    if (number && std::isfinite(*number)) {
+    auto const number = finiteNumber(value);
+    if (number) {
         return *number;
     }
 

@@ -3271,7 +3271,7 @@ export abstract class DeckMapView implements IRenderView {
         levels.forEach((level, index) => {
             const layerKey = `${DeckMapView.TILE_GRID_LAYER_KEY}/${level}`;
             const layer = this.createTileGridLayer(level, viewport, layerKey);
-            this.layerRegistry.upsert(layerKey, layer, 490 + index);
+            this.layerRegistry.upsert(layerKey, layer, 325 + index);
             nextLayerKeys.add(layerKey);
         });
         for (const key of this.tileGridLayerKeys) {
@@ -3374,7 +3374,7 @@ export abstract class DeckMapView implements IRenderView {
                 imageData,
                 parameters: DeckMapView.NO_DEPTH_PARAMETERS
             });
-            this.layerRegistry.upsert(layerKey, layer, 360);
+            this.layerRegistry.upsert(layerKey, layer, 300);
             nextLayerKeys.add(layerKey);
         }
 

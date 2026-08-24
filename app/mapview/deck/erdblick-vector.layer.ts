@@ -509,6 +509,16 @@ function screenLengthShader(shader: string, flags: number): string {
     : shader;
 }
 
+/** Compile restrained matte lighting only into explicitly shaded surfaces. */
+function surfaceShadingShader(shader: string, flags: number): string {
+  return (flags & GpuMaterialFlag.SurfaceShading) !== 0
+    ? shader.replace(
+        "#define SHADER_NAME",
+        "#define ERDBLICK_SURFACE_SHADING\n#define SHADER_NAME",
+      )
+    : shader;
+}
+
 /** Resolve the shader pair and direct interleaved layout for one primitive stream. */
 function primitiveProgram(source: GpuSceneMaterialStore): {
   vertexShader: string;
@@ -584,8 +594,14 @@ function primitiveProgram(source: GpuSceneMaterialStore): {
       };
     case GpuPrimitiveKind.SurfaceTriangle:
       return {
-        vertexShader: SURFACE_VERTEX_SHADER,
-        fragmentShader: SURFACE_FRAGMENT_SHADER,
+        vertexShader: surfaceShadingShader(
+          SURFACE_VERTEX_SHADER,
+          source.flags,
+        ),
+        fragmentShader: surfaceShadingShader(
+          SURFACE_FRAGMENT_SHADER,
+          source.flags,
+        ),
         layout: SURFACE_LAYOUT,
       };
     case GpuPrimitiveKind.Icon:
@@ -1178,8 +1194,8 @@ export class ErdblickVectorMaskLayer extends Layer<ErdblickVectorMaskLayerProps>
  * Construct the stable ordinary and interaction vector pass shells for one
  * Deck view.
  *
- * Surfaces stay below GLTF and tile-state overlays while paths, points,
- * arrows, and icons retain their legacy position above those layers.
+ * Ordinary surfaces and vectors stay above background, grid, and tile-state
+ * layers while preserving their relative surface-before-vector ordering.
  * Transient authored hover/selection geometry is physically drawn after the
  * shader interaction compositor. Every shell shares drill-pick suppression.
  */

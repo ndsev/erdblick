@@ -1973,10 +1973,18 @@ bool TileSubsetLayerRenderer::renderGeometry(
             evalFun,
             *color,
             zIndex,
-            pick);
+            pick,
+            rule.polygonHeight(evalFun));
         break;
     case mapget::GeomType::Mesh:
-        appendMesh(*projected, rule, evalFun, *color, zIndex, pick);
+        appendMesh(
+            *projected,
+            rule,
+            evalFun,
+            *color,
+            zIndex,
+            pick,
+            rule.polygonHeight(evalFun));
         break;
     case mapget::GeomType::AABB:
     case mapget::GeomType::GltfNodeIndex:
@@ -3274,7 +3282,8 @@ void TileSubsetLayerRenderer::appendSurface(
     BoundEvalFun const& evalFun,
     glm::fvec4 const& color,
     double zIndex,
-    uint32_t pick)
+    uint32_t pick,
+    double polygonHeight)
 {
     if (points.size() < 3) {
         return;
@@ -3284,7 +3293,9 @@ void TileSubsetLayerRenderer::appendSurface(
         points,
         ringStarts,
         gpuRecordStyle(rule, evalFun, color, zIndex, pick),
-        rule.depthTest());
+        rule.depthTest(),
+        polygonHeight,
+        rule.surfaceShading());
     vertexCount_ += static_cast<uint32_t>(points.size());
 }
 
@@ -3294,18 +3305,22 @@ void TileSubsetLayerRenderer::appendMesh(
     BoundEvalFun const& evalFun,
     glm::fvec4 const& color,
     double zIndex,
-    uint32_t pick)
+    uint32_t pick,
+    double polygonHeight)
 {
-    for (size_t index = 0; index + 2 < points.size(); index += 3) {
-        appendSurface(
-            {points[index], points[index + 1], points[index + 2]},
-            {},
-            rule,
-            evalFun,
-            color,
-            zIndex,
-            pick);
+    if (points.size() < 3U) {
+        return;
     }
+    recordPickNavigationAltitude(
+        pick,
+        std::span<mapget::Point const>{points}.first(3U));
+    gpuPacketBuilder_.appendTriangleMesh(
+        points,
+        gpuRecordStyle(rule, evalFun, color, zIndex, pick),
+        rule.depthTest(),
+        polygonHeight,
+        rule.surfaceShading());
+    vertexCount_ += static_cast<uint32_t>(points.size());
 }
 
 GpuPathRecordHandle TileSubsetLayerRenderer::appendPath(

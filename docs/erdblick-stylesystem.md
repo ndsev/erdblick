@@ -220,6 +220,8 @@ Common primitive fields include:
 - `color`, `color-expression`, or `color-scale`;
 - `opacity`;
 - `width` and optional `width-scale`;
+- `polygon-height` and optional `polygon-height-expression`;
+- `surface-shading` for restrained matte lighting on polygon and mesh triangles;
 - `offset` and `offset-increment`;
 - `z-index` and optional `z-index-expression`;
 - `lateral-offset-unit`: `meter`, `meters`, `m`, `pixel`, `pixels`, or `px`;
@@ -239,6 +241,30 @@ Common primitive fields include:
 
 Literal values are resolved without projection. Every expression-backed field
 is collected by the planner and transported in the appropriate field list.
+
+`polygon-height` extrudes polygon and triangle-mesh surface geometry vertically
+in metres. The renderer raises the triangulated roof and materializes walls for
+every polygon ring or mesh boundary edge; internal mesh diagonals remain
+hidden. `polygon-height-expression` resolves the height per emitted feature,
+attribute, or relation and falls back to the literal value when the expression
+is undefined. Both forms require finite, non-negative values:
+
+```yaml
+geometry: polygon
+polygon-height: 3
+polygon-height-expression: attributes.layer.BMD.BUILDING_HEIGHT.buildingHeight
+```
+
+`surface-shading: true` derives one flat normal from each existing surface
+triangle and applies a low-contrast ambient/directional light in 3D. It does
+not add geometry, cast shadows, or alter alpha. Flattened 2D rendering and GPU
+identity-mask passes retain the exact authored color. The property is opt-in so
+diagnostic surfaces and interaction materials remain visually literal:
+
+```yaml
+geometry: [polygon, mesh]
+surface-shading: true
+```
 
 `label-collision: true` lets Deck hide lower-priority labels that overlap
 inside one rendered style layer. `label-collision-priority` is an integer from

@@ -443,7 +443,8 @@ private:
         BoundEvalFun const& evalFun,
         glm::fvec4 const& color,
         double zIndex,
-        uint32_t pickIndex);
+        uint32_t pickIndex,
+        double polygonHeight = 0.0);
     /** Preserve GLTF mesh geometry in the temporary browser bridge. */
     void appendMesh(
         std::vector<mapget::Point> const& points,
@@ -451,7 +452,8 @@ private:
         BoundEvalFun const& evalFun,
         glm::fvec4 const& color,
         double zIndex,
-        uint32_t pickIndex);
+        uint32_t pickIndex,
+        double polygonHeight = 0.0);
     /** Expand one path into adjacency segments and optional shader arrowheads. */
     GpuPathRecordHandle appendPath(
         std::vector<mapget::Point> const& points,

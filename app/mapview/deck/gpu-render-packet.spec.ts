@@ -172,4 +172,20 @@ describe("GpuRenderPacketView", () => {
         view.setUint32(272, 1, true);
         expect(() => new GpuRenderPacketView(bytes)).toThrow(/layout/);
     });
+
+    it("accepts surface shading only for triangle streams", () => {
+        const bytes = ownedPacket();
+        const view = new DataView(bytes.buffer);
+        view.setUint16(162, GpuMaterialFlag.SurfaceShading, true);
+        expect(() => new GpuRenderPacketView(bytes)).toThrow(/layout/);
+
+        view.setUint16(160, GpuPrimitiveKind.SurfaceTriangle, true);
+        view.setUint32(172, 60, true);
+        view.setUint32(176, 1, true);
+        view.setUint32(184, 60, true);
+        view.setUint32(272, 1, true);
+        expect(new GpuRenderPacketView(bytes).streams[0].flags).toBe(
+            GpuMaterialFlag.SurfaceShading
+        );
+    });
 });

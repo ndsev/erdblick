@@ -1437,6 +1437,20 @@ bool validateStyleRuleYamlImpl(
         rulePath,
         report,
         sourceRuleIndex));
+    markInvalid(readScalar<bool>(
+        ruleYaml,
+        "surface-shading",
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "polygon-height",
+        0.0,
+        static_cast<double>(std::numeric_limits<float>::max()),
+        rulePath,
+        report,
+        sourceRuleIndex));
     markInvalid(validateNumericRange(
         ruleYaml,
         "z-index",
@@ -1489,6 +1503,7 @@ bool validateStyleRuleYamlImpl(
     markInvalid(validateExpression(ruleYaml, "attribute-filter", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "color-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "arrow-expression", false, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateExpression(ruleYaml, "polygon-height-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "z-index-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "z-index-group-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "icon-url-expression", false, rulePath, source, report, sourceRuleIndex));

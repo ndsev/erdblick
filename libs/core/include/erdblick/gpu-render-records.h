@@ -188,12 +188,22 @@ public:
         GpuPathRecordHandle const& handle,
         float threshold);
 
-    /** Triangulate one polygon, including holes, into duplicated triangle records. */
+    /** Triangulate one polygon and optionally add a raised roof plus ring walls. */
     void appendSurface(
         std::span<mapget::Point const> points,
         std::span<uint32_t const> ringStarts,
         GpuRecordStyle const& style,
-        bool depthTest);
+        bool depthTest,
+        double polygonHeight = 0.0,
+        bool surfaceShading = false);
+
+    /** Append triangle-list surface geometry and optionally extrude its boundary. */
+    void appendTriangleMesh(
+        std::span<mapget::Point const> points,
+        GpuRecordStyle const& style,
+        bool depthTest,
+        double polygonHeight = 0.0,
+        bool surfaceShading = false);
 
     /** Append one atlas-backed icon instance. */
     void appendIcon(
