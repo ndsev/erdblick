@@ -39,7 +39,7 @@ interface NormalizedZIndexEntry {
 }
 
 /**
- * Assign depth slots only to authored ranks which actually contain semantic ties.
+ * Compress authored ranks into the safe depth budget and spend spare slots on ties.
  *
  * A global tie lattice wastes the same number of slots on every unique z-index.
  * Dense Classic styles then exhaust the safe depth budget before repeated ranks
@@ -51,6 +51,40 @@ function allocateDepthRanks(
   orderedZIndices: readonly number[],
   tieBreakersByZIndex: ReadonlyMap<number, ReadonlySet<number>>,
 ): { allocations: Map<number, DepthRankAllocation>; slotCount: number } {
+  if (orderedZIndices.length > TARGET_DEPTH_STEPS) {
+    // A 24-bit depth buffer cannot represent an unbounded exact lattice inside
+    // the deliberately tiny local bias interval. Keep one slot per integral
+    // authored tier, then distribute the rest across each tier's fractions.
+    let tierCount = 1;
+    for (let index = 1; index < orderedZIndices.length; ++index) {
+      if (
+        Math.floor(orderedZIndices[index]) !==
+        Math.floor(orderedZIndices[index - 1])
+      ) {
+        ++tierCount;
+      }
+    }
+    const preserveTiers = tierCount <= TARGET_DEPTH_STEPS;
+    const ordinalSlots = TARGET_DEPTH_STEPS - (preserveTiers ? tierCount : 1);
+    const allocations = new Map<number, DepthRankAllocation>();
+    let tier = 0;
+    orderedZIndices.forEach((value, index) => {
+      if (
+        index > 0 &&
+        Math.floor(value) !== Math.floor(orderedZIndices[index - 1])
+      ) {
+        ++tier;
+      }
+      allocations.set(value, {
+        firstSlot:
+          (preserveTiers ? tier : 0) +
+          Math.floor((index * ordinalSlots) / (orderedZIndices.length - 1)),
+        tieBucketCount: 1,
+      });
+    });
+    return { allocations, slotCount: TARGET_DEPTH_STEPS };
+  }
+
   const bucketCounts = new Map<number, number>(
     orderedZIndices.map((value) => [value, 1]),
   );
@@ -960,10 +994,6 @@ export class GpuScene {
               : null,
         }));
       }
-      if (ready.length) {
-        this.updateZIndexLookup(ready);
-      }
-
       let labelsChanged = false;
       for (const item of ready) {
         const previous = item.entry.active;
@@ -1696,31 +1726,6 @@ export class GpuScene {
       removed = true;
     }
     return removed;
-  }
-
-  /** Initialize admitted ordering slots without exposing stale recycled values. */
-  private updateZIndexLookup(
-    staged: readonly {
-      entry: ContributionEntry;
-      installed: InstalledContribution;
-    }[],
-  ): void {
-    const startedAt = performance.now();
-    for (const { installed } of staged) {
-      this.contributionLookup.setRange(installed.contributionSlot, [
-        installed.pickingRange?.firstRecord ?? -1,
-        0,
-        installed.activationToken,
-        installed.zIndexRange?.firstRecord ?? -1,
-      ]);
-      if (installed.zIndexRange) {
-        this.zIndexLookup.setRange(
-          installed.zIndexRange.firstRecord,
-          new Float32Array(installed.zIndices.length * 4),
-        );
-      }
-    }
-    this.lastZIndexUpdateMs = performance.now() - startedAt;
   }
 
   /**

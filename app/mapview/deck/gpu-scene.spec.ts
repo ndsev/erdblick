@@ -740,7 +740,42 @@ describe("GpuScene contribution lifecycle", () => {
     expect(ranked[8]).toBeGreaterThan(Math.max(ranked[0], ranked[4]));
   });
 
-  it("defers whole-scene z-index ranking while packets are arriving", () => {
+  it("bounds dense depth ranks without collapsing isolated authored tiers", () => {
+    const { device, scene } = createScene();
+    const zIndices = [
+      -20,
+      -19,
+      ...Array.from({ length: 1025 }, (_, index) => index * 0.0001),
+    ];
+    zIndices.forEach((zIndex, index) => {
+      const reservation = scene.prepareRender(
+        "origin",
+        [11, 48, 0],
+        [
+          {
+            identity: `dense-${index}`,
+            mapTileKey: `Features:Map:Layer:${index}:0`,
+            styleOrder: 0,
+          },
+        ],
+      );
+      scene.applyPacket(pointPacket(reservation, { zIndex }), reservation);
+      scene.finishRender(reservation);
+    });
+
+    scene.publishPresentation();
+    const ranked = activeTexture(
+      device,
+      "erdblick-gpu-z-index-table",
+    ).writes.at(-1)!.data as Float32Array;
+    const offsets = zIndices.map((_, index) => ranked[index * 4]);
+    expect(new Set(offsets).size).toBeLessThanOrEqual(1024);
+    expect(offsets[0]).toBeLessThan(offsets[1]);
+    expect(offsets[1]).toBeLessThan(offsets[2]);
+    expect(offsets.at(-1)).toBeGreaterThan(offsets[2]);
+  });
+
+  it("keeps contribution and z-index lookups unchanged until publication", () => {
     const { device, scene } = createScene();
     const install = (identity: string, tileId: number) => {
       const reservation = scene.prepareRender(
@@ -759,15 +794,33 @@ describe("GpuScene contribution lifecycle", () => {
     };
 
     install("first", 1);
-    const texture = activeTexture(device, "erdblick-gpu-z-index-table");
-    const writesBefore = texture.writes.length;
+    expect(
+      device.textures.filter(
+        (texture) => texture.id === "erdblick-gpu-contribution-table",
+      ),
+    ).toHaveLength(0);
+    expect(
+      device.textures.filter(
+        (texture) => texture.id === "erdblick-gpu-z-index-table",
+      ),
+    ).toHaveLength(0);
     install("second", 2);
 
-    expect(texture.writes.length - writesBefore).toBe(1);
+    expect(
+      device.textures.filter(
+        (texture) => texture.id === "erdblick-gpu-contribution-table",
+      ),
+    ).toHaveLength(0);
+    expect(
+      device.textures.filter(
+        (texture) => texture.id === "erdblick-gpu-z-index-table",
+      ),
+    ).toHaveLength(0);
     scene.publishPresentation();
-    expect(activeTexture(device, "erdblick-gpu-z-index-table")).not.toBe(
-      texture,
-    );
+    expect(
+      activeTexture(device, "erdblick-gpu-contribution-table"),
+    ).toBeTruthy();
+    expect(activeTexture(device, "erdblick-gpu-z-index-table")).toBeTruthy();
   });
 
   it("rejects a superseded packet without replacing the visible revision", () => {
@@ -892,24 +945,27 @@ describe("GpuScene contribution lifecycle", () => {
       initial,
     );
     scene.finishRender(initial);
+    scene.publishPresentation();
+    const presentedRevision = scene.presentationRevision;
+    const presentedContribution = scene.contributionTexture;
+    const presentedZIndex = scene.zIndexTexture;
     const replacement = scene.prepareRender("origin", [11, 48, 0], input);
-    const zLookup = device.textures.find(
-      (texture) => texture.id === "erdblick-gpu-z-index-table",
-    )!;
-    zLookup.failNextWrite = true;
-
-    expect(() =>
-      scene.applyPacket(
-        pointPacket(replacement, { featureId: "Road.2", zIndex: 10 }),
-        replacement,
-      ),
-    ).toThrow(/Synthetic texture/);
+    scene.applyPacket(
+      pointPacket(replacement, { featureId: "Road.2", zIndex: 10 }),
+      replacement,
+    );
     scene.finishRender(replacement);
+    device.failNextTextureWriteId = "erdblick-gpu-z-index-table";
 
+    expect(() => scene.publishPresentation()).toThrow(/Synthetic texture/);
+
+    expect(scene.presentationRevision).toBe(presentedRevision);
+    expect(scene.contributionTexture).toBe(presentedContribution);
+    expect(scene.zIndexTexture).toBe(presentedZIndex);
     expect(scene.snapshot()).toMatchObject({
       activeContributionCount: 1,
-      pickingHighWater: 1,
-      zIndexHighWater: 1,
+      pickingHighWater: 2,
+      zIndexHighWater: 2,
     });
     expect(scene.resolvePick(0)).toEqual([
       {
@@ -1155,6 +1211,11 @@ describe("GpuScene contribution lifecycle", () => {
     scene.removeContribution("stale");
     expect(oldStoreView.getUint32(36, true)).toBe(oldRecordWord);
     scene.publishPresentation();
+    const contributionTexture = activeTexture(
+      device,
+      "erdblick-gpu-contribution-table",
+    );
+    const writesBeforePublication = contributionTexture.writes.length;
 
     const replacement = install("replacement", 3, 8n, 59);
     expect(replacement.contributions[0].slot).toBe(stale.contributions[0].slot);
@@ -1162,15 +1223,19 @@ describe("GpuScene contribution lifecycle", () => {
       stale.contributions[0].activationToken,
     );
     expect(oldRecordWord >>> 8).toBe(stale.contributions[0].activationToken);
+    expect(contributionTexture.writes.length).toBe(writesBeforePublication);
 
-    const contributionTexture = activeTexture(
+    scene.publishPresentation();
+    expect(contributionTexture.writes.length).toBe(writesBeforePublication);
+    const publishedTexture = activeTexture(
       device,
       "erdblick-gpu-contribution-table",
     );
-    const publishedToken = [...contributionTexture.writes]
-      .reverse()
-      .map((write) => write.data as Float32Array)
-      .find((data) => data.length === 4)?.[2];
+    expect(publishedTexture).not.toBe(contributionTexture);
+    const publishedValues = publishedTexture.writes.at(-1)!
+      .data as Float32Array;
+    const publishedToken =
+      publishedValues[replacement.contributions[0].slot * 4 + 2];
     expect(publishedToken).toBe(replacement.contributions[0].activationToken);
   });
 
