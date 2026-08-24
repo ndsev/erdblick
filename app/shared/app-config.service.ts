@@ -844,9 +844,16 @@ export class AppConfigService {
             merged.mapPresets = [];
             merged._mapPresetsInvalid = false;
         } else if (!serverConfig.mapPresets.configured && serverConfig.mapPresets.write) {
-            // A durable writable server owns an omitted catalog without copying static definitions.
-            merged.mapPresets = [];
-            merged._mapPresetsInvalid = false;
+            const parsedStaticPresets = parseMapPresetDefinitions(staticConfig.mapPresets ?? []);
+            const hasValidStaticCatalog = Array.isArray(staticConfig.mapPresets)
+                && !staticConfig._mapPresetsInvalid
+                && parsedStaticPresets.issues.length === 0
+                && parsedStaticPresets.presets.length === staticConfig.mapPresets.length;
+            if (!hasValidStaticCatalog) {
+                // With no valid inherited catalog, expose a writable empty value for first-time setup.
+                merged.mapPresets = [];
+                merged._mapPresetsInvalid = false;
+            }
         }
         if (serverErdblickConfig.locationSearch && isPlainObject(serverErdblickConfig.locationSearch)) {
             const mergedLocationSearch: RawLocationSearchConfig = {

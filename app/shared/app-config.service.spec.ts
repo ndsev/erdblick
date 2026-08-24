@@ -349,7 +349,7 @@ describe("AppConfigService", () => {
         expect(config.serverConfig.mapPresets.configured).toBe(false);
     });
 
-    it("does not copy a static catalog into an omitted writable server catalog", async () => {
+    it("keeps a valid static catalog when the writable server key is omitted", async () => {
         const {service, httpClient} = createService();
         const staticPreset = {
             id: "static",
@@ -359,6 +359,30 @@ describe("AppConfigService", () => {
         httpClient.get.mockImplementation((url: string) => {
             if (url === "/static-config/config.json") {
                 return of({mapPresets: [staticPreset]});
+            }
+            return of(new HttpResponse({
+                status: 200,
+                body: {
+                    capabilities: {
+                        mapPresets: mapPresetCapability({write: true})
+                    },
+                    erdblick: {}
+                } satisfies ServerConfigResponse
+            }));
+        });
+
+        const config = await service.load();
+
+        expect(config.mapPresets).toEqual([{...staticPreset, enabled: true}]);
+        expect(config.mapPresetConfig).toMatchObject({configured: true, valid: true, write: true});
+        expect(config.serverConfig.mapPresets.configured).toBe(false);
+    });
+
+    it("does not expose a malformed static catalog through an omitted writable server key", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => {
+            if (url === "/static-config/config.json") {
+                return of({mapPresets: [{id: "broken"}]});
             }
             return of(new HttpResponse({
                 status: 200,
@@ -467,13 +491,21 @@ describe("AppConfigService", () => {
 
     it("preserves an explicit empty server map-preset list", async () => {
         const {service, httpClient} = createService();
+        const staticPreset = {
+            id: "static",
+            name: "Static",
+            layerPresets: [{layerId: "Lane", styleId: "Lanes", presetId: "topology"}]
+        };
         httpClient.get.mockImplementation((url: string) => {
             if (url === "/static-config/config.json") {
-                return of({mapPresets: [{id: "static"}]});
+                return of({mapPresets: [staticPreset]});
             }
             return of(new HttpResponse({
                 status: 200,
                 body: {
+                    capabilities: {
+                        mapPresets: mapPresetCapability({configured: true, write: true})
+                    },
                     erdblick: {mapPresets: []}
                 } satisfies ServerConfigResponse
             }));
@@ -481,6 +513,7 @@ describe("AppConfigService", () => {
 
         const config = await service.load();
         expect(config.mapPresets).toEqual([]);
+        expect(config.mapPresetConfig).toMatchObject({configured: true, valid: true, write: true});
     });
 
     it("lets malformed authoritative server presets block valid static fallback", async () => {

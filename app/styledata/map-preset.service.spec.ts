@@ -104,6 +104,29 @@ describe("MapPresetService", () => {
         expect(options.headers.get("If-Match")).toBe('"rev-1"');
     });
 
+    it("materializes the complete inherited catalog on its first server write", async () => {
+        const {service, config, http} = createService();
+        config.snapshot.serverConfig.mapPresets.configured = false;
+        const added: MapPresetDefinition = {
+            id: "geometry",
+            name: "Geometry",
+            enabled: true,
+            layerPresets: [{layerId: "Road", styleId: "Roads", presetId: "geometry"}]
+        };
+        const canonical = [...configured, added];
+        http.patch.mockReturnValue(of(new HttpResponse({
+            status: 200,
+            body: {path: "/erdblick/mapPresets", value: canonical, revision: "rev-2"}
+        })));
+
+        expect(await service.addPreset(added)).toBe(true);
+        expect(http.patch.mock.calls[0][1]).toEqual({
+            path: "/erdblick/mapPresets",
+            value: canonical
+        });
+        expect(service.presets).toEqual(canonical);
+    });
+
     it("allows only one complete-catalog write in flight", async () => {
         const {service, http} = createService();
         const pending = new Subject<HttpResponse<unknown>>();
