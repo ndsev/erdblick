@@ -75,6 +75,23 @@ FeatureStyleRule::LengthUnit parseLengthUnit(std::string unit)
         : FeatureStyleRule::LengthUnit::Meter;
 }
 
+/** Expand one supported Deck box shorthand into its four-value form. */
+std::array<float, 4> parseLabelBox(
+    YAML::Node const& node,
+    bool allowScalar,
+    bool allowPair)
+{
+    if (allowScalar && node.IsScalar()) {
+        auto const value = node.as<float>();
+        return {value, value, value, value};
+    }
+    auto const values = node.as<std::vector<float>>();
+    if (allowPair && values.size() == 2U) {
+        return {values[0], values[1], values[0], values[1]};
+    }
+    return {values.at(0), values.at(1), values.at(2), values.at(3)};
+}
+
 /** Parse one geometry keyword from YAML into the corresponding mapget geometry enum. */
 std::optional<mapget::GeomType> parseGeometryEnum(std::string const& enumStr) {
     if (enumStr == "point") {
@@ -697,13 +714,40 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     /// Label Rule Fields
     /////////////////////////////////////
 
-    // Parse labels' rules
-    if (yaml["label-font"].IsDefined()) {
-        // Parse label font
-        labelFont_ = yaml["label-font"].as<std::string>();
+    if (yaml["label-font-family"].IsDefined()) {
+        labelFontFamily_ = yaml["label-font-family"].as<std::string>();
+    }
+    if (yaml["label-font-weight"].IsDefined()) {
+        labelFontWeight_ = yaml["label-font-weight"].as<uint32_t>();
+    }
+    if (yaml["label-size"].IsDefined()) {
+        labelSize_ = yaml["label-size"].as<float>();
+    }
+    if (yaml["label-size-scale"].IsDefined()) {
+        labelSizeScale_ = yaml["label-size-scale"].as<float>();
+    }
+    if (yaml["label-size-units"].IsDefined()) {
+        auto const units = yaml["label-size-units"].as<std::string>();
+        if (units == "meters") {
+            labelSizeUnit_ = LabelSizeUnit::Meter;
+        }
+        else if (units == "common") {
+            labelSizeUnit_ = LabelSizeUnit::Common;
+        }
+        else {
+            labelSizeUnit_ = LabelSizeUnit::Pixel;
+        }
+    }
+    if (yaml["label-size-min-pixels"].IsDefined()) {
+        labelSizeMinPixels_ = yaml["label-size-min-pixels"].as<float>();
+    }
+    if (yaml["label-size-max-pixels"].IsDefined()) {
+        labelSizeMaxPixels_ = yaml["label-size-max-pixels"].as<float>();
+    }
+    if (yaml["label-angle"].IsDefined()) {
+        labelAngle_ = yaml["label-angle"].as<float>();
     }
     if (yaml["label-color"].IsDefined()) {
-        // Parse option to have a label background color.
         labelColor_ = Color(yaml["label-color"].as<std::string>()).toFVec4();
     }
     if (yaml["label-opacity"].IsDefined()) {
@@ -717,29 +761,49 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             yaml["label-collision-priority"].as<int32_t>();
     }
     if (yaml["label-outline-color"].IsDefined()) {
-        // Parse option to have a label background color.
         labelOutlineColor_ = Color(yaml["label-outline-color"].as<std::string>()).toFVec4();
     }
     if (yaml["label-outline-width"].IsDefined()) {
-        // Parse option for the width of the label outline color.
-        outlineWidth_ = yaml["label-outline-width"].as<float>();
+        labelOutlineWidth_ = yaml["label-outline-width"].as<float>();
+    }
+    if (yaml["label-background"].IsDefined()) {
+        labelBackground_ = yaml["label-background"].as<bool>();
     }
     if (yaml["label-background-color"].IsDefined()) {
-        // Parse option to have a label background color.
-        showBackground_ = true;
         labelBackgroundColor_ = Color(yaml["label-background-color"].as<std::string>()).toFVec4();
     }
+    if (yaml["label-border-color"].IsDefined()) {
+        labelBorderColor_ = Color(yaml["label-border-color"].as<std::string>()).toFVec4();
+    }
+    if (yaml["label-border-width"].IsDefined()) {
+        labelBorderWidth_ = yaml["label-border-width"].as<float>();
+    }
     if (yaml["label-background-padding"].IsDefined()) {
-        // Parse option to have a label padding.
-        labelBackgroundPadding_ = yaml["label-background-padding"].as<std::pair<int, int>>();
+        labelBackgroundPadding_ = parseLabelBox(
+            yaml["label-background-padding"],
+            false,
+            true);
     }
-    if (yaml["label-horizontal-origin"].IsDefined()) {
-        // Parse label horizontal origin
-        labelHorizontalOrigin_ = yaml["label-horizontal-origin"].as<std::string>();
+    if (yaml["label-background-border-radius"].IsDefined()) {
+        labelBackgroundBorderRadius_ = parseLabelBox(
+            yaml["label-background-border-radius"],
+            true,
+            false);
     }
-    if (yaml["label-vertical-origin"].IsDefined()) {
-        // Parse label vertical origin
-        labelVerticalOrigin_ = yaml["label-vertical-origin"].as<std::string>();
+    if (yaml["label-text-anchor"].IsDefined()) {
+        auto const anchor = yaml["label-text-anchor"].as<std::string>();
+        labelTextAnchor_ = anchor == "start"
+            ? LabelTextAnchor::Start
+            : anchor == "end" ? LabelTextAnchor::End : LabelTextAnchor::Middle;
+    }
+    if (yaml["label-alignment-baseline"].IsDefined()) {
+        auto const baseline =
+            yaml["label-alignment-baseline"].as<std::string>();
+        labelAlignmentBaseline_ = baseline == "top"
+            ? LabelAlignmentBaseline::Top
+            : baseline == "bottom"
+                ? LabelAlignmentBaseline::Bottom
+                : LabelAlignmentBaseline::Center;
     }
     if (yaml["label-text-expression"].IsDefined()) {
         // Parse label SIMFIL expression
@@ -749,24 +813,20 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse label placeholder text
         labelText_ = yaml["label-text"].as<std::string>();
     }
-    if (yaml["label-style"].IsDefined()) {
-        // Parse label style string
-        labelStyle_ = yaml["label-style"].as<std::string>();
-    }
-    if (yaml["label-scale"].IsDefined()) {
-        // Parse label scale string
-        labelScale_ = yaml["label-scale"].as<float>();
-    }
     if (yaml["label-pixel-offset"].IsDefined()) {
-        // Parse option to have a label padding.
         labelPixelOffset_ = yaml["label-pixel-offset"].as<std::pair<float, float>>();
     }
-    if (yaml["label-eye-offset"].IsDefined()) {
-        // Parse option to have a label padding.
-        auto coordinates = yaml["label-eye-offset"].as<std::vector<float>>();
-        if (coordinates.size() == 3) {
-            labelEyeOffset_ = std::tuple<float, float, float>{coordinates.at(0), coordinates.at(1), coordinates.at(2)};
-        }
+    if (yaml["label-line-height"].IsDefined()) {
+        labelLineHeight_ = yaml["label-line-height"].as<float>();
+    }
+    if (yaml["label-word-break"].IsDefined()) {
+        labelWordBreak_ = yaml["label-word-break"].as<std::string>() ==
+                "break-all"
+            ? LabelWordBreak::BreakAll
+            : LabelWordBreak::BreakWord;
+    }
+    if (yaml["label-max-width"].IsDefined()) {
+        labelMaxWidth_ = yaml["label-max-width"].as<float>();
     }
     /////////////////////////////////////
     /// Sub-Rule Fields
@@ -1593,9 +1653,44 @@ bool FeatureStyleRule::hasLabel() const
     return !labelTextExpression_.empty() || !labelText_.empty();
 }
 
-std::string const& FeatureStyleRule::labelFont() const
+std::string const& FeatureStyleRule::labelFontFamily() const
 {
-    return labelFont_;
+    return labelFontFamily_;
+}
+
+uint32_t FeatureStyleRule::labelFontWeight() const
+{
+    return labelFontWeight_;
+}
+
+float FeatureStyleRule::labelSize() const
+{
+    return labelSize_;
+}
+
+float FeatureStyleRule::labelSizeScale() const
+{
+    return labelSizeScale_;
+}
+
+FeatureStyleRule::LabelSizeUnit FeatureStyleRule::labelSizeUnit() const
+{
+    return labelSizeUnit_;
+}
+
+float FeatureStyleRule::labelSizeMinPixels() const
+{
+    return labelSizeMinPixels_;
+}
+
+float FeatureStyleRule::labelSizeMaxPixels() const
+{
+    return labelSizeMaxPixels_;
+}
+
+float FeatureStyleRule::labelAngle() const
+{
+    return labelAngle_;
 }
 
 glm::fvec4 const& FeatureStyleRule::labelColor() const
@@ -1628,9 +1723,9 @@ float FeatureStyleRule::labelOutlineWidth() const
     return labelOutlineWidth_;
 }
 
-bool FeatureStyleRule::showBackground() const
+bool FeatureStyleRule::labelBackground() const
 {
-    return showBackground_;
+    return labelBackground_;
 }
 
 glm::fvec4 const& FeatureStyleRule::labelBackgroundColor() const
@@ -1638,24 +1733,36 @@ glm::fvec4 const& FeatureStyleRule::labelBackgroundColor() const
     return labelBackgroundColor_;
 }
 
-std::pair<int, int> const& FeatureStyleRule::labelBackgroundPadding() const
+glm::fvec4 const& FeatureStyleRule::labelBorderColor() const
+{
+    return labelBorderColor_;
+}
+
+float FeatureStyleRule::labelBorderWidth() const
+{
+    return labelBorderWidth_;
+}
+
+std::array<float, 4> const& FeatureStyleRule::labelBackgroundPadding() const
 {
     return labelBackgroundPadding_;
 }
 
-std::string const& FeatureStyleRule::labelHorizontalOrigin() const
+std::array<float, 4> const&
+FeatureStyleRule::labelBackgroundBorderRadius() const
 {
-    return labelHorizontalOrigin_;
+    return labelBackgroundBorderRadius_;
 }
 
-std::string const& FeatureStyleRule::labelVerticalOrigin() const
+FeatureStyleRule::LabelTextAnchor FeatureStyleRule::labelTextAnchor() const
 {
-    return labelVerticalOrigin_;
+    return labelTextAnchor_;
 }
 
-std::string const& FeatureStyleRule::labelHeightReference() const
+FeatureStyleRule::LabelAlignmentBaseline
+FeatureStyleRule::labelAlignmentBaseline() const
 {
-    return labelHeightReference_;
+    return labelAlignmentBaseline_;
 }
 
 std::string const& FeatureStyleRule::labelTextExpression() const
@@ -1676,23 +1783,24 @@ std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
     return labelText_;
 }
 
-std::string const& FeatureStyleRule::labelStyle() const
-{
-    return labelStyle_;
-}
-
-float FeatureStyleRule::labelScale() const {
-    return labelScale_;
-}
-
 std::optional<std::pair<float, float>> const& FeatureStyleRule::labelPixelOffset() const
 {
     return labelPixelOffset_;
 }
 
-std::optional<std::tuple<float, float, float>> const& FeatureStyleRule::labelEyeOffset() const
+float FeatureStyleRule::labelLineHeight() const
 {
-    return labelEyeOffset_;
+    return labelLineHeight_;
+}
+
+FeatureStyleRule::LabelWordBreak FeatureStyleRule::labelWordBreak() const
+{
+    return labelWordBreak_;
+}
+
+float FeatureStyleRule::labelMaxWidth() const
+{
+    return labelMaxWidth_;
 }
 
 glm::dvec3 const& FeatureStyleRule::offset() const

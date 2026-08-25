@@ -14,8 +14,8 @@ import {
 const STREAM_BYTES = 48;
 const CONTRIBUTION_BYTES = 56;
 const SPAN_BYTES = 16;
-const PICK_BYTES = 24;
-const LABEL_BYTES = 120;
+const PICK_BYTES = 32;
+const LABEL_BYTES = 176;
 const POINT_BYTES = 40;
 
 /** Minimal byte-addressable luma buffer used to verify scene ownership. */
@@ -140,6 +140,7 @@ interface PacketOptions {
   pointByte?: number;
   zIndex?: number;
   depthTieKey?: number;
+  presentationPrimitiveOrder?: number;
   renderOrder?: number;
   minimumLod?: number;
 }
@@ -256,6 +257,12 @@ function pointPacket(
     view.setFloat32(
       pickOffset + 20,
       options.navigationAltitude ?? 0,
+      true,
+    );
+    view.setUint32(pickOffset + 24, 0, true);
+    view.setUint32(
+      pickOffset + 28,
+      options.presentationPrimitiveOrder ?? 3,
       true,
     );
   }
@@ -448,6 +455,36 @@ describe("GpuScene contribution lifecycle", () => {
         featureId: "Road.1",
       },
     ]);
+  });
+
+  it("exposes authored z-index and primitive order for one picked object", () => {
+    const { scene } = createScene();
+    const reservation = scene.prepareRender(
+      "origin",
+      [11, 48, 0],
+      [
+        {
+          identity: "ordered",
+          mapTileKey: "Features:Map:Layer:1:0",
+          styleOrder: 0,
+          lod: 7,
+        },
+      ],
+    );
+    scene.applyPacket(
+      pointPacket(reservation, {
+        featureId: "Road.1",
+        zIndex: 12.5,
+        presentationPrimitiveOrder: 2,
+      }),
+      reservation,
+    );
+    scene.finishRender(reservation);
+
+    expect(scene.pickOrder(0)).toEqual({
+      zIndex: 12.5,
+      primitiveOrder: 2,
+    });
   });
 
   it("rolls back an incomplete fragmented revision on task release", () => {
@@ -1415,6 +1452,9 @@ describe("GpuScene contribution lifecycle", () => {
     );
     scene.finishRender(reservation);
     scene.publishPresentation();
+    const zIndexTextureCount = device.textures.filter(
+      (texture) => texture.id === "erdblick-gpu-z-index-table",
+    ).length;
 
     expect(scene.labels()).toEqual([]);
     expect(scene.setContributionLod("tile", 3.5)).toBe(true);
@@ -1422,6 +1462,11 @@ describe("GpuScene contribution lifecycle", () => {
     expect(redraw).toHaveBeenCalledWith("GPU contribution LOD changed");
 
     scene.publishPresentation();
+    expect(
+      device.textures.filter(
+        (texture) => texture.id === "erdblick-gpu-z-index-table",
+      ),
+    ).toHaveLength(zIndexTextureCount);
     const table = activeTexture(device, "erdblick-gpu-contribution-table");
     const values = table.writes.at(-1)!.data as Float32Array;
     expect(values[reservation.contributions[0].slot * 4 + 1]).toBe(3.5);

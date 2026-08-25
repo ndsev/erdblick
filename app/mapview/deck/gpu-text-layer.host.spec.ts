@@ -1,12 +1,19 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
+import {TextLayer} from "@deck.gl/layers";
 
 import {
     createGpuTextLayerHost,
-    GpuTextLayerHost
+    DeckTextOverlayService,
+    GpuTextLayerHost,
+    isDeckTextOverlayLayer
 } from "./gpu-text-layer.host";
-import {GpuLabelFlag} from "./gpu-render-packet";
+import {
+    GpuLabelFlag,
+    GpuLabelSizeUnit,
+    GpuLabelWordBreak
+} from "./gpu-render-packet";
 
-/** Builds one complete logical label with overridable compatibility fields. */
+/** Builds one complete logical label with overridable TextLayer fields. */
 function label(overrides: Record<string, unknown> = {}) {
     return {
         contributionIndex: 0,
@@ -21,15 +28,25 @@ function label(overrides: Record<string, unknown> = {}) {
         color: [255, 255, 255, 255],
         outlineColor: [0, 0, 0, 255],
         backgroundColor: [0, 0, 0, 0],
+        borderColor: [0, 0, 0, 255],
         outlineWidth: 1,
-        backgroundPadding: [0, 0],
+        borderWidth: 0,
+        backgroundPadding: [0, 0, 0, 0],
+        backgroundBorderRadius: [0, 0, 0, 0],
+        sizeScale: 1,
+        sizeMinPixels: 0,
+        sizeMaxPixels: Number.MAX_SAFE_INTEGER,
+        lineHeight: 1,
+        maxWidth: -1,
         flags: GpuLabelFlag.Billboard | GpuLabelFlag.DepthTest,
         minLod: 0,
-        horizontalOrigin: 0,
-        verticalOrigin: 0,
+        textAnchor: 0,
+        alignmentBaseline: 0,
         renderOrder: 0,
         fontWeight: 400,
         collisionPriority: 0,
+        sizeUnit: GpuLabelSizeUnit.Pixel,
+        wordBreak: GpuLabelWordBreak.BreakWord,
         globalPickIndex: 7,
         styleOrder: 0,
         ...overrides
@@ -98,6 +115,78 @@ describe("GpuTextLayerHost", () => {
             bucket.renderOrder).sort()).toEqual([1, 4]);
         expect(buckets.map((bucket: {fontWeight: number}) =>
             bucket.fontWeight).sort()).toEqual([400, 700]);
+    });
+
+    it("passes authored text properties directly to Deck TextLayer", () => {
+        const datum = label({
+            size: 18,
+            angle: 12,
+            textAnchor: -1,
+            alignmentBaseline: 1,
+            borderColor: [1, 2, 3, 4],
+            borderWidth: 3,
+            sizeUnit: GpuLabelSizeUnit.Meter,
+            sizeScale: 2,
+            sizeMinPixels: 7,
+            sizeMaxPixels: 80,
+            fontFamily: "Noto Sans",
+            fontWeight: 700,
+            lineHeight: 1.25,
+            backgroundPadding: [1, 2, 3, 4],
+            backgroundBorderRadius: [4, 3, 2, 1],
+            wordBreak: GpuLabelWordBreak.BreakAll,
+            maxWidth: 14,
+            flags: GpuLabelFlag.Billboard | GpuLabelFlag.Background
+        });
+        const host = new GpuTextLayerHost({
+            id: "text",
+            data: [],
+            scene: {labels: () => [datum]} as never,
+            flattenZ: false
+        });
+        const [layer] = host.renderLayers();
+        const props = layer.props as unknown as {
+            data: readonly unknown[];
+            getSize: (item: unknown) => number;
+            getAngle: (item: unknown) => number;
+            getTextAnchor: (item: unknown) => string;
+            getAlignmentBaseline: (item: unknown) => string;
+            getBorderColor: (item: unknown) => number[];
+            getBorderWidth: (item: unknown) => number;
+            sizeUnits: string;
+            sizeScale: number;
+            sizeMinPixels: number;
+            sizeMaxPixels: number;
+            fontFamily: string;
+            fontWeight: number;
+            lineHeight: number;
+            background: boolean;
+            backgroundPadding: number[];
+            backgroundBorderRadius: number[];
+            wordBreak: string;
+            maxWidth: number;
+        };
+
+        expect(props).toMatchObject({
+            sizeUnits: "meters",
+            sizeScale: 2,
+            sizeMinPixels: 7,
+            sizeMaxPixels: 80,
+            fontFamily: "Noto Sans",
+            fontWeight: 700,
+            lineHeight: 1.25,
+            background: true,
+            backgroundPadding: [1, 2, 3, 4],
+            backgroundBorderRadius: [4, 3, 2, 1],
+            wordBreak: "break-all",
+            maxWidth: 14
+        });
+        expect(props.getSize(props.data[0])).toBe(18);
+        expect(props.getAngle(props.data[0])).toBe(12);
+        expect(props.getTextAnchor(props.data[0])).toBe("start");
+        expect(props.getAlignmentBaseline(props.data[0])).toBe("bottom");
+        expect(props.getBorderColor(props.data[0])).toEqual([1, 2, 3, 4]);
+        expect(props.getBorderWidth(props.data[0])).toBe(3);
     });
 
     it("separates unselectable labels so they cannot consume a drill-pick hit", () => {
@@ -178,6 +267,52 @@ describe("GpuTextLayerHost", () => {
         );
         expect(host.props.pickable).toBe(true);
         expect(host.props.drillPickEligible).toBe(true);
+    });
+
+    it("classifies logical and direct Deck text roots for the final overlay", () => {
+        const host = createGpuTextLayerHost(
+            "text",
+            {labels: () => []} as never,
+            false
+        );
+        const directText = new TextLayer({id: "direct-text", data: []});
+
+        expect(isDeckTextOverlayLayer(host)).toBe(true);
+        expect(isDeckTextOverlayLayer(directText)).toBe(true);
+        expect(isDeckTextOverlayLayer({id: "vector"} as never)).toBe(false);
+    });
+
+    it("renders text after compositing while preserving scene color", () => {
+        const render = vi.fn();
+        const service = new DeckTextOverlayService();
+        (service as any).pass = {render};
+        const host = createGpuTextLayerHost(
+            "text",
+            {labels: () => []} as never,
+            false
+        );
+        service.preRender({
+            pass: "screen",
+            isPicking: false,
+            layers: [host],
+            viewports: []
+        } as never);
+
+        service.renderOverlay();
+        service.renderOverlay();
+
+        expect(render).toHaveBeenCalledOnce();
+        const options = render.mock.calls[0][0];
+        expect(options).toMatchObject({
+            target: null,
+            pass: "text-overlay",
+            isPicking: false,
+            clearCanvas: true,
+            clearColor: false,
+            clearStack: true
+        });
+        expect(options.layerFilter({layer: host})).toBe(true);
+        expect(options.layerFilter({layer: {id: "vector"}})).toBe(false);
     });
 
     it("maps TextLayer-local objects back to scene-global pick indices", () => {

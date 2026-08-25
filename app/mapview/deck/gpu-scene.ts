@@ -34,13 +34,6 @@ interface DepthRankAllocation {
   tieBucketCount: number;
 }
 
-interface NormalizedZIndexEntry {
-  value: number;
-  tieBreaker: number;
-  semanticGroup: number;
-  authored: boolean;
-}
-
 /**
  * Compress authored ranks into the safe depth budget and spend spare slots on ties.
  *
@@ -54,7 +47,7 @@ interface NormalizedZIndexEntry {
  */
 function allocateDepthRanks(
   orderedZIndices: readonly number[],
-  tieBreakersByZIndex: ReadonlyMap<number, ReadonlySet<number>>,
+  tieBreakersByZIndex: ReadonlyMap<number, ReadonlyMap<number, number>>,
 ): { allocations: Map<number, DepthRankAllocation>; slotCount: number } {
   if (orderedZIndices.length > TARGET_DEPTH_STEPS) {
     // A 24-bit depth buffer cannot represent an unbounded exact lattice inside
@@ -398,7 +391,7 @@ interface PreparedFloatLookupReplacement {
 
 interface PreparedSceneOrder {
   contribution: PreparedFloatLookupReplacement;
-  zIndex: PreparedFloatLookupReplacement;
+  zIndex?: PreparedFloatLookupReplacement;
 }
 
 /**
@@ -697,6 +690,15 @@ export class GpuScene {
   private readonly contributionSlots = new GpuRangeAllocator();
   private readonly pickingRanges = new GpuRangeAllocator();
   private readonly zIndexRanges = new GpuRangeAllocator();
+  private readonly zIndexReferenceCounts = new Map<number, number>();
+  private readonly tieBreakerReferenceCountsByZIndex = new Map<
+    number,
+    Map<number, number>
+  >();
+  private readonly semanticZIndexReferenceCounts = new Map<
+    number,
+    Map<number, number>
+  >();
   private pickOwnerSlots = new Uint32Array();
   private readonly activeContributionBySlot = new Map<
     number,
@@ -721,6 +723,8 @@ export class GpuScene {
   private _revision = 0;
   private _presentationRevision = 0;
   private labelCount = 0;
+  private authoredZIndexReferenceCount = 0;
+  private sceneOrderDirty = false;
   private lastZIndexUpdateMs = 0;
   private destroyed = false;
 
@@ -1086,7 +1090,9 @@ export class GpuScene {
           // slot during admission would create a tile-shaped hole in unrelated
           // Deck frames that still draw the previous buffer generation.
           this.presentationReleases.push(previous);
+          this.changeSceneOrderReferences(previous, -1);
         }
+        this.changeSceneOrderReferences(item.installed, 1);
         item.reserved.installed = true;
         item.entry.active = item.installed;
         this.publishPickOwner(item.installed);
@@ -1180,6 +1186,7 @@ export class GpuScene {
       if (entry.active) {
         labelsChanged ||= entry.active.labels.length > 0;
         this.presentationReleases.push(entry.active);
+        this.changeSceneOrderReferences(entry.active, -1);
         entry.active = null;
         sceneChanged = true;
       }
@@ -1239,6 +1246,31 @@ export class GpuScene {
     const altitude =
       this.ownedPackedPick(globalPickIndex)?.record.navigationAltitude;
     return Number.isFinite(altitude) ? altitude : undefined;
+  }
+
+  /** Return the authored z-index and fixed primitive pass of one rendered pick. */
+  pickOrder(
+    globalPickIndex: number,
+  ): { zIndex: number; primitiveOrder: number } | undefined {
+    const owned = this.ownedPackedPick(globalPickIndex);
+    if (!owned) {
+      return undefined;
+    }
+    const { installed, record } = owned;
+    if (
+      record.presentationPrimitiveOrder === 0 ||
+      record.presentationZIndexSlot === 0xffff_ffff
+    ) {
+      return undefined;
+    }
+    const zIndex = installed.zIndices[record.presentationZIndexSlot]?.value;
+    if (zIndex === undefined) {
+      return undefined;
+    }
+    return {
+      zIndex: Number.isFinite(zIndex) ? (zIndex === 0 ? 0 : zIndex) : 0,
+      primitiveOrder: record.presentationPrimitiveOrder,
+    };
   }
 
   /** Test whether selected contributions already retain an exact local target. */
@@ -1496,6 +1528,11 @@ export class GpuScene {
     this.originsByKey.clear();
     this.contributionByIdentity.clear();
     this.contributionByKey.clear();
+    this.zIndexReferenceCounts.clear();
+    this.tieBreakerReferenceCountsByZIndex.clear();
+    this.semanticZIndexReferenceCounts.clear();
+    this.authoredZIndexReferenceCount = 0;
+    this.sceneOrderDirty = false;
     this.activeContributionBySlot.clear();
     this.presentationReleases.length = 0;
     this.pickOwnerSlots = new Uint32Array();
@@ -1520,7 +1557,10 @@ export class GpuScene {
     }
     const order = this.prepareSceneOrder();
     order.contribution.commit();
-    order.zIndex.commit();
+    order.zIndex?.commit();
+    if (order.zIndex) {
+      this.sceneOrderDirty = false;
+    }
     for (const installed of this.presentationReleases) {
       this.releaseInstalled(installed, false);
     }
@@ -1836,85 +1876,97 @@ export class GpuScene {
   }
 
   /**
+   * Maintain the compact ordering domain as contributions enter and leave.
+   * Additions always need a new z-index upload, while removals only require a
+   * rerank when the last reference to an ordering value disappears.
+   */
+  private changeSceneOrderReferences(
+    installed: InstalledContribution,
+    delta: -1 | 1,
+  ): void {
+    let domainChanged = false;
+    const update = (references: Map<number, number>, key: number): void => {
+      const previous = references.get(key) ?? 0;
+      const next = previous + delta;
+      if (next < 0) {
+        throw new Error("GPU scene z-index references are unbalanced.");
+      }
+      if (next === 0) {
+        references.delete(key);
+      } else {
+        references.set(key, next);
+      }
+      if (previous === 0 || next === 0) {
+        domainChanged = true;
+      }
+    };
+    const hadAuthoredZIndex = this.authoredZIndexReferenceCount > 0;
+    for (const entry of installed.zIndices) {
+      const authored = Number.isFinite(entry.value);
+      const normalized = authored ? entry.value : 0;
+      const value = normalized === 0 ? 0 : normalized;
+      update(this.zIndexReferenceCounts, value);
+      if (authored) {
+        this.authoredZIndexReferenceCount += delta;
+        let tieBreakers =
+          this.tieBreakerReferenceCountsByZIndex.get(value);
+        if (!tieBreakers) {
+          if (delta < 0) {
+            throw new Error("GPU scene z-index tie references are missing.");
+          }
+          tieBreakers = new Map<number, number>();
+          this.tieBreakerReferenceCountsByZIndex.set(value, tieBreakers);
+        }
+        update(tieBreakers, entry.tieBreaker >>> 0);
+        if (tieBreakers.size === 0) {
+          this.tieBreakerReferenceCountsByZIndex.delete(value);
+        }
+      }
+      const semanticGroup = entry.semanticGroup >>> 0;
+      if (semanticGroup !== 0) {
+        let semanticValues =
+          this.semanticZIndexReferenceCounts.get(semanticGroup);
+        if (!semanticValues) {
+          if (delta < 0) {
+            throw new Error("GPU scene semantic z-index references are missing.");
+          }
+          semanticValues = new Map<number, number>();
+          this.semanticZIndexReferenceCounts.set(
+            semanticGroup,
+            semanticValues,
+          );
+        }
+        update(semanticValues, value);
+        if (semanticValues.size === 0) {
+          this.semanticZIndexReferenceCounts.delete(semanticGroup);
+        }
+      }
+    }
+    if (this.authoredZIndexReferenceCount < 0) {
+      throw new Error("GPU scene authored z-index references are unbalanced.");
+    }
+    domainChanged ||=
+      hadAuthoredZIndex !== (this.authoredZIndexReferenceCount > 0);
+    this.sceneOrderDirty ||=
+      (delta > 0 && installed.zIndices.length > 0) || domainChanged;
+  }
+
+  /**
    * Prepare one globally coherent exact-order table for the next presentation.
    *
    * Tile-local ranks are invalid once contributions share persistent material
    * buffers: the same authored value can otherwise receive a different depth in
-   * each tile and let lower geometry occlude its neighbors. Publication already
-   * batches many admissions, so doing the compact metadata walk here avoids the
-   * former per-packet whole-scene rerank without weakening ordering semantics.
+   * each tile and let lower geometry occlude its neighbors. The ordering domain
+   * is maintained incrementally as contributions change, and pure LOD updates
+   * bypass the exact-order texture rebuild entirely.
    */
   private prepareSceneOrder(): PreparedSceneOrder {
-    const startedAt = performance.now();
-    const active = [...this.contributionByIdentity.values()].flatMap((entry) =>
-      entry.active ? [entry.active] : [],
-    );
-    const normalizedByContribution = new Map<
-      InstalledContribution,
-      NormalizedZIndexEntry[]
-    >();
-    const uniqueZIndices = new Set<number>();
-    const tieBreakersByZIndex = new Map<number, Set<number>>();
-    const semanticGroups = new Set<number>();
-    const semanticEntriesByGroup = new Map<number, Set<number>>();
-    let hasAuthoredZIndex = false;
-    for (const installed of active) {
-      const normalized = installed.zIndices.map((entry) => {
-        const authored = Number.isFinite(entry.value);
-        hasAuthoredZIndex ||= authored;
-        const result = authored ? entry.value : 0;
-        const value = result === 0 ? 0 : result;
-        const tieBreaker = entry.tieBreaker >>> 0;
-        const semanticGroup = entry.semanticGroup >>> 0;
-        uniqueZIndices.add(value);
-        if (authored) {
-          let tieBreakers = tieBreakersByZIndex.get(value);
-          if (!tieBreakers) {
-            tieBreakers = new Set<number>();
-            tieBreakersByZIndex.set(value, tieBreakers);
-          }
-          tieBreakers.add(tieBreaker);
-        }
-        if (semanticGroup !== 0) {
-          semanticGroups.add(semanticGroup);
-          const groupEntries =
-            semanticEntriesByGroup.get(semanticGroup) ?? new Set<number>();
-          groupEntries.add(value);
-          semanticEntriesByGroup.set(semanticGroup, groupEntries);
-        }
-        return {
-          value,
-          tieBreaker,
-          semanticGroup,
-          authored,
-        };
-      });
-      normalizedByContribution.set(installed, normalized);
+    const active: InstalledContribution[] = [];
+    for (const entry of this.contributionByIdentity.values()) {
+      if (entry.active) {
+        active.push(entry.active);
+      }
     }
-    const orderedZIndices = [...uniqueZIndices].sort(
-      (left, right) => left - right,
-    );
-    const depthRanks = allocateDepthRanks(orderedZIndices, tieBreakersByZIndex);
-    const compactSemanticGroups = new Map(
-      [...semanticGroups]
-        .sort((left, right) => left - right)
-        .map((group, index) => [group, index + 1]),
-    );
-    const semanticDepthByGroup = new Map<number, Map<number, number>>();
-    for (const [group, entries] of semanticEntriesByGroup) {
-      const ordered = [...entries].sort((left, right) => left - right);
-      const depths = new Map<number, number>();
-      ordered.forEach((value, rank) => {
-        depths.set(
-          value,
-          1 - (rank + 1) / (ordered.length + 1),
-        );
-      });
-      semanticDepthByGroup.set(group, depths);
-    }
-    const step = hasAuthoredZIndex
-      ? MAX_LOCAL_CLIP_SPACE_BIAS / depthRanks.slotCount
-      : 0;
     const contributionUpdates: FloatLookupUpdate[] = active.map(
       (installed) => ({
         firstSlot: installed.contributionSlot,
@@ -1932,42 +1984,79 @@ export class GpuScene {
         values: [0, 0, 0, 0],
       })),
     );
-    const zIndexUpdates: FloatLookupUpdate[] = [];
-    for (const installed of active) {
-      if (!installed.zIndexRange) {
-        continue;
-      }
-      const values = new Float32Array(installed.zIndices.length * 4);
-      normalizedByContribution.get(installed)!.forEach((entry, index) => {
-        const offset = index * 4;
-        const allocation = depthRanks.allocations.get(entry.value);
-        if (!allocation) {
-          return;
-        }
-        // The renderer puts a Morton tile phase in the low bits. Power-of-two
-        // masking preserves that spatial coloring instead of randomly letting
-        // neighboring tile-edge geometry collide in the same depth bucket.
-        const tieOrdinal = entry.authored
-          ? entry.tieBreaker & (allocation.tieBucketCount - 1)
-          : 0;
-        values[offset] = (allocation.firstSlot + tieOrdinal) * step;
-        if (entry.semanticGroup !== 0) {
-          values[offset + 1] =
-            compactSemanticGroups.get(entry.semanticGroup) ?? 0;
-          values[offset + 2] =
-            semanticDepthByGroup
-              .get(entry.semanticGroup)
-              ?.get(entry.value) ?? 0.5;
-        }
-      });
-      zIndexUpdates.push({
-        firstSlot: installed.zIndexRange.firstRecord,
-        values,
-      });
-    }
     const contribution =
       this.contributionLookup.prepareReplacement(contributionUpdates);
+    if (!this.sceneOrderDirty) {
+      return { contribution };
+    }
+
+    const startedAt = performance.now();
     try {
+      const orderedZIndices = [...this.zIndexReferenceCounts.keys()].sort(
+        (left, right) => left - right,
+      );
+      const depthRanks = allocateDepthRanks(
+        orderedZIndices,
+        this.tieBreakerReferenceCountsByZIndex,
+      );
+      const compactSemanticGroups = new Map(
+        [...this.semanticZIndexReferenceCounts.keys()]
+          .sort((left, right) => left - right)
+          .map((group, index) => [group, index + 1]),
+      );
+      const semanticDepthByGroup = new Map<number, Map<number, number>>();
+      for (const [group, references] of
+        this.semanticZIndexReferenceCounts) {
+        const ordered = [...references.keys()].sort(
+          (left, right) => left - right,
+        );
+        const depths = new Map<number, number>();
+        ordered.forEach((value, rank) => {
+          depths.set(value, 1 - (rank + 1) / (ordered.length + 1));
+        });
+        semanticDepthByGroup.set(group, depths);
+      }
+      const step = this.authoredZIndexReferenceCount > 0
+        ? MAX_LOCAL_CLIP_SPACE_BIAS / depthRanks.slotCount
+        : 0;
+      const zIndexUpdates: FloatLookupUpdate[] = [];
+      for (const installed of active) {
+        if (!installed.zIndexRange) {
+          continue;
+        }
+        const values = new Float32Array(installed.zIndices.length * 4);
+        installed.zIndices.forEach((entry, index) => {
+          const authored = Number.isFinite(entry.value);
+          const normalized = authored ? entry.value : 0;
+          const value = normalized === 0 ? 0 : normalized;
+          const tieBreaker = entry.tieBreaker >>> 0;
+          const semanticGroup = entry.semanticGroup >>> 0;
+          const offset = index * 4;
+          const allocation = depthRanks.allocations.get(value);
+          if (!allocation) {
+            return;
+          }
+          // The renderer puts a Morton tile phase in the low bits. Power-of-two
+          // masking preserves that spatial coloring instead of randomly letting
+          // neighboring tile-edge geometry collide in the same depth bucket.
+          const tieOrdinal = authored
+            ? tieBreaker & (allocation.tieBucketCount - 1)
+            : 0;
+          values[offset] = (allocation.firstSlot + tieOrdinal) * step;
+          if (semanticGroup !== 0) {
+            values[offset + 1] =
+              compactSemanticGroups.get(semanticGroup) ?? 0;
+            values[offset + 2] =
+              semanticDepthByGroup
+                .get(semanticGroup)
+                ?.get(value) ?? 0.5;
+          }
+        });
+        zIndexUpdates.push({
+          firstSlot: installed.zIndexRange.firstRecord,
+          values,
+        });
+      }
       const zIndex = this.zIndexLookup.prepareReplacement(zIndexUpdates);
       this.lastZIndexUpdateMs = performance.now() - startedAt;
       return { contribution, zIndex };

@@ -19,9 +19,9 @@ namespace
 constexpr uint32_t kStreamDescriptorBytes = 48U;
 constexpr uint32_t kContributionDescriptorBytes = 56U;
 constexpr uint32_t kContributionSpanBytes = 16U;
-constexpr uint32_t kPickRecordBytes = 24U;
+constexpr uint32_t kPickRecordBytes = 32U;
 constexpr uint32_t kPickMemberBytes = 8U;
-constexpr uint32_t kLabelRecordBytes = 120U;
+constexpr uint32_t kLabelRecordBytes = 176U;
 constexpr uint32_t kResourceRequestBytes = 24U;
 constexpr uint32_t kRuntimeIssueBytes = 40U;
 constexpr uint32_t kTableAlignment = 8U;
@@ -45,6 +45,13 @@ constexpr uint32_t kKnownLabelFlags =
     static_cast<uint32_t>(GpuLabelFlag::Background) |
     static_cast<uint32_t>(GpuLabelFlag::Collision) |
     kGpuLabelMinimumLodMask;
+constexpr uint32_t kGpuLabelSizeUnitMask = 0xffU;
+constexpr uint32_t kGpuLabelWordBreakShift = 8U;
+constexpr uint32_t kGpuLabelWordBreakMask =
+    0xffU << kGpuLabelWordBreakShift;
+constexpr uint32_t kKnownLabelOptions =
+    kGpuLabelSizeUnitMask | kGpuLabelWordBreakMask;
+constexpr uint32_t kMaximumPresentationPrimitiveOrder = 5U;
 
 /** One validated byte interval inside an untrusted packet. */
 struct PacketRange {
@@ -417,10 +424,25 @@ void validateLogicalOwnership(GpuRenderPacketData const& packet)
     uint32_t previousOwner = 0U;
     bool hasPreviousOwner = false;
     for (auto const& pick : packet.picks) {
-        if (pick.contributionIndex >= packet.contributions.size() ||
+        if (pick.contributionIndex >= packet.contributions.size()) {
+            throw std::invalid_argument(
+                "GpuRenderPacket pick references an unknown contribution.");
+        }
+        auto const& contribution =
+            packet.contributions[pick.contributionIndex];
+        auto const hasPresentation =
+            pick.presentationZIndexSlot !=
+                std::numeric_limits<uint32_t>::max();
+        if ((hasPresentation != (pick.presentationPrimitiveOrder != 0U)) ||
+            pick.presentationPrimitiveOrder >
+                kMaximumPresentationPrimitiveOrder ||
+            (hasPresentation &&
+             ((packet.fragmentCount == 1U && contribution.zIndices.empty()) ||
+              (!contribution.zIndices.empty() &&
+               pick.presentationZIndexSlot >= contribution.zIndices.size()))) ||
             (hasPreviousOwner && pick.contributionIndex < previousOwner) ||
             pick.localPickIndex >=
-                packet.contributions[pick.contributionIndex].totalPickCount ||
+                contribution.totalPickCount ||
             (hasPreviousLocalPick[pick.contributionIndex] &&
              pick.localPickIndex <= previousLocalPick[pick.contributionIndex]))
         {
@@ -722,6 +744,8 @@ std::vector<std::byte> GpuRenderPacketCodec::encode(
         writer.put(offset + 12U, pick.entryOrdinal);
         writer.put(offset + 16U, pick.endpointRole);
         writer.put(offset + 20U, pick.navigationAltitude);
+        writer.put(offset + 24U, pick.presentationZIndexSlot);
+        writer.put(offset + 28U, pick.presentationPrimitiveOrder);
     }
 
     for (uint32_t index = 0U; index < packet.labels.size(); ++index) {
@@ -751,6 +775,10 @@ std::vector<std::byte> GpuRenderPacketCodec::encode(
             writer.put(offset + 72U + component, label.color[component]);
             writer.put(offset + 76U + component, label.outlineColor[component]);
             writer.put(offset + 80U + component, label.backgroundColor[component]);
+            writer.put(offset + 120U + component, label.borderColor[component]);
+            writer.put(
+                offset + 136U + component * sizeof(float),
+                label.backgroundBorderRadius[component]);
         }
         writer.put(offset + 84U, label.outlineWidth);
         writer.put(offset + 88U, label.backgroundPadding[0]);
@@ -764,11 +792,24 @@ std::vector<std::byte> GpuRenderPacketCodec::encode(
             label.flags |
                 (static_cast<uint32_t>(label.minimumLod) <<
                  kGpuLabelMinimumLodShift));
-        writer.put(offset + 100U, label.horizontalOrigin);
-        writer.put(offset + 104U, label.verticalOrigin);
+        writer.put(offset + 100U, label.textAnchor);
+        writer.put(offset + 104U, label.alignmentBaseline);
         writer.put(offset + 108U, label.renderOrder);
         writer.put(offset + 112U, label.fontWeight);
         writer.put(offset + 116U, label.collisionPriority);
+        writer.put(offset + 124U, label.borderWidth);
+        writer.put(offset + 128U, label.backgroundPadding[2]);
+        writer.put(offset + 132U, label.backgroundPadding[3]);
+        writer.put(offset + 152U, label.sizeScale);
+        writer.put(offset + 156U, label.sizeMinPixels);
+        writer.put(offset + 160U, label.sizeMaxPixels);
+        writer.put(offset + 164U, label.lineHeight);
+        writer.put(offset + 168U, label.maxWidth);
+        writer.put(
+            offset + 172U,
+            static_cast<uint32_t>(label.sizeUnit) |
+                (static_cast<uint32_t>(label.wordBreak) <<
+                 kGpuLabelWordBreakShift));
     }
 
     for (uint32_t index = 0U;
@@ -1120,8 +1161,22 @@ GpuRenderPacketInfo GpuRenderPacketCodec::validate(
             auto const pick = picks.first +
                 (firstPick + ordinal) * kPickRecordBytes;
             auto const localPick = reader.get<uint32_t>(pick + 4U);
+            auto const presentationZIndexSlot =
+                reader.get<uint32_t>(pick + 24U);
+            auto const presentationPrimitiveOrder =
+                reader.get<uint32_t>(pick + 28U);
+            auto const hasPresentation =
+                presentationZIndexSlot !=
+                    std::numeric_limits<uint32_t>::max();
             if (reader.get<uint32_t>(pick) != index ||
                 localPick >= totalPickCount ||
+                hasPresentation != (presentationPrimitiveOrder != 0U) ||
+                presentationPrimitiveOrder >
+                    kMaximumPresentationPrimitiveOrder ||
+                (hasPresentation &&
+                 ((fragmentCount == 1U && zIndexCount == 0U) ||
+                  (zIndexCount > 0U &&
+                   presentationZIndexSlot >= zIndexCount))) ||
                 (hasPreviousLocalPick && localPick <= previousLocalPick))
             {
                 throw std::invalid_argument(
@@ -1231,8 +1286,19 @@ GpuRenderPacketInfo GpuRenderPacketCodec::validate(
         auto const label = labels.first + index * kLabelRecordBytes;
         auto const fontWeight = reader.get<uint32_t>(label + 112U);
         auto const collisionPriority = reader.get<int32_t>(label + 116U);
+        auto const textAnchor = reader.get<int32_t>(label + 100U);
+        auto const alignmentBaseline = reader.get<int32_t>(label + 104U);
+        auto const options = reader.get<uint32_t>(label + 172U);
+        auto const sizeUnit = options & kGpuLabelSizeUnitMask;
+        auto const wordBreak =
+            (options & kGpuLabelWordBreakMask) >> kGpuLabelWordBreakShift;
         if (fontWeight == 0U || fontWeight > 1000U ||
             collisionPriority < -1000 || collisionPriority > 1000 ||
+            textAnchor < -1 || textAnchor > 1 ||
+            alignmentBaseline < -1 || alignmentBaseline > 1 ||
+            sizeUnit > static_cast<uint32_t>(GpuLabelSizeUnit::Common) ||
+            wordBreak > static_cast<uint32_t>(GpuLabelWordBreak::BreakAll) ||
+            (options & ~kKnownLabelOptions) != 0U ||
             (reader.get<uint32_t>(label + 96U) & ~kKnownLabelFlags) != 0U) {
             throw std::invalid_argument(
                 "GpuRenderPacket label metadata is invalid.");

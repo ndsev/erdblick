@@ -167,8 +167,11 @@ TEST_CASE("GpuRenderPacketBuilder emits final primitive records and ownership sp
         bytes,
         arrowDataOffset + kGpuArrowRecordBytes + 32U) == -2.0F);
     auto const contributionTable = read<uint32_t>(bytes, 80U);
+    auto const pickTable = read<uint32_t>(bytes, 96U);
     auto const zIndexTable = read<uint32_t>(bytes, 152U);
     CHECK(read<uint32_t>(bytes, contributionTable + 48U) == 1U);
+    CHECK(read<uint32_t>(bytes, pickTable + 24U) == 0U);
+    CHECK(read<uint32_t>(bytes, pickTable + 28U) == 4U);
     CHECK(read<double>(bytes, zIndexTable) == 12.0);
     CHECK(read<uint32_t>(bytes, pathDataOffset + 120U) == 0U);
 }

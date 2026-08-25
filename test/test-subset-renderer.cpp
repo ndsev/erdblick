@@ -79,6 +79,8 @@ public:
         uint32_t entryOrdinal = 0U;
         uint32_t endpointRole = 0U;
         float navigationAltitude = 0.0F;
+        uint32_t presentationZIndexSlot = 0U;
+        uint32_t presentationPrimitiveOrder = 0U;
     };
 
     struct Issue {
@@ -211,7 +213,7 @@ public:
         std::vector<Pick> result;
         result.reserve(count);
         for (uint32_t index = 0U; index < count; ++index) {
-            auto const record = table + index * 24U;
+            auto const record = table + index * 32U;
             result.push_back({
                 .contributionIndex = read<uint32_t>(record),
                 .localPickIndex = read<uint32_t>(record + 4U),
@@ -219,6 +221,8 @@ public:
                 .entryOrdinal = read<uint32_t>(record + 12U),
                 .endpointRole = read<uint32_t>(record + 16U),
                 .navigationAltitude = read<float>(record + 20U),
+                .presentationZIndexSlot = read<uint32_t>(record + 24U),
+                .presentationPrimitiveOrder = read<uint32_t>(record + 28U),
             });
         }
         return result;
@@ -232,7 +236,7 @@ public:
         std::vector<std::string> result;
         result.reserve(count);
         for (uint32_t index = 0U; index < count; ++index) {
-            auto const record = table + index * 120U;
+            auto const record = table + index * 176U;
             result.push_back(string(
                 read<uint32_t>(record + 32U),
                 read<uint32_t>(record + 36U)));
@@ -249,7 +253,7 @@ public:
         result.reserve(count);
         for (uint32_t index = 0U; index < count; ++index) {
             auto const flags = read<uint32_t>(
-                table + index * 120U + 96U);
+                table + index * 176U + 96U);
             result.push_back(static_cast<uint8_t>(
                 (flags & kGpuLabelMinimumLodMask) >>
                 kGpuLabelMinimumLodShift));
@@ -265,7 +269,7 @@ public:
         std::vector<float> result;
         result.reserve(count);
         for (uint32_t index = 0U; index < count; ++index) {
-            result.push_back(read<float>(table + index * 120U + 48U));
+            result.push_back(read<float>(table + index * 176U + 48U));
         }
         return result;
     }
@@ -278,7 +282,7 @@ public:
         std::vector<std::string> result;
         result.reserve(count);
         for (uint32_t index = 0U; index < count; ++index) {
-            auto const record = table + index * 120U;
+            auto const record = table + index * 176U;
             result.push_back(string(
                 read<uint32_t>(record + 40U),
                 read<uint32_t>(record + 44U)));
@@ -294,20 +298,20 @@ public:
         std::vector<uint32_t> result;
         result.reserve(count);
         for (uint32_t index = 0U; index < count; ++index) {
-            result.push_back(read<uint32_t>(table + index * 120U + 112U));
+            result.push_back(read<uint32_t>(table + index * 176U + 112U));
         }
         return result;
     }
 
-    /** Decode horizontal and vertical TextLayer anchor codes for every label. */
-    [[nodiscard]] std::vector<std::pair<int32_t, int32_t>> labelOrigins() const
+    /** Decode horizontal anchor and vertical baseline codes for every label. */
+    [[nodiscard]] std::vector<std::pair<int32_t, int32_t>> labelAlignments() const
     {
         auto const table = read<uint32_t>(112U);
         auto const count = read<uint32_t>(116U);
         std::vector<std::pair<int32_t, int32_t>> result;
         result.reserve(count);
         for (uint32_t index = 0U; index < count; ++index) {
-            auto const record = table + index * 120U;
+            auto const record = table + index * 176U;
             result.emplace_back(
                 read<int32_t>(record + 100U),
                 read<int32_t>(record + 104U));
@@ -1213,21 +1217,25 @@ rules:
       geometry-name: centerline
       opacity: 0
       billboard: true
-      label-font: "800 7px Helvetica Neue"
+      label-font-family: Helvetica Neue
+      label-font-weight: 800
+      label-size: 7
       label-text-expression: endpointLabel
       min-lod-expression: 4
-      label-horizontal-origin: LEFT
-      label-vertical-origin: ABOVE
+      label-text-anchor: start
+      label-alignment-baseline: bottom
     relation-target-style:
       geometry: line
       geometry-name: centerline
       opacity: 0
       billboard: true
-      label-font: "800 7px Helvetica Neue"
+      label-font-family: Helvetica Neue
+      label-font-weight: 800
+      label-size: 7
       label-text-expression: endpointLabel
       min-lod-expression: 4
-      label-horizontal-origin: LEFT
-      label-vertical-origin: ABOVE
+      label-text-anchor: start
+      label-alignment-baseline: bottom
 )yaml");
     REQUIRE(style.isValid());
 
@@ -1251,7 +1259,7 @@ rules:
         std::vector<std::string>(3U, "Helvetica Neue"));
     REQUIRE(packet.labelFontWeights() == std::vector<uint32_t>(3U, 800U));
     REQUIRE(packet.labelMinimumLods() == std::vector<uint8_t>(3U, 4U));
-    REQUIRE(packet.labelOrigins() ==
+    REQUIRE(packet.labelAlignments() ==
         std::vector<std::pair<int32_t, int32_t>>(3U, {-1, 1}));
 }
 

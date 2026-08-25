@@ -7,10 +7,17 @@
 
 #include "color.h"
 
+#include <array>
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <memory>
+#include <optional>
 #include <regex>
+#include <string>
+#include <string_view>
 #include <variant>
+#include <vector>
 
 namespace erdblick
 {
@@ -106,6 +113,33 @@ public:
     enum class LengthUnit {
         Meter,
         Pixel,
+    };
+
+    /** Deck TextLayer unit system used for authored label sizes. */
+    enum class LabelSizeUnit : uint32_t {
+        Pixel,
+        Meter,
+        Common,
+    };
+
+    /** Deck TextLayer horizontal anchor values. */
+    enum class LabelTextAnchor : int32_t {
+        Start = -1,
+        Middle = 0,
+        End = 1,
+    };
+
+    /** Deck TextLayer vertical baseline values. */
+    enum class LabelAlignmentBaseline : int32_t {
+        Top = -1,
+        Center = 0,
+        Bottom = 1,
+    };
+
+    /** Deck TextLayer wrapping strategy for labels with a maximum width. */
+    enum class LabelWordBreak : uint32_t {
+        BreakWord,
+        BreakAll,
     };
 
     /** Backward-compatible name for the shared length unit contract. */
@@ -272,8 +306,22 @@ public:
     [[nodiscard]] std::optional<bool> const& attributeValidityGeometry() const;
     /** Report whether this rule can emit a label. */
     [[nodiscard]] bool hasLabel() const;
-    /** Return the CSS-like font string for labels. */
-    [[nodiscard]] std::string const& labelFont() const;
+    /** Return the CSS font-family value passed directly to Deck TextLayer. */
+    [[nodiscard]] std::string const& labelFontFamily() const;
+    /** Return the numeric CSS font weight passed directly to Deck TextLayer. */
+    [[nodiscard]] uint32_t labelFontWeight() const;
+    /** Return the label size consumed by Deck's `getSize` accessor. */
+    [[nodiscard]] float labelSize() const;
+    /** Return the layer-wide Deck text-size multiplier. */
+    [[nodiscard]] float labelSizeScale() const;
+    /** Return the Deck unit system used by label size. */
+    [[nodiscard]] LabelSizeUnit labelSizeUnit() const;
+    /** Return the minimum rendered label size in pixels. */
+    [[nodiscard]] float labelSizeMinPixels() const;
+    /** Return the maximum rendered label size in pixels. */
+    [[nodiscard]] float labelSizeMaxPixels() const;
+    /** Return the label rotation in degrees. */
+    [[nodiscard]] float labelAngle() const;
     /** Return the label fill color. */
     [[nodiscard]] glm::fvec4 const& labelColor() const;
     /** Return the opacity multiplier applied to every label material color. */
@@ -286,30 +334,34 @@ public:
     [[nodiscard]] glm::fvec4 const& labelOutlineColor() const;
     /** Return the label outline width. */
     [[nodiscard]] float labelOutlineWidth() const;
-    /** Report whether a label background rectangle should be drawn. */
-    [[nodiscard]] bool showBackground() const;
+    /** Report whether Deck should render a label background rectangle. */
+    [[nodiscard]] bool labelBackground() const;
     /** Return the background fill color for labels. */
     [[nodiscard]] glm::fvec4 const& labelBackgroundColor() const;
-    /** Return pixel padding applied around label background rectangles. */
-    [[nodiscard]] std::pair<int, int> const& labelBackgroundPadding() const;
-    /** Return the deck horizontal-origin string for labels. */
-    [[nodiscard]] std::string const& labelHorizontalOrigin() const;
-    /** Return the deck vertical-origin string for labels. */
-    [[nodiscard]] std::string const& labelVerticalOrigin() const;
-    /** Return the deck height-reference string for labels. */
-    [[nodiscard]] std::string const& labelHeightReference() const;
+    /** Return the background border color consumed by Deck's accessor. */
+    [[nodiscard]] glm::fvec4 const& labelBorderColor() const;
+    /** Return the background border width in pixels. */
+    [[nodiscard]] float labelBorderWidth() const;
+    /** Return Deck's four-value background padding. */
+    [[nodiscard]] std::array<float, 4> const& labelBackgroundPadding() const;
+    /** Return Deck's per-corner background radii. */
+    [[nodiscard]] std::array<float, 4> const& labelBackgroundBorderRadius() const;
+    /** Return Deck's horizontal text anchor. */
+    [[nodiscard]] LabelTextAnchor labelTextAnchor() const;
+    /** Return Deck's vertical alignment baseline. */
+    [[nodiscard]] LabelAlignmentBaseline labelAlignmentBaseline() const;
     /** Return the raw label text expression, if one was configured. */
     [[nodiscard]] std::string const& labelTextExpression() const;
     /** Resolve the effective label text for the current evaluation context. */
     [[nodiscard]] std::string labelText(BoundEvalFun const& evalFun) const;
-    /** Return the renderer-specific label style keyword. */
-    [[nodiscard]] std::string const& labelStyle() const;
-    /** Return the label scale multiplier. */
-    [[nodiscard]] float labelScale() const;
     /** Return an optional screen-space pixel offset for labels. */
     [[nodiscard]] std::optional<std::pair<float, float>> const& labelPixelOffset() const;
-    /** Return an optional eye-space XYZ offset for labels. */
-    [[nodiscard]] std::optional<std::tuple<float, float, float>> const& labelEyeOffset() const;
+    /** Return Deck's unitless line-height multiplier. */
+    [[nodiscard]] float labelLineHeight() const;
+    /** Return Deck's wrapping strategy. */
+    [[nodiscard]] LabelWordBreak labelWordBreak() const;
+    /** Return Deck's text-width limit as a multiple of label size. */
+    [[nodiscard]] float labelMaxWidth() const;
 
     /** Return the stable index of this rule inside its style sheet. */
     [[nodiscard]] uint32_t const& index() const;
@@ -414,26 +466,37 @@ private:
     LengthUnit lateralOffsetUnit_ = LengthUnit::Meter;
     std::optional<glm::dvec3> pointMergeGridCellSize_;
 
-    // Labels' rules
-    std::string labelFont_ = "24px Helvetica";
+    // Deck TextLayer properties. Accessor-backed values remain per label in
+    // the GPU packet; layer-wide values participate in browser-side buckets.
+    std::string labelFontFamily_ = "Monaco, monospace";
+    uint32_t labelFontWeight_ = 400U;
+    float labelSize_ = 32.0F;
+    float labelSizeScale_ = 1.0F;
+    LabelSizeUnit labelSizeUnit_ = LabelSizeUnit::Pixel;
+    float labelSizeMinPixels_ = 0.0F;
+    float labelSizeMaxPixels_ = std::numeric_limits<float>::max();
+    float labelAngle_ = 0.0F;
     glm::fvec4 labelColor_{1., 1., 1., 1.};
     float labelOpacity_ = 1.0f;
     bool labelCollision_ = false;
     int32_t labelCollisionPriority_ = 0;
     glm::fvec4 labelOutlineColor_{.0, .0, .0, .1};
-    float labelOutlineWidth_ = .1;
-    bool showBackground_ = false;
-    glm::fvec4 labelBackgroundColor_{.0, .0, .0, .0};
-    std::pair<int, int> labelBackgroundPadding_{0, 0};
-    std::string labelHorizontalOrigin_ = "CENTER";
-    std::string labelVerticalOrigin_ = "CENTER";
-    std::string labelHeightReference_ = "NONE";
+    float labelOutlineWidth_ = 0.0F;
+    bool labelBackground_ = false;
+    glm::fvec4 labelBackgroundColor_{1., 1., 1., 1.};
+    glm::fvec4 labelBorderColor_{.0, .0, .0, 1.};
+    float labelBorderWidth_ = 0.0F;
+    std::array<float, 4> labelBackgroundPadding_{};
+    std::array<float, 4> labelBackgroundBorderRadius_{};
+    LabelTextAnchor labelTextAnchor_ = LabelTextAnchor::Middle;
+    LabelAlignmentBaseline labelAlignmentBaseline_ =
+        LabelAlignmentBaseline::Center;
     std::string labelTextExpression_;
     std::string labelText_;
-    std::string labelStyle_ = "FILL";
-    float labelScale_ = 1.;
     std::optional<std::pair<float, float>> labelPixelOffset_;
-    std::optional<std::tuple<float, float, float>> labelEyeOffset_;
+    float labelLineHeight_ = 1.0F;
+    LabelWordBreak labelWordBreak_ = LabelWordBreak::BreakWord;
+    float labelMaxWidth_ = -1.0F;
 
     std::string iconUrl_;
     std::string iconUrlExpression_;

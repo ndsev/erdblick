@@ -12,6 +12,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <initializer_list>
 #include <limits>
 #include <ranges>
 #include <regex>
@@ -333,6 +334,94 @@ bool validateVectorSize(
         }
     }
     return true;
+}
+
+/** Validate a numeric YAML vector against one of several supported lengths. */
+bool validateVectorSizes(
+    YAML::Node const& parent,
+    std::string const& property,
+    std::initializer_list<size_t> expectedSizes,
+    std::string const& rulePath,
+    StyleValidationReport& report,
+    std::optional<uint32_t> ruleIndex)
+{
+    auto const node = parent[property];
+    if (!node.IsDefined()) {
+        return true;
+    }
+    if (!node.IsSequence() ||
+        std::ranges::find(expectedSizes, node.size()) == expectedSizes.end())
+    {
+        std::ostringstream message;
+        message << property << " must be a sequence with ";
+        for (auto iterator = expectedSizes.begin();
+             iterator != expectedSizes.end();
+             ++iterator)
+        {
+            if (iterator != expectedSizes.begin()) {
+                message << " or ";
+            }
+            message << *iterator;
+        }
+        message << " entries.";
+        auto& issue = report.addIssue(
+            "error",
+            "schema",
+            "rule-skipped",
+            message.str(),
+            locationForNode(node));
+        issue.ruleIndex = ruleIndex;
+        issue.rulePath = rulePath;
+        issue.property = property;
+        return false;
+    }
+    for (auto const& value : node) {
+        try {
+            (void) value.as<double>();
+        }
+        catch (YAML::Exception const& error) {
+            auto& issue = report.addIssue(
+                "error",
+                "schema",
+                "rule-skipped",
+                "Could not parse " + property + " entry: " + error.msg,
+                locationForNode(value));
+            issue.ruleIndex = ruleIndex;
+            issue.rulePath = rulePath;
+            issue.property = property;
+            return false;
+        }
+    }
+    return true;
+}
+
+/** Validate a Deck box property authored as one number or four corners. */
+bool validateScalarOrFourVector(
+    YAML::Node const& parent,
+    std::string const& property,
+    std::string const& rulePath,
+    StyleValidationReport& report,
+    std::optional<uint32_t> ruleIndex)
+{
+    auto const node = parent[property];
+    if (!node.IsDefined()) {
+        return true;
+    }
+    if (node.IsScalar()) {
+        return readScalar<double>(
+            parent,
+            property,
+            rulePath,
+            report,
+            ruleIndex);
+    }
+    return validateVectorSize(
+        parent,
+        property,
+        4U,
+        rulePath,
+        report,
+        ruleIndex);
 }
 
 /** Validate one inclusive two-value integer LOD range. */
@@ -1459,6 +1548,34 @@ bool validateStyleRuleYamlImpl(
         rulePath,
         report,
         sourceRuleIndex));
+    markInvalid(validateEnumValue(
+        ruleYaml,
+        "label-size-units",
+        {"meters", "common", "pixels"},
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateEnumValue(
+        ruleYaml,
+        "label-text-anchor",
+        {"start", "middle", "end"},
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateEnumValue(
+        ruleYaml,
+        "label-alignment-baseline",
+        {"top", "center", "bottom"},
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateEnumValue(
+        ruleYaml,
+        "label-word-break",
+        {"break-word", "break-all"},
+        rulePath,
+        report,
+        sourceRuleIndex));
 
     rejectRemoved(
         "aspect",
@@ -1469,6 +1586,27 @@ bool validateStyleRuleYamlImpl(
     rejectRemoved(
         "lod",
         "lod was removed in style schema version 2; use lod-range or min-lod-expression instead.");
+    rejectRemoved(
+        "label-font",
+        "label-font was replaced by label-font-family, label-font-weight, and label-size.");
+    rejectRemoved(
+        "label-horizontal-origin",
+        "label-horizontal-origin was replaced by Deck's label-text-anchor property.");
+    rejectRemoved(
+        "label-vertical-origin",
+        "label-vertical-origin was replaced by Deck's label-alignment-baseline property.");
+    rejectRemoved(
+        "label-style",
+        "label-style has no Deck equivalent; use label-outline-width and label-outline-color.");
+    rejectRemoved(
+        "label-scale",
+        "label-scale was replaced by Deck's label-size-scale property.");
+    rejectRemoved(
+        "label-eye-offset",
+        "label-eye-offset is not supported by Deck TextLayer; use label-pixel-offset or offset.");
+    rejectRemoved(
+        "label-height-reference",
+        "label-height-reference is not supported by Deck TextLayer; use offset for a physical displacement.");
 
     if (context != RuleValidationContext::TopLevel &&
         ruleYaml["scope"].IsDefined())
@@ -1544,8 +1682,159 @@ bool validateStyleRuleYamlImpl(
         }
     }
 
+    if (ruleYaml["label-font-family"].IsDefined()) {
+        std::string fontFamily;
+        if (!readScalar(
+                ruleYaml,
+                "label-font-family",
+                rulePath,
+                report,
+                sourceRuleIndex,
+                &fontFamily))
+        {
+            ok = false;
+        }
+        else if (isBlank(fontFamily)) {
+            auto& issue = report.addIssue(
+                "error",
+                "schema",
+                "rule-skipped",
+                "label-font-family must not be empty.",
+                locationForNode(ruleYaml["label-font-family"]));
+            issue.ruleIndex = sourceRuleIndex;
+            issue.rulePath = rulePath;
+            issue.property = "label-font-family";
+            ok = false;
+        }
+    }
+
     markInvalid(validateNumericRange(ruleYaml, "opacity", 0.0, 1.0, rulePath, report, sourceRuleIndex));
     markInvalid(validateNumericRange(ruleYaml, "label-opacity", 0.0, 1.0, rulePath, report, sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "label-size",
+        0.0,
+        static_cast<double>(std::numeric_limits<float>::max()),
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "label-size-scale",
+        0.0,
+        static_cast<double>(std::numeric_limits<float>::max()),
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "label-size-min-pixels",
+        0.0,
+        static_cast<double>(std::numeric_limits<float>::max()),
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "label-size-max-pixels",
+        0.0,
+        static_cast<double>(std::numeric_limits<float>::max()),
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "label-angle",
+        -static_cast<double>(std::numeric_limits<float>::max()),
+        static_cast<double>(std::numeric_limits<float>::max()),
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "label-font-weight",
+        1.0,
+        1000.0,
+        rulePath,
+        report,
+        sourceRuleIndex));
+    if (auto const fontWeight = ruleYaml["label-font-weight"];
+        fontWeight.IsDefined())
+    {
+        try {
+            auto const value = fontWeight.as<double>();
+            if (std::trunc(value) != value) {
+                auto& issue = report.addIssue(
+                    "error",
+                    "schema",
+                    "rule-skipped",
+                    "label-font-weight must be an integer.",
+                    locationForNode(fontWeight));
+                issue.ruleIndex = sourceRuleIndex;
+                issue.rulePath = rulePath;
+                issue.property = "label-font-weight";
+                ok = false;
+            }
+        }
+        catch (YAML::Exception const&) {
+            // validateNumericRange already reports malformed scalars.
+        }
+    }
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "label-outline-width",
+        0.0,
+        static_cast<double>(std::numeric_limits<float>::max()),
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "label-border-width",
+        0.0,
+        static_cast<double>(std::numeric_limits<float>::max()),
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "label-line-height",
+        0.0,
+        static_cast<double>(std::numeric_limits<float>::max()),
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateNumericRange(
+        ruleYaml,
+        "label-max-width",
+        -1.0,
+        static_cast<double>(std::numeric_limits<float>::max()),
+        rulePath,
+        report,
+        sourceRuleIndex));
+    if (auto const minimum = ruleYaml["label-size-min-pixels"];
+        minimum.IsDefined() && ruleYaml["label-size-max-pixels"].IsDefined())
+    {
+        try {
+            auto const maximum =
+                ruleYaml["label-size-max-pixels"].as<double>();
+            if (minimum.as<double>() > maximum) {
+                auto& issue = report.addIssue(
+                    "error",
+                    "schema",
+                    "rule-skipped",
+                    "label-size-min-pixels must not exceed label-size-max-pixels.",
+                    locationForNode(minimum));
+                issue.ruleIndex = sourceRuleIndex;
+                issue.rulePath = rulePath;
+                issue.property = "label-size-min-pixels";
+                ok = false;
+            }
+        }
+        catch (YAML::Exception const&) {
+            // The individual range validators report malformed scalars.
+        }
+    }
     markInvalid(validateNumericRange(
         ruleYaml,
         "label-collision-priority",
@@ -1557,6 +1846,12 @@ bool validateStyleRuleYamlImpl(
     markInvalid(readScalar<bool>(
         ruleYaml,
         "label-collision",
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(readScalar<bool>(
+        ruleYaml,
+        "label-background",
         rulePath,
         report,
         sourceRuleIndex));
@@ -1610,7 +1905,8 @@ bool validateStyleRuleYamlImpl(
         "gap-color",
         "label-color",
         "label-outline-color",
-        "label-background-color"
+        "label-background-color",
+        "label-border-color"
     }) {
         markInvalid(validateColorValue(ruleYaml, property, rulePath, report, sourceRuleIndex));
     }
@@ -1618,9 +1914,20 @@ bool validateStyleRuleYamlImpl(
     markInvalid(validateVectorSize(ruleYaml, "offset", 3, rulePath, report, sourceRuleIndex));
     markInvalid(validateVectorSize(ruleYaml, "offset-increment", 3, rulePath, report, sourceRuleIndex));
     markInvalid(validateVectorSize(ruleYaml, "point-merge-grid-cell", 3, rulePath, report, sourceRuleIndex));
-    markInvalid(validateVectorSize(ruleYaml, "label-eye-offset", 3, rulePath, report, sourceRuleIndex));
     markInvalid(validateVectorSize(ruleYaml, "label-pixel-offset", 2, rulePath, report, sourceRuleIndex));
-    markInvalid(validateVectorSize(ruleYaml, "label-background-padding", 2, rulePath, report, sourceRuleIndex));
+    markInvalid(validateVectorSizes(
+        ruleYaml,
+        "label-background-padding",
+        {2U, 4U},
+        rulePath,
+        report,
+        sourceRuleIndex));
+    markInvalid(validateScalarOrFourVector(
+        ruleYaml,
+        "label-background-border-radius",
+        rulePath,
+        report,
+        sourceRuleIndex));
 
     markInvalid(validateExpression(ruleYaml, "filter", true, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "attribute-filter", false, rulePath, source, report, sourceRuleIndex));

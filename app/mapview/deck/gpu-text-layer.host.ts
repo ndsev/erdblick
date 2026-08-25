@@ -1,15 +1,24 @@
 import {
     COORDINATE_SYSTEM,
     CompositeLayer,
+    type Effect,
+    type EffectContext,
+    type Layer,
     type LayerContext,
     type LayerProps,
-    type PickingInfo
+    type PickingInfo,
+    type PreRenderOptions,
+    _LayersPass as LayersPass
 } from "@deck.gl/core";
 import {CollisionFilterExtension} from "@deck.gl/extensions";
 import {TextLayer} from "@deck.gl/layers";
 
 import {DeckZIndexExtension} from "./deck-z-index.extension";
-import {GpuLabelFlag} from "./gpu-render-packet";
+import {
+    GpuLabelFlag,
+    GpuLabelSizeUnit,
+    GpuLabelWordBreak
+} from "./gpu-render-packet";
 import type {GpuScene, GpuSceneLabel} from "./gpu-scene";
 
 const NO_DEPTH_PARAMETERS = {
@@ -36,9 +45,17 @@ interface GpuTextBucket {
     collision: boolean;
     fontFamily: string;
     fontWeight: number;
+    sizeUnits: "pixels" | "meters" | "common";
+    sizeScale: number;
+    sizeMinPixels: number;
+    sizeMaxPixels: number;
+    lineHeight: number;
     outlineColor: [number, number, number, number];
     outlineWidth: number;
-    backgroundPadding: [number, number];
+    backgroundPadding: [number, number, number, number];
+    backgroundBorderRadius: [number, number, number, number];
+    wordBreak: "break-word" | "break-all";
+    maxWidth: number;
     data: GpuTextDatum[];
 }
 
@@ -94,22 +111,31 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
                 getSize: (label: GpuTextDatum) => label.size,
                 getAngle: (label: GpuTextDatum) => label.angle,
                 getPixelOffset: (label: GpuTextDatum) => label.pixelOffset,
-                getTextAnchor: (label: GpuTextDatum) => label.horizontalOrigin < 0
+                getTextAnchor: (label: GpuTextDatum) => label.textAnchor < 0
                     ? "start"
-                    : label.horizontalOrigin > 0 ? "end" : "middle",
-                getAlignmentBaseline: (label: GpuTextDatum) => label.verticalOrigin < 0
+                    : label.textAnchor > 0 ? "end" : "middle",
+                getAlignmentBaseline: (label: GpuTextDatum) => label.alignmentBaseline < 0
                     ? "top"
-                    : label.verticalOrigin > 0 ? "bottom" : "center",
+                    : label.alignmentBaseline > 0 ? "bottom" : "center",
                 getBackgroundColor: (label: GpuTextDatum) => label.backgroundColor,
-                sizeUnits: "pixels",
+                getBorderColor: (label: GpuTextDatum) => label.borderColor,
+                getBorderWidth: (label: GpuTextDatum) => label.borderWidth,
+                sizeUnits: bucket.sizeUnits,
+                sizeScale: bucket.sizeScale,
+                sizeMinPixels: bucket.sizeMinPixels,
+                sizeMaxPixels: bucket.sizeMaxPixels,
                 fontFamily: bucket.fontFamily,
                 fontWeight: bucket.fontWeight,
+                lineHeight: bucket.lineHeight,
                 billboard: bucket.billboard,
                 background: bucket.background,
                 backgroundPadding: bucket.backgroundPadding,
+                backgroundBorderRadius: bucket.backgroundBorderRadius,
                 outlineColor: bucket.outlineColor,
                 outlineWidth: bucket.outlineWidth,
                 fontSettings: {sdf: bucket.outlineWidth > 0},
+                wordBreak: bucket.wordBreak,
+                maxWidth: bucket.maxWidth,
                 extensions: [
                     ...(bucket.depthTest
                         ? [new DeckZIndexExtension()]
@@ -157,6 +183,14 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
             const pickable = label.globalPickIndex !== null;
             const background = (label.flags & GpuLabelFlag.Background) !== 0;
             const collision = (label.flags & GpuLabelFlag.Collision) !== 0;
+            const sizeUnits = label.sizeUnit === GpuLabelSizeUnit.Meter
+                ? "meters"
+                : label.sizeUnit === GpuLabelSizeUnit.Common
+                    ? "common"
+                    : "pixels";
+            const wordBreak = label.wordBreak === GpuLabelWordBreak.BreakAll
+                ? "break-all"
+                : "break-word";
             const key = JSON.stringify([
                 label.styleOrder,
                 label.renderOrder,
@@ -167,9 +201,17 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
                 collision,
                 label.fontFamily,
                 label.fontWeight,
+                sizeUnits,
+                label.sizeScale,
+                label.sizeMinPixels,
+                label.sizeMaxPixels,
+                label.lineHeight,
                 label.outlineColor,
                 label.outlineWidth,
-                label.backgroundPadding
+                label.backgroundPadding,
+                label.backgroundBorderRadius,
+                wordBreak,
+                label.maxWidth
             ]);
             let bucket = result.get(key);
             if (!bucket) {
@@ -184,9 +226,17 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
                     collision,
                     fontFamily: label.fontFamily,
                     fontWeight: label.fontWeight,
+                    sizeUnits,
+                    sizeScale: label.sizeScale,
+                    sizeMinPixels: label.sizeMinPixels,
+                    sizeMaxPixels: label.sizeMaxPixels,
+                    lineHeight: label.lineHeight,
                     outlineColor: label.outlineColor,
                     outlineWidth: label.outlineWidth,
                     backgroundPadding: label.backgroundPadding,
+                    backgroundBorderRadius: label.backgroundBorderRadius,
+                    wordBreak,
+                    maxWidth: label.maxWidth,
                     data: []
                 };
                 result.set(key, bucket);
@@ -226,6 +276,67 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
             this.setNeedsUpdate();
             this.setNeedsRedraw();
         });
+    }
+}
+
+/** Returns whether a root layer belongs in the final, post-compositor text pass. */
+export function isDeckTextOverlayLayer(layer: Layer): boolean {
+    return layer instanceof GpuTextLayerHost || layer instanceof TextLayer;
+}
+
+/**
+ * Captures Deck's current frame inputs and redraws every text root after scene compositing.
+ * The pass preserves scene color while clearing scene depth, so labels remain above geometry,
+ * retain their own depth ordering, and never enter contact-shading input buffers.
+ */
+export class DeckTextOverlayService implements Effect {
+    readonly id = "deck-text-overlay-service";
+    readonly props = null;
+    readonly useInPicking = false;
+
+    private pass: LayersPass | null = null;
+    private frameOptions: PreRenderOptions | null = null;
+
+    /** Allocate the dedicated final text pass on Deck's graphics device. */
+    setup(context: EffectContext): void {
+        this.pass = new LayersPass(context.device, {
+            id: "deck-text-overlay-pass"
+        });
+    }
+
+    /** Retain the ordinary screen frame inputs for the matching post-compositor draw. */
+    preRender(options: PreRenderOptions): void {
+        if (!options.isPicking && options.pass === "screen") {
+            this.frameOptions = options;
+        }
+    }
+
+    /** Draw text to the canvas after every scene compositor has presented its result. */
+    renderOverlay(): void {
+        const options = this.frameOptions;
+        this.frameOptions = null;
+        if (!this.pass || !options) {
+            return;
+        }
+        this.pass.render({
+            ...options,
+            target: null,
+            pass: "text-overlay",
+            isPicking: false,
+            clearCanvas: true,
+            // LayersPass supports preserving color while clearing depth, but its
+            // published type does not include the runtime-supported false value.
+            clearColor: false as never,
+            clearStack: true,
+            layerFilter: ({layer}) => isDeckTextOverlayLayer(layer)
+        });
+    }
+
+    /** Release references owned by the effect when Deck retires the view. */
+    cleanup(): void {
+        this.pass?.cleanup();
+        this.pass = null;
+        this.frameOptions = null;
     }
 }
 

@@ -1,4 +1,4 @@
-export const GPU_RENDER_PACKET_ABI_VERSION = 16;
+export const GPU_RENDER_PACKET_ABI_VERSION = 18;
 export const GPU_RENDER_PACKET_HEADER_BYTES = 160;
 // One oversized packet is still admitted by itself, so this ceiling is also
 // the maximum unavoidable geometry upload burst from one worker task.
@@ -9,9 +9,9 @@ const GPU_RENDER_PACKET_MAGIC = 0x50475245;
 const STREAM_DESCRIPTOR_BYTES = 48;
 const CONTRIBUTION_DESCRIPTOR_BYTES = 56;
 const CONTRIBUTION_SPAN_BYTES = 16;
-const PICK_RECORD_BYTES = 24;
+const PICK_RECORD_BYTES = 32;
 const PICK_MEMBER_BYTES = 8;
-const LABEL_RECORD_BYTES = 120;
+const LABEL_RECORD_BYTES = 176;
 const RESOURCE_RECORD_BYTES = 24;
 const ISSUE_RECORD_BYTES = 40;
 const GPU_ACTIVATION_TOKEN_MAX = 0x00ff_ffff;
@@ -49,6 +49,17 @@ export enum GpuLabelFlag {
   DepthTest = 1 << 1,
   Background = 1 << 2,
   Collision = 1 << 3,
+}
+
+export enum GpuLabelSizeUnit {
+  Pixel,
+  Meter,
+  Common,
+}
+
+export enum GpuLabelWordBreak {
+  BreakWord,
+  BreakAll,
 }
 
 const GPU_LABEL_MINIMUM_LOD_SHIFT = 8;
@@ -115,6 +126,10 @@ export interface GpuPickRecordView {
   endpointRole: number;
   /** Finite only after this semantic row materialized visible presentation. */
   navigationAltitude: number;
+  /** Contribution-local slot of the highest emitted z-index, or uint32 max. */
+  presentationZIndexSlot: number;
+  /** One-based surface-before-vector pass used only when z-index values tie. */
+  presentationPrimitiveOrder: number;
 }
 
 interface PickStorage {
@@ -166,6 +181,8 @@ function decodePickRecord(
     entryOrdinal: storage.picks.getUint32(offset + 12, true),
     endpointRole: storage.picks.getUint32(offset + 16, true),
     navigationAltitude: storage.picks.getFloat32(offset + 20, true),
+    presentationZIndexSlot: storage.picks.getUint32(offset + 24, true),
+    presentationPrimitiveOrder: storage.picks.getUint32(offset + 28, true),
   };
 }
 
@@ -200,6 +217,22 @@ export class GpuRetainedPickTable {
   localPickIndex(index: number): number {
     return this.storage.picks.getUint32(
       pickOffset(this.storage, index) + 4,
+      true,
+    );
+  }
+
+  /** Read the local z-index slot retained for candidate ordering. */
+  presentationZIndexSlot(index: number): number {
+    return this.storage.picks.getUint32(
+      pickOffset(this.storage, index) + 24,
+      true,
+    );
+  }
+
+  /** Read the fixed primitive-pass tie-breaker without decoding a pick object. */
+  presentationPrimitiveOrder(index: number): number {
+    return this.storage.picks.getUint32(
+      pickOffset(this.storage, index) + 28,
       true,
     );
   }
@@ -247,6 +280,22 @@ export class GpuPickTableView {
     );
   }
 
+  /** Read the local z-index slot retained for candidate ordering. */
+  presentationZIndexSlot(index: number): number {
+    return this.storage.picks.getUint32(
+      pickOffset(this.storage, index) + 24,
+      true,
+    );
+  }
+
+  /** Read the fixed primitive-pass tie-breaker without decoding a pick object. */
+  presentationPrimitiveOrder(index: number): number {
+    return this.storage.picks.getUint32(
+      pickOffset(this.storage, index) + 28,
+      true,
+    );
+  }
+
   /** Read one exact source-row tuple for an immediate consumer. */
   record(index: number): GpuPickRecordView {
     return decodePickRecord(this.storage, index);
@@ -280,6 +329,14 @@ export class GpuPickTableView {
         offset + 20,
         true,
       );
+      const presentationZIndexSlot = this.storage.picks.getUint32(
+        offset + 24,
+        true,
+      );
+      const presentationPrimitiveOrder = this.storage.picks.getUint32(
+        offset + 28,
+        true,
+      );
       if (
         !Number.isFinite(navigationAltitude) &&
         !Number.isNaN(navigationAltitude)
@@ -287,6 +344,13 @@ export class GpuPickTableView {
         throw new Error(
           `GPU pick ${index} has an infinite navigation altitude.`,
         );
+      }
+      if (
+        (presentationZIndexSlot !== 0xffffffff) !==
+          (presentationPrimitiveOrder !== 0) ||
+        presentationPrimitiveOrder > 5
+      ) {
+        throw new Error(`GPU pick ${index} has invalid presentation order.`);
       }
     }
   }
@@ -305,15 +369,25 @@ export interface GpuLabelRecordView {
   color: [number, number, number, number];
   outlineColor: [number, number, number, number];
   backgroundColor: [number, number, number, number];
+  borderColor: [number, number, number, number];
   outlineWidth: number;
-  backgroundPadding: [number, number];
+  borderWidth: number;
+  backgroundPadding: [number, number, number, number];
+  backgroundBorderRadius: [number, number, number, number];
+  sizeScale: number;
+  sizeMinPixels: number;
+  sizeMaxPixels: number;
+  lineHeight: number;
+  maxWidth: number;
   flags: number;
   minLod: number;
-  horizontalOrigin: number;
-  verticalOrigin: number;
+  textAnchor: number;
+  alignmentBaseline: number;
   renderOrder: number;
   fontWeight: number;
   collisionPriority: number;
+  sizeUnit: GpuLabelSizeUnit;
+  wordBreak: GpuLabelWordBreak;
 }
 
 export interface GpuResourceRequestView {
@@ -720,11 +794,23 @@ export class GpuRenderPacketView {
         GPU_LABEL_MINIMUM_LOD_SHIFT;
       const fontWeight = this.u32(offset + 112);
       const collisionPriority = this.i32(offset + 116);
+      const textAnchor = this.i32(offset + 100);
+      const alignmentBaseline = this.i32(offset + 104);
+      const options = this.u32(offset + 172);
+      const sizeUnit = options & 0xff;
+      const wordBreak = (options >>> 8) & 0xff;
       if (
         fontWeight === 0 ||
         fontWeight > 1000 ||
         collisionPriority < -1000 ||
         collisionPriority > 1000 ||
+        textAnchor < -1 ||
+        textAnchor > 1 ||
+        alignmentBaseline < -1 ||
+        alignmentBaseline > 1 ||
+        sizeUnit > GpuLabelSizeUnit.Common ||
+        wordBreak > GpuLabelWordBreak.BreakAll ||
+        options >>> 16 !== 0 ||
         (packedFlags &
           ~(
             GpuLabelFlag.Billboard |
@@ -754,15 +840,35 @@ export class GpuRenderPacketView {
         color: color(offset + 72),
         outlineColor: color(offset + 76),
         backgroundColor: color(offset + 80),
+        borderColor: color(offset + 120),
         outlineWidth: this.f32(offset + 84),
-        backgroundPadding: [this.f32(offset + 88), this.f32(offset + 92)],
+        borderWidth: this.f32(offset + 124),
+        backgroundPadding: [
+          this.f32(offset + 88),
+          this.f32(offset + 92),
+          this.f32(offset + 128),
+          this.f32(offset + 132),
+        ],
+        backgroundBorderRadius: [
+          this.f32(offset + 136),
+          this.f32(offset + 140),
+          this.f32(offset + 144),
+          this.f32(offset + 148),
+        ],
+        sizeScale: this.f32(offset + 152),
+        sizeMinPixels: this.f32(offset + 156),
+        sizeMaxPixels: this.f32(offset + 160),
+        lineHeight: this.f32(offset + 164),
+        maxWidth: this.f32(offset + 168),
         flags,
         minLod,
-        horizontalOrigin: this.i32(offset + 100),
-        verticalOrigin: this.i32(offset + 104),
+        textAnchor,
+        alignmentBaseline,
         renderOrder: this.u32(offset + 108),
         fontWeight,
         collisionPriority,
+        sizeUnit,
+        wordBreak,
       };
     });
   }
@@ -819,9 +925,15 @@ export class GpuRenderPacketView {
       ) {
         const contributionIndex = this.picks.contributionIndex(pick);
         const localPickIndex = this.picks.localPickIndex(pick);
+        const presentationZIndexSlot =
+          this.picks.presentationZIndexSlot(pick);
         if (
           contributionIndex !== index ||
           localPickIndex >= owner.totalPickCount ||
+          (presentationZIndexSlot !== 0xffffffff &&
+            ((this.fragmentCount === 1 && owner.zIndices.length === 0) ||
+              (owner.zIndices.length > 0 &&
+                presentationZIndexSlot >= owner.zIndices.length))) ||
           (pick > owner.firstPick &&
             localPickIndex <= this.picks.localPickIndex(pick - 1))
         ) {

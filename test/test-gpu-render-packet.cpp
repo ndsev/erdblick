@@ -61,6 +61,8 @@ erdblick::GpuRenderPacketData samplePacket()
         .entryOrdinal = 17U,
         .endpointRole = 2U,
         .navigationAltitude = 412.25F,
+        .presentationZIndexSlot = 1U,
+        .presentationPrimitiveOrder = 2U,
     });
     packet.labels.push_back({
         .contributionIndex = 0U,
@@ -73,6 +75,8 @@ erdblick::GpuRenderPacketData samplePacket()
         .renderOrder = 6U,
         .fontWeight = 700U,
         .collisionPriority = 42,
+        .sizeUnit = GpuLabelSizeUnit::Common,
+        .wordBreak = GpuLabelWordBreak::BreakAll,
     });
     packet.resourceRequests.push_back({
         .resourceKind = 1U,
@@ -111,6 +115,18 @@ TEST_CASE("GpuRenderPacket round-trips its validated header and tables")
         bytes.data() + pickTable + 20U,
         sizeof(navigationAltitude));
     CHECK(navigationAltitude == 412.25F);
+    uint32_t presentationZIndexSlot = 0U;
+    std::memcpy(
+        &presentationZIndexSlot,
+        bytes.data() + pickTable + 24U,
+        sizeof(presentationZIndexSlot));
+    CHECK(presentationZIndexSlot == 1U);
+    uint32_t presentationPrimitiveOrder = 0U;
+    std::memcpy(
+        &presentationPrimitiveOrder,
+        bytes.data() + pickTable + 28U,
+        sizeof(presentationPrimitiveOrder));
+    CHECK(presentationPrimitiveOrder == 2U);
     uint32_t labelTable = 0U;
     std::memcpy(&labelTable, bytes.data() + 112U, sizeof(labelTable));
     uint32_t labelFlags = 0U;
@@ -120,6 +136,15 @@ TEST_CASE("GpuRenderPacket round-trips its validated header and tables")
         sizeof(labelFlags));
     CHECK(((labelFlags & erdblick::kGpuLabelMinimumLodMask) >>
         erdblick::kGpuLabelMinimumLodShift) == 5U);
+    uint32_t labelOptions = 0U;
+    std::memcpy(
+        &labelOptions,
+        bytes.data() + labelTable + 172U,
+        sizeof(labelOptions));
+    CHECK((labelOptions & 0xffU) ==
+        static_cast<uint32_t>(erdblick::GpuLabelSizeUnit::Common));
+    CHECK(((labelOptions >> 8U) & 0xffU) ==
+        static_cast<uint32_t>(erdblick::GpuLabelWordBreak::BreakAll));
 }
 
 TEST_CASE("GpuRenderPacket rejects malformed wire data before upload")
@@ -181,6 +206,15 @@ TEST_CASE("GpuRenderPacket rejects malformed wire data before upload")
             erdblick::GpuRenderPacketCodec::validate(bytes),
             std::invalid_argument);
     }
+    SECTION("invalid label TextLayer options") {
+        auto bytes = erdblick::GpuRenderPacketCodec::encode(samplePacket());
+        uint32_t labelTable = 0U;
+        std::memcpy(&labelTable, bytes.data() + 112U, sizeof(labelTable));
+        overwrite(bytes, labelTable + 172U, uint32_t{0x00010000U});
+        CHECK_THROWS_AS(
+            erdblick::GpuRenderPacketCodec::validate(bytes),
+            std::invalid_argument);
+    }
     SECTION("overlapping packet tables") {
         auto bytes = erdblick::GpuRenderPacketCodec::encode(samplePacket());
         uint32_t contributionTable = 0U;
@@ -222,6 +256,15 @@ TEST_CASE("GpuRenderPacket rejects malformed wire data before upload")
             erdblick::GpuRenderPacketCodec::validate(bytes),
             std::invalid_argument);
     }
+    SECTION("invalid pick presentation order") {
+        auto bytes = erdblick::GpuRenderPacketCodec::encode(samplePacket());
+        uint32_t pickTable = 0U;
+        std::memcpy(&pickTable, bytes.data() + 96U, sizeof(pickTable));
+        overwrite(bytes, pickTable + 28U, uint32_t{6U});
+        CHECK_THROWS_AS(
+            erdblick::GpuRenderPacketCodec::validate(bytes),
+            std::invalid_argument);
+    }
 }
 
 TEST_CASE("GpuRenderPacket rejects invalid logical references while encoding")
@@ -251,6 +294,13 @@ TEST_CASE("GpuRenderPacket rejects invalid logical references while encoding")
     SECTION("invalid contribution index") {
         auto packet = samplePacket();
         packet.picks.front().contributionIndex = 3U;
+        CHECK_THROWS_AS(
+            erdblick::GpuRenderPacketCodec::encode(packet),
+            std::invalid_argument);
+    }
+    SECTION("invalid pick presentation z-index slot") {
+        auto packet = samplePacket();
+        packet.picks.front().presentationZIndexSlot = 2U;
         CHECK_THROWS_AS(
             erdblick::GpuRenderPacketCodec::encode(packet),
             std::invalid_argument);

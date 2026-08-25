@@ -71,7 +71,9 @@ import {GpuSceneMaskController} from "./gpu-scene-mask.controller";
 import {gpuIconAtlasService} from "./gpu-icon-atlas.service";
 import {
     createGpuTextLayerHost,
-    GpuTextLayerHost
+    DeckTextOverlayService,
+    GpuTextLayerHost,
+    isDeckTextOverlayLayer
 } from "./gpu-text-layer.host";
 import {
     DeckInteractionOutlineService,
@@ -305,6 +307,7 @@ export abstract class DeckMapView implements IRenderView {
         new DeckInteractionOutlineService(this.layerRegistry);
     protected readonly semanticZIndexService =
         new DeckSemanticZIndexService(this.layerRegistry);
+    private readonly textOverlayService = new DeckTextOverlayService();
     private gpuScene: GpuScene | null = null;
     private gpuVectorLayers: readonly ErdblickVectorLayer[] = [];
     private readonly gpuVectorDisabledPickIndices = new Set<number>();
@@ -433,13 +436,17 @@ export abstract class DeckMapView implements IRenderView {
     private readonly deckCursor = ({isDragging}: {isDragging: boolean}) =>
         this.isHoveringFeature ? "pointer" : (isDragging ? "grabbing" : "grab");
     /**
-     * Separates visible GLTF rendering from the invisible GLTF pick-proxy pass.
+     * Routes deferred text and GLTF pick proxies to their dedicated passes.
      *
-     * deck still draws non-pickable layers during picking unless they are filtered out explicitly,
-     * so the visible GLTF layer must be excluded there or it will overwrite the cheap proxy ids.
+     * Text remains eligible for picking and collision layout but is presented by the final overlay.
+     * Deck also draws non-pickable layers during picking unless filtered explicitly, so visible GLTF
+     * content must be excluded there or it overwrites the cheap proxy ids.
      */
     private readonly deckLayerFilter: DeckProps<DeckView>["layerFilter"] = ({layer, isPicking}) => {
         const layerId = String(layer.id ?? "");
+        if (!isPicking && isDeckTextOverlayLayer(layer)) {
+            return false;
+        }
         if (isDeckInteractionMaskLayer(layerId)) {
             return false;
         }
@@ -581,7 +588,8 @@ export abstract class DeckMapView implements IRenderView {
             layers: [],
             effects: [
                 this.semanticZIndexService,
-                this.interactionOutlineService
+                this.interactionOutlineService,
+                this.textOverlayService
             ],
             onBeforeRender: () => this.updateContactShadingTarget(),
             controller: false,
@@ -613,6 +621,7 @@ export abstract class DeckMapView implements IRenderView {
                         this.contactShadingService.render(viewport);
                     }
                 }
+                this.textOverlayService.renderOverlay();
                 const completedAtMs = performance.now();
                 const frameIntervalMs = this.deckPreviousFrameCompletedAtMs > 0
                     ? completedAtMs - this.deckPreviousFrameCompletedAtMs
@@ -1326,14 +1335,33 @@ export abstract class DeckMapView implements IRenderView {
         return result;
     }
 
-    /** Expands merged objects and deduplicates exact map-tile/feature identities in pick traversal order. */
+    /**
+     * Orders GPU vector picks by rendered z-index and primitive pass before
+     * expanding merged objects and deduplicating exact feature identities.
+     * Non-vector picks retain Deck's relative and absolute candidate positions.
+     */
     private uniqueFeatureIdsFromPickingInfos(
         pickedObjects: PickingInfo[],
         maxFeatures = Number.POSITIVE_INFINITY
     ): TileFeatureId[] {
         const featureIds: TileFeatureId[] = [];
         const seen = new Set<string>();
-        for (const picked of pickedObjects) {
+        const candidates = pickedObjects.map((picked, index) => ({
+            picked,
+            index,
+            order: this.renderedPickOrder(picked)
+        }));
+        const orderedVectorPicks = candidates
+            .filter(candidate => candidate.order !== undefined)
+            .sort((left, right) =>
+                right.order!.zIndex - left.order!.zIndex ||
+                right.order!.primitiveOrder - left.order!.primitiveOrder ||
+                left.index - right.index);
+        let vectorPickIndex = 0;
+        for (const candidate of candidates) {
+            const picked = candidate.order === undefined
+                ? candidate.picked
+                : orderedVectorPicks[vectorPickIndex++].picked;
             for (const featureId of this.featureIdsFromPickingInfo(picked)) {
                 const identity = `${featureId.mapTileKey}\u0000${featureId.featureId}`;
                 if (seen.has(identity)) {
@@ -1347,6 +1375,23 @@ export abstract class DeckMapView implements IRenderView {
             }
         }
         return featureIds;
+    }
+
+    /** Resolve ordering metadata for one GPU vector picking result. */
+    private renderedPickOrder(
+        picked: PickingInfo
+    ): {zIndex: number; primitiveOrder: number} | undefined {
+        const globalPickIndex = Number(
+            (picked.object as {globalPickIndex?: unknown} | undefined)
+                ?.globalPickIndex ?? picked.index
+        );
+        if (!this.gpuScene || !Number.isInteger(globalPickIndex) ||
+            globalPickIndex < 0 ||
+            (!(picked.layer instanceof ErdblickVectorLayer) &&
+             !(picked.sourceLayer instanceof ErdblickVectorLayer))) {
+            return undefined;
+        }
+        return this.gpuScene.pickOrder(globalPickIndex);
     }
 
     /** Resolves feature ids from metadata already returned by a deck picking operation. */

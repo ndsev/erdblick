@@ -1740,6 +1740,90 @@ rules:
         "label-opacity"));
 }
 
+TEST_CASE("FeatureLayerStyle maps label fields directly to Deck TextLayer", "[erdblick.style]")
+{
+    auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(
+name: DeckLabels
+version: 2
+rules:
+  - geometry: point
+    label-text: Deck
+    label-font-family: Noto Sans
+    label-font-weight: 700
+    label-size: 18
+    label-size-scale: 1.5
+    label-size-units: meters
+    label-size-min-pixels: 7
+    label-size-max-pixels: 80
+    label-angle: 12
+    label-outline-width: 0.15
+    label-background: true
+    label-background-color: "#112233"
+    label-border-color: "#556677"
+    label-border-width: 3
+    label-background-padding: [1, 2, 3, 4]
+    label-background-border-radius: [4, 3, 2, 1]
+    label-text-anchor: start
+    label-alignment-baseline: bottom
+    label-line-height: 1.25
+    label-word-break: break-all
+    label-max-width: 14
+)yaml"));
+    INFO(nlohmann::json(style.validationReport()).dump(2));
+    REQUIRE(style.isValid());
+    REQUIRE(style.rules().size() == 1U);
+    auto const& rule = style.rules().front();
+    CHECK(rule.labelFontFamily() == "Noto Sans");
+    CHECK(rule.labelFontWeight() == 700U);
+    CHECK(rule.labelSize() == 18.0F);
+    CHECK(rule.labelSizeScale() == 1.5F);
+    CHECK(rule.labelSizeUnit() == FeatureStyleRule::LabelSizeUnit::Meter);
+    CHECK(rule.labelSizeMinPixels() == 7.0F);
+    CHECK(rule.labelSizeMaxPixels() == 80.0F);
+    CHECK(rule.labelAngle() == 12.0F);
+    CHECK(rule.labelOutlineWidth() == 0.15F);
+    CHECK(rule.labelBackground());
+    CHECK(rule.labelBorderWidth() == 3.0F);
+    auto const expectedPadding = std::array<float, 4>{1, 2, 3, 4};
+    auto const expectedRadii = std::array<float, 4>{4, 3, 2, 1};
+    CHECK(rule.labelBackgroundPadding() == expectedPadding);
+    CHECK(rule.labelBackgroundBorderRadius() == expectedRadii);
+    CHECK(rule.labelTextAnchor() == FeatureStyleRule::LabelTextAnchor::Start);
+    CHECK(rule.labelAlignmentBaseline() ==
+        FeatureStyleRule::LabelAlignmentBaseline::Bottom);
+    CHECK(rule.labelLineHeight() == 1.25F);
+    CHECK(rule.labelWordBreak() == FeatureStyleRule::LabelWordBreak::BreakAll);
+    CHECK(rule.labelMaxWidth() == 14.0F);
+}
+
+TEST_CASE("FeatureLayerStyle rejects removed Cesium label fields", "[erdblick.style]")
+{
+    for (auto const property : {
+             "label-font",
+             "label-horizontal-origin",
+             "label-vertical-origin",
+             "label-style",
+             "label-scale",
+             "label-eye-offset",
+             "label-height-reference"})
+    {
+        DYNAMIC_SECTION(property) {
+            auto const source = std::string(R"yaml(
+name: RemovedLabelField
+version: 2
+rules:
+  - geometry: point
+    label-text: label
+    )yaml") + property + ": 1\n";
+            auto style = FeatureLayerStyle(SharedUint8Array(source));
+            REQUIRE_FALSE(style.isValid());
+            REQUIRE(reportHasProperty(
+                nlohmann::json(style.validationReport()),
+                property));
+        }
+    }
+}
+
 TEST_CASE("Bundled styles pass native style validation", "[erdblick.style]")
 {
     auto const stylesDirectory =

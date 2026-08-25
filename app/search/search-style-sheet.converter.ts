@@ -26,9 +26,11 @@ const SUPPORTED_RULE_KEYS = new Set([
     "label-text-expression",
     "label-color",
     "label-opacity",
-    "label-scale",
+    "label-size",
+    "label-font-family",
     "label-outline-color",
     "label-outline-width",
+    "label-background",
     "label-background-color",
     "label-background-padding",
     "billboard",
@@ -255,9 +257,11 @@ export function featureSearchRuleToStyleRule(
         result["label-text-expression"] = rule.labelExpression.trim();
         result["label-color"] = labelColor(rule.color);
         result["label-opacity"] = opacity;
-        result["label-scale"] = Math.max(0.1, width / 14);
+        result["label-size"] = 24 * Math.max(0.1, width / 14);
+        result["label-font-family"] = "Helvetica";
         result["label-outline-color"] = "#ffffff";
-        result["label-outline-width"] = 2;
+        result["label-outline-width"] = 0.1;
+        result["label-background"] = true;
         result["label-background-color"] = rule.labelBackgroundColor
             ?? DEFAULT_FEATURE_SEARCH_LABEL_BACKGROUND_COLOR;
         result["label-background-padding"] = [2, 2];
@@ -634,9 +638,11 @@ function patchProjectedRule(
                 "label-text-expression",
                 "label-color",
                 "label-opacity",
-                "label-scale",
+                "label-size",
+                "label-font-family",
                 "label-outline-color",
                 "label-outline-width",
+                "label-background",
                 "label-background-color",
                 "label-background-padding",
                 "billboard",
@@ -656,7 +662,7 @@ function patchProjectedRule(
     if (styleWidth(original) !== styleWidth(updated)) {
         sync(["width"]);
         if (hasOnlyGeometry(updated, "label")) {
-            sync(["label-scale"]);
+            sync(["label-size"]);
         }
     }
     if (Number(original.opacity ?? 1) !== Number(updated.opacity ?? 1)) {
@@ -849,9 +855,11 @@ function labelCompatibilityWarnings(
     const warnings: QuickStyleWarning[] = [];
     for (const key of [
         "label-color",
-        "label-scale",
+        "label-size",
+        "label-font-family",
         "label-outline-color",
         "label-outline-width",
+        "label-background",
         "label-background-padding",
         "billboard",
         "depth-test"

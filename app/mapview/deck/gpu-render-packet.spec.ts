@@ -26,7 +26,7 @@ function emptyPacket(): Uint8Array {
 
 /** Build one point stream with two records owned by one pickable contribution. */
 function ownedPacket(): Uint8Array {
-    const bytes = new Uint8Array(384);
+    const bytes = new Uint8Array(392);
     const view = new DataView(bytes.buffer);
     view.setUint32(0, 0x50475245, true);
     view.setUint16(4, GPU_RENDER_PACKET_ABI_VERSION, true);
@@ -39,12 +39,12 @@ function ownedPacket(): Uint8Array {
         [80, 208, 1],
         [88, 264, 1],
         [96, 280, 1],
-        [104, 304, 0],
-        [112, 304, 0],
-        [120, 304, 0],
-        [128, 304, 0],
-        [144, 304, 0],
-        [152, 304, 0]
+        [104, 312, 0],
+        [112, 312, 0],
+        [120, 312, 0],
+        [128, 312, 0],
+        [144, 312, 0],
+        [152, 312, 0]
     ];
     for (const [header, offset, count] of tables) {
         view.setUint32(header, offset, true);
@@ -54,7 +54,7 @@ function ownedPacket(): Uint8Array {
     view.setBigUint64(164, 1n, true);
     view.setUint32(172, 40, true);
     view.setUint32(176, 2, true);
-    view.setUint32(180, 304, true);
+    view.setUint32(180, 312, true);
     view.setUint32(184, 80, true);
     view.setBigUint64(208, 1n, true);
     view.setUint32(220, 0, true);
@@ -71,6 +71,8 @@ function ownedPacket(): Uint8Array {
     view.setUint32(272, 2, true);
     view.setUint32(280, 0, true);
     view.setUint32(284, 0, true);
+    view.setUint32(304, 0xffffffff, true);
+    view.setUint32(308, 0, true);
     return bytes;
 }
 

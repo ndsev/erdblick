@@ -27,6 +27,19 @@ constexpr uint32_t kGpuRecordFlagMask = 0xffU;
 constexpr uint32_t kGpuActivationTokenMax = 0x00ffffffU;
 static_assert(std::has_single_bit(kGpuDepthTieBucketCount));
 
+/** Mirror the fixed surface-before-vector render passes as a one-based pick tie-breaker. */
+uint32_t presentationPrimitiveOrder(GpuPrimitiveKind kind)
+{
+    switch (kind) {
+    case GpuPrimitiveKind::SurfaceTriangle: return 1U;
+    case GpuPrimitiveKind::PathSegment: return 2U;
+    case GpuPrimitiveKind::Point: return 3U;
+    case GpuPrimitiveKind::Arrow: return 4U;
+    case GpuPrimitiveKind::Icon: return 5U;
+    }
+    return 0U;
+}
+
 template<typename T>
 void appendScalar(std::vector<std::byte>& bytes, T value)
 {
@@ -249,6 +262,13 @@ void padRecord(std::vector<std::byte>& bytes, size_t recordStart, size_t stride)
 class GpuRenderPacketBuilder::Impl
 {
 public:
+    /** Highest rendered order retained for one contribution-local semantic pick. */
+    struct PickPresentation {
+        double zIndex = 0.0;
+        uint32_t zIndexSlot = std::numeric_limits<uint32_t>::max();
+        uint32_t primitiveOrder = 0U;
+    };
+
     /** Rule-local stream identity which avoids re-hashing material bytes per record. */
     struct StreamIdentity {
         uint32_t renderOrder = 0U;
@@ -283,6 +303,7 @@ public:
     std::unordered_set<std::string> resourceRequestKeys;
     std::optional<uint32_t> activeContribution;
     std::vector<std::tuple<uint64_t, uint32_t, uint32_t>> activeZIndexKeys;
+    std::vector<std::vector<PickPresentation>> pickPresentations;
 
     /** Resolve or create one material-compatible fixed-stride output stream. */
     [[nodiscard]] uint32_t stream(
@@ -429,6 +450,40 @@ public:
              kGpuMinimumLodShift);
     }
 
+    /** Retain the top emitted primitive order without scanning records in JavaScript. */
+    void recordPickPresentation(
+        GpuRecordStyle const& style,
+        uint32_t primitiveOrder)
+    {
+        if (style.localPickIndex == kGpuUnselectable) {
+            return;
+        }
+        auto& presentations = pickPresentations.at(contributionIndex());
+        if (presentations.size() <= style.localPickIndex) {
+            presentations.resize(
+                static_cast<size_t>(style.localPickIndex) + 1U);
+        }
+        auto& current = presentations[style.localPickIndex];
+        auto const zIndex = std::isfinite(style.zIndex)
+            ? (style.zIndex == 0.0 ? 0.0 : style.zIndex)
+            : 0.0;
+        if (current.primitiveOrder != 0U &&
+            (zIndex < current.zIndex ||
+             (zIndex == current.zIndex &&
+              primitiveOrder <= current.primitiveOrder)))
+        {
+            return;
+        }
+        current = {
+            .zIndex = zIndex,
+            .zIndexSlot = zIndexSlot(
+                style.zIndex,
+                style.depthTieKey,
+                style.semanticGroup),
+            .primitiveOrder = primitiveOrder,
+        };
+    }
+
     /** Pack z-order, color, ownership, picking, and activation fields. */
     void appendCommon(
         std::vector<std::byte>& bytes,
@@ -457,6 +512,9 @@ public:
         bool billboard,
         bool depthTest)
     {
+        recordPickPresentation(
+            arrow.style,
+            presentationPrimitiveOrder(GpuPrimitiveKind::Arrow));
         auto const flags = materialFlags(
             billboard,
             depthTest,
@@ -522,6 +580,7 @@ void GpuRenderPacketBuilder::reset()
     impl_->resourceRequestKeys.clear();
     impl_->activeContribution.reset();
     impl_->activeZIndexKeys.clear();
+    impl_->pickPresentations.clear();
 }
 
 void GpuRenderPacketBuilder::configure(
@@ -563,6 +622,7 @@ void GpuRenderPacketBuilder::beginContribution(
         .slot = slot,
         .activationToken = activationToken,
     });
+    impl_->pickPresentations.emplace_back();
     impl_->activeContribution = index;
     impl_->activeZIndexKeys.clear();
     impl_->contributionStreamStarts.clear();
@@ -600,6 +660,9 @@ void GpuRenderPacketBuilder::appendPoint(
     bool depthTest,
     bool ring)
 {
+    impl_->recordPickPresentation(
+        point.style,
+        presentationPrimitiveOrder(GpuPrimitiveKind::Point));
     auto const flags = materialFlags(
         billboard,
         depthTest,
@@ -630,6 +693,9 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
     if (path.points.size() < 2U || path.width <= 0.0F) {
         return {};
     }
+    impl_->recordPickPresentation(
+        path.style,
+        presentationPrimitiveOrder(GpuPrimitiveKind::PathSegment));
     auto const variableOffset =
         path.lateralOffsetVectorsPx.size() >= path.points.size();
     if (path.screenLengthAnchor != GpuScreenLengthAnchor::None &&
@@ -1055,6 +1121,7 @@ void GpuRenderPacketBuilder::appendSurface(
         kGpuSurfaceTriangleRecordBytes,
         style);
     auto& bytes = impl_->packet.streams[streamIndex].records;
+    auto const initialByteSize = bytes.size();
     auto const height = std::isfinite(polygonHeight)
         ? std::max(0.0, polygonHeight)
         : 0.0;
@@ -1085,6 +1152,11 @@ void GpuRenderPacketBuilder::appendSurface(
             lifted(points[indices[index + 2U]]));
     }
     if (height <= 0.0) {
+        if (bytes.size() > initialByteSize) {
+            impl_->recordPickPresentation(
+                style,
+                presentationPrimitiveOrder(GpuPrimitiveKind::SurfaceTriangle));
+        }
         return;
     }
     for (size_t ring = 0U; ring + 1U < starts.size(); ++ring) {
@@ -1108,6 +1180,11 @@ void GpuRenderPacketBuilder::appendSurface(
             appendTriangle(lowerCurrent, lowerNext, upperNext);
             appendTriangle(lowerCurrent, upperNext, upperCurrent);
         }
+    }
+    if (bytes.size() > initialByteSize) {
+        impl_->recordPickPresentation(
+            style,
+            presentationPrimitiveOrder(GpuPrimitiveKind::SurfaceTriangle));
     }
 }
 
@@ -1207,6 +1284,9 @@ void GpuRenderPacketBuilder::appendIcon(
     bool billboard,
     bool depthTest)
 {
+    impl_->recordPickPresentation(
+        icon.style,
+        presentationPrimitiveOrder(GpuPrimitiveKind::Icon));
     auto const flags = materialFlags(
         billboard,
         depthTest,
@@ -1241,6 +1321,15 @@ void GpuRenderPacketBuilder::appendPick(GpuPickRecord pick)
         impl_->packet.contributions[pick.contributionIndex].totalPickCount;
     if (pick.localPickIndex == std::numeric_limits<uint32_t>::max()) {
         throw std::length_error("GPU pick index exceeds its local uint32 range.");
+    }
+    auto const& presentations =
+        impl_->pickPresentations.at(pick.contributionIndex);
+    if (pick.localPickIndex < presentations.size()) {
+        auto const& presentation = presentations[pick.localPickIndex];
+        if (presentation.primitiveOrder != 0U) {
+            pick.presentationZIndexSlot = presentation.zIndexSlot;
+            pick.presentationPrimitiveOrder = presentation.primitiveOrder;
+        }
     }
     totalPickCount = std::max(totalPickCount, pick.localPickIndex + 1U);
     impl_->packet.picks.push_back(std::move(pick));

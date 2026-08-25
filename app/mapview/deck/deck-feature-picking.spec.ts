@@ -6,6 +6,7 @@ import {describe, expect, it, vi} from "vitest";
 import type {TileFeatureId} from "../../shared/appstate.service";
 import {DeckMapView2D} from "./deck-view2d";
 import {DeckMapView3D} from "./deck-view3d";
+import {ErdblickVectorLayer} from "./erdblick-vector.layer";
 import {
     DECK_MAP_FAR_Z_MULTIPLIER,
     DECK_MAP_FOV_DEGREES,
@@ -148,6 +149,55 @@ describe("Deck rendered-feature picking", () => {
             {mapTileKey: "map-a/tile", featureId: "feature-4"},
             {mapTileKey: "map-b/tile", featureId: "feature-4"}
         ]);
+    });
+
+    it("orders vector candidates by z-index without moving external picks", () => {
+        const view = createView() as any;
+        const layer = new ErdblickVectorLayer({
+            id: "gpu-scene",
+            data: [],
+            scene: {} as never,
+            flattenZ: false,
+            drillPickEligible: true
+        });
+        const externalLayer = {
+            id: "external",
+            props: {
+                drillPickEligible: true,
+                tileKey: "external/tile",
+                featureAddresses: [7],
+                subsetPickResolver: subsetPickResolver("external/tile")
+            }
+        };
+        const orders = [
+            {zIndex: 5, primitiveOrder: 2},
+            {zIndex: 10, primitiveOrder: 1},
+            {zIndex: 10, primitiveOrder: 2}
+        ];
+        view.gpuScene = {
+            pickOrder: (index: number) => orders[index],
+            resolvePick: (index: number): TileFeatureId[] => [{
+                mapTileKey: "map/tile",
+                featureId: `feature-${index}`
+            }]
+        };
+        view.deck = {
+            props: {layers: [layer, externalLayer]},
+            pickMultipleObjects: vi.fn(() => [
+                {layer, object: {globalPickIndex: 0}, index: 0},
+                {layer: externalLayer, index: 0},
+                {layer, object: {globalPickIndex: 1}, index: 1},
+                {layer, object: {globalPickIndex: 2}, index: 2}
+            ])
+        };
+
+        expect(view.drillPickFeatures({x: 0, y: 0}, 4, 4).featureIds)
+            .toEqual([
+                {mapTileKey: "map/tile", featureId: "feature-2"},
+                {mapTileKey: "external/tile", featureId: "feature-7"},
+                {mapTileKey: "map/tile", featureId: "feature-1"},
+                {mapTileKey: "map/tile", featureId: "feature-0"}
+            ]);
     });
 
     it("selects only the top unique feature on primary click", () => {

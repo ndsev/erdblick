@@ -12,7 +12,7 @@ namespace erdblick
 {
 
 /** Binary ABI version understood by the persistent GPU renderer. */
-inline constexpr uint16_t kGpuRenderPacketAbiVersion = 16U;
+inline constexpr uint16_t kGpuRenderPacketAbiVersion = 18U;
 
 /** Little-endian integer whose bytes spell `ERGP`. */
 inline constexpr uint32_t kGpuRenderPacketMagic = 0x50475245U;
@@ -90,6 +90,19 @@ enum class GpuLabelFlag : uint32_t {
     Collision = 1U << 3U,
 };
 
+/** Deck TextLayer size units encoded in each logical label record. */
+enum class GpuLabelSizeUnit : uint32_t {
+    Pixel,
+    Meter,
+    Common,
+};
+
+/** Deck TextLayer word-break strategies encoded in each label record. */
+enum class GpuLabelWordBreak : uint32_t {
+    BreakWord,
+    BreakAll,
+};
+
 inline constexpr uint32_t kGpuLabelMinimumLodShift = 8U;
 inline constexpr uint32_t kGpuLabelMinimumLodMask = 7U << kGpuLabelMinimumLodShift;
 
@@ -148,6 +161,10 @@ struct GpuPickRecord {
     uint32_t entryOrdinal = 0U;
     uint32_t endpointRole = 0U;
     float navigationAltitude = std::numeric_limits<float>::quiet_NaN();
+    /** Contribution-local slot of the highest emitted z-index, or uint32 max. */
+    uint32_t presentationZIndexSlot = std::numeric_limits<uint32_t>::max();
+    /** One-based surface-before-vector pass used only when z-index values tie. */
+    uint32_t presentationPrimitiveOrder = 0U;
 };
 
 /** Logical text datum retained by the shared Deck TextLayer host. */
@@ -164,15 +181,25 @@ struct GpuLabelRecord {
     std::array<uint8_t, 4> color{255U, 255U, 255U, 255U};
     std::array<uint8_t, 4> outlineColor{};
     std::array<uint8_t, 4> backgroundColor{};
+    std::array<uint8_t, 4> borderColor{};
     float outlineWidth = 0.0F;
-    std::array<float, 2> backgroundPadding{};
+    float borderWidth = 0.0F;
+    std::array<float, 4> backgroundPadding{};
+    std::array<float, 4> backgroundBorderRadius{};
+    float sizeScale = 1.0F;
+    float sizeMinPixels = 0.0F;
+    float sizeMaxPixels = std::numeric_limits<float>::max();
+    float lineHeight = 1.0F;
+    float maxWidth = -1.0F;
     uint32_t flags = 0U;
     uint8_t minimumLod = 0U;
-    int32_t horizontalOrigin = 0;
-    int32_t verticalOrigin = 0;
+    int32_t textAnchor = 0;
+    int32_t alignmentBaseline = 0;
     uint32_t renderOrder = 0U;
     uint32_t fontWeight = 400U;
     int32_t collisionPriority = 0;
+    GpuLabelSizeUnit sizeUnit = GpuLabelSizeUnit::Pixel;
+    GpuLabelWordBreak wordBreak = GpuLabelWordBreak::BreakWord;
 };
 
 /** Browser resource missing from the worker's current append-only icon catalog. */

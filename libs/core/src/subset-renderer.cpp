@@ -312,88 +312,6 @@ mapget::Point offsetAabbOrigin(
     return shifted.points_.empty() ? origin : shifted.points_.front();
 }
 
-int32_t labelOriginCode(std::string_view origin)
-{
-    if (origin == "LEFT" || origin == "TOP" || origin == "BELOW") {
-        return -1;
-    }
-    if (origin == "RIGHT" || origin == "BOTTOM" || origin == "ABOVE") {
-        return 1;
-    }
-    if (origin == "BASELINE") {
-        return 2;
-    }
-    return 0;
-}
-
-/** Parsed layer-wide TextLayer font properties from the compact CSS shorthand. */
-struct ParsedLabelFont {
-    float size = 14.0F;
-    std::string family;
-    uint32_t weight = 400U;
-};
-
-/** Extract the pixel size, family, and nearest numeric/bold weight token. */
-ParsedLabelFont parseLabelFont(std::string const& font)
-{
-    ParsedLabelFont result{.family = font};
-    auto const pixels = font.find("px");
-    if (pixels != std::string::npos) {
-        auto const separator = pixels == 0U
-            ? std::string::npos
-            : font.find_last_of(" \t", pixels - 1U);
-        auto const begin = separator == std::string::npos
-            ? 0U
-            : separator + 1U;
-        if (begin < pixels) {
-            float parsedSize = result.size;
-            std::istringstream parser(font.substr(begin, pixels - begin));
-            parser >> std::noskipws >> parsedSize;
-            if (parser.eof() && !parser.fail() &&
-                std::isfinite(parsedSize) && parsedSize > 0.0F)
-            {
-                result.size = parsedSize;
-            }
-        }
-        auto const familyBegin = font.find_first_not_of(" \t", pixels + 2U);
-        result.family = familyBegin == std::string::npos
-            ? std::string{"Helvetica"}
-            : font.substr(familyBegin);
-        if (separator != std::string::npos) {
-            auto const weightEnd = font.find_last_not_of(" \t", separator);
-            if (weightEnd != std::string::npos) {
-                auto const weightSeparator = weightEnd == 0U
-                    ? std::string::npos
-                    : font.find_last_of(" \t", weightEnd - 1U);
-                auto const weightBegin = weightSeparator == std::string::npos
-                    ? 0U
-                    : weightSeparator + 1U;
-                auto const token = std::string_view(font).substr(
-                    weightBegin,
-                    weightEnd - weightBegin + 1U);
-                uint32_t parsedWeight = result.weight;
-                auto const parsed = std::from_chars(
-                    token.data(),
-                    token.data() + token.size(),
-                    parsedWeight);
-                if (parsed.ec == std::errc{} &&
-                    parsed.ptr == token.data() + token.size() &&
-                    parsedWeight > 0U && parsedWeight <= 1000U)
-                {
-                    result.weight = parsedWeight;
-                }
-                else if (token == "bold") {
-                    result.weight = 700U;
-                }
-                else if (token == "normal") {
-                    result.weight = 400U;
-                }
-            }
-        }
-    }
-    return result;
-}
-
 double mercatorWorldX(double longitudeDeg)
 {
     return (kMercatorTileSize * ((longitudeDeg * kDegToRad) + kPi)) /
@@ -3652,7 +3570,6 @@ void TileSubsetLayerRenderer::appendLabel(
     }
     recordPickNavigationAltitude(pick, std::span{&point, size_t{1U}});
     auto const absolutePosition = unprojectLocalPoint(point);
-    auto const font = parseLabelFont(rule.labelFont());
     auto labelFlags = static_cast<uint32_t>(GpuLabelFlag::None);
     if (rule.billboard().value_or(true)) {
         labelFlags |= static_cast<uint32_t>(GpuLabelFlag::Billboard);
@@ -3660,7 +3577,7 @@ void TileSubsetLayerRenderer::appendLabel(
     if (rule.depthTest()) {
         labelFlags |= static_cast<uint32_t>(GpuLabelFlag::DepthTest);
     }
-    if (rule.showBackground()) {
+    if (rule.labelBackground()) {
         labelFlags |= static_cast<uint32_t>(GpuLabelFlag::Background);
     }
     if (rule.labelCollision()) {
@@ -3685,26 +3602,35 @@ void TileSubsetLayerRenderer::appendLabel(
             absolutePosition.z,
         },
         .text = text,
-        .fontFamily = font.family,
-        .size = font.size * rule.labelScale(),
+        .fontFamily = rule.labelFontFamily(),
+        .size = rule.labelSize(),
         .pixelOffset = {pixelOffset.first, pixelOffset.second},
-        .angle = 0.0F,
+        .angle = rule.labelAngle(),
         .zIndex = std::isfinite(zIndex) ? zIndex : 0.0,
         .color = colorBytes(rule.labelColor()),
         .outlineColor = colorBytes(rule.labelOutlineColor()),
         .backgroundColor = colorBytes(rule.labelBackgroundColor()),
+        .borderColor = colorBytes(rule.labelBorderColor()),
         .outlineWidth = rule.labelOutlineWidth(),
-        .backgroundPadding = {
-            static_cast<float>(backgroundPadding.first),
-            static_cast<float>(backgroundPadding.second),
-        },
+        .borderWidth = rule.labelBorderWidth(),
+        .backgroundPadding = backgroundPadding,
+        .backgroundBorderRadius = rule.labelBackgroundBorderRadius(),
+        .sizeScale = rule.labelSizeScale(),
+        .sizeMinPixels = rule.labelSizeMinPixels(),
+        .sizeMaxPixels = rule.labelSizeMaxPixels(),
+        .lineHeight = rule.labelLineHeight(),
+        .maxWidth = rule.labelMaxWidth(),
         .flags = labelFlags,
         .minimumLod = rule.minimumLod(evalFun),
-        .horizontalOrigin = labelOriginCode(rule.labelHorizontalOrigin()),
-        .verticalOrigin = labelOriginCode(rule.labelVerticalOrigin()),
+        .textAnchor = static_cast<int32_t>(rule.labelTextAnchor()),
+        .alignmentBaseline =
+            static_cast<int32_t>(rule.labelAlignmentBaseline()),
         .renderOrder = rule.renderIndex(),
-        .fontWeight = font.weight,
+        .fontWeight = rule.labelFontWeight(),
         .collisionPriority = rule.labelCollisionPriority(),
+        .sizeUnit = static_cast<GpuLabelSizeUnit>(rule.labelSizeUnit()),
+        .wordBreak =
+            static_cast<GpuLabelWordBreak>(rule.labelWordBreak()),
     });
     ++vertexCount_;
 }
