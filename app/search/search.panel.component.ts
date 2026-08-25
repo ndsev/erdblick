@@ -1,4 +1,13 @@
-import {AfterViewInit, Component, ElementRef, HostListener, OnDestroy, Renderer2, ViewChild} from "@angular/core";
+import {
+    AfterViewInit,
+    ChangeDetectorRef,
+    Component,
+    ElementRef,
+    HostListener,
+    OnDestroy,
+    Renderer2,
+    ViewChild
+} from "@angular/core";
 import {GeoMath, Rectangle} from "../integrations/geo";
 import {InfoMessageService} from "../shared/info.service";
 import {SearchTarget, JumpTargetService} from "./jump.service";
@@ -38,6 +47,12 @@ import {
     parseNdsCoordinateString,
     parsePackedTileId as parsePackedTileIdValue
 } from "../coords/nds-coordinate.util";
+import {
+    ExternalViewerLocation,
+    ExternalViewerProvider,
+    ExternalViewerService,
+    ResolvedExternalViewerLocation
+} from "./external-viewer.service";
 
 interface SearchHistoryViewEntry extends SearchHistoryEntry {
     label: string;
@@ -56,6 +71,17 @@ interface ParsedNdsCoordinateLabel {
     x: number;
     y: number;
     level?: number;
+}
+
+interface SearchResizeSession {
+    pointerId: number;
+    startPointerX: number;
+    startWidth: number;
+    minWidth: number;
+    maxWidth: number;
+    handle: HTMLElement;
+    bodyCursor: string;
+    bodyUserSelect: string;
 }
 
 @Component({
@@ -149,6 +175,18 @@ interface ParsedNdsCoordinateLabel {
                         </div>
                     </div>
                 </app-dialog>
+                @if (searchService.showFeatureSearchDialog) {
+                    <div class="app-resize-handle app-resize-handle-se app-resize-horizontal search-resize-handle"
+                         data-testid="search-resize-handle"
+                         aria-hidden="true"
+                         [style.z-index]="searchResizeHandleZIndex"
+                         (pointerdown)="beginSearchResize($event)"
+                         (pointermove)="continueSearchResize($event)"
+                         (pointerup)="finishSearchResize($event)"
+                         (pointercancel)="finishSearchResize($event)"
+                         (lostpointercapture)="finishSearchResize($event)">
+                    </div>
+                }
             </div>
         </div>
         
@@ -168,6 +206,7 @@ interface ParsedNdsCoordinateLabel {
 export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 130000;
     readonly searchActionsBaseZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX;
+    searchResizeHandleZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 1;
 
     searchItems: Array<SearchTarget> = [];
     private locationSearchItems: Array<SearchTarget> = [];
@@ -202,12 +241,15 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     };
     private acceptedCompletionCandidate: CompletionCandidate | null = null;
     private dismissedCompletionSignature: string | null = null;
+    private destroyed = false;
+    private searchResizeSession?: SearchResizeSession;
 
     mapSelectionVisible: boolean = false;
     mapSelection: Array<string> = [];
 
     @ViewChild('textarea') textarea!: ElementRef<HTMLTextAreaElement>;
     @ViewChild('actionsdialog') dialog!: AppDialogComponent;
+    @ViewChild('searchcontrols') private searchControls?: ElementRef<HTMLElement>;
 
     cursorPosition: number = 0;
 
@@ -342,33 +384,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             validate: (value: string) => { return this.validateWGS84(value, false) }
         });
 
-        /////////// Jump to Google Maps/OSM
-        label = "lat = ? | lon = ?"
-        if (latLonValid) {
-            label = this.parseWgs84Coordinates(value, false)!.label;
-        } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        /////////// Open in external viewers
+        const externalLocation = this.externalViewerLocation(value);
+        for (const provider of this.externalViewerService.providers) {
+            targetsArray.push(this.externalViewerTarget(provider, externalLocation));
         }
-        targetsArray.push({
-            id: "e:gm",
-            icon: "pi-map-marker",
-            color: "green",
-            name: "Open WGS84 Lat-Lon in Google Maps",
-            label: label,
-            enabled: latLonValid,
-            jump: (value: string) => { return this.openInGM(value) },
-            validate: (value: string) => { return this.validateWGS84(value, false) }
-        });
-        targetsArray.push({
-            id: "e:osm",
-            icon: "pi-map-marker",
-            color: "green",
-            name: "Open WGS84 Lat-Lon in Open Street Maps",
-            label: label,
-            enabled: latLonValid,
-            jump: (value: string) => { return this.openInOSM(value) },
-            validate: (value: string) => { return this.validateWGS84(value, false) }
-        });
         return targetsArray;
     }
 
@@ -384,7 +404,9 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 private jumpService: JumpTargetService,
                 private menuService: RightClickMenuService,
                 public searchService: FeatureSearchService,
-                private locationSearchService: LocationSearchService) {
+                private locationSearchService: LocationSearchService,
+                private externalViewerService: ExternalViewerService,
+                private changeDetectorRef: ChangeDetectorRef) {
         this.keyboardService.registerShortcut("Ctrl+k", this.searchShortcutHandler);
 
         this.subscriptions.add(this.jumpService.targetValueSubject.subscribe((event: string) => {
@@ -401,13 +423,24 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             debounce(() => timer(this.locationSearchService.debounceMs)),
             switchMap(query => this.locationSearchService.search(query, this.stateService.locationSearchResultLimit))
         ).subscribe(matches => {
-            if (!this.shouldRequestLocationSearch(this.searchInputValue)) {
-                return;
-            }
-            this.locationSearchItems = matches.map(match => this.locationSearchService.createSearchTarget(match));
-            this.setCurrentSearchItems(this.currentSearchItems());
-            this.reloadSearchHistory();
-            this.refreshSearchMenu();
+            const completedQuery = this.searchInputValue.trim();
+            // A cached provider can complete synchronously while Angular is
+            // checking the search-menu ngFor inputs. Publish the replacement
+            // in the next task and discard it if the input has moved on.
+            setTimeout(() => {
+                if (this.destroyed ||
+                    this.searchInputValue.trim() !== completedQuery ||
+                    !this.shouldRequestLocationSearch(this.searchInputValue)) {
+                    return;
+                }
+                this.locationSearchItems = matches.map(match =>
+                    this.locationSearchService.createSearchTarget(match)
+                );
+                this.setCurrentSearchItems(this.currentSearchItems());
+                this.reloadSearchHistory();
+                this.refreshSearchMenu();
+                this.changeDetectorRef.markForCheck();
+            }, 0);
         }));
 
         this.subscriptions.add(this.stateService.locationSearchResultLimitState.subscribe(() => {
@@ -443,6 +476,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             if (this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
                 this.completionItems = [];
                 this.completion.visible = false;
+                this.changeDetectorRef.markForCheck();
                 return;
             }
             this.completionItems = value.filter((item, index, array) => {
@@ -470,15 +504,17 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 textarea === document.activeElement;
 
             if (length > 0 && focusValid) {
-                this.refreshCompletionZIndex();
+                this.refreshSearchOverlayZIndices();
             }
             this.completion.visible = length > 0 && focusValid;
+            this.changeDetectorRef.markForCheck();
         }));
 
         this.subscriptions.add(this.searchService.completionPending.pipe(distinctUntilChanged()).subscribe((pending: boolean) => {
             if (pending && this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
                 this.completion.pending = false;
                 this.completion.visible = false;
+                this.changeDetectorRef.markForCheck();
                 return;
             }
             const textarea = this.textarea?.nativeElement;
@@ -489,11 +525,12 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
 
             this.completion.pending = pending && focusValid;
             if (this.completion.pending) {
-                this.refreshCompletionZIndex();
+                this.refreshSearchOverlayZIndices();
                 this.updateCursor();
             } else if (this.completionItems.length === 0) {
                 this.completion.visible = false;
             }
+            this.changeDetectorRef.markForCheck();
         }));
 
         this.subscriptions.add(this.searchInputChanged.pipe(debounceTime(this.completion.completionDelay)).subscribe(() => {
@@ -512,7 +549,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.subscriptions.add(this.dialog.onShow.subscribe(() => {
             setTimeout(() => {
                 this.expandTextarea();
-                this.refreshCompletionZIndex();
+                this.refreshSearchOverlayZIndices();
             }, 10);
         }));
 
@@ -525,10 +562,91 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
 
     /** Releases subscriptions and global shortcuts when the responsive shell replaces the panel. */
     ngOnDestroy() {
+        this.destroyed = true;
+        this.cancelSearchResize();
         this.keyboardService.unregisterShortcut("Ctrl+k", this.searchShortcutHandler);
         this.subscriptions.unsubscribe();
         this.searchInputChanged.complete();
         this.locationSearchQueryChanged.complete();
+    }
+
+    /** Starts a pointer-captured, width-only resize of the search actions pane. */
+    protected beginSearchResize(event: PointerEvent): void {
+        if (event.button !== 0 || this.searchResizeSession) {
+            return;
+        }
+        const container = this.searchControls?.nativeElement;
+        const handle = event.currentTarget;
+        if (!container || !(handle instanceof HTMLElement)) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        const bounds = container.getBoundingClientRect();
+        const styles = getComputedStyle(container);
+        const viewportMaximum = Math.max(1, window.innerWidth - bounds.left);
+        const minimum = this.cssPixelValue(styles.minWidth, 1);
+        const maximum = Math.max(
+            minimum,
+            Math.min(this.cssPixelValue(styles.maxWidth, viewportMaximum), viewportMaximum)
+        );
+        const body = document.body;
+        this.searchResizeSession = {
+            pointerId: event.pointerId,
+            startPointerX: event.clientX,
+            startWidth: bounds.width,
+            minWidth: minimum,
+            maxWidth: maximum,
+            handle,
+            bodyCursor: body.style.cursor,
+            bodyUserSelect: body.style.userSelect
+        };
+        container.style.width = `${bounds.width}px`;
+        body.style.cursor = getComputedStyle(handle).cursor || 'col-resize';
+        body.style.userSelect = 'none';
+        handle.setPointerCapture(event.pointerId);
+    }
+
+    /** Updates the search pane width while its resize pointer remains captured. */
+    protected continueSearchResize(event: PointerEvent): void {
+        const session = this.searchResizeSession;
+        const container = this.searchControls?.nativeElement;
+        if (!session || !container || event.pointerId !== session.pointerId) {
+            return;
+        }
+        event.preventDefault();
+        const requestedWidth = session.startWidth + event.clientX - session.startPointerX;
+        const width = Math.min(session.maxWidth, Math.max(session.minWidth, requestedWidth));
+        container.style.width = `${width}px`;
+    }
+
+    /** Finishes search-pane resizing and restores page-level pointer styles. */
+    protected finishSearchResize(event: PointerEvent): void {
+        if (!this.searchResizeSession || event.pointerId !== this.searchResizeSession.pointerId) {
+            return;
+        }
+        this.cancelSearchResize();
+    }
+
+    /** Converts a computed CSS length to pixels, falling back for non-numeric values such as `none`. */
+    private cssPixelValue(value: string, fallback: number): number {
+        const parsed = Number.parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    /** Cancels any active search resize and releases its pointer capture. */
+    private cancelSearchResize(): void {
+        const session = this.searchResizeSession;
+        if (!session) {
+            return;
+        }
+        this.searchResizeSession = undefined;
+        if (session.handle.hasPointerCapture(session.pointerId)) {
+            session.handle.releasePointerCapture(session.pointerId);
+        }
+        document.body.style.cursor = session.bodyCursor;
+        document.body.style.userSelect = session.bodyUserSelect;
     }
 
     /** Executes a resolved omnibox action and closes the action dialog if it is currently available. */
@@ -997,49 +1115,73 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         }
     }
 
-    /**
-     * Opens the parsed coordinates in Google Maps and returns them for local reuse.
-     */
-    openInGM(value: string): number[] | undefined {
-        if (!value) {
-            this.messageService.showError("No value provided!");
-            return;
-        }
-        const result = this.parseWgs84Coordinates(value, false)?.coords;
-        if (result) {
-            const lat = result[0];
-            const lon = result[1];
-            window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`, "_blank");
-            return result;
-        }
-        return;
+    /** Builds one omnibox action for a configured external map viewer. */
+    private externalViewerTarget(
+        provider: ExternalViewerProvider,
+        location: ResolvedExternalViewerLocation | undefined
+    ): SearchTarget {
+        return {
+            id: provider.id,
+            icon: "pi-map-marker",
+            color: "green",
+            name: provider.name,
+            label: location
+                ? this.externalViewerLabel(location)
+                : `lat = ? | lon = ?<br><span class="search-option-warning">Invalid coordinates</span>`,
+            enabled: location !== undefined,
+            acceptsEmptyInput: true,
+            saveToHistory: (input: string) => this.explicitExternalViewerLocation(input) !== undefined,
+            execute: (input: string) => {
+                const resolved = this.externalViewerLocation(input);
+                if (resolved) {
+                    this.externalViewerService.open(provider, resolved);
+                }
+            },
+            validate: (input: string) => this.externalViewerLocation(input) !== undefined
+        };
     }
 
-    /**
-     * Opens the parsed coordinates in OpenStreetMap and returns them for local reuse.
-     */
-    openInOSM(value: string): Rectangle | number[] | undefined {
-        if (!value) {
-            this.messageService.showError("No value provided!");
-            return;
+    /** Formats the coordinate and fallback source shown below an external-viewer action. */
+    private externalViewerLabel(location: ResolvedExternalViewerLocation): string {
+        const sourceLabels = {
+            input: "search input",
+            marker: "current marker",
+            viewport: "viewport centre"
+        } as const;
+        return `lat = ${location.lat} | lon = ${location.lon} | ${sourceLabels[location.source]}`;
+    }
+
+    /** Resolves valid explicit coordinates or applies the shared marker/viewport fallback. */
+    private externalViewerLocation(value: string): ResolvedExternalViewerLocation | undefined {
+        const explicit = this.explicitExternalViewerLocation(value);
+        if (explicit) {
+            return this.externalViewerService.resolveLocation(explicit);
         }
-        const result = this.parseWgs84Coordinates(value, false)?.coords;
-        if (result) {
-            const lat = result[0];
-            const lon = result[1];
-            window.open(`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}&zoom=16`, "_blank");
-            return result;
+        if (this.looksLikeCoordinateInput(value)) {
+            return undefined;
         }
-        return;
+        return this.externalViewerService.resolveLocation();
+    }
+
+    /** Returns a valid explicit latitude/longitude input without applying fallback behavior. */
+    private explicitExternalViewerLocation(value: string): ExternalViewerLocation | undefined {
+        const parsed = this.parseWgs84Coordinates(value, false);
+        if (!parsed || !this.validateWGS84(value, false)) {
+            return undefined;
+        }
+        return {lat: parsed.coords[0], lon: parsed.coords[1]};
+    }
+
+    /** Distinguishes malformed two-coordinate input from ordinary search text. */
+    private looksLikeCoordinateInput(value: string): boolean {
+        return (value.match(/-?\d+(?:\.\d+)?/g) ?? []).length >= 2;
     }
 
     /**
      * Re-evaluates which jump targets are currently executable for the active input.
      */
     validateMenuItems() {
-        this.searchItems.forEach(item =>
-            item.enabled = this.searchInputValue != "" && item.validate(this.searchInputValue)
-        );
+        this.searchItems.forEach(item => item.enabled = this.canRunTarget(item, this.searchInputValue));
     }
 
     /**
@@ -1070,27 +1212,24 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.updateCursor();
         this.searchService.showFeatureSearchDialog = true;
         this.setSearchValue(this.searchInputValue);
-        this.refreshCompletionZIndex();
+        this.refreshSearchOverlayZIndices();
     }
 
     /**
      * Keeps the completion popup just above the PrimeNG search-actions dialog without hardcoding a global z-index.
      */
-    private refreshCompletionZIndex() {
+    private refreshSearchOverlayZIndices() {
         const container = this.dialog?.container();
-        if (!container) {
-            this.completion.zIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 2000;
-            return;
-        }
-
-        const inlineZIndex = Number.parseInt(container.style.zIndex, 10);
-        const computedZIndex = Number.parseInt(window.getComputedStyle(container).zIndex, 10);
+        const inlineZIndex = container ? Number.parseInt(container.style.zIndex, 10) : Number.NaN;
+        const computedZIndex = container
+            ? Number.parseInt(window.getComputedStyle(container).zIndex, 10)
+            : Number.NaN;
         const dialogZIndex = Number.isFinite(inlineZIndex)
             ? inlineZIndex
-            : (Number.isFinite(computedZIndex)
-                ? computedZIndex
-                : SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX);
+            : (Number.isFinite(computedZIndex) ? computedZIndex : SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX);
+        this.searchResizeHandleZIndex = dialogZIndex + 1;
         this.completion.zIndex = dialogZIndex + 2000;
+        this.changeDetectorRef.markForCheck();
     }
 
     /**
@@ -1136,13 +1275,8 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     private refreshSearchMenu() {
         this.activeSearchItems = [];
         this.inactiveSearchItems = [];
-        if (!this.searchInputValue) {
-            this.inactiveSearchItems = this.searchItems;
-            this.visibleSearchHistory = this.searchHistory;
-            return;
-        }
         for (const searchItem of this.searchItems) {
-            if (searchItem.validate(this.searchInputValue)) {
+            if (this.canRunTarget(searchItem, this.searchInputValue)) {
                 this.activeSearchItems.push(searchItem);
             } else {
                 this.inactiveSearchItems.push(searchItem);
@@ -1183,10 +1317,26 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
      * Persists the currently selected target and input so the central search-state flow executes it.
      */
     targetToHistory(target: SearchTarget) {
-        const entry = this.searchHistoryEntryForTarget(target, this.searchInputValue);
-        if (entry) {
-            this.executeAndRememberSearchEntry(entry);
+        if (!this.canRunTarget(target, this.searchInputValue)) {
+            return;
         }
+        const entry = this.searchHistoryEntryForTarget(target, this.searchInputValue);
+        if (entry && (target.saveToHistory?.(this.searchInputValue) ?? true)) {
+            this.executeAndRememberSearchEntry(entry);
+            return;
+        }
+        this.executeResolvedTarget(target, {
+            version: 2,
+            actionId: target.id,
+            input: this.searchInputValue.trim(),
+            actionName: target.name
+        });
+        this.dialog?.close(new Event("close-on-execute"));
+    }
+
+    /** Returns whether a target can run for the supplied input, including empty-input actions. */
+    private canRunTarget(target: SearchTarget, input: string): boolean {
+        return (!!input.trim() || target.acceptsEmptyInput === true) && target.validate(input);
     }
 
     /**
@@ -1345,7 +1495,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 return;
             }
 
-            if (this.searchInputValue.trim() && this.activeSearchItems.length) {
+            if (this.activeSearchItems.length) {
                 this.targetToHistory(this.activeSearchItems[0]);
             }
 

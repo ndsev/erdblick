@@ -21,6 +21,7 @@
             "index": "app/index.html",
             "browser": "app/main.ts",
             "polyfills": [
+              "app/zone-flags.ts",
               "zone.js"
             ],
             "tsConfig": "tsconfig.app.json",
@@ -28,7 +29,7 @@
               {
                 "glob": "**/*",
                 "input": "config/styles",
-                "output": "/bundle/styles"
+                "output": "/static-config/styles"
               },
               {
                 "glob": "**/*",
@@ -38,12 +39,12 @@
               {
                 "glob": "**/*.json",
                 "input": "config",
-                "output": "/"
+                "output": "/static-config"
               },
               {
                 "glob": "**/*.js",
                 "input": "config",
-                "output": "/config"
+                "output": "/static-config"
               },
               {
                 "glob": "VERSION",
@@ -101,7 +102,7 @@
                 {
                   "glob": "**/*",
                   "input": "config/styles",
-                  "output": "/bundle/styles"
+                  "output": "/static-config/styles"
                 },
                 {
                   "glob": "**/*",
@@ -111,12 +112,12 @@
                 {
                   "glob": "**/*.json",
                   "input": "config",
-                  "output": "/"
+                  "output": "/static-config"
                 },
                 {
                   "glob": "**/*.js",
                   "input": "config",
-                  "output": "/config"
+                  "output": "/static-config"
                 },
                 {
                   "glob": "VERSION",
@@ -175,6 +176,15 @@
                 }
               ]
             },
+            "profiling": {
+              "sourceMap": {
+                "scripts": true,
+                "styles": false,
+                "hidden": false,
+                "vendor": true
+              },
+              "namedChunks": true
+            },
             "test": {
               "optimization": {
                 "scripts": false,
@@ -207,7 +217,7 @@
                 {
                   "glob": "**/*",
                   "input": "config/styles",
-                  "output": "/bundle/styles"
+                  "output": "/static-config/styles"
                 },
                 {
                   "glob": "**/*",
@@ -217,12 +227,12 @@
                 {
                   "glob": "**/*.json",
                   "input": "config",
-                  "output": "/"
+                  "output": "/static-config"
                 },
                 {
                   "glob": "**/*.js",
                   "input": "config",
-                  "output": "/config"
+                  "output": "/static-config"
                 },
                 {
                   "glob": "VERSION",
@@ -300,7 +310,7 @@
                 {
                   "glob": "**/*",
                   "input": "config/styles",
-                  "output": "/bundle/styles"
+                  "output": "/static-config/styles"
                 },
                 {
                   "glob": "**/*",
@@ -310,12 +320,12 @@
                 {
                   "glob": "**/*.json",
                   "input": "config",
-                  "output": "/"
+                  "output": "/static-config"
                 },
                 {
                   "glob": "**/*.js",
                   "input": "config",
-                  "output": "/config"
+                  "output": "/static-config"
                 },
                 {
                   "glob": "VERSION",

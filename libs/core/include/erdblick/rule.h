@@ -1,14 +1,23 @@
 #pragma once
 
-#include "mapget/model/featurelayer.h"
+#include "mapget/model/geometry.h"
 #include "simfil/model/nodes.h"
 #include "simfil/overlay.h"
 #include "yaml-cpp/yaml.h"
 
 #include "color.h"
 
+#include <array>
+#include <cstdint>
 #include <functional>
+#include <limits>
+#include <memory>
+#include <optional>
 #include <regex>
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
 
 namespace erdblick
 {
@@ -18,13 +27,34 @@ namespace erdblick
  */
 struct BoundEvalFun
 {
-    simfil::model_ptr<simfil::OverlayNode> context_;
+    using EvalRef = simfil::Value(*)(void*, std::string const&);
+    using ReportIssueRef = void(*)(
+        void*,
+        std::string const&,
+        std::string const&,
+        std::string const&,
+        uint32_t);
+
     std::function<simfil::Value(std::string const& expr)> eval_;
     std::function<void(
         std::string const& property,
         std::string const& expression,
         std::string const& message,
         uint32_t ruleIndex)> reportIssue_;
+    void* context_ = nullptr;
+    EvalRef evalRef_ = nullptr;
+    ReportIssueRef reportIssueRef_ = nullptr;
+
+    /** Evaluate through the allocation-free reference or owning fallback callback. */
+    [[nodiscard]] simfil::Value evaluate(std::string const& expression) const;
+    /** Report a style issue through the configured reference or owning callback. */
+    void reportIssue(
+        std::string const& property,
+        std::string const& expression,
+        std::string const& message,
+        uint32_t ruleIndex) const;
+    /** Return whether either callback representation can report style issues. */
+    [[nodiscard]] bool hasIssueReporter() const;
 };
 
 /**
@@ -43,7 +73,7 @@ public:
     FeatureStyleRule(FeatureStyleRule const& other, bool resetNonInheritableAttrs=false);
 
     /** Selects whether the rule runs against whole features, relations, or attributes. */
-    enum Aspect {
+    enum Scope {
         Feature,
         Relation,
         Attribute
@@ -56,11 +86,13 @@ public:
         SelectionHighlight
     };
 
-    /** Restricts the rule to a specific fidelity mode or lets the caller choose. */
-    enum Fidelity {
-        AnyFidelity,
-        HighFidelity,
-        LowFidelity
+    static constexpr uint8_t kMinimumLod = 0U;
+    static constexpr uint8_t kMaximumLod = 7U;
+
+    /** Inclusive stylesheet-level range in which one top-level rule is active. */
+    struct LodRange {
+        uint8_t minimum = kMinimumLod;
+        uint8_t maximum = kMaximumLod;
     };
 
     /** Describes whether polylines should receive directional arrow heads. */
@@ -71,6 +103,55 @@ public:
         DoubleArrow
     };
 
+    /** Selects how a relation helper line chooses its endpoint positions. */
+    enum class RelationLineGeometry {
+        Centers,
+        ConnectionStubs,
+    };
+
+    /** Unit system used by authored physical or screen-space lengths. */
+    enum class LengthUnit {
+        Meter,
+        Pixel,
+    };
+
+    /** Deck TextLayer unit system used for authored label sizes. */
+    enum class LabelSizeUnit : uint32_t {
+        Pixel,
+        Meter,
+        Common,
+    };
+
+    /** Deck TextLayer horizontal anchor values. */
+    enum class LabelTextAnchor : int32_t {
+        Start = -1,
+        Middle = 0,
+        End = 1,
+    };
+
+    /** Deck TextLayer vertical baseline values. */
+    enum class LabelAlignmentBaseline : int32_t {
+        Top = -1,
+        Center = 0,
+        Bottom = 1,
+    };
+
+    /** Deck TextLayer wrapping strategy for labels with a maximum width. */
+    enum class LabelWordBreak : uint32_t {
+        BreakWord,
+        BreakAll,
+    };
+
+    /** Backward-compatible name for the shared length unit contract. */
+    using LateralOffsetUnit = LengthUnit;
+
+    /** Selects a feature's function in semantic support/overlay ordering. */
+    enum class ZIndexRole {
+        None,
+        Support,
+        Overlay,
+    };
+
     /** Describes how nested rule fragments are evaluated. */
     enum class BranchMode {
         None,
@@ -78,16 +159,21 @@ public:
         AllOf
     };
 
-    /** Return this rule when it matches the feature and current evaluation context. */
-    FeatureStyleRule const* match(mapget::Feature& feature, BoundEvalFun const& evalFun) const;
-    /** Visit every concrete matching leaf rule. Returns true if at least one leaf matched. */
+    /** Static result metadata used for client-owned rule traversal. */
+    struct MatchContext {
+        std::string_view featureType;
+        std::optional<std::string_view> relationName;
+        std::optional<std::string_view> attributeName;
+        std::optional<std::string_view> attributeLayer;
+        std::optional<bool> hasValidity;
+    };
+
+    /** Visit every matching concrete leaf using only metadata and projected scalars. */
     bool forEachMatchingRule(
-        mapget::Feature& feature,
-        BoundEvalFun const& evalFun,
+        MatchContext const& context,
+        BoundEvalFun const& entryEvalFun,
         std::function<void(FeatureStyleRule const&)> const& callback,
-        std::string_view const* relationName = nullptr) const;
-    /** Check only source-feature gates that do not require the final evaluation context. */
-    [[nodiscard]] bool matchesFeatureGates(mapget::Feature& feature) const;
+        BoundEvalFun const* featureEvalFun = nullptr) const;
     /** Visit all concrete renderable leaf rules without evaluating feature gates. */
     void forEachConcreteRule(std::function<void(FeatureStyleRule const&)> const& callback) const;
     /** Assign stable render identities to concrete leaf rules in source order. */
@@ -98,51 +184,81 @@ public:
     [[nodiscard]] BranchMode branchMode() const;
     /** Return nested branch rules. */
     [[nodiscard]] std::vector<FeatureStyleRule> const& subRules() const;
-    /** Return the rule's target aspect. */
-    [[nodiscard]] Aspect aspect() const;
-    /** Return the highlight pass this rule belongs to. */
-    [[nodiscard]] HighlightMode mode() const;
-    /** Return the fidelity mode requested by the rule. */
-    [[nodiscard]] Fidelity fidelity() const;
-    /** Return the required geometry/data stage override, if the rule pins one. */
-    [[nodiscard]] std::optional<uint32_t> stage() const;
-    /** Return the low-fi LOD bucket restriction, if one was configured. */
-    [[nodiscard]] std::optional<uint8_t> lod() const;
+    /** Return the rule's target scope. */
+    [[nodiscard]] Scope scope() const;
+    /** Report whether this rule participates in one highlight pass. */
+    [[nodiscard]] bool supportsMode(HighlightMode mode) const;
+    /** Return the bit mask of all highlight passes this rule participates in. */
+    [[nodiscard]] uint32_t highlightModesMask() const;
+    /** Return the inclusive LOD range in which this top-level rule participates. */
+    [[nodiscard]] LodRange const& lodRange() const;
+    /** Report whether this rule participates in one integer LOD. */
+    [[nodiscard]] bool supportsLod(uint8_t lod) const;
+    /** Resolve the first integer LOD at which this concrete emitted entry is visible. */
+    [[nodiscard]] uint8_t minimumLod(BoundEvalFun const& evalFun) const;
     /** Report whether geometry emitted by this rule may be selected in the UI. */
     [[nodiscard]] bool selectable() const;
-    /** Check whether this rule can emit the given geometry type and stage. */
-    [[nodiscard]] bool supports(
-        mapget::GeomType const& g,
-        std::optional<uint32_t> geometryStage={}) const;
+    /** Check whether this rule can emit the given named geometry. */
+    [[nodiscard]] bool supports(mapget::GeomType g, std::optional<std::string_view> geometryName = {}) const;
     /** Return the raw geometry-type bit mask used by `supports()`. */
     [[nodiscard]] uint32_t geometryTypesMask() const;
     /** Return this node's own mask or the union of descendant concrete masks. */
     [[nodiscard]] uint32_t effectiveGeometryTypesMask() const;
+    /** Return the concrete semantic geometry name, or wildcard when absent. */
+    [[nodiscard]] std::optional<std::string> const& geometryName() const;
+    /** Return one common descendant geometry name, or wildcard on disagreement. */
+    [[nodiscard]] std::optional<std::string> effectiveGeometryName() const;
 
-    /** Resolve the effective RGBA color, including optional color expressions. */
-    [[nodiscard]] glm::fvec4 color(BoundEvalFun const& evalFun) const;
+    /** Return this node's host-feature filter expression. */
+    [[nodiscard]] std::string const& filter() const;
+    /** Return presentation expressions evaluated in this node's active context. */
+    [[nodiscard]] std::vector<std::pair<std::string, std::string>> expressionUses() const;
+
+    /** Resolve the effective RGBA color, including expression and color-scale modes. */
+    [[nodiscard]] std::optional<glm::fvec4> color(BoundEvalFun const& evalFun) const;
     /** Report whether the rule explicitly overrides the base RGB tint. */
     [[nodiscard]] bool hasExplicitColor() const;
     /** Report whether the rule explicitly overrides opacity. */
     [[nodiscard]] bool hasExplicitOpacity() const;
     /** Return the configured line width or point radius basis value. */
     [[nodiscard]] float width() const;
+    /** Resolve a width-scale override against projected entry values. */
+    [[nodiscard]] float width(BoundEvalFun const& evalFun) const;
     /** Report whether emitted geometry should participate in depth testing. */
     [[nodiscard]] bool depthTest() const;
+    /** Report whether surface triangles should receive restrained matte lighting. */
+    [[nodiscard]] bool surfaceShading() const;
+    /** Resolve the non-negative height in metres used to extrude polygon geometry. */
+    [[nodiscard]] double polygonHeight(BoundEvalFun const& evalFun) const;
+    /** Resolve the optional ordinal draw order used to separate coplanar geometry. */
+    [[nodiscard]] std::optional<double> zIndex(BoundEvalFun const& evalFun) const;
+    /** Hash the optional typed semantic ordering-group expression. */
+    [[nodiscard]] std::optional<uint64_t> zIndexGroup(
+        BoundEvalFun const& evalFun) const;
+    /** Return the authored semantic ordering-group expression. */
+    [[nodiscard]] std::string const& zIndexGroupExpression() const;
+    /** Return whether this rule provides support geometry or a grouped overlay. */
+    [[nodiscard]] ZIndexRole zIndexRole() const;
     /** Return the billboard override, or `std::nullopt` to use renderer defaults. */
     [[nodiscard]] std::optional<bool> const& billboard() const;
     /** Report whether geometry should be flattened onto the 2D/ground plane. */
     [[nodiscard]] bool flat() const;
     /** Report whether polyline rendering should use a dash pattern. */
     [[nodiscard]] bool isDashed() const;
-    /** Return the dash segment length in pixels. */
-    [[nodiscard]] int dashLength() const;
+    /** Return the authored length of each visible dash segment. */
+    [[nodiscard]] float dashLength() const;
+    /** Return the authored length of each gap between dash segments. */
+    [[nodiscard]] float dashGap() const;
+    /** Return whether dash and gap lengths are measured in metres or pixels. */
+    [[nodiscard]] LengthUnit dashUnit() const;
     /** Return the color used for the "off" segments of dashed lines. */
     [[nodiscard]] glm::fvec4 const& gapColor() const;
     /** Return the 8-bit dash pattern mask. */
     [[nodiscard]] int dashPattern() const;
     /** Resolve arrow direction, including optional expression-backed overrides. */
     [[nodiscard]] Arrow arrow(BoundEvalFun const& evalFun) const;
+    /** Return a compile-time arrow mode, or no value when it depends on entry data. */
+    [[nodiscard]] std::optional<Arrow> constantArrow() const;
     /** Return the outline RGBA color for point/icon/label rendering. */
     [[nodiscard]] glm::fvec4 const& outlineColor() const;
     /** Return the outline thickness in renderer-specific units. */
@@ -151,6 +267,8 @@ public:
     [[nodiscard]] glm::dvec3 const& offset() const;
     /** Return the per-slot local XYZ increment used for stacked rendering. */
     [[nodiscard]] glm::dvec3 const& offsetIncrement() const;
+    /** Return whether lateral line offsets are world-space metres or screen pixels. */
+    [[nodiscard]] LateralOffsetUnit lateralOffsetUnit() const;
     /** Return the optional point-merge grid cell size for feature aggregation. */
     [[nodiscard]] std::optional<glm::dvec3> const& pointMergeGridCellSize() const;
 
@@ -161,8 +279,12 @@ public:
 
     /** Return the regex used to filter relation types, if any. */
     [[nodiscard]] std::optional<std::regex> const& relationType() const;
+    /** Return the original relation-name regex transported to mapget. */
+    [[nodiscard]] std::optional<std::string> const& relationTypePattern() const;
     /** Return the vertical offset used when drawing relation helper lines. */
     [[nodiscard]] float relationLineHeightOffset() const;
+    /** Return how relation helper-line endpoints are selected. */
+    [[nodiscard]] RelationLineGeometry relationLineGeometry() const;
     /** Return the optional style used for relation end markers. */
     [[nodiscard]] std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle() const;
     /** Return the optional style recursively applied to relation source features. */
@@ -184,38 +306,62 @@ public:
     [[nodiscard]] std::optional<bool> const& attributeValidityGeometry() const;
     /** Report whether this rule can emit a label. */
     [[nodiscard]] bool hasLabel() const;
-    /** Return the CSS-like font string for labels. */
-    [[nodiscard]] std::string const& labelFont() const;
+    /** Return the CSS font-family value passed directly to Deck TextLayer. */
+    [[nodiscard]] std::string const& labelFontFamily() const;
+    /** Return the numeric CSS font weight passed directly to Deck TextLayer. */
+    [[nodiscard]] uint32_t labelFontWeight() const;
+    /** Return the label size consumed by Deck's `getSize` accessor. */
+    [[nodiscard]] float labelSize() const;
+    /** Return the layer-wide Deck text-size multiplier. */
+    [[nodiscard]] float labelSizeScale() const;
+    /** Return the Deck unit system used by label size. */
+    [[nodiscard]] LabelSizeUnit labelSizeUnit() const;
+    /** Return the minimum rendered label size in pixels. */
+    [[nodiscard]] float labelSizeMinPixels() const;
+    /** Return the maximum rendered label size in pixels. */
+    [[nodiscard]] float labelSizeMaxPixels() const;
+    /** Return the label rotation in degrees. */
+    [[nodiscard]] float labelAngle() const;
     /** Return the label fill color. */
     [[nodiscard]] glm::fvec4 const& labelColor() const;
+    /** Return the opacity multiplier applied to every label material color. */
+    [[nodiscard]] float labelOpacity() const;
+    /** Report whether overlapping labels should be hidden by Deck. */
+    [[nodiscard]] bool labelCollision() const;
+    /** Return the priority used when collision-filtered labels overlap. */
+    [[nodiscard]] int32_t labelCollisionPriority() const;
     /** Return the label outline color. */
     [[nodiscard]] glm::fvec4 const& labelOutlineColor() const;
     /** Return the label outline width. */
     [[nodiscard]] float labelOutlineWidth() const;
-    /** Report whether a label background rectangle should be drawn. */
-    [[nodiscard]] bool showBackground() const;
+    /** Report whether Deck should render a label background rectangle. */
+    [[nodiscard]] bool labelBackground() const;
     /** Return the background fill color for labels. */
     [[nodiscard]] glm::fvec4 const& labelBackgroundColor() const;
-    /** Return pixel padding applied around label background rectangles. */
-    [[nodiscard]] std::pair<int, int> const& labelBackgroundPadding() const;
-    /** Return the deck horizontal-origin string for labels. */
-    [[nodiscard]] std::string const& labelHorizontalOrigin() const;
-    /** Return the deck vertical-origin string for labels. */
-    [[nodiscard]] std::string const& labelVerticalOrigin() const;
-    /** Return the deck height-reference string for labels. */
-    [[nodiscard]] std::string const& labelHeightReference() const;
+    /** Return the background border color consumed by Deck's accessor. */
+    [[nodiscard]] glm::fvec4 const& labelBorderColor() const;
+    /** Return the background border width in pixels. */
+    [[nodiscard]] float labelBorderWidth() const;
+    /** Return Deck's four-value background padding. */
+    [[nodiscard]] std::array<float, 4> const& labelBackgroundPadding() const;
+    /** Return Deck's per-corner background radii. */
+    [[nodiscard]] std::array<float, 4> const& labelBackgroundBorderRadius() const;
+    /** Return Deck's horizontal text anchor. */
+    [[nodiscard]] LabelTextAnchor labelTextAnchor() const;
+    /** Return Deck's vertical alignment baseline. */
+    [[nodiscard]] LabelAlignmentBaseline labelAlignmentBaseline() const;
     /** Return the raw label text expression, if one was configured. */
     [[nodiscard]] std::string const& labelTextExpression() const;
     /** Resolve the effective label text for the current evaluation context. */
     [[nodiscard]] std::string labelText(BoundEvalFun const& evalFun) const;
-    /** Return the renderer-specific label style keyword. */
-    [[nodiscard]] std::string const& labelStyle() const;
-    /** Return the label scale multiplier. */
-    [[nodiscard]] float labelScale() const;
     /** Return an optional screen-space pixel offset for labels. */
     [[nodiscard]] std::optional<std::pair<float, float>> const& labelPixelOffset() const;
-    /** Return an optional eye-space XYZ offset for labels. */
-    [[nodiscard]] std::optional<std::tuple<float, float, float>> const& labelEyeOffset() const;
+    /** Return Deck's unitless line-height multiplier. */
+    [[nodiscard]] float labelLineHeight() const;
+    /** Return Deck's wrapping strategy. */
+    [[nodiscard]] LabelWordBreak labelWordBreak() const;
+    /** Return Deck's text-width limit as a multiple of label size. */
+    [[nodiscard]] float labelMaxWidth() const;
 
     /** Return the stable index of this rule inside its style sheet. */
     [[nodiscard]] uint32_t const& index() const;
@@ -231,25 +377,84 @@ private:
         return 1 << static_cast<std::underlying_type_t<mapget::GeomType>>(g);
     }
 
-    Aspect aspect_ = Feature;
-    HighlightMode mode_ = NoHighlight;
-    Fidelity fidelity_ = AnyFidelity;
-    std::optional<uint32_t> stage_;
-    std::optional<uint8_t> lod_;
+public:
+    /** Dense integer lookup used by small enum-like categorical scales. */
+    template<typename T>
+    struct DenseIntegerScale {
+        int64_t minimum = 0;
+        std::vector<std::optional<T>> values;
+    };
+
+    /** Typed literal stop used by the Erdblick-only color-scale presentation. */
+    struct ColorScaleStop {
+        using Key = std::variant<bool, int64_t, double, std::string>;
+        Key key;
+        glm::fvec4 color;
+        std::optional<double> numericKey;
+    };
+    struct ColorScale {
+        enum class Mode { Linear, Categorical };
+        Mode mode = Mode::Linear;
+        std::string expression;
+        std::vector<ColorScaleStop> stops;
+        std::optional<glm::fvec4> fallback;
+        std::optional<DenseIntegerScale<glm::fvec4>> denseIntegerStops;
+    };
+    struct WidthScaleStop {
+        ColorScaleStop::Key key;
+        float width = 0.0f;
+        std::optional<double> numericKey;
+    };
+    struct WidthScale {
+        ColorScale::Mode mode = ColorScale::Mode::Linear;
+        std::string expression;
+        std::vector<WidthScaleStop> stops;
+        std::optional<float> fallback;
+        std::optional<DenseIntegerScale<float>> denseIntegerStops;
+    };
+    /** Literal screen-space glow material for vector geometry. */
+    struct Glow {
+        glm::fvec4 color{0.0f, 0.0f, 0.0f, 1.0f};
+        float radius = 0.0f;
+        float opacity = 1.0f;
+    };
+
+    /** Return the optional screen-space glow attached to emitted geometry. */
+    [[nodiscard]] std::optional<Glow> const& glow() const;
+
+private:
+    Scope scope_ = Feature;
+    uint32_t highlightModesMask_ = 1U << NoHighlight;
+    LodRange lodRange_{};
+    std::string minimumLodExpression_;
     bool selectable_ = true;
     uint32_t geometryTypes_ = 0;  // bitfield from GeomType enum
+    std::optional<std::string> geometryName_;
+    std::optional<std::string> exactType_;
     std::optional<std::regex> type_;
     std::string filter_;
     glm::fvec4 color_{.0, .0, .0, 1.};
     std::string colorExpression_;
+    std::optional<ColorScale> colorScale_;
     bool hasExplicitColor_ = false;
     bool hasExplicitOpacity_ = false;
     float width_ = 1.;
+    std::optional<WidthScale> widthScale_;
+    std::optional<Glow> glow_;
     bool depthTest_ = true;
+    bool surfaceShading_ = false;
+    double polygonHeight_ = 0.0;
+    std::string polygonHeightExpression_;
+    std::optional<double> zIndex_;
+    std::string zIndexExpression_;
+    std::string zIndexGroupExpression_;
+    ZIndexRole zIndexRole_ = ZIndexRole::None;
     std::optional<bool> billboard_;
     bool flat_ = false;
     bool dashed_ = false;
-    int dashLength_ = 16;
+    float dashLength_ = 16.0F;
+    float dashGap_ = 16.0F;
+    LengthUnit dashUnit_ = LengthUnit::Pixel;
     glm::fvec4 gapColor_{.0, .0, .0, 0.};
     int dashPattern_ = 255;
     Arrow arrow_ = NoArrow;
@@ -258,31 +463,48 @@ private:
     float outlineWidth_ = .0;
     glm::dvec3 offset_{.0, .0, .0};
     glm::dvec3 offsetIncrement_{.0, .0, .0};
+    LengthUnit lateralOffsetUnit_ = LengthUnit::Meter;
     std::optional<glm::dvec3> pointMergeGridCellSize_;
 
-    // Labels' rules
-    std::string labelFont_ = "24px Helvetica";
+    // Deck TextLayer properties. Accessor-backed values remain per label in
+    // the GPU packet; layer-wide values participate in browser-side buckets.
+    std::string labelFontFamily_ = "Monaco, monospace";
+    uint32_t labelFontWeight_ = 400U;
+    float labelSize_ = 32.0F;
+    float labelSizeScale_ = 1.0F;
+    LabelSizeUnit labelSizeUnit_ = LabelSizeUnit::Pixel;
+    float labelSizeMinPixels_ = 0.0F;
+    float labelSizeMaxPixels_ = std::numeric_limits<float>::max();
+    float labelAngle_ = 0.0F;
     glm::fvec4 labelColor_{1., 1., 1., 1.};
+    float labelOpacity_ = 1.0f;
+    bool labelCollision_ = false;
+    int32_t labelCollisionPriority_ = 0;
     glm::fvec4 labelOutlineColor_{.0, .0, .0, .1};
-    float labelOutlineWidth_ = .1;
-    bool showBackground_ = false;
-    glm::fvec4 labelBackgroundColor_{.0, .0, .0, .0};
-    std::pair<int, int> labelBackgroundPadding_{0, 0};
-    std::string labelHorizontalOrigin_ = "CENTER";
-    std::string labelVerticalOrigin_ = "CENTER";
-    std::string labelHeightReference_ = "NONE";
+    float labelOutlineWidth_ = 0.0F;
+    bool labelBackground_ = false;
+    glm::fvec4 labelBackgroundColor_{1., 1., 1., 1.};
+    glm::fvec4 labelBorderColor_{.0, .0, .0, 1.};
+    float labelBorderWidth_ = 0.0F;
+    std::array<float, 4> labelBackgroundPadding_{};
+    std::array<float, 4> labelBackgroundBorderRadius_{};
+    LabelTextAnchor labelTextAnchor_ = LabelTextAnchor::Middle;
+    LabelAlignmentBaseline labelAlignmentBaseline_ =
+        LabelAlignmentBaseline::Center;
     std::string labelTextExpression_;
     std::string labelText_;
-    std::string labelStyle_ = "FILL";
-    float labelScale_ = 1.;
     std::optional<std::pair<float, float>> labelPixelOffset_;
-    std::optional<std::tuple<float, float, float>> labelEyeOffset_;
+    float labelLineHeight_ = 1.0F;
+    LabelWordBreak labelWordBreak_ = LabelWordBreak::BreakWord;
+    float labelMaxWidth_ = -1.0F;
 
     std::string iconUrl_;
     std::string iconUrlExpression_;
 
     std::optional<std::regex> relationType_;
+    std::optional<std::string> relationTypePattern_;
     float relationLineHeightOffset_ = 1.0; // Offset of the relation line over the center in m.
+    RelationLineGeometry relationLineGeometry_ = RelationLineGeometry::Centers;
     std::shared_ptr<FeatureStyleRule> relationLineEndMarkerStyle_;
     std::shared_ptr<FeatureStyleRule> relationSourceStyle_;
     std::shared_ptr<FeatureStyleRule> relationTargetStyle_;

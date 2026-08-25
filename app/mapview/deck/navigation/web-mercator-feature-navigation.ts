@@ -1,0 +1,374 @@
+import {
+    MapView,
+    type MapViewProps,
+    WebMercatorViewport
+} from "@deck.gl/core";
+import {
+    altitudeToFovy,
+    getProjectionParameters,
+    unitsPerMeter
+} from "@math.gl/web-mercator";
+import type {NavigationAnchor, NavigationScreenPosition} from "./feature-navigation.types";
+
+/** deck.gl's normalized default map-camera altitude, made explicit for Erdblick's camera contract. */
+export const DECK_MAP_DEFAULT_ALTITUDE = 1.5;
+
+/** deck.gl's default vertical map FOV, shared by rendering and camera-state conversion. */
+export const DECK_MAP_FOV_DEGREES = altitudeToFovy(DECK_MAP_DEFAULT_ALTITUDE);
+
+/**
+ * Near-plane scale that preserves depth precision while still allowing close inspection.
+ *
+ * Values much smaller than this collapse the 24-bit depth buffer at long, grazing views and
+ * make coplanar vector overlays flicker. The navigation constraint already stops anchored zooms
+ * before the target crosses this plane, so moving it closer does not improve navigation safety.
+ */
+export const DECK_MAP_NEAR_Z_MULTIPLIER = 0.01;
+
+/**
+ * Horizon-aware far-plane scale with clearance for below-sea-level geometry.
+ *
+ * deck.gl derives the unscaled far plane from where the top view ray meets the z=0 plane. A
+ * multiplier close to one therefore clips negative-altitude geometry across the upper part of a
+ * pitched viewport. The extra half-distance keeps that geometry visible while the comparatively
+ * conservative near plane retains useful depth precision.
+ */
+export const DECK_MAP_FAR_Z_MULTIPLIER = 1.5;
+
+/** Lowest ordinary map altitude that the perspective clip volume keeps visible. */
+export const DECK_MAP_MINIMUM_ALTITUDE_METERS = -100;
+
+/** Camera-distance cap used when a pitched map view reaches the flat-map horizon. */
+export const DECK_MAP_HORIZON_DISTANCE_MULTIPLIER = 100;
+
+/** math.gl's internal camera-distance horizon cap. */
+const MATH_GL_HORIZON_DISTANCE_MULTIPLIER = 10;
+
+/** Relative margin that prevents a target from reaching or crossing the near plane. */
+export const NAVIGATION_TARGET_NEAR_RELATIVE_EPSILON = 1e-6;
+
+const TARGET_ALIGNMENT_STEPS = 3;
+
+/** Returns a longitude in the world copy nearest to the supplied reference. */
+export function longitudeInNearestWorld(longitude: number, reference: number): number {
+    const delta = ((longitude - reference + 180) % 360 + 360) % 360 - 180;
+    return reference + delta;
+}
+
+/** Camera fields required to construct a deck.gl map viewport. */
+export interface DeckMapCameraState {
+    longitude: number;
+    latitude: number;
+    zoom: number;
+    minZoom?: number;
+    maxZoom?: number;
+    pitch: number;
+    bearing: number;
+    position?: [number, number, number];
+}
+
+/** Projection state needed to reproduce math.gl's horizon-aware far-plane calculation. */
+interface DeckMapProjectionState {
+    latitude?: number;
+    zoom?: number;
+    pitch?: number;
+    position?: number[];
+}
+
+/**
+ * Calculates the map far plane while replacing math.gl's short fixed horizon cap.
+ *
+ * math.gl computes `min(surfaceDistance * farMultiplier, cameraDistance * 10)`. Calling it with
+ * the far multiplier divided by the desired cap expansion and scaling the result afterwards gives
+ * the same surface-distance branch while changing only the cap to `cameraDistance * 100`.
+ */
+export function deckMapFarZ(
+    state: DeckMapProjectionState,
+    width: number,
+    height: number
+): number {
+    const horizonExpansion = DECK_MAP_HORIZON_DISTANCE_MULTIPLIER /
+        MATH_GL_HORIZON_DISTANCE_MULTIPLIER;
+    const latitude = state.latitude ?? 0;
+    const position = state.position;
+    const centerAltitudeMeters = position?.[2] ?? 0;
+    const commonProjectionOptions = {
+        width: Math.max(1, width),
+        height: Math.max(1, height),
+        scale: Math.pow(2, state.zoom ?? 0),
+        pitch: state.pitch ?? 0,
+        fovy: DECK_MAP_FOV_DEGREES,
+        nearZMultiplier: DECK_MAP_NEAR_Z_MULTIPLIER
+    };
+    const projection = getProjectionParameters({
+        ...commonProjectionOptions,
+        center: [0, 0, centerAltitudeMeters * unitsPerMeter(latitude)],
+        farZMultiplier: DECK_MAP_FAR_Z_MULTIPLIER / horizonExpansion
+    });
+    const horizonAwareFar = projection.far * horizonExpansion;
+
+    // A scalar ground-plane margin cannot guarantee a useful physical depth: at close zooms the
+    // same multiplier may reach only a few metres below z=0. Re-run the surface calculation with
+    // the configured altitude floor as its reference plane. The ordinary math.gl horizon cap
+    // keeps grazing views bounded; the longer Erdblick cap remains owned by the z=0 calculation.
+    const minimumAltitudeFar = getProjectionParameters({
+        ...commonProjectionOptions,
+        center: [
+            0,
+            0,
+            (centerAltitudeMeters - DECK_MAP_MINIMUM_ALTITUDE_METERS) *
+                unitsPerMeter(latitude)
+        ],
+        farZMultiplier: 1.01
+    }).far;
+    return Math.max(horizonAwareFar, minimumAltitudeFar);
+}
+
+type DeckWebMercatorViewportOptions = NonNullable<
+    ConstructorParameters<typeof WebMercatorViewport>[0]
+>;
+
+/** Web Mercator viewport that applies Erdblick's complete projection contract. */
+class ErdblickWebMercatorViewport extends WebMercatorViewport {
+    constructor(options: DeckWebMercatorViewportOptions = {}) {
+        const width = options.width || 1;
+        const height = options.height || 1;
+        super({
+            ...options,
+            fovy: DECK_MAP_FOV_DEGREES,
+            nearZMultiplier: DECK_MAP_NEAR_Z_MULTIPLIER,
+            farZMultiplier: DECK_MAP_FAR_Z_MULTIPLIER,
+            farZ: deckMapFarZ(options, width, height)
+        });
+    }
+}
+
+/** Deck map view whose render viewport shares Erdblick's projection contract. */
+export class ErdblickMapView extends MapView {
+    constructor(props: MapViewProps = {}) {
+        super({
+            ...props,
+            fovy: DECK_MAP_FOV_DEGREES,
+            nearZMultiplier: DECK_MAP_NEAR_Z_MULTIPLIER,
+            farZMultiplier: DECK_MAP_FAR_Z_MULTIPLIER
+        });
+    }
+
+    override getViewportType(): typeof WebMercatorViewport {
+        return ErdblickWebMercatorViewport;
+    }
+}
+
+/** Creates a Web Mercator viewport using Erdblick's single map-projection contract. */
+export function createDeckMapViewport(
+    state: DeckMapCameraState,
+    width: number,
+    height: number,
+    orthographic: boolean
+): WebMercatorViewport {
+    return new ErdblickWebMercatorViewport({
+        width,
+        height,
+        longitude: state.longitude,
+        latitude: state.latitude,
+        zoom: state.zoom,
+        pitch: state.pitch,
+        bearing: state.bearing,
+        position: state.position,
+        orthographic
+    });
+}
+
+/**
+ * Re-expresses a perspective camera around the ground plane without changing screen positions.
+ *
+ * deck.gl's target navigation temporarily stores the map center as a meter offset so elevated
+ * features remain exact gesture pivots. Keeping that representation after the gesture is harmful:
+ * TileLayer still selects its quadtree depth from `zoom`, even when a large center altitude makes
+ * the visible ground footprint many levels coarser. Intersecting the camera's center ray with the
+ * ground and adapting zoom produces the same projection while returning `position` to zero.
+ */
+export function viewStateWithGroundCenter<StateT extends DeckMapCameraState>(
+    state: StateT,
+    width: number,
+    height: number,
+    orthographic: boolean
+): StateT {
+    const position = state.position;
+    if (orthographic || !position || position.every(value => value === 0)) {
+        return state;
+    }
+    const viewport = createDeckMapViewport(state, width, height, false);
+    const centerToCamera = viewport.cameraPosition.map(
+        (value, index) => value - viewport.center[index]
+    );
+    const centerDistance = Math.hypot(...centerToCamera);
+    if (!Number.isFinite(centerDistance) || centerDistance <= 0) {
+        return state;
+    }
+    const direction = centerToCamera.map(value => value / centerDistance);
+    const upward = direction[2];
+    const groundDistance = viewport.cameraPosition[2] / upward;
+    if (!Number.isFinite(groundDistance) || groundDistance <= 0 || upward <= 0) {
+        return state;
+    }
+    const groundCenter = viewport.cameraPosition.map(
+        (value, index) => value - direction[index] * groundDistance
+    );
+    const [longitude, latitude] = viewport.unprojectFlat(groundCenter);
+    const zoom = Math.log2(viewport.altitude * viewport.height / groundDistance);
+    if (![longitude, latitude, zoom].every(Number.isFinite)
+        || Math.abs(latitude) > 85.05113) {
+        return state;
+    }
+    return {
+        ...state,
+        longitude,
+        latitude,
+        zoom,
+        position: [0, 0, 0]
+    };
+}
+
+/** Resolves an anchor into the repeated-world copy local to a viewport. */
+export function navigationAnchorInViewportWorld(
+    anchor: NavigationAnchor,
+    viewport: WebMercatorViewport
+): NavigationAnchor {
+    return [
+        longitudeInNearestWorld(anchor[0], viewport.longitude),
+        anchor[1],
+        anchor[2]
+    ];
+}
+
+/**
+ * Retains a world position at a requested pixel using deck.gl's public 3D pan operation.
+ *
+ * This is kept downstream for Erdblick's ground-centred UI commands and orthographic map mode.
+ * Perspective feature orbit/zoom uses `WebMercatorViewport#getTargetViewState` below.
+ */
+export function viewStateKeepingAnchor<StateT extends DeckMapCameraState>(
+    nextState: StateT,
+    anchor: NavigationAnchor,
+    pixel: NavigationScreenPosition,
+    width: number,
+    height: number,
+    orthographic: boolean
+): StateT {
+    let result = {...nextState};
+    for (let step = 0; step < TARGET_ALIGNMENT_STEPS; step++) {
+        const viewport = createDeckMapViewport(result, width, height, orthographic);
+        const localAnchor = navigationAnchorInViewportWorld(anchor, viewport);
+        const projected = viewport.project(localAnchor);
+        if (projected.length >= 2
+            && projected.every(Number.isFinite)
+            && Math.hypot(projected[0] - pixel[0], projected[1] - pixel[1]) <= 1e-4) {
+            break;
+        }
+        const center = viewport.panByPosition3D(localAnchor, pixel);
+        if (!Number.isFinite(center.longitude) || !Number.isFinite(center.latitude)) {
+            return nextState;
+        }
+        result = {
+            ...result,
+            longitude: center.longitude,
+            latitude: center.latitude
+        };
+    }
+    return result;
+}
+
+/**
+ * Returns whether an anchor is finite, in front of the camera, within clipping, and optionally
+ * on screen. No product-visible metre clearance is imposed.
+ */
+export function isNavigationAnchorUsable(
+    viewport: WebMercatorViewport,
+    anchor: NavigationAnchor,
+    requireOnScreen = false
+): boolean {
+    const info = viewport.getTargetInfo(anchor);
+    if (!info
+        || !info.isValid
+        || !Number.isFinite(info.targetDistance)
+        || info.targetDistance <= 0
+        || info.cameraDepth < info.near * (1 + NAVIGATION_TARGET_NEAR_RELATIVE_EPSILON)
+        || info.cameraDepth >= info.far) {
+        return false;
+    }
+    return !requireOnScreen || info.isVisible;
+}
+
+/**
+ * Reconstructs a feature-relative command through deck.gl's minimum-distance contract.
+ *
+ * Orthographic MapView retains the stock anchored-pan behavior because target navigation is
+ * perspective-only. In perspective mode deck.gl owns both the inverse camera transform and the
+ * metric clearance clamp; Erdblick only supplies the product preference sampled for this command.
+ */
+export function viewStateKeepingNavigationAnchor<StateT extends DeckMapCameraState>(
+    currentState: StateT,
+    requestedState: StateT,
+    anchor: NavigationAnchor,
+    pixel: NavigationScreenPosition,
+    width: number,
+    height: number,
+    orthographic: boolean,
+    minimumTargetDistance: number
+): StateT {
+    if (orthographic) {
+        return viewStateKeepingAnchor(
+            requestedState,
+            anchor,
+            pixel,
+            width,
+            height,
+            true
+        );
+    }
+
+    return resolveTargetViewState(
+        currentState,
+        requestedState,
+        anchor,
+        pixel,
+        width,
+        height,
+        minimumTargetDistance
+    ) ?? currentState;
+}
+
+/** Resolves one perspective pose via the public viewport inverse, preserving extra app fields. */
+function resolveTargetViewState<StateT extends DeckMapCameraState>(
+    currentState: StateT,
+    requestedState: StateT,
+    anchor: NavigationAnchor,
+    pixel: NavigationScreenPosition,
+    width: number,
+    height: number,
+    minimumTargetDistance: number
+): StateT | null {
+    const alignedState = viewStateKeepingAnchor(
+        currentState,
+        anchor,
+        pixel,
+        width,
+        height,
+        false
+    );
+    const sourceViewport = createDeckMapViewport(alignedState, width, height, false);
+    const targetInfo = sourceViewport.getTargetInfo(anchor);
+    if (!targetInfo) {
+        return null;
+    }
+    const result = sourceViewport.getTargetViewState({
+        target: targetInfo.target,
+        screenPosition: pixel,
+        bearing: requestedState.bearing,
+        pitch: requestedState.pitch,
+        zoom: requestedState.zoom,
+        minimumTargetDistance
+    });
+    return result ? {...requestedState, ...result} : null;
+}

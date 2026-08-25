@@ -1,3 +1,8 @@
+import type {
+    FeatureSearchColorMode,
+    FeatureSearchColorStop
+} from "../shared/feature-search-state";
+
 export type SearchStyleColorMode = "solid" | "gradient" | "categories";
 export type SearchStyleFieldValueKind = "number" | "integer" | "string" | "boolean" | "enum" | "object" | "array" | "unknown";
 
@@ -31,6 +36,8 @@ export interface SearchStyleColorDraft {
     mode: SearchStyleColorMode;
     field: string;
     customField?: boolean;
+    /** Scalar type learned from observed values when no schema field supplies it. */
+    categoryValueKind?: SearchStyleFieldValueKind;
     solidColor: string;
     gradientStops: SearchStyleGradientStopDraft[];
     categoryStops: SearchStyleCategoryStopDraft[];
@@ -52,6 +59,84 @@ export interface SearchStyleAutoInitializationResult {
 
 export const DEFAULT_SEARCH_STYLE_SOLID_COLOR = "#ff1726";
 export const EMPTY_GRADIENT_PREVIEW_COLOR = "#8f8f8f";
+
+/**
+ * Converts persisted search color state into one always-loadable style fragment.
+ *
+ * The editor deliberately persists intermediate states (for example a newly
+ * selected category mode before its stops arrive). Such a state must not tear
+ * down the currently running search presentation. Invalid or empty scales use
+ * their fallback color until a later editor update completes them.
+ */
+export function searchStyleColorProperties(
+    color: FeatureSearchColorMode
+): Record<string, unknown> {
+    if (color.mode === "solid") {
+        return {"color": usableStyleColor(color.color)};
+    }
+
+    const expression = color.field?.trim();
+    const fallback = usableStyleColor(color.fallbackColor);
+    if (!expression) {
+        return {"color": fallback};
+    }
+
+    const stops = color.mode === "gradient"
+        ? normalizedLinearStyleStops(color.stops, fallback)
+        : normalizedCategoricalStyleStops(color.stops, fallback);
+    if (stops.length === 0) {
+        return {"color": fallback};
+    }
+    return {
+        "color-scale": {
+            mode: color.mode === "gradient" ? "linear" : "categorical",
+            expression,
+            stops,
+            fallback
+        }
+    };
+}
+
+function usableStyleColor(
+    value: string | null | undefined,
+    fallback = DEFAULT_SEARCH_STYLE_SOLID_COLOR
+): string {
+    return value?.trim() || fallback;
+}
+
+function normalizedLinearStyleStops(
+    stops: readonly FeatureSearchColorStop[],
+    fallback: string
+): Array<[number, string]> {
+    const byValue = new Map<number, string>();
+    for (const stop of stops) {
+        const value = Number(stop.value);
+        if (Number.isFinite(value)) {
+            byValue.set(value, usableStyleColor(stop.color, fallback));
+        }
+    }
+    return [...byValue].sort(([left], [right]) => left - right);
+}
+
+function normalizedCategoricalStyleStops(
+    stops: readonly FeatureSearchColorStop[],
+    fallback: string
+): Array<[unknown, string]> {
+    const result: Array<[unknown, string]> = [];
+    const seen = new Set<string>();
+    for (const stop of stops) {
+        const key = `${typeof stop.value}:${JSON.stringify(stop.value)}`;
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        result.push([
+            stop.value,
+            usableStyleColor(stop.color, fallback)
+        ]);
+    }
+    return result;
+}
 
 function normalizeHexString(value: string | null | undefined): string | undefined {
     const trimmed = (value ?? "").trim();
@@ -93,6 +178,7 @@ export function cloneSearchStyleColorDraft(draft: SearchStyleColorDraft): Search
         mode: draft.mode,
         field: draft.field,
         customField: !!draft.customField,
+        categoryValueKind: draft.categoryValueKind,
         solidColor: normalizeHexColor(draft.solidColor),
         gradientStops: draft.gradientStops.map(stop => ({
             id: stop.id,
@@ -408,6 +494,7 @@ export function autoInitializeSearchStyleColorDraft(
             return {
                 draft: cloneSearchStyleColorDraft({
                     ...draft,
+                    categoryValueKind: fieldOption.valueKind,
                     categoryStops: categoryStopsForEnumValues(enumValues, nextId),
                     gradientStops: []
                 }),
@@ -536,9 +623,10 @@ export function serializableCategoryStops(
     draft: SearchStyleColorDraft,
     valueKind?: SearchStyleFieldValueKind
 ): Array<{value: unknown; color: string}> {
+    const effectiveValueKind = valueKind ?? draft.categoryValueKind;
     return draft.categoryStops
         .map(stop => ({
-            value: serializableValue(stop.valueText, valueKind),
+            value: serializableValue(stop.valueText, effectiveValueKind),
             color: normalizeHexColor(stop.color, draft.fallbackColor || draft.solidColor)
         }));
 }

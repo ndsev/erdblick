@@ -120,4 +120,24 @@ describe("DeckLayerRegistry", () => {
         registry.flush();
         expect(deck.commits.at(-1)).toEqual([]);
     });
+
+    it("reuses clean shared layers when an unrelated registry entry changes", () => {
+        const deck = new DeckStub();
+        const registry = new DeckLayerRegistry(deck);
+        const build = vi.fn((_key: string, contributions: ReadonlyMap<string, unknown>) => ({
+            order: 10,
+            layer: {id: `shared:${contributions.size}`}
+        }));
+
+        registry.upsertShared("arena/page-0", "block-a", {}, build);
+        registry.flush();
+        registry.upsert("overlay", {id: "overlay"}, 100);
+        registry.flush();
+
+        expect(build).toHaveBeenCalledTimes(1);
+        expect(deck.commits.at(-1)?.map(layer => layer.id)).toEqual([
+            "shared:1",
+            "overlay"
+        ]);
+    });
 });

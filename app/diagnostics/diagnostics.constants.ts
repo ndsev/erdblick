@@ -14,11 +14,15 @@ export const LOG_INTERVAL_MS = 1500;
 export const MAX_LOGS = 1000;
 /** Maximum number of tile ids retained for a shared peak value. */
 export const PEAK_TILE_LIMIT = 5;
+/** Internal unit for independently formatted tile conversion ages. */
+export const CONVERSION_AGE_UNIT = 'conversion-age-ms';
 
 /** Supported perf-key suffixes that imply a display unit. */
 export const UNIT_SUFFIXES: DiagnosticsUnitSuffix[] = [
     {suffix: '#ms', unit: 'ms'},
     {suffix: '-ms', unit: 'ms'},
+    {suffix: '#bytes', unit: 'B'},
+    {suffix: '-bytes', unit: 'B'},
     {suffix: '#kb', unit: 'KB'},
     {suffix: '-kb', unit: 'KB'},
     {suffix: '#mb', unit: 'MB'},

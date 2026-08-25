@@ -38,6 +38,8 @@ export interface SearchTarget {
     name: string;
     label: string;
     enabled: boolean;
+    acceptsEmptyInput?: boolean;
+    saveToHistory?: (value: string) => boolean;
     payload?: unknown;
     jump?: (value: string, payload?: unknown) => number[] | Rectangle | undefined;
     execute?: (value: string, payload?: unknown) => void;
@@ -110,7 +112,7 @@ export class JumpTargetService {
             return;
         }
 
-        const jumpTargetsPath = `/config/${jumpTargetsConfig}.js`;
+        const jumpTargetsPath = `/static-config/${jumpTargetsConfig}.js`;
         this.loadJumpTargetsModule(jumpTargetsPath)
             .then((plugin) => plugin.default() as Array<SearchTarget>)
             .then((jumpTargets: Array<SearchTarget>) => {
@@ -415,10 +417,10 @@ export class JumpTargetService {
                 featureId: featureId
             } as TileFeatureId]);
         } else {
-            await this.inspectionSelection.setHoveredFeatures([{
+            this.inspectionSelection.setHoveredFeatures([{
                 mapTileKey: selectThisFeature.tileId,
                 featureId: featureId
-            }]);
+            }], true);
         }
 
         // Center the camera on the feature if a view index was passed.

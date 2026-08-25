@@ -1,16 +1,37 @@
-import {Component, output, input, effect, ViewChild} from "@angular/core";
+import {
+    ChangeDetectorRef,
+    Component,
+    effect,
+    input,
+    OnDestroy,
+    output,
+    ViewChild
+} from "@angular/core";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
-import {InspectionPanelModel} from "../shared/appstate.service";
+import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {TreeTableNode} from "primeng/api";
 import {TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
-import {FeatureWrapper} from "../mapdata/features.model";
+import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {
-    MapTileRequestStatus,
     MapTileStreamClient,
 } from "../mapdata/tilestream";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {Column, InspectionTreeComponent} from "./inspection.tree.component";
+import {
+    expandSingleChildSourceDataPaths,
+    sourceDataTreePresentation
+} from "./sourcedata-tree.presentation";
+import {waitForSourceDataRequest} from "./source-data-request";
+import {
+    MapTileStreamService,
+    RetainedTileExpiryOwner
+} from "../mapdata/map-tile-stream.service";
+
+interface LoadedSourceDataLayer {
+    layer: TileSourceDataLayer;
+    expiresAtMs: number | null;
+}
 
 @Component({
     selector: 'sourcedata-panel',
@@ -24,9 +45,21 @@ import {Column, InspectionTreeComponent} from "./inspection.tree.component";
                 <strong>Error</strong><br>{{ errorMessage }}
             </div>
         } @else {
+            @if (staleErrorMessage) {
+                <div class="source-data-stale-error">
+                    <strong>Refresh failed:</strong> {{ staleErrorMessage }}
+                </div>
+            }
+            @if (sqlQuery) {
+                <details class="source-data-sql-query" data-testid="source-data-sql-query">
+                    <summary>SQL query</summary>
+                    <code>{{ sqlQuery }}</code>
+                </details>
+            }
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
                              [showFilter]="showFilter()"
+                             [defaultVisibleColumnKeys]="stateService.sourceDataInspectionDefaultColumns"
                              [firstHighlightedItemIndex]="firstHighlightedItemIndex">
             </inspection-tree>
         }
@@ -34,7 +67,7 @@ import {Column, InspectionTreeComponent} from "./inspection.tree.component";
     standalone: false
 })
 /** Loads one source-data tile on demand and renders it through the shared inspection tree. */
-export class SourceDataPanelComponent {
+export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOwner {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
     filterText = input<string | undefined>();
@@ -44,56 +77,143 @@ export class SourceDataPanelComponent {
 
     loading: boolean = true;
     errorMessage: string = "";
+    staleErrorMessage: string = "";
+    sqlQuery: string | undefined;
 
     treeData: TreeTableNode[] = [];
     columns: Column[] = [
         { key: "key",     header: "Key",     width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
         { key: "value",   header: "Value",   width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
-        { key: "address", header: "Address", width: '100px', transform: this.addressFormatter.bind(this) },
-        { key: "type",    header: "Type",    width: 'auto',  transform: this.schemaTypeURLFormatter.bind(this) }
-    ]
+        {
+            key: "displayAddress",
+            header: "Address",
+            width: '100px',
+            transform: this.addressFormatter.bind(this),
+            toggleable: true,
+            toggleIcon: "numbers"
+        },
+        {
+            key: "schemaType",
+            header: "Type",
+            width: 'auto',
+            transform: this.schemaTypeURLFormatter.bind(this),
+            toggleable: true,
+            toggleIcon: "data_object"
+        }
+    ];
 
     addressFormat: SourceDataAddressFormat = coreLib.SourceDataAddressFormat.BIT_RANGE;
     firstHighlightedItemIndex: number = 0;
 
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
-    constructor(private mapService: MapInfoService) {
+    private loadRevision = 0;
+    private valueEpoch = 0;
+
+    constructor(private mapService: MapInfoService,
+                public stateService: AppStateService,
+                private tileStream: MapTileStreamService,
+                private readonly cdr: ChangeDetectorRef) {
         effect(() => {
-            if (!this.panel().sourceData) {
+            const sourceData = this.panel().sourceData;
+            const revision = ++this.loadRevision;
+            this.tileStream.cancelRetainedTileExpiries?.(this);
+            if (!sourceData) {
                 return;
             }
             this.loading = true;
             this.treeData = [];
             this.errorMessage = "";
-
-            this.loadSourceDataLayer(this.panel().sourceData!.mapTileKey)
-                .then(layer => {
-                    const root = layer.toObject();
-                    this.addressFormat = layer.addressFormat();
-
-                    layer.delete();
-
-                    const treeData = this.treeDataFromRoot(root);
-                    if (treeData.length) {
-                        this.treeData = treeData;
-                        this.selectItemWithAddress(this.panel().sourceData!.address);
-                    } else {
-                        this.treeData = [];
-                        this.setError(this.noSourceDataMessage(this.panel().sourceData!.mapTileKey));
-                    }
-                })
-                .catch(error => {
-                    this.setError(`${error}`);
-                })
-                .finally(() => {
-                    this.loading = false;
-                });
+            this.staleErrorMessage = "";
+            this.sqlQuery = undefined;
+            void this.refreshSourceData(
+                sourceData.mapTileKey,
+                sourceData.address,
+                revision,
+                false
+            );
         });
     }
 
+    ngOnDestroy(): void {
+        ++this.loadRevision;
+        this.tileStream.cancelRetainedTileExpiries?.(this);
+    }
+
+    expireTiles(tokens: ReadonlyArray<{
+        tileId: number;
+        valueVersion: number;
+    }>): void {
+        if (!tokens.some(token => token.valueVersion === this.valueEpoch)) {
+            return;
+        }
+        const sourceData = this.panel().sourceData;
+        if (!sourceData) {
+            return;
+        }
+        const revision = this.loadRevision;
+        void this.refreshSourceData(
+            sourceData.mapTileKey,
+            sourceData.address,
+            revision,
+            true
+        );
+    }
+
+    /** Keeps the current tree visible until a current replacement has parsed successfully. */
+    private async refreshSourceData(
+        mapTileKey: string,
+        address: bigint | undefined,
+        revision: number,
+        renewal: boolean
+    ): Promise<void> {
+        let loaded: LoadedSourceDataLayer | null = null;
+        try {
+            loaded = await this.loadSourceDataLayer(mapTileKey);
+            if (revision !== this.loadRevision) {
+                return;
+            }
+            const root = loaded.layer.toObject();
+            this.addressFormat = loaded.layer.addressFormat();
+            const presentation = sourceDataTreePresentation(root);
+            if (!presentation.treeData.length) {
+                throw new Error(this.noSourceDataMessage(mapTileKey));
+            }
+            this.sqlQuery = presentation.sqlQuery;
+            this.treeData = presentation.treeData;
+            this.errorMessage = "";
+            this.staleErrorMessage = "";
+            this.selectItemWithAddress(address);
+            const [, , tileId] = coreLib.parseMapTileKey(mapTileKey);
+            const epoch = ++this.valueEpoch;
+            this.tileStream.updateRetainedTileExpiry?.(
+                this,
+                Number(tileId),
+                epoch,
+                loaded.expiresAtMs
+            );
+        } catch (error) {
+            if (revision !== this.loadRevision) {
+                return;
+            }
+            const message = `${error}`;
+            if (renewal && this.treeData.length) {
+                this.staleErrorMessage = message;
+                this.error.emit(message);
+            } else {
+                this.setError(message);
+            }
+        } finally {
+            loaded?.layer.delete();
+            if (revision === this.loadRevision) {
+                this.loading = false;
+                this.cdr.markForCheck();
+            }
+        }
+    }
+
     /** Fetches and parses one source-data layer over the WebSocket source-data endpoint. */
-    async loadSourceDataLayer(mapTileKey: string) : Promise<TileSourceDataLayer> {
+    async loadSourceDataLayer(mapTileKey: string) : Promise<LoadedSourceDataLayer> {
         const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
         if (!this.mapService.isMapLayerReady(mapId, layerId)) {
             const map = this.mapService.maps.maps.get(mapId);
@@ -110,37 +230,54 @@ export class SourceDataPanelComponent {
         };
 
         let layer: TileSourceDataLayer | null = null;
-        let sourceDataParseError: Error | null = null;
+        let expiresAtMs: number | null = null;
         const socket = new MapTileStreamClient("/interactive");
         const dataSourceInfoJson = this.mapService.getDataSourceInfoJson();
         if (dataSourceInfoJson) {
             socket.setDataSourceInfoJson(dataSourceInfoJson);
         }
 
-        socket.withSourceDataCallback((payload) => {
-            try {
-                const parsedLayer = uint8ArrayToWasm((wasmBlob) => {
-                    return socket.parser.readTileSourceDataLayer(wasmBlob);
-                }, payload);
-                if (parsedLayer) {
+        const sourceDataReceived = new Promise<void>((resolve, reject) => {
+            socket.withSourceDataCallback((payload) => {
+                try {
+                    const metadata = uint8ArrayToWasm((wasmBlob) =>
+                        socket.parser.readTileLayerMetadata(wasmBlob),
+                    payload) as unknown as {
+                        conversionTimestampMs?: number;
+                        ttlMs?: number;
+                    };
+                    const timestamp = Number(metadata.conversionTimestampMs);
+                    const ttl = Number(metadata.ttlMs);
+                    const expiry = Number.isFinite(timestamp) &&
+                        Number.isFinite(ttl) && ttl > 0
+                        ? timestamp + ttl
+                        : null;
+                    expiresAtMs = expiry !== null && Number.isFinite(expiry)
+                        ? expiry
+                        : null;
+                    const parsedLayer = uint8ArrayToWasm((wasmBlob) => {
+                        return socket.parser.readTileSourceDataLayer(wasmBlob);
+                    }, payload);
+                    if (!parsedLayer) {
+                        reject(new Error(this.noSourceDataMessage(mapTileKey)));
+                        return;
+                    }
                     const currentLayer = layer as TileSourceDataLayer | null;
                     currentLayer?.delete();
                     layer = parsedLayer;
+                    resolve();
+                } catch (err) {
+                    reject(err instanceof Error ? err : new Error(`${err}`));
                 }
-            } catch (err) {
-                sourceDataParseError = err instanceof Error ? err : new Error(`${err}`);
-            }
+            });
         });
 
-        let status;
         try {
             socket.sendRequest(requestBody);
-            status = await socket.waitForCompletion();
-
-            const waitUntil = Date.now() + 5000;
-            while (!layer && !sourceDataParseError && Date.now() < waitUntil) {
-                await new Promise(resolve => setTimeout(resolve, 25));
-            }
+            await waitForSourceDataRequest(
+                socket.waitForCompletion(),
+                sourceDataReceived
+            );
         } catch (err) {
             const currentLayer = layer as TileSourceDataLayer | null;
             currentLayer?.delete();
@@ -149,26 +286,9 @@ export class SourceDataPanelComponent {
             socket.destroy();
         }
 
-        if (sourceDataParseError) {
-            const currentLayer = layer as TileSourceDataLayer | null;
-            currentLayer?.delete();
-            throw sourceDataParseError;
-        }
-
-        const statusMessage = status.message || "";
-        const failures = (status.requests || []).filter(req => req.status !== MapTileRequestStatus.Success);
-        if (failures.length) {
-            const summary = failures
-                .map(req => `${req.mapId}/${req.layerId}: ${req.statusText}`)
-                .join(", ");
-            const currentLayer = layer as TileSourceDataLayer | null;
-            currentLayer?.delete();
-            throw new Error(`Tile request failed: ${summary}`);
-        }
-
         const loadedLayer = layer as TileSourceDataLayer | null;
         if (!loadedLayer) {
-            throw new Error(statusMessage || this.noSourceDataMessage(mapTileKey));
+            throw new Error(this.noSourceDataMessage(mapTileKey));
         }
 
         const error = loadedLayer.getError();
@@ -177,23 +297,7 @@ export class SourceDataPanelComponent {
             throw new Error(`Error while loading layer: ${error}`);
         }
 
-        return loadedLayer;
-    }
-
-    /** Normalizes the parser output so the tree always receives a list of visible root nodes. */
-    private treeDataFromRoot(root: any): TreeTableNode[] {
-        if (!root) {
-            return [];
-        }
-        if (Array.isArray(root.children)) {
-            return root.children.filter((node: any) => this.hasTreeNodeContent(node));
-        }
-        return this.hasTreeNodeContent(root) ? [root] : [];
-    }
-
-    /** Filters parser artifacts that do not contribute visible data to the tree. */
-    private hasTreeNodeContent(node: any): boolean {
-        return !!node && (node.data !== undefined || (Array.isArray(node.children) && node.children.length > 0));
+        return {layer: loadedLayer, expiresAtMs};
     }
 
     /** Builds a user-facing empty-state message for a tile without source data. */
@@ -203,16 +307,11 @@ export class SourceDataPanelComponent {
         return `No source data for tile ${tileId} (${layerName}) of map ${mapId}.`;
     }
 
-    /**
-     * Set an error message that gets displayed.
-     * Unsets the tree to an empty array.
-     *
-     * @param message Error message
-     */
     /** Replaces the tree with an error state and notifies the parent panel. */
     setError(message: string) {
         this.loading = false;
         this.treeData = [];
+        this.sqlQuery = undefined;
         this.errorMessage = message;
         this.error.emit(message);
     }
@@ -245,7 +344,7 @@ export class SourceDataPanelComponent {
         return `<a href="${prefix + url}" target="_blank">${schema}</a>`;
     }
 
-    /** Formats both scalar and bit-range source-data addresses for the table cell. */
+    /** Formats a presentation address without affecting canonical selection addresses. */
     addressFormatter(colKey: string, rowData: any): string {
         if (!colKey || !rowData.hasOwnProperty(colKey)) {
             return "";
@@ -262,27 +361,30 @@ export class SourceDataPanelComponent {
 
     /** Expands and highlights the row that covers the requested source-data address, if present. */
     selectItemWithAddress(address?: bigint) {
-        let addressInRange: (address: any) => boolean | undefined;
-        if (address !== undefined) {
-            if (this.addressFormat == coreLib.SourceDataAddressFormat.BIT_RANGE) {
-                const searchAddress = {
-                    offset: address >> BigInt(32) & BigInt(0xFFFFFFFF),
-                    size: address & BigInt(0xFFFFFFFF),
-                }
+        if (address === undefined) {
+            expandSingleChildSourceDataPaths(this.treeData);
+            this.firstHighlightedItemIndex = 0;
+            return;
+        }
 
-                const addressLow = typeof searchAddress === 'object' ? searchAddress['offset'] : searchAddress;
-                const addressHigh = addressLow + (typeof searchAddress === 'object' ? searchAddress['size'] : searchAddress);
+        let addressInRange: (candidate: any) => boolean;
+        if (this.addressFormat == coreLib.SourceDataAddressFormat.BIT_RANGE) {
+            const searchAddress = {
+                offset: address >> BigInt(32) & BigInt(0xFFFFFFFF),
+                size: address & BigInt(0xFFFFFFFF),
+            }
 
-                addressInRange = (address: any) => {
-                    return address.offset >= addressLow &&
-                        address.offset + address.size <= addressHigh &&
-                        (address.size != 0 || addressLow == addressHigh);
-                }
-            } else {
-                const searchAddress = address;
-                addressInRange = (address: any) => {
-                    return address == searchAddress;
-                }
+            const addressLow = searchAddress.offset;
+            const addressHigh = addressLow + searchAddress.size;
+
+            addressInRange = (candidate: any) => {
+                return candidate.offset >= addressLow &&
+                    candidate.offset + candidate.size <= addressHigh &&
+                    (candidate.size != 0 || addressLow == addressHigh);
+            }
+        } else {
+            addressInRange = (candidate: any) => {
+                return candidate == address;
             }
         }
         // Virtual row index (visible row index) of the first highlighted row, or undefined.
@@ -297,10 +399,10 @@ export class SourceDataPanelComponent {
                 node.data.styleClass = "highlight";
             }
 
-            if (node.data.address && addressInRange && addressInRange(node.data.address)) {
+            if (node.data.address && addressInRange(node.data.address)) {
                 highlight = true;
 
-                if (!firstHighlightedItemIndex) {
+                if (firstHighlightedItemIndex === undefined) {
                     firstHighlightedItemIndex = virtualRowIndex;
                 }
 
@@ -308,15 +410,6 @@ export class SourceDataPanelComponent {
                 parents.forEach((parent: TreeTableNode) =>{
                     parent.expanded = true;
                 });
-            }
-
-            if (address === undefined && node.children && node.children.length < 5) {
-                node.expanded = true;
-                for (const child of node.children) {
-                    if (child.children && child.children.length < 5) {
-                        child.expanded = true;
-                    }
-                }
             }
 
             if (node.children) {
@@ -329,19 +422,6 @@ export class SourceDataPanelComponent {
         this.treeData.forEach((item: TreeTableNode, index) => {
             select(item, [], false, index);
         });
-
-        if (address === undefined) {
-            for (const item of this.treeData) {
-                if (item.children) {
-                    item.expanded = true;
-                    for (const child of item.children) {
-                        if (child.children && child.children.length < 5) {
-                            child.expanded = true;
-                        }
-                    }
-                }
-            }
-        }
 
         this.firstHighlightedItemIndex = firstHighlightedItemIndex ?? 0;
     }

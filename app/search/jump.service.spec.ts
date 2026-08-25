@@ -237,9 +237,9 @@ describe('JumpTargetService', () => {
             target.execute('65536 m1 layerA');
         }
 
-        expect(coreLib.getSourceDataLayerKey('m1', 'LAYER-ID', 65536)).toBe("SourceData:m1:LAYER-ID:65536:0");
+        expect(coreLib.getSourceDataLayerKey('m1', 'LAYER-ID', 65536)).toBe("SourceData:m1:LAYER-ID:65536");
         expect(stateService.setSelection).toHaveBeenCalledWith({
-            mapTileKey: 'SourceData:m1:LAYER-ID:65536:0',
+            mapTileKey: 'SourceData:m1:LAYER-ID:65536',
         } as any);
         expect(menuNextSpy).not.toHaveBeenCalled();
     });
@@ -247,8 +247,8 @@ describe('JumpTargetService', () => {
     it('creates SourceData metadata keys using the tile-zero sentinel', () => {
         const key = coreLib.getSourceDataLayerKey('m1', 'Metadata-RegistryMetadata', 0);
 
-        expect(key).toBe('SourceData:m1:Metadata-RegistryMetadata:0:0');
-        expect(coreLib.parseMapTileKey(key)).toEqual(['m1', 'Metadata-RegistryMetadata', 0, 0]);
+        expect(key).toBe('SourceData:m1:Metadata-RegistryMetadata:0');
+        expect(coreLib.parseMapTileKey(key)).toEqual(['m1', 'Metadata-RegistryMetadata', 0]);
     });
 
     it('forwards markedPosition to AppStateService using Cartographic.fromDegrees', () => {

@@ -1,30 +1,43 @@
 import {HttpClient} from "@angular/common/http";
 import {Injectable} from "@angular/core";
 import {BehaviorSubject, firstValueFrom, Subject} from "rxjs";
-import {FeatureTile} from "./features.model";
-import {RequestedLayerProgressState} from "./map-runtime.model";
 import {
     dataSourceCatalogStatus,
     dataSourceProgressPercent,
     isDataSourceCatalogEntryReady,
     MapInfoItem,
     MapLayerTree,
+    layerPresetInferenceKey,
     sortDataSourceCatalogEntries,
     StyleOptionNode
 } from "./map.tree.model";
-import {SearchResultTile} from "./search-result-tile.model";
-import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
+import {
+    coreLib,
+    uint8ArrayFromWasm,
+    uint8ArrayToWasm
+} from "../integrations/wasm";
 import {AppStateService, TileGridMode, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 import {StyleService} from "../styledata/style.service";
-import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
+import type {
+    FeatureLayerStyle,
+    TileLayerParser
+} from "../../build/libs/core/erdblick-core";
+import {MapgetLayer} from "./mapget-layer.model";
+import {MapPresetService} from "../styledata/map-preset.service";
 
 /** Lightweight datasource status/progress update carried by interactive catalog-change frames. */
 interface SourceCatalogEntryUpdate {
-    sourceId: string;
+    configIndex: number;
     status?: string;
     statusMessage?: string;
     progress?: number | null;
+}
+
+/** One concrete option/view pair invalidated by an atomic style-option transaction. */
+export interface StyleOptionChange {
+    optionNode: StyleOptionNode;
+    viewIndex: number;
 }
 
 
@@ -36,34 +49,41 @@ export class MapInfoService {
     public readonly legalInformationPerMap = new Map<string, Set<string>>();
     public readonly legalInformationUpdated = new Subject<boolean>();
     public readonly layerStateChanged = new Subject<string>();
-    public readonly styleOptionChanged = new Subject<[StyleOptionNode, number]>();
+    public readonly styleOptionsChanged = new Subject<StyleOptionChange[]>();
     /** Emits after ready datasource metadata has been replaced in the shared parser. */
     public readonly dataSourceInfoChanged = new Subject<void>();
     public readonly maps$: BehaviorSubject<MapLayerTree>;
 
     /** Shared parser instance whose datasource metadata is populated from `/sources`. */
     private parserInstance: TileLayerParser | null = null;
+    /** Full-schema style planners created only for maps which are actually presented. */
+    private readonly styleParsersByMapId = new Map<string, TileLayerParser>();
     /** Raw datasource metadata retained for diagnostics/debug export. */
     private dataSourceInfoJson: string | null = null;
+    /** UTF-8 form of ready datasource metadata shared with render workers. */
+    private dataSourceInfoBlobValue: Uint8Array | null = null;
+    /** Schema-free, map-local parser metadata used only by subset render workers. */
+    private readonly renderDataSourceInfoBlobCache = new Map<string, Uint8Array>();
+    /** Complete dictionary snapshots reused until the stream appends new fields. */
+    private readonly fieldDictBlobCache = new Map<string, Uint8Array>();
     /** Latest datasource-catalog revision advertised by `/sources`, if the backend supports it. */
     private sourceCatalogRevisionValue: number | null = null;
     /** True while at least one catalog entry is not ready; used to avoid pruning recoverable state. */
     private catalogHasNonReadyEntries = false;
     /** Last catalog snapshot, including initializing/failed entries that are not passed to the parser. */
     private sourceCatalogEntries: MapInfoItem[] = [];
-    /** Last requested stage coverage per layer, used to enrich incomplete layer metadata. */
-    private requestedLayerProgressByKey: Map<string, RequestedLayerProgressState> = new Map();
-    /** Highest stage count observed from streamed tile payloads when `/sources` did not declare it. */
-    private observedLayerStageCountByKey: Map<string, number> = new Map();
+    /** Immutable feature-layer identities rebuilt from the current source catalog. */
+    private mapgetLayersByKey = new Map<string, MapgetLayer>();
 
     constructor(
         private readonly httpClient: HttpClient,
         private readonly stateService: AppStateService,
         private readonly styleService: StyleService,
+        private readonly mapPresetService: MapPresetService,
         private readonly messageService: InfoMessageService
     ) {
         this.maps$ = new BehaviorSubject<MapLayerTree>(
-            new MapLayerTree([], this.stateService, this.styleService)
+            new MapLayerTree([], this.stateService, this.styleService, this.mapPresetService)
         );
     }
 
@@ -87,6 +107,93 @@ export class MapInfoService {
         return this.dataSourceInfoJson;
     }
 
+    /** Returns immutable ready datasource metadata for worker-local parsers. */
+    getDataSourceInfoBlob(): Uint8Array | null {
+        return this.dataSourceInfoBlobValue;
+    }
+
+    /**
+     * Plans one stylesheet against the full schema of its exact map only.
+     *
+     * Tile transport and feature-id lookup use the shared schema-free parser.
+     * Keeping schema construction here makes the expensive completion model
+     * lazy per presented map instead of blocking startup on every configured
+     * datasource.
+     */
+    planStyleFilter(
+        style: FeatureLayerStyle,
+        mapId: string,
+        layerId: string,
+        highlightMode: number,
+        lod: number
+    ): unknown {
+        return this.styleParserForMap(mapId).planStyleFilter(
+            style,
+            mapId,
+            layerId,
+            highlightMode,
+            lod
+        );
+    }
+
+    /**
+     * Returns the minimal datasource metadata needed to deserialize one map's
+     * subset layers in a render worker.
+     *
+     * Rendering consumes LayerInfo identity, versions, feature-id
+     * compositions, and geometry metadata, but it does not compile SIMFIL or
+     * provide completion. Keeping featureModelSchema out of this payload
+     * avoids parsing the complete completion catalog independently in every
+     * renderer.
+     */
+    getRenderDataSourceInfoBlob(mapId: string): Uint8Array | null {
+        const cached = this.renderDataSourceInfoBlobCache.get(mapId);
+        if (cached) {
+            return cached;
+        }
+
+        const sources = this.schemaFreeDataSourceInfo(
+            this.sourceCatalogEntries
+                .filter(source =>
+                    source.mapId === mapId &&
+                    isDataSourceCatalogEntryReady(source))
+        );
+        if (!sources.length) {
+            return null;
+        }
+
+        const blob = new TextEncoder().encode(JSON.stringify(sources));
+        this.renderDataSourceInfoBlobCache.set(mapId, blob);
+        return blob;
+    }
+
+    /**
+     * Snapshots one complete string-pool dictionary for an isolated consumer.
+     *
+     * Streamed layer payloads refer to dictionary IDs but do not embed their
+     * strings. Render workers do not consume the ordered transport stream, so
+     * each worker task must carry the dictionary state against which its
+     * subset payload was decoded on the main thread.
+     */
+    getFieldDictBlob(stringPoolId: string): Uint8Array | null {
+        const cached = this.fieldDictBlobCache.get(stringPoolId);
+        if (cached) {
+            return cached;
+        }
+        const snapshot = uint8ArrayFromWasm(data =>
+            this.tileLayerParser.getFieldDict(data, stringPoolId)
+        );
+        if (snapshot) {
+            this.fieldDictBlobCache.set(stringPoolId, snapshot);
+        }
+        return snapshot;
+    }
+
+    /** Invalidates worker snapshots after an additive field-dictionary frame. */
+    invalidateFieldDictBlobCache(): void {
+        this.fieldDictBlobCache.clear();
+    }
+
     /** Returns the last `/sources` catalog revision observed from response headers. */
     get sourceCatalogRevision(): number | null {
         return this.sourceCatalogRevisionValue;
@@ -107,6 +214,16 @@ export class MapInfoService {
     isMapLayerReady(mapId: string, layerId: string): boolean {
         const map = this.maps.maps.get(mapId);
         return !!map?.layers.has(layerId) && isDataSourceCatalogEntryReady(map.info);
+    }
+
+    /** Returns the immutable catalog identity for one feature layer. */
+    mapgetLayer(mapId: string, layerId: string): MapgetLayer | undefined {
+        return this.mapgetLayersByKey.get(`${mapId}/${layerId}`);
+    }
+
+    /** Iterates all current non-source-data mapget layer identities. */
+    mapgetLayers(): Iterable<MapgetLayer> {
+        return this.mapgetLayersByKey.values();
     }
 
     /** Returns whether a map catalog entry is currently initializing. */
@@ -149,6 +266,9 @@ export class MapInfoService {
     async reloadDataSources(): Promise<boolean> {
         try {
             const response = await firstValueFrom(this.httpClient.get<Array<MapInfoItem>>("/sources?blocking=false", {
+                // Catalog validators from older mapget servers can collide after a restart.
+                // Fetching the authoritative snapshot must therefore bypass the HTTP cache.
+                cache: "no-store",
                 observe: "response"
             }));
             const result = Array.isArray(response.body) ? response.body : [];
@@ -170,11 +290,16 @@ export class MapInfoService {
             const dataSourceInfoChanged = jsonString !== this.dataSourceInfoJson;
             this.dataSourceInfoJson = jsonString;
             if (dataSourceInfoChanged) {
+                this.invalidateFieldDictBlobCache();
+                this.renderDataSourceInfoBlobCache.clear();
+                this.clearStyleParsers();
+                this.dataSourceInfoBlobValue = new TextEncoder().encode(jsonString);
+                const parserJson = JSON.stringify(
+                    this.schemaFreeDataSourceInfo(readyEntries)
+                );
                 uint8ArrayToWasm(wasmBuffer => {
                     this.tileLayerParser.setDataSourceInfo(wasmBuffer);
-                }, new TextEncoder().encode(jsonString));
-                FeatureTile.clearDataSourceInfoBlobCache();
-                SearchResultTile.clearDataSourceInfoBlobCache();
+                }, new TextEncoder().encode(parserJson));
                 this.dataSourceInfoChanged.next();
             }
             this.layerStateChanged.next("datasources");
@@ -188,10 +313,10 @@ export class MapInfoService {
 
     /** Applies a lightweight source-status update from the interactive stream without reloading `/sources`. */
     applySourceCatalogChange(update: SourceCatalogEntryUpdate, revision: number | null = null): boolean {
-        if (!update.sourceId) {
+        if (!Number.isInteger(update.configIndex) || update.configIndex < 0) {
             return false;
         }
-        const index = this.sourceCatalogEntries.findIndex(entry => entry.sourceId === update.sourceId);
+        const index = this.sourceCatalogEntries.findIndex(entry => entry.configIndex === update.configIndex);
         if (index < 0) {
             return false;
         }
@@ -222,7 +347,9 @@ export class MapInfoService {
 
     /** Returns true when a lightweight update announces readiness but the local entry still lacks full metadata. */
     sourceCatalogChangeNeedsRefresh(update: SourceCatalogEntryUpdate): boolean {
-        const entry = this.sourceCatalogEntries.find(sourceEntry => sourceEntry.sourceId === update.sourceId);
+        const entry = this.sourceCatalogEntries.find(
+            sourceEntry => sourceEntry.configIndex === update.configIndex
+        );
         if (!entry) {
             return true;
         }
@@ -245,14 +372,103 @@ export class MapInfoService {
     private publishSourceCatalogTree(catalog: MapInfoItem[]): void {
         this.sourceCatalogEntries = sortDataSourceCatalogEntries(catalog);
         this.catalogHasNonReadyEntries = this.sourceCatalogEntries.some(entry => !isDataSourceCatalogEntryReady(entry));
+        this.mapgetLayersByKey = this.materializeMapgetLayers(this.sourceCatalogEntries);
         const maps = this.sourceCatalogEntries.filter(entry => !entry.addOn || !isDataSourceCatalogEntryReady(entry));
-        this.maps$.next(new MapLayerTree(
+        const nextTree = new MapLayerTree(
             maps,
             this.stateService,
             this.styleService,
+            this.mapPresetService,
             this.canPruneStateForCurrentCatalog()
-        ));
+        );
+        this.maps.destroy();
+        this.maps$.next(nextTree);
         this.reapplySyncOptionsForAllViews();
+    }
+
+    /** Materializes the catalog-only layer model without view or presentation state. */
+    private materializeMapgetLayers(catalog: MapInfoItem[]): Map<string, MapgetLayer> {
+        const result = new Map<string, MapgetLayer>();
+        for (const source of catalog) {
+            if (!isDataSourceCatalogEntryReady(source) || source.addOn) {
+                continue;
+            }
+            for (const layer of Object.values(source.layers ?? {})) {
+                if (layer.type === "SourceData") {
+                    continue;
+                }
+                const key = `${source.mapId}/${layer.layerId}`;
+                const current = this.mapgetLayersByKey.get(key);
+                if (current &&
+                    current.sourceId === source.sourceId &&
+                    current.stringPoolId === source.stringPoolId &&
+                    current.info === layer) {
+                    result.set(key, current);
+                    continue;
+                }
+                const mapgetLayer = new MapgetLayer(
+                    source.sourceId,
+                    source.stringPoolId,
+                    source.mapId,
+                    layer.layerId,
+                    layer
+                );
+                result.set(key, mapgetLayer);
+            }
+        }
+        return result;
+    }
+
+    /** Returns a lazily initialized full-schema parser for one presented map. */
+    private styleParserForMap(mapId: string): TileLayerParser {
+        const cached = this.styleParsersByMapId.get(mapId);
+        if (cached) {
+            return cached;
+        }
+        const sources = this.sourceCatalogEntries.filter(source =>
+            source.mapId === mapId &&
+            isDataSourceCatalogEntryReady(source)
+        );
+        if (!sources.length) {
+            throw new Error(`Datasource '${mapId}' is not ready for style planning.`);
+        }
+        const parser = new coreLib.TileLayerParser() as TileLayerParser;
+        try {
+            const json = new TextEncoder().encode(JSON.stringify(sources));
+            uint8ArrayToWasm(
+                wasmBuffer => parser.setDataSourceInfo(wasmBuffer),
+                json
+            );
+        } catch (error) {
+            parser.delete();
+            throw error;
+        }
+        this.styleParsersByMapId.set(mapId, parser);
+        return parser;
+    }
+
+    /** Releases full-schema planners before installing a changed catalog. */
+    private clearStyleParsers(): void {
+        for (const parser of this.styleParsersByMapId.values()) {
+            parser.delete();
+        }
+        this.styleParsersByMapId.clear();
+    }
+
+    /** Removes completion schemas while retaining all transport/model identity metadata. */
+    private schemaFreeDataSourceInfo(
+        sources: readonly MapInfoItem[]
+    ): MapInfoItem[] {
+        return sources.map(source => ({
+            ...source,
+            layers: Object.fromEntries(
+                Object.entries(source.layers ?? {}).map(([layerId, layer]) => {
+                    const parserLayer = {...layer};
+                    delete parserLayer["featureModelSchema"];
+                    return [layerId, parserLayer];
+                })
+            )
+        }));
     }
 
     /** Converts absent/null/invalid source progress to the UI's "no percentage available" state. */
@@ -276,100 +492,6 @@ export class MapInfoService {
     /** Reapplies persisted tree parameters after style, view, or datasource state changes. */
     configureTreeParameters(): void {
         this.maps.configureTreeParameters();
-    }
-
-    /** Returns the best-known stage count for a layer from metadata, requests, and observed payloads. */
-    getLayerStageCount(mapId: string, layerId: string): number {
-        let stageCount = 1;
-        const layerInfo = this.maps.maps.get(mapId)?.layers.get(layerId)?.info as {
-            stages?: unknown;
-            stageLabels?: unknown;
-        } | undefined;
-
-        if (typeof layerInfo?.stages === "number"
-            && Number.isFinite(layerInfo.stages)
-            && layerInfo.stages > 0) {
-            stageCount = Math.max(stageCount, Math.floor(layerInfo.stages));
-        }
-        if (Array.isArray(layerInfo?.stageLabels) && layerInfo.stageLabels.length > 0) {
-            stageCount = Math.max(stageCount, layerInfo.stageLabels.length);
-        }
-
-        const layerKey = this.layerRequestKey(mapId, layerId);
-        const trackedRequestState = this.requestedLayerProgressByKey.get(layerKey);
-        if (trackedRequestState) {
-            stageCount = Math.max(stageCount, trackedRequestState.stageCount);
-        }
-        const observedStageCount = this.observedLayerStageCountByKey.get(layerKey);
-        if (typeof observedStageCount === "number" && observedStageCount > 0) {
-            stageCount = Math.max(stageCount, observedStageCount);
-        }
-
-        return stageCount;
-    }
-
-    /** Resolves stage labels for a layer, filling gaps with generic `Stage N` labels. */
-    getLayerStageLabels(mapId: string, layerId: string, stageCount: number): string[] {
-        const layerInfo = this.maps.maps.get(mapId)?.layers.get(layerId)?.info as {
-            stageLabels?: unknown;
-        } | undefined;
-        const declaredStageLabels = Array.isArray(layerInfo?.stageLabels)
-            ? layerInfo.stageLabels
-            : [];
-        const result: string[] = [];
-        for (let stage = 0; stage < stageCount; stage++) {
-            const label = declaredStageLabels[stage];
-            if (typeof label === "string" && label.trim().length > 0) {
-                result.push(label.trim());
-            } else {
-                result.push(`Stage ${stage}`);
-            }
-        }
-        return result;
-    }
-
-    /** Returns the stage considered high-fidelity for rendering decisions and inspection labels. */
-    getLayerHighFidelityStage(mapId: string, layerId: string): number {
-        const stageCount = this.getLayerStageCount(mapId, layerId);
-        const layerInfo = this.maps.maps.get(mapId)?.layers.get(layerId)?.info as {
-            highFidelityStage?: unknown;
-        } | undefined;
-        const fallback = stageCount > 1 ? 1 : 0;
-        if (typeof layerInfo?.highFidelityStage !== "number"
-            || !Number.isFinite(layerInfo.highFidelityStage)) {
-            return fallback;
-        }
-        return Math.max(0, Math.min(stageCount - 1, Math.floor(layerInfo.highFidelityStage)));
-    }
-
-    /** Replaces the stage-count request state used to enrich layer metadata for progress and inspection. */
-    setRequestedLayerProgress(progress: Map<string, RequestedLayerProgressState>): void {
-        this.requestedLayerProgressByKey = progress;
-    }
-
-    /** Returns the current requested-layer progress state. */
-    requestedLayerProgress(): Iterable<RequestedLayerProgressState> {
-        return this.requestedLayerProgressByKey.values();
-    }
-
-    /** Expands the known stage count for a layer when incoming payloads reveal additional stages. */
-    trackObservedLayerStage(mapId: string, layerId: string, stage: number) {
-        if (!Number.isInteger(stage) || stage < 0) {
-            return;
-        }
-
-        const layerKey = this.layerRequestKey(mapId, layerId);
-        const observedStageCount = Math.max(1, Math.floor(stage) + 1);
-        const previousStageCount = this.observedLayerStageCountByKey.get(layerKey) ?? 1;
-        if (observedStageCount <= previousStageCount) {
-            return;
-        }
-        this.observedLayerStageCountByKey.set(layerKey, observedStageCount);
-    }
-
-    /** Returns the stable key used to aggregate per-layer request progress. */
-    layerRequestKey(mapId: string, layerId: string): string {
-        return `${mapId}/${layerId}`;
     }
 
     /** Persists map/layer visibility changes and emits the resulting map-state event. */
@@ -396,6 +518,35 @@ export class MapInfoService {
     /** Sets the tile-grid coordinate mode and refreshes affected overlays. */
     setViewTileGridMode(viewIndex: number, mode: TileGridMode) {
         this.maps.setViewTileGridMode(viewIndex, mode);
+        this.layerStateChanged.next("tile-grid");
+    }
+
+    /** Sets the independent tile-grid line level for one view. */
+    setViewTileGridLevel(viewIndex: number, level: number): void {
+        this.maps.setViewTileGridLevel(viewIndex, level);
+        this.layerStateChanged.next("tile-grid");
+    }
+
+    /** Sets whether the tile grid follows the viewport-based auto-level heuristic. */
+    setViewTileGridAutoLevel(viewIndex: number, autoLevel: boolean): void {
+        this.maps.setViewTileGridAutoLevel(viewIndex, autoLevel);
+        this.layerStateChanged.next("tile-grid");
+    }
+
+    /** Returns whether the tile grid currently follows the auto-level heuristic. */
+    isViewTileGridAutoLevelEnabled(viewIndex: number): boolean {
+        return this.maps.getViewTileGridAutoLevel(viewIndex);
+    }
+
+    /** Sets the tile-grid line colour for one view. */
+    setViewTileGridColor(viewIndex: number, color: string): void {
+        this.maps.setViewTileGridColor(viewIndex, color);
+        this.layerStateChanged.next("tile-grid");
+    }
+
+    /** Sets the tile-grid opacity for one view. */
+    setViewTileGridOpacity(viewIndex: number, opacity: number): void {
+        this.maps.setViewTileGridOpacity(viewIndex, opacity);
         this.layerStateChanged.next("tile-grid");
     }
 
@@ -435,21 +586,33 @@ export class MapInfoService {
             return false;
         }
         const result = this.maps.syncViews(viewIndex);
-        for (const [optionNode, targetIndex] of result.styleOptionChanges) {
-            this.styleOptionChanged.next([optionNode, targetIndex]);
-        }
+        this.publishStyleOptionChanges(result.styleOptionChanges.map(([optionNode, targetIndex]) => ({
+            optionNode,
+            viewIndex: targetIndex
+        })));
         return result.viewConfigChanged;
     }
 
     /** Pushes one view's current style-option values into every compatible layer and sibling view. */
     applySyncOptionsForView(viewIndex: number) {
+        const changes: StyleOptionChange[] = [];
         for (const layer of this.maps.allFeatureLayers()) {
-            const syncedOptions = this.maps.syncLayers(viewIndex, layer.mapId, layer.id);
+            const syncedOptions = this.maps.syncLayers(viewIndex, layer.mapId, layer.id, false);
             for (const syncedOption of syncedOptions) {
-                this.styleOptionChanged.next([syncedOption, viewIndex]);
+                changes.push({optionNode: syncedOption, viewIndex});
             }
         }
-        if (this.syncViewsIfEnabled(viewIndex)) {
+        let viewConfigChanged = false;
+        if (this.stateService.viewSync.includes(VIEW_SYNC_LAYERS)) {
+            const result = this.maps.syncViews(viewIndex, false);
+            viewConfigChanged = result.viewConfigChanged;
+            changes.push(...result.styleOptionChanges.map(([optionNode, targetIndex]) => ({
+                optionNode,
+                viewIndex: targetIndex
+            })));
+        }
+        this.persistAndPublishStyleOptionChanges(changes);
+        if (viewConfigChanged) {
             this.layerStateChanged.next("sync-options");
         }
     }
@@ -495,18 +658,102 @@ export class MapInfoService {
 
     /** Applies a style-option value change and emits it for render invalidation. */
     applyStyleOptionChange(optionNode: StyleOptionNode, viewIndex: number): void {
-        if (optionNode.value.length <= viewIndex) {
-            return;
-        }
-        this.styleOptionChanged.next([optionNode, viewIndex]);
+        this.applyStyleOptionChanges([optionNode], viewIndex);
+    }
+
+    /** Applies one atomic collection of option mutations and performs synchronization once. */
+    applyStyleOptionChanges(optionNodes: StyleOptionNode[], viewIndex: number): void {
+        const directNodes = optionNodes.filter(optionNode => optionNode.value.length > viewIndex);
+        const sourceLayers = new Set(directNodes.map(optionNode =>
+            `${optionNode.mapId}\u0000${optionNode.layerId}`));
+        this.applyStyleOptionTransaction(directNodes, viewIndex, sourceLayers, true);
+    }
+
+    /** Applies preset-owned changes while synchronizing every component source layer once. */
+    applyPresetChanges(
+        optionNodes: StyleOptionNode[],
+        viewIndex: number,
+        sourceLayers: ReadonlyArray<{mapId: string; layerId: string}>
+    ): void {
+        const directNodes = optionNodes.filter(optionNode => optionNode.value.length > viewIndex);
+        this.applyStyleOptionTransaction(
+            directNodes,
+            viewIndex,
+            new Set(sourceLayers.map(source => `${source.mapId}\u0000${source.layerId}`)),
+            false);
+    }
+
+    /** Executes one option transaction across direct, layer-synced, and view-synced targets. */
+    private applyStyleOptionTransaction(
+        directNodes: StyleOptionNode[],
+        viewIndex: number,
+        sourceLayers: Set<string>,
+        inferPresets: boolean
+    ): void {
+        const changes: StyleOptionChange[] = directNodes.map(optionNode => ({optionNode, viewIndex}));
         if (this.isSyncOptionsForViewEnabled(viewIndex)) {
-            const syncedOptions = this.maps.syncLayers(viewIndex, optionNode.mapId, optionNode.layerId);
-            for (const syncedOption of syncedOptions) {
-                this.styleOptionChanged.next([syncedOption, viewIndex]);
+            for (const sourceLayer of sourceLayers) {
+                const [mapId, layerId] = sourceLayer.split("\u0000");
+                const syncedOptions = this.maps.syncLayers(viewIndex, mapId, layerId, false);
+                changes.push(...syncedOptions.map(optionNode => ({optionNode, viewIndex})));
             }
         }
-        if (this.syncViewsIfEnabled(viewIndex)) {
+        let viewConfigChanged = false;
+        if (this.stateService.viewSync.includes(VIEW_SYNC_LAYERS)) {
+            const result = this.maps.syncViews(viewIndex, false);
+            viewConfigChanged = result.viewConfigChanged;
+            changes.push(...result.styleOptionChanges.map(([optionNode, targetIndex]) => ({
+                optionNode,
+                viewIndex: targetIndex
+            })));
+        }
+        if (changes.length) {
+            this.persistAndPublishStyleOptionChanges(changes, inferPresets);
+        } else {
+            this.maps.reconcilePresetSelections();
+        }
+        if (viewConfigChanged) {
             this.layerStateChanged.next("style-options");
+        }
+    }
+
+    /** Writes changed option arrays once and publishes one deduplicated render transaction. */
+    private persistAndPublishStyleOptionChanges(
+        changes: StyleOptionChange[],
+        inferPresets = true
+    ): void {
+        if (!changes.length) {
+            return;
+        }
+        const changedOptions = new Map<string, StyleOptionNode>();
+        for (const change of changes) {
+            changedOptions.set(change.optionNode.key, change.optionNode);
+        }
+        this.stateService.setStyleOptionValuesBatch([...changedOptions.values()].map(optionNode => ({
+            mapId: optionNode.mapId,
+            layerId: optionNode.layerId,
+            shortStyleId: optionNode.shortStyleId,
+            optionId: optionNode.id,
+            values: optionNode.value
+        })));
+        const inferenceTargets = inferPresets
+            ? new Set(changes.map(change => layerPresetInferenceKey(
+                change.viewIndex,
+                change.optionNode.mapId,
+                change.optionNode.layerId)))
+            : new Set<string>();
+        this.maps.reconcilePresetSelections(inferenceTargets);
+        this.publishStyleOptionChanges(changes);
+    }
+
+    /** Emits a render batch with duplicate option/view pairs removed in first-seen order. */
+    private publishStyleOptionChanges(changes: StyleOptionChange[]): void {
+        const unique = new Map<string, StyleOptionChange>();
+        for (const change of changes) {
+            unique.set(`${change.viewIndex}\u0000${change.optionNode.key}`, change);
+        }
+        if (unique.size) {
+            this.styleOptionsChanged.next([...unique.values()]);
         }
     }
 

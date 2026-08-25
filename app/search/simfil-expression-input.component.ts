@@ -34,8 +34,6 @@ import {simfilHighlightStyle, simfilLanguage} from "./simfil-language";
                 [pending]="completion.pending"
                 [items]="completionItems"
                 [selectionIndex]="completion.selectionIndex"
-                [top]="completion.top"
-                [left]="completion.left"
                 [zIndex]="completionZIndex"
                 (popupMouseDown)="onCompletionPopupDown($event)"
                 (candidateSelected)="applyCompletion($event)"
@@ -70,6 +68,8 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
     @Output() completionAccepted = new EventEmitter<CompletionCandidate>();
 
     @ViewChild("editorHost", {static: true}) private editorHost!: ElementRef<HTMLElement>;
+    @ViewChild(SearchCompletionPopupComponent, {static: true})
+    private completionPopup!: SearchCompletionPopupComponent;
 
     private static nextId = 1;
     private readonly generatedOwnerId = `simfil-expression:${SimfilExpressionInputComponent.nextId++}`;
@@ -85,11 +85,10 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
     private applyingExternalValue = false;
     private completionMapLayersSignature = "";
     private dismissedCompletionSignature: string | null = null;
+    private completionBindingQueued = false;
 
     completionItems: CompletionCandidate[] = [];
     completion = {
-        top: 0,
-        left: 0,
         selectionIndex: 0,
         visible: false,
         pending: false
@@ -112,8 +111,10 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         });
         this.applySingleLineClass();
         this.observeTheme();
-        this.bindCompletionOwner();
-        this.updateCursorPosition();
+        // BehaviorSubjects emit synchronously when bound. Defer those
+        // template-visible mutations until Angular's current view check has
+        // completed, then coalesce any same-turn input changes into this bind.
+        this.scheduleCompletionBinding();
     }
 
     /** Applies input changes without rebuilding the CodeMirror view. */
@@ -138,7 +139,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
             });
         }
         if (changes["completionOwnerId"]) {
-            this.bindCompletionOwner();
+            this.scheduleCompletionBinding();
         }
         if (changes["completionScope"] || this.completionMapLayersChanged()) {
             this.resetCompletion();
@@ -147,11 +148,29 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
 
     /** Releases CodeMirror, completion subscriptions, and pending backend completion requests. */
     ngOnDestroy(): void {
+        this.viewReady = false;
         this.modeObserver?.disconnect();
         this.completionSubscriptions.unsubscribe();
         this.subscriptions.unsubscribe();
         this.searchService.clearCurrentCompletion(this.ownerId());
         this.editorView?.destroy();
+        this.editorView = undefined;
+    }
+
+    /** Defers one completion-stream bind beyond the active Angular check. */
+    private scheduleCompletionBinding(): void {
+        if (!this.viewReady || this.completionBindingQueued) {
+            return;
+        }
+        this.completionBindingQueued = true;
+        queueMicrotask(() => {
+            this.completionBindingQueued = false;
+            if (!this.viewReady || !this.editorView) {
+                return;
+            }
+            this.bindCompletionOwner();
+            this.updateCursorPosition();
+        });
     }
 
     /** Focuses the inline editor. */
@@ -544,8 +563,10 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
         this.cursorChange.emit(cursor);
         const coords = view.coordsAtPos(cursor);
         const fallbackRect = view.dom.getBoundingClientRect();
-        this.completion.top = coords?.bottom ?? fallbackRect.bottom;
-        this.completion.left = coords?.left ?? fallbackRect.left;
+        this.completionPopup.setPosition(
+            coords?.bottom ?? fallbackRect.bottom,
+            coords?.left ?? fallbackRect.left
+        );
     }
 
     /** Mirrors the single-line input state onto CodeMirror's root element. */

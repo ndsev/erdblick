@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <cmath>
 #include <iostream>
+#include <limits>
 #include <regex>
 #include <set>
 
@@ -18,13 +20,155 @@ constexpr size_t highlightModeIndex(FeatureStyleRule::HighlightMode mode) {
     return static_cast<size_t>(mode);
 }
 
-/** Collapse fidelity into the two cache buckets used by `FeatureLayerStyle`. */
-constexpr size_t fidelityIndex(FeatureStyleRule::Fidelity fidelity) {
-    return fidelity == FeatureStyleRule::LowFidelity ? 1U : 0U;
+/** Clamp an externally supplied LOD before indexing fixed rule caches. */
+constexpr size_t lodIndex(uint8_t lod) {
+    return std::min<size_t>(lod, FeatureStyleRule::kMaximumLod);
+}
+
+/** Derive the default seven density boundaries around the LOD-3 threshold. */
+std::array<uint32_t, 7> defaultLodThresholds(uint32_t lod3Threshold)
+{
+    auto const threshold = std::clamp(
+        lod3Threshold,
+        16U,
+        std::numeric_limits<uint32_t>::max() / 4U);
+    return {
+        threshold * 4U,
+        threshold * 2U,
+        threshold,
+        threshold / 2U,
+        threshold / 4U,
+        threshold / 8U,
+        threshold / 16U,
+    };
 }
 
 /** Shared empty vector returned when no rule candidates apply. */
 const std::vector<uint32_t> kEmptyRuleIndices{};
+
+std::optional<size_t> interactionEffectIndex(
+    FeatureStyleRule::HighlightMode mode)
+{
+    if (mode == FeatureStyleRule::HoverHighlight) {
+        return 0U;
+    }
+    if (mode == FeatureStyleRule::SelectionHighlight) {
+        return 1U;
+    }
+    return std::nullopt;
+}
+
+std::optional<InteractionEffectColor> parseInteractionColor(
+    YAML::Node const& node)
+{
+    if (!node.IsDefined()) {
+        return std::nullopt;
+    }
+    if (node.IsScalar()) {
+        Color color(node.as<std::string>());
+        if (!color.isValid()) {
+            return std::nullopt;
+        }
+        return InteractionEffectColor{color.toFVec4(), std::nullopt};
+    }
+    if (node.IsMap() && node["option"].IsScalar()) {
+        auto const option = node["option"].as<std::string>();
+        if (!option.empty()) {
+            return InteractionEffectColor{std::nullopt, option};
+        }
+    }
+    return std::nullopt;
+}
+
+JsValue interactionColorToJs(
+    InteractionEffectColor const& color,
+    std::string const& literalField,
+    std::string const& optionField,
+    JsValue const& options)
+{
+    auto result = JsValue::Dict();
+    auto resolved = color.literal;
+    if (!resolved && color.optionId && options.has(*color.optionId)) {
+        auto const option = options[*color.optionId];
+        if (option.type() == JsValue::Type::String) {
+            Color parsed(option.toString());
+            if (parsed.isValid()) {
+                resolved = parsed.toFVec4();
+            }
+        }
+    }
+    if (resolved) {
+        auto const& value = *resolved;
+        auto byte = [](float component) {
+            return static_cast<uint8_t>(std::round(
+                std::clamp(component, 0.0f, 1.0f) * 255.0f));
+        };
+        result.set(literalField, JsValue::List({
+            JsValue(byte(value.r)),
+            JsValue(byte(value.g)),
+            JsValue(byte(value.b)),
+            JsValue(byte(value.a)),
+        }));
+    }
+    if (color.optionId) {
+        result.set(optionField, JsValue(*color.optionId));
+    }
+    return result;
+}
+}
+
+NativeJsValue InteractionEffect::toJsValue(NativeJsValue const& options_) const
+{
+    JsValue const options(options_);
+    auto result = JsValue::Dict({
+        {"tintMix", JsValue(tintMix)},
+        {"opacity", JsValue(opacity)},
+        {"edgeWidth", JsValue(edgeWidth)},
+        {"haloRadius", JsValue(haloRadius)},
+        {"haloOpacity", JsValue(haloOpacity)},
+        {"stripeSpacing", JsValue(stripeSpacing)},
+        {"stripeWidth", JsValue(stripeWidth)},
+        {"stripeOpacity", JsValue(stripeOpacity)},
+        {"stripeAngle", JsValue(stripeAngle)},
+        {"stripeOffset", JsValue(stripeOffset)},
+        {"stripeSoftness", JsValue(stripeSoftness)},
+    });
+    if (tint) {
+        auto color = interactionColorToJs(
+            *tint,
+            "tint",
+            "tintOption",
+            options);
+        if (color.has("tint")) result.set("tint", color["tint"]);
+        if (color.has("tintOption")) result.set("tintOption", color["tintOption"]);
+    }
+    if (haloColor) {
+        auto color = interactionColorToJs(
+            *haloColor,
+            "haloColor",
+            "haloColorOption",
+            options);
+        if (color.has("haloColor")) {
+            result.set("haloColor", color["haloColor"]);
+        }
+        if (color.has("haloColorOption")) {
+            result.set("haloColorOption", color["haloColorOption"]);
+        }
+    }
+    if (stripeColor) {
+        auto color = interactionColorToJs(
+            *stripeColor,
+            "stripeColor",
+            "stripeColorOption",
+            options);
+        if (color.has("stripeColor")) {
+            result.set("stripeColor", color["stripeColor"]);
+        }
+        if (color.has("stripeColorOption")) {
+            result.set("stripeColorOption", color["stripeColorOption"]);
+        }
+    }
+    return *result;
 }
 
 FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
@@ -51,9 +195,23 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
         return;
     }
 
+    if (auto const thresholds = styleYaml["lod-thresholds"];
+        thresholds.IsDefined())
+    {
+        std::array<uint32_t, kLodCount - 1U> parsed{};
+        for (size_t index = 0; index < parsed.size(); ++index) {
+            parsed[index] = thresholds[index].as<uint32_t>();
+        }
+        lodThresholds_ = parsed;
+    }
+
     if (auto name = styleYaml["name"]) {
         if (name.IsScalar())
             name_ = name.Scalar();
+    }
+
+    if (auto category = styleYaml["category"]; category && category.Scalar() == "search") {
+        category_ = StyleCategory::Search;
     }
 
     if (auto enabled = styleYaml["default"]) {
@@ -75,42 +233,6 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
                 "schema",
                 "stylesheet-failed",
                 "Could not parse style sheet default: " + e.msg,
-                locationFromMark(e.mark));
-            validationReport_.markStylesheetFailed();
-            return;
-        }
-    }
-
-    if (auto stage = styleYaml["stage"]) {
-        if (!stage.IsScalar()) {
-            validationReport_.addIssue(
-                "error",
-                "schema",
-                "stylesheet-failed",
-                "Style sheet stage must be a scalar integer.",
-                locationForNode(stage));
-            validationReport_.markStylesheetFailed();
-            return;
-        }
-        try {
-            auto parsedStage = stage.as<int>();
-            if (parsedStage < 0) {
-                validationReport_.addIssue(
-                    "error",
-                    "schema",
-                    "stylesheet-failed",
-                    "Style sheet stage must be non-negative.",
-                    locationForNode(stage));
-                validationReport_.markStylesheetFailed();
-                return;
-            }
-            stage_ = static_cast<uint32_t>(parsedStage);
-        } catch (YAML::Exception const& e) {
-            validationReport_.addIssue(
-                "error",
-                "schema",
-                "stylesheet-failed",
-                "Could not parse style sheet stage: " + e.msg,
                 locationFromMark(e.mark));
             validationReport_.markStylesheetFailed();
             return;
@@ -185,6 +307,233 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
         }
     }
 
+    if (auto effects = styleYaml["interaction-effects"]) {
+        if (!effects.IsMap()) {
+            validationReport_.addIssue(
+                "warning",
+                "schema",
+                "interaction-effect-skipped",
+                "interaction-effects must be a map keyed by hover and selection.",
+                locationForNode(effects));
+        }
+        else {
+            for (auto const& [modeName, modeIndex] : {
+                     std::pair<std::string_view, size_t>{"hover", 0U},
+                     std::pair<std::string_view, size_t>{"selection", 1U}})
+            {
+                auto effectYaml = effects[std::string(modeName)];
+                if (!effectYaml.IsDefined()) {
+                    continue;
+                }
+                auto fail = [&](std::string message, YAML::Node const& node) {
+                    auto& issue = validationReport_.addIssue(
+                        "warning",
+                        "schema",
+                        "interaction-effect-skipped",
+                        std::move(message),
+                        locationForNode(node));
+                    issue.rulePath =
+                        "interaction-effects." + std::string(modeName);
+                    issue.property = "interaction-effects";
+                };
+                if (!effectYaml.IsMap()) {
+                    fail("Interaction effect must be a YAML map.", effectYaml);
+                    continue;
+                }
+                try {
+                    InteractionEffect effect;
+                    if (effectYaml["tint"].IsDefined()) {
+                        effect.tint = parseInteractionColor(effectYaml["tint"]);
+                        if (!effect.tint) {
+                            fail(
+                                "Interaction tint must be a literal color or {option: id}.",
+                                effectYaml["tint"]);
+                            continue;
+                        }
+                    }
+                    if (effectYaml["tint-mix"].IsDefined()) {
+                        effect.tintMix = effectYaml["tint-mix"].as<float>();
+                    }
+                    if (effectYaml["opacity"].IsDefined()) {
+                        effect.opacity = effectYaml["opacity"].as<float>();
+                    }
+                    if (effectYaml["edge-width"].IsDefined()) {
+                        effect.edgeWidth = effectYaml["edge-width"].as<float>();
+                    }
+                    if (auto halo = effectYaml["halo"]) {
+                        if (!halo.IsMap() || !halo["color"].IsDefined()) {
+                            fail(
+                                "Interaction halo must be a map with a color.",
+                                halo);
+                            continue;
+                        }
+                        effect.haloColor =
+                            parseInteractionColor(halo["color"]);
+                        if (!effect.haloColor) {
+                            fail(
+                                "Interaction halo color must be a literal color or {option: id}.",
+                                halo["color"]);
+                            continue;
+                        }
+                        if (halo["radius"].IsDefined()) {
+                            effect.haloRadius = halo["radius"].as<float>();
+                        }
+                        if (halo["opacity"].IsDefined()) {
+                            effect.haloOpacity = halo["opacity"].as<float>();
+                        }
+                    }
+                    if (auto stripe = effectYaml["stripe"]) {
+                        if (!stripe.IsMap()) {
+                            fail("Interaction stripe must be a YAML map.", stripe);
+                            continue;
+                        }
+                        if (stripe["color"].IsDefined()) {
+                            effect.stripeColor =
+                                parseInteractionColor(stripe["color"]);
+                            if (!effect.stripeColor) {
+                                fail(
+                                    "Interaction stripe color must be a literal color or {option: id}.",
+                                    stripe["color"]);
+                                continue;
+                            }
+                        }
+                        if (stripe["spacing"].IsDefined()) {
+                            effect.stripeSpacing = stripe["spacing"].as<float>();
+                        }
+                        if (stripe["width"].IsDefined()) {
+                            effect.stripeWidth = stripe["width"].as<float>();
+                        }
+                        if (stripe["opacity"].IsDefined()) {
+                            effect.stripeOpacity = stripe["opacity"].as<float>();
+                        }
+                        if (stripe["angle"].IsDefined()) {
+                            effect.stripeAngle = stripe["angle"].as<float>();
+                        }
+                        if (stripe["offset"].IsDefined()) {
+                            effect.stripeOffset = stripe["offset"].as<float>();
+                        }
+                        if (stripe["softness"].IsDefined()) {
+                            effect.stripeSoftness = stripe["softness"].as<float>();
+                        }
+                    }
+                    if (!std::isfinite(effect.tintMix) ||
+                        effect.tintMix < 0.0f || effect.tintMix > 1.0f ||
+                        !std::isfinite(effect.opacity) ||
+                        effect.opacity < 0.0f || effect.opacity > 1.0f ||
+                        !std::isfinite(effect.edgeWidth) ||
+                        effect.edgeWidth < 0.0f ||
+                        !std::isfinite(effect.haloRadius) ||
+                        effect.haloRadius < 0.0f ||
+                        !std::isfinite(effect.haloOpacity) ||
+                        effect.haloOpacity < 0.0f || effect.haloOpacity > 1.0f ||
+                        !std::isfinite(effect.stripeSpacing) ||
+                        effect.stripeSpacing < 0.0f ||
+                        !std::isfinite(effect.stripeWidth) ||
+                        effect.stripeWidth < 0.0f ||
+                        !std::isfinite(effect.stripeOpacity) ||
+                        effect.stripeOpacity < 0.0f || effect.stripeOpacity > 1.0f ||
+                        !std::isfinite(effect.stripeAngle) ||
+                        !std::isfinite(effect.stripeOffset) ||
+                        !std::isfinite(effect.stripeSoftness) ||
+                        effect.stripeSoftness < 0.0f)
+                    {
+                        fail(
+                            "Interaction effect numeric values are outside their supported ranges.",
+                            effectYaml);
+                        continue;
+                    }
+                    interactionEffects_[modeIndex] = std::move(effect);
+                }
+                catch (YAML::Exception const& exception) {
+                    fail(
+                        "Could not parse interaction effect: " + exception.msg,
+                        effectYaml);
+                }
+            }
+        }
+    }
+
+    if (auto presets = styleYaml["presets"]) {
+        if (!presets.IsSequence()) {
+            validationReport_.addIssue(
+                "warning",
+                "schema",
+                "preset-skipped",
+                "Style sheet presets must be a YAML sequence. Ignoring presets.",
+                locationForNode(presets));
+        } else if (presets.size() > 200) {
+            validationReport_.addIssue(
+                "warning",
+                "schema",
+                "preset-skipped",
+                "Style sheet presets exceed the limit of 200 entries. Ignoring presets.",
+                locationForNode(presets));
+        } else {
+            std::set<std::string> knownOptionIds;
+            std::set<std::string> editableBooleanOptionIds;
+            for (auto const& option : options_) {
+                knownOptionIds.insert(option.id_);
+                if (option.type_ == FeatureStyleOptionType::Bool && !option.internal_) {
+                    editableBooleanOptionIds.insert(option.id_);
+                }
+            }
+
+            std::set<std::string> seenPresetIds;
+            std::set<std::string> seenPresetNames;
+            uint32_t presetIndex = 0;
+            for (auto const& preset : presets) {
+                auto const sourcePresetIndex = presetIndex++;
+                auto const presetPath = "presets[" + std::to_string(sourcePresetIndex) + "]";
+                if (!validateStylePresetYaml(
+                        preset,
+                        sourcePresetIndex,
+                        knownOptionIds,
+                        editableBooleanOptionIds,
+                        validationReport_)) {
+                    continue;
+                }
+
+                auto const presetId = preset["id"].Scalar();
+                auto const presetName = preset["name"].Scalar();
+                if (seenPresetIds.contains(presetId)) {
+                    auto& issue = validationReport_.addIssue(
+                        "warning",
+                        "schema",
+                        "preset-skipped",
+                        "Duplicate style preset id '" + presetId + "' was ignored.",
+                        locationForNode(preset["id"]));
+                    issue.rulePath = presetPath;
+                    issue.property = "id";
+                    continue;
+                }
+                if (seenPresetNames.contains(presetName)) {
+                    auto& issue = validationReport_.addIssue(
+                        "warning",
+                        "schema",
+                        "preset-skipped",
+                        "Duplicate style preset name '" + presetName + "' was ignored.",
+                        locationForNode(preset["name"]));
+                    issue.rulePath = presetPath;
+                    issue.property = "name";
+                    continue;
+                }
+                try {
+                    presets_.emplace_back(preset);
+                    seenPresetIds.insert(presetId);
+                    seenPresetNames.insert(presetName);
+                } catch (YAML::Exception const& e) {
+                    auto& issue = validationReport_.addIssue(
+                        "warning",
+                        "schema",
+                        "preset-skipped",
+                        "Could not parse style preset: " + e.msg,
+                        locationFromMark(e.mark));
+                    issue.rulePath = presetPath;
+                }
+            }
+        }
+    }
+
     uint32_t ruleIndex = 0;
     uint32_t renderRuleIndex = 0;
     for (auto const& rule : styleYaml["rules"]) {
@@ -224,21 +573,22 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
 
     for (uint32_t runtimeRuleIndex = 0; runtimeRuleIndex < rules_.size(); ++runtimeRuleIndex) {
         auto const& rule = rules_[runtimeRuleIndex];
-        auto modeIndex = highlightModeIndex(rule.mode());
-        auto const highFidelityIndex = fidelityIndex(FeatureStyleRule::HighFidelity);
-        auto const lowFidelityIndex = fidelityIndex(FeatureStyleRule::LowFidelity);
-        if (rule.fidelity() == FeatureStyleRule::AnyFidelity ||
-            rule.fidelity() == FeatureStyleRule::HighFidelity) {
-            ruleIndicesByModeAndFidelity_[modeIndex][highFidelityIndex].push_back(runtimeRuleIndex);
+        for (size_t modeIndex = 0; modeIndex < kHighlightModeCount; ++modeIndex) {
+            auto const mode = static_cast<FeatureStyleRule::HighlightMode>(modeIndex);
+            if (!rule.supportsMode(mode)) {
+                continue;
+            }
+            for (uint8_t lod = FeatureStyleRule::kMinimumLod;
+                 lod <= FeatureStyleRule::kMaximumLod;
+                 ++lod)
+            {
+                if (rule.supportsLod(lod)) {
+                    ruleIndicesByModeAndLod_[modeIndex][lod].push_back(
+                        runtimeRuleIndex);
+                }
+            }
+            highlightModeMask_ |= (1u << modeIndex);
         }
-        if (rule.fidelity() == FeatureStyleRule::AnyFidelity ||
-            rule.fidelity() == FeatureStyleRule::LowFidelity) {
-            ruleIndicesByModeAndFidelity_[modeIndex][lowFidelityIndex].push_back(runtimeRuleIndex);
-        }
-        if (rule.fidelity() == FeatureStyleRule::LowFidelity) {
-            hasExplicitLowFidelityRules_ = true;
-        }
-        highlightModeMask_ |= (1u << modeIndex);
     }
 
     validationReport_.loadedRuleCount = static_cast<uint32_t>(rules_.size());
@@ -267,6 +617,11 @@ const std::vector<FeatureStyleOption>& FeatureLayerStyle::options() const
     return options_;
 }
 
+const std::vector<FeatureStylePreset>& FeatureLayerStyle::presets() const
+{
+    return presets_;
+}
+
 bool FeatureLayerStyle::hasLayerAffinity(std::string const& layerName) const {
     if (!layerAffinity_) {
         return true;
@@ -279,13 +634,12 @@ bool FeatureLayerStyle::defaultEnabled() const
     return enabled_;
 }
 
-uint32_t FeatureLayerStyle::minimumStage() const
-{
-    return stage_;
-}
-
 std::string const& FeatureLayerStyle::name() const {
     return name_;
+}
+
+StyleCategory FeatureLayerStyle::category() const {
+    return category_;
 }
 
 uint32_t FeatureLayerStyle::supportedHighlightModesMask() const
@@ -298,39 +652,121 @@ bool FeatureLayerStyle::supportsHighlightMode(FeatureStyleRule::HighlightMode mo
     return (highlightModeMask_ & (1u << highlightModeIndex(mode))) != 0;
 }
 
-bool FeatureLayerStyle::hasExplicitLowFidelityRules() const
+bool FeatureLayerStyle::supportsInteractionEffect(
+    FeatureStyleRule::HighlightMode mode) const
 {
-    return hasExplicitLowFidelityRules_;
+    auto const index = interactionEffectIndex(mode);
+    return index && interactionEffects_[*index].has_value();
+}
+
+NativeJsValue FeatureLayerStyle::interactionEffect(
+    FeatureStyleRule::HighlightMode mode,
+    NativeJsValue const& options) const
+{
+    auto const index = interactionEffectIndex(mode);
+    if (!index || !interactionEffects_[*index]) {
+        return *JsValue::Undefined();
+    }
+    return interactionEffects_[*index]->toJsValue(options);
+}
+
+uint8_t FeatureLayerStyle::lodForVisibleTileCount(
+    uint32_t visibleTileCount,
+    uint32_t defaultLod3TileThreshold) const
+{
+    auto const thresholds = lodThresholds_.value_or(
+        defaultLodThresholds(defaultLod3TileThreshold));
+    for (uint8_t lod = FeatureStyleRule::kMinimumLod;
+         lod < FeatureStyleRule::kMaximumLod;
+         ++lod)
+    {
+        if (visibleTileCount >= thresholds[lod]) {
+            return lod;
+        }
+    }
+    return FeatureStyleRule::kMaximumLod;
+}
+
+double FeatureLayerStyle::presentationLodForVisibleTileCount(
+    uint32_t visibleTileCount,
+    uint32_t defaultLod3TileThreshold) const
+{
+    auto const thresholds = lodThresholds_.value_or(
+        defaultLodThresholds(defaultLod3TileThreshold));
+    if (visibleTileCount >= thresholds.front()) {
+        return FeatureStyleRule::kMinimumLod;
+    }
+
+    auto const interpolate = [visibleTileCount](
+        double upperThreshold,
+        double lowerThreshold,
+        double lowerLod)
+    {
+        auto const count = std::clamp(
+            static_cast<double>(visibleTileCount),
+            lowerThreshold,
+            upperThreshold);
+        auto const progress = std::log(upperThreshold / count) /
+            std::log(upperThreshold / lowerThreshold);
+        return lowerLod + progress;
+    };
+    for (size_t index = 1U; index < thresholds.size(); ++index) {
+        if (visibleTileCount >= thresholds[index]) {
+            return interpolate(
+                thresholds[index - 1U],
+                thresholds[index],
+                static_cast<double>(index - 1U));
+        }
+    }
+    if (visibleTileCount == 0U || thresholds.back() == 1U) {
+        return FeatureStyleRule::kMaximumLod;
+    }
+
+    // Continue the final density ratio for the otherwise unbounded LOD 6->7
+    // interval. This keeps custom non-geometric threshold ladders smooth.
+    auto const lastThreshold = static_cast<double>(thresholds.back());
+    auto const precedingThreshold = static_cast<double>(
+        thresholds[thresholds.size() - 2U]);
+    auto const finalThreshold = std::max(
+        1.0,
+        lastThreshold * lastThreshold / precedingThreshold);
+    if (visibleTileCount <= finalThreshold) {
+        return FeatureStyleRule::kMaximumLod;
+    }
+    return interpolate(
+        lastThreshold,
+        finalThreshold,
+        FeatureStyleRule::kMaximumLod - 1U);
 }
 
 bool FeatureLayerStyle::hasRelationRules(FeatureStyleRule::HighlightMode mode) const
 {
     return std::ranges::any_of(rules_, [mode](auto const& rule) {
-        return rule.mode() == mode && rule.aspect() == FeatureStyleRule::Relation;
+        return rule.supportsMode(mode) && rule.scope() == FeatureStyleRule::Relation;
     });
 }
 
 std::vector<uint32_t> const& FeatureLayerStyle::candidateRuleIndices(
     FeatureStyleRule::HighlightMode mode,
-    FeatureStyleRule::Fidelity fidelity,
+    uint8_t lod,
     std::string_view featureTypeId) const
 {
     auto modeIndex = highlightModeIndex(mode);
-    auto fidelityIdx = fidelityIndex(fidelity);
+    auto const activeLodIndex = lodIndex(lod);
     if (!supportsHighlightMode(mode)) {
         return kEmptyRuleIndices;
     }
     if (featureTypeId.empty()) {
-        return ruleIndicesByModeAndFidelity_[modeIndex][fidelityIdx];
+        return ruleIndicesByModeAndLod_[modeIndex][activeLodIndex];
     }
 
     auto cacheIt = ruleIndicesByTypeCache_.find(featureTypeId);
     if (cacheIt == ruleIndicesByTypeCache_.end()) {
         RuleIndexCacheEntry entry{};
         for (size_t cacheModeIndex = 0; cacheModeIndex < kHighlightModeCount; ++cacheModeIndex) {
-            for (size_t cacheFidelityIndex = 0; cacheFidelityIndex < kFidelityCount; ++cacheFidelityIndex) {
-                auto const& ruleIndices = ruleIndicesByModeAndFidelity_[cacheModeIndex][cacheFidelityIndex];
-                auto& filtered = entry.byModeAndFidelity[cacheModeIndex][cacheFidelityIndex];
+            for (size_t cacheLodIndex = 0; cacheLodIndex < kLodCount; ++cacheLodIndex) {
+                auto const& ruleIndices = ruleIndicesByModeAndLod_[cacheModeIndex][cacheLodIndex];
+                auto& filtered = entry.byModeAndLod[cacheModeIndex][cacheLodIndex];
                 filtered.reserve(ruleIndices.size());
                 for (auto ruleIndex : ruleIndices) {
                     if (rules_[ruleIndex].maybeMatchesType(featureTypeId)) {
@@ -343,7 +779,7 @@ std::vector<uint32_t> const& FeatureLayerStyle::candidateRuleIndices(
         cacheIt = insertIt;
     }
 
-    return cacheIt->second.byModeAndFidelity[modeIndex][fidelityIdx];
+    return cacheIt->second.byModeAndLod[modeIndex][activeLodIndex];
 }
 
 FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)
@@ -386,6 +822,22 @@ FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)
     }
     if (auto node = yaml["internal"]) {
         internal_ = node.as<bool>();
+    }
+}
+
+FeatureStylePresetValue::FeatureStylePresetValue(YAML::Node const& yaml)
+    : optionId_(yaml["optionId"].as<std::string>()),
+      value_(yaml["value"].as<bool>())
+{
+}
+
+FeatureStylePreset::FeatureStylePreset(YAML::Node const& yaml)
+    : id_(yaml["id"].as<std::string>()),
+      name_(yaml["name"].as<std::string>())
+{
+    values_.reserve(yaml["values"].size());
+    for (auto const& value : yaml["values"]) {
+        values_.emplace_back(value);
     }
 }
 

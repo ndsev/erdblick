@@ -9,14 +9,38 @@ if (Catch2_SOURCE_DIR)
   list(APPEND CMAKE_MODULE_PATH "${Catch2_SOURCE_DIR}/extras")
 endif()
 
+include(Catch)
+include(CTest)
+
 add_executable(test.erdblick
-  test-visualization.cpp)
+  test-visualization.cpp
+  test-source-data-inspection.cpp)
 
 target_link_libraries(test.erdblick
   PUBLIC
     erdblick-core
     Catch2::Catch2WithMain)
 
-include(Catch)
-include(CTest)
 catch_discover_tests(test.erdblick)
+
+add_executable(test.erdblick-style-plan
+  test-style-filter-plan.cpp)
+
+target_link_libraries(test.erdblick-style-plan
+  PUBLIC
+    erdblick-core
+    Catch2::Catch2WithMain)
+
+catch_discover_tests(test.erdblick-style-plan)
+
+add_executable(test.erdblick-subset-renderer
+  test-subset-renderer.cpp
+  test-gpu-render-packet.cpp
+  test-gpu-render-records.cpp)
+
+target_link_libraries(test.erdblick-subset-renderer
+  PUBLIC
+    erdblick-core
+    Catch2::Catch2WithMain)
+
+catch_discover_tests(test.erdblick-subset-renderer)

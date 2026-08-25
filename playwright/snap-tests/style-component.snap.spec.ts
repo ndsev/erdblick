@@ -10,6 +10,7 @@ import {
 
 const MAP_INDEX = 0;
 const LAYER_INDEX = 0;
+const CONFIGURED_STYLE_TEST_ID = 'default-style';
 test.use({ stateSnapshot: 'style_editor_state' });
 
 test.describe('Snapshot – style component', () => {
@@ -19,7 +20,12 @@ test.describe('Snapshot – style component', () => {
         await enableMapLayer(page, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
 
         const stylesDialog = await openStylesDialog(page);
-        const editButton = stylesDialog.locator('[data-testid^="style-edit-button-"]').first();
+        // Wait for the configured style bundle to replace the transient empty
+        // startup tree, then edit a deterministic style. Choosing the first
+        // live locator made this test race style initialization.
+        const editButton = stylesDialog.getByTestId(
+            `style-edit-button-${CONFIGURED_STYLE_TEST_ID}`
+        );
         await expect(editButton).toBeVisible();
         const editButtonTestId = await editButton.getAttribute('data-testid');
         if (!editButtonTestId?.startsWith('style-edit-button-')) {
@@ -35,6 +41,11 @@ test.describe('Snapshot – style component', () => {
         await editButton.click();
         const editorDialog = page.getByTestId('style-editor-dialog').locator('.p-dialog').first();
         await expect(editorDialog).toBeVisible();
+        await expect(editorDialog.getByTestId('style-editor-header').locator('.app-surface-header'))
+            .toBeVisible();
+        await expect(editorDialog.getByTestId('style-editor-enabled')).toBeVisible();
+        await expect(editorDialog.getByTestId('style-editor-quick-name')).toBeVisible();
+        await expect(editorDialog.getByTestId('style-editor-quick-layers')).toBeVisible();
 
         await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('style-component-editor.png', {
@@ -62,6 +73,18 @@ test.describe('Snapshot – style component', () => {
             {
                 locator: stylesDialog.getByTestId('styles-close-button'),
                 label: 'Close dialog'
+            },
+            {
+                locator: editorDialog.getByTestId('style-editor-enabled'),
+                label: 'Enable or disable style'
+            },
+            {
+                locator: editorDialog.getByTestId('style-editor-quick-name'),
+                label: 'Edit style name'
+            },
+            {
+                locator: editorDialog.getByTestId('style-editor-quick-layers'),
+                label: 'Set layer affinity'
             },
             {
                 locator: editorDialog.getByTestId('style-editor-apply-button'),

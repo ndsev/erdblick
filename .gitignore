@@ -10,6 +10,8 @@ static-visualization-only
 .angular
 node_modules
 config
+config/*
+config/styles/*
 out-tsc
 config/config.json
 dist
@@ -22,3 +24,4 @@ dev-screenshots/
 dev/
 .venv*/
 mapget-cache.db
+*/graphify-out/*

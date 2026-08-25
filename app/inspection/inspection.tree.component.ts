@@ -6,9 +6,11 @@ import {
     ViewChild,
     input,
     OnDestroy,
+    SecurityContext,
     effect,
     output
 } from "@angular/core";
+import {DomSanitizer} from "@angular/platform-browser";
 import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
 import {TreeTable} from "primeng/treetable";
 import {toObservable} from "@angular/core/rxjs-interop";
@@ -21,17 +23,29 @@ import {ClipboardService} from "../shared/clipboard.service";
 import {AppStateService, SelectedSourceData, type InspectionTreeExpansionState} from "../shared/appstate.service";
 import {Popover} from "primeng/popover";
 import {JumpTargetService} from "../search/jump.service";
-import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
+import {
+    isFeatureInspectionSubTarget,
+    parseFeatureInspectionTarget,
+    stripFeatureInspectionTarget
+} from "../shared/tile-feature-id";
 import {FeatureSearchService} from "../search/feature.search.service";
 import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import {inspectionSearchNumberLiteral} from "./inspection-search.util";
+import {
+    inspectionHtmlPresentation,
+    type InspectionHtmlPresentation
+} from "./inspection-html.presentation";
+import {expandPathToFirstHighlightedRow} from "./inspection-tree-highlight";
+import {inspectionValueBubbleClasses} from "./inspection-value-bubble.presentation";
 
 /** Column definition used by the inspection tree's generic table renderer. */
 export interface Column {
     key: string,
     header: string,
     width: string,
-    transform: (colKey: string, rowData: any) => any
+    transform: (colKey: string, rowData: any) => any,
+    toggleable?: boolean,
+    toggleIcon?: string
 }
 
 /** User-facing switches that control which inspection fields participate in tree filtering. */
@@ -57,28 +71,49 @@ export class FeatureFilterOptions {
                      [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
                      [globalFilterFields]="filterFields">
             <ng-template pTemplate="caption">
-                @if (showFilter()) {
+                @if (showFilter() || toggleableColumns().length) {
                     <div class="filter-container">
-                        <p-iconfield class="input-container">
-                            @if (filterOptions()) {
-                                <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter"
-                                             style="cursor: pointer"/>
-                            }
-                            <input class="filter-input" type="text" pInputText placeholder="Filter inspection tree"
-                                   [(ngModel)]="filterString"
-                                   (ngModelChange)="onFilterInput($event)"
-                                   (input)="onFilterInput($any($event.target).value)"/>
-                            @if (filterString) {
-                                <i (click)="clearFilter()" class="pi pi-times clear-icon" style="cursor: pointer"></i>
-                            }
-                        </p-iconfield>
+                        @if (showFilter()) {
+                            <p-iconfield class="input-container">
+                                @if (filterOptions()) {
+                                    <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter"
+                                                 style="cursor: pointer"/>
+                                }
+                                <input class="filter-input" type="text" pInputText placeholder="Filter inspection tree"
+                                       [(ngModel)]="filterString"
+                                       (ngModelChange)="onFilterInput($event)"
+                                       (input)="onFilterInput($any($event.target).value)"/>
+                                @if (filterString) {
+                                    <i (click)="clearFilter()" class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                                }
+                            </p-iconfield>
+                        }
+                        @if (toggleableColumns().length) {
+                            <p-buttonGroup class="inspection-column-visibility-buttons">
+                                @for (col of toggleableColumns(); track col.key) {
+                                    <p-button class="inspection-column-visibility-button"
+                                              [severity]="isColumnVisible(col) ? 'primary' : 'secondary'"
+                                              [outlined]="!isColumnVisible(col)"
+                                              (click)="toggleColumnVisibility($event, col)"
+                                              [pTooltip]="(isColumnVisible(col) ? 'Hide ' : 'Show ') + col.header + ' column'"
+                                              [tooltipOptions]="{appendTo: 'body'}"
+                                              tooltipPosition="bottom"
+                                              [attr.aria-pressed]="isColumnVisible(col)"
+                                              [attr.aria-label]="(isColumnVisible(col) ? 'Hide ' : 'Show ') + col.header + ' column'">
+                                        <span class="material-symbols-outlined">
+                                            {{ col.toggleIcon || 'view_column' }}
+                                        </span>
+                                    </p-button>
+                                }
+                            </p-buttonGroup>
+                        }
                     </div>
                 }
             </ng-template>
 
             <ng-template pTemplate="colgroup">
                 <colgroup>
-                    @for (col of columns(); track col.key) {
+                    @for (col of visibleColumns(); track col.key) {
                         <col [style.width]="col.width"/>
                     }
                 </colgroup>
@@ -86,7 +121,7 @@ export class FeatureFilterOptions {
 
             <ng-template pTemplate="header">
                 <tr>
-                    @for (col of columns(); track col.key) {
+                    @for (col of visibleColumns(); track col.key) {
                         <th ttResizableColumn>
                             <div class="inspection-header-content">
                                 <span class="inspection-header-label">{{ col.header }}</span>
@@ -133,7 +168,7 @@ export class FeatureFilterOptions {
                         (mouseenter)="onRowHover(rowData)"
                         (mouseleave)="onRowHoverExit(rowData)"
                         [ngClass]="getRowClasses(rowData)">
-                        @for (col of columns(); track $index) {
+                        @for (col of visibleColumns(); track $index) {
                             <td [class]="getStyleClassByType(rowData) + ' inspection-tree-cell'"
                                 [pTooltip]="valueCellUsesBubblePopover(rowNode, rowData, col.key) ? '' : cellTooltip(rowNode, rowData, col.key)"
                                 tooltipPosition="left"
@@ -172,13 +207,13 @@ export class FeatureFilterOptions {
                                                     <span class="inspection-value-bubble-group">
                                                         @for (child of bubble.children; track child.targetNodeId + ':' + child.label + ':' + $index) {
                                                             <span class="inspection-value-bubble-frame"
-                                                                  (mouseenter)="onValueBubbleHover(child)"
-                                                                  (mouseleave)="onValueBubbleHoverExit(rowData)">
+                                                                  (mouseenter)="onValueBubbleHover(child, rowData)"
+                                                                  (mouseleave)="onValueBubbleHoverExit(child, rowData)">
                                                                 <button type="button"
                                                                         class="inspection-value-bubble"
                                                                         [ngClass]="valueBubbleClasses(child)"
                                                                         (click)="onValueBubbleClick($event, child)">
-                                                                    {{ child.label }}
+                                                                    {{ valueBubbleDisplayText(child) }}
                                                                 </button>
                                                                 <button type="button"
                                                                         class="inspection-value-bubble-copy"
@@ -190,13 +225,13 @@ export class FeatureFilterOptions {
                                                     </span>
                                                 } @else {
                                                     <span class="inspection-value-bubble-frame"
-                                                          (mouseenter)="onValueBubbleHover(bubble)"
-                                                          (mouseleave)="onValueBubbleHoverExit(rowData)">
+                                                          (mouseenter)="onValueBubbleHover(bubble, rowData)"
+                                                          (mouseleave)="onValueBubbleHoverExit(bubble, rowData)">
                                                         <button type="button"
                                                                 class="inspection-value-bubble"
                                                                 [ngClass]="valueBubbleClasses(bubble)"
                                                                 (click)="onValueBubbleClick($event, bubble)">
-                                                            {{ bubble.label }}
+                                                            {{ valueBubbleDisplayText(bubble) }}
                                                         </button>
                                                         <button type="button"
                                                                 class="inspection-value-bubble-copy"
@@ -209,6 +244,7 @@ export class FeatureFilterOptions {
                                         </span>
                                     } @else if (col.key === "value" && isFeatureIdValueRow(rowData)) {
                                         <a href=""
+                                           class="inspection-cell-primary-value"
                                            (click)="onFeatureIdLinkClick($event, rowData)"
                                            (mouseenter)="onNodeValueHover(rowData, col.key)"
                                            (mouseleave)="onNodeValueHoverExit(rowData, col.key)"
@@ -220,7 +256,8 @@ export class FeatureFilterOptions {
                                            [innerHTML]="filterFields.indexOf(col.key) !== -1 ? (col.transform(col.key, rowData) | highlight: filterString) : col.transform(col.key, rowData)">
                                         </a>
                                     } @else {
-                                        <span (click)="onNodeClick($event, rowData, col.key)"
+                                        <span class="inspection-cell-primary-value"
+                                              (click)="onNodeClick($event, rowData, col.key)"
                                               (mouseenter)="onNodeValueHover(rowData, col.key)"
                                               (mouseleave)="onNodeValueHoverExit(rowData, col.key)"
                                               style="cursor: pointer"
@@ -243,8 +280,8 @@ export class FeatureFilterOptions {
                                             }
                                         </span>
                                     }
-                                    @if (rowData.hasOwnProperty("stageLabelBubble") && $index === 0) {
-                                        <span class="inspection-stage-label-badge">{{rowData["stageLabelBubble"]}}</span>
+                                    @if (rowData.hasOwnProperty("geometryNameBubble") && $index === 0) {
+                                        <span class="inspection-geometry-name-badge">{{rowData["geometryNameBubble"]}}</span>
                                     }
                                     @if (rowData.hasOwnProperty("valueCount") && $index === 0) {
                                         <p-tag class="inspection-node-count-tag"
@@ -268,8 +305,8 @@ export class FeatureFilterOptions {
                                                 <p-button class="source-data-button"
                                                           (click)="showSourceData($event, item)"
                                                           severity="secondary"
-                                                          label="{{ item.qualifier.substring(0, 1).toUpperCase() }}"
-                                                          pTooltip="Go to {{item.qualifier?.trim()}} source data."
+                                                          [label]="sourceDataReferenceLabel(item)"
+                                                          [pTooltip]="sourceDataReferenceTooltip(item)"
                                                           [tooltipOptions]="{appendTo: 'body'}"
                                                           tooltipPosition="bottom" />
                                             }
@@ -284,7 +321,7 @@ export class FeatureFilterOptions {
 
             <ng-template pTemplate="emptymessage">
                 <tr>
-                    <td [attr.colspan]="columns().length">No entries found.</td>
+                    <td [attr.colspan]="visibleColumns().length">No entries found.</td>
                 </tr>
             </ng-template>
         </p-treeTable>
@@ -321,6 +358,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private activeStrongHoverGroupId?: string;
     private activeFeatureIdNodeId?: string;
     private activeValueBubbleTargetNodeId?: string;
+    private activeMapHoverOwner?: string;
+    private mapHoverEpoch = 0;
 
     @ViewChild('tt') table!: TreeTable;
     @ViewChild('filterPanel') filterPanel!: Popover;
@@ -339,6 +378,35 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     geoJson = input<string>();
     enableSourceDataNavigation = input<boolean>(true);
     featureIds = input<string[]>([]);
+    defaultVisibleColumnKeys = input<readonly string[] | undefined>(undefined);
+
+    /** Returns columns currently participating in the table layout. */
+    protected visibleColumns(): Column[] {
+        return this.columns().filter(column => this.isColumnVisible(column));
+    }
+
+    /** Returns columns for which the caller requested a visibility control. */
+    protected toggleableColumns(): Column[] {
+        return this.columns().filter(column => column.toggleable);
+    }
+
+    /** Returns whether one column is currently shown. */
+    protected isColumnVisible(column: Column): boolean {
+        return !this.hiddenColumnKeys.has(column.key);
+    }
+
+    /** Toggles one optional column without mutating the caller-owned column definitions. */
+    protected toggleColumnVisibility(event: MouseEvent, column: Column): void {
+        event.stopPropagation();
+        if (this.hiddenColumnKeys.has(column.key)) {
+            this.hiddenColumnKeys.delete(column.key);
+        } else {
+            this.hiddenColumnKeys.add(column.key);
+        }
+        this.stateService.setInspectionTreeHiddenColumns(this.panelId(), this.hiddenColumnKeys);
+        this.refreshLayout();
+        this.cdr.markForCheck();
+    }
 
     filterFields: string[] = [
         "key",
@@ -351,6 +419,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     filterString = "";
     private suppressFilterEmit = false;
     private lastEmittedFilterText = "";
+    private readonly hiddenColumnKeys = new Set<string>();
     protected fullExpansionActive = false;
     private expansionSnapshotBeforeFullExpand?: Map<string, boolean | undefined>;
     protected fullCollapseActive = false;
@@ -365,6 +434,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private valueBubblePopoverHost?: HTMLElement;
     private valueBubblePopoverElement?: HTMLDivElement;
     private valueBubblePopoverFrame?: number;
+    private readonly inspectionHtmlCache = new Map<string, InspectionHtmlPresentation | null>();
     private readonly valueBubblePopoverGapPx = 8;
     private readonly valueBubblePopoverMarginPx = 4;
     private readonly valueBubblePopoverMaxWidthPx = 1024;
@@ -390,7 +460,31 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 private jumpService: JumpTargetService,
                 public stateService: AppStateService,
                 private messageService: InfoMessageService,
-                private featureSearchService: FeatureSearchService) {
+                private featureSearchService: FeatureSearchService,
+                private sanitizer: DomSanitizer) {
+        effect(() => {
+            const columns = this.columns();
+            const savedHiddenColumns = this.stateService.getInspectionTreeHiddenColumns(this.panelId());
+            const defaultVisibleColumns = this.defaultVisibleColumnKeys();
+            const visibleByDefault = defaultVisibleColumns === undefined
+                ? undefined
+                : new Set(defaultVisibleColumns);
+
+            this.hiddenColumnKeys.clear();
+            for (const column of columns) {
+                if (!column.toggleable) {
+                    continue;
+                }
+                const hidden = savedHiddenColumns
+                    ? savedHiddenColumns.includes(column.key)
+                    : visibleByDefault !== undefined && !visibleByDefault.has(column.key);
+                if (hidden) {
+                    this.hiddenColumnKeys.add(column.key);
+                }
+            }
+            this.refreshLayout();
+            this.cdr.markForCheck();
+        });
         effect(() => {
             this.savePanelExpansionState();
             this.data = this.treeData();
@@ -400,9 +494,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.expansionSnapshotBeforeFullCollapse = undefined;
             this.applyInitialExpansion(this.data);
             this.restorePanelExpansionState(this.data);
+            const targetedHighlightIndex = expandPathToFirstHighlightedRow(this.data);
 
             this.refreshLayout();
-            this.scrollToHighlightedIndex(this.firstHighlightedItemIndex());
+            this.scrollToHighlightedIndex(
+                targetedHighlightIndex ?? this.firstHighlightedItemIndex()
+            );
             this.cdr.markForCheck();
         });
         effect(() => {
@@ -710,7 +807,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private valueBubbleTooltip(bubbles: any[]): string {
         const labels: string[] = [];
         for (const bubble of bubbles) {
-            const label = this.valueBubbleText(bubble);
+            const label = this.valueBubbleDisplayText(bubble);
             if (label) {
                 labels.push(label);
             }
@@ -718,11 +815,23 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         return labels.join(" ");
     }
 
-    /** Returns the flattened visible text for one bubble. */
-    private valueBubbleText(bubble: any): string {
+    /** Returns flattened plain text for one bubble, including formatted HTML values. */
+    protected valueBubbleDisplayText(bubble: any): string {
         if (this.hasBubbleChildren(bubble)) {
             return bubble.children
-                .map((child: any) => this.valueBubbleText(child))
+                .map((child: any) => this.valueBubbleDisplayText(child))
+                .filter((label: string) => label.length > 0)
+                .join(" ");
+        }
+        const label = typeof bubble?.label === "string" ? bubble.label : "";
+        return this.formattedInspectionHtml(label)?.text || label;
+    }
+
+    /** Returns the original flattened bubble labels for lossless copy operations. */
+    private valueBubbleSourceText(bubble: any): string {
+        if (this.hasBubbleChildren(bubble)) {
+            return bubble.children
+                .map((child: any) => this.valueBubbleSourceText(child))
                 .filter((label: string) => label.length > 0)
                 .join(" ");
         }
@@ -731,10 +840,13 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Returns whether a value cell should use the structured bubble popover instead of a plain tooltip. */
     protected valueCellUsesBubblePopover(rowNode: any, rowData: any, colKey: string): boolean {
-        return colKey === "value" && this.shouldShowValueBubbles(rowNode, rowData);
+        return colKey === "value" && (
+            this.shouldShowValueBubbles(rowNode, rowData)
+            || this.formattedInspectionHtml(rowData?.["value"]) !== undefined
+        );
     }
 
-    /** Shows the structured bubble popover next to collapsed summary rows. */
+    /** Shows a structured bubble or formatted-value preview next to the hovered value cell. */
     protected onValueCellMouseEnter(event: MouseEvent, rowNode: any, rowData: any, colKey: string): void {
         if (!this.valueCellUsesBubblePopover(rowNode, rowData, colKey)) {
             return;
@@ -743,7 +855,14 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (!cell) {
             return;
         }
-        this.showValueBubblePopover(cell, rowData["valueBubbles"]);
+        if (this.shouldShowValueBubbles(rowNode, rowData)) {
+            this.showValueBubblePopover(cell, rowData["valueBubbles"]);
+            return;
+        }
+        const formatted = this.formattedInspectionHtml(rowData["value"]);
+        if (formatted) {
+            this.showHtmlValuePopover(cell, formatted);
+        }
     }
 
     /** Hides the structured bubble popover when the pointer leaves a value cell. */
@@ -754,15 +873,43 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.hideValueBubblePopover();
     }
 
+    /** Caches sanitized HTML parsing because template predicates run repeatedly during change detection. */
+    private formattedInspectionHtml(value: unknown): InspectionHtmlPresentation | undefined {
+        if (typeof value !== "string" || !value.includes("<") || !value.includes(">")) {
+            return undefined;
+        }
+        if (this.inspectionHtmlCache.has(value)) {
+            return this.inspectionHtmlCache.get(value) ?? undefined;
+        }
+        const presentation = inspectionHtmlPresentation(
+            value,
+            html => this.sanitizer.sanitize(SecurityContext.HTML, html)
+        );
+        this.inspectionHtmlCache.set(value, presentation ?? null);
+        return presentation;
+    }
+
+    /** Builds a non-interactive formatted HTML preview in the shared body-level popover. */
+    private showHtmlValuePopover(cell: HTMLElement, presentation: InspectionHtmlPresentation): void {
+        const content = document.createElement("div");
+        content.className = "inspection-value-html-popover-content";
+        content.innerHTML = presentation.html;
+        this.showValuePopoverContent(cell, content);
+    }
 
     /** Builds the value-bubble popover in document.body so undocked dialogs cannot clip it. */
     private showValueBubblePopover(cell: HTMLElement, bubbles: any[]): void {
-        const container = this.ensureValueBubblePopoverElement();
         const content = document.createElement("div");
         content.className = "inspection-value-bubble-popover-content";
         for (const bubble of bubbles) {
             content.appendChild(this.createValueBubblePopoverNode(bubble));
         }
+        this.showValuePopoverContent(cell, content);
+    }
+
+    /** Installs and positions content in the singleton body-level value popover. */
+    private showValuePopoverContent(cell: HTMLElement, content: HTMLElement): void {
+        const container = this.ensureValueBubblePopoverElement();
         container.replaceChildren(content);
         container.style.visibility = "hidden";
         container.style.display = "block";
@@ -811,13 +958,19 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Converts one leaf bubble to a styled non-interactive popover item. */
     private createValueBubblePopoverLeaf(bubble: any): HTMLElement {
         const item = document.createElement("span");
+        const formatted = this.formattedInspectionHtml(bubble?.label);
+        if (formatted) {
+            item.classList.add("inspection-value-html-popover-content");
+            item.innerHTML = formatted.html;
+            return item;
+        }
         item.classList.add("inspection-value-bubble", "inspection-value-bubble-popover-item");
         for (const [className, enabled] of Object.entries(this.valueBubbleClasses(bubble))) {
             if (enabled) {
                 item.classList.add(className);
             }
         }
-        item.textContent = this.valueBubbleText(bubble);
+        item.textContent = this.valueBubbleDisplayText(bubble);
         return item;
     }
 
@@ -899,54 +1052,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Assigns stable kind and color classes so grouped bubbles keep their leaf colors. */
     protected valueBubbleClasses(bubble: any): Record<string, boolean> {
-        const kind = typeof bubble?.kind === "string" && bubble.kind.length ? bubble.kind : "scalar";
-        const classes: Record<string, boolean> = {
-            [`inspection-value-bubble-${kind}`]: true
-        };
-        if (this.stateService.inspectionValueVaryColors) {
-            classes[`inspection-value-bubble-color-${this.valueBubbleColorIndex(bubble)}`] = true;
-        }
-        if (this.stateService.inspectionValueVaryOutlines) {
-            classes[`inspection-value-bubble-outline-${this.valueBubbleOutlineIndex(bubble)}`] = true;
-        }
-        if (this.stateService.inspectionValueVaryStriping) {
-            classes[`inspection-value-bubble-stripe-${this.valueBubbleStripeIndex(bubble)}`] = true;
-        }
-        return classes;
-    }
-
-    /** Hashes the source target/label so color and outline assignments survive regrouping. */
-    private valueBubbleHash(bubble: any): number {
-        const key = `${bubble?.colorKey ?? bubble?.label ?? ""}`;
-        let hash = 0;
-        for (let i = 0; i < key.length; ++i) {
-            hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
-        }
-        return Math.abs(hash);
-    }
-
-    /** Maps a bubble's stable hash to the color palette. */
-    private valueBubbleColorIndex(bubble: any): number {
-        return this.valueBubbleHash(bubble) % 10;
-    }
-
-    /** Maps a bubble's stable hash to an additional non-color visual discriminator. */
-    private valueBubbleOutlineIndex(bubble: any): number {
-        if (this.isValidityBubble(bubble)) {
-            return 6;
-        }
-        const nonValidityOutlines = [0, 1, 2, 3, 4, 5, 7];
-        return nonValidityOutlines[Math.floor(this.valueBubbleHash(bubble) / 10) % nonValidityOutlines.length];
-    }
-
-    /** Maps a bubble's stable hash to a subtle background stripe discriminator. */
-    private valueBubbleStripeIndex(bubble: any): number {
-        return Math.floor(this.valueBubbleHash(bubble) / 80) % 5;
-    }
-
-    /** Returns whether a bubble should use the dedicated validity outline family. */
-    private isValidityBubble(bubble: any): boolean {
-        return typeof bubble?.kind === "string" && bubble.kind.startsWith("validity");
+        return inspectionValueBubbleClasses(bubble, {
+            varyColors: this.stateService.inspectionValueVaryColors,
+            varyOutlines: this.stateService.inspectionValueVaryOutlines,
+            varyStriping: this.stateService.inspectionValueVaryStriping
+        });
     }
 
     /** Expands and highlights the inspection row represented by one propagated value bubble. */
@@ -978,14 +1088,14 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     protected copyValueBubble(event: MouseEvent, bubble: any): void {
         event.preventDefault();
         event.stopPropagation();
-        const value = this.valueBubbleText(bubble);
+        const value = this.valueBubbleSourceText(bubble);
         if (value) {
             this.copyToClipboard(value);
         }
     }
 
     /** Activates the same map hover behavior as the row represented by a bubble. */
-    protected onValueBubbleHover(bubble: any): void {
+    protected onValueBubbleHover(bubble: any, rowData: any): void {
         const hoverTargetNodeId = typeof bubble?.hoverTargetNodeId === "string" && bubble.hoverTargetNodeId.length
             ? bubble.hoverTargetNodeId
             : bubble?.targetNodeId;
@@ -993,23 +1103,25 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (!targetRow) {
             return;
         }
+        this.claimMapHover(this.valueBubbleHoverOwner(bubble, rowData));
         if (this.isFeatureIdValueRow(targetRow)) {
             this.activeFeatureIdNodeId = typeof targetRow?.["nodeId"] === "string"
                 ? targetRow["nodeId"]
                 : undefined;
-            this.jumpService.highlightByJumpTargetFilter(
-                targetRow["mapId"],
-                targetRow["value"],
-                coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+            this.highlightVisibleFeatureReference(targetRow);
             return;
         }
         this.highlightRowHoverTarget(targetRow);
     }
 
     /** Restores the owning row hover state after leaving a bubble. */
-    protected onValueBubbleHoverExit(rowData: any): void {
-        this.activeFeatureIdNodeId = undefined;
-        this.highlightRowHoverTarget(rowData);
+    protected onValueBubbleHoverExit(bubble: any, rowData: any): void {
+        const owner = this.valueBubbleHoverOwner(bubble, rowData);
+        this.deferMapHoverTransition(owner, () => {
+            this.activeFeatureIdNodeId = undefined;
+            this.activeMapHoverOwner = this.rowHoverOwner(rowData);
+            this.highlightRowHoverTarget(rowData);
+        });
     }
 
     /** Shows the inline copy button only for leaf rows with a non-empty value cell. */
@@ -1106,7 +1218,10 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             if (this.inspectionMenuItems.length) {
                 this.inspectionMenuItems.push({separator: true});
             }
-            const targetLabel = inspectionTarget.includes(":relation#") ? "Relation/Validity" : "Attr/Validity";
+            const targetLabel = parseFeatureInspectionTarget(inspectionTarget)
+                .scope === "relation"
+                ? "Relation/Validity"
+                : "Attr/Validity";
             this.inspectionMenuItems.push({
                 label: this.isInspectionTargetHighlighted(mapTileKey, inspectionTarget)
                     ? `Unhighlight ${targetLabel}`
@@ -1136,7 +1251,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             rowData?.["softHoverGroupId"]
         ];
         return candidates.find((value): value is string =>
-            typeof value === "string" && (value.includes(":attribute#") || value.includes(":relation#")));
+            typeof value === "string" && isFeatureInspectionSubTarget(value));
     }
 
     /** Checks whether this panel already highlights the requested attribute/validity target. */
@@ -1260,6 +1375,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Activates row-based soft or strong hover highlighting while the pointer is over a row. */
     onRowHover(rowData: any) {
+        this.claimMapHover(this.rowHoverOwner(rowData));
         this.activeSoftHoverGroupId = typeof rowData?.["softHoverGroupId"] === "string"
             ? rowData["softHoverGroupId"]
             : undefined;
@@ -1272,19 +1388,23 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Clears any hover highlight emitted from row-level annotations. */
     onRowHoverExit(rowData: any) {
-        this.activeSoftHoverGroupId = undefined;
-        this.activeStrongHoverGroupId = undefined;
-        this.activeFeatureIdNodeId = undefined;
-        if (!rowData.hasOwnProperty("type") &&
-            !rowData.hasOwnProperty("hoverId") &&
-            !rowData.hasOwnProperty("softHoverGroupId")) {
-            return;
-        }
-        if (rowData["type"] === this.InspectionValueType.FEATUREID.value ||
-            rowData["hoverId"] ||
-            rowData["softHoverGroupId"]) {
-            this.mapService.setHoveredFeatures([]).then();
-        }
+        const owner = this.rowHoverOwner(rowData);
+        this.deferMapHoverTransition(owner, () => {
+            this.activeMapHoverOwner = undefined;
+            this.activeSoftHoverGroupId = undefined;
+            this.activeStrongHoverGroupId = undefined;
+            this.activeFeatureIdNodeId = undefined;
+            if (!rowData.hasOwnProperty("type") &&
+                !rowData.hasOwnProperty("hoverId") &&
+                !rowData.hasOwnProperty("softHoverGroupId")) {
+                return;
+            }
+            if (rowData["type"] === this.InspectionValueType.FEATUREID.value ||
+                rowData["hoverId"] ||
+                rowData["softHoverGroupId"]) {
+                this.mapService.setHoveredFeatures([]);
+            }
+        }, true);
     }
 
     /** Highlights feature-id values independently from the row hover group. */
@@ -1292,13 +1412,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (colKey !== "value" || !this.isFeatureIdValueRow(rowData)) {
             return;
         }
+        this.claimMapHover(this.featureValueHoverOwner(rowData, colKey));
         this.activeFeatureIdNodeId = typeof rowData?.["nodeId"] === "string"
             ? rowData["nodeId"]
             : undefined;
-        this.jumpService.highlightByJumpTargetFilter(
-            rowData["mapId"],
-            rowData["value"],
-            coreLib.HighlightMode.HOVER_HIGHLIGHT).then();
+        this.highlightVisibleFeatureReference(rowData);
     }
 
     /** Restores row-level hover once the pointer leaves a feature-id cell. */
@@ -1306,8 +1424,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (colKey !== "value" || !this.isFeatureIdValueRow(rowData)) {
             return;
         }
-        this.activeFeatureIdNodeId = undefined;
-        this.highlightRowHoverTarget(rowData);
+        const owner = this.featureValueHoverOwner(rowData, colKey);
+        this.deferMapHoverTransition(owner, () => {
+            this.activeFeatureIdNodeId = undefined;
+            this.activeMapHoverOwner = this.rowHoverOwner(rowData);
+            this.highlightRowHoverTarget(rowData);
+        });
     }
 
     /** Chooses the strongest available hover target annotation for a tree row and forwards it to the map. */
@@ -1323,15 +1445,75 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             ? rowData["mapTileKey"]
             : undefined;
         if (!mapTileKey || !hoverId) {
-            this.mapService.setHoveredFeatures([]).then();
+            this.mapService.setHoveredFeatures([]);
             return;
         }
-        this.mapService.setHoveredFeatures([{
-            mapTileKey,
-            featureId: hoverId
-        }]).then();
+        this.mapService.setHoveredFeatures([{mapTileKey, featureId: hoverId}], true);
     }
 
+    /** Highlights a referenced feature locally when present and permits the authored remote fallback otherwise. */
+    private highlightVisibleFeatureReference(rowData: any): void {
+        const mapTileKey = rowData?.["mapTileKey"];
+        const featureId = rowData?.["value"];
+        const valid = typeof mapTileKey === "string" && typeof featureId === "string";
+        this.mapService.setHoveredFeatures(valid && mapTileKey && featureId
+            ? [{mapTileKey, featureId}]
+            : [], true);
+    }
+
+    /** Stable DOM-independent owner identity for one tree row hover. */
+    private rowHoverOwner(rowData: any): string {
+        return `row:${String(rowData?.["nodeId"] ?? "")}`;
+    }
+
+    /** Stable owner identity for a FeatureId value cell nested inside a row. */
+    private featureValueHoverOwner(rowData: any, colKey: string): string {
+        return `feature:${String(rowData?.["nodeId"] ?? "")}:${colKey}`;
+    }
+
+    /** Stable owner identity for a propagated value bubble. */
+    private valueBubbleHoverOwner(bubble: any, rowData: any): string {
+        return `bubble:${String(rowData?.["nodeId"] ?? "")}:${String(
+            bubble?.hoverTargetNodeId ?? bubble?.targetNodeId ?? ""
+        )}`;
+    }
+
+    /** Claims map-hover ownership and invalidates every previously deferred leave. */
+    private claimMapHover(owner: string): void {
+        this.mapHoverEpoch += 1;
+        this.activeMapHoverOwner = owner;
+    }
+
+    /** Ignore a delayed leave after another row or nested value has taken ownership. */
+    private deferMapHoverTransition(
+        owner: string,
+        transition: () => void,
+        acceptNestedOwner = false
+    ): void {
+        const ownerMatches = (): boolean => {
+            const currentOwner = this.activeMapHoverOwner;
+            return currentOwner === owner ||
+                (acceptNestedOwner && currentOwner?.startsWith(
+                    `feature:${owner.slice("row:".length)}:`
+                )) ||
+                (acceptNestedOwner && currentOwner?.startsWith(
+                    `bubble:${owner.slice("row:".length)}:`
+                )) || false;
+        };
+        if (!ownerMatches()) {
+            return;
+        }
+        const transitionEpoch = ++this.mapHoverEpoch;
+        queueMicrotask(() => {
+            if (this.destroyed ||
+                transitionEpoch !== this.mapHoverEpoch ||
+                !ownerMatches()) {
+                return;
+            }
+            transition();
+            this.cdr.markForCheck();
+        });
+    }
     /** Returns whether a row's value column stores a FeatureId rather than a plain scalar. */
     protected isFeatureIdValueRow(rowData: any): boolean {
         return rowData?.["type"] === this.InspectionValueType.FEATUREID.value;
@@ -1374,7 +1556,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         return Array.isArray(node?.children) && node.children.length > 0;
     }
 
-    /** Builds the CSS class map for stage badges, hover groups, and special inspection rows. */
+    /** Builds the CSS class map for geometry badges, hover groups, and special inspection rows. */
     getRowClasses(rowData: any): Record<string, boolean> {
         const strongHoverGroupId = typeof rowData?.["strongHoverGroupId"] === "string"
             ? rowData["strongHoverGroupId"]
@@ -1409,6 +1591,24 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         } catch (e) {
             this.messageService.showError(`Encountered error: ${e}`);
         }
+    }
+
+    /** Returns the compact qualifier initial used by a source-data navigation button. */
+    protected sourceDataReferenceLabel(sourceDataRef: any): string {
+        const qualifier = typeof sourceDataRef?.qualifier === "string"
+            ? sourceDataRef.qualifier.trim()
+            : "";
+        return qualifier ? qualifier[0].toUpperCase() : "S";
+    }
+
+    /** Describes source-data navigation even when the backend supplied no qualifier. */
+    protected sourceDataReferenceTooltip(sourceDataRef: any): string {
+        const qualifier = typeof sourceDataRef?.qualifier === "string"
+            ? sourceDataRef.qualifier.trim()
+            : "";
+        return qualifier
+            ? `Go to ${qualifier} source data.`
+            : "Go to source data.";
     }
 
     /** Maps inspection value types to the CSS classes used by the table template. */

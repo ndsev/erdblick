@@ -62,6 +62,12 @@ export class SearchCompletionPopupComponent implements AfterViewInit, OnDestroy 
         document.body.appendChild(this.popup.nativeElement);
     }
 
+    /** Positions the body-mounted popup without involving Angular change detection. */
+    setPosition(top: number, left: number): void {
+        this.popup.nativeElement.style.top = `${top}px`;
+        this.popup.nativeElement.style.left = `${left}px`;
+    }
+
     /** Removes the body-mounted popup explicitly because Angular no longer owns its original DOM position. */
     ngOnDestroy(): void {
         this.popup.nativeElement.remove();

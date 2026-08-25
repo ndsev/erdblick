@@ -9,7 +9,7 @@ import {MapTreeNode} from "../mapdata/map.tree.model";
 import {ErdblickStyle} from "../styledata/style.service";
 import {coreLib} from "../integrations/wasm";
 import {InfoMessageService} from "./info.service";
-import type {FeatureWrapper} from "../mapdata/features.model";
+import type {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import type {DiagnosticsExportOptions, DiagnosticsLogFilter} from "../diagnostics/diagnostics.model";
 import {
     BackgroundLayerConfig,
@@ -26,6 +26,7 @@ import {
     serializeFeatureSearchState
 } from "./feature-search-state";
 import {stripFeatureInspectionTarget} from "./tile-feature-id";
+import type {LayerPresetRef} from "../styledata/layer-preset.model";
 import {
     compressUrlCsvRuns,
     decodeLayerNamesV2,
@@ -40,6 +41,26 @@ import {
     sourceDataSelectionMapIds
 } from "./url-state-codec";
 import type {UrlV2MapTileKeyFactory} from "./url-state-codec";
+import {
+    clampTileSubsetRenderWorkerCount
+} from "./tile-render-policy";
+import {
+    clampLod3TileThreshold,
+    DEFAULT_LOD3_TILE_THRESHOLD
+} from "./lod-policy";
+
+export {
+    AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
+    clampTileSubsetRenderWorkerCount,
+    MAX_TILE_SUBSET_RENDER_WORKER_COUNT,
+    MIN_TILE_SUBSET_RENDER_WORKER_COUNT
+} from "./tile-render-policy";
+export {
+    clampLod3TileThreshold,
+    DEFAULT_LOD3_TILE_THRESHOLD,
+    MAX_LOD3_TILE_THRESHOLD,
+    MIN_LOD3_TILE_THRESHOLD
+} from "./lod-policy";
 
 const COORDINATE_STATE_DECIMAL_PLACES = 8;
 const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
@@ -47,6 +68,9 @@ const DEFAULT_FEATURE_SEARCH_GROUPING = [1];
 const FEATURE_SEARCH_GROUPING_OPTION_IDS = new Set([1, 2, 3, 4]);
 
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
+export const DEFAULT_DRILL_PICK_RADIUS = 3;
+export const MIN_DRILL_PICK_RADIUS = 1;
+export const MAX_DRILL_PICK_RADIUS = 10;
 export const MAX_COMPARE_PANELS = 4;
 export const MAX_NUM_TILES_TO_LOAD = 512;
 export const DEFAULT_LOCATION_SEARCH_RESULT_LIMIT = 10;
@@ -54,6 +78,12 @@ export const MAX_LOCATION_SEARCH_RESULT_LIMIT = 50;
 export const DEFAULT_MAP_ZOOM_STEP = 0.5;
 export const MIN_MAP_ZOOM_STEP = 0.001;
 export const MAX_MAP_ZOOM_STEP = 1.0;
+export const DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS = 20;
+export const MIN_FEATURE_ZOOM_CLEARANCE_METERS = 0;
+export const MAX_FEATURE_ZOOM_CLEARANCE_METERS = 100;
+export const DEFAULT_TILE_GRID_LEVEL = 13;
+export const DEFAULT_TILE_GRID_COLOR = "f5f5f5";
+export const DEFAULT_TILE_GRID_OPACITY = 39;
 export const VIEW_SYNC_PROJECTION = "proj";
 export const VIEW_SYNC_POSITION = "pos";
 export const VIEW_SYNC_MOVEMENT = "mov";
@@ -61,11 +91,6 @@ export const VIEW_SYNC_LAYERS = "lay";
 export const DEFAULT_EM_WIDTH = 30;
 export const DEFAULT_EM_HEIGHT = 40;
 export const DEFAULT_DOCKED_EM_HEIGHT = 20;
-export const MAX_DECK_STYLE_WORKERS = 32;
-export const DEFAULT_DECK_STYLE_WORKER_COUNT = 2;
-export const DEFAULT_LOW_FI_TILE_THRESHOLD = 128;
-export const MIN_LOW_FI_TILE_THRESHOLD = 1;
-export const MAX_LOW_FI_TILE_THRESHOLD = 4096;
 export const ABOUT_DIALOG_LAYOUT_ID = 'about-dialog';
 export const LEGAL_INFO_DIALOG_LAYOUT_ID = 'legal-info-dialog';
 export const PREFERENCES_DIALOG_LAYOUT_ID = 'preferences-dialog';
@@ -75,8 +100,10 @@ export const ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID = 'advanced-preferences-dialo
 export const DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID = 'diagnostics-performance';
 export const DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID = 'diagnostics-log';
 export const DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID = 'diagnostics-export';
+export const CACHE_RESET_DIALOG_LAYOUT_ID = 'cache-reset-dialog';
 export const STYLES_DIALOG_LAYOUT_ID = 'styles-dialog';
 export const STYLE_EDITOR_DIALOG_LAYOUT_ID = 'style-editor-dialog';
+export const STYLE_PRESET_EDITOR_DIALOG_LAYOUT_ID = 'style-preset-editor-dialog';
 export const FEATURE_SEARCH_DIALOG_LAYOUT_ID = 'feature-search';
 export const FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID = 'feature-search-export';
 export const SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID = 'source-data-selection-dialog';
@@ -94,19 +121,6 @@ export const DEFAULT_HIGHLIGHT_COLORS = [
     "#ccefff",
     "#58cf08"
 ]
-
-/** Clamp one low-fi tile threshold to the supported integer preference range. */
-export function clampLowFiTileThreshold(
-    value: unknown,
-    fallback = DEFAULT_LOW_FI_TILE_THRESHOLD): number {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) {
-        return fallback;
-    }
-    return Math.min(
-        MAX_LOW_FI_TILE_THRESHOLD,
-        Math.max(MIN_LOW_FI_TILE_THRESHOLD, Math.trunc(numeric)));
-}
 
 /** Normalizes feature search grouping values from persisted state. */
 function normalizeFeatureSearchGrouping(value: unknown): number[] {
@@ -147,6 +161,27 @@ export interface TileFeatureId {
     mapTileKey: string;
 }
 
+/** One ordered SIMFIL field shown in the map feature-hover popover. */
+export interface HoverLabelFieldConfig {
+    expression: string;
+    customExpression: boolean;
+    /** Optional short key shown next to the value; the expression leaf is used when absent. */
+    displayKey?: string;
+}
+
+/** Derives the concise key used for a hover field when no override was configured. */
+export function defaultHoverLabelFieldKey(expression: string): string {
+    const trimmed = expression.trim();
+    const leaf = trimmed.split(".").filter(segment => segment.length).at(-1);
+    return leaf ?? trimmed;
+}
+
+/** Initial hover overlay preserves the previous feature-id-only behavior. */
+export const DEFAULT_HOVER_LABEL_FIELDS: HoverLabelFieldConfig[] = [{
+    expression: "id",
+    customExpression: false
+}];
+
 /** Selection payload used for source-data/meta-data rows that are not regular features. */
 export interface SelectedSourceData {
     mapTileKey: string;
@@ -163,6 +198,8 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     sourceData?: SelectedSourceData;
     color: string;
     undocked: boolean;
+    /** Runtime-only marker used while feature identities are resolving into inspectable wrappers. */
+    loading?: boolean;
 }
 
 /** Transient expansion state for one mounted inspection tree. */
@@ -232,6 +269,8 @@ export interface InspectionComparisonOption {
 export interface CameraViewState {
     destination: { lon: number, lat: number, alt: number };
     orientation: { heading: number, pitch: number, roll: number };
+    /** Local map-centre offset in metres; omitted legacy values resolve to zero. */
+    position?: [x: number, y: number, z: number];
 }
 
 /** Persisted selected background-layer id plus per-view opacity. */
@@ -247,6 +286,33 @@ export interface LayerViewConfig {
     visible: boolean;
 }
 
+/** One complete per-option value array written through the atomic style-state batch API. */
+export interface StyleOptionStateUpdate {
+    mapId: string;
+    layerId: string;
+    shortStyleId: string;
+    optionId: string;
+    values: Array<string | number | boolean>;
+}
+
+/** Qualified layer-preset selections for concrete map/layer pairs within one map view. */
+export type LayerPresetSelections = Record<string, Record<string, LayerPresetRef>>;
+
+/** Map-preset selections for concrete maps within one map view. */
+export type MapPresetSelections = Record<string, string>;
+
+const LAYER_PRESET_REF_SCHEMA = z.object({
+    styleId: z.string(),
+    presetId: z.string().min(1)
+}).strict();
+
+// A stored unqualified id from the former global preset implementation is retained
+// with an empty style id so the map tree can migrate it only when resolution is unique.
+const STORED_LAYER_PRESET_REF_SCHEMA = z.union([
+    LAYER_PRESET_REF_SCHEMA,
+    z.string().min(1).transform(presetId => ({styleId: "", presetId}))
+]);
+
 /** Enumerates view properties that can be synchronized across split views. */
 export interface ViewSyncOptionDescriptor {
     name: string;
@@ -257,6 +323,44 @@ export interface ViewSyncOptionDescriptor {
 
 /** Tile-grid overlay labeling mode used by the map panel and Deck overlay. */
 export type TileGridMode = "xyz" | "nds";
+
+/** Returns the highest meaningful grid level for the selected coordinate mode. */
+export function tileGridMaxLevel(mode: TileGridMode): number {
+    return mode === "nds" ? 15 : 22;
+}
+
+/** Clamps a configured grid level to the selected coordinate mode. */
+export function clampTileGridLevel(value: unknown, mode: TileGridMode): number {
+    const numeric = Number(value);
+    return Number.isFinite(numeric)
+        ? Math.max(0, Math.min(tileGridMaxLevel(mode), Math.round(numeric)))
+        : DEFAULT_TILE_GRID_LEVEL;
+}
+
+/** Normalizes a PrimeNG colour-picker value to six lowercase RGB digits. */
+export function normalizeTileGridColor(value: unknown): string {
+    const normalized = String(value).replace(/^#/, "").toLowerCase();
+    return /^[0-9a-f]{6}$/.test(normalized) ? normalized : DEFAULT_TILE_GRID_COLOR;
+}
+
+/** Clamps tile-grid opacity to an integer percentage. */
+export function clampTileGridOpacity(value: unknown): number {
+    const numeric = Number(value);
+    return Number.isFinite(numeric)
+        ? Math.max(0, Math.min(100, Math.round(numeric)))
+        : DEFAULT_TILE_GRID_OPACITY;
+}
+
+/** Converts persisted grid appearance values to the deck.gl RGBA tuple. */
+export function tileGridRgba(color: string, opacity: number): [number, number, number, number] {
+    const normalized = normalizeTileGridColor(color);
+    return [
+        Number.parseInt(normalized.slice(0, 2), 16),
+        Number.parseInt(normalized.slice(2, 4), 16),
+        Number.parseInt(normalized.slice(4, 6), 16),
+        Math.round(clampTileGridOpacity(opacity) * 255 / 100)
+    ];
+}
 
 /** Limits used while validating imported viewer snapshots. */
 interface SnapshotImportLimits {
@@ -304,6 +408,17 @@ export function clampMapZoomStep(value: number): number {
         return DEFAULT_MAP_ZOOM_STEP;
     }
     return Math.min(MAX_MAP_ZOOM_STEP, Math.max(MIN_MAP_ZOOM_STEP, value));
+}
+
+/** Clamps the persisted minimum feature-navigation camera distance. */
+export function clampFeatureZoomClearanceMeters(value: number): number {
+    if (!Number.isFinite(value)) {
+        return DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS;
+    }
+    return Math.min(
+        MAX_FEATURE_ZOOM_CLEARANCE_METERS,
+        Math.max(MIN_FEATURE_ZOOM_CLEARANCE_METERS, value)
+    );
 }
 
 /** Produces a detached clone suitable for app-state snapshots and comparisons. */
@@ -395,6 +510,7 @@ export class AppStateService implements OnDestroy {
     private readonly CONFIG_DEFAULT_STATE_META_KEY = "erdblickConfigDefaultStateMeta";
     private readonly SNAPSHOT_UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
     private readonly RETIRED_URL_PARAM_KEYS = new Set(["s"]);
+    private readonly RETIRED_STATE_KEYS = new Set(["mapPresets"]);
     private static readonly URL_SYNC_MIN_INTERVAL_MS = 50;
     private configDefaultStateMeta: ConfigDefaultStateMeta = {
         version: 1,
@@ -440,7 +556,7 @@ export class AppStateService implements OnDestroy {
     readonly markedPositionState = this.createState<number[]>({
         name: 'markedPosition',
         defaultValue: [],
-        schema: z.array(z.coerce.number()).max(2),
+        schema: z.array(z.coerce.number()).max(3),
         toStorage: (value: number[]) => value.map(v => roundCoordinateStateValue(v)),
         fromStorage: (payload: any): number[] => (payload as number[]).map(v => roundCoordinateStateValue(v)),
         urlParamName: 'mp',
@@ -550,7 +666,8 @@ export class AppStateService implements OnDestroy {
         name: 'cameraView',
         defaultValue: {
             destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
-            orientation: {heading: 0, pitch: -Math.PI / 2, roll: 0}
+            orientation: {heading: 0, pitch: -Math.PI / 2, roll: 0},
+            position: [0, 0, 0]
         },
         schema: z.object({
             lon: z.coerce.number().optional(),
@@ -558,7 +675,10 @@ export class AppStateService implements OnDestroy {
             alt: z.coerce.number().optional(),
             h: z.coerce.number().optional(),
             p: z.coerce.number().optional(),
-            r: z.coerce.number().optional()
+            r: z.coerce.number().optional(),
+            px: z.coerce.number().optional(),
+            py: z.coerce.number().optional(),
+            pz: z.coerce.number().optional()
         }),
         toStorage: (value: any) => ({
             lon: roundCoordinateStateValue(value.destination.lon),
@@ -566,7 +686,10 @@ export class AppStateService implements OnDestroy {
             alt: roundCoordinateStateValue(value.destination.alt),
             h: roundCoordinateStateValue(value.orientation.heading),
             p: roundCoordinateStateValue(value.orientation.pitch),
-            r: roundCoordinateStateValue(value.orientation.roll)
+            r: roundCoordinateStateValue(value.orientation.roll),
+            px: roundCoordinateStateValue(value.position?.[0] ?? 0),
+            py: roundCoordinateStateValue(value.position?.[1] ?? 0),
+            pz: roundCoordinateStateValue(value.position?.[2] ?? 0)
         }),
         fromStorage: (payload: any, currentValue: CameraViewState) => ({
             destination: {
@@ -578,7 +701,13 @@ export class AppStateService implements OnDestroy {
                 heading: roundCoordinateStateValue(payload.h ?? currentValue.orientation.heading),
                 pitch: roundCoordinateStateValue(payload.p ?? currentValue.orientation.pitch),
                 roll: roundCoordinateStateValue(payload.r ?? currentValue.orientation.roll),
-            }
+            },
+            // Older URLs, local-storage entries, and snapshots have no map-centre offset.
+            position: [
+                roundCoordinateStateValue(payload.px ?? 0),
+                roundCoordinateStateValue(payload.py ?? 0),
+                roundCoordinateStateValue(payload.pz ?? 0)
+            ]
         }),
         urlFormEncode: true
     });
@@ -591,42 +720,32 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    readonly deckStyleWorkersOverrideState = this.createState<boolean>({
-        name: 'deckStyleWorkersOverride',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly deckThreadedRenderingEnabledState = this.createState<boolean>({
-        name: 'deckThreadedRenderingEnabled',
-        defaultValue: true,
-        schema: Boolish
-    });
-
     readonly deckAntialiasingEnabledState = this.createState<boolean>({
         name: 'deckAntialiasingEnabled',
         defaultValue: true,
         schema: Boolish
     });
 
-    readonly pinLowFiToMaxLodState = this.createState<boolean>({
-        name: 'pinLowFiToMaxLod',
-        defaultValue: false,
+    readonly contactShadingEnabledState = this.createState<boolean>({
+        name: 'contactShadingEnabled',
+        defaultValue: true,
         schema: Boolish
     });
 
-    readonly lowFiTileThresholdState = this.createState<number>({
-        name: 'lowFiTileThreshold',
-        defaultValue: DEFAULT_LOW_FI_TILE_THRESHOLD,
+    readonly lod3TileThresholdState = this.createState<number>({
+        name: 'lod3TileThreshold',
+        defaultValue: DEFAULT_LOD3_TILE_THRESHOLD,
         schema: z.coerce.number().int(),
-        toStorage: value => clampLowFiTileThreshold(value, DEFAULT_LOW_FI_TILE_THRESHOLD),
-        fromStorage: value => clampLowFiTileThreshold(value, DEFAULT_LOW_FI_TILE_THRESHOLD)
+        toStorage: value => clampLod3TileThreshold(value, DEFAULT_LOD3_TILE_THRESHOLD),
+        fromStorage: value => clampLod3TileThreshold(value, DEFAULT_LOD3_TILE_THRESHOLD)
     });
 
-    readonly deckStyleWorkersCountState = this.createState<number>({
-        name: 'deckStyleWorkersCount',
-        defaultValue: DEFAULT_DECK_STYLE_WORKER_COUNT,
-        schema: z.coerce.number().int().min(1).max(MAX_DECK_STYLE_WORKERS)
+    readonly tileSubsetRenderWorkerCountState = this.createState<number>({
+        name: 'tileSubsetRenderWorkerCount',
+        defaultValue: 0,
+        schema: z.coerce.number().int(),
+        toStorage: value => clampTileSubsetRenderWorkerCount(value),
+        fromStorage: value => clampTileSubsetRenderWorkerCount(value)
     });
 
     readonly tilePullCompressionEnabledState = this.createState<boolean>({
@@ -640,6 +759,13 @@ export class AppStateService implements OnDestroy {
         defaultValue: DEFAULT_MAP_ZOOM_STEP,
         schema: z.coerce.number(),
         fromStorage: value => clampMapZoomStep(Number(value))
+    });
+
+    readonly featureZoomClearanceMetersState = this.createState<number>({
+        name: 'featureZoomClearanceMeters',
+        defaultValue: DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS,
+        schema: z.coerce.number(),
+        fromStorage: value => clampFeatureZoomClearanceMeters(Number(value))
     });
 
     readonly layerSyncOptionsState = this.createMapViewState<boolean>({
@@ -694,6 +820,38 @@ export class AppStateService implements OnDestroy {
         urlParamName: 'tgm'
     });
 
+    readonly viewTileGridLevelState = this.createMapViewState<number>({
+        name: "tileGridLevel",
+        defaultValue: DEFAULT_TILE_GRID_LEVEL,
+        schema: z.coerce.number().int().min(0).max(22),
+        urlParamName: "tgl"
+    });
+
+    readonly viewTileGridAutoLevelState = this.createMapViewState<boolean>({
+        name: "tileGridAutoLevel",
+        defaultValue: false,
+        schema: Boolish,
+        urlParamName: "tga"
+    });
+
+    readonly viewTileGridColorState = this.createMapViewState<string>({
+        name: "tileGridColor",
+        defaultValue: DEFAULT_TILE_GRID_COLOR,
+        schema: z.string(),
+        toStorage: (value: string) => normalizeTileGridColor(value),
+        fromStorage: (payload: unknown) => normalizeTileGridColor(payload),
+        urlParamName: "tgc"
+    });
+
+    readonly viewTileGridOpacityState = this.createMapViewState<number>({
+        name: "tileGridOpacity",
+        defaultValue: DEFAULT_TILE_GRID_OPACITY,
+        schema: z.coerce.number().min(0).max(100),
+        toStorage: (value: number) => clampTileGridOpacity(value),
+        fromStorage: (payload: unknown) => clampTileGridOpacity(payload),
+        urlParamName: "tgo"
+    });
+
     readonly layerZoomLevelState = this.createMapViewState<Array<number>>({
         name: "zoomLevel",
         defaultValue: [],
@@ -709,6 +867,20 @@ export class AppStateService implements OnDestroy {
     });
 
     readonly stylesState = new StyleState(this.statePool);
+
+    readonly layerPresetSelectionState = this.createMapViewState<LayerPresetSelections>({
+        name: "stylePresetSelection",
+        defaultValue: {},
+        schema: z.record(z.string(), z.record(z.string(), STORED_LAYER_PRESET_REF_SCHEMA)),
+        snapshotPersist: false
+    });
+
+    readonly mapPresetSelectionState = this.createMapViewState<MapPresetSelections>({
+        name: "mapPresetSelection",
+        defaultValue: {},
+        schema: z.record(z.string(), z.string()),
+        snapshotPersist: false
+    });
 
     readonly styleVisibilityState = this.createState<Record<string, boolean>>({
         name: 'styleVisiblity',
@@ -727,6 +899,21 @@ export class AppStateService implements OnDestroy {
         name: 'enabledCoordsTileIds',
         defaultValue: ["WGS84"],
         schema: z.array(z.string())
+    });
+
+    readonly coordinatesEnabledState = this.createState<boolean>({
+        name: "coordinatesEnabled",
+        defaultValue: true,
+        schema: Boolish,
+        snapshotPersist: false,
+        configDefault: true
+    });
+
+    readonly coordinatesLegalTermsAcceptedState = this.createState<boolean>({
+        name: "coordinatesLegalTermsAccepted",
+        defaultValue: false,
+        schema: Boolish,
+        snapshotPersist: false
     });
 
     readonly diagnosticsLogFilterState = this.createState<DiagnosticsLogFilter>({
@@ -833,10 +1020,29 @@ export class AppStateService implements OnDestroy {
         schema: z.coerce.number().int().min(1).max(MAX_SIMULTANEOUS_INSPECTIONS)
     });
 
+    readonly drillPickRadiusState = this.createState<number>({
+        name: 'drillPickRadius',
+        defaultValue: DEFAULT_DRILL_PICK_RADIUS,
+        schema: z.coerce.number().int().min(MIN_DRILL_PICK_RADIUS).max(MAX_DRILL_PICK_RADIUS)
+    });
+
     readonly inspectionTreeExpandByDefaultState = this.createState<boolean>({
         name: 'inspectionTreeExpandByDefault',
         defaultValue: false,
         schema: Boolish
+    });
+
+    readonly sourceDataInspectionDefaultColumnsState = this.createState<string[]>({
+        name: 'sourceDataInspectionDefaultColumns',
+        defaultValue: [],
+        schema: z.array(z.enum(["displayAddress", "schemaType"]))
+    });
+
+    readonly inspectionTreeHiddenColumnsState = this.createState<Record<string, string[]>>({
+        name: 'inspectionTreeHiddenColumns',
+        defaultValue: {},
+        schema: z.record(z.string(), z.array(z.string())),
+        snapshotPersist: false
     });
 
     readonly inspectionValueVaryColorsState = this.createState<boolean>({
@@ -855,6 +1061,22 @@ export class AppStateService implements OnDestroy {
         name: 'inspectionValueVaryStriping',
         defaultValue: false,
         schema: Boolish
+    });
+
+    readonly hoverLabelsEnabledState = this.createState<boolean>({
+        name: 'hoverLabelsEnabled',
+        defaultValue: true,
+        schema: Boolish
+    });
+
+    readonly hoverLabelFieldsState = this.createState<HoverLabelFieldConfig[]>({
+        name: 'hoverLabelFields',
+        defaultValue: DEFAULT_HOVER_LABEL_FIELDS.map(field => ({...field})),
+        schema: z.array(z.object({
+            expression: z.string(),
+            customExpression: Boolish,
+            displayKey: z.string().optional()
+        }))
     });
 
     readonly inspectionComparisonState = this.createState<InspectionComparisonModel | null>({
@@ -925,6 +1147,7 @@ export class AppStateService implements OnDestroy {
     /** Registers all persisted state slots and wires startup hydration/persistence flow. */
     constructor(private readonly router: Router,
                 private readonly infoMessageService: InfoMessageService) {
+        this.retireMapPresetDefinitionStorage();
         // Perform initial hydration after the initial NavigationEnd event arrives.
         this.router.events.pipe(filter(event => event instanceof NavigationEnd), take(1)).subscribe(() => {
             this.initializePersistence();
@@ -957,6 +1180,7 @@ export class AppStateService implements OnDestroy {
             const panelIds = panels.map(panel => panel.id);
             this.pruneInspectionDialogLayout(panelIds);
             this.pruneInspectionTreeExpansionStates(panelIds);
+            this.pruneInspectionTreeHiddenColumns(panelIds);
             this.sanitizeFocusedInspectionPanel(panels);
         });
     }
@@ -998,7 +1222,9 @@ export class AppStateService implements OnDestroy {
         if (this.viewSync.includes(VIEW_SYNC_POSITION)) {
             const camState = this.cameraViewDataState.getValue(this.focusedView);
             this.setView(this.focusedView,
-                Cartographic.fromDegrees(camState.destination.lon, camState.destination.lat, camState.destination.alt));
+                Cartographic.fromDegrees(camState.destination.lon, camState.destination.lat, camState.destination.alt),
+                camState.orientation,
+                camState.position);
         }
         if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
             this.setProjectionMode(this.focusedView, this.mode2dState.getValue(this.focusedView));
@@ -1498,16 +1724,13 @@ export class AppStateService implements OnDestroy {
         layerType,
         mapId,
         layerId,
-        tileId,
-        stage
+        tileId
     ) => {
-        const parsedStage = Number(stage || 0);
         return coreLib.createMapTileKey(
             layerType,
             mapId,
             layerId,
-            tileId,
-            Number.isFinite(parsedStage) ? parsedStage : 0);
+            tileId);
     };
 
     /** Restores v2 URL params through a coordinated layer-indexed decode path. */
@@ -1668,7 +1891,7 @@ export class AppStateService implements OnDestroy {
             return [];
         }
 
-        const normalizedResult = this.normalizeSnapshot(snapshot);
+        const normalizedResult = this.normalizeSnapshot(snapshot, true);
         if (normalizedResult.errors.length) {
             normalizedResult.errors.forEach(error =>
                 console.warn(`[AppStateService] Ignoring invalid config state: ${error}`));
@@ -1688,7 +1911,7 @@ export class AppStateService implements OnDestroy {
         try {
             for (const [key, value] of Object.entries(normalized)) {
                 const state = this.statePool.get(key);
-                if (!state || !state.isSnapshotState()) {
+                if (!state || !state.isConfigDefaultState()) {
                     continue;
                 }
                 state.applySnapshotValue(value);
@@ -1788,7 +2011,7 @@ export class AppStateService implements OnDestroy {
     }
 
     /** Normalizes legacy snapshot shapes before schema validation is applied. */
-    private normalizeSnapshot(snapshot: unknown): SnapshotNormalizationResult {
+    private normalizeSnapshot(snapshot: unknown, forConfigDefault: boolean = false): SnapshotNormalizationResult {
         const limits = this.getSnapshotImportLimits();
         const errors: string[] = [];
         let serialized: string;
@@ -1815,6 +2038,10 @@ export class AppStateService implements OnDestroy {
         }
 
         for (const key of keys) {
+            if (this.RETIRED_STATE_KEYS.has(key)) {
+                delete normalized[key];
+                continue;
+            }
             const state = this.statePool.get(key);
             if (!state) {
                 if (this.validateStyleOptionSnapshotEntry(key, normalized[key], errors)) {
@@ -1823,7 +2050,10 @@ export class AppStateService implements OnDestroy {
                 errors.push(`Unknown snapshot state '${key}'.`);
                 continue;
             }
-            if (!state.isSnapshotState()) {
+            const stateIsAllowed = forConfigDefault
+                ? state.isConfigDefaultState()
+                : state.isSnapshotState();
+            if (!stateIsAllowed) {
                 delete normalized[key];
             }
         }
@@ -1837,7 +2067,10 @@ export class AppStateService implements OnDestroy {
             if (!state) {
                 continue;
             }
-            if (!state.isSnapshotState()) {
+            const stateIsAllowed = forConfigDefault
+                ? state.isConfigDefaultState()
+                : state.isSnapshotState();
+            if (!stateIsAllowed) {
                 continue;
             }
             try {
@@ -1898,6 +2131,25 @@ export class AppStateService implements OnDestroy {
         }
         for (const key of keys) {
             localStorage.removeItem(key);
+        }
+    }
+
+    /** Removes the obsolete browser-owned map-preset catalog and its ownership metadata. */
+    private retireMapPresetDefinitionStorage(): void {
+        localStorage.removeItem("mapPresets");
+        const rawMeta = localStorage.getItem(this.CONFIG_DEFAULT_STATE_META_KEY);
+        if (!rawMeta) {
+            return;
+        }
+        try {
+            const meta = JSON.parse(rawMeta) as {entries?: Record<string, unknown>};
+            if (!meta.entries || !Object.prototype.hasOwnProperty.call(meta.entries, "mapPresets")) {
+                return;
+            }
+            delete meta.entries["mapPresets"];
+            localStorage.setItem(this.CONFIG_DEFAULT_STATE_META_KEY, JSON.stringify(meta));
+        } catch {
+            // The normal metadata loader handles malformed input.
         }
     }
 
@@ -2043,24 +2295,34 @@ export class AppStateService implements OnDestroy {
         this.seedAdditionalViews(previousViewCount, val);
         this.numViewsState.next(val);
     };
-    get deckThreadedRenderingEnabled() {return this.deckThreadedRenderingEnabledState.getValue();}
-    set deckThreadedRenderingEnabled(val: boolean) {this.deckThreadedRenderingEnabledState.next(val);}
     get deckAntialiasingEnabled() {return this.deckAntialiasingEnabledState.getValue();}
     set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
-    get pinLowFiToMaxLod() {return this.pinLowFiToMaxLodState.getValue();}
-    set pinLowFiToMaxLod(val: boolean) {this.pinLowFiToMaxLodState.next(val);}
-    get lowFiTileThreshold() {return this.lowFiTileThresholdState.getValue();}
-    set lowFiTileThreshold(val: number) {
-        this.lowFiTileThresholdState.next(clampLowFiTileThreshold(val, DEFAULT_LOW_FI_TILE_THRESHOLD));
+    get contactShadingEnabled() {return this.contactShadingEnabledState.getValue();}
+    set contactShadingEnabled(val: boolean) {this.contactShadingEnabledState.next(!!val);}
+    get lod3TileThreshold() {return this.lod3TileThresholdState.getValue();}
+    set lod3TileThreshold(val: number) {
+        this.lod3TileThresholdState.next(clampLod3TileThreshold(val, DEFAULT_LOD3_TILE_THRESHOLD));
     }
-    get deckStyleWorkersOverride() {return this.deckStyleWorkersOverrideState.getValue();}
-    set deckStyleWorkersOverride(val: boolean) {this.deckStyleWorkersOverrideState.next(val);};
-    get deckStyleWorkersCount() {return this.deckStyleWorkersCountState.getValue();}
-    set deckStyleWorkersCount(val: number) {this.deckStyleWorkersCountState.next(val);};
+    get tileSubsetRenderWorkerCount() {
+        return this.tileSubsetRenderWorkerCountState.getValue();
+    }
+    set tileSubsetRenderWorkerCount(val: number) {
+        this.tileSubsetRenderWorkerCountState.next(
+            clampTileSubsetRenderWorkerCount(val)
+        );
+    }
     get tilePullCompressionEnabled() {return this.tilePullCompressionEnabledState.getValue();}
     set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);};
     get mapZoomStep() {return this.mapZoomStepState.getValue();}
     set mapZoomStep(val: number) {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));};
+    get featureZoomClearanceMeters() {
+        return this.featureZoomClearanceMetersState.getValue();
+    }
+    set featureZoomClearanceMeters(val: number) {
+        this.featureZoomClearanceMetersState.next(
+            clampFeatureZoomClearanceMeters(Number(val))
+        );
+    }
     get locationSearchResultLimit() {return this.locationSearchResultLimitState.getValue();}
     set locationSearchResultLimit(val: number) {this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val));};
     get marker() {return this.markerState.getValue();}
@@ -2093,16 +2355,39 @@ export class AppStateService implements OnDestroy {
         const normalized = Math.min(MAX_SIMULTANEOUS_INSPECTIONS, Math.max(1, Math.trunc(numeric)));
         this.inspectionsLimitState.next(normalized);
     };
+    get drillPickRadius() {return this.drillPickRadiusState.getValue();}
+    set drillPickRadius(val: number) {
+        const numeric = Number(val);
+        if (!Number.isFinite(numeric)) {
+            return;
+        }
+        const normalized = Math.min(MAX_DRILL_PICK_RADIUS, Math.max(MIN_DRILL_PICK_RADIUS, Math.trunc(numeric)));
+        this.drillPickRadiusState.next(normalized);
+    };
     get inspectionComparison() {return this.inspectionComparisonState.getValue();}
     set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
     get inspectionTreeExpandByDefault() {return this.inspectionTreeExpandByDefaultState.getValue();}
     set inspectionTreeExpandByDefault(val: boolean) {this.inspectionTreeExpandByDefaultState.next(!!val);}
+    get sourceDataInspectionDefaultColumns() {
+        return this.sourceDataInspectionDefaultColumnsState.getValue();
+    }
+    set sourceDataInspectionDefaultColumns(val: string[]) {
+        const allowed = new Set(["displayAddress", "schemaType"]);
+        this.sourceDataInspectionDefaultColumnsState.next(
+            [...new Set(val.filter(column => allowed.has(column)))]);
+    }
     get inspectionValueVaryColors() {return this.inspectionValueVaryColorsState.getValue();}
     set inspectionValueVaryColors(val: boolean) {this.inspectionValueVaryColorsState.next(!!val);}
     get inspectionValueVaryOutlines() {return this.inspectionValueVaryOutlinesState.getValue();}
     set inspectionValueVaryOutlines(val: boolean) {this.inspectionValueVaryOutlinesState.next(!!val);}
     get inspectionValueVaryStriping() {return this.inspectionValueVaryStripingState.getValue();}
     set inspectionValueVaryStriping(val: boolean) {this.inspectionValueVaryStripingState.next(!!val);}
+    get hoverLabelsEnabled() {return this.hoverLabelsEnabledState.getValue();}
+    set hoverLabelsEnabled(val: boolean) {this.hoverLabelsEnabledState.next(!!val);}
+    get hoverLabelFields() {return this.hoverLabelFieldsState.getValue();}
+    set hoverLabelFields(val: HoverLabelFieldConfig[]) {
+        this.hoverLabelFieldsState.next(val.map(field => ({...field})));
+    }
     get isDockOpen() {return this.dockOpenState.getValue();}
     set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
     get dockActiveTab() {return this.dockActiveTabState.getValue();}
@@ -2222,8 +2507,13 @@ export class AppStateService implements OnDestroy {
         return Cartographic.fromDegrees(destination.lon, destination.lat, destination.alt);
     }
 
-    /** Internal helper that writes camera destination and orientation without extra policy. */
-    private _setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
+    /** Internal helper that writes a complete camera pose without extra synchronization policy. */
+    private _setView(
+        viewIndex: number,
+        destination: Cartographic,
+        orientation?: { heading: number, pitch: number, roll: number },
+        position: readonly [number, number, number] = [0, 0, 0]
+    ) {
         // Fall back to the current orientation if none was passed.
         orientation = orientation ?? this.cameraViewDataState.getValue(viewIndex).orientation;
         const view: CameraViewState = {
@@ -2236,13 +2526,19 @@ export class AppStateService implements OnDestroy {
                 heading: roundCoordinateStateValue(orientation.heading),
                 pitch: roundCoordinateStateValue(orientation.pitch),
                 roll: roundCoordinateStateValue(orientation.roll),
-            }
+            },
+            position: position.map(roundCoordinateStateValue) as [number, number, number]
         };
         this.cameraViewDataState.next(viewIndex, view);
     }
 
-    /** Persists camera destination/orientation and updates the focused view marker. */
-    setView(viewIndex: number, destination: Cartographic, orientation?: { heading: number, pitch: number, roll: number }) {
+    /** Persists a camera pose and applies the configured cross-view synchronization policy. */
+    setView(
+        viewIndex: number,
+        destination: Cartographic,
+        orientation?: { heading: number, pitch: number, roll: number },
+        position: readonly [number, number, number] = [0, 0, 0]
+    ) {
         const syncPosition = this.viewSync.includes(VIEW_SYNC_POSITION);
         const syncMovement = this.viewSync.includes(VIEW_SYNC_MOVEMENT);
 
@@ -2254,7 +2550,7 @@ export class AppStateService implements OnDestroy {
 
             if (syncPosition) {
                 for (let i = 0; i < this.numViews; i++) {
-                    this._setView(i, destination, orientation);
+                    this._setView(i, destination, orientation, position);
                 }
                 return;
             }
@@ -2266,7 +2562,7 @@ export class AppStateService implements OnDestroy {
                 const deltaLon = destLon - previous.lon;
                 const deltaLat = destLat - previous.lat;
 
-                this._setView(viewIndex, destination, orientation);
+                this._setView(viewIndex, destination, orientation, position);
 
                 for (let i = 0; i < this.numViews; i++) {
                     if (i === viewIndex) {
@@ -2278,13 +2574,13 @@ export class AppStateService implements OnDestroy {
                         target.destination.lat + deltaLat,
                         target.destination.alt
                     );
-                    this._setView(i, newDestination);
+                    this._setView(i, newDestination, undefined, target.position);
                 }
                 return;
             }
         }
 
-        this._setView(viewIndex, destination, orientation);
+        this._setView(viewIndex, destination, orientation, position);
     }
 
     /** Switches one view between 2D and 3D projection mode. */
@@ -2600,6 +2896,21 @@ export class AppStateService implements OnDestroy {
         return state ? this.cloneInspectionTreeExpansionState(state) : undefined;
     }
 
+    /** Persists the optional columns hidden by the user in one inspection panel. */
+    setInspectionTreeHiddenColumns(panelId: number, hiddenColumns: Iterable<string>): void {
+        const states = this.inspectionTreeHiddenColumnsState.getValue();
+        this.inspectionTreeHiddenColumnsState.next({
+            ...states,
+            [panelId]: [...new Set(hiddenColumns)]
+        });
+    }
+
+    /** Returns a panel's persisted hidden columns, or undefined when defaults still apply. */
+    getInspectionTreeHiddenColumns(panelId: number): string[] | undefined {
+        const hiddenColumns = this.inspectionTreeHiddenColumnsState.getValue()[panelId];
+        return hiddenColumns ? [...hiddenColumns] : undefined;
+    }
+
     /** Clones an optional inspection-tree expansion snapshot. */
     private cloneInspectionTreeExpansionSnapshot(
         snapshot?: InspectionTreeExpansionSnapshot
@@ -2779,6 +3090,7 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Append a newly docked surface after existing siblings in the same tab. */
     private nextSurfaceDockOrder(dockTab: string): number {
         const orders = Object.values(this.dialogLayoutsState.getValue())
             .filter(layout => (layout.docked ?? false) && layout.dockTab === dockTab)
@@ -2943,6 +3255,17 @@ export class AppStateService implements OnDestroy {
         }
     }
 
+    /** Removes persisted column overrides for inspection panels that no longer exist. */
+    private pruneInspectionTreeHiddenColumns(activePanelIds: number[]): void {
+        const activeIds = new Set(activePanelIds.map(String));
+        const current = this.inspectionTreeHiddenColumnsState.getValue();
+        const retained = Object.fromEntries(
+            Object.entries(current).filter(([panelId]) => activeIds.has(panelId)));
+        if (Object.keys(retained).length !== Object.keys(current).length) {
+            this.inspectionTreeHiddenColumnsState.next(retained);
+        }
+    }
+
     /** Opens the inspection comparison dialog with the supplied model. */
     openInspectionComparison(model: InspectionComparisonModel): void {
         this.inspectionComparisonState.next(model);
@@ -3083,7 +3406,7 @@ export class AppStateService implements OnDestroy {
         if (position) {
             const longitude = GeoMath.toDegrees(position.longitude);
             const latitude = GeoMath.toDegrees(position.latitude);
-            this.markedPosition = [longitude, latitude];
+            this.markedPosition = [longitude, latitude, position.height];
         } else {
             this.markedPosition = [];
         }
@@ -3203,24 +3526,95 @@ export class AppStateService implements OnDestroy {
      *  map layer does not exist in layerNames, an exception will be thrown.
      */
     setStyleOptionValues(mapId: string, layerId: string, shortStyleId: string, optionId: string, value: (string|number|boolean)[]) {
-        const mapLayerId = `${mapId}/${layerId}`;
-        const layerIndex = this.layerNames.indexOf(mapLayerId);
-        if (layerIndex === -1) {
-            throw new Error(`[AppStateService] Unknown map layer '${mapLayerId}' when writing style option values`);
+        this.setStyleOptionValuesBatch([{
+            mapId,
+            layerId,
+            shortStyleId,
+            optionId,
+            values: value
+        }]);
+    }
+
+    /** Writes a complete collection of style-option arrays and emits style state exactly once. */
+    setStyleOptionValuesBatch(updates: StyleOptionStateUpdate[]): void {
+        if (!updates.length) {
+            return;
         }
-        const key = this.stylesState.styleOptionKey(mapId, layerId, shortStyleId, optionId);
+        for (const update of updates) {
+            const mapLayerId = `${update.mapId}/${update.layerId}`;
+            if (!this.layerNames.includes(mapLayerId)) {
+                throw new Error(`[AppStateService] Unknown map layer '${mapLayerId}' when writing style option values`);
+            }
+        }
+
         const views = this.numViewsState.getValue();
+        const nextStyles = new Map(this.styles);
+        for (const update of updates) {
+            const key = this.stylesState.styleOptionKey(
+                update.mapId,
+                update.layerId,
+                update.shortStyleId,
+                update.optionId);
+            let nextValues = [...update.values];
+            if (nextValues.length < views) {
+                const last = nextValues.length ? nextValues[nextValues.length - 1] : false;
+                nextValues = nextValues.concat(Array.from({length: views - nextValues.length}, () => last));
+            } else if (nextValues.length > views) {
+                nextValues = nextValues.slice(0, views);
+            }
+            nextStyles.set(key, nextValues);
+        }
+        this.stylesState.next(nextStyles);
+    }
 
-        let nextValues: (string|number|boolean)[] = Array.isArray(value) ? [...value] : [];
-        if (nextValues.length < views) {
-            const last = nextValues.length ? nextValues[nextValues.length - 1] : false;
-            nextValues = nextValues.concat(Array.from({length: views - nextValues.length}, () => last));
-        } else if (nextValues.length > views) {
-            nextValues = nextValues.slice(0, views);
+    /** Returns the locally selected qualified layer preset for one map/layer/view. */
+    getLayerPresetSelection(viewIndex: number, mapId: string, layerId: string): LayerPresetRef | null {
+        const ref = this.layerPresetSelectionState.getValue(viewIndex)[mapId]?.[layerId];
+        return ref ? {...ref} : null;
+    }
+
+    /** Stores or clears one map/layer/view layer-preset association without changing option values. */
+    setLayerPresetSelection(viewIndex: number, mapId: string, layerId: string, ref: LayerPresetRef | null): void {
+        const current = this.layerPresetSelectionState.getValue(viewIndex);
+        const currentRef = current[mapId]?.[layerId] ?? null;
+        if (currentRef?.styleId === ref?.styleId && currentRef?.presetId === ref?.presetId) {
+            return;
         }
 
-        this.styles.set(key, nextValues);
-        this.stylesState.next(this.styles);
+        const next: LayerPresetSelections = {...current};
+        const mapSelections = {...(next[mapId] ?? {})};
+        if (ref) {
+            mapSelections[layerId] = {...ref};
+            next[mapId] = mapSelections;
+        } else {
+            delete mapSelections[layerId];
+            if (Object.keys(mapSelections).length) {
+                next[mapId] = mapSelections;
+            } else {
+                delete next[mapId];
+            }
+        }
+        this.layerPresetSelectionState.next(viewIndex, next);
+    }
+
+    /** Returns the selected map-level preset for one concrete map/view. */
+    getMapPresetSelection(viewIndex: number, mapId: string): string | null {
+        return this.mapPresetSelectionState.getValue(viewIndex)[mapId] ?? null;
+    }
+
+    /** Stores or clears a map-level preset association without changing option values. */
+    setMapPresetSelection(viewIndex: number, mapId: string, presetId: string | null): void {
+        const current = this.mapPresetSelectionState.getValue(viewIndex);
+        if ((current[mapId] ?? null) === presetId) {
+            return;
+        }
+        const next = {...current};
+        if (presetId) {
+            next[mapId] = presetId;
+        } else {
+            delete next[mapId];
+        }
+        this.mapPresetSelectionState.next(viewIndex, next);
     }
 
     /** Returns whether the style is visible in the persisted style tree. */
@@ -3235,6 +3629,16 @@ export class AppStateService implements OnDestroy {
     setStyleVisibility(styleId: string, val: boolean) {
         this.styleVisibility[styleId] = val;
         this.styleVisibilityState.next(this.styleVisibility);
+    }
+
+    /** Removes stale visibility when a locally imported style identity is deleted. */
+    removeStyleVisibility(styleId: string) {
+        if (!Object.prototype.hasOwnProperty.call(this.styleVisibility, styleId)) {
+            return;
+        }
+        const next = {...this.styleVisibility};
+        delete next[styleId];
+        this.styleVisibility = next;
     }
 
     /** Adds a persisted feature-search definition. Runtime results remain service-owned. */
@@ -3396,6 +3800,10 @@ export class AppStateService implements OnDestroy {
         pruneViews(this.backgroundState);
         pruneViews(this.viewTileBordersState);
         pruneViews(this.viewTileGridModeState);
+        pruneViews(this.viewTileGridLevelState);
+        pruneViews(this.viewTileGridAutoLevelState);
+        pruneViews(this.viewTileGridColorState);
+        pruneViews(this.viewTileGridOpacityState);
         pruneViews(this.cameraViewDataState);
         pruneViews(this.layerVisibilityState);
         pruneViews(this.layerZoomLevelState);

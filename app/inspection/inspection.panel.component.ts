@@ -7,7 +7,7 @@ import {
 } from "../shared/appstate.service";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {InspectionSelectionService} from "./inspection-selection.service";
-import {FeatureWrapper} from "../mapdata/features.model";
+import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {coreLib} from "../integrations/wasm";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
@@ -206,9 +206,9 @@ export class InspectionPanelComponent {
                     this.selectedLayerItem = undefined;
                 }
             } else {
-                this.title = panel.features.length > 1 ?
+                this.title = panel.loading ? "Loading inspection…" : panel.features.length > 1 ?
                     `Selected ${panel.features.length} features` :
-                    displayFeatureId(panel.features[0].featureId);
+                    panel.features.length ? displayFeatureId(panel.features[0].featureId) : "Inspection";
                 this.layerMenuItems = [];
                 this.selectedLayerItem = undefined;
             }

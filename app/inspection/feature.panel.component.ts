@@ -1,13 +1,16 @@
 import {ChangeDetectorRef, Component, effect, input, NgZone, OnDestroy, output, ViewChild} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
-import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {coreLib} from "../integrations/wasm";
 import {InspectionPanelModel} from "../shared/appstate.service";
-import {FeatureWrapper} from "../mapdata/features.model";
+import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspection.tree.component";
 import {Feature} from '../../build/libs/core/erdblick-core';
-import {Subscription} from "rxjs";
-import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
+import {
+    hasFeatureInspectionValidity,
+    isFeatureInspectionSubTarget,
+    stripFeatureInspectionTarget,
+    stripFeatureInspectionValidity
+} from "../shared/tile-feature-id";
 
 /** Click target metadata emitted by C++ for propagated scalar value pills. */
 interface InspectionValueBubble {
@@ -47,7 +50,7 @@ interface InspectionModelData {
     template: `
         <div style="position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; min-height: 0;">
             @if (loading) {
-                <div style="position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.55);">
+                <div style="position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--p-content-background) 55%, transparent);">
                     <p-progressSpinner ariaLabel="loading"/>
                 </div>
             }
@@ -64,7 +67,7 @@ interface InspectionModelData {
     `,
     standalone: false
 })
-/** Renders feature inspection data and keeps it in sync while staged tiles continue loading. */
+/** Renders feature-restricted inspection data. */
 export class FeaturePanelComponent implements OnDestroy {
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
@@ -84,33 +87,22 @@ export class FeaturePanelComponent implements OnDestroy {
     selectedFeatures?: FeatureWrapper[];
     loading: boolean = false;
     firstHighlightedItemIndex?: number;
-    private readonly tileUpdateSubscription: Subscription;
     private rebuildQueued = false;
     private destroyed = false;
 
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
-    constructor(private mapService: MapTileStreamService,
-                private cdr: ChangeDetectorRef,
+    constructor(private cdr: ChangeDetectorRef,
                 private ngZone: NgZone) {
         effect(() => {
             this.panel();
             this.scheduleInspectionTreeRebuild();
         });
-        this.tileUpdateSubscription = this.mapService.selectionTileUpdated.subscribe(tileKey => {
-            const selectedFeatures = this.panel().features ?? [];
-            const hasUpdatedSelectionTile = selectedFeatures.some(feature => feature.mapTileKey === tileKey);
-            if (!hasUpdatedSelectionTile) {
-                return;
-            }
-            this.scheduleInspectionTreeRebuild();
-        });
     }
 
-    /** Tears down staged-selection listeners so closed panels stop rebuilding. */
+    /** Prevents queued inspection work from touching a destroyed component. */
     ngOnDestroy() {
         this.destroyed = true;
-        this.tileUpdateSubscription.unsubscribe();
     }
 
     /** Rebuilds the tree immediately and refreshes the virtual scroller geometry. */
@@ -147,12 +139,13 @@ export class FeaturePanelComponent implements OnDestroy {
         });
     }
 
-    /** Re-reads GeoJSON and inspection trees from the selected features when staged data changes. */
+    /** Re-reads GeoJSON and inspection trees from the selected feature values. */
     private rebuildInspectionTree() {
         const previousExpansionState = this.captureTreeExpansionState(this.treeData);
-        this.selectedFeatures = this.panel().features ?? [];
+        const panel = this.panel();
+        this.selectedFeatures = panel.features ?? [];
+        this.loading = panel.loading === true;
         if (!this.selectedFeatures.length) {
-            this.loading = false;
             this.geoJson = `{"type":"FeatureCollection","features":[]}`;
             this.featureIds = [];
             this.treeData = [];
@@ -163,15 +156,11 @@ export class FeaturePanelComponent implements OnDestroy {
         this.featureIds = Array.from(new Set(
             this.selectedFeatures.map(feature => stripFeatureInspectionTarget(feature.featureId))
         ));
-        this.loading = this.selectedFeatures.some(feature =>
-            !this.mapService.isTileInspectionDataComplete(feature.featureTile));
+        this.loading = false;
 
         const selectedFeatureInspectionModels: InspectionModelData[][] = [];
         const selectedFeatureGeoJsonTexts: string[] = [];
         this.selectedFeatures.forEach(featureWrapper => {
-            if (!this.mapService.isTileInspectionDataComplete(featureWrapper.featureTile)) {
-                return;
-            }
             try {
                 featureWrapper.peek((feature: Feature) => {
                     selectedFeatureInspectionModels.push(feature.inspectionModel() as InspectionModelData[]);
@@ -196,11 +185,6 @@ export class FeaturePanelComponent implements OnDestroy {
                 selectedFeatureCount: this.selectedFeatures.length,
                 error
             });
-        }
-
-        // During staged loading, keep the existing tree until inspection data is available.
-        if (!nextTreeData.length && this.loading && this.treeData.length) {
-            return;
         }
 
         this.restoreTreeExpansionState(nextTreeData, previousExpansionState);
@@ -247,11 +231,11 @@ export class FeaturePanelComponent implements OnDestroy {
     private highlightSelectedInspectionTarget(nodes: TreeTableNode[]): number | undefined {
         const selectedTargetIds = (this.selectedFeatures ?? [])
             .map(feature => feature.featureId)
-            .filter(featureId => featureId.includes(":attribute#") || featureId.includes(":relation#"));
+            .filter(isFeatureInspectionSubTarget);
         const exactTargetIds = new Set(selectedTargetIds);
         const parentTargetIds = new Set(selectedTargetIds
-            .map(featureId => featureId.replace(/:validity#\d+$/, ""))
-            .filter(featureId => featureId.includes(":attribute#") || featureId.includes(":relation#")));
+            .map(stripFeatureInspectionValidity)
+            .filter(isFeatureInspectionSubTarget));
         if (!exactTargetIds.size) {
             return undefined;
         }
@@ -280,7 +264,10 @@ export class FeaturePanelComponent implements OnDestroy {
                 highlightedNode = node;
                 highlightedParents = parents;
                 selectedHighlightTarget = matchedTarget;
-                selectedHighlightMode = matchedTarget?.includes(":validity#") ? "strong" : "soft";
+                selectedHighlightMode = matchedTarget &&
+                    hasFeatureInspectionValidity(matchedTarget)
+                    ? "strong"
+                    : "soft";
                 for (const parent of parents) {
                     parent.expanded = true;
                 }
@@ -384,15 +371,6 @@ export class FeaturePanelComponent implements OnDestroy {
                 return null;
             }
             return trimmed;
-        };
-
-        /** Removes validity suffixes from displayed inspection names. */
-        const stripValiditySuffix = (hoverId: string): string => {
-            const validityIndex = hoverId.indexOf(":validity#");
-            if (validityIndex >= 0) {
-                return hoverId.slice(0, validityIndex);
-            }
-            return hoverId;
         };
 
         /** Builds a stable tree node id from the current traversal path. */
@@ -499,8 +477,9 @@ export class FeaturePanelComponent implements OnDestroy {
                 let nextSoftHoverGroupId = context.softHoverGroupId;
                 let nextStrongHoverGroupId = context.strongHoverGroupId;
                 if (typeof data?.hoverId === "string") {
-                    if (data.hoverId.includes(":validity#")) {
-                        nextSoftHoverGroupId = stripValiditySuffix(data.hoverId);
+                    if (hasFeatureInspectionValidity(data.hoverId)) {
+                        nextSoftHoverGroupId =
+                            stripFeatureInspectionValidity(data.hoverId);
                         nextStrongHoverGroupId = data.hoverId;
                     } else {
                         nextSoftHoverGroupId = data.hoverId;
@@ -528,7 +507,7 @@ export class FeaturePanelComponent implements OnDestroy {
                 if (isGeometryTypeValue(node.data["value"])) {
                     const nameBubble = extractGeometryNameBubble(children);
                     if (nameBubble) {
-                        node.data["stageLabelBubble"] = nameBubble;
+                        node.data["geometryNameBubble"] = nameBubble;
                     }
                 }
                 node.children = children;

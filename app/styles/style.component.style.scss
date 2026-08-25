@@ -4,8 +4,8 @@
   }
 
   .p-dialog {
-    min-width: 30em;
-    width: 30em;
+    min-width: 46em;
+    width: 52em;
     min-height: 18em;
     max-width: calc(100vw - 1em);
     max-height: calc(100vh - 1em);
@@ -79,6 +79,81 @@
       overflow: hidden;
     }
 
+    .style-presets-tab {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75em;
+      min-height: 0;
+    }
+
+    .style-presets-toolbar,
+    .quick-preset-actions {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5em;
+    }
+
+    .quick-preset-form {
+      display: grid;
+      grid-template-columns: minmax(11em, 1fr) minmax(11em, 1fr);
+      gap: 0.75em;
+      padding: 0.75em;
+      border: 1px solid var(--p-content-border-color);
+      border-radius: var(--p-border-radius-md);
+
+      p-iftalabel,
+      input,
+      .p-select,
+      .p-multiselect {
+        min-width: 0;
+        width: 100%;
+      }
+
+      .quick-preset-options-select,
+      .quick-preset-actions {
+        grid-column: 1 / -1;
+      }
+    }
+
+    .style-preset-issues {
+      display: grid;
+      gap: 0.35em;
+    }
+
+    .style-preset-list {
+      display: grid;
+      gap: 0.25em;
+    }
+
+    .style-preset-list-row {
+      align-items: center;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 0.65em;
+      padding: 0.45em;
+      border-radius: var(--p-border-radius-sm);
+
+      &:hover {
+        background: var(--p-highlight-background);
+      }
+
+      label {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        cursor: pointer;
+
+        span {
+          color: var(--p-text-muted-color);
+          font-size: 0.85em;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+      }
+    }
+
     .style-errors-toolbar {
       flex: 0 0 auto;
       min-width: 0;
@@ -109,6 +184,17 @@
 
       td {
         padding: 0.5em;
+      }
+    }
+  }
+
+  @media only screen and (max-width: 48em) {
+    .p-dialog-content .quick-preset-form {
+      grid-template-columns: minmax(0, 1fr);
+
+      .quick-preset-options-select,
+      .quick-preset-actions {
+        grid-column: auto;
       }
     }
   }
@@ -172,6 +258,7 @@ style-panel {
   }
 
   .additional-style-tag,
+  .search-style-tag,
   .modified-style-tag {
     margin-left: 0.5em;
   }

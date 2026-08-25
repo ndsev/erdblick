@@ -1,5 +1,6 @@
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
+import {FrameBudgetLoop} from "../shared/frame-budget-loop";
 
 export enum MapTileRequestStatus {
     Open = 0,
@@ -15,13 +16,11 @@ export const MAP_TILE_STREAM_TYPE_FEATURES = 2;
 export const MAP_TILE_STREAM_TYPE_SOURCEDATA = 3;
 export const MAP_TILE_STREAM_TYPE_STATUS = 4;
 export const MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT = 6;
-export const MAP_TILE_STREAM_TYPE_SEARCH_RESULTS = 7;
+export const MAP_TILE_STREAM_TYPE_SUBSETS = 7;
 export const MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE = 8;
 export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
 export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-context";
-export const MAP_TILE_STREAM_SEARCH_STATUS_TYPE = "mapget.search.status";
-export const MAP_TILE_STREAM_PROTOCOL_MAJOR = 2;
-export const MAP_TILE_STREAM_PROTOCOL_MINOR = 0;
+export const MAP_TILE_STREAM_FILTER_STATUS_TYPE = "mapget.filter.status";
 const TARGET_TILE_REQUEST_CHUNK_BYTES = 1024 * 1024;
 const MAX_TILE_REQUEST_MESSAGE_BYTES = 9 * 1024 * 1024;
 
@@ -42,21 +41,21 @@ export interface MapTileStreamStatusPayload {
     message?: string;
 }
 
-export interface MapTileStreamSearchStatusPayload {
-    type: typeof MAP_TILE_STREAM_SEARCH_STATUS_TYPE;
-    searchId: string;
-    refresh?: number;
-    requestKey?: string;
+export interface MapTileStreamFilterStatusPayload {
+    type: typeof MAP_TILE_STREAM_FILTER_STATUS_TYPE;
+    filterId: string;
+    generation: number;
     mapId?: string;
     layerId?: string;
+    sourceId?: string;
     state: string;
-    tilesQueued?: number;
-    tilesLoaded?: number;
-    tilesSearched?: number;
-    tilesConsidered?: number;
-    tilesCompleted?: number;
-    matches?: number;
-    chunksEmitted?: number;
+    outputTilesRequested?: number;
+    sourceTilesQueued?: number;
+    sourceTilesLoaded?: number;
+    sourceTilesEvaluated?: number;
+    outputTilesReady?: number;
+    outputTilesEmitted?: number;
+    entriesEmitted?: number;
     error?: string;
 }
 export enum TileLoadState {
@@ -88,6 +87,12 @@ interface TileRequestPayload {
     chunk?: TileRequestChunk;
 }
 
+interface QueuedTransportFrame {
+    bytes: Uint8Array;
+    type: number;
+    version: {major: number; minor: number; patch: number};
+}
+
 export interface MapTileStreamTransportCompressionStats {
     totalPullResponses: number;
     totalPullGzipResponses: number;
@@ -102,7 +107,7 @@ export interface MapTileStreamTransportCompressionStats {
 
 /** Lightweight datasource status object optionally embedded in a source-catalog change frame. */
 export interface MapTileStreamSourceCatalogChangeSource {
-    sourceId: string;
+    configIndex: number;
     status?: string;
     statusMessage?: string;
     progress?: number | null;
@@ -156,6 +161,7 @@ export class MapTileStreamClient {
     private connecting: Promise<void> | null = null;
     private readonly decoder = new TextDecoder();
     private readonly encoder = new TextEncoder();
+    private readonly protocolVersion: {major: number; minor: number};
     public parser: TileLayerParser;
     private lastRequestPromise: Promise<void> | null = null;
     private awaitingCompletion: boolean = false;
@@ -168,17 +174,23 @@ export class MapTileStreamClient {
     private latestRequestedRequestId: number | null = null;
     private incomingRequestId: number | null = null;
     private supportsRequestContextFrames: boolean = false;
-    private frameQueue: Array<ArrayBuffer | Blob> = [];
-    private frameQueueTimer: ReturnType<typeof setTimeout> | null = null;
-    private processingFrameQueue: boolean = false;
     private frameProcessingPaused: boolean = false;
-    private readonly frameTimeBudgetMs: number = 10;
+    private frameQueueEpoch = 0;
+    private pendingFrameMessages = 0;
+    private frameMessageChain: Promise<void> = Promise.resolve();
+    private readonly frameLoop = new FrameBudgetLoop<QueuedTransportFrame>(
+        frame => {
+            this.dispatchFrame(frame);
+            return true;
+        },
+        4,
+        "task"
+    );
     private pullClientId: number | null = null;
     private sourcesRevision: number | null = null;
     private pullControllers: AbortController[] = [];
     private readonly pullParallelism: number = 2;
     private readonly pullWaitMs: number = 25000;
-    private readonly pullRetryDelayMs: number = 50;
     private readonly pullBatchMaxBytesCap: number = 64 * 1024 * 1024;
     private readonly pullBatchMinBytes: number = 64 * 1024;
     private readonly pullDownstreamEwmaAlpha: number = 0.2;
@@ -196,16 +208,22 @@ export class MapTileStreamClient {
     private usingLegacyPullFallback: boolean = false;
     private readonly ownsParser: boolean;
     private protocolMismatchReported: boolean = false;
+    private protocolMismatchActive: boolean = false;
+    private transportFailureActive: boolean = false;
+    /** Counts successful websocket connections so the first context frame can identify reconnects. */
+    private openedSocketCount: number = 0;
+    /** True until the current socket identifies its datasource-catalog revision. */
+    private awaitingSocketSourcesRevision: boolean = false;
 
     onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
     onFeatures: ((payload: Uint8Array) => void) | null = null;
     onSourceData: ((payload: Uint8Array) => void) | null = null;
-    onSearchResults: ((payload: Uint8Array) => void) | null = null;
+    onSubsets: ((payload: Uint8Array) => void) | null = null;
     onFields: ((frame: Uint8Array) => void) | null = null;
     onStatus: ((status: MapTileStreamStatusPayload) => void) | null = null;
-    onSearchStatus: ((status: MapTileStreamSearchStatusPayload) => void) | null = null;
+    onFilterStatus: ((status: MapTileStreamFilterStatusPayload) => void) | null = null;
     onSourceCatalogChanged: ((change: MapTileStreamSourceCatalogChangePayload) => void) | null = null;
-    onSourcesRevisionChanged: ((revision: number) => void) | null = null;
+    onSourcesRevisionChanged: ((revision: number, reconnected: boolean) => void) | null = null;
     onOpen: (() => void) | null = null;
     onError: ((event: Event) => void) | null = null;
     onClose: ((event: CloseEvent) => void) | null = null;
@@ -216,6 +234,13 @@ export class MapTileStreamClient {
         this.activeStreamPath = path;
         this.ownsParser = !parser;
         this.parser = parser ?? new coreLib.TileLayerParser();
+        // The parser and framing version come from the same mapget build in
+        // WASM. Keeping a second TypeScript version inevitably drifts during
+        // dependency upgrades and cannot describe what this client can parse.
+        this.protocolVersion = {
+            major: coreLib.tileLayerStreamProtocolMajor(),
+            minor: coreLib.tileLayerStreamProtocolMinor()
+        };
     }
 
     /** Registers the callback that receives feature payload frames without the transport header. */
@@ -230,9 +255,9 @@ export class MapTileStreamClient {
         return this;
     }
 
-    /** Registers the callback that receives search-result payload frames without the transport header. */
-    withSearchResultsCallback(callback: (payload: Uint8Array) => void) {
-        this.onSearchResults = callback;
+    /** Registers the callback that receives subset payload frames without the transport header. */
+    withSubsetsCallback(callback: (payload: Uint8Array) => void) {
+        this.onSubsets = callback;
         return this;
     }
 
@@ -249,8 +274,8 @@ export class MapTileStreamClient {
     }
 
     /** Registers the callback that receives parsed server-side search status payloads. */
-    withSearchStatusCallback(callback: (status: MapTileStreamSearchStatusPayload) => void) {
-        this.onSearchStatus = callback;
+    withFilterStatusCallback(callback: (status: MapTileStreamFilterStatusPayload) => void) {
+        this.onFilterStatus = callback;
         return this;
     }
 
@@ -260,8 +285,8 @@ export class MapTileStreamClient {
         return this;
     }
 
-    /** Registers the callback that receives datasource-catalog revision updates from request-context frames. */
-    withSourcesRevisionChangedCallback(callback: (revision: number) => void) {
+    /** Registers revision updates and identifies the first context received after a websocket reconnect. */
+    withSourcesRevisionChangedCallback(callback: (revision: number, reconnected: boolean) => void) {
         this.onSourcesRevisionChanged = callback;
         return this;
     }
@@ -272,15 +297,17 @@ export class MapTileStreamClient {
             return undefined;
         }
         const sourceRecord = source as Record<string, unknown>;
-        const sourceId = sourceRecord["sourceId"];
+        const configIndex = sourceRecord["configIndex"];
         const status = sourceRecord["status"];
         const statusMessage = sourceRecord["statusMessage"];
         const progress = sourceRecord["progress"];
-        if (typeof sourceId !== "string" || !sourceId.length) {
+        if (typeof configIndex !== "number"
+            || !Number.isInteger(configIndex)
+            || configIndex < 0) {
             return undefined;
         }
         return {
-            sourceId,
+            configIndex,
             status: typeof status === "string" ? status : undefined,
             statusMessage: typeof statusMessage === "string" ? statusMessage : undefined,
             progress: typeof progress === "number" && Number.isFinite(progress)
@@ -344,6 +371,25 @@ export class MapTileStreamClient {
         }
     }
 
+    /**
+     * Abort one ambiguous interactive transfer and let ordinary reconnect
+     * create a fresh server-side session. No same-session parser repair is
+     * attempted because payload bytes are not retained for retransmission.
+     */
+    failInteractiveConnection(message: string, error?: unknown): void {
+        if (this.transportFailureActive || this.protocolMismatchActive) {
+            return;
+        }
+        this.transportFailureActive = true;
+        console.error(message, error);
+        this.stopPullLoops();
+        this.clearPendingFrames();
+        this.rejectCompletion(
+            error instanceof Error ? error : new Error(message)
+        );
+        this.close(1011, "interactive transport failure");
+    }
+
     /** Tears down websocket, pull loops, parser state, and any pending completion promise. */
     destroy() {
         this.close(1000, "done");
@@ -355,8 +401,11 @@ export class MapTileStreamClient {
         this.supportsRequestContextFrames = false;
         this.pullClientId = null;
         this.sourcesRevision = null;
+        this.openedSocketCount = 0;
+        this.awaitingSocketSourcesRevision = false;
         this.stopPullLoops();
         this.clearPendingFrames();
+        this.frameLoop.dispose();
         this.resetCompletionPromise();
         if (this.ownsParser && this.parser) {
             this.parser.delete();
@@ -365,8 +414,9 @@ export class MapTileStreamClient {
 
     /** Drops queued frames that have not yet been handed to the parser or render pipeline. */
     clearPendingFrames() {
-        console.log(`Clearing ${this.frameQueue.length} frames.`)
-        this.frameQueue = [];
+        this.frameQueueEpoch += 1;
+        this.pendingFrameMessages = 0;
+        this.frameLoop.clear();
     }
 
     /** Invalidates in-flight payloads after datasource dictionaries have been replaced. */
@@ -387,9 +437,7 @@ export class MapTileStreamClient {
     /** Pauses or resumes frame handling so the rest of the app can shed load temporarily. */
     setFrameProcessingPaused(paused: boolean) {
         this.frameProcessingPaused = paused;
-        if (!paused && this.frameQueue.length) {
-            this.scheduleFrameProcessing(0);
-        }
+        this.frameLoop.setPaused(paused);
     }
 
     /** Enables or disables gzip-aware `/interactive/payload` pull requests. */
@@ -409,7 +457,7 @@ export class MapTileStreamClient {
 
     /** Returns the number of queued websocket frames waiting to be processed. */
     getPendingFrameQueueSize(): number {
-        return this.frameQueue.length;
+        return this.pendingFrameMessages + this.frameLoop.length;
     }
 
     /** Returns the latest datasource catalog revision announced by request-context frames. */
@@ -418,15 +466,24 @@ export class MapTileStreamClient {
     }
 
     /** Stores the newest datasource-catalog revision and optionally notifies consumers. */
-    private updateSourcesRevision(revision: number, notify: boolean): void {
+    private updateSourcesRevision(revision: number, notify: boolean, reconnected: boolean = false): void {
         const nextRevision = Math.max(0, Math.floor(revision));
         const previousRevision = this.sourcesRevision;
         this.sourcesRevision = previousRevision === null
             ? nextRevision
             : Math.max(previousRevision, nextRevision);
-        if (notify && (previousRevision === null || nextRevision > previousRevision)) {
-            this.onSourcesRevisionChanged?.(nextRevision);
+        if (notify && (reconnected || previousRevision === null || nextRevision > previousRevision)) {
+            this.onSourcesRevisionChanged?.(nextRevision, reconnected);
         }
+    }
+
+    /** Starts a new connection-scoped revision sequence and records whether this is a reconnect. */
+    private prepareForOpenedSocket(): void {
+        this.openedSocketCount++;
+        this.awaitingSocketSourcesRevision = true;
+        // Revisions are process-local; retaining the previous socket's maximum
+        // would hide equal or lower revisions after a backend restart.
+        this.sourcesRevision = null;
     }
 
     /** Returns aggregated compression metrics for `/interactive/payload` responses. */
@@ -465,7 +522,7 @@ export class MapTileStreamClient {
             supportsRequestContextFrames: this.supportsRequestContextFrames,
             pullClientId: this.pullClientId,
             sourcesRevision: this.sourcesRevision,
-            pendingFrameQueueSize: this.frameQueue.length,
+            pendingFrameQueueSize: this.getPendingFrameQueueSize(),
             frameProcessingPaused: this.frameProcessingPaused,
             pullCompressionEnabled: this.pullCompressionEnabled,
             pullBatchMaxBytesBudget: this.pullBatchMaxBytesBudget,
@@ -514,7 +571,10 @@ export class MapTileStreamClient {
      * Sends the current logical interactive tile request if it differs from the last one.
      * Large requests are chunked across multiple websocket messages but still share one request id.
      */
-    async updateRequest(tileLayerRequests: any[]) {
+    async updateRequest(
+        tileLayerRequests: any[],
+        force = false
+    ): Promise<"sent" | "unchanged" | "failed"> {
         const stringPoolOffsets = this.parser!.getFieldDictOffsets();
         const requestBodyBase = {
             requests: tileLayerRequests,
@@ -524,8 +584,8 @@ export class MapTileStreamClient {
         const newRequestBody = JSON.stringify(requestBodyBase);
 
         // Ensure that the new request is different from the previous one.
-        if (this.lastTilesRequestBody === newRequestBody) {
-            return false;
+        if (!force && this.lastTilesRequestBody === newRequestBody) {
+            return "unchanged";
         }
         this.lastTilesRequestBody = newRequestBody;
         const previousRequestId = this.latestRequestedRequestId;
@@ -538,27 +598,26 @@ export class MapTileStreamClient {
                 requestId);
             this.sendSerializedRequests(requestPayloads);
             await this.waitForSend();
-            return true;
+            return "sent";
         } catch (err) {
             this.lastTilesRequestBody = null;
             this.latestRequestedRequestId = previousRequestId;
             console.error("Failed to send interactive tile request.", err);
-            return false;
+            return "failed";
         }
     }
 
     /**
-     * Splits oversized interactive requests at request-group boundaries so the backend can process
-     * each map/layer/level group independently without reassembly.
+     * Splits oversized interactive requests while preserving one atomic logical
+     * snapshot identified by the shared request id and ordered chunk metadata.
      */
     private buildRequestPayloads(
         tileLayerRequests: any[],
         stringPoolOffsets: unknown,
         requestId: number): string[]
     {
-        // Chunk only between complete request groups. The stream service keeps these
-        // groups disjoint by map/layer/tile-level, so the server can schedule
-        // each chunk immediately while keeping one logical request id.
+        // Chunk only between complete request groups where possible. Mapget
+        // stages every piece and reconciles only after the final chunk.
         const singlePayload = JSON.stringify({
             requests: tileLayerRequests,
             stringPoolOffsets,
@@ -567,6 +626,18 @@ export class MapTileStreamClient {
         if (this.byteLength(singlePayload) <= TARGET_TILE_REQUEST_CHUNK_BYTES) {
             return [singlePayload];
         }
+
+        // A user-configured view can put hundreds of thousands of IDs into one
+        // map/layer/filter group. Split tile-indexed fields together so that a
+        // single logical group never becomes an unsendable all-or-nothing JSON
+        // object when one presentation covers a very large tile set.
+        const boundedRequests = tileLayerRequests.flatMap(request =>
+            this.splitRequestGroupForTransport(
+                request,
+                stringPoolOffsets,
+                requestId
+            )
+        );
 
         const chunks: TileRequestPayload[] = [];
         let currentRequests: any[] = [];
@@ -587,7 +658,7 @@ export class MapTileStreamClient {
             currentRequests = [];
         };
 
-        for (const request of tileLayerRequests) {
+        for (const request of boundedRequests) {
             const candidateRequests = [...currentRequests, request];
             const currentChunkIndex = nextChunkIndex;
             const candidatePayload = JSON.stringify(makeChunk(candidateRequests, currentChunkIndex, false));
@@ -612,6 +683,105 @@ export class MapTileStreamClient {
 
         chunks[chunks.length - 1].chunk!.isLast = true;
         return chunks.map(chunk => JSON.stringify(chunk));
+    }
+
+    /** Splits one request group while keeping every tile-indexed side array aligned. */
+    private splitRequestGroupForTransport(
+        request: any,
+        stringPoolOffsets: unknown,
+        requestId: number
+    ): any[] {
+        const encoded = JSON.stringify({
+            requests: [request],
+            requestId,
+            chunk: {index: 0, isLast: false},
+            stringPoolOffsets
+        } satisfies TileRequestPayload);
+        if (this.byteLength(encoded) <= TARGET_TILE_REQUEST_CHUNK_BYTES) {
+            return [request];
+        }
+        const tileIds = Array.isArray(request?.tileIds)
+            ? request.tileIds
+            : [];
+        if (tileIds.length <= 1) {
+            if (this.byteLength(encoded) > MAX_TILE_REQUEST_MESSAGE_BYTES) {
+                throw new Error(
+                    `Single interactive request group exceeds ` +
+                    `${MAX_TILE_REQUEST_MESSAGE_BYTES} bytes; refusing to send it.`
+                );
+            }
+            return [request];
+        }
+
+        // Estimate a slightly conservative number of leaf pieces from the
+        // already measured payload. Partition every tile-indexed side array in
+        // one pass instead of filtering the complete arrays at every level of
+        // a recursive bisection (which was O(n log n) for large viewports).
+        const encodedBytes = this.byteLength(encoded);
+        const targetBytes = TARGET_TILE_REQUEST_CHUNK_BYTES * 0.85;
+        const pieceCount = Math.min(
+            tileIds.length,
+            Math.max(2, Math.ceil(encodedBytes / targetBytes))
+        );
+        return this.partitionRequestGroup(request, pieceCount).flatMap(piece =>
+            this.splitRequestGroupForTransport(
+                piece,
+                stringPoolOffsets,
+                requestId
+            )
+        );
+    }
+
+    /** Partitions one request and all tile-indexed side arrays in linear time. */
+    private partitionRequestGroup(request: any, pieceCount: number): any[] {
+        const tileIds = Array.isArray(request?.tileIds)
+            ? request.tileIds
+            : [];
+        const tileCountPerPiece = Math.ceil(tileIds.length / pieceCount);
+        const pieces: Array<Record<string, any>> = Array.from(
+            {length: pieceCount},
+            (_, index) => ({
+                ...request,
+                tileIds: tileIds.slice(
+                    index * tileCountPerPiece,
+                    Math.min(tileIds.length, (index + 1) * tileCountPerPiece)
+                )
+            })
+        ).filter(piece => piece["tileIds"].length > 0);
+
+        const indexedFields = [
+            "priorityTileIds",
+            "roots",
+            "featureIds"
+        ] as const;
+        if (!indexedFields.some(field => Array.isArray(request?.[field]))) {
+            return pieces;
+        }
+        const pieceByTileId = new Map<string, number>();
+        pieces.forEach((piece, pieceIndex) => {
+            for (const tileId of piece["tileIds"]) {
+                pieceByTileId.set(String(tileId), pieceIndex);
+            }
+        });
+        for (const field of indexedFields) {
+            const values = request?.[field];
+            if (!Array.isArray(values)) {
+                continue;
+            }
+            for (const piece of pieces) {
+                piece[field] = [];
+            }
+            for (const value of values) {
+                const tileId = field === "priorityTileIds"
+                    ? value
+                    : value?.tileId;
+                const pieceIndex = pieceByTileId.get(String(tileId));
+                if (pieceIndex !== undefined) {
+                    pieces[pieceIndex][field].push(value);
+                }
+            }
+        }
+        return pieces;
     }
 
     /** Measures the UTF-8 payload size that matters for websocket message limits. */
@@ -652,6 +822,11 @@ export class MapTileStreamClient {
 
     /** Opens the websocket once and reuses an in-flight connection attempt for concurrent callers. */
     async connect(): Promise<void> {
+        if (this.protocolMismatchActive) {
+            throw new Error(
+                "The map backend uses an incompatible tile-stream protocol."
+            );
+        }
         if (this.socket?.readyState === WebSocket.OPEN) {
             return;
         }
@@ -722,7 +897,8 @@ export class MapTileStreamClient {
                     return;
                 }
                 opened = true;
-                this.protocolMismatchReported = false;
+                this.prepareForOpenedSocket();
+                this.transportFailureActive = false;
                 this.onOpen?.();
                 resolve();
             };
@@ -747,6 +923,9 @@ export class MapTileStreamClient {
                 const isCurrent = this.socket === socket;
                 if (isCurrent) {
                     this.socket = null;
+                    // A new server-side session has no subscription registry;
+                    // force the next update to send the complete snapshot.
+                    this.lastTilesRequestBody = null;
                     this.pullClientId = null;
                     this.stopPullLoops();
                     this.onClose?.(event);
@@ -830,63 +1009,48 @@ export class MapTileStreamClient {
         return url.toString();
     }
 
-    /** Queues a raw websocket message for budgeted processing on the next timer tick. */
+    /**
+     * Splits raw websocket/pull messages in arrival order, then queues every
+     * contained VTLV frame as one independently budgeted work item.
+     */
     private enqueueFrame(data: ArrayBuffer | Blob) {
-        this.frameQueue.push(data);
-        if (this.frameProcessingPaused) {
-            return;
-        }
-        this.scheduleFrameProcessing(0);
-    }
-
-    /** Schedules frame processing if no timer is already pending. */
-    private scheduleFrameProcessing(delayMs: number) {
-        if (this.frameProcessingPaused) {
-            return;
-        }
-        if (this.frameQueueTimer) {
-            return;
-        }
-        this.frameQueueTimer = setTimeout(() => {
-            this.frameQueueTimer = null;
-            this.processFrameQueue().catch(err => {
-                console.error("Tile stream message handler failed.", err);
+        const epoch = this.frameQueueEpoch;
+        this.pendingFrameMessages += 1;
+        this.frameMessageChain = this.frameMessageChain
+            .then(async () => {
+                if (epoch !== this.frameQueueEpoch) {
+                    return;
+                }
+                const frames = await this.decodeMessage(data);
+                if (epoch === this.frameQueueEpoch) {
+                    this.frameLoop.enqueueMany(frames);
+                }
+            })
+            .catch(err => {
+                this.failInteractiveConnection(
+                    "Tile stream message could not be decoded.",
+                    err
+                );
+            })
+            .finally(() => {
+                if (epoch === this.frameQueueEpoch) {
+                    this.pendingFrameMessages =
+                        Math.max(0, this.pendingFrameMessages - 1);
+                }
             });
-        }, delayMs);
     }
 
-    /** Drains queued websocket messages until the per-tick frame budget is exhausted. */
-    private async processFrameQueue() {
-        if (this.processingFrameQueue || this.frameProcessingPaused) {
-            return;
-        }
-        this.processingFrameQueue = true;
-        try {
-            const startTime = Date.now();
-            let handledMessages = 0;
-            while (this.frameQueue.length) {
-                const data = this.frameQueue.shift()!;
-                try {
-                    await this.handleMessage(data);
-                    ++handledMessages;
-                } catch (err) {
-                    console.error("Tile stream message handler failed.", err);
-                }
-                if (Date.now() - startTime > this.frameTimeBudgetMs) {
-                    break;
-                }
-            }
-        } finally {
-            this.processingFrameQueue = false;
-        }
-
-        if (this.frameQueue.length) {
-            this.scheduleFrameProcessing(0);
-        }
-    }
-
-    /** Normalizes websocket messages to byte arrays and iterates over packed transport frames. */
+    /** Test/auxiliary path which immediately dispatches one complete packed message. */
     private async handleMessage(data: ArrayBuffer | Blob): Promise<void> {
+        for (const frame of await this.decodeMessage(data)) {
+            this.dispatchFrame(frame);
+        }
+    }
+
+    /** Normalizes one message and returns its strictly ordered VTLV frames. */
+    private async decodeMessage(
+        data: ArrayBuffer | Blob
+    ): Promise<QueuedTransportFrame[]> {
         let bytes: Uint8Array;
 
         if (data instanceof ArrayBuffer) {
@@ -894,38 +1058,46 @@ export class MapTileStreamClient {
         } else if (data instanceof Blob) {
             bytes = new Uint8Array(await data.arrayBuffer());
         } else {
-            console.warn("Unexpected WebSocket message payload.");
-            return;
+            throw new Error("Unexpected WebSocket message payload.");
         }
 
         if (bytes.length < MAP_TILE_STREAM_HEADER_SIZE) {
-            console.warn("Tile stream frame too small.");
-            return;
+            throw new Error("Tile stream frame is smaller than its header.");
         }
 
+        const frames: QueuedTransportFrame[] = [];
         let offset = 0;
         while (offset + MAP_TILE_STREAM_HEADER_SIZE <= bytes.length) {
             const header = this.readFrameHeader(bytes, offset);
-            if (!this.isCompatibleProtocol(header.version)) {
-                this.reportProtocolMismatch(header.version);
-                return;
-            }
             const type = header.type;
             const payloadLength = header.payloadLength;
             const frameEnd = offset + MAP_TILE_STREAM_HEADER_SIZE + payloadLength;
             if (frameEnd > bytes.length) {
-                console.warn("Tile stream frame size mismatch.");
-                return;
+                throw new Error("Tile stream frame size does not match its header.");
             }
 
-            const frameBytes = bytes.subarray(offset, frameEnd);
-            await this.handleFrame(frameBytes, type);
+            frames.push({
+                bytes: bytes.subarray(offset, frameEnd),
+                type,
+                version: header.version
+            });
             offset = frameEnd;
         }
 
         if (offset !== bytes.length) {
-            console.warn("Tile stream frame alignment mismatch.");
+            throw new Error("Tile stream frame alignment is invalid.");
         }
+        return frames;
+    }
+
+    /** Applies compatibility checks and dispatches one frame at its FIFO turn. */
+    private dispatchFrame(frame: QueuedTransportFrame): void {
+        if (!this.isCompatibleProtocol(frame.version)) {
+            this.reportProtocolMismatch(frame.version);
+            this.clearPendingFrames();
+            return;
+        }
+        this.handleFrame(frame.bytes, frame.type);
     }
 
     /** Reads the fixed-size VTLV header emitted by mapget's TileLayerStream writer. */
@@ -944,31 +1116,30 @@ export class MapTileStreamClient {
 
     /** Returns whether a VTLV frame can be parsed by this frontend build. */
     private isCompatibleProtocol(version: {major: number; minor: number}): boolean {
-        return version.major === MAP_TILE_STREAM_PROTOCOL_MAJOR
-            && version.minor === MAP_TILE_STREAM_PROTOCOL_MINOR;
+        return version.major === this.protocolVersion.major
+            && version.minor === this.protocolVersion.minor;
     }
 
     /** Reports one protocol mismatch and stops the active transport because following frame parsing is unsafe. */
     private reportProtocolMismatch(version: {major: number; minor: number; patch: number}): void {
+        this.protocolMismatchActive = true;
+        this.transportFailureActive = true;
         if (!this.protocolMismatchReported) {
             this.protocolMismatchReported = true;
             this.onProtocolMismatch?.({
                 actual: version,
-                expected: {
-                    major: MAP_TILE_STREAM_PROTOCOL_MAJOR,
-                    minor: MAP_TILE_STREAM_PROTOCOL_MINOR
-                }
+                expected: this.protocolVersion
             });
         }
         this.stopPullLoops();
         this.rejectCompletion(new Error(
             `Unsupported mapget tile-stream protocol ${version.major}.${version.minor}.${version.patch}; `
-            + `expected ${MAP_TILE_STREAM_PROTOCOL_MAJOR}.${MAP_TILE_STREAM_PROTOCOL_MINOR}.x.`));
+            + `expected ${this.protocolVersion.major}.${this.protocolVersion.minor}.x.`));
         this.close(1002, "unsupported mapget tile-stream protocol");
     }
 
     /** Dispatches one parsed transport frame to the parser, callbacks, or completion tracking. */
-    private async handleFrame(bytes: Uint8Array, type: number): Promise<void> {
+    private handleFrame(bytes: Uint8Array, type: number): void {
         if (type === MAP_TILE_STREAM_TYPE_END_OF_STREAM) {
             return;
         }
@@ -976,27 +1147,23 @@ export class MapTileStreamClient {
             if (type === MAP_TILE_STREAM_TYPE_STATUS) {
                 const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
                 const payloadText = this.decoder.decode(payloadBytes);
-                try {
-                    const payload = JSON.parse(payloadText) as MapTileStreamStatusPayload;
-                    if (!this.matchesCurrentRequest(payload.requestId)) {
-                        return;
+                const payload = JSON.parse(payloadText) as MapTileStreamStatusPayload;
+                if (!this.matchesCurrentRequest(payload.requestId)) {
+                    return;
+                }
+                if (payload.type === MAP_TILE_STREAM_FILTER_STATUS_TYPE) {
+                    if (this.onFilterStatus) {
+                        this.onFilterStatus(payload as unknown as MapTileStreamFilterStatusPayload);
                     }
-                    if (payload.type === MAP_TILE_STREAM_SEARCH_STATUS_TYPE) {
-                        if (this.onSearchStatus) {
-                            this.onSearchStatus(payload as unknown as MapTileStreamSearchStatusPayload);
-                        }
-                        return;
-                    }
-                    if (this.onStatus) {
-                        this.onStatus(payload);
-                    }
-                    if (payload.allDone && this.awaitingCompletion) {
-                        this.resolveCompletion(payload);
-                    } else if (payload.allDone) {
-                        this.lastStatusPayload = payload;
-                    }
-                } catch (err) {
-                    console.error("Failed to parse interactive status payload:", err);
+                    return;
+                }
+                if (this.onStatus) {
+                    this.onStatus(payload);
+                }
+                if (payload.allDone && this.awaitingCompletion) {
+                    this.resolveCompletion(payload);
+                } else if (payload.allDone) {
+                    this.lastStatusPayload = payload;
                 }
                 return;
             }
@@ -1004,26 +1171,25 @@ export class MapTileStreamClient {
             if (type === MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT) {
                 const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
                 const payloadText = this.decoder.decode(payloadBytes);
-                try {
-                    const payload = JSON.parse(payloadText) as MapTileStreamRequestContextPayload;
-                    if (payload.type === MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE && Number.isFinite(payload.requestId)) {
-                        this.supportsRequestContextFrames = true;
-                        this.incomingRequestId = Math.max(0, Math.floor(payload.requestId));
-                        if (Number.isFinite(payload.sourcesRevision)) {
-                            this.updateSourcesRevision(Number(payload.sourcesRevision), true);
-                        }
-                        if (Number.isFinite(payload.clientId)) {
-                            const nextClientId = Math.max(1, Math.floor(Number(payload.clientId)));
-                            if (this.pullClientId !== nextClientId) {
-                                this.pullClientId = nextClientId;
-                                this.startPullLoops();
-                            } else if (!this.pullControllers.length) {
-                                this.startPullLoops();
-                            }
+                const payload = JSON.parse(payloadText) as MapTileStreamRequestContextPayload;
+                if (payload.type === MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE && Number.isFinite(payload.requestId)) {
+                    this.supportsRequestContextFrames = true;
+                    this.incomingRequestId = Math.max(0, Math.floor(payload.requestId));
+                    if (Number.isFinite(payload.sourcesRevision)) {
+                        const reconnected = this.awaitingSocketSourcesRevision
+                            && this.openedSocketCount > 1;
+                        this.awaitingSocketSourcesRevision = false;
+                        this.updateSourcesRevision(Number(payload.sourcesRevision), true, reconnected);
+                    }
+                    if (Number.isFinite(payload.clientId)) {
+                        const nextClientId = Math.max(1, Math.floor(Number(payload.clientId)));
+                        if (this.pullClientId !== nextClientId) {
+                            this.pullClientId = nextClientId;
+                            this.startPullLoops();
+                        } else if (!this.pullControllers.length) {
+                            this.startPullLoops();
                         }
                     }
-                } catch (err) {
-                    console.error("Failed to parse interactive request-context payload:", err);
                 }
                 return;
             }
@@ -1031,27 +1197,23 @@ export class MapTileStreamClient {
             if (type === MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE) {
                 const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
                 const payloadText = this.decoder.decode(payloadBytes);
-                try {
-                    const payload = JSON.parse(payloadText) as MapTileStreamSourceCatalogChangePayload;
-                    if (payload.type === "mapget.sources.changed" && Number.isFinite(payload.revision)) {
-                        const revision = Math.max(0, Math.floor(Number(payload.revision)));
-                        this.updateSourcesRevision(revision, false);
-                        const source = this.parseSourceCatalogChangeSource(payload.source);
-                        this.onSourceCatalogChanged?.({
-                            type: "mapget.sources.changed",
-                            revision,
-                            reason: typeof payload.reason === "string" ? payload.reason : undefined,
-                            ...(source ? {source} : {})
-                        });
-                    }
-                } catch (err) {
-                    console.error("Failed to parse source-catalog change payload:", err);
+                const payload = JSON.parse(payloadText) as MapTileStreamSourceCatalogChangePayload;
+                if (payload.type === "mapget.sources.changed" && Number.isFinite(payload.revision)) {
+                    const revision = Math.max(0, Math.floor(Number(payload.revision)));
+                    this.updateSourcesRevision(revision, false);
+                    const source = this.parseSourceCatalogChangeSource(payload.source);
+                    this.onSourceCatalogChanged?.({
+                        type: "mapget.sources.changed",
+                        revision,
+                        reason: typeof payload.reason === "string" ? payload.reason : undefined,
+                        ...(source ? {source} : {})
+                    });
                 }
                 return;
             }
 
             if (type === MAP_TILE_STREAM_TYPE_FIELDS) {
-                // Field dictionaries are node-keyed prerequisites for feature/search payloads.
+                // Field dictionaries are string-pool-keyed prerequisites for feature/subset payloads.
                 // They can legitimately arrive after a newer request context has superseded
                 // their original request, while the already-accepted feature payload still
                 // remains cached. Keep them additive across request churn; datasource reloads
@@ -1085,12 +1247,17 @@ export class MapTileStreamClient {
                 return;
             }
 
-            if (type === MAP_TILE_STREAM_TYPE_SEARCH_RESULTS) {
-                if (!this.acceptsCurrentPayloadFrame()) {
-                    return;
-                }
-                if (this.onSearchResults) {
-                    this.onSearchResults(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
+            if (type === MAP_TILE_STREAM_TYPE_SUBSETS) {
+                // A pull response can cross a same-generation coverage update:
+                // the server has already marked its subset tile forwarded,
+                // while the newer request-context frame may be processed first.
+                // Unlike complete feature/source-data frames, every subset
+                // carries filterId + generation + tile identity and the owning
+                // FilterSubscriptionRef applies the exact current-coverage
+                // gate. Rejecting it by untagged request context here loses a
+                // valid result permanently.
+                if (this.onSubsets) {
+                    this.onSubsets(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
                 }
                 return;
             }
@@ -1099,7 +1266,10 @@ export class MapTileStreamClient {
                 this.onFrame(bytes, type);
             }
         } catch (err) {
-            console.error("Tile stream message handler failed.", err);
+            this.failInteractiveConnection(
+                "Tile stream frame could not be processed.",
+                err
+            );
         }
     }
 
@@ -1117,7 +1287,11 @@ export class MapTileStreamClient {
             return true;
         }
         if (requestId === undefined) {
-            return true;
+            // Versioned interactive servers tag every logical request status. Reject
+            // untagged frames once that capability has been observed so an
+            // unrelated control/error frame cannot complete the active
+            // request or overwrite its terminal diagnostics.
+            return !this.supportsRequestContextFrames;
         }
         return requestId === this.latestRequestedRequestId;
     }
@@ -1133,7 +1307,7 @@ export class MapTileStreamClient {
             this.pullControllers.push(controller);
             this.runPullLoop(controller).catch(err => {
                 if (!controller.signal.aborted) {
-                    console.error("Tile pull loop failed.", err);
+                    this.failInteractiveConnection("Tile pull loop failed.", err);
                 }
             });
         }
@@ -1157,7 +1331,8 @@ export class MapTileStreamClient {
 
             try {
                 const startedAt = performance.now();
-                const response = await fetch(this.resolvePullUrl(clientId), {
+                const pullUrl = this.resolvePullUrl(clientId);
+                const response = await fetch(pullUrl, {
                     method: "GET",
                     cache: "no-store",
                     signal: controller.signal,
@@ -1184,23 +1359,32 @@ export class MapTileStreamClient {
                 }
 
                 if (response.status === 410) {
-                    if (this.pullClientId === clientId) {
-                        this.pullClientId = null;
-                        this.stopPullLoops();
-                    }
+                    this.failInteractiveConnection(
+                        "The interactive payload session disappeared."
+                    );
                     return;
                 }
 
-                if (this.activateLegacyPullFallbackForStatus(response.status)) {
+                if (this.activateLegacyPullFallbackForStatus(
+                    response.status,
+                    pullUrl
+                )) {
                     continue;
                 }
+                this.failInteractiveConnection(
+                    `Interactive payload fetch failed with HTTP ${response.status}.`
+                );
+                return;
             } catch (err) {
                 if (controller.signal.aborted) {
                     return;
                 }
+                this.failInteractiveConnection(
+                    "Interactive payload fetch failed.",
+                    err
+                );
+                return;
             }
-
-            await this.delay(this.pullRetryDelayMs, controller.signal);
         }
     }
 
@@ -1234,12 +1418,29 @@ export class MapTileStreamClient {
     }
 
     /** Switches payload pulls to `/tiles/next` when a stale proxy rejects `/interactive/payload`. */
-    private activateLegacyPullFallbackForStatus(status: number): boolean {
-        if (this.usingLegacyPullFallback || ![404, 405, 501].includes(status)) {
+    private activateLegacyPullFallbackForStatus(
+        status: number,
+        requestedUrl?: string
+    ): boolean {
+        if (![404, 405, 501].includes(status)) {
             return false;
         }
-        if (!this.legacyEndpointPath(this.activeStreamPath, "interactive", "tiles/next")) {
+        const legacyPath = this.legacyEndpointPath(
+            this.activeStreamPath,
+            "interactive",
+            "tiles/next"
+        );
+        if (!legacyPath) {
             return false;
+        }
+        if (this.usingLegacyPullFallback) {
+            // Parallel pulls may both have targeted the primary route before
+            // the first 404 enables fallback. Treat those already-issued
+            // primary responses as handled, but fail if the legacy route
+            // itself returns an unsupported-route status.
+            return requestedUrl !== undefined &&
+                new URL(requestedUrl, document.baseURI).pathname !==
+                    new URL(legacyPath, document.baseURI).pathname;
         }
         this.usingLegacyPullFallback = true;
         console.warn(`Fell back to legacy mapget tile payload endpoint ${this.debugPath(this.resolvePullPath())}.`);
@@ -1340,22 +1541,4 @@ export class MapTileStreamClient {
         return parsed;
     }
 
-    /** Abort-aware timeout used by the pull loop retry path. */
-    private async delay(ms: number, signal: AbortSignal): Promise<void> {
-        if (signal.aborted || ms <= 0) {
-            return;
-        }
-        await new Promise<void>(resolve => {
-            const timeout = setTimeout(() => {
-                signal.removeEventListener("abort", onAbort);
-                resolve();
-            }, ms);
-            const onAbort = () => {
-                clearTimeout(timeout);
-                signal.removeEventListener("abort", onAbort);
-                resolve();
-            };
-            signal.addEventListener("abort", onAbort, {once: true});
-        });
-    }
 }

@@ -16,6 +16,14 @@ You can open SourceData from several entry points:
    ```
 4. **Map metadata** – use the metadata action in **Maps & Layers** to open service- and module-level blobs such as `ServiceDefinition`, `SpatialExtent`, or registry metadata.
 
+The metadata action opens a height-bounded, searchable list so maps with large
+metadata catalogs remain usable on smaller screens.
+
+For example, filtering an Island-2 metadata list for `ServiceDefinition`
+narrows it to the corresponding metadata entry:
+
+![Map metadata list filtered to Metadata-ServiceDefinition](screenshots/03-metadata-search.png)
+
 ![Shortcut from inspector to SourceData](screenshots/goto-sourcedata.png)
 
 ## Dedicated SourceData Panels
@@ -33,11 +41,40 @@ This separation keeps feature inspection and raw-payload inspection from competi
 Once the panel is open:
 
 - use the filter box to find field names or values
+- use the Address and Type buttons next to the filter to show or hide those columns;
+  both are hidden initially unless enabled under **Preferences → Source data columns**
 - expand nodes to inspect structure, offsets, and values
 - switch between raw layers with the dropdown when a tile exposes several SourceData entries
 - inspect metadata-only layers such as service definition or registry metadata without leaving the same overall workflow
 
-When SourceData is opened from a feature node, erdblick tries to preselect the matching address range in the raw tree so you can line up the interpreted feature view with the original payload faster.
+Collapsed structures summarize descendant scalar values with the same value
+bubbles used by feature inspection. Selecting a bubble expands and highlights
+its source field, while expanding the parent hides the redundant summary.
+Aggregates show at most 100 values followed by an ellipsis, keeping very wide
+payloads responsive. Initial expansion opens each top-level node and continues
+only through branches that have exactly one child.
+
+SQL-backed SourceData additionally exposes the executed query in a collapsible
+**SQL query** section. Query rows appear directly as **Result row 1**, **Result
+row 2**, and so on, rather than through an extra `rows > index` hierarchy.
+Decoded array fields remain expandable arrays. Structural table, row, and
+scalar-cell ranges are omitted from the Address column. Decoded blob offsets
+are shown relative to the blob start, while erdblick retains the canonical
+absolute addresses internally for source-reference selection.
+
+NDS.Classic maps expose the complete physical Tile Content Index as the
+tile-zero metadata layer `Metadata-Classic-tileContentIndexTable`. Results from
+multiple product databases are presented together and identify their physical
+source per row.
+
+When SourceData is opened from a feature node, erdblick preselects the matching
+address range, reopens its ancestor path even if that path was collapsed during
+an earlier visit, and scrolls the raw tree to the first matching row.
+
+The selected source range remains aligned with its feature inspection while
+the optional Address and Type columns expose the raw record boundaries:
+
+![Selected SourceData range with Address and Type columns](screenshots/28c-source-data-reference.png)
 
 ## Hints for Efficient Debugging
 

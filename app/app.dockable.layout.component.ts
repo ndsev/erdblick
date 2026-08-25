@@ -5,6 +5,7 @@ import {FeatureSearchService, FeatureSearchSession} from "./search/feature.searc
 import {DockedPanelDragController, DockedPanelDragOffset} from "./shared/docked-panel-drag.controller";
 import {Subscription} from "rxjs";
 import {MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT} from "./mapview/render-view.model";
+import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
 
 @Component({
     selector: 'dockable-layout',
@@ -14,7 +15,7 @@ import {MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT} from "./mapview/render-view.model"
                 <mapview-container></mapview-container>
                 @if (!environment.visualizationOnly) {
                     <main-bar></main-bar>
-                    <coordinates-panel></coordinates-panel>
+                    <coordinates-panel [coordinatesVisible]="coordinatesPolicy.effectiveEnabled"></coordinates-panel>
                     <div class="dock-toggle" (click)="toggleDock()">
                         @if (stateService.isDockOpen) {
                             <span class="material-symbols-outlined" pTooltip="Collapse dock">
@@ -131,6 +132,7 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
     protected readonly searchDockDrag: DockedPanelDragController<string>;
 
     constructor(public stateService: AppStateService,
+                public coordinatesPolicy: CoordinatesPolicyService,
                 private renderer: Renderer2,
                 private featureSearchService: FeatureSearchService,
                 private cdr: ChangeDetectorRef) {

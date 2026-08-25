@@ -11,8 +11,8 @@ import reports = require('istanbul-reports');
  *
  * Summarises V8 JavaScript and CSS coverage collected during the test run into
  * `coverage/playwright/v8-coverage-summary.json` and shuts down the `mapget`
- * process that was spawned in `global-setup.ts` using the pid stored in
- * `playwright/.cache/global-state.json`.
+ * process that was spawned in `global-setup.ts` using the per-port pid stored
+ * in `playwright/.cache/global-state-<port>.json`.
  */
 
 interface GlobalState {
@@ -683,11 +683,12 @@ async function globalTeardown(config: FullConfig): Promise<void> {
     }
 
     const configDir = process.cwd();
+    const port = process.env["EB_APP_PORT"] || '9000';
     const statePath = path.join(
         configDir,
         'playwright',
         '.cache',
-        'global-state.json'
+        `global-state-${port}.json`
     );
 
     // If there is no state file, there is no `mapget` process to terminate.
@@ -703,6 +704,7 @@ async function globalTeardown(config: FullConfig): Promise<void> {
     } catch {
         state = null;
     }
+    fs.rmSync(statePath, {force: true});
 
     if (state && state.mapgetPid) {
         try {

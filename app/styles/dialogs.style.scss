@@ -1,3 +1,169 @@
+.p-dialog-enter-active,
+.p-dialog-leave-active {
+  // Firefox can flash compositor-animated dialogs against the WebGPU canvas.
+  // Showing and hiding immediately still lets PrimeNG complete its lifecycle.
+  animation: none !important;
+}
+
+.p-dialog .app-dialog-resize-handle,
+.app-resize-handle {
+  --app-resize-hit-depth: 0.5em;
+
+  position: absolute;
+  display: block;
+  width: 3em;
+  height: 3em;
+  z-index: 90;
+  touch-action: none;
+
+  &::after {
+    position: absolute;
+    width: 3em;
+    height: 3em;
+    box-sizing: border-box;
+    content: "";
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+  }
+
+  &:hover::after {
+    opacity: 0.8;
+  }
+}
+
+// Clip each large visual handle to two thin border arms so nearby controls remain clickable.
+.p-dialog .app-dialog-resize-nw,
+.app-resize-handle-nw {
+  top: 0;
+  right: auto;
+  bottom: auto;
+  left: 0;
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% var(--app-resize-hit-depth),
+    var(--app-resize-hit-depth) var(--app-resize-hit-depth),
+    var(--app-resize-hit-depth) 100%,
+    0 100%
+  );
+  cursor: nwse-resize;
+
+  &::after {
+    top: 0.1em;
+    left: 0.1em;
+    border-top: 0.2em solid currentColor;
+    border-left: 0.2em solid currentColor;
+    border-radius: 0.75em 0 0 0;
+  }
+}
+
+.p-dialog .app-dialog-resize-ne,
+.app-resize-handle-ne {
+  top: 0;
+  right: 0;
+  bottom: auto;
+  left: auto;
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% 100%,
+    calc(100% - var(--app-resize-hit-depth)) 100%,
+    calc(100% - var(--app-resize-hit-depth)) var(--app-resize-hit-depth),
+    0 var(--app-resize-hit-depth)
+  );
+  cursor: nesw-resize;
+
+  &::after {
+    top: 0.1em;
+    right: 0.1em;
+    border-top: 0.2em solid currentColor;
+    border-right: 0.2em solid currentColor;
+    border-radius: 0 0.75em 0 0;
+  }
+}
+
+.p-dialog .app-dialog-resize-sw,
+.app-resize-handle-sw {
+  top: auto;
+  right: auto;
+  bottom: 0;
+  left: 0;
+  clip-path: polygon(
+    0 0,
+    var(--app-resize-hit-depth) 0,
+    var(--app-resize-hit-depth) calc(100% - var(--app-resize-hit-depth)),
+    100% calc(100% - var(--app-resize-hit-depth)),
+    100% 100%,
+    0 100%
+  );
+  cursor: nesw-resize;
+
+  &::after {
+    bottom: 0.1em;
+    left: 0.1em;
+    border-bottom: 0.2em solid currentColor;
+    border-left: 0.2em solid currentColor;
+    border-radius: 0 0 0 0.75em;
+  }
+}
+
+.p-dialog .app-dialog-resize-se,
+.app-resize-handle-se {
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  clip-path: polygon(
+    100% 0,
+    100% 100%,
+    0 100%,
+    0 calc(100% - var(--app-resize-hit-depth)),
+    calc(100% - var(--app-resize-hit-depth)) calc(100% - var(--app-resize-hit-depth)),
+    calc(100% - var(--app-resize-hit-depth)) 0
+  );
+  cursor: nwse-resize;
+
+  &::after {
+    right: 0.1em;
+    bottom: 0.1em;
+    border-right: 0.2em solid currentColor;
+    border-bottom: 0.2em solid currentColor;
+    border-radius: 0 0 .75em 0;
+  }
+}
+
+.app-resize-horizontal {
+  cursor: col-resize;
+}
+
+.app-resize-vertical {
+  cursor: row-resize;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .p-dialog .app-dialog-resize-handle,
+  .app-resize-handle {
+    --app-resize-hit-depth: 0.75em;
+  }
+
+  .p-dialog .app-dialog-resize-handle::after,
+  .app-resize-handle::after {
+    opacity: 0.5;
+  }
+}
+
+.p-dialog.app-dialog-compact {
+  > .p-dialog-header {
+    height: 2.5em;
+    padding: 0.75em;
+  }
+
+  > .p-dialog-content {
+    padding: 0.5em;
+  }
+}
+
 .alert-dialog {
   .p-dialog-mask {
     z-index: 9001 !important;
@@ -216,4 +382,3 @@
 .app-confirm-popup-error .app-confirm-popup-icon {
   color: var(--p-red-500, var(--p-button-danger-background));
 }
-

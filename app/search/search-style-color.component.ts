@@ -1,4 +1,5 @@
 import {
+    ChangeDetectionStrategy,
     Component,
     EventEmitter,
     Input,
@@ -26,12 +27,14 @@ import {
     SearchStyleColorDraft,
     SearchStyleColorMode,
     SearchStyleFieldOption,
+    SearchStyleFieldValueKind,
     SearchStyleGradientStopDraft,
     sortedGradientStopDrafts
 } from "./search-style-color.util";
 
 @Component({
     selector: "search-style-color",
+    changeDetection: ChangeDetectionStrategy.OnPush,
     template: `
         <div class="search-style-color">
             <div class="search-style-color-mode-row">
@@ -65,7 +68,7 @@ import {
                         *
                     </button>
 
-                    @if (viewDraft.customField) {
+                    @if (viewDraft.customField || fieldOptions.length === 0) {
                         <simfil-expression-input class="search-style-color-field-input"
                                                  [value]="viewDraft.field"
                                                  (valueChange)="setCustomField($event)"
@@ -86,6 +89,8 @@ import {
                                   optionLabel="label"
                                   optionValue="value"
                                   [filter]="true"
+                                  [virtualScroll]="fieldOptionsForCurrentMode.length > 100"
+                                  [virtualScrollItemSize]="36"
                                   appendTo="body">
                         </p-select>
                     }
@@ -129,12 +134,14 @@ import {
                               [disabled]="!canSortGradientStops"
                               (click)="sortGradientStops()">
                     </p-button>
-                    <p-button icon="pi pi-database"
-                              label="Update from data"
-                              severity="secondary"
-                              [outlined]="true"
-                              (click)="updateStopsFromData()">
-                    </p-button>
+                    @if (canUpdateFromData) {
+                        <p-button icon="pi pi-database"
+                                  label="Update from data"
+                                  severity="secondary"
+                                  [outlined]="true"
+                                  (click)="updateStopsFromData()">
+                        </p-button>
+                    }
                 </div>
                 <div class="search-style-color-stop-list">
                     @for (stop of viewDraft.gradientStops; track stop.id; let stopIndex = $index) {
@@ -169,12 +176,14 @@ import {
                               [outlined]="true"
                               (click)="addCategoryStop()">
                     </p-button>
-                    <p-button icon="pi pi-database"
-                              label="Update from data"
-                              severity="secondary"
-                              [outlined]="true"
-                              (click)="updateStopsFromData()">
-                    </p-button>
+                    @if (canUpdateFromData) {
+                        <p-button icon="pi pi-database"
+                                  label="Update from data"
+                                  severity="secondary"
+                                  [outlined]="true"
+                                  (click)="updateStopsFromData()">
+                        </p-button>
+                    }
                 </div>
                 <div class="search-style-color-stop-list">
                     @for (stop of viewDraft.categoryStops; track stop.id; let stopIndex = $index) {
@@ -229,6 +238,7 @@ export class SearchStyleColorComponent implements OnChanges {
     @Input() colorPickerOverlayOptions?: OverlayOptions;
     @Input() dataSummary?: SearchValueSummary;
     @Input() dataSummaryStatus: SearchValueSummariesState["status"] = "idle";
+    @Input() canUpdateFromData = true;
     @Output() draftChange = new EventEmitter<SearchStyleColorDraft>();
     @Output() updateFromDataRequested = new EventEmitter<void>();
 
@@ -246,6 +256,8 @@ export class SearchStyleColorComponent implements OnChanges {
 
     protected viewDraft = defaultSearchStyleColorDraft("");
     protected colorWarning = "";
+    protected categoryValueOptions: Array<{label: string; value: string}> = [];
+    private currentModeFieldOptions: SearchStyleFieldOption[] = [];
     private dataColorWarning = "";
     private pendingUpdateFromData = false;
 
@@ -264,6 +276,9 @@ export class SearchStyleColorComponent implements OnChanges {
             this.viewDraft = cloneSearchStyleColorDraft(this.draft);
             this.nextStopId = this.maxStopId(this.viewDraft) + 1;
         }
+        if (changes["draft"] || changes["fieldOptions"]) {
+            this.refreshCurrentModeFieldOptions();
+        }
         if ((changes["dataSummary"] || changes["dataSummaryStatus"]) && this.dataSummary) {
             this.dataColorWarning = "";
             if (this.pendingUpdateFromData && this.dataSummaryStatus === "ready") {
@@ -280,14 +295,7 @@ export class SearchStyleColorComponent implements OnChanges {
     }
 
     protected get fieldOptionsForCurrentMode(): SearchStyleFieldOption[] {
-        if (this.viewDraft.mode !== "gradient") {
-            return this.fieldOptions;
-        }
-        return this.fieldOptions.filter(option => isNumericStyleValueKind(option.valueKind));
-    }
-
-    protected get categoryValueOptions(): Array<{label: string; value: string}> {
-        return (this.selectedFieldOption()?.enumValues ?? []).map(value => ({label: value, value}));
+        return this.currentModeFieldOptions;
     }
 
     protected get categoryValueInputType(): string {
@@ -319,6 +327,7 @@ export class SearchStyleColorComponent implements OnChanges {
             }
         }
         this.viewDraft = this.autoInitializedDraft({...this.viewDraft, mode, field: nextField});
+        this.refreshCurrentModeFieldOptions();
         this.updateColorWarning();
         this.emitChange();
     }
@@ -330,6 +339,7 @@ export class SearchStyleColorComponent implements OnChanges {
             return;
         }
         this.viewDraft = this.autoInitializedDraft({...this.viewDraft, field, customField: false});
+        this.refreshCurrentModeFieldOptions();
         this.updateColorWarning();
         this.emitChange();
     }
@@ -337,7 +347,19 @@ export class SearchStyleColorComponent implements OnChanges {
     protected setFieldMode(mode: "field" | "custom"): void {
         this.clearDataWarning();
         if (mode === "custom") {
-            this.viewDraft = {...this.viewDraft, customField: true};
+            this.viewDraft = {
+                ...this.viewDraft,
+                customField: true,
+                categoryValueKind: undefined
+            };
+            this.refreshCurrentModeFieldOptions();
+            this.updateColorWarning();
+            this.emitChange();
+            return;
+        }
+        if (this.fieldOptions.length === 0) {
+            this.viewDraft = {...this.viewDraft, customField: false};
+            this.refreshCurrentModeFieldOptions();
             this.updateColorWarning();
             this.emitChange();
             return;
@@ -354,6 +376,7 @@ export class SearchStyleColorComponent implements OnChanges {
             }
         }
         this.viewDraft = this.autoInitializedDraft({...this.viewDraft, customField: false, field: nextField});
+        this.refreshCurrentModeFieldOptions();
         this.updateColorWarning();
         this.emitChange();
     }
@@ -365,7 +388,15 @@ export class SearchStyleColorComponent implements OnChanges {
 
     protected setCustomField(field: string): void {
         this.clearDataWarning();
-        this.viewDraft = {...this.viewDraft, field: field ?? "", customField: true};
+        this.viewDraft = {
+            ...this.viewDraft,
+            field: field ?? "",
+            customField: this.viewDraft.customField || this.fieldOptions.length > 0,
+            categoryValueKind: this.fieldOptions.length > 0
+                ? undefined
+                : this.viewDraft.categoryValueKind
+        };
+        this.refreshCurrentModeFieldOptions();
         this.updateColorWarning();
         this.emitChange();
     }
@@ -529,7 +560,10 @@ export class SearchStyleColorComponent implements OnChanges {
     }
 
     private selectedFieldIsNumeric(): boolean {
-        return isNumericStyleValueKind(this.selectedFieldOption()?.valueKind);
+        return isNumericStyleValueKind(
+            this.selectedFieldOption()?.valueKind ??
+                this.viewDraft.categoryValueKind
+        );
     }
 
     private selectedFieldSupportsGradient(): boolean {
@@ -545,6 +579,23 @@ export class SearchStyleColorComponent implements OnChanges {
 
     private firstFieldForCurrentMode(): string {
         return this.fieldOptionsForCurrentMode[0]?.value ?? "";
+    }
+
+    /** Keeps picker inputs referentially stable between actual field/schema changes. */
+    private refreshCurrentModeFieldOptions(): void {
+        this.currentModeFieldOptions = this.viewDraft.mode === "gradient"
+            ? this.fieldOptions.filter(option =>
+                isNumericStyleValueKind(option.valueKind))
+            : this.fieldOptions;
+        const enumValues = this.selectedFieldOption()?.enumValues ?? [];
+        if (this.categoryValueOptions.length !== enumValues.length ||
+            enumValues.some((value, index) =>
+                this.categoryValueOptions[index]?.value !== value)) {
+            this.categoryValueOptions = enumValues.map(value => ({
+                label: value,
+                value
+            }));
+        }
     }
 
     private fieldExists(field: string): boolean {
@@ -610,12 +661,15 @@ export class SearchStyleColorComponent implements OnChanges {
             return;
         }
 
+        const valueKind = this.observedCategoryValueKind(summary)
+            ?? this.selectedFieldOption()?.valueKind;
         this.viewDraft = {
             ...this.viewDraft,
+            categoryValueKind: valueKind,
             gradientStops: [],
             categoryStops: categoryStopsForObservedValues(
                 values,
-                this.selectedFieldOption()?.valueKind,
+                valueKind,
                 () => this.nextStopId++
             )
         };
@@ -624,6 +678,26 @@ export class SearchStyleColorComponent implements OnChanges {
             : "";
         this.emitChange();
         this.updateColorWarning();
+    }
+
+    /** Infers one safe scalar category type from the value-summary kind counters. */
+    private observedCategoryValueKind(
+        summary: SearchValueSummary
+    ): SearchStyleFieldValueKind | undefined {
+        const numeric = summary.kinds.integer + summary.kinds.number;
+        const boolean = summary.kinds.boolean;
+        const string = summary.kinds.string;
+        const scalar = numeric + boolean + string;
+        if (numeric > 0 && scalar === numeric) {
+            return "number";
+        }
+        if (boolean > 0 && scalar === boolean) {
+            return "boolean";
+        }
+        if (string > 0 && scalar === string) {
+            return "string";
+        }
+        return undefined;
     }
 
     /** Explains why observed data is not available yet and kicks off lazy aggregation. */

@@ -10,6 +10,52 @@ export let coreLib: any;
 // Shared initialization promise so multiple callers can await library readiness safely.
 let __initializingPromise: Promise<void> | null = null;
 
+/**
+ * Converts an exception crossing the C++/JavaScript boundary into a normal
+ * JavaScript Error. Legacy Emscripten EH throws a numeric pointer; without
+ * this conversion application error handling can only display that number.
+ */
+export function normalizeWasmException(exception: unknown): Error {
+    if (exception instanceof Error) {
+        return exception;
+    }
+    const wasmExceptionConstructor =
+        (globalThis as any).WebAssembly?.Exception;
+    const isNativeException =
+        typeof exception === "number" ||
+        (wasmExceptionConstructor &&
+            exception instanceof wasmExceptionConstructor);
+    if (isNativeException &&
+        typeof coreLib?.getExceptionMessage === "function" &&
+        typeof coreLib?.incrementExceptionRefcount === "function" &&
+        typeof coreLib?.decrementExceptionRefcount === "function") {
+        let retained = false;
+        try {
+            coreLib.incrementExceptionRefcount(exception);
+            retained = true;
+            const details = coreLib.getExceptionMessage(exception);
+            const type = Array.isArray(details)
+                ? String(details[0] ?? "")
+                : "";
+            const message = Array.isArray(details)
+                ? String(details[1] ?? "")
+                : String(details ?? "");
+            const text = [type, message].filter(Boolean).join(": ");
+            return new Error(text || "Unknown C++ exception.");
+        } catch (translationError) {
+            return new Error(
+                `C++ exception ${String(exception)} ` +
+                `(message extraction failed: ${String(translationError)})`
+            );
+        } finally {
+            if (retained) {
+                coreLib.decrementExceptionRefcount(exception);
+            }
+        }
+    }
+    return new Error(String(exception));
+}
+
 // Served by Angular as a static asset; see angular.json assets (/bundle/wasm).
 /** Initializes the shared WASM module singleton exactly once. */
 export async function initializeLibrary(): Promise<void> {
@@ -64,17 +110,41 @@ export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T, inputData: 
 export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T | false, inputData: Uint8Array): T | null;
 /** Copies a JS byte array into WASM memory, runs a callback, and cleans up the shared buffer. */
 export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T | false, inputData: Uint8Array): T | null {
+    try {
+        return uint8ArrayToWasmOrThrow(fun, inputData) as T | null;
+    } catch (e) {
+        console.error(`Error while parsing UINT8 encoded data: ${e}`)
+        return null;
+    }
+}
+
+export function uint8ArrayToWasmOrThrow<T>(
+    fun: (d: SharedUint8Array) => T,
+    inputData: Uint8Array
+): T;
+export function uint8ArrayToWasmOrThrow<T>(
+    fun: (d: SharedUint8Array) => T | false,
+    inputData: Uint8Array
+): T | null;
+/**
+ * Strict byte-to-WASM boundary for callers which own an error channel.
+ * Native exceptions retain their concrete message instead of becoming a
+ * generic null parse result.
+ */
+export function uint8ArrayToWasmOrThrow<T>(
+    fun: (d: SharedUint8Array) => T | false,
+    inputData: Uint8Array
+): T | null {
     let sharedGlbArray: SharedUint8Array | null = null;
     try {
         const shared = new coreLib.SharedUint8Array(inputData.length);
         sharedGlbArray = shared;
-        let bufferPtr = Number(shared.getPointer());
+        const bufferPtr = Number(shared.getPointer());
         coreLib.HEAPU8.set(inputData, bufferPtr);
-        let result = fun(shared);
-        return (result === false) ? null : result;
-    } catch (e) {
-        console.error(`Error while parsing UINT8 encoded data: ${e}`)
-        return null;
+        const result = fun(shared);
+        return result === false ? null : result;
+    } catch (exception) {
+        throw normalizeWasmException(exception);
     } finally {
         sharedGlbArray?.delete();
     }
@@ -98,6 +168,12 @@ export async function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Pro
         coreLib.HEAPU8.set(inputData, bufferPtr);
         let result = await fun(shared);
         return (result === false) ? null : result;
+    } catch (exception) {
+        console.error(
+            "Error while processing UINT8 encoded data:",
+            normalizeWasmException(exception)
+        );
+        return null;
     } finally {
         sharedGlbArray?.delete();
     }

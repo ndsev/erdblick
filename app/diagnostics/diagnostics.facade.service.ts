@@ -1,4 +1,4 @@
-import {Injectable, OnDestroy} from '@angular/core';
+import {Injectable, NgZone, OnDestroy} from '@angular/core';
 import {BehaviorSubject} from 'rxjs';
 import {
     AppStateService,
@@ -7,7 +7,8 @@ import {
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
 } from '../shared/appstate.service';
 import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
-import {MapRenderService} from '../mapdata/map-render.service';
+import {TileSubsetLayerRenderService} from '../mapview/deck/tile-subset-layer-render.service';
+import {ViewLayerDiagnosticsService} from '../mapview/view-layer-diagnostics.service';
 import {DiagnosticsDatasource} from './diagnostics.datasource';
 import {
     DiagnosticsExportBundle,
@@ -41,10 +42,13 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     private nextPerformanceScopeRequestId = 1;
 
     constructor(mapService: MapTileStreamService,
-                mapRenderService: MapRenderService,
+                renderService: TileSubsetLayerRenderService,
+                viewDiagnostics: ViewLayerDiagnosticsService,
                 private readonly stateService: AppStateService,
-                styleValidationReportService: StyleValidationReportService) {
-        super(mapService, mapRenderService, stateService, styleValidationReportService);
+                styleValidationReportService: StyleValidationReportService,
+                ngZone: NgZone) {
+        super(mapService, renderService, viewDiagnostics, stateService,
+            styleValidationReportService, ngZone);
     }
 
     /** Opens the performance dialog after refreshing the current aggregated stats. */

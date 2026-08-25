@@ -80,6 +80,12 @@ body {
 
   .p-contextmenu {
     width: 22em;
+
+    .picked-feature-map-tag {
+      flex: 0 0 auto;
+      font-size: 0.75em;
+      padding: 0.1em 0.4em;
+    }
   }
 
   .p-popover-content {

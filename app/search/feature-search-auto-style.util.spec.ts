@@ -2,7 +2,8 @@ import {describe, expect, it} from "vitest";
 import {
     defaultSearchStyleFieldOptionsForAnalysis,
     preferredSearchAutoStyleField,
-    searchAutoStyleFieldOptions
+    searchAutoStyleFieldOptions,
+    searchAutoStyleFieldOptionsArePortable
 } from "./feature-search-auto-style.util";
 import type {
     FeatureSearchAutoStyleAnalysis,
@@ -34,7 +35,7 @@ const option = (partial: Partial<FeatureSearchAutoStyleOption>): FeatureSearchAu
 });
 
 describe("feature search auto-style helpers", () => {
-    it("generates one first scalar field per resolved attribute scope", () => {
+    it("generates one ranked scalar field per resolved attribute scope", () => {
         const warningSignField = option({
             value: "warningSign",
             attrName: "WARNING_SIGN",
@@ -55,6 +56,131 @@ describe("feature search auto-style helpers", () => {
             [warningSignField, pedestrianWayFirstField, pedestrianWaySecondField],
             readyAttributeAnalysis
         )).toEqual([pedestrianWayFirstField]);
+    });
+
+    it("prefers an attribute-named enum field for WARNING_SIGN", () => {
+        const analysis: FeatureSearchAutoStyleAnalysis = {
+            status: "ready",
+            concreteScope: "attribute",
+            attributeScopes: [{
+                attrName: "WARNING_SIGN",
+                attrLayerName: "Routing",
+                featureType: "Link",
+                mapId: "Classic",
+                layerId: "Routing"
+            }],
+            matchedFieldNames: [],
+            matchedEnumValues: []
+        };
+        const arbitraryFirstField = option({
+            value: "attributeValue.additionalText",
+            attrName: "WARNING_SIGN",
+            valueKind: "string"
+        });
+        const warningSignField = option({
+            value: "attributeValue.warningSign",
+            attrName: "WARNING_SIGN",
+            valueKind: "enum",
+            enumValues: ["DANGER"]
+        });
+
+        expect(preferredSearchAutoStyleField(
+            [arbitraryFirstField, warningSignField],
+            analysis
+        )).toBe(warningSignField);
+    });
+
+    it("keeps equally semantic field paths from heterogeneous WARNING_SIGN schemas", () => {
+        const analysis: FeatureSearchAutoStyleAnalysis = {
+            status: "ready",
+            concreteScope: "attribute",
+            attributeScopes: [{
+                attrName: "WARNING_SIGN",
+                attrLayerName: "Routing",
+                featureType: "Link",
+                mapId: "Classic",
+                layerId: "Routing"
+            }, {
+                attrName: "WARNING_SIGN",
+                attrLayerName: "RoadRules",
+                featureType: "Road",
+                mapId: "Live",
+                layerId: "Road"
+            }],
+            matchedFieldNames: [],
+            matchedEnumValues: []
+        };
+        const classic = option({
+            value: "warningSign",
+            attrName: "WARNING_SIGN",
+            valueKind: "enum",
+            mapLayers: [{mapId: "Classic", layerId: "Routing"}]
+        });
+        const live = option({
+            value: "attributeValue.warningSign",
+            attrName: "WARNING_SIGN",
+            valueKind: "enum",
+            mapLayers: [{mapId: "Live", layerId: "Road"}]
+        });
+
+        expect(searchAutoStyleFieldOptions([classic, live], analysis))
+            .toEqual([classic, live]);
+        expect(searchAutoStyleFieldOptionsArePortable([classic, live], analysis)).toBe(false);
+    });
+
+    it("allows heterogeneous paths when portable feature-type guards separate them", () => {
+        const analysis: FeatureSearchAutoStyleAnalysis = {
+            status: "ready",
+            concreteScope: "attribute",
+            attributeScopes: [{
+                attrName: "WARNING_SIGN",
+                attrLayerName: "Routing",
+                featureType: "Link",
+                mapId: "Classic",
+                layerId: "Routing"
+            }, {
+                attrName: "WARNING_SIGN",
+                attrLayerName: "RoadRules",
+                featureType: "Road",
+                mapId: "Live",
+                layerId: "Road"
+            }],
+            matchedFieldNames: [],
+            matchedEnumValues: []
+        };
+        const classic = option({
+            value: "warningSign",
+            attrName: "WARNING_SIGN",
+            featureType: "Link",
+            mapLayers: [{mapId: "Classic", layerId: "Routing"}]
+        });
+        const live = option({
+            value: "attributeValue.warningSign",
+            attrName: "WARNING_SIGN",
+            featureType: "Road",
+            mapLayers: [{mapId: "Live", layerId: "Road"}]
+        });
+
+        expect(searchAutoStyleFieldOptionsArePortable([classic, live], analysis)).toBe(true);
+    });
+
+    it("rejects an automatic field set that leaves a resolved source scope uncovered", () => {
+        const analysis: FeatureSearchAutoStyleAnalysis = {
+            ...readyAttributeAnalysis,
+            attributeScopes: [pedestrianWayScope, {
+                ...pedestrianWayScope,
+                mapId: "Live",
+                layerId: "Road"
+            }]
+        };
+        const classicOnly = option({
+            value: "pedestrianKind",
+            attrName: "PEDESTRIAN_WAY",
+            featureType: "Link",
+            mapLayers: [{mapId: "Classic", layerId: "Routing"}]
+        });
+
+        expect(searchAutoStyleFieldOptionsArePortable([classicOnly], analysis)).toBe(false);
     });
 
     it("uses resolved attribute scopes for default style candidates", () => {

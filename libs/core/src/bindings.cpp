@@ -8,6 +8,7 @@
 #include <cxxabi.h>
 #include <algorithm>
 #include <optional>
+#include <glm/trigonometric.hpp>
 
 #include <sanitizer/lsan_interface.h>
 #include <sanitizer/asan_interface.h>
@@ -32,6 +33,7 @@ const char *__asan_default_options() {
 #include "mapget/model/point.h"
 #include "mapget/model/sourcedatalayer.h"
 #include "mapget/model/simfilutil.h"
+#include "mapget/model/stream.h"
 #include "simfil/model/nodes.h"
 #include "visualization.h"
 #include "parser.h"
@@ -106,24 +108,6 @@ size_t getFreeMemory() {
     return totalMemory - dynamicTop + i.fordblks;
 }
 
-/** Export the integer value used for the "all geometry" deck output mode. */
-int deckGeometryOutputAll()
-{
-    return static_cast<int>(DeckFeatureLayerVisualization::GeometryOutputMode::All);
-}
-
-/** Export the integer value used for the "points only" deck output mode. */
-int deckGeometryOutputPointsOnly()
-{
-    return static_cast<int>(DeckFeatureLayerVisualization::GeometryOutputMode::PointsOnly);
-}
-
-/** Export the integer value used for the "non-points only" deck output mode. */
-int deckGeometryOutputNonPointsOnly()
-{
-    return static_cast<int>(DeckFeatureLayerVisualization::GeometryOutputMode::NonPointsOnly);
-}
-
 /** Report whether the parsed tile exposes a tile-level GLB attachment. */
 bool tileFeatureLayerHasGlbAttachment(TileFeatureLayer const& tile)
 {
@@ -134,12 +118,6 @@ bool tileFeatureLayerHasGlbAttachment(TileFeatureLayer const& tile)
 std::string tileFeatureLayerGlbAttachmentName(TileFeatureLayer const& tile)
 {
     return tile.glbAttachmentName();
-}
-
-/** Copy the tile-level GLB attachment into a SharedUint8Array for JS-side consumption. */
-bool copyTileFeatureLayerGlbAttachment(TileFeatureLayer const& tile, SharedUint8Array& output)
-{
-    return tile.copyGlbAttachment(output);
 }
 
 /**
@@ -161,7 +139,9 @@ namespace {
 constexpr int MAX_TILE_RESULT_LIMIT = 1 << 20;
 constexpr double PI = 3.14159265358979323846;
 constexpr double RADIANS_TO_DEGREES = 180.0 / PI;
-constexpr double CANONICAL_CAMERA_VERTICAL_FOV_RADIANS = 60.0 * PI / 180.0;
+constexpr double DECK_DEFAULT_CAMERA_ALTITUDE = 1.5;
+const double CANONICAL_CAMERA_VERTICAL_FOV_RADIANS =
+    2.0 * std::atan(0.5 / DECK_DEFAULT_CAMERA_ALTITUDE);
 constexpr double CANONICAL_CAMERA_ASPECT_RATIO = 16.0 / 9.0;
 constexpr double EARTH_RADIUS_METERS = 6378137.0;
 constexpr double WEB_MERCATOR_MAX_LATITUDE = 85.05112878;
@@ -192,14 +172,14 @@ bool isFiniteViewport(Viewport const& viewport)
 }
 
 /**
- * Build a deterministic viewport used for zoom/fidelity policy decisions.
+ * Build a deterministic viewport used for zoom and style-LOD policy decisions.
  *
  * The synthetic camera sits at the equator, points straight down, and only varies by altitude.
  */
 Viewport canonicalViewportForAltitude(double altitudeMeters)
 {
     const auto safeAltitude = std::max(1.0, altitudeMeters);
-    const auto visibleHeightMeters = 2.0 * safeAltitude * std::tan(CANONICAL_CAMERA_VERTICAL_FOV_RADIANS * 0.5);
+    const auto visibleHeightMeters = 2.0 * safeAltitude * glm::tan(CANONICAL_CAMERA_VERTICAL_FOV_RADIANS * 0.5);
     const auto visibleWidthMeters = visibleHeightMeters * CANONICAL_CAMERA_ASPECT_RATIO;
     const auto heightDegrees = std::min(
         WEB_MERCATOR_MAX_LATITUDE * 2.0,
@@ -291,10 +271,28 @@ uint32_t getNumTileIds(Viewport const& vp, int level) {
 }
 
 /**
- * Returns the tile count for a deterministic canonical camera used for fidelity policy decisions.
+ * Count visible tiles without requiring Embind to construct a temporary Viewport value object.
  *
- * The canonical camera is fixed at the equator, points straight down, and uses a 60-degree
- * vertical field of view with a 16:9 aspect ratio. Only the altitude varies.
+ * This scalar boundary is useful in high-frequency UI paths which already need only the
+ * viewport bounds. It also avoids coupling those paths to the lifetime machinery of the
+ * larger Viewport value binding.
+ */
+uint32_t getNumTileIdsForBounds(double south, double west, double width, double height, int level) {
+    Viewport viewport{
+        .south = south,
+        .west = west,
+        .width = width,
+        .height = height
+    };
+    return getNumTileIds(viewport, level);
+}
+
+/**
+ * Returns the tile count for a deterministic canonical camera used for style-LOD decisions.
+ *
+ * The canonical camera is fixed at the equator, points straight down, and explicitly uses
+ * deck.gl's default 1.5-altitude lens (approximately 36.87 degrees) with a 16:9 aspect ratio.
+ * Only the physical altitude varies.
  */
 uint32_t getNumTileIdsForCanonicalCamera(double altitudeMeters, int level)
 {
@@ -364,21 +362,12 @@ mapget::model_ptr<mapget::Geometry> preferredFeatureGeometry(mapget::model_ptr<m
 {
     mapget::model_ptr<mapget::Geometry> result;
     if (auto geometryCollection = feature->geomOrNull()) {
-        geometryCollection->forEachGeometryAtPreferredStage(
-            std::nullopt,
+        geometryCollection->forEachGeometry(
             [&result](auto&& geometry)
             {
                 result = geometry;
                 return false;
             });
-        if (!result) {
-            geometryCollection->forEachGeometry(
-                [&result](auto&& geometry)
-                {
-                    result = geometry;
-                    return false;
-                });
-        }
     }
     return result;
 }
@@ -458,26 +447,23 @@ std::string createMapTileKey(
     std::string const& layerType,
     std::string const& mapId,
     std::string const& layerId,
-    std::string const& tileId,
-    int32_t stage)
+    std::string const& tileId)
 {
     auto const escapedKey =
         layerType + ":" +
         mapget::escapeIdentifierComponent(mapId) + ":" +
         mapget::escapeIdentifierComponent(layerId) + ":" +
-        tileId + ":" +
-        std::to_string(std::max(0, stage));
+        tileId;
     return mapget::MapTileKey(escapedKey).toString();
 }
 
-/** Get mapId, layerId, tileId and stage of a MapTileKey. */
+/** Get mapId, layerId, and tileId of a MapTileKey. */
 NativeJsValue parseMapTileKey(std::string const& key) {
     auto tileKey = mapget::MapTileKey(key);
     return *JsValue::List({
         JsValue(tileKey.mapId_),
         JsValue(tileKey.layerId_),
-        JsValue(tileKey.tileId_.value()),
-        JsValue(tileKey.stage_)
+        JsValue(tileKey.tileId_.value())
     });
 }
 
@@ -582,6 +568,18 @@ void validateSimfil(const std::string &query) {
         .rewriteMode = simfil::RewriteMode::None});
 }
 
+uint16_t tileLayerStreamProtocolMajor()
+{
+    return mapget::TileLayerStream::
+        CurrentProtocolVersion.major_;
+}
+
+uint16_t tileLayerStreamProtocolMinor()
+{
+    return mapget::TileLayerStream::
+        CurrentProtocolVersion.minor_;
+}
+
 }
 
 EMSCRIPTEN_BINDINGS(erdblick)
@@ -636,6 +634,11 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .value("Color", FeatureStyleOptionType::Color)
         .value("String", FeatureStyleOptionType::String);
 
+    ////////// StyleCategory
+    em::enum_<StyleCategory>("StyleCategory")
+        .value("Base", StyleCategory::Base)
+        .value("Search", StyleCategory::Search);
+
     ////////// FeatureStyleOption
     em::value_object<FeatureStyleOption>("FeatureStyleOption")
         .field("label", &FeatureStyleOption::label_)
@@ -645,19 +648,34 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("description", &FeatureStyleOption::description_)
         .field("internal", &FeatureStyleOption::internal_);
 
+    ////////// FeatureStylePreset
+    em::value_object<FeatureStylePresetValue>("FeatureStylePresetValue")
+        .field("optionId", &FeatureStylePresetValue::optionId_)
+        .field("value", &FeatureStylePresetValue::value_);
+    em::register_vector<FeatureStylePresetValue>("FeatureStylePresetValues");
+    em::value_object<FeatureStylePreset>("FeatureStylePreset")
+        .field("id", &FeatureStylePreset::id_)
+        .field("name", &FeatureStylePreset::name_)
+        .field("values", &FeatureStylePreset::values_);
+
     ////////// FeatureLayerStyle
     em::register_vector<FeatureStyleOption>("FeatureStyleOptions");
+    em::register_vector<FeatureStylePreset>("FeatureStylePresets");
     em::class_<FeatureLayerStyle>("FeatureLayerStyle").constructor<SharedUint8Array&>()
         .function("options", &FeatureLayerStyle::options, em::allow_raw_pointers())
+        .function("presets", &FeatureLayerStyle::presets, em::allow_raw_pointers())
         .function("isValid", &FeatureLayerStyle::isValid)
         .function("validationReport", &FeatureLayerStyle::validationReport)
         .function("name", &FeatureLayerStyle::name)
+        .function("category", &FeatureLayerStyle::category)
         .function("hasLayerAffinity", &FeatureLayerStyle::hasLayerAffinity)
         .function("defaultEnabled", &FeatureLayerStyle::defaultEnabled)
-        .function("minimumStage", &FeatureLayerStyle::minimumStage)
-        .function("hasExplicitLowFidelityRules", &FeatureLayerStyle::hasExplicitLowFidelityRules)
+        .function("lodForVisibleTileCount", &FeatureLayerStyle::lodForVisibleTileCount)
+        .function("presentationLodForVisibleTileCount", &FeatureLayerStyle::presentationLodForVisibleTileCount)
         .function("hasRelationRules", &FeatureLayerStyle::hasRelationRules)
-        .function("supportsHighlightMode", &FeatureLayerStyle::supportsHighlightMode);
+        .function("supportsHighlightMode", &FeatureLayerStyle::supportsHighlightMode)
+        .function("supportsInteractionEffect", &FeatureLayerStyle::supportsInteractionEffect)
+        .function("interactionEffect", &FeatureLayerStyle::interactionEffect);
 
     ////////// SourceDataAddressFormat
     em::enum_<mapget::TileSourceDataLayer::SourceDataAddressFormat>("SourceDataAddressFormat")
@@ -723,37 +741,39 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// TileFeatureLayer
     em::class_<TileFeatureLayer>("TileFeatureLayer")
         .function("id", &TileFeatureLayer::id)
-        .function("stage", &TileFeatureLayer::stage)
         .function("tileId", &TileFeatureLayer::tileId)
         .function("numFeatures", &TileFeatureLayer::numFeatures)
         .function("numVertices", &TileFeatureLayer::numVertices)
         .function("center", &TileFeatureLayer::center)
         .function("find", &TileFeatureLayer::find)
-        .function("attachOverlay", &TileFeatureLayer::attachOverlay)
         .function("hasGlbAttachment", &tileFeatureLayerHasGlbAttachment)
         .function("glbAttachmentName", &tileFeatureLayerGlbAttachmentName)
-        .function("copyGlbAttachment", &copyTileFeatureLayerGlbAttachment)
         .function("featureIdByAddress", &TileFeatureLayer::featureIdByAddress)
         .function("featureByAddress", &TileFeatureLayer::featureByAddress)
         .function("findFeatureIndex", &TileFeatureLayer::findFeatureIndex);
 
-    ////////// TileSearchResultLayer
-    em::class_<TileSearchResultLayer>("TileSearchResultLayer")
-        .function("id", &TileSearchResultLayer::id)
-        .function("nodeId", &TileSearchResultLayer::nodeId)
-        .function("mapId", &TileSearchResultLayer::mapId)
-        .function("layerId", &TileSearchResultLayer::layerId)
-        .function("tileId", &TileSearchResultLayer::tileId)
-        .function("stage", &TileSearchResultLayer::stage)
-        .function("numResults", &TileSearchResultLayer::numResults)
-        .function("resultFields", &TileSearchResultLayer::resultFields)
-        .function("info", &TileSearchResultLayer::info)
-        .function("resultEntries", &TileSearchResultLayer::resultEntries)
-        .function("resultEntryRange", &TileSearchResultLayer::resultEntryRange)
-        .function("resultEntryRangeCompact", &TileSearchResultLayer::resultEntryRangeCompact)
-        .function("valueSummaries", &TileSearchResultLayer::valueSummaries)
-        .function("toJson", &TileSearchResultLayer::toJson)
-        .function("copyDiagnostics", &TileSearchResultLayer::copyDiagnostics);
+    ////////// TileSubsetLayer
+    em::class_<TileSubsetLayer>("TileSubsetLayer")
+        .function("id", &TileSubsetLayer::id)
+        .function("stringPoolId", &TileSubsetLayer::stringPoolId)
+        .function("mapId", &TileSubsetLayer::mapId)
+        .function("layerId", &TileSubsetLayer::layerId)
+        .function("tileId", &TileSubsetLayer::tileId)
+        .function("filterId", &TileSubsetLayer::filterId)
+        .function("generation", &TileSubsetLayer::generation)
+        .function("numChannels", &TileSubsetLayer::numChannels)
+        .function("numEntries", &TileSubsetLayer::numEntries)
+        .function("info", &TileSubsetLayer::info)
+        .function("dependencies", &TileSubsetLayer::dependencies)
+        .function("issues", &TileSubsetLayer::issues)
+        .function("glbAttachmentName", &TileSubsetLayer::glbAttachmentName)
+        .function("channelSchema", &TileSubsetLayer::channelSchema)
+        .function("entryRange", &TileSubsetLayer::entryRange)
+        .function("valueSummaries", &TileSubsetLayer::valueSummaries)
+        .function("resolvePick", &TileSubsetLayer::resolvePick)
+        .function("findPickReferences", &TileSubsetLayer::findPickReferences)
+        .function("toJson", &TileSubsetLayer::toJson)
+        .function("copyDiagnostics", &TileSubsetLayer::copyDiagnostics);
 
     ////////// Highlight Modes
     em::enum_<FeatureStyleRule::HighlightMode>("HighlightMode")
@@ -761,75 +781,85 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .value("HOVER_HIGHLIGHT", FeatureStyleRule::HoverHighlight)
         .value("SELECTION_HIGHLIGHT", FeatureStyleRule::SelectionHighlight);
 
-    em::enum_<FeatureStyleRule::Fidelity>("RuleFidelity")
-        .value("ANY", FeatureStyleRule::AnyFidelity)
-        .value("HIGH", FeatureStyleRule::HighFidelity)
-        .value("LOW", FeatureStyleRule::LowFidelity);
-
-    ////////// DeckFeatureLayerVisualization
-    em::class_<DeckFeatureLayerVisualization>("DeckFeatureLayerVisualization")
-        .constructor<int, std::string, FeatureLayerStyle const&, em::val, em::val, FeatureStyleRule::HighlightMode, FeatureStyleRule::Fidelity, int, int, int, em::val>()
-        .class_function("GEOMETRY_OUTPUT_ALL", &deckGeometryOutputAll)
-        .class_function("GEOMETRY_OUTPUT_POINTS_ONLY", &deckGeometryOutputPointsOnly)
-        .class_function("GEOMETRY_OUTPUT_NON_POINTS_ONLY", &deckGeometryOutputNonPointsOnly)
-        .function("setGeometryOutputMode", &DeckFeatureLayerVisualization::setGeometryOutputMode)
-        .function("geometryOutputMode", &DeckFeatureLayerVisualization::geometryOutputMode)
+    ////////// TileSubsetLayerRenderer
+    em::class_<TileSubsetLayerRenderer>("TileSubsetLayerRenderer")
+        .constructor<
+            int,
+            std::string,
+            FeatureLayerStyle const&,
+            int,
+            int>()
         .function(
-            "addTileFeatureLayer",
-            std::function<void(DeckFeatureLayerVisualization&, TileFeatureLayer const&)>(
-                [](DeckFeatureLayerVisualization& self, TileFeatureLayer const& tile)
+            "setCoordinateOrigin",
+            &TileSubsetLayerRenderer::setCoordinateOrigin)
+        .function(
+            "setLineSimplificationTolerance",
+            &TileSubsetLayerRenderer::setLineSimplificationTolerance)
+        .function(
+            "configureGpuPacket",
+            &TileSubsetLayerRenderer::configureGpuPacket)
+        .function(
+            "addGpuIconResource",
+            &TileSubsetLayerRenderer::addGpuIconResource)
+        .function(
+            "addTileSubsetContribution",
+            std::function<void(
+                TileSubsetLayerRenderer&,
+                TileSubsetLayer const&,
+                uint32_t,
+                uint32_t,
+                uint32_t,
+                uint32_t,
+                uint32_t)>(
+                [](TileSubsetLayerRenderer& self,
+                   TileSubsetLayer const& tile,
+                   uint32_t contributionKeyLow,
+                   uint32_t contributionKeyHigh,
+                   uint32_t contributionRevision,
+                   uint32_t contributionSlot,
+                   uint32_t contributionActivationToken)
                 {
-                    self.addTileFeatureLayer(tile);
+                    self.addTileSubsetContribution(
+                        tile,
+                        contributionKeyLow,
+                        contributionKeyHigh,
+                        contributionRevision,
+                        contributionSlot,
+                        contributionActivationToken);
                 }))
+        .function("run", &TileSubsetLayerRenderer::run)
         .function(
-            "run",
-            std::function<void(DeckFeatureLayerVisualization&)>(
-                [](DeckFeatureLayerVisualization& self)
-                {
-                    self.FeatureLayerVisualizationBase::run();
-                }))
-        .function("abiVersion", &DeckFeatureLayerVisualization::abiVersion)
-        .function("renderResult", &DeckFeatureLayerVisualization::renderResult)
+            "resetForNextTile",
+            &TileSubsetLayerRenderer::resetForNextTile)
         .function(
-            "runtimeStyleIssues",
-            std::function<NativeJsValue(DeckFeatureLayerVisualization const&)>(
-                [](DeckFeatureLayerVisualization const& self)
-                {
-                    return self.runtimeStyleIssues();
-                }))
-        .function("mergedPointFeatures", &DeckFeatureLayerVisualization::mergedPointFeatures)
-        .function("externalRelationReferences", &DeckFeatureLayerVisualization::externalRelationReferences)
-        .function(
-            "processResolvedExternalReferences",
-            &DeckFeatureLayerVisualization::processResolvedExternalReferences);
-
-    ////////// DeckTileSearchResultLayerVisualization
-    em::class_<DeckTileSearchResultLayerVisualization>("DeckTileSearchResultLayerVisualization")
-        .constructor<int, std::string, std::string>()
-        .function(
-            "addTileSearchResultLayer",
-            std::function<void(DeckTileSearchResultLayerVisualization&, TileSearchResultLayer const&)>(
-                [](DeckTileSearchResultLayerVisualization& self, TileSearchResultLayer const& tile)
-                {
-                    self.addTileSearchResultLayer(tile);
-                }))
-        .function("run", &DeckTileSearchResultLayerVisualization::run)
-        .function("abiVersion", &DeckTileSearchResultLayerVisualization::abiVersion)
-        .function("renderResult", &DeckTileSearchResultLayerVisualization::renderResult)
-        .function("vertexCount", &DeckTileSearchResultLayerVisualization::vertexCount);
+            "renderBridgeResult",
+            &TileSubsetLayerRenderer::renderBridgeResult)
+        .function("renderPackets", &TileSubsetLayerRenderer::renderPackets)
+        .function("vertexCount", &TileSubsetLayerRenderer::vertexCount);
 
     ////////// TileLayerMetadata
     em::value_object<TileLayerParser::TileLayerMetadata>("TileLayerMetadata")
         .field("id", &TileLayerParser::TileLayerMetadata::id)
-        .field("nodeId", &TileLayerParser::TileLayerMetadata::nodeId)
+        .field("stringPoolId", &TileLayerParser::TileLayerMetadata::stringPoolId)
         .field("mapName", &TileLayerParser::TileLayerMetadata::mapName)
         .field("layerName", &TileLayerParser::TileLayerMetadata::layerName)
         .field("tileId", &TileLayerParser::TileLayerMetadata::tileId)
-        .field("stage", &TileLayerParser::TileLayerMetadata::stage)
         .field("legalInfo", &TileLayerParser::TileLayerMetadata::legalInfo)
         .field("error", &TileLayerParser::TileLayerMetadata::error)
         .field("numFeatures", &TileLayerParser::TileLayerMetadata::numFeatures)
+        .field("conversionTimestampMs", &TileLayerParser::TileLayerMetadata::conversionTimestampMs)
+        .field("ttlMs", &TileLayerParser::TileLayerMetadata::ttlMs)
         .field("scalarFields", &TileLayerParser::TileLayerMetadata::scalarFields);
+
+    em::value_object<TileLayerParser::TileSubsetLayerMetadata>("TileSubsetLayerMetadata")
+        .field("layer", &TileLayerParser::TileSubsetLayerMetadata::layer)
+        .field("filterId", &TileLayerParser::TileSubsetLayerMetadata::filterId)
+        .field("generation", &TileLayerParser::TileSubsetLayerMetadata::generation)
+        .field("dependencies", &TileLayerParser::TileSubsetLayerMetadata::dependencies)
+        .field("issues", &TileLayerParser::TileSubsetLayerMetadata::issues)
+        .field(
+            "glbAttachmentName",
+            &TileLayerParser::TileSubsetLayerMetadata::glbAttachmentName);
 
     ////////// TileLayerParser
     em::class_<TileLayerParser>("TileLayerParser")
@@ -842,14 +872,16 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
         .function("readTileSourceDataLayer", &TileLayerParser::readTileSourceDataLayer)
-        .function("readTileSearchResultLayer", &TileLayerParser::readTileSearchResultLayer)
+        .function("readTileSubsetLayer", &TileLayerParser::readTileSubsetLayer)
         .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)
+        .function("readTileSubsetLayerMetadata", &TileLayerParser::readTileSubsetLayerMetadata)
         .function("completeSearchQuery", &TileLayerParser::completeSearchQuery)
         .function("isAttributeScopeSearchQuery", &TileLayerParser::isAttributeScopeSearchQuery)
         .function("getAttributeScopeForQuery", &TileLayerParser::getAttributeScopeForQuery)
         .function("getMapLayersForQuery", &TileLayerParser::getMapLayersForQuery)
         .function("normalizeSearchQuery", &TileLayerParser::normalizeSearchQuery)
         .function("searchStyleFieldsForQuery", &TileLayerParser::searchStyleFieldsForQuery)
+        .function("planStyleFilter", &TileLayerParser::planStyleFilter)
         .function(
             "filterFeatureJumpTargets",
             std::function<
@@ -867,9 +899,18 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// Get simfil diagnostics messages from a list of diagnostics buffers
     em::function("simfilGetDiagnostics", &simfilGetDiagnostics);
 
+    ////////// Authoritative mapget tile-stream protocol version
+    em::function(
+        "tileLayerStreamProtocolMajor",
+        &tileLayerStreamProtocolMajor);
+    em::function(
+        "tileLayerStreamProtocolMinor",
+        &tileLayerStreamProtocolMinor);
+
     ////////// Viewport TileID calculation
     em::function("getTileIds", &getTileIds);
     em::function("getNumTileIds", &getNumTileIds);
+    em::function("getNumTileIdsForBounds", &getNumTileIdsForBounds);
     em::function("getNumTileIdsForCanonicalCamera", &getNumTileIdsForCanonicalCamera);
     em::function("getTilePriorityById", &getTilePriorityById);
     em::function("getTilePosition", &getTilePosition);
@@ -886,7 +927,6 @@ EMSCRIPTEN_BINDINGS(erdblick)
 
     ////////// Get tile id with vertical/horizontal offset
     em::function("getTileNeighbor", &getTileNeighbor);
-
     ////////// Get a test tile/style
     em::function("generateTestTile", &generateTestTile);
     em::function("generateTestStyle", &generateTestStyle);

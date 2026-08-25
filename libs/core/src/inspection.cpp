@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -191,36 +192,10 @@ std::string geometryCoordinatePath(const model_ptr<Geometry>& geometry, uint32_t
     return fmt::format("coordinates[{}]", pointIndex);
 }
 
-/** Resolve the layer's configured high-fidelity stage with safe fallbacks for legacy metadata. */
-uint32_t highFidelityStage(const mapget::TileFeatureLayer& layer)
-{
-    auto const layerInfo = layer.layerInfo();
-    auto const stages = std::max<uint32_t>(1U, layerInfo ? layerInfo->stages_ : 1U);
-    auto const fallback = stages > 1U ? 1U : 0U;
-    auto const configured = layerInfo ? layerInfo->highFidelityStage_ : fallback;
-    return std::min(stages - 1U, configured);
-}
-
-/** Resolve the display label for a geometry stage using layer metadata when present. */
-std::string stageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
-{
-    auto const layerInfo = layer.layerInfo();
-    if (layerInfo && stage < layerInfo->stageLabels_.size()) {
-        return layerInfo->stageLabels_[stage];
-    }
-    return fmt::format("Stage {}", stage);
-}
-
-/** Hide stage labels for baseline/high-fi geometry and show them only for add-on stages. */
-bool shouldDisplayStageLabel(const mapget::TileFeatureLayer& layer, uint32_t stage)
-{
-    return stage > highFidelityStage(layer);
-}
-
 using InspectionNode = InspectionConverter::InspectionNode;
 using ValueBubble = InspectionConverter::InspectionNode::ValueBubble;
 
-constexpr auto kMaxPropagatedBubbles = 12U;
+constexpr auto kMaxAggregateValues = 100U;
 
 /** Return the non-array base value type for scalar propagation decisions. */
 InspectionConverter::ValueType baseValueType(InspectionConverter::ValueType type)
@@ -389,6 +364,78 @@ ValueBubble makeGroupedBubble(std::deque<ValueBubble> children)
     return group;
 }
 
+/** Return the filtering rank used when choosing which child summaries survive propagation. */
+uint8_t bubbleContributionRank(ValueBubble const& bubble, bool isCountField)
+{
+    return static_cast<uint8_t>((isCountField ? 4U : 0U)
+        | (isCompleteValidityBubble(bubble) ? 2U : 0U)
+        | (isEmptyBitmaskBubble(bubble) ? 1U : 0U));
+}
+
+/**
+ * Keep at most `remaining` scalar values from a bubble tree.
+ *
+ * Group shells are retained so sibling pairs remain visually disjoint, while
+ * nested aggregate content is truncated before it can grow quadratically.
+ */
+std::optional<ValueBubble> takeBubblePrefix(
+    ValueBubble bubble,
+    size_t& remaining,
+    bool& truncated)
+{
+    if (bubble.children_.empty()) {
+        if (remaining == 0) {
+            truncated = true;
+            return std::nullopt;
+        }
+        --remaining;
+        return bubble;
+    }
+
+    auto children = std::move(bubble.children_);
+    bubble.children_.clear();
+    for (size_t index = 0; index < children.size(); ++index) {
+        if (remaining == 0) {
+            truncated = true;
+            break;
+        }
+        if (auto child = takeBubblePrefix(std::move(children[index]), remaining, truncated)) {
+            bubble.children_.push_back(std::move(*child));
+        }
+    }
+    if (bubble.children_.empty()) {
+        return std::nullopt;
+    }
+
+    bubble.label_.clear();
+    for (auto const& child : bubble.children_) {
+        if (!bubble.label_.empty()) {
+            bubble.label_ += " ";
+        }
+        bubble.label_ += child.label_;
+    }
+    bubble.targetNodeId_ = firstBubbleTarget(bubble.children_.front());
+    return bubble;
+}
+
+/** Result returned to a parent while keeping truncation separate from real value bubbles. */
+struct BubblePropagation {
+    std::deque<ValueBubble> bubbles_;
+    bool truncated_ = false;
+};
+
+/** Add the visual overflow marker to a row-local summary without propagating it as a value. */
+void setNodeValueBubbles(
+    InspectionNode& node,
+    std::deque<ValueBubble> const& bubbles,
+    bool truncated)
+{
+    node.valueBubbles_ = bubbles;
+    if (truncated) {
+        node.valueBubbles_.push_back(makeValueBubble("…", node.nodeId_, "overflow", "overflow"));
+    }
+}
+
 InspectionNode const* directChildByKey(InspectionNode const& node, std::string_view key);
 
 /** Return whether a child node is a true boolean flag. */
@@ -524,7 +571,12 @@ std::optional<ValueBubble> booleanArrayBitsBubbleForNode(InspectionNode const& n
     auto hasTrueValue = false;
     auto targetNodeId = node.nodeId_;
     std::string label;
+    size_t valueCount = 0;
     for (auto const& child : node.children_) {
+        if (valueCount == kMaxAggregateValues) {
+            label += " …";
+            break;
+        }
         auto const childValue = child.value_.as<bool>();
         if (!label.empty()) {
             label += " ";
@@ -534,6 +586,7 @@ std::optional<ValueBubble> booleanArrayBitsBubbleForNode(InspectionNode const& n
             targetNodeId = child.nodeId_;
             hasTrueValue = true;
         }
+        ++valueCount;
     }
 
     return makeValueBubble(
@@ -666,6 +719,52 @@ std::string compactValidityOffset(InspectionNode const& offsetNode)
     return value;
 }
 
+/** Render a logical attribute-point index or inclusive range as one compact token. */
+std::optional<std::string> compactAttrPointReference(InspectionNode const& node)
+{
+    auto const key = inspectionKeyString(node);
+    auto const* point = key == "attrPointIndex"
+        ? &node
+        : directChildByKey(node, "attrPointIndex");
+    if (point) {
+        if (auto const* index = directChildByKey(*point, "index")) {
+            return fmt::format("AP #{}", index->value_.toString());
+        }
+    }
+
+    auto const* range = key == "attrPointIndexRange"
+        ? &node
+        : directChildByKey(node, "attrPointIndexRange");
+    if (range) {
+        auto const* start = directChildByKey(*range, "start");
+        auto const* end = directChildByKey(*range, "end");
+        if (start && end) {
+            return fmt::format(
+                "AP #{}–#{}",
+                start->value_.toString(),
+                end->value_.toString());
+        }
+    }
+    return std::nullopt;
+}
+
+/** Build the row-local summary shown while attribute-point details are collapsed. */
+std::optional<ValueBubble> attrPointBubbleForNode(InspectionNode const& node)
+{
+    auto label = compactAttrPointReference(node);
+    if (!label) {
+        return std::nullopt;
+    }
+    auto const* target = directChildByKey(
+        node,
+        inspectionKeyString(node) == "attrPointIndex" ? "index" : "start");
+    return makeValueBubble(
+        std::move(*label),
+        target ? target->nodeId_ : node.nodeId_,
+        "attr-point",
+        "attr-point");
+}
+
 /** Label and propagation strength for one compact validity bubble. */
 struct CompactValidityBubble {
     std::string label_;
@@ -702,6 +801,10 @@ CompactValidityBubble compactValidityBubble(InspectionNode const& validityNode)
             hasCompleteDirectionOnly = false;
         }
     }
+    if (auto attrPoint = compactAttrPointReference(validityNode)) {
+        parts.push_back(std::move(*attrPoint));
+        hasCompleteDirectionOnly = false;
+    }
 
     if (parts.empty()) {
         return CompactValidityBubble{.label_ = "validity", .kind_ = "validity"};
@@ -733,10 +836,11 @@ bool isValidityNode(InspectionNode const& node)
     return node.hoverId_.find(":validity#") != std::string::npos;
 }
 
-/** Build the special one-bubble-per-validity representation. */
-std::deque<ValueBubble> validityBubblesForNode(InspectionNode const& node)
+/** Build the bounded one-bubble-per-validity representation. */
+BubblePropagation validityBubblesForNode(InspectionNode const& node)
 {
     std::deque<ValueBubble> bubbles;
+    auto truncated = false;
     for (auto const& child : node.children_) {
         auto const hasValidityHoverId = child.hoverId_.find(":validity#") != std::string::npos;
         auto const looksLikeIndexedValidity = child.key_.type() == JsValue::Type::Number
@@ -744,7 +848,9 @@ std::deque<ValueBubble> validityBubblesForNode(InspectionNode const& node)
                 || directChildByKey(child, "featureId")
                 || directChildByKey(child, "transitionNumber")
                 || directChildByKey(child, "start")
-                || directChildByKey(child, "point"));
+                || directChildByKey(child, "point")
+                || directChildByKey(child, "attrPointIndex")
+                || directChildByKey(child, "attrPointIndexRange"));
         if (!hasValidityHoverId && !looksLikeIndexedValidity) {
             continue;
         }
@@ -752,11 +858,18 @@ std::deque<ValueBubble> validityBubblesForNode(InspectionNode const& node)
         if (compact.label_ == "validity") {
             continue;
         }
+        if (bubbles.size() == kMaxAggregateValues) {
+            truncated = true;
+            break;
+        }
         auto kind = std::move(compact.kind_);
         bubbles.push_back(makeValueBubble(std::move(compact.label_), child.nodeId_, kind, "validity"));
     }
     if (!bubbles.empty()) {
-        return bubbles;
+        return {
+            .bubbles_ = std::move(bubbles),
+            .truncated_ = truncated
+        };
     }
     auto compact = compactValidityBubble(node);
     if (compact.label_ == "validity") {
@@ -764,7 +877,7 @@ std::deque<ValueBubble> validityBubblesForNode(InspectionNode const& node)
     }
     auto kind = std::move(compact.kind_);
     bubbles.push_back(makeValueBubble(std::move(compact.label_), node.nodeId_, kind, "validity"));
-    return bubbles;
+    return {.bubbles_ = std::move(bubbles)};
 }
 
 /** Convert a bubble tree into the JS shape consumed by the inspection table. */
@@ -880,30 +993,46 @@ std::string relationRowHoverId(model_ptr<Relation> const& relation, std::string 
     return relationHoverId;
 }
 
-/** Compute propagated scalar bubbles bottom-up and return this node's contribution to its parent. */
-std::deque<ValueBubble> buildPropagatedValueBubbles(InspectionNode& node, std::string_view parentKey = {})
+/** Compute bounded scalar summaries bottom-up and return this node's contribution to its parent. */
+BubblePropagation buildPropagatedValueBubbles(InspectionNode& node, std::string_view parentKey = {})
 {
-    struct ChildContribution {
-        ValueBubble bubble_;
-        bool isCountField_ = false;
-        bool isCompleteValidity_ = false;
-        bool isEmptyBitmask_ = false;
-    };
-
-    std::vector<ChildContribution> childContributions;
+    node.valueBubbles_.clear();
+    std::deque<ValueBubble> childContributions;
+    auto remainingValues = static_cast<size_t>(kMaxAggregateValues);
+    auto childContributionsTruncated = false;
+    std::optional<uint8_t> bestContributionRank;
     auto const key = inspectionKeyString(node);
     for (auto& child : node.children_) {
-        auto childBubbles = buildPropagatedValueBubbles(child, key);
+        auto childPropagation = buildPropagatedValueBubbles(child, key);
+        if (childPropagation.bubbles_.empty()) {
+            continue;
+        }
         auto const isCountField = isLikelyZserioCountField(inspectionKeyString(child));
-        for (auto& bubble : childBubbles) {
-            auto const isCompleteValidity = isCompleteValidityBubble(bubble);
-            auto const isEmptyBitmask = isEmptyBitmaskBubble(bubble);
-            childContributions.push_back(ChildContribution{
-                .bubble_ = std::move(bubble),
-                .isCountField_ = isCountField,
-                .isCompleteValidity_ = isCompleteValidity,
-                .isEmptyBitmask_ = isEmptyBitmask
-            });
+        auto childRank = std::numeric_limits<uint8_t>::max();
+        for (auto const& bubble : childPropagation.bubbles_) {
+            childRank = std::min(childRank, bubbleContributionRank(bubble, isCountField));
+        }
+        if (!bestContributionRank || childRank < *bestContributionRank) {
+            bestContributionRank = childRank;
+            childContributions.clear();
+            remainingValues = kMaxAggregateValues;
+            childContributionsTruncated = false;
+        }
+        if (childRank != *bestContributionRank) {
+            continue;
+        }
+
+        childContributionsTruncated |= childPropagation.truncated_;
+        for (auto& bubble : childPropagation.bubbles_) {
+            if (bubbleContributionRank(bubble, isCountField) != childRank) {
+                continue;
+            }
+            if (auto retained = takeBubblePrefix(
+                    std::move(bubble),
+                    remainingValues,
+                    childContributionsTruncated)) {
+                childContributions.push_back(std::move(*retained));
+            }
         }
     }
 
@@ -919,27 +1048,33 @@ std::deque<ValueBubble> buildPropagatedValueBubbles(InspectionNode& node, std::s
     }
 
     if (isValidityNode(node)) {
-        node.valueBubbles_ = validityBubblesForNode(node);
-        return node.valueBubbles_;
+        auto propagation = validityBubblesForNode(node);
+        setNodeValueBubbles(node, propagation.bubbles_, propagation.truncated_);
+        return propagation;
     }
 
     auto daysOfWeekBubbles = daysOfWeekBubblesForNode(node);
     if (!daysOfWeekBubbles.empty()) {
         node.valueBubbles_ = std::move(daysOfWeekBubbles);
-        return node.valueBubbles_;
+        return {.bubbles_ = node.valueBubbles_};
     }
 
     auto monthsOfYearBubbles = monthsOfYearBubblesForNode(node);
     if (!monthsOfYearBubbles.empty()) {
         node.valueBubbles_ = std::move(monthsOfYearBubbles);
-        return node.valueBubbles_;
+        return {.bubbles_ = node.valueBubbles_};
+    }
+
+    if (auto attrPointBubble = attrPointBubbleForNode(node)) {
+        node.valueBubbles_.push_back(*attrPointBubble);
+        return {.bubbles_ = {std::move(*attrPointBubble)}};
     }
 
     auto booleanArrayBitsBubble = booleanArrayBitsBubbleForNode(node);
     if (booleanArrayBitsBubble) {
         node.valueBubbles_.push_back(*booleanArrayBitsBubble);
         if (auto propagated = propagatedBooleanArrayBubbleForNode(node)) {
-            return std::deque<ValueBubble>{std::move(*propagated)};
+            return {.bubbles_ = {std::move(*propagated)}};
         }
         return {};
     }
@@ -947,66 +1082,48 @@ std::deque<ValueBubble> buildPropagatedValueBubbles(InspectionNode& node, std::s
     auto relationBubble = relationBubbleForNode(node);
     if (relationBubble) {
         node.valueBubbles_.push_back(std::move(*relationBubble));
-        return node.valueBubbles_;
+        return {.bubbles_ = node.valueBubbles_};
     }
 
     auto scalarBubble = scalarBubbleForNode(node);
     if (scalarBubble) {
-        return std::deque<ValueBubble>{std::move(*scalarBubble)};
+        return {.bubbles_ = {std::move(*scalarBubble)}};
     }
 
     if (baseValueType(node.type_) == InspectionConverter::ValueType::Section) {
         return {};
     }
 
-    auto const hasNonCountContribution = std::ranges::any_of(
-        childContributions,
-        [](auto const& contribution) { return !contribution.isCountField_; });
-    auto const hasStrongContribution = std::ranges::any_of(
-        childContributions,
-        [hasNonCountContribution](auto const& contribution) {
-            return !(hasNonCountContribution && contribution.isCountField_)
-                && !contribution.isCompleteValidity_;
-        });
-    auto const hasNonEmptyBitmaskContribution = std::ranges::any_of(
-        childContributions,
-        [hasNonCountContribution, hasStrongContribution](auto const& contribution) {
-            auto const wouldKeep = !(hasNonCountContribution && contribution.isCountField_)
-                && !(hasStrongContribution && contribution.isCompleteValidity_);
-            return wouldKeep && !contribution.isEmptyBitmask_;
-        });
-    for (auto& contribution : childContributions) {
-        if (hasNonCountContribution && contribution.isCountField_) {
-            continue;
-        }
-        if (hasStrongContribution && contribution.isCompleteValidity_) {
-            continue;
-        }
-        if (hasNonEmptyBitmaskContribution && contribution.isEmptyBitmask_) {
-            continue;
-        }
-        node.valueBubbles_.push_back(std::move(contribution.bubble_));
+    sortValidityBubblesFirst(childContributions);
+    if (childContributions.empty()) {
+        return {};
     }
-    sortValidityBubblesFirst(node.valueBubbles_);
+    setNodeValueBubbles(node, childContributions, childContributionsTruncated);
 
-    if (node.valueBubbles_.empty()) {
-        return {};
-    }
-    if (node.valueBubbles_.size() > kMaxPropagatedBubbles) {
-        // Keep the row-local summary visible, but do not bubble very wide
-        // aggregates further upward into less specific parent rows.
-        return {};
-    }
     if (isTransparentPropagationContainer(inspectionKeyString(node))) {
-        return node.valueBubbles_;
+        return {
+            .bubbles_ = std::move(childContributions),
+            .truncated_ = childContributionsTruncated
+        };
     }
-    if (containsUngroupedBubble(node.valueBubbles_)) {
-        return node.valueBubbles_;
+    if (containsUngroupedBubble(childContributions)) {
+        return {
+            .bubbles_ = std::move(childContributions),
+            .truncated_ = childContributionsTruncated
+        };
     }
-    if (node.valueBubbles_.size() == 1) {
-        return std::deque<ValueBubble>{node.valueBubbles_.front()};
+    if (childContributions.size() == 1) {
+        return {
+            .bubbles_ = std::move(childContributions),
+            .truncated_ = childContributionsTruncated
+        };
     }
-    return std::deque<ValueBubble>{makeGroupedBubble(node.valueBubbles_)};
+    std::deque<ValueBubble> grouped;
+    grouped.push_back(makeGroupedBubble(std::move(childContributions)));
+    return {
+        .bubbles_ = std::move(grouped),
+        .truncated_ = childContributionsTruncated
+    };
 }
 
 }
@@ -1077,18 +1194,13 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     if (auto geomCollection = featurePtr->geomOrNull())
     {
         auto scope = push(convertString("Geometry"), RawPath{"geometry"}, ValueType::Section);
-        const auto highFiStage = highFidelityStage(featurePtr->model());
         const auto exportAsGeometryCollection = geomCollection->numGeometries() > 1;
         uint32_t exportGeometryIndex = 0;
         uint32_t displayGeometryIndex = 0;
         geomCollection->forEachGeometry(
-            [this, &exportGeometryIndex, &displayGeometryIndex, highFiStage, exportAsGeometryCollection]
+            [this, &exportGeometryIndex, &displayGeometryIndex, exportAsGeometryCollection]
             (model_ptr<Geometry> const& geom) -> bool {
             const auto currentExportGeometryIndex = exportGeometryIndex++;
-            const auto geometryStage = geom->model().stage().value_or(0U);
-            if (geometryStage < highFiStage) {
-                return true;
-            }
             const auto geometryObjectPath = exportAsGeometryCollection
                 ? fmt::format("geometries[{}]", currentExportGeometryIndex)
                 : std::string{};
@@ -1097,9 +1209,14 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
         });
     }
 
-    assignInspectionNodeIds(root_);
-    buildPropagatedValueBubbles(root_);
+    finalizeTree(root_);
     return root_.childrenToJsValue(tile_->mapId());
+}
+
+void InspectionConverter::finalizeTree(InspectionNode& root)
+{
+    assignInspectionNodeIds(root);
+    buildPropagatedValueBubbles(root);
 }
 
 InspectionConverter::InspectionNodeScope InspectionConverter::push(
@@ -1364,6 +1481,9 @@ void InspectionConverter::convertValidity(
     auto scope = push(key, key.as<std::string>());
     auto renderValidity = [this](Validity const& v) -> bool {
 
+        auto attrPointIndex = v.attrPointIndex();
+        auto attrPointIndexRange = v.attrPointIndexRange();
+
         if (auto direction = v.direction()) {
             auto dirScope = push("direction", "direction", ValueType::String);
             switch (direction) {
@@ -1386,6 +1506,9 @@ void InspectionConverter::convertValidity(
         if (auto featureId = v.featureId()) {
             auto featureIdScope = push("featureId", "featureId", ValueType::FeatureId);
             assignFeatureReference(*featureIdScope, featureId);
+            if (attrPointIndex || attrPointIndexRange) {
+                featureIdScope->geoJsonPath_.clear();
+            }
         }
 
         if (auto transitionNumber = v.transitionNumber()) {
@@ -1412,21 +1535,31 @@ void InspectionConverter::convertValidity(
             return true;
         }
 
-        if (auto geom = v.simpleGeometry()) {
-            auto const highFiStage = highFidelityStage(v.model());
-            auto const geometryStage = geom->model().stage().value_or(0U);
-            if (geometryStage >= highFiStage) {
-                convertGeometry(JsValue("simpleGeometry"), geom);
-            }
+        if (attrPointIndex) {
+            convertAttrPointValidity(
+                convertString("attrPointIndex"),
+                attrPointIndex->sequence(),
+                attrPointIndex->index());
             return true;
         }
 
-        if (auto geometryStage = v.geometryStage()) {
-            push("geometryStage", "geometryStage", ValueType::Number)->value_ = JsValue(*geometryStage);
-            if (shouldDisplayStageLabel(v.model(), *geometryStage)) {
-                push("geometryStageLabel", "geometryStageLabel", ValueType::String)->value_ =
-                    convertString(stageLabel(v.model(), *geometryStage));
-            }
+        if (attrPointIndexRange) {
+            convertAttrPointValidity(
+                convertString("attrPointIndexRange"),
+                attrPointIndexRange->sequence(),
+                attrPointIndexRange->start(),
+                attrPointIndexRange->end());
+            return true;
+        }
+
+        if (auto geom = v.simpleGeometry()) {
+            convertGeometry(JsValue("simpleGeometry"), geom);
+            return true;
+        }
+
+        if (auto geometryName = v.geometryName()) {
+            push("geometryName", "geometryName", ValueType::String)->value_ =
+                convertString(*geometryName);
         }
 
         auto renderOffset = [this, &v](Point const& data, std::string_view const& name)
@@ -1487,6 +1620,90 @@ void InspectionConverter::convertValidity(
     });
 }
 
+void InspectionConverter::convertAttrPointValidity(
+    JsValue const& key,
+    model_ptr<AttrPointSequence> const& sequence,
+    uint32_t start,
+    std::optional<uint32_t> end)
+{
+    auto scope = push(key, key.as<std::string>());
+
+    {
+        auto const sequencePath = std::string{"sequence.[\"$mapgetAttrPointSequence\"]"};
+        auto sequenceScope = push("sequence", RawPath{sequencePath}, ValueType::Number);
+        sequenceScope->value_ = JsValue(sequence->addr().index());
+        convertSourceDataReferences(sequence->sourceDataReferences(), *sequenceScope);
+    }
+
+    auto const appendSyntheticNumber = [this](std::string_view name, auto value) {
+        auto child = push(name, AbsolutePath{""}, ValueType::Number);
+        child->value_ = JsValue(value);
+    };
+    auto const appendSyntheticString = [this](std::string_view name, std::string_view value) {
+        auto child = push(name, AbsolutePath{""}, ValueType::String);
+        child->value_ = convertString(value);
+    };
+    auto const attrPointAt = [&sequence](uint32_t logicalIndex) -> model_ptr<AttrPoint> {
+        auto attrPoints = sequence->attrPoints();
+        for (uint32_t index = 0; index < sequence->attrPointCount(); ++index) {
+            auto candidate = attrPoints->attrPointAt(index);
+            if (candidate->index() == logicalIndex) {
+                return candidate;
+            }
+            if (candidate->index() > logicalIndex) {
+                break;
+            }
+        }
+        return {};
+    };
+    auto const appendLogicalPosition = [
+        this,
+        &sequence,
+        &attrPointAt,
+        &appendSyntheticNumber,
+        &appendSyntheticString
+    ](std::string_view name, uint32_t logicalIndex) {
+        {
+            auto indexScope = push(name, name, ValueType::Number);
+            indexScope->value_ = JsValue(logicalIndex);
+            if (auto attrPoint = attrPointAt(logicalIndex)) {
+                convertSourceDataReferences(attrPoint->sourceDataReferences(), *indexScope);
+            }
+        }
+
+        auto const prefix = name == "index" ? std::string{} : std::string{name};
+        auto const resolvedPointName = prefix.empty() ? "point" : prefix + "Point";
+        {
+            auto pointScope = push(
+                resolvedPointName,
+                AbsolutePath{""},
+                ValueType::Number | ValueType::ArrayBit);
+            pointScope->value_ = pointArrayValue(sequence->pointAt(logicalIndex));
+        }
+
+        auto const kindName = prefix.empty() ? "pointKind" : prefix + "PointKind";
+        appendSyntheticString(
+            kindName,
+            sequence->isAttrPoint(logicalIndex) ? "ATTRIBUTE_POINT" : "SHAPE_POINT");
+        auto const offsetName = prefix.empty() ? "metricOffsetMeters" : prefix + "MetricOffsetMeters";
+        appendSyntheticNumber(offsetName, sequence->metricOffsetAt(logicalIndex));
+    };
+
+    if (auto geometryName = sequence->geometry()->name()) {
+        appendSyntheticString("geometryName", *geometryName);
+    }
+    appendSyntheticNumber("geometryIndex", sequence->geometryIndex());
+    appendSyntheticNumber("positionCount", sequence->positionCount());
+
+    if (end) {
+        appendLogicalPosition("start", start);
+        appendLogicalPosition("end", *end);
+    }
+    else {
+        appendLogicalPosition("index", start);
+    }
+}
+
 void InspectionConverter::convertField(
     const simfil::StringId& fieldId,
     const simfil::ModelNode::Ptr& value)
@@ -1516,6 +1733,13 @@ void InspectionConverter::convertField(
         auto relationRef = tile_->resolve<RelationReference>(*value);
         auto relation = relationRef->relation();
         convertRelation(fieldName, path, relation, relationIndexFor(relation));
+        return;
+    }
+    if (value->addr().column()
+        == TileFeatureLayer::ColumnId::SourceDataReferenceCollections) {
+        convertSourceDataReferences(
+            tile_->resolve<SourceDataReferenceCollection>(*value),
+            *current_);
         return;
     }
 
@@ -1650,6 +1874,12 @@ JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& m
         newDict.set("nodeId", JsValue(nodeId_));
     if (mapId_)
         newDict.set("mapId", *mapId_);
+    if (address_)
+        newDict.set("address", *address_);
+    if (addressScope_)
+        newDict.set("addressScope", JsValue(true));
+    if (!schemaType_.empty())
+        newDict.set("schemaType", JsValue(schemaType_));
     if (!keyBubbles_.empty()) {
         auto bubbles = JsValue::List();
         for (auto const& bubble : keyBubbles_) {

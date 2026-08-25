@@ -1,10 +1,47 @@
 #include "rule.h"
+#include "mapget/model/hash.h"
+#include <algorithm>
+#include <charconv>
+#include <cctype>
+#include <cmath>
 #include <iostream>
 #include "simfil/value.h"
 #include "search.h"
 
 namespace erdblick
 {
+
+simfil::Value BoundEvalFun::evaluate(std::string const& expression) const
+{
+    if (evalRef_) {
+        return evalRef_(context_, expression);
+    }
+    return eval_ ? eval_(expression) : simfil::Value::undef();
+}
+
+void BoundEvalFun::reportIssue(
+    std::string const& property,
+    std::string const& expression,
+    std::string const& message,
+    uint32_t ruleIndex) const
+{
+    if (reportIssueRef_) {
+        reportIssueRef_(
+            context_,
+            property,
+            expression,
+            message,
+            ruleIndex);
+    }
+    else if (reportIssue_) {
+        reportIssue_(property, expression, message, ruleIndex);
+    }
+}
+
+bool BoundEvalFun::hasIssueReporter() const
+{
+    return reportIssueRef_ || static_cast<bool>(reportIssue_);
+}
 
 namespace
 {
@@ -25,6 +62,34 @@ std::optional<FeatureStyleRule::Arrow> parseArrowMode(std::string const& arrowSt
 
     std::cout << "Unsupported arrow mode: " << arrowStr << std::endl;
     return {};
+}
+
+/** Parse the shared style length-unit aliases used by offsets and dashes. */
+FeatureStyleRule::LengthUnit parseLengthUnit(std::string unit)
+{
+    std::ranges::transform(unit, unit.begin(), [](unsigned char value) {
+        return static_cast<char>(std::tolower(value));
+    });
+    return unit == "pixel" || unit == "pixels" || unit == "px"
+        ? FeatureStyleRule::LengthUnit::Pixel
+        : FeatureStyleRule::LengthUnit::Meter;
+}
+
+/** Expand one supported Deck box shorthand into its four-value form. */
+std::array<float, 4> parseLabelBox(
+    YAML::Node const& node,
+    bool allowScalar,
+    bool allowPair)
+{
+    if (allowScalar && node.IsScalar()) {
+        auto const value = node.as<float>();
+        return {value, value, value, value};
+    }
+    auto const values = node.as<std::vector<float>>();
+    if (allowPair && values.size() == 2U) {
+        return {values[0], values[1], values[0], values[1]};
+    }
+    return {values.at(0), values.at(1), values.at(2), values.at(3)};
 }
 
 /** Parse one geometry keyword from YAML into the corresponding mapget geometry enum. */
@@ -51,6 +116,170 @@ std::optional<mapget::GeomType> parseGeometryEnum(std::string const& enumStr) {
     std::cout << "Unsupported geometry type: " << enumStr << std::endl;
     return {};
 }
+
+/** Detect patterns whose regex semantics are exactly a literal string comparison. */
+bool isLiteralRegex(std::string_view pattern)
+{
+    constexpr std::string_view metaCharacters = R"(.^$|()[]{}*+?\)";
+    return pattern.find_first_of(metaCharacters) == std::string_view::npos;
+}
+
+/** Parse a typed YAML scalar without stringifying numeric/category keys. */
+FeatureStyleRule::ColorScaleStop::Key parseColorScaleKey(YAML::Node const& node)
+{
+    auto const scalar = node.Scalar();
+    auto const tag = node.Tag();
+    if (tag == "!" || tag.ends_with(":str")) {
+        return scalar;
+    }
+    if (scalar == "true") {
+        return true;
+    }
+    if (scalar == "false") {
+        return false;
+    }
+    int64_t integer = 0;
+    auto const integerResult = std::from_chars(
+        scalar.data(),
+        scalar.data() + scalar.size(),
+        integer);
+    if (integerResult.ec == std::errc{} &&
+        integerResult.ptr == scalar.data() + scalar.size())
+    {
+        return integer;
+    }
+    char* end = nullptr;
+    auto const number = std::strtod(scalar.c_str(), &end);
+    if (end == scalar.c_str() + scalar.size() && std::isfinite(number)) {
+        return number;
+    }
+    return scalar;
+}
+
+/** Convert a SIMFIL scalar into one typed color-scale key. */
+std::optional<FeatureStyleRule::ColorScaleStop::Key> colorScaleKey(simfil::Value const& value)
+{
+    if (value.isa(simfil::ValueType::Bool)) {
+        return value.as<simfil::ValueType::Bool>();
+    }
+    if (value.isa(simfil::ValueType::Int)) {
+        return value.as<simfil::ValueType::Int>();
+    }
+    if (value.isa(simfil::ValueType::Float)) {
+        auto number = value.as<simfil::ValueType::Float>();
+        return std::isfinite(number)
+            ? std::optional<FeatureStyleRule::ColorScaleStop::Key>{number}
+            : std::nullopt;
+    }
+    if (value.isa(simfil::ValueType::String)) {
+        return value.as<simfil::ValueType::String>();
+    }
+    return std::nullopt;
+}
+
+std::optional<double> numericColorScaleKey(
+    FeatureStyleRule::ColorScaleStop::Key const& key)
+{
+    if (auto integer = std::get_if<int64_t>(&key)) {
+        return static_cast<double>(*integer);
+    }
+    if (auto number = std::get_if<double>(&key)) {
+        return *number;
+    }
+    return std::nullopt;
+}
+
+/** Convert a SIMFIL integer or float into a finite double. */
+std::optional<double> finiteNumber(simfil::Value const& value)
+{
+    if (value.isa(simfil::ValueType::Int)) {
+        return static_cast<double>(value.as<simfil::ValueType::Int>());
+    }
+    if (value.isa(simfil::ValueType::Float)) {
+        auto const number = value.as<simfil::ValueType::Float>();
+        return std::isfinite(number)
+            ? std::optional<double>{number}
+            : std::nullopt;
+    }
+    return std::nullopt;
+}
+
+/** Build an allocation-bounded direct lookup when every category is integral. */
+template<typename Stop, typename Result, typename Project>
+std::optional<FeatureStyleRule::DenseIntegerScale<Result>>
+denseIntegerScale(std::vector<Stop> const& stops, Project project)
+{
+    constexpr uint64_t kMaximumDenseSpan = 1024U;
+    auto integerKey = [](FeatureStyleRule::ColorScaleStop::Key const& key)
+        -> std::optional<int64_t> {
+        if (auto const integer = std::get_if<int64_t>(&key)) {
+            return *integer;
+        }
+        auto const number = std::get_if<double>(&key);
+        constexpr double kInt64UpperExclusive = 9223372036854775808.0;
+        if (!number || !std::isfinite(*number) ||
+            std::trunc(*number) != *number ||
+            *number < static_cast<double>(
+                std::numeric_limits<int64_t>::min()) ||
+            *number >= kInt64UpperExclusive)
+        {
+            return std::nullopt;
+        }
+        return static_cast<int64_t>(*number);
+    };
+    if (stops.empty()) {
+        return std::nullopt;
+    }
+    int64_t minimum = std::numeric_limits<int64_t>::max();
+    int64_t maximum = std::numeric_limits<int64_t>::min();
+    for (auto const& stop : stops) {
+        auto const key = integerKey(stop.key);
+        if (!key) {
+            return std::nullopt;
+        }
+        minimum = std::min(minimum, *key);
+        maximum = std::max(maximum, *key);
+    }
+    auto const span = static_cast<uint64_t>(maximum) -
+        static_cast<uint64_t>(minimum) + 1U;
+    if (span > kMaximumDenseSpan) {
+        return std::nullopt;
+    }
+    FeatureStyleRule::DenseIntegerScale<Result> result{
+        .minimum = minimum,
+        .values = std::vector<std::optional<Result>>(
+            static_cast<size_t>(span)),
+    };
+    for (auto const& stop : stops) {
+        auto const key = *integerKey(stop.key);
+        auto const index = static_cast<size_t>(
+            key - minimum);
+        if (!result.values[index]) {
+            result.values[index] = project(stop);
+        }
+    }
+    return result;
+}
+
+/** Return an integral SIMFIL number without constructing a scale-key variant. */
+std::optional<int64_t> integerScaleKey(simfil::Value const& value)
+{
+    if (value.isa(simfil::ValueType::Int)) {
+        return value.as<simfil::ValueType::Int>();
+    }
+    if (!value.isa(simfil::ValueType::Float)) {
+        return std::nullopt;
+    }
+    auto const number = value.as<simfil::ValueType::Float>();
+    constexpr double kInt64UpperExclusive = 9223372036854775808.0;
+    if (!std::isfinite(number) || std::trunc(number) != number ||
+        number < static_cast<double>(std::numeric_limits<int64_t>::min()) ||
+        number >= kInt64UpperExclusive)
+    {
+        return std::nullopt;
+    }
+    return static_cast<int64_t>(number);
+}
 }
 
 FeatureStyleRule::FeatureStyleRule(YAML::Node const& yaml, uint32_t index) : index_(index)
@@ -62,6 +291,7 @@ FeatureStyleRule::FeatureStyleRule(const FeatureStyleRule& other, bool resetNonI
 {
     *this = other;
     if (resetNonInheritableAttrs) {
+        exactType_.reset();
         type_.reset();
         filter_.clear();
         branchMode_ = BranchMode::None;
@@ -89,76 +319,90 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             geometryTypes_ |= geomTypeBit(*geomType);
         }
     }
-    if (yaml["aspect"].IsDefined()) {
-        // Parse the feature aspect that is covered by this rule.
-        auto aspectStr = yaml["aspect"].as<std::string>();
-        if (aspectStr == "feature") {
-            aspect_ = Feature;
+    if (yaml["scope"].IsDefined()) {
+        auto scopeStr = yaml["scope"].as<std::string>();
+        if (scopeStr == "feature") {
+            scope_ = Feature;
         }
-        else if (aspectStr == "relation") {
-            aspect_ = Relation;
+        else if (scopeStr == "relation") {
+            scope_ = Relation;
         }
-        else if (aspectStr == "attribute") {
-            aspect_ = Attribute;
+        else if (scopeStr == "attribute") {
+            scope_ = Attribute;
         }
         else {
-            std::cout << "Unsupported aspect: " << aspectStr << std::endl;
+            std::cout << "Unsupported scope: " << scopeStr << std::endl;
             return;
         }
     }
     if (yaml["mode"].IsDefined()) {
-        // Parse the feature aspect that is covered by this rule.
-        auto modeStr = yaml["mode"].as<std::string>();
-        if (modeStr == "none") {
-            mode_ = NoHighlight;
-        }
-        else if (modeStr == "hover") {
-            mode_ = HoverHighlight;
-        }
-        else if (modeStr == "selection") {
-            mode_ = SelectionHighlight;
+        // A rule may be shared by multiple interaction passes. An explicitly
+        // authored value replaces, rather than augments, an inherited mode.
+        highlightModesMask_ = 0U;
+        auto addMode = [this](YAML::Node const& modeYaml) {
+            auto const modeStr = modeYaml.as<std::string>();
+            if (modeStr == "none") {
+                highlightModesMask_ |= 1U << NoHighlight;
+            }
+            else if (modeStr == "hover") {
+                highlightModesMask_ |= 1U << HoverHighlight;
+            }
+            else if (modeStr == "selection") {
+                highlightModesMask_ |= 1U << SelectionHighlight;
+            }
+            else {
+                std::cout << "Unsupported mode: " << modeStr << std::endl;
+            }
+        };
+        if (yaml["mode"].IsSequence()) {
+            for (auto const& modeYaml : yaml["mode"]) {
+                addMode(modeYaml);
+            }
         }
         else {
-            std::cout << "Unsupported mode: " << modeStr << std::endl;
+            addMode(yaml["mode"]);
         }
     }
-    if (yaml["fidelity"].IsDefined()) {
-        auto fidelityStr = yaml["fidelity"].as<std::string>();
-        if (fidelityStr == "any") {
-            fidelity_ = AnyFidelity;
+    if (yaml["lod-range"].IsDefined()) {
+        auto const range = yaml["lod-range"].as<std::vector<uint32_t>>();
+        lodRange_ = {
+            static_cast<uint8_t>(range.at(0)),
+            static_cast<uint8_t>(range.at(1)),
+        };
+    }
+    else if (yaml["fidelity"].IsDefined()) {
+        // Fidelity remains authoring shorthand only. Rendering and planning
+        // operate exclusively on the canonical integer LOD range.
+        auto const fidelity = yaml["fidelity"].as<std::string>();
+        if (fidelity == "low") {
+            lodRange_ = {kMinimumLod, 2U};
         }
-        else if (fidelityStr == "high") {
-            fidelity_ = HighFidelity;
-        }
-        else if (fidelityStr == "low") {
-            fidelity_ = LowFidelity;
+        else if (fidelity == "high") {
+            lodRange_ = {3U, kMaximumLod};
         }
         else {
-            std::cout << "Unsupported fidelity: " << fidelityStr << std::endl;
+            lodRange_ = {kMinimumLod, kMaximumLod};
         }
     }
-    if (yaml["stage"].IsDefined()) {
-        auto const parsedStage = yaml["stage"].as<int>();
-        if (parsedStage < 0) {
-            std::cout << "Unsupported stage: " << parsedStage << std::endl;
-        }
-        else {
-            stage_ = static_cast<uint32_t>(parsedStage);
-        }
+    if (yaml["min-lod-expression"].IsDefined()) {
+        minimumLodExpression_ =
+            yaml["min-lod-expression"].as<std::string>();
     }
-    if (yaml["lod"].IsDefined()) {
-        auto const parsedLod = yaml["lod"].as<int>();
-        auto const maxLod = static_cast<int>(mapget::Feature::MAX_LOD);
-        if (parsedLod < 0 || parsedLod > maxLod) {
-            std::cout << "Unsupported lod: " << parsedLod << std::endl;
-        }
-        else {
-            lod_ = static_cast<uint8_t>(parsedLod);
-        }
+    if (yaml["geometry-name"].IsDefined()) {
+        auto name = yaml["geometry-name"].as<std::string>();
+        geometryName_ = name == "*" ? std::nullopt : std::optional<std::string>{std::move(name)};
     }
     if (yaml["type"].IsDefined()) {
         // Parse a feature type regular expression, e.g. `Lane|Boundary`
-        type_ = yaml["type"].as<std::string>();
+        auto pattern = yaml["type"].as<std::string>();
+        exactType_.reset();
+        type_.reset();
+        if (isLiteralRegex(pattern)) {
+            exactType_ = std::move(pattern);
+        }
+        else {
+            type_ = pattern;
+        }
     }
     if (yaml["filter"].IsDefined()) {
         // Parse a simfil filter expression, e.g. `properties.functionalRoadClass == 4`
@@ -179,6 +423,36 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         colorExpression_ = yaml["color-expression"].as<std::string>();
         hasExplicitColor_ = true;
     }
+    if (yaml["color-scale"].IsDefined()) {
+        auto const scaleYaml = yaml["color-scale"];
+        ColorScale scale;
+        scale.mode = scaleYaml["mode"].as<std::string>() == "categorical"
+            ? ColorScale::Mode::Categorical
+            : ColorScale::Mode::Linear;
+        scale.expression = scaleYaml["expression"].as<std::string>();
+        for (auto const& stopYaml : scaleYaml["stops"]) {
+            auto key = parseColorScaleKey(stopYaml[0]);
+            scale.stops.push_back(ColorScaleStop{
+                key,
+                Color(stopYaml[1].as<std::string>()).toFVec4(),
+                numericColorScaleKey(key),
+            });
+        }
+        if (scale.mode == ColorScale::Mode::Categorical) {
+            scale.denseIntegerStops = denseIntegerScale<
+                ColorScaleStop,
+                glm::fvec4>(
+                    scale.stops,
+                    [](ColorScaleStop const& stop) {
+                        return stop.color;
+                    });
+        }
+        if (scaleYaml["fallback"].IsDefined()) {
+            scale.fallback = Color(scaleYaml["fallback"].as<std::string>()).toFVec4();
+        }
+        colorScale_ = std::move(scale);
+        hasExplicitColor_ = true;
+    }
     if (yaml["opacity"].IsDefined()) {
         // Parse an opacity float value in range 0..1
         color_.a = yaml["opacity"].as<float>();
@@ -188,8 +462,84 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse a line width, defaults to pixels
         width_ = yaml["width"].as<float>();
     }
+    if (yaml["width-scale"].IsDefined()) {
+        auto const scaleYaml = yaml["width-scale"];
+        WidthScale scale;
+        scale.mode =
+            scaleYaml["mode"].as<std::string>() == "categorical"
+                ? ColorScale::Mode::Categorical
+                : ColorScale::Mode::Linear;
+        scale.expression =
+            scaleYaml["expression"].as<std::string>();
+        for (auto const& stopYaml : scaleYaml["stops"]) {
+            auto key = parseColorScaleKey(stopYaml[0]);
+            scale.stops.push_back(WidthScaleStop{
+                key,
+                stopYaml[1].as<float>(),
+                numericColorScaleKey(key),
+            });
+        }
+        if (scale.mode == ColorScale::Mode::Categorical) {
+            scale.denseIntegerStops = denseIntegerScale<
+                WidthScaleStop,
+                float>(
+                    scale.stops,
+                    [](WidthScaleStop const& stop) {
+                        return stop.width;
+                    });
+        }
+        if (scaleYaml["fallback"].IsDefined()) {
+            scale.fallback =
+                scaleYaml["fallback"].as<float>();
+        }
+        widthScale_ = std::move(scale);
+    }
+    if (yaml["glow"].IsDefined()) {
+        auto const glowYaml = yaml["glow"];
+        Glow glow;
+        if (glowYaml["color"].IsDefined()) {
+            glow.color = Color(
+                glowYaml["color"].as<std::string>()).toFVec4();
+        }
+        if (glowYaml["radius"].IsDefined()) {
+            glow.radius = glowYaml["radius"].as<float>();
+        }
+        if (glowYaml["opacity"].IsDefined()) {
+            glow.opacity = glowYaml["opacity"].as<float>();
+        }
+        glow_ = glow;
+    }
     if (yaml["depth-test"].IsDefined()) {
         depthTest_ = yaml["depth-test"].as<bool>();
+    }
+    if (yaml["surface-shading"].IsDefined()) {
+        surfaceShading_ = yaml["surface-shading"].as<bool>();
+    }
+    if (yaml["polygon-height"].IsDefined()) {
+        polygonHeight_ = yaml["polygon-height"].as<double>();
+    }
+    if (yaml["polygon-height-expression"].IsDefined()) {
+        polygonHeightExpression_ =
+            yaml["polygon-height-expression"].as<std::string>();
+    }
+    if (yaml["z-index"].IsDefined()) {
+        zIndex_ = yaml["z-index"].as<double>();
+    }
+    if (yaml["z-index-expression"].IsDefined()) {
+        zIndexExpression_ = yaml["z-index-expression"].as<std::string>();
+    }
+    if (yaml["z-index-group-expression"].IsDefined()) {
+        zIndexGroupExpression_ =
+            yaml["z-index-group-expression"].as<std::string>();
+    }
+    if (yaml["z-index-role"].IsDefined()) {
+        auto const role = yaml["z-index-role"].as<std::string>();
+        if (role == "support") {
+            zIndexRole_ = ZIndexRole::Support;
+        }
+        else if (role == "overlay") {
+            zIndexRole_ = ZIndexRole::Overlay;
+        }
     }
     if (yaml["billboard"].IsDefined()) {
         // Parse whether the rendered primitive should face the camera.
@@ -225,6 +575,10 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         offsetIncrement_.y = yaml["offset-increment"][1].as<double>();
         offsetIncrement_.z = yaml["offset-increment"][2].as<double>();
     }
+    if (yaml["lateral-offset-unit"].IsDefined()) {
+        lateralOffsetUnit_ = parseLengthUnit(
+            yaml["lateral-offset-unit"].as<std::string>());
+    }
     if (yaml["point-merge-grid-cell"].IsDefined() && yaml["point-merge-grid-cell"].size() >= 3) {
         pointMergeGridCellSize_ = glm::dvec3();
         pointMergeGridCellSize_->x = yaml["point-merge-grid-cell"][0].as<double>();
@@ -243,18 +597,27 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     /////////////////////////////////////
 
     if (yaml["dashed"].IsDefined()) {
-        // Parse line dashes
         dashed_ = yaml["dashed"].as<bool>();
-        if (yaml["dash-length"].IsDefined()) {
-            dashLength_ = yaml["dash-length"].as<int>();
+    }
+    if (yaml["dash-length"].IsDefined()) {
+        dashLength_ = yaml["dash-length"].as<float>();
+        // Preserve the legacy one-value cadence unless a gap is authored.
+        if (!yaml["dash-gap"].IsDefined()) {
+            dashGap_ = dashLength_;
         }
-        if (yaml["gap-color"].IsDefined()) {
-            auto colorStr = yaml["gap-color"].as<std::string>();
-            gapColor_ = Color(colorStr).toFVec4();
-        }
-        if (yaml["dash-pattern"].IsDefined()) {
-            dashPattern_ = yaml["dash-pattern"].as<int>();
-        }
+    }
+    if (yaml["dash-gap"].IsDefined()) {
+        dashGap_ = yaml["dash-gap"].as<float>();
+    }
+    if (yaml["dash-unit"].IsDefined()) {
+        dashUnit_ = parseLengthUnit(yaml["dash-unit"].as<std::string>());
+    }
+    if (yaml["gap-color"].IsDefined()) {
+        auto colorStr = yaml["gap-color"].as<std::string>();
+        gapColor_ = Color(colorStr).toFVec4();
+    }
+    if (yaml["dash-pattern"].IsDefined()) {
+        dashPattern_ = yaml["dash-pattern"].as<int>();
     }
     if (yaml["arrow"].IsDefined()) {
         // Parse line arrowheads
@@ -273,25 +636,39 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
 
     if (yaml["relation-type"].IsDefined()) {
         // Parse a relation type regular expression, e.g. `connectedFrom|connectedTo`
-        relationType_ = yaml["relation-type"].as<std::string>();
+        relationTypePattern_ =
+            yaml["relation-type"].as<std::string>();
+        relationType_ = *relationTypePattern_;
     }
     if (yaml["relation-line-height-offset"].IsDefined()) {
         // Parse vertical offset for relation line in meters.
         relationLineHeightOffset_ = yaml["relation-line-height-offset"].as<float>();
     }
+    if (yaml["relation-line-geometry"].IsDefined()) {
+        auto const value = yaml["relation-line-geometry"].as<std::string>();
+        if (value == "connection-stubs") {
+            relationLineGeometry_ = RelationLineGeometry::ConnectionStubs;
+        }
+        else {
+            relationLineGeometry_ = RelationLineGeometry::Centers;
+        }
+    }
     if (yaml["relation-line-end-markers"].IsDefined()) {
         // Parse style for the relation line end-markers.
         relationLineEndMarkerStyle_ = std::make_shared<FeatureStyleRule>(*this, true);
+        relationLineEndMarkerStyle_->scope_ = Feature;
         relationLineEndMarkerStyle_->parse(yaml["relation-line-end-markers"]);
     }
     if (yaml["relation-source-style"].IsDefined()) {
         // Parse style for the relation source geometry.
         relationSourceStyle_ = std::make_shared<FeatureStyleRule>(*this, true);
+        relationSourceStyle_->scope_ = Feature;
         relationSourceStyle_->parse(yaml["relation-source-style"]);
     }
     if (yaml["relation-target-style"].IsDefined()) {
         // Parse style for the relation target geometry.
         relationTargetStyle_ = std::make_shared<FeatureStyleRule>(*this, true);
+        relationTargetStyle_->scope_ = Feature;
         relationTargetStyle_->parse(yaml["relation-target-style"]);
     }
     if (yaml["relation-recursive"].IsDefined()) {
@@ -337,39 +714,96 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     /// Label Rule Fields
     /////////////////////////////////////
 
-    // Parse labels' rules
-    if (yaml["label-font"].IsDefined()) {
-        // Parse label font
-        labelFont_ = yaml["label-font"].as<std::string>();
+    if (yaml["label-font-family"].IsDefined()) {
+        labelFontFamily_ = yaml["label-font-family"].as<std::string>();
+    }
+    if (yaml["label-font-weight"].IsDefined()) {
+        labelFontWeight_ = yaml["label-font-weight"].as<uint32_t>();
+    }
+    if (yaml["label-size"].IsDefined()) {
+        labelSize_ = yaml["label-size"].as<float>();
+    }
+    if (yaml["label-size-scale"].IsDefined()) {
+        labelSizeScale_ = yaml["label-size-scale"].as<float>();
+    }
+    if (yaml["label-size-units"].IsDefined()) {
+        auto const units = yaml["label-size-units"].as<std::string>();
+        if (units == "meters") {
+            labelSizeUnit_ = LabelSizeUnit::Meter;
+        }
+        else if (units == "common") {
+            labelSizeUnit_ = LabelSizeUnit::Common;
+        }
+        else {
+            labelSizeUnit_ = LabelSizeUnit::Pixel;
+        }
+    }
+    if (yaml["label-size-min-pixels"].IsDefined()) {
+        labelSizeMinPixels_ = yaml["label-size-min-pixels"].as<float>();
+    }
+    if (yaml["label-size-max-pixels"].IsDefined()) {
+        labelSizeMaxPixels_ = yaml["label-size-max-pixels"].as<float>();
+    }
+    if (yaml["label-angle"].IsDefined()) {
+        labelAngle_ = yaml["label-angle"].as<float>();
     }
     if (yaml["label-color"].IsDefined()) {
-        // Parse option to have a label background color.
         labelColor_ = Color(yaml["label-color"].as<std::string>()).toFVec4();
     }
+    if (yaml["label-opacity"].IsDefined()) {
+        labelOpacity_ = yaml["label-opacity"].as<float>();
+    }
+    if (yaml["label-collision"].IsDefined()) {
+        labelCollision_ = yaml["label-collision"].as<bool>();
+    }
+    if (yaml["label-collision-priority"].IsDefined()) {
+        labelCollisionPriority_ =
+            yaml["label-collision-priority"].as<int32_t>();
+    }
     if (yaml["label-outline-color"].IsDefined()) {
-        // Parse option to have a label background color.
         labelOutlineColor_ = Color(yaml["label-outline-color"].as<std::string>()).toFVec4();
     }
     if (yaml["label-outline-width"].IsDefined()) {
-        // Parse option for the width of the label outline color.
-        outlineWidth_ = yaml["label-outline-width"].as<float>();
+        labelOutlineWidth_ = yaml["label-outline-width"].as<float>();
+    }
+    if (yaml["label-background"].IsDefined()) {
+        labelBackground_ = yaml["label-background"].as<bool>();
     }
     if (yaml["label-background-color"].IsDefined()) {
-        // Parse option to have a label background color.
-        showBackground_ = true;
         labelBackgroundColor_ = Color(yaml["label-background-color"].as<std::string>()).toFVec4();
     }
+    if (yaml["label-border-color"].IsDefined()) {
+        labelBorderColor_ = Color(yaml["label-border-color"].as<std::string>()).toFVec4();
+    }
+    if (yaml["label-border-width"].IsDefined()) {
+        labelBorderWidth_ = yaml["label-border-width"].as<float>();
+    }
     if (yaml["label-background-padding"].IsDefined()) {
-        // Parse option to have a label padding.
-        labelBackgroundPadding_ = yaml["label-background-padding"].as<std::pair<int, int>>();
+        labelBackgroundPadding_ = parseLabelBox(
+            yaml["label-background-padding"],
+            false,
+            true);
     }
-    if (yaml["label-horizontal-origin"].IsDefined()) {
-        // Parse label horizontal origin
-        labelHorizontalOrigin_ = yaml["label-horizontal-origin"].as<std::string>();
+    if (yaml["label-background-border-radius"].IsDefined()) {
+        labelBackgroundBorderRadius_ = parseLabelBox(
+            yaml["label-background-border-radius"],
+            true,
+            false);
     }
-    if (yaml["label-vertical-origin"].IsDefined()) {
-        // Parse label vertical origin
-        labelVerticalOrigin_ = yaml["label-vertical-origin"].as<std::string>();
+    if (yaml["label-text-anchor"].IsDefined()) {
+        auto const anchor = yaml["label-text-anchor"].as<std::string>();
+        labelTextAnchor_ = anchor == "start"
+            ? LabelTextAnchor::Start
+            : anchor == "end" ? LabelTextAnchor::End : LabelTextAnchor::Middle;
+    }
+    if (yaml["label-alignment-baseline"].IsDefined()) {
+        auto const baseline =
+            yaml["label-alignment-baseline"].as<std::string>();
+        labelAlignmentBaseline_ = baseline == "top"
+            ? LabelAlignmentBaseline::Top
+            : baseline == "bottom"
+                ? LabelAlignmentBaseline::Bottom
+                : LabelAlignmentBaseline::Center;
     }
     if (yaml["label-text-expression"].IsDefined()) {
         // Parse label SIMFIL expression
@@ -379,24 +813,20 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         // Parse label placeholder text
         labelText_ = yaml["label-text"].as<std::string>();
     }
-    if (yaml["label-style"].IsDefined()) {
-        // Parse label style string
-        labelStyle_ = yaml["label-style"].as<std::string>();
-    }
-    if (yaml["label-scale"].IsDefined()) {
-        // Parse label scale string
-        labelScale_ = yaml["label-scale"].as<float>();
-    }
     if (yaml["label-pixel-offset"].IsDefined()) {
-        // Parse option to have a label padding.
         labelPixelOffset_ = yaml["label-pixel-offset"].as<std::pair<float, float>>();
     }
-    if (yaml["label-eye-offset"].IsDefined()) {
-        // Parse option to have a label padding.
-        auto coordinates = yaml["label-eye-offset"].as<std::vector<float>>();
-        if (coordinates.size() == 3) {
-            labelEyeOffset_ = std::tuple<float, float, float>{coordinates.at(0), coordinates.at(1), coordinates.at(2)};
-        }
+    if (yaml["label-line-height"].IsDefined()) {
+        labelLineHeight_ = yaml["label-line-height"].as<float>();
+    }
+    if (yaml["label-word-break"].IsDefined()) {
+        labelWordBreak_ = yaml["label-word-break"].as<std::string>() ==
+                "break-all"
+            ? LabelWordBreak::BreakAll
+            : LabelWordBreak::BreakWord;
+    }
+    if (yaml["label-max-width"].IsDefined()) {
+        labelMaxWidth_ = yaml["label-max-width"].as<float>();
     }
     /////////////////////////////////////
     /// Sub-Rule Fields
@@ -420,60 +850,85 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     parseBranch("all-of", BranchMode::AllOf);
 }
 
-FeatureStyleRule const* FeatureStyleRule::match(mapget::Feature& feature, BoundEvalFun const& evalFun) const
-{
-    FeatureStyleRule const* result = nullptr;
-    forEachMatchingRule(feature, evalFun, [&](FeatureStyleRule const& matchingRule) {
-        if (!result) {
-            result = &matchingRule;
-        }
-    });
-    return result;
-}
-
 bool FeatureStyleRule::forEachMatchingRule(
-    mapget::Feature& feature,
-    BoundEvalFun const& evalFun,
+    MatchContext const& context,
+    BoundEvalFun const& entryEvalFun,
     std::function<void(FeatureStyleRule const&)> const& callback,
-    std::string_view const* relationName) const
+    BoundEvalFun const* featureEvalFun) const
 {
-    if (lod_) {
-        auto const featureLod = static_cast<uint8_t>(feature.lod());
-        if (featureLod != *lod_) {
+    if (exactType_) {
+        if (context.featureType != *exactType_) {
+            return false;
+        }
+    }
+    else if (type_) {
+        if (!std::regex_match(
+                context.featureType.begin(),
+                context.featureType.end(),
+                *type_))
+        {
             return false;
         }
     }
 
-    // Filter by feature type regular expression.
-    if (type_) {
-        auto typeId = feature.typeId();
-        if (!std::regex_match(typeId.begin(), typeId.end(), *type_)) {
+    if (relationType_ && context.relationName) {
+        if (!std::regex_match(
+                context.relationName->begin(),
+                context.relationName->end(),
+                *relationType_))
+        {
             return false;
         }
     }
-
-    if (relationName && relationType_) {
-        if (!std::regex_match(relationName->begin(), relationName->end(), *relationType_)) {
+    if (attributeType_) {
+        if (!context.attributeName ||
+            !std::regex_match(
+                context.attributeName->begin(),
+                context.attributeName->end(),
+                *attributeType_))
+        {
             return false;
         }
     }
+    if (attributeLayerType_) {
+        if (!context.attributeLayer ||
+            !std::regex_match(
+                context.attributeLayer->begin(),
+                context.attributeLayer->end(),
+                *attributeLayerType_))
+        {
+            return false;
+        }
+    }
+    if (attributeValidityGeometry_ &&
+        (!context.hasValidity ||
+         *context.hasValidity != *attributeValidityGeometry_))
+    {
+        return false;
+    }
 
-    // Filter by simfil expression.
-    if (!filter_.empty()) {
-        auto filterValue = evalFun.eval_(filter_);
-        if (!filterValue.isa(simfil::ValueType::Bool)) {
-            if (evalFun.reportIssue_) {
-                evalFun.reportIssue_(
-                    "filter",
-                    filter_,
-                    "Filter expression did not evaluate to a boolean: " + filterValue.toString(),
-                    index_);
-            }
+    auto expressionMatches = [](BoundEvalFun const& evalFun, std::string const& expression) {
+        if (expression.empty()) {
+            return true;
+        }
+        auto value = evalFun.evaluate(expression);
+        if (value.isa(simfil::ValueType::Undef) ||
+            value.isa(simfil::ValueType::Null))
+        {
             return false;
         }
-        if (!filterValue.as<simfil::ValueType::Bool>()) {
-            return false;
+        if (value.isa(simfil::ValueType::Bool)) {
+            return value.as<simfil::ValueType::Bool>();
         }
+        return true;
+    };
+    auto const& hostEvalFun = featureEvalFun ? *featureEvalFun : entryEvalFun;
+    if (!expressionMatches(hostEvalFun, filter_) ||
+        (context.attributeName &&
+         attributeFilter_ &&
+         !expressionMatches(entryEvalFun, *attributeFilter_)))
+    {
+        return false;
     }
 
     if (branchMode_ == BranchMode::None) {
@@ -483,7 +938,12 @@ bool FeatureStyleRule::forEachMatchingRule(
 
     if (branchMode_ == BranchMode::FirstOf) {
         for (auto const& rule : subRules_) {
-            if (rule.forEachMatchingRule(feature, evalFun, callback, relationName)) {
+            if (rule.forEachMatchingRule(
+                    context,
+                    entryEvalFun,
+                    callback,
+                    featureEvalFun))
+            {
                 return true;
             }
         }
@@ -492,37 +952,13 @@ bool FeatureStyleRule::forEachMatchingRule(
 
     bool matched = false;
     for (auto const& rule : subRules_) {
-        matched = rule.forEachMatchingRule(feature, evalFun, callback, relationName) || matched;
+        matched = rule.forEachMatchingRule(
+            context,
+            entryEvalFun,
+            callback,
+            featureEvalFun) || matched;
     }
     return matched;
-}
-
-bool FeatureStyleRule::matchesFeatureGates(mapget::Feature& feature) const
-{
-    if (lod_) {
-        auto const featureLod = static_cast<uint8_t>(feature.lod());
-        if (featureLod != *lod_) {
-            return false;
-        }
-    }
-
-    if (type_) {
-        auto typeId = feature.typeId();
-        if (!std::regex_match(typeId.begin(), typeId.end(), *type_)) {
-            return false;
-        }
-    }
-
-    if (branchMode_ == BranchMode::None) {
-        return true;
-    }
-
-    for (auto const& rule : subRules_) {
-        if (rule.matchesFeatureGates(feature)) {
-            return true;
-        }
-    }
-    return false;
 }
 
 void FeatureStyleRule::forEachConcreteRule(std::function<void(FeatureStyleRule const&)> const& callback) const
@@ -540,16 +976,31 @@ void FeatureStyleRule::assignRenderRuleIndices(uint32_t& nextRenderRuleIndex)
 {
     if (branchMode_ == BranchMode::None) {
         renderIndex_ = nextRenderRuleIndex++;
-        return;
     }
-    for (auto& rule : subRules_) {
-        rule.assignRenderRuleIndices(nextRenderRuleIndex);
+    else {
+        for (auto& rule : subRules_) {
+            rule.assignRenderRuleIndices(nextRenderRuleIndex);
+        }
+    }
+    for (auto const& nested : {
+             relationLineEndMarkerStyle_,
+             relationSourceStyle_,
+             relationTargetStyle_})
+    {
+        if (nested) {
+            nested->assignRenderRuleIndices(nextRenderRuleIndex);
+        }
     }
 }
 
 bool FeatureStyleRule::maybeMatchesType(std::string_view typeId) const
 {
-    if (type_) {
+    if (exactType_) {
+        if (typeId != *exactType_) {
+            return false;
+        }
+    }
+    else if (type_) {
         if (!std::regex_match(typeId.begin(), typeId.end(), *type_)) {
             return false;
         }
@@ -594,28 +1045,167 @@ uint32_t FeatureStyleRule::effectiveGeometryTypesMask() const
     return result;
 }
 
-bool FeatureStyleRule::supports(
-    const mapget::GeomType& g,
-    std::optional<uint32_t> geometryStage) const
+std::optional<std::string> const& FeatureStyleRule::geometryName() const
 {
-    if (stage_) {
-        if (!geometryStage || *geometryStage != *stage_) {
-            return false;
-        }
-    }
-
-    // Ensure that the geometry type is supported by the rule.
-    if (!(geometryTypes_ & geomTypeBit(g))) {
-        return false;
-    }
-
-    return true;
+    return geometryName_;
 }
 
-glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
+std::optional<std::string> FeatureStyleRule::effectiveGeometryName() const
 {
+    std::optional<std::string> common;
+    bool initialized = false;
+    bool wildcard = false;
+    forEachConcreteRule([&](FeatureStyleRule const& rule) {
+        if (!initialized) {
+            common = rule.geometryName_;
+            initialized = true;
+            wildcard = !common;
+            return;
+        }
+        if (!rule.geometryName_ || wildcard || rule.geometryName_ != common) {
+            wildcard = true;
+            common.reset();
+        }
+    });
+    return wildcard ? std::nullopt : common;
+}
+
+bool FeatureStyleRule::supports(
+    mapget::GeomType g,
+    std::optional<std::string_view> geometryName) const
+{
+    if (geometryName_ &&
+        (!geometryName || *geometryName != *geometryName_))
+    {
+        return false;
+    }
+    return (geometryTypes_ & geomTypeBit(g)) != 0;
+}
+
+std::string const& FeatureStyleRule::filter() const
+{
+    return filter_;
+}
+
+std::vector<std::pair<std::string, std::string>>
+FeatureStyleRule::expressionUses() const
+{
+    std::vector<std::pair<std::string, std::string>> result;
+    auto append = [&](std::string property, std::string const& expression) {
+        if (!expression.empty()) {
+            result.emplace_back(std::move(property), expression);
+        }
+    };
+    append("filter", filter_);
+    if (attributeFilter_) {
+        append("attribute-filter", *attributeFilter_);
+    }
+    append("color-expression", colorExpression_);
+    if (colorScale_) {
+        append("color-scale.expression", colorScale_->expression);
+    }
+    if (widthScale_) {
+        append("width-scale.expression", widthScale_->expression);
+    }
+    append("arrow-expression", arrowExpression_);
+    append("min-lod-expression", minimumLodExpression_);
+    append("polygon-height-expression", polygonHeightExpression_);
+    append("z-index-expression", zIndexExpression_);
+    append("z-index-group-expression", zIndexGroupExpression_);
+    append("icon-url-expression", iconUrlExpression_);
+    append("label-text-expression", labelTextExpression_);
+    return result;
+}
+
+std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) const
+{
+    if (colorScale_) {
+        auto fallback = [&]() -> std::optional<glm::fvec4> {
+            if (!colorScale_->fallback) {
+                return std::nullopt;
+            }
+            auto color = *colorScale_->fallback;
+            color.a *= color_.a;
+            return color;
+        };
+        auto const evaluated = evalFun.evaluate(colorScale_->expression);
+        if (colorScale_->mode == ColorScale::Mode::Categorical &&
+            colorScale_->denseIntegerStops)
+        {
+            auto const key = integerScaleKey(evaluated);
+            if (!key || *key < colorScale_->denseIntegerStops->minimum) {
+                return fallback();
+            }
+            auto const index = static_cast<uint64_t>(*key) -
+                static_cast<uint64_t>(
+                    colorScale_->denseIntegerStops->minimum);
+            if (index >= colorScale_->denseIntegerStops->values.size() ||
+                !colorScale_->denseIntegerStops->values[
+                    static_cast<size_t>(index)])
+            {
+                return fallback();
+            }
+            auto color = *colorScale_->denseIntegerStops->values[
+                static_cast<size_t>(index)];
+            color.a *= color_.a;
+            return color;
+        }
+        auto const value = colorScaleKey(evaluated);
+        if (!value) {
+            return fallback();
+        }
+        if (colorScale_->mode == ColorScale::Mode::Categorical) {
+            auto const valueNumber = numericColorScaleKey(*value);
+            for (auto const& stop : colorScale_->stops) {
+                auto const equal = valueNumber
+                    ? stop.numericKey && *valueNumber == *stop.numericKey
+                    : !stop.numericKey && *value == stop.key;
+                if (equal) {
+                    auto color = stop.color;
+                    color.a *= color_.a;
+                    return color;
+                }
+            }
+            return fallback();
+        }
+
+        auto input = numericColorScaleKey(*value);
+        if (!input || colorScale_->stops.empty()) {
+            return fallback();
+        }
+        auto const first = colorScale_->stops.front().numericKey;
+        auto const last = colorScale_->stops.back().numericKey;
+        if (!first || !last) {
+            return fallback();
+        }
+        if (*input <= *first || colorScale_->stops.size() == 1) {
+            auto color = colorScale_->stops.front().color;
+            color.a *= color_.a;
+            return color;
+        }
+        if (*input >= *last) {
+            auto color = colorScale_->stops.back().color;
+            color.a *= color_.a;
+            return color;
+        }
+        for (size_t index = 1; index < colorScale_->stops.size(); ++index) {
+            auto const lower = colorScale_->stops[index - 1].numericKey;
+            auto const upper = colorScale_->stops[index].numericKey;
+            if (!lower || !upper || *input > *upper) {
+                continue;
+            }
+            auto const t = static_cast<float>((*input - *lower) / (*upper - *lower));
+            auto color = glm::mix(
+                colorScale_->stops[index - 1].color,
+                colorScale_->stops[index].color,
+                t);
+            color.a *= color_.a;
+            return color;
+        }
+        return fallback();
+    }
     if (!colorExpression_.empty()) {
-        auto colorVal = evalFun.eval_(colorExpression_);
+        auto colorVal = evalFun.evaluate(colorExpression_);
         if (colorVal.isa(simfil::ValueType::Int)) {
             auto colorInt = colorVal.as<simfil::ValueType::Int>();
             auto a = static_cast<float>(colorInt & 0xff) / 255.;
@@ -625,7 +1215,7 @@ glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
             auto g = static_cast<float>(colorInt & 0xff) / 255.;
             colorInt >>= 8;
             auto r = static_cast<float>(colorInt & 0xff) / 255.;
-            return {r, g, b, a};
+            return glm::fvec4{r, g, b, a};
         }
         else if (colorVal.isa(simfil::ValueType::String)) {
             auto colorStr = colorVal.as<simfil::ValueType::String>();
@@ -633,8 +1223,8 @@ glm::fvec4 FeatureStyleRule::color(BoundEvalFun const& evalFun) const
         }
         else
         {
-            if (evalFun.reportIssue_) {
-                evalFun.reportIssue_(
+            if (evalFun.hasIssueReporter()) {
+                evalFun.reportIssue(
                     "color-expression",
                     colorExpression_,
                     "Color expression returned an unsupported value: " + colorVal.toString(),
@@ -662,9 +1252,211 @@ float FeatureStyleRule::width() const
     return width_;
 }
 
+float FeatureStyleRule::width(BoundEvalFun const& evalFun) const
+{
+    if (!widthScale_) {
+        return width_;
+    }
+    auto const fallback =
+        widthScale_->fallback.value_or(width_);
+    auto const evaluated = evalFun.evaluate(widthScale_->expression);
+    if (widthScale_->mode == ColorScale::Mode::Categorical &&
+        widthScale_->denseIntegerStops)
+    {
+        auto const key = integerScaleKey(evaluated);
+        if (!key || *key < widthScale_->denseIntegerStops->minimum) {
+            return fallback;
+        }
+        auto const index = static_cast<uint64_t>(*key) -
+            static_cast<uint64_t>(
+                widthScale_->denseIntegerStops->minimum);
+        if (index >= widthScale_->denseIntegerStops->values.size() ||
+            !widthScale_->denseIntegerStops->values[
+                static_cast<size_t>(index)])
+        {
+            return fallback;
+        }
+        return *widthScale_->denseIntegerStops->values[
+            static_cast<size_t>(index)];
+    }
+    auto const value = colorScaleKey(evaluated);
+    if (!value) {
+        return fallback;
+    }
+
+    if (widthScale_->mode ==
+        ColorScale::Mode::Categorical)
+    {
+        auto const valueNumber = numericColorScaleKey(*value);
+        for (auto const& stop : widthScale_->stops) {
+            auto const equal = valueNumber
+                ? stop.numericKey && *valueNumber == *stop.numericKey
+                : !stop.numericKey && *value == stop.key;
+            if (equal) {
+                return stop.width;
+            }
+        }
+        return fallback;
+    }
+
+    auto input = numericColorScaleKey(*value);
+    if (!input || widthScale_->stops.empty()) {
+        return fallback;
+    }
+    auto const first = widthScale_->stops.front().numericKey;
+    auto const last = widthScale_->stops.back().numericKey;
+    if (!first || !last) {
+        return fallback;
+    }
+    if (*input <= *first ||
+        widthScale_->stops.size() == 1)
+    {
+        return widthScale_->stops.front().width;
+    }
+    if (*input >= *last) {
+        return widthScale_->stops.back().width;
+    }
+    for (size_t index = 1;
+         index < widthScale_->stops.size();
+         ++index)
+    {
+        auto const lower = widthScale_->stops[index - 1].numericKey;
+        auto const upper = widthScale_->stops[index].numericKey;
+        if (!lower || !upper || *input > *upper) {
+            continue;
+        }
+        auto const t = static_cast<float>(
+            (*input - *lower) /
+            (*upper - *lower));
+        return std::lerp(
+            widthScale_->stops[index - 1].width,
+            widthScale_->stops[index].width,
+            t);
+    }
+    return fallback;
+}
+
 bool FeatureStyleRule::depthTest() const
 {
     return depthTest_;
+}
+
+bool FeatureStyleRule::surfaceShading() const
+{
+    return surfaceShading_;
+}
+
+double FeatureStyleRule::polygonHeight(BoundEvalFun const& evalFun) const
+{
+    auto const fallback = std::isfinite(polygonHeight_) && polygonHeight_ >= 0.0
+        ? polygonHeight_
+        : 0.0;
+    if (polygonHeightExpression_.empty()) {
+        return fallback;
+    }
+
+    auto const value = evalFun.evaluate(polygonHeightExpression_);
+    if (value.isa(simfil::ValueType::Undef) ||
+        value.isa(simfil::ValueType::Null))
+    {
+        return fallback;
+    }
+    auto const number = finiteNumber(value);
+    if (number && *number >= 0.0) {
+        return *number;
+    }
+
+    if (evalFun.hasIssueReporter()) {
+        evalFun.reportIssue(
+            "polygon-height-expression",
+            polygonHeightExpression_,
+            "Expression must evaluate to a finite non-negative number; using the literal polygon-height fallback.",
+            index_);
+    }
+    return fallback;
+}
+
+std::optional<double> FeatureStyleRule::zIndex(
+    BoundEvalFun const& evalFun) const
+{
+    if (zIndexExpression_.empty()) {
+        return zIndex_;
+    }
+
+    auto const value = evalFun.evaluate(zIndexExpression_);
+    if (value.isa(simfil::ValueType::Undef) ||
+        value.isa(simfil::ValueType::Null))
+    {
+        return zIndex_;
+    }
+    auto const number = finiteNumber(value);
+    if (number) {
+        return *number;
+    }
+
+    if (evalFun.hasIssueReporter()) {
+        evalFun.reportIssue(
+            "z-index-expression",
+            zIndexExpression_,
+            "Expression must evaluate to a finite number; using the literal z-index fallback if configured.",
+            index_);
+    }
+    return zIndex_;
+}
+
+std::optional<uint64_t> FeatureStyleRule::zIndexGroup(
+    BoundEvalFun const& evalFun) const
+{
+    if (zIndexGroupExpression_.empty()) {
+        return std::nullopt;
+    }
+
+    auto const value = evalFun.evaluate(zIndexGroupExpression_);
+    auto hash = mapget::Hash{};
+    if (value.isa(simfil::ValueType::Bool)) {
+        return hash
+            .mix(uint32_t{1U})
+            .mix(value.as<simfil::ValueType::Bool>())
+            .value();
+    }
+    if (value.isa(simfil::ValueType::Int)) {
+        return hash
+            .mix(uint32_t{2U})
+            .mix(value.as<simfil::ValueType::Int>())
+            .value();
+    }
+    if (value.isa(simfil::ValueType::Float)) {
+        auto number = value.as<simfil::ValueType::Float>();
+        if (std::isfinite(number)) {
+            number = number == 0.0 ? 0.0 : number;
+            return hash.mix(uint32_t{3U}).mix(number).value();
+        }
+    }
+    if (value.isa(simfil::ValueType::String)) {
+        return hash
+            .mix(uint32_t{4U})
+            .mix(value.as<simfil::ValueType::String>())
+            .value();
+    }
+
+    if (evalFun.hasIssueReporter()) {
+        evalFun.reportIssue(
+            "z-index-group-expression",
+            zIndexGroupExpression_,
+            "Expression must evaluate to a boolean, integer, finite number, or string; grouped rendering was skipped.",
+            index_);
+    }
+    return std::nullopt;
+}
+
+std::string const& FeatureStyleRule::zIndexGroupExpression() const
+{
+    return zIndexGroupExpression_;
+}
+
+FeatureStyleRule::ZIndexRole FeatureStyleRule::zIndexRole() const
+{
+    return zIndexRole_;
 }
 
 std::optional<bool> const& FeatureStyleRule::billboard() const
@@ -682,9 +1474,19 @@ bool FeatureStyleRule::isDashed() const
     return dashed_;
 }
 
-int FeatureStyleRule::dashLength() const
+float FeatureStyleRule::dashLength() const
 {
     return dashLength_;
+}
+
+float FeatureStyleRule::dashGap() const
+{
+    return dashGap_;
+}
+
+FeatureStyleRule::LengthUnit FeatureStyleRule::dashUnit() const
+{
+    return dashUnit_;
 }
 
 glm::fvec4 const& FeatureStyleRule::gapColor() const
@@ -700,15 +1502,15 @@ int FeatureStyleRule::dashPattern() const
 FeatureStyleRule::Arrow FeatureStyleRule::arrow(BoundEvalFun const& evalFun) const
 {
     if (!arrowExpression_.empty()) {
-        auto arrowVal = evalFun.eval_(arrowExpression_);
+        auto arrowVal = evalFun.evaluate(arrowExpression_);
         if (arrowVal.isa(simfil::ValueType::String)) {
             auto arrowStr = arrowVal.as<simfil::ValueType::String>();
             if (auto arrowMode = parseArrowMode(arrowStr))
                 return *arrowMode;
         }
 
-        if (evalFun.reportIssue_) {
-            evalFun.reportIssue_(
+        if (evalFun.hasIssueReporter()) {
+            evalFun.reportIssue(
                 "arrow-expression",
                 arrowExpression_,
                 "Arrow expression returned an unsupported value: " + arrowVal.toString(),
@@ -718,6 +1520,13 @@ FeatureStyleRule::Arrow FeatureStyleRule::arrow(BoundEvalFun const& evalFun) con
                   << ": " << arrowVal.toString() << std::endl;
     }
     return arrow_;
+}
+
+std::optional<FeatureStyleRule::Arrow> FeatureStyleRule::constantArrow() const
+{
+    return arrowExpression_.empty()
+        ? std::optional<Arrow>{arrow_}
+        : std::nullopt;
 }
 
 glm::fvec4 const& FeatureStyleRule::outlineColor() const
@@ -730,14 +1539,25 @@ float FeatureStyleRule::outlineWidth() const
     return outlineWidth_;
 }
 
+std::optional<FeatureStyleRule::Glow> const& FeatureStyleRule::glow() const
+{
+    return glow_;
+}
+
 float FeatureStyleRule::relationLineHeightOffset() const
 {
     return relationLineHeightOffset_;
 }
 
-FeatureStyleRule::Aspect FeatureStyleRule::aspect() const
+FeatureStyleRule::RelationLineGeometry
+FeatureStyleRule::relationLineGeometry() const
 {
-    return aspect_;
+    return relationLineGeometry_;
+}
+
+FeatureStyleRule::Scope FeatureStyleRule::scope() const
+{
+    return scope_;
 }
 
 std::shared_ptr<FeatureStyleRule> FeatureStyleRule::relationLineEndMarkerStyle() const
@@ -770,24 +1590,51 @@ bool FeatureStyleRule::selectable() const
     return selectable_;
 }
 
-FeatureStyleRule::HighlightMode FeatureStyleRule::mode() const
+bool FeatureStyleRule::supportsMode(HighlightMode mode) const
 {
-    return mode_;
+    return (highlightModesMask_ & (1U << mode)) != 0U;
 }
 
-FeatureStyleRule::Fidelity FeatureStyleRule::fidelity() const
+uint32_t FeatureStyleRule::highlightModesMask() const
 {
-    return fidelity_;
+    return highlightModesMask_;
 }
 
-std::optional<uint32_t> FeatureStyleRule::stage() const
+FeatureStyleRule::LodRange const& FeatureStyleRule::lodRange() const
 {
-    return stage_;
+    return lodRange_;
 }
 
-std::optional<uint8_t> FeatureStyleRule::lod() const
+bool FeatureStyleRule::supportsLod(uint8_t lod) const
 {
-    return lod_;
+    return lod >= lodRange_.minimum && lod <= lodRange_.maximum;
+}
+
+uint8_t FeatureStyleRule::minimumLod(BoundEvalFun const& evalFun) const
+{
+    if (minimumLodExpression_.empty()) {
+        return kMinimumLod;
+    }
+    auto const value = evalFun.evaluate(minimumLodExpression_);
+    if (value.isa(simfil::ValueType::Undef) ||
+        value.isa(simfil::ValueType::Null))
+    {
+        return kMinimumLod;
+    }
+    if (auto const number = finiteNumber(value)) {
+        return static_cast<uint8_t>(std::clamp(
+            std::ceil(*number),
+            static_cast<double>(kMinimumLod),
+            static_cast<double>(kMaximumLod)));
+    }
+    if (evalFun.hasIssueReporter()) {
+        evalFun.reportIssue(
+            "min-lod-expression",
+            minimumLodExpression_,
+            "Expression must evaluate to a finite number; using LOD 0.",
+            index_);
+    }
+    return kMinimumLod;
 }
 
 std::optional<std::regex> const& FeatureStyleRule::relationType() const
@@ -795,19 +1642,75 @@ std::optional<std::regex> const& FeatureStyleRule::relationType() const
     return relationType_;
 }
 
+std::optional<std::string> const&
+FeatureStyleRule::relationTypePattern() const
+{
+    return relationTypePattern_;
+}
+
 bool FeatureStyleRule::hasLabel() const
 {
     return !labelTextExpression_.empty() || !labelText_.empty();
 }
 
-std::string const& FeatureStyleRule::labelFont() const
+std::string const& FeatureStyleRule::labelFontFamily() const
 {
-    return labelFont_;
+    return labelFontFamily_;
+}
+
+uint32_t FeatureStyleRule::labelFontWeight() const
+{
+    return labelFontWeight_;
+}
+
+float FeatureStyleRule::labelSize() const
+{
+    return labelSize_;
+}
+
+float FeatureStyleRule::labelSizeScale() const
+{
+    return labelSizeScale_;
+}
+
+FeatureStyleRule::LabelSizeUnit FeatureStyleRule::labelSizeUnit() const
+{
+    return labelSizeUnit_;
+}
+
+float FeatureStyleRule::labelSizeMinPixels() const
+{
+    return labelSizeMinPixels_;
+}
+
+float FeatureStyleRule::labelSizeMaxPixels() const
+{
+    return labelSizeMaxPixels_;
+}
+
+float FeatureStyleRule::labelAngle() const
+{
+    return labelAngle_;
 }
 
 glm::fvec4 const& FeatureStyleRule::labelColor() const
 {
     return labelColor_;
+}
+
+float FeatureStyleRule::labelOpacity() const
+{
+    return labelOpacity_;
+}
+
+bool FeatureStyleRule::labelCollision() const
+{
+    return labelCollision_;
+}
+
+int32_t FeatureStyleRule::labelCollisionPriority() const
+{
+    return labelCollisionPriority_;
 }
 
 glm::fvec4 const& FeatureStyleRule::labelOutlineColor() const
@@ -820,9 +1723,9 @@ float FeatureStyleRule::labelOutlineWidth() const
     return labelOutlineWidth_;
 }
 
-bool FeatureStyleRule::showBackground() const
+bool FeatureStyleRule::labelBackground() const
 {
-    return showBackground_;
+    return labelBackground_;
 }
 
 glm::fvec4 const& FeatureStyleRule::labelBackgroundColor() const
@@ -830,24 +1733,36 @@ glm::fvec4 const& FeatureStyleRule::labelBackgroundColor() const
     return labelBackgroundColor_;
 }
 
-std::pair<int, int> const& FeatureStyleRule::labelBackgroundPadding() const
+glm::fvec4 const& FeatureStyleRule::labelBorderColor() const
+{
+    return labelBorderColor_;
+}
+
+float FeatureStyleRule::labelBorderWidth() const
+{
+    return labelBorderWidth_;
+}
+
+std::array<float, 4> const& FeatureStyleRule::labelBackgroundPadding() const
 {
     return labelBackgroundPadding_;
 }
 
-std::string const& FeatureStyleRule::labelHorizontalOrigin() const
+std::array<float, 4> const&
+FeatureStyleRule::labelBackgroundBorderRadius() const
 {
-    return labelHorizontalOrigin_;
+    return labelBackgroundBorderRadius_;
 }
 
-std::string const& FeatureStyleRule::labelVerticalOrigin() const
+FeatureStyleRule::LabelTextAnchor FeatureStyleRule::labelTextAnchor() const
 {
-    return labelVerticalOrigin_;
+    return labelTextAnchor_;
 }
 
-std::string const& FeatureStyleRule::labelHeightReference() const
+FeatureStyleRule::LabelAlignmentBaseline
+FeatureStyleRule::labelAlignmentBaseline() const
 {
-    return labelHeightReference_;
+    return labelAlignmentBaseline_;
 }
 
 std::string const& FeatureStyleRule::labelTextExpression() const
@@ -858,7 +1773,7 @@ std::string const& FeatureStyleRule::labelTextExpression() const
 std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
 {
     if (!labelTextExpression_.empty()) {
-        auto resultVal = evalFun.eval_(labelTextExpression_);
+        auto resultVal = evalFun.evaluate(labelTextExpression_);
         auto resultText = resultVal.toString();
         if (!resultText.empty()) {
             return resultText;
@@ -868,23 +1783,24 @@ std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
     return labelText_;
 }
 
-std::string const& FeatureStyleRule::labelStyle() const
-{
-    return labelStyle_;
-}
-
-float FeatureStyleRule::labelScale() const {
-    return labelScale_;
-}
-
 std::optional<std::pair<float, float>> const& FeatureStyleRule::labelPixelOffset() const
 {
     return labelPixelOffset_;
 }
 
-std::optional<std::tuple<float, float, float>> const& FeatureStyleRule::labelEyeOffset() const
+float FeatureStyleRule::labelLineHeight() const
 {
-    return labelEyeOffset_;
+    return labelLineHeight_;
+}
+
+FeatureStyleRule::LabelWordBreak FeatureStyleRule::labelWordBreak() const
+{
+    return labelWordBreak_;
+}
+
+float FeatureStyleRule::labelMaxWidth() const
+{
+    return labelMaxWidth_;
 }
 
 glm::dvec3 const& FeatureStyleRule::offset() const
@@ -895,6 +1811,11 @@ glm::dvec3 const& FeatureStyleRule::offset() const
 glm::dvec3 const& FeatureStyleRule::offsetIncrement() const
 {
     return offsetIncrement_;
+}
+
+FeatureStyleRule::LateralOffsetUnit FeatureStyleRule::lateralOffsetUnit() const
+{
+    return lateralOffsetUnit_;
 }
 
 std::optional<glm::dvec3> const& FeatureStyleRule::pointMergeGridCellSize() const
@@ -910,12 +1831,12 @@ bool FeatureStyleRule::hasIconUrl() const
 std::string FeatureStyleRule::iconUrl(BoundEvalFun const& evalFun) const
 {
     if (!iconUrlExpression_.empty()) {
-        auto iconUrlVal = evalFun.eval_(iconUrlExpression_);
+        auto iconUrlVal = evalFun.evaluate(iconUrlExpression_);
         if (iconUrlVal.isa(simfil::ValueType::String)) {
             return iconUrlVal.as<simfil::ValueType::String>();
         }
-        if (evalFun.reportIssue_) {
-            evalFun.reportIssue_(
+        if (evalFun.hasIssueReporter()) {
+            evalFun.reportIssue(
                 "icon-url-expression",
                 iconUrlExpression_,
                 "Icon URL expression returned an unsupported value: " + iconUrlVal.toString(),

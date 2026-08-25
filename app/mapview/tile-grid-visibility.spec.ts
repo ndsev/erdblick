@@ -1,6 +1,9 @@
-import {describe, expect, it} from "vitest";
+import "@angular/compiler";
+import {describe, expect, it, vi} from "vitest";
 import type {Viewport} from "../../build/libs/core/erdblick-core";
+import {coreLib} from "../integrations/wasm";
 import {
+    autoTileGridLevel,
     coarsenedTileLevel,
     tileGridExtentForLevel,
     tileGridVisibleCellCount
@@ -37,5 +40,21 @@ describe("tile-grid visibility helpers", () => {
 
         expect(ndsExtent?.colCount).toBe((ndsExtent?.rowCount ?? 0) * 2);
         expect(xyzExtent?.colCount).toBe(xyzExtent?.rowCount);
+    });
+
+    it.each(["nds", "xyz"] as const)("automatically selects %s level from canonical-camera density", mode => {
+        const canonicalCount = vi.spyOn(
+            coreLib as any,
+            "getNumTileIdsForCanonicalCamera"
+        ).mockImplementation((...args: unknown[]) => {
+            const level = args[1] as number;
+            return level > 9 ? 65 : 64;
+        });
+        try {
+            expect(autoTileGridLevel(12_345, mode)).toBe(9);
+            expect(canonicalCount).toHaveBeenCalledWith(12_345, 9);
+        } finally {
+            canonicalCount.mockRestore();
+        }
     });
 });

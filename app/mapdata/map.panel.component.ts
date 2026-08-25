@@ -1,9 +1,16 @@
 import {Component, ViewChild} from "@angular/core";
 import {MapInfoService} from "./map-info.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
-import {AppStateService, SelectedSourceData, TileGridMode} from "../shared/appstate.service";
+import {
+    AppStateService,
+    DEFAULT_TILE_GRID_COLOR,
+    DEFAULT_TILE_GRID_OPACITY,
+    SelectedSourceData,
+    TileGridMode,
+    tileGridMaxLevel
+} from "../shared/appstate.service";
 import {coreLib} from "../integrations/wasm";
-import {MenuItem} from "primeng/api";
+import {MenuItem, TreeNode} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {Popover} from "primeng/popover";
 import {KeyboardService} from "../shared/keyboard.service";
@@ -11,11 +18,28 @@ import {AppModeService} from "../shared/app-mode.service";
 import {
     CoverageRectItem,
     dataSourceCatalogStatus,
+    filterMapTreeNodes,
+    layerPresetNode,
+    layerStyleOptions,
+    LayerPresetNode,
     MapInfoItem,
+    MapTreeViewNode,
     removeGroupPrefix,
     StyleOptionNode
 } from "./map.tree.model";
-import {Subscription} from "rxjs";
+import {
+    BehaviorSubject,
+    combineLatest,
+    distinctUntilChanged,
+    filter,
+    map,
+    Observable,
+    of,
+    startWith,
+    Subscription,
+    switchMap,
+    timer
+} from "rxjs";
 import {GeoMath, Rectangle} from "../integrations/geo";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
@@ -27,6 +51,12 @@ import {
 import {FeatureSearchService} from "../search/feature.search.service";
 import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import {InfoMessageService} from "../shared/info.service";
+import {StyleEditorRequestService} from "../styledata/style-editor-request.service";
+import {StyleService} from "../styledata/style.service";
+import {
+    MapPresetService,
+    NO_PRESET_ID
+} from "../styledata/map-preset.service";
 
 /** One rendered select option in the per-view background-layer dropdown. */
 interface BackgroundLayerOption {
@@ -36,6 +66,20 @@ interface BackgroundLayerOption {
     experimental: boolean;
 }
 
+/** Searchable metadata-layer choice shown by a map node. */
+interface MetadataLayerOption {
+    label: string;
+    mapTileKey: string;
+}
+
+/** Map-tree data projected for display without changing the canonical map or datasource state. */
+interface MapPanelTreeView {
+    size: number;
+    nodesByView: MapTreeViewNode[][];
+}
+
+/** Mirrors PrimeNG TreeTable's default delay so rapid typing produces one applied map filter. */
+const MAP_FILTER_DELAY_MS = 300;
 
 @Component({
     selector: 'map-panel',
@@ -43,13 +87,30 @@ interface BackgroundLayerOption {
         <app-dialog #mapLayerDialog class="map-layer-dialog" data-testid="map-layer-dialog" header=""
                   [visible]="layerDialogVisible"
                   (visibleChange)="setMapsPanelVisible($event)"
-                  [position]="'left'" [draggable]="false" [resizable]="false" 
+                  [position]="'left'" [draggable]="false" [resizable]="true"
                   (onShow)="onMapLayerDialogShow()"
                   [style]="{ 'max-height': '100%', 
                   'border-top-left-radius': '0 !important',
                   'border-bottom-left-radius': '0 !important' }">
             <p-button class="close-maps-button" icon="pi pi-times" severity="secondary" (click)="closeMapsPanel()"
                       (mousedown)="$event.stopPropagation()"/>
+            <ng-container *ngIf="mapTreeView$ | async as mapTreeView">
+            <div class="map-filter" data-testid="map-filter">
+                <p-iconfield class="input-container">
+                    <p-inputicon class="pi pi-filter"/>
+                    <input class="filter-input" data-testid="map-filter-input" type="text" pInputText
+                           placeholder="Filter maps, layers, and options"
+                           aria-label="Filter maps, layers, and options"
+                           [ngModel]="mapFilterText"
+                           (ngModelChange)="updateMapFilter($event)"
+                           (keydown.escape)="clearMapFilter(); $event.stopPropagation()"/>
+                    @if (mapFilterText) {
+                        <i onEnterClick class="pi pi-times clear-icon" data-testid="map-filter-clear"
+                           role="button" tabindex="0" aria-label="Clear map filter"
+                           (click)="clearMapFilter()"></i>
+                    }
+                </p-iconfield>
+            </div>
             <p-accordion data-testid="map-tabs" [(value)]="mapAccordionValue" [multiple]="true">
                 @for (index of viewIndices; track index) {
                     <p-accordion-panel class="map-tab" [value]="index" [attr.data-testid]="getMapTabTestId(index)">
@@ -151,6 +212,58 @@ interface BackgroundLayerOption {
                                                     </div>
                                                 </div>
                                             </div>
+                                            <div class="tile-grid-level-row" [ngClass]="{'disabled': !tileBordersEnabled[index]}">
+                                                <label [for]="'tile-grid-level-' + index">Level</label>
+                                                <div class="tile-grid-level-controls">
+                                                    <p-inputNumber [ngModel]="displayTileGridLevel(index)"
+                                                                   (ngModelChange)="onTileGridLevelChanged(index, $event)"
+                                                                   [showButtons]="true"
+                                                                   [min]="0"
+                                                                   [max]="maxTileGridLevel(tileGridModes[index])"
+                                                                   buttonLayout="horizontal"
+                                                                   spinnerMode="horizontal"
+                                                                   [inputId]="'tile-grid-level-' + index"
+                                                                   decrementButtonClass="p-button-secondary"
+                                                                   incrementButtonClass="p-button-secondary"
+                                                                   incrementButtonIcon="pi pi-plus"
+                                                                   decrementButtonIcon="pi pi-minus"
+                                                                   pTooltip="Change grid level"
+                                                                   tooltipPosition="bottom"
+                                                                   [disabled]="!tileBordersEnabled[index]"
+                                                                   [attr.data-testid]="getTileGridLevelTestId(index)"
+                                                                   tabindex="0"/>
+                                                    <p-button onEnterClick
+                                                              (click)="toggleTileGridAutoLevel(index)"
+                                                              [styleClass]="tileGridAutoLevels[index] ? 'map-controls-button p-button-success' : 'map-controls-button p-button-secondary'"
+                                                              [style]="{'min-width': '3.75em', 'padding-left': '0.35em', 'padding-right': '0.35em'}"
+                                                              label="AUTO"
+                                                              pTooltip="Automatically select the grid level"
+                                                              tooltipPosition="bottom"
+                                                              [disabled]="!tileBordersEnabled[index]"
+                                                              [attr.data-testid]="getTileGridAutoLevelTestId(index)"
+                                                              tabindex="0"/>
+                                                </div>
+                                            </div>
+                                            <div class="tile-grid-appearance-row" [ngClass]="{'disabled': !tileBordersEnabled[index]}">
+                                                <p-colorpicker class="tile-grid-color-picker"
+                                                               [ngModel]="tileGridColors[index]"
+                                                               (ngModelChange)="setTileGridColor(index, $event)"
+                                                               format="hex"
+                                                               appendTo="body"
+                                                               [overlayOptions]="{autoZIndex: true, baseZIndex: 30010}"
+                                                               [disabled]="!tileBordersEnabled[index]"
+                                                               [attr.data-testid]="getTileGridColorTestId(index)"/>
+                                                <span class="tile-grid-opacity-value">{{ tileGridOpacities[index] }}%</span>
+                                                <p-slider class="tile-grid-opacity-slider"
+                                                          [ngModel]="tileGridOpacities[index]"
+                                                          (ngModelChange)="setTileGridOpacity(index, $event)"
+                                                          orientation="horizontal"
+                                                          [min]="0"
+                                                          [max]="100"
+                                                          [disabled]="!tileBordersEnabled[index]"
+                                                          [attr.data-testid]="getTileGridOpacityTestId(index)"
+                                                          tabindex="-1"/>
+                                            </div>
                                         </div>
                                     </p-popover>
                                     <p-popover #backgroundPopover [baseZIndex]="30000">
@@ -223,17 +336,21 @@ interface BackgroundLayerOption {
                         </p-accordion-header>
 
                         <p-accordion-content>
-                            <ng-container *ngIf="mapService.maps$ | async as mapGroups">
-                                @if (!mapGroups.size) {
-                                    <div style="margin-top: 0.75em">
+                            @if (mapAccordionValue.includes(index)) {
+                            @if (!mapTreeView.size) {
+                                    <div class="map-tree-message">
                                         No maps loaded.
                                     </div>
-                                } @else {
-                                    
-                                }
-                           
-                            <div *ngIf="mapGroups.size" class="maps-container">
-                                <p-tree [value]="mapGroups.nodes">
+                            } @else if (!mapTreeView.nodesByView[index]?.length) {
+                                <div class="map-tree-message" data-testid="map-filter-empty">
+                                    No matching maps, layers, presets, or options.
+                                </div>
+                            } @else {
+                            <div class="maps-container">
+                                <p-tree [value]="mapTreeView.nodesByView[index]" [trackBy]="trackMapTreeNode"
+                                        (onNodeExpand)="updateMapTreeNodeExpansion($event.node, true)"
+                                        (onNodeCollapse)="updateMapTreeNodeExpansion($event.node, false)"
+                                        [attr.data-testid]="'map-tree-' + index">
                                     <!-- Template for Group nodes -->
                                     <ng-template let-node pTemplate="Group">
                                         <div class="flex-container map-group-row">
@@ -254,10 +371,29 @@ interface BackgroundLayerOption {
                                     </ng-template>
                                     <!-- Template for Map nodes -->
                                     <ng-template let-node pTemplate="Map">
-                                        <p-menu #metadataMenu [model]="metadataMenusEntries.get(node.id)"
-                                                [popup]="true"
-                                                appendTo="body"/>
+                                        <p-popover #metadataPopover
+                                                   styleClass="metadata-layer-popover"
+                                                   [baseZIndex]="30000"
+                                                   appendTo="body">
+                                            <p-listbox class="metadata-layer-listbox"
+                                                       [options]="metadataLayerOptions.get(node.id) ?? []"
+                                                       optionLabel="label"
+                                                       [filter]="true"
+                                                       filterBy="label"
+                                                       filterPlaceHolder="Search metadata"
+                                                       ariaFilterLabel="Search metadata"
+                                                       emptyFilterMessage="No matching metadata"
+                                                       scrollHeight="min(24rem, calc(100vh - 10rem))"
+                                                       [ngModel]="null"
+                                                       (onChange)="inspectMetadataLayer($event.value, metadataPopover)">
+                                                <ng-template let-option pTemplate="item">
+                                                    <span class="metadata-layer-option"
+                                                          [title]="option.label">{{ option.label }}</span>
+                                                </ng-template>
+                                            </p-listbox>
+                                        </p-popover>
                                         <div class="flex-container map-tree-row"
+                                             [class.has-map-presets]="node.mapPresets.length > 0"
                                              [ngClass]="{'has-datasource-status': dataSourceStatus(node.info) !== 'ready'}">
                                             <span class="checkbox-entry map-tree-title">
                                                 @if (dataSourceStatus(node.info) !== 'ready') {
@@ -285,20 +421,32 @@ interface BackgroundLayerOption {
                                                 </label>
                                             </span>
                                             <div class="map-controls">
-                                                <p-button onEnterClick (click)="focus($event, index, flatCoverage(node))"
+                                                @if (node.mapPresets.length > 0) {
+                                                    <p-select class="map-preset-select"
+                                                              [options]="mapPresetOptionsForView(node.id, index)"
+                                                              [ngModel]="node.selectedMapPresetIds[index]"
+                                                              (ngModelChange)="selectMapPreset(node.id, index, $event)"
+                                                              optionLabel="label"
+                                                              optionValue="value"
+                                                              optionDisabled="disabled"
+                                                              appendTo="body"
+                                                              [disabled]="dataSourceStatus(node.info) !== 'ready'"
+                                                              [attr.aria-label]="'Map preset for ' + node.id"/>
+                                                }
+                                                <p-button onEnterClick (click)="focus($event, index, mapCoverage(node.id))"
                                                           label="" pTooltip="Focus on map" tooltipPosition="bottom"
                                                           [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                           tabindex="0"
-                                                          *ngIf="flatCoverage(node).length">
+                                                          *ngIf="mapCoverage(node.id).length">
                                                     <span class="material-symbols-outlined"
                                                           style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
                                                         </p-button>
-                                                        <p-button onEnterClick (click)="metadataMenu.toggle($event)" label=""
-                                                                  pTooltip="{{!metadataMenusEntries.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'}}"
+                                                        <p-button onEnterClick (click)="metadataPopover.toggle($event)" label=""
+                                                                  pTooltip="{{!metadataLayerOptions.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'}}"
                                                                   tooltipPosition="bottom"
                                                                   [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                                   tabindex="0"
-                                                                  [disabled]="!metadataMenusEntries.get(node.id)?.length">
+                                                                  [disabled]="!metadataLayerOptions.get(node.id)?.length">
                                                     <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
                                                         data_object
                                                     </span>
@@ -361,12 +509,58 @@ interface BackgroundLayerOption {
                                                    [ngModel]="displayMapLayerLevel(index, node.mapId, node.id, node.viewConfig[index].level)"/>
                                         </div>
                                     </ng-template>
+                                    <!-- Template for the leading layer-preset control. -->
+                                    <ng-template let-node pTemplate="Preset">
+                                        <div class="style-preset-row"
+                                             [attr.data-testid]="stylePresetRowTestId(node, index)">
+                                            <p-select class="style-preset-select"
+                                                      [options]="node.selectOptions"
+                                                      [ngModel]="node.selectedPresetKeys[index]"
+                                                      (ngModelChange)="selectLayerPreset(node, index, $event)"
+                                                      optionLabel="label"
+                                                      optionValue="value"
+                                                      appendTo="body"
+                                                      [disabled]="node.presets.length === 0"
+                                                      [attr.aria-label]="'Layer preset for ' + node.layerId"/>
+                                            @if (node.selectedPresetKeys[index]) {
+                                                <p-button onEnterClick
+                                                          class="style-preset-expand-button"
+                                                          [attr.data-testid]="stylePresetExpandTestId(node, index)"
+                                                          [pTooltip]="node.expandedPresetOptions[index]
+                                                              ? 'Hide preset options'
+                                                              : 'Show preset options'"
+                                                          tooltipPosition="bottom"
+                                                          (click)="toggleStylePresetOptions($event, node, index)">
+                                                    <span class="material-symbols-outlined">
+                                                        {{ node.expandedPresetOptions[index] ? "unfold_less" : "unfold_more" }}
+                                                    </span>
+                                                </p-button>
+                                                @for (styleId of selectedPresetStyleIds(node, index); track styleId) {
+                                                    <p-button onEnterClick
+                                                              class="style-option-edit-button"
+                                                              [attr.data-testid]="stylePresetEditButtonTestId(node, index, styleId)"
+                                                              pTooltip="Edit style sheet"
+                                                              tooltipPosition="bottom"
+                                                              (click)="openPresetStyleSheet($event, styleId)">
+                                                        <span class="material-symbols-outlined">brush</span>
+                                                    </p-button>
+                                                }
+                                            }
+                                        </div>
+                                    </ng-template>
                                     <!-- Template for boolean style option nodes -->
                                     <ng-template let-node pTemplate="Bool">
-                                        <div class="map-option-row">
+                                        <div class="map-option-row"
+                                             [class.style-option-group-highlight]="isStyleOptionGroupActive(node, index)"
+                                             [attr.data-style-option-group]="styleOptionGroupKey(node, index)"
+                                             (mouseenter)="activateStyleOptionGroup(node, index)"
+                                             (mouseleave)="deactivateStyleOptionGroup($event, node, index)"
+                                             (focusin)="activateStyleOptionGroup(node, index)"
+                                             (focusout)="deactivateStyleOptionGroup($event, node, index)">
                                         <span class="checkbox-entry oblique"
                                               [ngClass]="{'disabled': !mapService.maps.getMapLayerVisibility(index, node.mapId, node.layerId)}">
                                             <p-checkbox
+                                                    [attr.data-testid]="styleOptionCheckboxTestId(node, index)"
                                                     [(ngModel)]="node.value[index]"
                                                     (ngModelChange)="updateStyleOption(node, index)"
                                                     [binary]="true"
@@ -374,12 +568,23 @@ interface BackgroundLayerOption {
                                                     [name]="index + '_' + node.key"/>
                                             <label [for]="index + '_' + node.key">{{ node.info.label }}</label>
                                         </span>
+                                        @if (node.firstInStyleGroup) {
+                                            <p-button onEnterClick class="style-option-edit-button"
+                                                      [attr.data-testid]="styleOptionEditButtonTestId(node, index)"
+                                                      (click)="openStyleSheet($event, node)"
+                                                      pTooltip="Edit style sheet"
+                                                      tooltipPosition="bottom"
+                                                      tabindex="0">
+                                                <span class="material-symbols-outlined">brush</span>
+                                            </p-button>
+                                        }
                                         </div>
                                     </ng-template>
                                     <!-- TODO: Add Templates for String/Color Options, and ignore internal ones. -->
                                 </p-tree>
                             </div>
-                            </ng-container>
+                            }
+                            }
                         </p-accordion-content>
                     </p-accordion-panel>
                 }
@@ -392,6 +597,7 @@ interface BackgroundLayerOption {
                         </span>
                 </p-button>
             }
+            </ng-container>
         </app-dialog>
         <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}"></p-menu>
@@ -404,6 +610,39 @@ interface BackgroundLayerOption {
  */
 export class MapPanelComponent {
     protected readonly wmsExperimentalTooltip = WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP;
+
+    mapFilterText = "";
+    private readonly mapFilterTextChanges = new BehaviorSubject("");
+    private readonly appliedMapFilterTextChanges = this.mapFilterTextChanges.pipe(
+        map(filterText => filterText.trim()),
+        switchMap(filterText => filterText
+            ? timer(MAP_FILTER_DELAY_MS).pipe(map(() => filterText))
+            : of(filterText)
+        ),
+        distinctUntilChanged()
+    );
+    private readonly stylePresetProjectionChanges = new BehaviorSubject(0);
+    readonly mapTreeView$: Observable<MapPanelTreeView> = combineLatest([
+        this.mapService.maps$,
+        this.appliedMapFilterTextChanges,
+        this.styleService.styleGroups,
+        this.stateService.numViewsState,
+        this.mapPresetService.presets$,
+        this.stateService.layerPresetSelectionState.appState,
+        this.stateService.mapPresetSelectionState.appState,
+        this.stylePresetProjectionChanges,
+        this.mapService.layerStateChanged.pipe(
+            filter(reason => reason === "visibility"),
+            startWith("visibility")
+        )
+    ]).pipe(
+        map(([mapTree, filterText, _styleGroups, numViews]) => ({
+            size: mapTree.size,
+            nodesByView: Array.from(
+                {length: numViews},
+                (_, viewIndex) => filterMapTreeNodes(mapTree.nodes, filterText, viewIndex))
+        }))
+    );
 
     subscriptions: Subscription[] = [];
     viewIndices: number[] = [];
@@ -418,6 +657,10 @@ export class MapPanelComponent {
     lastEnabledBackgroundLayerIds: Array<string | null> = [];
     tileBordersEnabled: boolean[] = [];
     tileGridModes: TileGridMode[] = [];
+    tileGridAutoLevels: boolean[] = [false];
+    tileGridColors: string[] = [DEFAULT_TILE_GRID_COLOR];
+    tileGridOpacities: number[] = [DEFAULT_TILE_GRID_OPACITY];
+    activeStyleOptionGroup: string | null = null;
 
     syncedOptions: boolean[] = [];
     layerDialogVisible: boolean = false;
@@ -427,7 +670,7 @@ export class MapPanelComponent {
 
     @ViewChild('mapLayerDialog') mapLayerDialog: AppDialogComponent | undefined;
 
-    metadataMenusEntries: Map<string, { label: string, command: () => void }[]> = new Map();
+    metadataLayerOptions = new Map<string, MetadataLayerOption[]>();
 
     /** Subscribes the panel UI to map, app-state, and dialog-stack updates. */
     constructor(public mapService: MapInfoService,
@@ -438,24 +681,23 @@ export class MapPanelComponent {
                 private readonly configService: AppConfigService,
                 private readonly dialogStack: DialogStackService,
                 private readonly featureSearchService: FeatureSearchService,
-                private readonly infoMessageService: InfoMessageService) {
+                private readonly infoMessageService: InfoMessageService,
+                private readonly styleEditorRequestService: StyleEditorRequestService,
+                private readonly mapPresetService: MapPresetService,
+                private readonly styleService: StyleService) {
         this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
 
         this.subscriptions.push(
             // Rebuild metadata menus recursively and prune when needed.
             this.mapService.maps$.subscribe(mapTree => {
-                this.metadataMenusEntries.clear();
+                this.metadataLayerOptions.clear();
                 for (const [_, mapItem] of mapTree.maps) {
-                    this.metadataMenusEntries.set(
+                    this.metadataLayerOptions.set(
                         mapItem.id,
                         this.mapService.findLayersForMapId(mapItem.id, true)
                             .map(layer => ({
                                 label: layer.name,
-                                command: () => {
-                                    this.stateService.setSelection({
-                                        mapTileKey: coreLib.getSourceDataLayerKey(mapItem.id, layer.id, 0)
-                                    } as SelectedSourceData);
-                                }
+                                mapTileKey: coreLib.getSourceDataLayerKey(mapItem.id, layer.id, 0)
                             }))
                     );
                 }
@@ -464,6 +706,7 @@ export class MapPanelComponent {
                     this.mapService.maps.getViewTileBorderState(index));
                 this.tileGridModes = Array.from({length: numViews}, (_, index) =>
                     this.mapService.maps.getViewTileGridMode(index));
+                this.refreshTileGridControls();
             })
         );
 
@@ -487,6 +730,7 @@ export class MapPanelComponent {
                     this.tileBordersEnabled.push(this.mapService.maps.getViewTileBorderState(viewIndex));
                     this.tileGridModes.push(this.mapService.maps.getViewTileGridMode(viewIndex));
                 });
+                this.refreshTileGridControls();
                 this.refreshBackgroundControls();
                 while (this.mapsCollapsed.length < this.viewIndices.length) {
                     this.mapsCollapsed.push(false);
@@ -531,7 +775,21 @@ export class MapPanelComponent {
                 const numViews = this.stateService.numViews;
                 this.tileGridModes = Array.from({length: numViews}, (_, index) =>
                     this.stateService.viewTileGridModeState.getValue(index));
+                this.refreshTileGridControls();
             })
+        );
+
+        this.subscriptions.push(
+            this.stateService.viewTileGridLevelState.appState.subscribe(_ => this.refreshTileGridControls())
+        );
+        this.subscriptions.push(
+            this.stateService.viewTileGridAutoLevelState.appState.subscribe(_ => this.refreshTileGridControls())
+        );
+        this.subscriptions.push(
+            this.stateService.viewTileGridColorState.appState.subscribe(_ => this.refreshTileGridControls())
+        );
+        this.subscriptions.push(
+            this.stateService.viewTileGridOpacityState.appState.subscribe(_ => this.refreshTileGridControls())
         );
 
         this.subscriptions.push(
@@ -542,6 +800,41 @@ export class MapPanelComponent {
     /** Brings the floating maps dialog to the top of the dialog stack when shown. */
     onMapLayerDialogShow() {
         this.dialogStack.bringToFront(this.mapLayerDialog);
+    }
+
+    /** Applies one presentation filter to the map trees rendered for every view. */
+    updateMapFilter(filterText: string) {
+        this.mapFilterText = filterText;
+        this.mapFilterTextChanges.next(filterText);
+    }
+
+    /** Clears the session-local map-tree filter and restores the canonical tree presentation. */
+    clearMapFilter() {
+        this.updateMapFilter("");
+    }
+
+    /** Keeps PrimeNG tree components attached to the same logical nodes across filter projections. */
+    readonly trackMapTreeNode = (
+        _index: number,
+        node: MapTreeViewNode
+    ): string => node.key;
+
+    /** Persists normal tree expansion while keeping filtered projection expansion temporary. */
+    updateMapTreeNodeExpansion(node: TreeNode, expanded: boolean): void {
+        if (!this.mapFilterText.trim() && node.key !== undefined) {
+            this.mapService.maps.setNodeExpanded(node.key, expanded);
+        }
+    }
+
+    /** Refreshes independent tile-grid controls from their per-view AppState values. */
+    private refreshTileGridControls(): void {
+        const numViews = this.stateService.numViews;
+        this.tileGridAutoLevels = Array.from({length: numViews}, (_, index) =>
+            this.mapService.maps.getViewTileGridAutoLevel(index));
+        this.tileGridColors = Array.from({length: numViews}, (_, index) =>
+            this.mapService.maps.getViewTileGridColor(index));
+        this.tileGridOpacities = Array.from({length: numViews}, (_, index) =>
+            this.mapService.maps.getViewTileGridOpacity(index));
     }
 
     /** Rebuilds the background dropdown contents and resolved per-view selection state. */
@@ -725,16 +1018,15 @@ export class MapPanelComponent {
         );
     }
 
-    /** Flattens one tree node's direct child coverage rectangles into a single array. */
-    flatCoverage(node: any): (number | CoverageRectItem)[] {
-        if (!node || !node.children) {
+    /** Collects full map coverage from the canonical tree, independent of the filtered presentation. */
+    mapCoverage(mapId: string): (number | CoverageRectItem)[] {
+        const mapNode = this.mapService.maps.maps.get(mapId);
+        if (!mapNode) {
             return [];
         }
         const coverage: (number | CoverageRectItem)[] = [];
-        for (const child of node.children) {
-            if (child.info && Array.isArray(child.info.coverage)) {
-                coverage.push(...child.info.coverage);
-            }
+        for (const child of mapNode.children) {
+            coverage.push(...child.info.coverage);
         }
         return coverage;
     }
@@ -784,6 +1076,17 @@ export class MapPanelComponent {
         popover.toggle(event);
     }
 
+    /** Opens the selected tile-zero metadata layer and closes its picker. */
+    inspectMetadataLayer(option: MetadataLayerOption | null, popover: Popover): void {
+        if (!option) {
+            return;
+        }
+        this.stateService.setSelection({
+            mapTileKey: option.mapTileKey
+        } as SelectedSourceData);
+        popover.hide();
+    }
+
     /** Sets the visibility of one map or layer entry for a specific view. */
     toggleLayer(viewIndex: number, mapName: string, layerName: string = "", state: boolean) {
         this.viewState.setMapLayerVisibility(viewIndex, mapName, layerName, state);
@@ -824,6 +1127,26 @@ export class MapPanelComponent {
         return `tile-grid-mode-${mode}-${viewIndex}`;
     }
 
+    /** Returns the stable test id for one tile-grid level input. */
+    getTileGridLevelTestId(viewIndex: number): string {
+        return `tile-grid-level-${viewIndex}`;
+    }
+
+    /** Returns the stable test id for one tile-grid auto-level button. */
+    getTileGridAutoLevelTestId(viewIndex: number): string {
+        return `tile-grid-auto-level-${viewIndex}`;
+    }
+
+    /** Returns the stable test id for one tile-grid colour picker. */
+    getTileGridColorTestId(viewIndex: number): string {
+        return `tile-grid-color-${viewIndex}`;
+    }
+
+    /** Returns the stable test id for one tile-grid opacity slider. */
+    getTileGridOpacityTestId(viewIndex: number): string {
+        return `tile-grid-opacity-${viewIndex}`;
+    }
+
     /** Returns the stable test id for one background toolbar button. */
     getBackgroundButtonTestId(viewIndex: number): string {
         return `background-button-${viewIndex}`;
@@ -849,6 +1172,97 @@ export class MapPanelComponent {
     setTileGridMode(viewIndex: number, mode: TileGridMode) {
         this.tileGridModes[viewIndex] = mode;
         this.viewState.setViewTileGridMode(viewIndex, mode);
+        this.refreshTileGridControls();
+    }
+
+    /** Returns the highest grid level supported by one coordinate mode. */
+    maxTileGridLevel(mode: TileGridMode): number {
+        return tileGridMaxLevel(mode);
+    }
+
+    /** Applies a manually chosen grid level and disables automatic level selection. */
+    onTileGridLevelChanged(viewIndex: number, level: number | null): void {
+        if (level === null || !Number.isFinite(level)) {
+            return;
+        }
+        if (this.viewState.isViewTileGridAutoLevelEnabled(viewIndex)) {
+            this.viewState.setViewTileGridAutoLevel(viewIndex, false);
+        }
+        this.viewState.setViewTileGridLevel(viewIndex, Math.max(0, Math.floor(level)));
+        this.refreshTileGridControls();
+    }
+
+    /** Toggles automatic viewport-based level selection for one grid. */
+    toggleTileGridAutoLevel(viewIndex: number): void {
+        const nextState = !this.viewState.isViewTileGridAutoLevelEnabled(viewIndex);
+        this.viewState.setViewTileGridAutoLevel(viewIndex, nextState);
+        this.refreshTileGridControls();
+    }
+
+    /** Returns the grid level currently shown or rendered for one view. */
+    displayTileGridLevel(viewIndex: number): number {
+        return this.viewState.getEffectiveViewTileGridLevel(viewIndex);
+    }
+
+    /** Sets the line-grid RGB colour for one view. */
+    setTileGridColor(viewIndex: number, color: string): void {
+        this.viewState.setViewTileGridColor(viewIndex, color);
+        this.refreshTileGridControls();
+    }
+
+    /** Sets the line-grid opacity percentage for one view. */
+    setTileGridOpacity(viewIndex: number, opacity: number | null): void {
+        if (opacity === null) {
+            return;
+        }
+        this.viewState.setViewTileGridOpacity(viewIndex, opacity);
+        this.refreshTileGridControls();
+    }
+
+    /** Returns the view/layer-qualified identity of one stylesheet option group. */
+    styleOptionGroupKey(node: StyleOptionNode, viewIndex: number): string {
+        return `${viewIndex}:${node.mapId}:${node.layerId}:${node.styleOptionGroupId}`;
+    }
+
+    /** Marks every option from the hovered or focused stylesheet group as active. */
+    activateStyleOptionGroup(node: StyleOptionNode, viewIndex: number): void {
+        this.activeStyleOptionGroup = this.styleOptionGroupKey(node, viewIndex);
+    }
+
+    /** Clears the group unless pointer or focus moved to another row in the same group. */
+    deactivateStyleOptionGroup(event: MouseEvent | FocusEvent, node: StyleOptionNode, viewIndex: number): void {
+        const groupKey = this.styleOptionGroupKey(node, viewIndex);
+        const relatedTarget = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null;
+        const relatedGroup = relatedTarget?.closest<HTMLElement>(".map-option-row")?.dataset["styleOptionGroup"];
+        if (relatedGroup !== groupKey && this.activeStyleOptionGroup === groupKey) {
+            this.activeStyleOptionGroup = null;
+        }
+    }
+
+    /** Returns whether one rendered option belongs to the current hover or focus group. */
+    isStyleOptionGroupActive(node: StyleOptionNode, viewIndex: number): boolean {
+        return this.activeStyleOptionGroup === this.styleOptionGroupKey(node, viewIndex);
+    }
+
+    /** Requests the existing guarded style editor for a map option's stylesheet. */
+    openStyleSheet(event: Event, node: StyleOptionNode): void {
+        event.preventDefault();
+        event.stopPropagation();
+        this.styleEditorRequestService.open(node.styleId);
+    }
+
+    /** Returns the stable editor-button test id for one style group in one view. */
+    styleOptionEditButtonTestId(node: StyleOptionNode, viewIndex: number): string {
+        const suffix = `${node.mapId}-${node.layerId}-${node.styleOptionGroupId}`
+            .replace(/[^a-zA-Z0-9_-]+/g, "-");
+        return `style-option-edit-${viewIndex}-${suffix}`;
+    }
+
+    /** Returns a stable selector for one concrete option checkbox. */
+    styleOptionCheckboxTestId(node: StyleOptionNode, viewIndex: number): string {
+        const suffix = `${node.mapId}-${node.layerId}-${node.styleId}-${node.id}`
+            .replace(/[^a-zA-Z0-9_-]+/g, "-");
+        return `style-option-${viewIndex}-${suffix}`;
     }
 
     /** Applies a manually chosen layer level and disables auto-level for that layer. */
@@ -899,8 +1313,155 @@ export class MapPanelComponent {
 
     /** Persists a style option change and triggers visualization refresh for the affected view. */
     updateStyleOption(node: StyleOptionNode, viewIndex: number) {
-        this.stateService.setStyleOptionValues(node.mapId, node.layerId, node.shortStyleId, node.id, node.value);
         this.mapService.applyStyleOptionChange(node, viewIndex);
+    }
+
+    /** Applies one embedded preset only to options in its owning style sheet. */
+    selectLayerPreset(node: LayerPresetNode, viewIndex: number, presetKey: string): void {
+        const normalizedKey = presetKey || NO_PRESET_ID;
+        const preset = node.presets.find(candidate => candidate.key === normalizedKey);
+        const layer = this.mapService.maps.getFeatureLayer(node.mapId, node.layerId);
+        if (!normalizedKey) {
+            this.mapService.maps.setLayerPresetSelection(viewIndex, node.mapId, node.layerId, null);
+            this.mapService.applyPresetChanges([], viewIndex, [{mapId: node.mapId, layerId: node.layerId}]);
+            this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
+            return;
+        }
+        if (!preset || !layer) {
+            this.mapService.maps.setLayerPresetSelection(viewIndex, node.mapId, node.layerId, null);
+            this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
+            return;
+        }
+
+        const options = layerStyleOptions(layer);
+        const changedOptions: StyleOptionNode[] = [];
+        for (const value of preset.values) {
+            const option = options.find(candidate =>
+                candidate.styleId === preset.styleId && candidate.id === value.optionId);
+            if (option && option.value[viewIndex] !== value.value) {
+                option.value[viewIndex] = value.value;
+                changedOptions.push(option);
+            }
+        }
+        this.mapService.maps.setLayerPresetSelection(viewIndex, node.mapId, node.layerId, preset.ref);
+        this.mapService.applyPresetChanges(
+            changedOptions, viewIndex, [{mapId: node.mapId, layerId: node.layerId}]);
+        this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
+    }
+
+    /** Applies every component of one map-level composition as a single style-option transaction. */
+    selectMapPreset(mapId: string, viewIndex: number, presetId: string): void {
+        const map = this.mapService.maps.maps.get(mapId);
+        const normalizedId = presetId || NO_PRESET_ID;
+        if (!map || !normalizedId) {
+            this.mapService.maps.setMapPresetSelection(viewIndex, mapId, null);
+            this.mapService.maps.reconcilePresetSelections();
+            this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
+            return;
+        }
+        const preset = map.mapPresets.find(candidate => candidate.id === normalizedId);
+        const components = preset
+            ? this.mapService.maps.resolveMapPresetComponents(map, preset)
+            : undefined;
+        if (!preset || !components
+            || (this.syncedOptions[viewIndex]
+                && this.mapService.maps.mapPresetHasSyncConflict(map, preset))) {
+            this.mapService.maps.setMapPresetSelection(viewIndex, mapId, null);
+            if (preset && this.syncedOptions[viewIndex]) {
+                this.infoMessageService.showError(
+                    `Map preset '${preset.name}' conflicts with synchronized layer options.`);
+            }
+            this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
+            return;
+        }
+
+        const changedOptions: StyleOptionNode[] = [];
+        for (const component of components) {
+            for (const value of component.preset.values) {
+                const option = layerStyleOptions(component.layer).find(candidate =>
+                    candidate.styleId === component.preset.styleId && candidate.id === value.optionId);
+                if (option && option.value[viewIndex] !== value.value) {
+                    option.value[viewIndex] = value.value;
+                    changedOptions.push(option);
+                }
+            }
+            this.mapService.maps.setLayerPresetSelection(
+                viewIndex,
+                mapId,
+                component.layer.id,
+                component.preset.ref);
+        }
+        this.mapService.maps.setMapPresetSelection(viewIndex, mapId, preset.id);
+        this.mapService.applyPresetChanges(
+            changedOptions,
+            viewIndex,
+            components.map(component => ({mapId, layerId: component.layer.id})));
+        this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
+    }
+
+    /** Disables map compositions that contradict the current view's layer-sync mode. */
+    mapPresetOptionsForView(mapId: string, viewIndex: number): Array<{
+        label: string;
+        value: string;
+        disabled?: boolean;
+    }> {
+        const map = this.mapService.maps.maps.get(mapId);
+        if (!map || !this.syncedOptions[viewIndex]) {
+            return map?.mapPresetOptions ?? [];
+        }
+        return map.mapPresetOptions.map(option => {
+            const preset = map.mapPresets.find(candidate => candidate.id === option.value);
+            return {
+                ...option,
+                disabled: !!preset && this.mapService.maps.mapPresetHasSyncConflict(map, preset)
+            };
+        });
+    }
+
+    /** Toggles projection of editable options owned by the current preset. */
+    toggleStylePresetOptions(event: Event, node: LayerPresetNode, viewIndex: number): void {
+        event.preventDefault();
+        event.stopPropagation();
+        this.mapService.maps.setLayerPresetExpanded(
+            viewIndex,
+            node.mapId,
+            node.layerId,
+            !node.expandedPresetOptions[viewIndex]);
+        this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
+    }
+
+    /** Returns the distinct style sheets owned by the selected preset for editor shortcuts. */
+    selectedPresetStyleIds(node: LayerPresetNode, viewIndex: number): string[] {
+        const preset = node.presets.find(candidate => candidate.key === node.selectedPresetKeys[viewIndex]);
+        return preset ? [preset.styleId] : [];
+    }
+
+    /** Opens one style sheet from the preset row's retained edit shortcut. */
+    openPresetStyleSheet(event: Event, styleId: string): void {
+        event.preventDefault();
+        event.stopPropagation();
+        this.styleEditorRequestService.open(styleId);
+    }
+
+    /** Returns the stable test id for one layer/view preset row. */
+    stylePresetRowTestId(node: LayerPresetNode, viewIndex: number): string {
+        return `style-preset-${viewIndex}-${this.stylePresetTestIdSuffix(node)}`;
+    }
+
+    /** Returns the stable test id for one preset owned-option expansion control. */
+    stylePresetExpandTestId(node: LayerPresetNode, viewIndex: number): string {
+        return `style-preset-expand-${viewIndex}-${this.stylePresetTestIdSuffix(node)}`;
+    }
+
+    /** Returns the stable test id for one preset-row stylesheet shortcut. */
+    stylePresetEditButtonTestId(node: LayerPresetNode, viewIndex: number, styleId: string): string {
+        const styleSuffix = styleId.replace(/[^a-zA-Z0-9_-]+/g, "-");
+        return `style-preset-edit-${viewIndex}-${this.stylePresetTestIdSuffix(node)}-${styleSuffix}`;
+    }
+
+    /** Produces a DOM-safe suffix from one concrete preset row identity. */
+    private stylePresetTestIdSuffix(node: LayerPresetNode): string {
+        return `${node.mapId}-${node.layerId}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
     }
 
     /** Adds another synchronized map view up to the current supported limit. */

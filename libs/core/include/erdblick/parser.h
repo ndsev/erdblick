@@ -2,6 +2,7 @@
 
 #include "mapget/model/stream.h"
 #include "mapget/model/featurelayer.h"
+#include "mapget/model/subsetlayer.h"
 #include "buffer.h"
 #include "interop/js-object.h"
 #include "mapget/model/featurelayer.h"
@@ -10,6 +11,8 @@
 
 namespace erdblick
 {
+
+class FeatureLayerStyle;
 
 /**
  * Stateful decoder for streamed mapget tile payloads and auxiliary dictionaries.
@@ -47,26 +50,37 @@ public:
      */
     TileSourceDataLayer readTileSourceDataLayer(SharedUint8Array const& buffer);
 
-    /**
-     * Parse a TileSearchResultLayer from a buffer.
-     */
-    TileSearchResultLayer readTileSearchResultLayer(SharedUint8Array const& buffer);
+    /** Parse one immutable server-evaluated subset from a filter frame. */
+    TileSubsetLayer readTileSubsetLayer(SharedUint8Array const& buffer);
 
     /** Cheap metadata view read from a tile blob without fully parsing the tile. */
     struct TileLayerMetadata {
         std::string id;
-        std::string nodeId;
+        std::string stringPoolId;
         std::string mapName;
         std::string layerName;
         int32_t tileId;
-        uint32_t stage;
         std::string legalInfo;
         std::string error;
         int32_t numFeatures;
+        double conversionTimestampMs;
+        /** Finite milliseconds when supplied by the datasource; NaN means no expiry. */
+        double ttlMs;
         NativeJsValue scalarFields;
     };
     /** Parse only cheap tile metadata without constructing the full feature/source-data model. */
     TileLayerMetadata readTileLayerMetadata(SharedUint8Array const& buffer);
+
+    /** Read base metadata plus filter identity without constructing subset entries. */
+    struct TileSubsetLayerMetadata {
+        TileLayerMetadata layer;
+        std::string filterId;
+        uint64_t generation;
+        NativeJsValue dependencies;
+        NativeJsValue issues;
+        std::string glbAttachmentName;
+    };
+    TileSubsetLayerMetadata readTileSubsetLayerMetadata(SharedUint8Array const& buffer);
 
     /**
      * Reset the parser by removing any buffered unparsed stream chunks.
@@ -88,7 +102,7 @@ public:
     /**
      * Get a serialized field dictionary, which can be passed into addFieldDict().
      */
-    void getFieldDict(SharedUint8Array& out, std::string const& nodeId);
+    void getFieldDict(SharedUint8Array& out, std::string const& stringPoolId);
 
     /**
      * Add a serialized field dictionary that is not wrapped in a message frame.
@@ -137,6 +151,17 @@ public:
      * getAttributeScopeForQuery(query), falling back to all attribute contexts if no attribute was inferred.
      */
     NativeJsValue searchStyleFieldsForQuery(std::string const& query, std::string const& scope, NativeJsValue const& options) const;
+
+    /**
+     * Derive one generic mapget `/filter` channel per active top-level style
+     * rule for a concrete catalog layer.
+     */
+    NativeJsValue planStyleFilter(
+        FeatureLayerStyle const& style,
+        std::string const& mapId,
+        std::string const& layerId,
+        int highlightMode,
+        int lod);
 
     /**
      * Set layer info which will be used if the external doesn't fit.

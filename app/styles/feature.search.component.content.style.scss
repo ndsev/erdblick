@@ -332,8 +332,11 @@ simfil-expression-input {
       width: 100%;
     }
   }
+}
 
-  .feature-search-style-rules {
+// Reusable high-fidelity rule controls own their styling independently of the host.
+search-style-rule-editor {
+  & {
     --feature-search-style-control-height: 1.75em;
     --feature-search-style-control-font-size: 0.82rem;
     --feature-search-style-icon-size: var(--feature-search-style-control-height);
@@ -352,6 +355,7 @@ simfil-expression-input {
 
     p-button,
     p-select,
+    p-multiselect,
     p-inputnumber,
     p-colorpicker {
       align-items: center;
@@ -361,6 +365,7 @@ simfil-expression-input {
 
     .p-button,
     .p-select,
+    .p-multiselect,
     .p-inputnumber-input,
     .p-inputtext,
     .feature-search-style-value-input,
@@ -373,6 +378,7 @@ simfil-expression-input {
     }
 
     .p-select,
+    .p-multiselect,
     .p-inputnumber-input {
       max-height: var(--feature-search-style-control-height);
     }
@@ -387,16 +393,21 @@ simfil-expression-input {
       max-height: var(--feature-search-style-control-height);
     }
 
-    .p-select-label {
+    .p-select-label,
+    .p-multiselect-label {
       align-items: center;
       display: flex;
       font-size: var(--feature-search-style-control-font-size);
       min-height: 0;
+      overflow: hidden;
       padding-block: 0;
       padding-inline: 0.45em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
-    .p-select-dropdown {
+    .p-select-dropdown,
+    .p-multiselect-dropdown {
       width: var(--feature-search-style-icon-size);
     }
 
@@ -411,6 +422,7 @@ simfil-expression-input {
 
     .p-button-label,
     .p-select-label,
+    .p-multiselect-label,
     .p-inputnumber-input,
     .feature-search-style-value-input,
     .feature-search-style-rule-name,
@@ -494,6 +506,58 @@ simfil-expression-input {
     min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
+  }
+
+  & {
+    display: flex;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .feature-search-style-rule-editor {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .search-style-rule-editor-toolbar {
+    display: flex;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    margin-bottom: 0.35em;
+  }
+
+  .search-style-rule-editor-empty {
+    color: var(--p-text-muted-color);
+    padding: 0.75em;
+  }
+
+  .search-style-rule-editor-read-only-placeholder {
+    align-items: center;
+    border: 1px dashed var(--p-content-border-color);
+    border-radius: 6px;
+    color: var(--p-text-muted-color);
+    flex: 0 0 auto;
+    margin-bottom: 0.5em;
+    padding: 0.75em;
+    display: flex;
+    gap: 0.4em;
+  }
+
+  .search-style-rule-help {
+    color: var(--p-primary-color);
+    cursor: help;
+    flex: 0 0 auto;
+    font-size: 1.15rem;
+    font-weight: 400;
+  }
+
+  .search-style-rule-help:focus-visible {
+    border-radius: 50%;
+    outline: 2px solid var(--p-focus-ring-color);
+    outline-offset: 2px;
   }
 
   .feature-search-style-panel {
@@ -580,6 +644,11 @@ simfil-expression-input {
     font-weight: 700;
     min-width: 7em;
     padding: 0 0.35em;
+  }
+
+  .feature-search-style-rule-label {
+    flex: 0 0 auto;
+    min-width: 5em;
   }
 
   .feature-search-style-rule-name:focus {
@@ -760,7 +829,6 @@ simfil-expression-input {
     min-width: 7em;
   }
 
-  .feature-search-style-loading,
   .feature-search-query-dirty,
   .feature-search-values-waiting,
   .search-style-color-warning {
@@ -925,6 +993,25 @@ simfil-expression-input {
 
   .search-style-color-delete {
     flex: 0 0 auto;
+  }
+}
+
+.feature-search-tabs {
+  .feature-search-saved-style-select {
+    min-width: 9em;
+    width: min(14em, 28vw);
+  }
+
+  .feature-search-style-rules {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .feature-search-style-rules > search-style-rule-editor {
+    flex: 1 1 auto;
   }
 
   .feature-search-style-actions {
@@ -1262,6 +1349,68 @@ simfil-expression-input {
   }
 }
 
+.feature-search-saved-style-option {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+
+  small {
+    color: var(--p-text-muted-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &.incompatible,
+  &.incompatible small {
+    color: var(--p-message-error-color, #dc2626);
+  }
+}
+
+.feature-search-style-application-message {
+  color: var(--p-text-muted-color);
+  flex: 0 0 auto;
+  font-size: 0.82em;
+  margin: 0.25em 0;
+
+  &.warning {
+    color: var(--p-message-warn-color, #d97706);
+  }
+}
+
+.search-style-save-content {
+  display: grid;
+  gap: 0.65rem;
+
+  > input,
+  > p-multiselect {
+    width: 100%;
+  }
+
+  .search-style-save-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0.25rem 0;
+  }
+
+  .search-style-save-help {
+    color: var(--p-text-muted-color);
+    line-height: 1.35;
+  }
+
+  .search-style-save-error {
+    color: var(--p-message-error-color, #dc2626);
+  }
+
+  .search-style-save-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+}
+
 .feature-search-colorpicker-overlay {
   // PrimeNG writes an inline transform on the body-appended overlay root, so shift the panel itself.
   // The search visualization color pickers sit near the right dock edge and need the panel to open leftward.
@@ -1283,4 +1432,9 @@ simfil-expression-input {
   .p-colorpicker-preview {
     border-radius: 50%;
   }
+}
+
+.search-style-rule-help-tooltip .p-tooltip-text {
+  max-width: min(34rem, calc(100vw - 2rem));
+  white-space: pre-line;
 }

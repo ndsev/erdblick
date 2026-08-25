@@ -1,9 +1,14 @@
-import {Component, ElementRef, HostListener, NgZone, OnDestroy, ViewChild} from "@angular/core";
+import {ChangeDetectorRef, Component, ElementRef, HostListener, NgZone, OnDestroy, ViewChild} from "@angular/core";
 import {InfoMessageService} from "../shared/info.service";
 import {MapViewStateService, ViewRecalculationReason} from "../mapview/map-view-state.service";
 import {StyleService} from "./style.service";
 import {ErdblickStyleGroup, ErdblickStyle, UpdatedModifiedStyleEntry} from "./style.service";
-import {AppStateService, STYLE_EDITOR_DIALOG_LAYOUT_ID, STYLES_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
+import {
+    AppStateService,
+    STYLE_EDITOR_DIALOG_LAYOUT_ID,
+    STYLE_PRESET_EDITOR_DIALOG_LAYOUT_ID,
+    STYLES_DIALOG_LAYOUT_ID
+} from "../shared/appstate.service";
 import {FileUpload} from "primeng/fileupload";
 import {Subscription} from "rxjs";
 import {KeyValue} from "@angular/common";
@@ -11,7 +16,7 @@ import {MenuItem} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {EditorService} from "../shared/editor.service";
 import {filter} from "rxjs/operators";
-import {removeGroupPrefix} from "../mapdata/map.tree.model"
+import {layerPresetNode, removeGroupPrefix} from "../mapdata/map.tree.model"
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {basicSetup} from "codemirror";
 import {Compartment, EditorState} from "@codemirror/state";
@@ -23,18 +28,50 @@ import {oneDark} from "@codemirror/theme-one-dark";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {StyleValidationReportService} from "./style-validation-report.service";
 import {StyleValidationIssue, StyleValidationReport} from "./style-validation.model";
+import {StyleEditorRequestService} from "./style-editor-request.service";
+import {
+    QuickStyleProjection,
+    QuickStyleWarning,
+    projectStyleSourceToQuick,
+    updateStyleSourceFromQuick,
+    updateStyleSourceMetadata
+} from "../search/search-style-sheet.converter";
+import {
+    FeatureSearchStyleRuleDraft,
+    SearchStyleRuleDraftCodec
+} from "../search/search-style-rule-editor.model";
+import {MapPresetService} from "./map-preset.service";
+import {MapPresetDefinition, MapPresetIssue} from "./map-preset.model";
+import {MapInfoService} from "../mapdata/map-info.service";
+
+interface QuickPresetOption {
+    key: string;
+    label: string;
+    layerId: string;
+    styleId: string;
+    presetId: string;
+}
 
 
 @Component({
     selector: 'style-panel',
     template: `
         <app-dialog class="styles-dialog" data-testid="styles-dialog" header="Style Sheets" [(visible)]="stylesDialogVisible"
-                  [modal]="false" [style]="{ 'min-width': '30em', 'width': '30em' }" #styles [closeOnEscape]="false"
+                  [modal]="false" [style]="{ 'min-width': 'min(38em, calc(100vw - 1em))', 'width': 'min(72em, 92vw)' }"
+                  #styles [closeOnEscape]="false"
                   [persistLayout]="true" [layoutId]="stylesDialogLayoutId"
                   (onShow)="onStylesDialogShow()">
             <p-tabs [(value)]="stylesDialogTab" class="style-sheets-tabs" data-testid="style-sheets-tabs">
                 <p-tablist>
                     <p-tab value="styles">Styles</p-tab>
+                    <p-tab value="presets" data-testid="style-presets-tab">
+                        <span>Map Presets </span>
+                        @if (presetService.issues$ | async; as presetIssues) {
+                            @if (presetIssues.length) {
+                                <p-badge [value]="presetIssues.length"/>
+                            }
+                        }
+                    </p-tab>
                     <p-tab value="errors">
                         <span>Errors </span>
                         @if (styleValidationReportService.reports$ | async; as styleIssues) {
@@ -86,6 +123,10 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
                                                            [class.clickable-style-tag]="node.overridesBaseStyle"
                                                            severity="info" value="Additional" [rounded]="true"
                                                            (click)="openCompareFromAdditionalTag($event, node.id)"/>
+                                                }
+                                                @if (node.category === 'search') {
+                                                    <p-tag class="search-style-tag"
+                                                           severity="danger" value="Search" [rounded]="true"/>
                                                 }
                                                 @if (node.modified && !node.imported) {
                                                     <p-tag class="modified-style-tag"
@@ -153,6 +194,100 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
                                     </div>
                                 </div>
                             }
+                        </div>
+                    </p-tabpanel>
+                    <p-tabpanel value="presets">
+                        <div class="style-presets-tab" data-testid="style-presets-panel">
+                            <div class="style-presets-toolbar">
+                                <p-button label="Add" icon="pi pi-plus"
+                                          data-testid="style-preset-add-button"
+                                          [disabled]="presetEditorSourceModified || !presetService.canWrite"
+                                          (click)="toggleQuickPresetForm()"/>
+                                <p-button label="Edit raw map presets" icon="pi pi-file-edit"
+                                          data-testid="style-preset-raw-edit-button"
+                                          [disabled]="!presetService.canWrite"
+                                          (click)="openPresetEditor()"/>
+                                @if (presetService.readOnlyReason; as readOnlyReason) {
+                                    <p-tag severity="secondary" value="Read only" [rounded]="true"
+                                           [pTooltip]="readOnlyReason"/>
+                                }
+                            </div>
+
+                            @if (presetService.readOnlyCatalogMessage; as catalogMessage) {
+                                <p-message severity="info"
+                                           data-testid="style-presets-read-only-message"
+                                           [text]="catalogMessage"/>
+                            }
+
+                            @if (quickPresetFormVisible) {
+                                <div class="quick-preset-form" data-testid="style-preset-add-form">
+                                    <p-iftalabel>
+                                        <input id="quick-preset-name" pInputText
+                                               data-testid="style-preset-name"
+                                               [(ngModel)]="quickPresetName"/>
+                                        <label for="quick-preset-name">Preset name</label>
+                                    </p-iftalabel>
+                                    <p-iftalabel class="quick-preset-options-select">
+                                        <p-multiSelect inputId="quick-preset-options"
+                                                       data-testid="style-preset-options"
+                                                       [options]="quickPresetOptionChoices"
+                                                       [(ngModel)]="quickPresetSelectedOptionKeys"
+                                                       optionLabel="label"
+                                                       optionValue="key"
+                                                       [filter]="true"
+                                                       [showToggleAll]="true"
+                                                       [maxSelectedLabels]="2"
+                                                       selectedItemsLabel="{0} layer presets"
+                                                       placeholder="Select layer presets"
+                                                       appendTo="body"/>
+                                        <label for="quick-preset-options">Layer presets</label>
+                                    </p-iftalabel>
+                                    <div class="quick-preset-actions">
+                                        <p-button label="Save" icon="pi pi-check"
+                                                  data-testid="style-preset-save-button"
+                                                  [disabled]="!canSaveQuickPreset()"
+                                                  (click)="saveQuickPreset()"/>
+                                        <p-button label="Cancel" icon="pi pi-times"
+                                                  severity="secondary"
+                                                  (click)="closeQuickPresetForm()"/>
+                                    </div>
+                                </div>
+                            }
+
+                            @if (presetService.issues$ | async; as presetIssues) {
+                                @if (presetIssues.length) {
+                                    <div class="style-preset-issues" data-testid="style-preset-issues">
+                                        @for (issue of presetIssues; track $index) {
+                                            <p-message severity="error"
+                                                       [text]="presetIssueText(issue)"/>
+                                        }
+                                    </div>
+                                }
+                            }
+
+                            <div class="style-preset-list">
+                                @for (preset of presetService.presets$ | async; track preset.id) {
+                                    <div class="style-preset-list-row"
+                                         [attr.data-testid]="'style-preset-definition-' + preset.id">
+                                        <p-toggleswitch
+                                            [inputId]="'style-preset-enabled-' + preset.id"
+                                            [ngModel]="presetService.isAvailable(preset)"
+                                            [disabled]="presetEditorSourceModified || !presetService.canWrite"
+                                            (ngModelChange)="setPresetAvailability(preset.id, $event)"/>
+                                        <label [for]="'style-preset-enabled-' + preset.id">
+                                            <strong>{{ preset.name }}</strong>
+                                            <span>{{ mapPresetLayersLabel(preset) }}</span>
+                                        </label>
+                                        <p-tag severity="secondary"
+                                               [value]="preset.layerPresets.length + ' layer presets'"
+                                               [rounded]="true"/>
+                                    </div>
+                                } @empty {
+                                    <p-message severity="info"
+                                               data-testid="style-presets-empty-message"
+                                               [text]="presetService.emptyCatalogMessage"/>
+                                }
+                            </div>
                         </div>
                     </p-tabpanel>
                     <p-tabpanel value="errors">
@@ -235,36 +370,193 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
         </app-dialog>
         <p-menu #styleMenu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
                 [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
-        <app-dialog header="Style Editor" [(visible)]="styleEditorVisible" [modal]="false" #editorDialog
+        <app-dialog [(visible)]="styleEditorVisible" [modal]="false" #editorDialog
                   data-testid="style-editor-dialog" class="editor-dialog"
+                  [closable]="false" [closeOnEscape]="false"
                   [persistLayout]="true" [layoutId]="styleEditorDialogLayoutId"
                   (onShow)="onEditorDialogShow()" (onHide)="onEditorDialogHide()">
-            <editor [sessionId]="styleEditorSessionId"></editor>
+            <ng-template #header>
+                <app-surface-header data-testid="style-editor-header"
+                                    [title]="styleEditorHeaderTitle()"
+                                    [hasSmartControl]="!!currentEditorStyle()"
+                                    [dragEnabled]="true"
+                                    (dragPointerDown)="editorDialog.startDrag($event)"
+                                    (closeRequest)="closeEditorDialog($event)">
+                    @if (currentEditorStyle(); as style) {
+                        <p-toggleswitch surfaceHeaderSmartControl
+                                        inputId="style-editor-enabled"
+                                        data-testid="style-editor-enabled"
+                                        [ngModel]="style.visible"
+                                        (ngModelChange)="toggleEditorStyle($event)"
+                                        (click)="$event.stopPropagation()"
+                                        (mousedown)="$event.stopPropagation()"
+                                        [pTooltip]="style.visible ? 'Disable style sheet' : 'Enable style sheet'"
+                                        tooltipPosition="bottom"
+                                        aria-label="Enable style sheet">
+                        </p-toggleswitch>
+                    }
+                </app-surface-header>
+            </ng-template>
+            <p-tabs [(value)]="styleEditorTab" class="style-editor-tabs" data-testid="style-editor-tabs">
+                <p-tablist>
+                    @if (styleEditorQuickAvailable) {
+                        <p-tab value="quick">Quick</p-tab>
+                    }
+                    <p-tab value="advanced">Advanced</p-tab>
+                </p-tablist>
+                <p-tabpanels>
+                    @if (styleEditorQuickAvailable) {
+                        <p-tabpanel value="quick" class="style-editor-quick-panel">
+                            <div class="style-editor-quick-content"
+                                 [class.read-only]="quickProjectionStale">
+                                @if (quickProjectionStale) {
+                                    <div class="style-editor-quick-stale">
+                                        Quick is read-only until Advanced contains valid YAML: {{ quickProjectionError }}
+                                    </div>
+                                }
+                                <div class="style-editor-quick-metadata">
+                                    <div class="style-editor-quick-field">
+                                        <label for="style-editor-quick-name">Name</label>
+                                        <input id="style-editor-quick-name"
+                                               data-testid="style-editor-quick-name"
+                                               pInputText
+                                               autocomplete="off"
+                                               [ngModel]="quickStyleName"
+                                               (ngModelChange)="onQuickStyleNameChange($event)"
+                                               [disabled]="quickProjectionStale">
+                                        @if (quickStyleNameIssue(); as issue) {
+                                            <small class="style-editor-quick-error" role="alert">{{ issue }}</small>
+                                        }
+                                    </div>
+                                    <div class="style-editor-quick-field style-editor-quick-affinity">
+                                        <label for="style-editor-quick-layers">Layer affinity</label>
+                                        @if (quickLayerAffinityKind === 'custom' && !quickReplacingCustomAffinity) {
+                                            <div class="style-editor-custom-affinity" data-testid="style-editor-custom-affinity">
+                                                <span [pTooltip]="quickCustomLayerAffinity">
+                                                    Custom affinity — edit in Advanced or replace
+                                                </span>
+                                                <p-button label="Choose exact layers"
+                                                          size="small"
+                                                          severity="secondary"
+                                                          [outlined]="true"
+                                                          [disabled]="quickProjectionStale"
+                                                          (click)="beginReplacingQuickAffinity()"/>
+                                                <p-button label="Any layer"
+                                                          size="small"
+                                                          severity="secondary"
+                                                          [text]="true"
+                                                          [disabled]="quickProjectionStale"
+                                                          (click)="setQuickAffinityAny()"/>
+                                            </div>
+                                        } @else {
+                                            <p-multiSelect inputId="style-editor-quick-layers"
+                                                           data-testid="style-editor-quick-layers"
+                                                           [options]="quickLayerOptions"
+                                                           [ngModel]="quickLayerAffinityIds"
+                                                           (ngModelChange)="onQuickLayerAffinityChange($event)"
+                                                           optionLabel="label"
+                                                           optionValue="value"
+                                                           placeholder="Any layer"
+                                                           [filter]="true"
+                                                           [showToggleAll]="true"
+                                                           [maxSelectedLabels]="3"
+                                                           [disabled]="quickProjectionStale"
+                                                           appendTo="body">
+                                            </p-multiSelect>
+                                            <small>No selection means any layer.</small>
+                                            @if (quickReplacingCustomAffinity) {
+                                                <p-button label="Clear custom affinity to Any"
+                                                          size="small"
+                                                          severity="secondary"
+                                                          [text]="true"
+                                                          (click)="setQuickAffinityAny()"/>
+                                            }
+                                        }
+                                    </div>
+                                </div>
+                                <search-style-rule-editor
+                                    [drafts]="quickRuleDrafts"
+                                    (draftsChange)="onQuickRuleDraftsChange($event)"
+                                    [fieldOptions]="[]"
+                                    [completionOwnerPrefix]="'style-editor-quick'"
+                                    [completionZIndex]="31050"
+                                    [showRuleNames]="false"
+                                    [sourceRuleIndices]="quickRuleSourceIndicesByDraftId"
+                                    [readOnlyRuleIndices]="quickReadOnlyRuleIndices"
+                                    [notesBySourceIndex]="quickWarningsBySourceIndex"
+                                    [expandRulesByDefault]="true"
+                                    [expansionContext]="stateService.styleEditorTargetId ?? ''"
+                                    [canRefreshValueSummaries]="false">
+                                </search-style-rule-editor>
+                            </div>
+                        </p-tabpanel>
+                    }
+                    <p-tabpanel value="advanced" class="style-editor-advanced-panel">
+                        <editor [sessionId]="styleEditorSessionId"></editor>
+                    </p-tabpanel>
+                </p-tabpanels>
+            </p-tabs>
             <div class="editor-actions style-editor-actions">
                 <div class="editor-actions-left">
-                    <p-button data-testid="style-editor-apply-button" (click)="applyEditedStyle()" label="Apply" icon="pi pi-check"
-                              [disabled]="!sourceWasModified"></p-button>
+                    <p-button
+                        [attr.data-testid]="canSaveCurrentStyleToSource() ? 'style-editor-save-source-button' : 'style-editor-apply-button'"
+                        (click)="saveOrApplyEditedStyle()"
+                        [label]="canSaveCurrentStyleToSource() ? 'Save to Source' : 'Apply'"
+                        [icon]="canSaveCurrentStyleToSource() ? 'pi pi-save' : 'pi pi-check'"
+                        [disabled]="!!quickStyleNameIssue() || (canSaveCurrentStyleToSource() ? !currentStyleHasSourceChanges() : !sourceWasModified)"
+                        [pTooltip]="canSaveCurrentStyleToSource() ? styleSourceSaveTooltip() : ''"></p-button>
                     <p-button data-testid="style-editor-close-button" (click)="closeEditorDialog($event)"
                               [label]='sourceWasModified ? "Discard" : "Close"'
                               icon="pi pi-times"></p-button>
                     <div class="editor-shortcuts">
-                        <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to save changes</div>
+                        <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to {{ canSaveCurrentStyleToSource() ? 'save to source' : 'apply changes' }}</div>
                         <div>Press <span style="color: grey">Esc</span> to quit</div>
                     </div>
                 </div>
                 <div class="editor-actions-right">
                     <p-button data-testid="style-editor-export-button" (click)="exportStyle(stateService.styleEditorTargetId ?? '')"
-                              [disabled]="sourceWasModified || !stateService.styleEditorTargetId" label="Export" icon="pi pi-file-export">
+                              [disabled]="sourceWasModified || !stateService.styleEditorTargetId"
+                              label="Export" icon="pi pi-file-export">
                     </p-button>
                     <p-button data-testid="style-editor-help-button" (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
                 </div>
+            </div>
+        </app-dialog>
+        <app-dialog header="Map Presets" [(visible)]="presetEditorVisible" [modal]="false"
+                    #presetEditorDialog data-testid="style-preset-editor-dialog"
+                    class="editor-dialog style-preset-editor-dialog"
+                    [closable]="false" [closeOnEscape]="false"
+                    [persistLayout]="true" [layoutId]="stylePresetEditorDialogLayoutId"
+                    (onShow)="onPresetEditorDialogShow()">
+            <editor [sessionId]="presetEditorSessionId"></editor>
+            <div class="editor-actions style-editor-actions">
+                <div class="editor-actions-left">
+                    <p-button data-testid="style-preset-editor-apply-button"
+                              label="Apply" icon="pi pi-check"
+                              [disabled]="!presetEditorSourceModified || !presetService.canWrite"
+                              (click)="applyPresetEditorSource()"/>
+                    <p-button data-testid="style-preset-editor-close-button"
+                              [label]="presetEditorSourceModified ? 'Discard' : 'Close'"
+                              icon="pi pi-times"
+                              (click)="closePresetEditor($event)"/>
+                </div>
+            </div>
+        </app-dialog>
+        <app-dialog header="Discard preset edits?" [(visible)]="presetEditorDiscardDialogVisible"
+                    [modal]="true" [closeOnEscape]="false" #presetEditorDiscardDialog>
+            <p>The raw preset source contains unapplied changes.</p>
+            <div class="dialog-controls">
+                <p-button label="Discard" severity="danger"
+                          (click)="discardPresetEditorChanges($event)"/>
+                <p-button label="Cancel"
+                          (click)="presetEditorDiscardDialog.close($event)"/>
             </div>
         </app-dialog>
         <app-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog 
                   [closeOnEscape]="false" (onShow)="onWarningShow()">
             <p>You have already edited the style data. Do you want to save the changes?</p>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                <p-button (click)="applyEditedStyle(); warningDialog.close($event)" label="Save"></p-button>
+                <p-button (click)="saveOrApplyEditedStyle(); warningDialog.close($event)" label="Save"></p-button>
                 <p-button (click)="warningDialog.close($event)" label="Cancel"></p-button>
                 <p-button (click)="discardStyleEdits(); closeEditorDialog($event)" label="Discard"></p-button>
             </div>
@@ -354,13 +646,35 @@ import {StyleValidationIssue, StyleValidationReport} from "./style-validation.mo
 export class StyleComponent implements OnDestroy {
     readonly stylesDialogLayoutId = STYLES_DIALOG_LAYOUT_ID;
     readonly styleEditorDialogLayoutId = STYLE_EDITOR_DIALOG_LAYOUT_ID;
+    readonly stylePresetEditorDialogLayoutId = STYLE_PRESET_EDITOR_DIALOG_LAYOUT_ID;
     readonly styleEditorSessionId = 'style-editor';
+    readonly presetEditorSessionId = 'map-presets-editor';
     warningDialogVisible: boolean = false;
     styleUpdateDialogVisible: boolean = false;
     styleEditorSourceSubscription: Subscription = new Subscription();
     styleEditorSaveSubscription: Subscription = new Subscription();
     sourceWasModified: boolean = false;
     private styleEditorOriginalSource: string = '';
+    styleEditorTab: "quick" | "advanced" = "quick";
+    styleEditorQuickAvailable = false;
+    quickRuleDrafts: FeatureSearchStyleRuleDraft[] = [];
+    quickWarnings: QuickStyleWarning[] = [];
+    quickWarningsBySourceIndex: Record<number, readonly QuickStyleWarning[]> = {};
+    quickReadOnlyRuleIndices: number[] = [];
+    quickStyleName = "";
+    quickLayerAffinityKind: "any" | "exact" | "custom" = "any";
+    quickLayerAffinityIds: string[] = [];
+    quickCustomLayerAffinity = "";
+    quickReplacingCustomAffinity = false;
+    quickLayerOptions: Array<{label: string; value: string}> = [];
+    quickProjectionStale = false;
+    quickProjectionError = "";
+    private quickProjection?: QuickStyleProjection;
+    private quickRuleSourceIndices = new Map<number, number>();
+    quickRuleSourceIndicesByDraftId: Record<number, number> = {};
+    private readonly quickRuleDraftCodec = new SearchStyleRuleDraftCodec();
+    private quickProjectionRefreshTimer?: ReturnType<typeof setTimeout>;
+    private updatingSourceFromQuick = false;
     stylesCollapsed: boolean = false;
     styleCompareDialogVisible: boolean = false;
     styleCompareLeftModified: boolean = false;
@@ -375,11 +689,23 @@ export class StyleComponent implements OnDestroy {
     private readonly compareThemeCompartmentB = new Compartment();
     private compareModeObserver?: MutationObserver;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
-    stylesDialogTab: 'styles' | 'errors' = 'styles';
+    private readonly styleEditorRequestSubscription: Subscription;
+    stylesDialogTab: 'styles' | 'presets' | 'errors' = 'styles';
     styleIssueFilter: string = '';
     styleErrorsOnly: boolean = false;
     styleValidationDialogVisible: boolean = false;
     lastEditorValidationReport?: StyleValidationReport;
+    quickPresetFormVisible = false;
+    quickPresetName = "";
+    quickPresetSelectedOptionKeys: string[] = [];
+    quickPresetOptionChoices: QuickPresetOption[] = [];
+    presetEditorVisible = false;
+    presetEditorDiscardDialogVisible = false;
+    presetEditorSourceModified = false;
+    private presetEditorOriginalSource = "";
+    private presetEditorSourceSubscription = new Subscription();
+    private presetEditorSaveSubscription = new Subscription();
+    private readonly presetMapSubscription: Subscription;
 
     @ViewChild('styleMenu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
@@ -391,6 +717,8 @@ export class StyleComponent implements OnDestroy {
     @ViewChild('styleValidationDialog') styleValidationDialog: AppDialogComponent | undefined;
     @ViewChild('styleCompareDialog') styleCompareDialog: AppDialogComponent | undefined;
     @ViewChild('styleCompareHost') styleCompareHost?: ElementRef<HTMLDivElement>;
+    @ViewChild('presetEditorDialog') presetEditorDialog: AppDialogComponent | undefined;
+    @ViewChild('presetEditorDiscardDialog') presetEditorDiscardDialog: AppDialogComponent | undefined;
 
     // Group visibility is derived from leaf styles; bind directly to node.visible.
 
@@ -400,10 +728,25 @@ export class StyleComponent implements OnDestroy {
                 public styleValidationReportService: StyleValidationReportService,
                 public stateService: AppStateService,
                 public editorService: EditorService,
+                public presetService: MapPresetService,
+                private readonly mapInfoService: MapInfoService,
                 private dialogStack: DialogStackService,
-                private ngZone: NgZone) {
+                private ngZone: NgZone,
+                private changeDetector: ChangeDetectorRef,
+                styleEditorRequestService: StyleEditorRequestService) {
         this.stateService.ready.pipe(filter(state => state)).subscribe(_ => {
             this.refreshUpdatedStylesDialogVisibility();
+        });
+        this.styleEditorRequestSubscription = styleEditorRequestService.requests.subscribe(styleId => {
+            this.showStyleEditor(styleId);
+        });
+        this.presetMapSubscription = this.mapInfoService.maps$.subscribe(() => {
+            if (this.quickPresetFormVisible) {
+                this.refreshQuickPresetOptions();
+            }
+            if (this.styleEditorQuickAvailable) {
+                this.refreshQuickLayerOptions();
+            }
         });
     }
 
@@ -429,7 +772,15 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareView?.destroy();
         this.styleEditorSourceSubscription.unsubscribe();
         this.styleEditorSaveSubscription.unsubscribe();
+        this.styleEditorRequestSubscription.unsubscribe();
+        if (this.quickProjectionRefreshTimer) {
+            clearTimeout(this.quickProjectionRefreshTimer);
+        }
+        this.presetEditorSourceSubscription.unsubscribe();
+        this.presetEditorSaveSubscription.unsubscribe();
+        this.presetMapSubscription.unsubscribe();
         this.editorService.closeSession(this.styleEditorSessionId);
+        this.editorService.closeSession(this.presetEditorSessionId);
     }
 
     /** Promotes the styles dialog above other overlays. */
@@ -441,6 +792,194 @@ export class StyleComponent implements OnDestroy {
     onEditorDialogShow() {
         this.ensureStyleEditorSession();
         this.dialogStack.bringToFront(this.editorDialog);
+    }
+
+    /** Promotes the raw preset editor above the styles dialog when shown. */
+    onPresetEditorDialogShow(): void {
+        this.dialogStack.bringToFront(this.presetEditorDialog);
+    }
+
+    /** Opens or closes the compact GUI form used to append one local preset. */
+    toggleQuickPresetForm(): void {
+        if (this.quickPresetFormVisible) {
+            this.closeQuickPresetForm();
+            return;
+        }
+        this.quickPresetFormVisible = true;
+        this.refreshQuickPresetOptions();
+    }
+
+    /** Clears and hides the quick preset form. */
+    closeQuickPresetForm(): void {
+        this.quickPresetFormVisible = false;
+        this.quickPresetName = "";
+        this.quickPresetSelectedOptionKeys = [];
+        this.refreshQuickPresetOptions();
+    }
+
+    /** Rebuilds map-agnostic component choices from embedded presets visible in the catalog. */
+    refreshQuickPresetOptions(): void {
+        const choices = new Map<string, QuickPresetOption>();
+        for (const layer of this.mapInfoService.maps.allFeatureLayers()) {
+            for (const preset of layerPresetNode(layer)?.presets ?? []) {
+                const key = JSON.stringify([layer.id, preset.styleId, preset.id]);
+                if (!choices.has(key)) {
+                    choices.set(key, {
+                        key,
+                        label: `${layer.id} — ${preset.styleId} — ${preset.name}`,
+                        layerId: layer.id,
+                        styleId: preset.styleId,
+                        presetId: preset.id
+                    });
+                }
+            }
+        }
+        this.quickPresetOptionChoices = [...choices.values()].sort((lhs, rhs) => lhs.label.localeCompare(rhs.label));
+        const validKeys = new Set(this.quickPresetOptionChoices.map(option => option.key));
+        this.quickPresetSelectedOptionKeys = this.quickPresetSelectedOptionKeys.filter(key => validKeys.has(key));
+    }
+
+    /** Returns selected quick-form options in their stable stylesheet order. */
+    quickPresetSelectedOptions(): QuickPresetOption[] {
+        const selectedKeys = new Set(this.quickPresetSelectedOptionKeys);
+        return this.quickPresetOptionChoices.filter(option => selectedKeys.has(option.key));
+    }
+
+    /** Returns whether the quick form is complete and assigns each layer at most once. */
+    canSaveQuickPreset(): boolean {
+        const name = this.quickPresetName.trim();
+        const selectedOptions = this.quickPresetSelectedOptions();
+        if (!this.presetService.canWrite
+            || this.presetEditorSourceModified
+            || !name
+            || !selectedOptions.length
+            || this.presetService.presets.some(preset =>
+                preset.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+            return false;
+        }
+        return new Set(selectedOptions.map(option => option.layerId)).size === selectedOptions.length;
+    }
+
+    /** Validates and appends the quick-form definition to the normalized map-preset catalog. */
+    async saveQuickPreset(): Promise<void> {
+        if (!this.canSaveQuickPreset()) {
+            return;
+        }
+        const selectedOptions = this.quickPresetSelectedOptions();
+        const preset: MapPresetDefinition = {
+            id: this.nextPresetId(this.quickPresetName),
+            name: this.quickPresetName.trim(),
+            enabled: true,
+            layerPresets: selectedOptions.map(option => ({
+                layerId: option.layerId,
+                styleId: option.styleId,
+                presetId: option.presetId
+            }))
+        };
+        if (await this.presetService.addPreset(preset)) {
+            this.messageService.showInfo(`Added map preset '${preset.name}'.`);
+            this.closeQuickPresetForm();
+        } else {
+            this.messageService.showError(`Could not add map preset '${preset.name}'.`);
+        }
+    }
+
+    /** Updates one preset's enabled flag in the combined map-preset AppState. */
+    async setPresetAvailability(presetId: string, available: boolean): Promise<void> {
+        if (!await this.presetService.setAvailable(presetId, available)) {
+            this.messageService.showError("Could not update the map preset. The server catalog remains authoritative.");
+        }
+    }
+
+    /** Formats the exact schema-level layer targets composed by one map preset. */
+    mapPresetLayersLabel(preset: MapPresetDefinition): string {
+        return preset.layerPresets.map(component => component.layerId).join(", ");
+    }
+
+    /** Formats one preset validation issue with its most specific available identity. */
+    presetIssueText(issue: MapPresetIssue): string {
+        const prefix = issue.presetId ? `${issue.presetId}: ` : "";
+        const suffix = issue.componentIndex === undefined ? "" : ` (component ${issue.componentIndex + 1})`;
+        return `${prefix}${issue.message}${suffix}`;
+    }
+
+    /** Opens a dedicated raw YAML editor session for the current effective preset source. */
+    openPresetEditor(): void {
+        this.closeQuickPresetForm();
+        this.presetEditorSourceSubscription.unsubscribe();
+        this.presetEditorSaveSubscription.unsubscribe();
+        this.editorService.createSession({
+            id: this.presetEditorSessionId,
+            source: this.presetService.source,
+            language: "yaml"
+        });
+        this.presetEditorOriginalSource = this.presetService.source.replace(/\n+$/, "");
+        this.presetEditorSourceSubscription = this.editorService
+            .getSession(this.presetEditorSessionId)!.source$
+            .subscribe(source => {
+                this.presetEditorSourceModified =
+                    source.replace(/\n+$/, "") !== this.presetEditorOriginalSource;
+            });
+        this.presetEditorSaveSubscription = this.editorService
+            .onSaveRequested(this.presetEditorSessionId)!
+            .subscribe(() => this.applyPresetEditorSource());
+        this.presetEditorSourceModified = false;
+        this.presetEditorVisible = true;
+    }
+
+    /** Validates and atomically activates the current raw preset source. */
+    async applyPresetEditorSource(): Promise<void> {
+        const source = this.editorService.getSessionSource(this.presetEditorSessionId);
+        if (!await this.presetService.applyOverrideSource(source)) {
+            this.messageService.showError("The preset source is invalid. The previous presets remain active.");
+            return;
+        }
+        this.presetEditorOriginalSource = source.replace(/\n+$/, "");
+        this.presetEditorSourceModified = false;
+        this.messageService.showInfo("Applied map presets.");
+    }
+
+    /** Closes the raw editor or asks for confirmation before discarding unsaved changes. */
+    closePresetEditor(event: Event): void {
+        event.stopPropagation();
+        if (this.presetEditorSourceModified) {
+            this.presetEditorDiscardDialogVisible = true;
+            return;
+        }
+        this.closePresetEditorSession(event);
+    }
+
+    /** Discards the raw buffer and closes both the warning and editor dialogs. */
+    discardPresetEditorChanges(event: Event): void {
+        event.stopPropagation();
+        this.presetEditorSourceModified = false;
+        this.presetEditorDiscardDialog?.close(event);
+        this.closePresetEditorSession(event);
+    }
+
+    /** Releases the raw editor session after a confirmed close. */
+    private closePresetEditorSession(event: Event): void {
+        this.presetEditorDialog?.close(event);
+        this.presetEditorSourceSubscription.unsubscribe();
+        this.presetEditorSaveSubscription.unsubscribe();
+        this.editorService.closeSession(this.presetEditorSessionId);
+        this.presetService.restoreEffectiveIssues();
+    }
+
+    /** Derives a unique stable ID from a user-visible preset name. */
+    private nextPresetId(name: string): string {
+        const base = name.trim().toLocaleLowerCase()
+            .normalize("NFKD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "") || "preset";
+        const ids = new Set(this.presetService.presets.map(preset => preset.id));
+        let candidate = base;
+        let suffix = 2;
+        while (ids.has(candidate)) {
+            candidate = `${base}-${suffix++}`;
+        }
+        return candidate;
     }
 
     /** Brings the compare dialog to the front and creates the merge view. */
@@ -574,35 +1113,54 @@ export class StyleComponent implements OnDestroy {
 
     /** Opens the style editor for one style and tracks dirty-state changes. */
     showStyleEditor(styleId: string) {
+        this.openStyleEditor(styleId);
+    }
+
+    /** Opens or reuses an editor session while preserving unsaved edits in another style. */
+    private openStyleEditor(styleId: string): boolean {
+        const currentTargetId = this.stateService.styleEditorTargetId;
+        const sameEditorSession = this.styleEditorVisible
+            && currentTargetId === styleId
+            && this.editorService.hasSession(this.styleEditorSessionId);
+        if (sameEditorSession) {
+            return true;
+        }
+        if (this.styleEditorVisible
+            && this.sourceWasModified
+            && currentTargetId !== styleId) {
+            this.messageService.showWarning('Discard or apply the current style edits before opening another style.');
+            return false;
+        }
         if (!this.prepareStyleEditorSession(styleId)) {
             this.messageService.showError(`Could not load style source for ${styleId}.`);
-            return;
+            return false;
         }
         this.styleEditorVisible = true;
+        return true;
     }
 
     /** Applies the current editor contents to the selected style. */
-    applyEditedStyle() {
+    applyEditedStyle(): string | undefined {
         const styleId = this.stateService.styleEditorTargetId;
         const styleData = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, '');
         if (!styleId) {
             this.messageService.showError(`No cached style ID found!`);
-            return;
+            return undefined;
         }
         if (!styleData) {
-            this.messageService.showError(`Cannot apply an empty style definition to style: ${styleId}!`);
-            return;
+            this.messageService.showError(`Cannot apply an empty style definition.`);
+            return undefined;
         }
         if (!this.styleService.styles.has(styleId)) {
             this.messageService.showError(`Could not apply changes to style: ${styleId}. Failed to access!`)
-            return;
+            return undefined;
         }
         const report = this.styleService.validateStyleSource(
             styleData,
             this.styleService.createEditorSourceRef(styleId, styleData));
         if (!report.valid) {
             this.showValidationFailure(report);
-            return;
+            return undefined;
         }
         const newStyleId = this.styleService.setStyleSource(styleId, styleData);
         // If there is no style ID returned, then setStyleSource failed.
@@ -612,7 +1170,65 @@ export class StyleComponent implements OnDestroy {
             this.styleEditorOriginalSource = styleData;
             this.editorService.updateSessionSource(this.styleEditorSessionId, styleData);
             this.refreshUpdatedStylesDialogVisibility();
+            return newStyleId;
         }
+        return undefined;
+    }
+
+    /** Applies pending editor text and persists the resulting style through the writable source mount. */
+    async saveEditedStyleToSource(): Promise<void> {
+        let styleId = this.stateService.styleEditorTargetId ?? undefined;
+        if (this.sourceWasModified) {
+            const appliedStyleId = this.applyEditedStyle();
+            if (!appliedStyleId) {
+                return;
+            }
+            styleId = appliedStyleId;
+        }
+        if (!styleId || !this.styleService.canSaveStyleToSource(styleId)) {
+            this.messageService.showError("The selected style is not backed by an editable source file.");
+            return;
+        }
+        if (!await this.styleService.saveStyleToSource(styleId)) {
+            this.messageService.showError(`Could not save style ${styleId} to its source file.`);
+            return;
+        }
+
+        const source = this.styleService.styles.get(styleId)?.source;
+        if (source !== undefined) {
+            this.styleEditorOriginalSource = source.replace(/\n+$/, "");
+            this.editorService.updateSessionSource(this.styleEditorSessionId, `${source}\n\n\n\n\n`);
+        }
+        this.sourceWasModified = false;
+        this.refreshUpdatedStylesDialogVisibility();
+        this.messageService.showSuccess(`Saved ${styleId} to the mapviewer source configuration.`);
+    }
+
+    /** Applies editor changes locally or writes them to source when source editing is enabled. */
+    saveOrApplyEditedStyle(): void {
+        if (this.canSaveCurrentStyleToSource()) {
+            void this.saveEditedStyleToSource();
+        } else {
+            this.applyEditedStyle();
+        }
+    }
+
+    /** Returns whether the current style URL belongs to the writable source-style mount. */
+    canSaveCurrentStyleToSource(): boolean {
+        const styleId = this.stateService.styleEditorTargetId;
+        return !!styleId && this.styleService.canSaveStyleToSource(styleId);
+    }
+
+    /** Returns whether the editor or applied style differs from its source-file baseline. */
+    currentStyleHasSourceChanges(): boolean {
+        const styleId = this.stateService.styleEditorTargetId;
+        return this.sourceWasModified || (!!styleId && this.styleService.styles.get(styleId)?.modified === true);
+    }
+
+    /** Describes the filesystem destination used by the source-save action. */
+    styleSourceSaveTooltip(): string {
+        const directory = this.styleService.getStyleEditingDirectory();
+        return directory ? `Overwrite the YAML file below ${directory}` : "Overwrite the source YAML file";
     }
 
     /** Closes the editor or opens the discard-warning dialog when unsaved edits exist. */
@@ -655,6 +1271,20 @@ export class StyleComponent implements OnDestroy {
         this.warningDialogVisible = false;
         this.sourceWasModified = false;
         this.stateService.styleEditorTargetId = null;
+        this.styleEditorQuickAvailable = false;
+        this.quickProjection = undefined;
+        this.quickRuleDrafts = [];
+        this.quickWarnings = [];
+        this.quickWarningsBySourceIndex = {};
+        this.quickReadOnlyRuleIndices = [];
+        this.quickStyleName = "";
+        this.quickLayerAffinityKind = "any";
+        this.quickLayerAffinityIds = [];
+        this.quickCustomLayerAffinity = "";
+        this.quickReplacingCustomAffinity = false;
+        this.quickLayerOptions = [];
+        this.quickRuleSourceIndices.clear();
+        this.quickRuleSourceIndicesByDraftId = {};
         this.styleEditorSourceSubscription.unsubscribe();
         this.styleEditorSaveSubscription.unsubscribe();
         this.editorService.closeSession(this.styleEditorSessionId);
@@ -663,7 +1293,11 @@ export class StyleComponent implements OnDestroy {
     /** Recreates the editor session when a persisted style-editor dialog is restored on startup/import. */
     private ensureStyleEditorSession(): void {
         const targetStyleId = this.stateService.styleEditorTargetId;
-        if (!targetStyleId || this.editorService.hasSession(this.styleEditorSessionId)) {
+        if (this.editorService.hasSession(this.styleEditorSessionId)) {
+            return;
+        }
+        if (!targetStyleId) {
+            this.styleEditorVisible = false;
             return;
         }
         if (!this.prepareStyleEditorSession(targetStyleId)) {
@@ -680,6 +1314,11 @@ export class StyleComponent implements OnDestroy {
             return false;
         }
         this.stateService.styleEditorTargetId = styleId;
+        return this.prepareStyleEditorSource(source);
+    }
+
+    /** Creates a fresh editor session and installs common dirty/save tracking. */
+    private prepareStyleEditorSource(source: string): boolean {
         this.styleEditorOriginalSource = source.replace(/\n+$/, '');
         this.editorService.createSession({
             id: this.styleEditorSessionId,
@@ -691,14 +1330,207 @@ export class StyleComponent implements OnDestroy {
         this.styleEditorSourceSubscription = this.editorService.getSession(this.styleEditorSessionId)!.source$.subscribe(
             editedStyleSource => {
                 this.sourceWasModified = editedStyleSource.replace(/\n+$/, '') !== this.styleEditorOriginalSource;
+                if (this.updatingSourceFromQuick) {
+                    return;
+                }
+                if (this.quickProjectionRefreshTimer) {
+                    clearTimeout(this.quickProjectionRefreshTimer);
+                }
+                this.ngZone.runOutsideAngular(() => {
+                    this.quickProjectionRefreshTimer = setTimeout(() => {
+                        this.quickProjectionRefreshTimer = undefined;
+                        this.refreshQuickProjection(editedStyleSource);
+                        this.changeDetector.detectChanges();
+                    }, 150);
+                });
             }
         );
         this.styleEditorSaveSubscription.unsubscribe();
         this.styleEditorSaveSubscription = this.editorService.onSaveRequested(this.styleEditorSessionId)?.subscribe(() => {
-            this.applyEditedStyle();
+            this.saveOrApplyEditedStyle();
         }) ?? new Subscription();
         this.sourceWasModified = false;
+        this.styleEditorQuickAvailable = !!this.stateService.styleEditorTargetId;
+        this.styleEditorTab = this.styleEditorQuickAvailable ? "quick" : "advanced";
+        this.refreshQuickProjection(source);
         return true;
+    }
+
+    /** Reprojects the authoritative Advanced YAML without replacing the last good view on parse errors. */
+    private refreshQuickProjection(source: string): void {
+        if (!this.styleEditorQuickAvailable) {
+            return;
+        }
+        try {
+            const projection = projectStyleSourceToQuick(source.replace(/\n+$/, ""));
+            const drafts = this.quickRuleDraftCodec.toDrafts(
+                projection.editableRules.map(projected => projected.rule));
+            this.quickRuleSourceIndices.clear();
+            drafts.forEach((draft, index) => {
+                this.quickRuleSourceIndices.set(draft.id, projection.editableRules[index].sourceIndex);
+            });
+            this.quickRuleSourceIndicesByDraftId = Object.fromEntries(this.quickRuleSourceIndices);
+            this.quickProjection = projection;
+            this.quickRuleDrafts = drafts;
+            this.quickWarnings = projection.warnings;
+            const warningsBySourceIndex: Record<number, QuickStyleWarning[]> = {};
+            for (const warning of projection.warnings) {
+                (warningsBySourceIndex[warning.sourceIndex] ??= []).push(warning);
+            }
+            this.quickWarningsBySourceIndex = warningsBySourceIndex;
+            this.quickReadOnlyRuleIndices = projection.readOnlyRuleIndices;
+            this.quickStyleName = projection.name;
+            this.quickLayerAffinityKind = projection.layerAffinity.kind;
+            this.quickLayerAffinityIds = projection.layerAffinity.kind === "exact"
+                ? [...projection.layerAffinity.layerIds]
+                : [];
+            this.quickCustomLayerAffinity = projection.layerAffinity.kind === "custom"
+                ? projection.layerAffinity.expression
+                : "";
+            this.quickReplacingCustomAffinity = false;
+            this.refreshQuickLayerOptions();
+            this.quickProjectionStale = false;
+            this.quickProjectionError = "";
+        } catch (error) {
+            this.quickProjectionStale = true;
+            this.quickProjectionError = error instanceof Error ? error.message : String(error);
+        }
+    }
+
+    /** Patches Quick edits into the YAML AST immediately while retaining unsupported document content. */
+    protected onQuickRuleDraftsChange(drafts: FeatureSearchStyleRuleDraft[]): void {
+        const projection = this.quickProjection;
+        if (!projection || this.quickProjectionStale) {
+            return;
+        }
+        const retainedDraftIds = new Set(drafts.map(draft => draft.id));
+        const deletedPartialRules = [...this.quickRuleSourceIndices]
+            .filter(([draftId]) => !retainedDraftIds.has(draftId))
+            .map(([, sourceIndex]) => projection.editableRules.find(rule => rule.sourceIndex === sourceIndex))
+            .filter(rule => rule?.support === "partial");
+        if (deletedPartialRules.length > 0) {
+            const indices = deletedPartialRules.map(rule => (rule!.sourceIndex + 1)).join(", ");
+            if (!window.confirm(
+                `Delete YAML rule${deletedPartialRules.length === 1 ? "" : "s"} ${indices}? `
+                + "Unsupported properties on the whole rule will also be removed."
+            )) {
+                this.refreshQuickProjection(this.editorService.getSessionSource(this.styleEditorSessionId));
+                return;
+            }
+        }
+        try {
+            const semanticRules = this.quickRuleDraftCodec.fromDrafts(drafts);
+            const updates = semanticRules.map((rule, index) => ({
+                sourceIndex: this.quickRuleSourceIndices.get(drafts[index].id),
+                rule
+            }));
+            const currentSource = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, "");
+            const updatedSource = updateStyleSourceFromQuick(currentSource, projection, updates);
+            this.commitQuickSource(updatedSource);
+        } catch (error) {
+            this.messageService.showError(
+                `Could not apply the Quick style change: ${error instanceof Error ? error.message : String(error)}`);
+            this.refreshQuickProjection(this.editorService.getSessionSource(this.styleEditorSessionId));
+        }
+    }
+
+    /** Returns the currently persisted style controlled by the editor header. */
+    protected currentEditorStyle(): ErdblickStyle | undefined {
+        const styleId = this.stateService.styleEditorTargetId;
+        return styleId ? this.styleService.styles.get(styleId) : undefined;
+    }
+
+    /** Builds the shared surface-header title from the currently persisted editor identity. */
+    protected styleEditorHeaderTitle(): string {
+        const styleId = this.stateService.styleEditorTargetId;
+        return styleId ? `Style Editor — ${styleId}` : "Style Editor";
+    }
+
+    /** Applies header visibility through the ordinary persisted style lifecycle. */
+    protected toggleEditorStyle(enabled: boolean): void {
+        const styleId = this.stateService.styleEditorTargetId;
+        if (styleId) {
+            this.styleService.toggleStyle(styleId, enabled, true);
+        }
+    }
+
+    /** Reports the immediate Quick-name validity used to gate Apply. */
+    protected quickStyleNameIssue(): string {
+        if (!this.quickStyleName.trim()) {
+            return "A style name is required.";
+        }
+        const conflict = this.styleService.styleIdentityConflict(this.quickStyleName);
+        return conflict && conflict.id !== this.stateService.styleEditorTargetId
+            ? `A style named or resolved by “${this.quickStyleName}” already exists.`
+            : "";
+    }
+
+    /** Patches the root YAML name immediately, preserving every unrelated AST node. */
+    protected onQuickStyleNameChange(name: string): void {
+        this.quickStyleName = name ?? "";
+        this.updateQuickMetadata({name: this.quickStyleName});
+    }
+
+    /** Replaces Any/custom affinity with a deterministic set of exact layer IDs. */
+    protected onQuickLayerAffinityChange(layerIds: string[] | null): void {
+        const selected = [...(layerIds ?? [])];
+        this.updateQuickMetadata({
+            layerAffinity: selected.length
+                ? {kind: "exact", layerIds: selected}
+                : {kind: "any"}
+        });
+    }
+
+    /** Enters an explicit replacement state without mutating a custom regex. */
+    protected beginReplacingQuickAffinity(): void {
+        this.quickReplacingCustomAffinity = true;
+        this.quickLayerAffinityIds = [];
+    }
+
+    /** Explicitly deletes the root layer expression. */
+    protected setQuickAffinityAny(): void {
+        this.updateQuickMetadata({layerAffinity: {kind: "any"}});
+    }
+
+    /** Applies one metadata patch through the same guarded Advanced-source session. */
+    private updateQuickMetadata(patch: Parameters<typeof updateStyleSourceMetadata>[1]): void {
+        if (!this.quickProjection || this.quickProjectionStale) {
+            return;
+        }
+        try {
+            const currentSource = this.editorService
+                .getSessionSource(this.styleEditorSessionId)
+                .replace(/\n+$/, "");
+            this.commitQuickSource(updateStyleSourceMetadata(currentSource, patch));
+        } catch (error) {
+            this.messageService.showError(
+                `Could not apply the Quick metadata change: ${error instanceof Error ? error.message : String(error)}`);
+            this.refreshQuickProjection(this.editorService.getSessionSource(this.styleEditorSessionId));
+        }
+    }
+
+    /** Updates CodeMirror synchronously while suppressing its delayed projection refresh. */
+    private commitQuickSource(updatedSource: string): void {
+        this.updatingSourceFromQuick = true;
+        try {
+            this.editorService.updateSessionSource(this.styleEditorSessionId, updatedSource);
+        } finally {
+            this.updatingSourceFromQuick = false;
+        }
+        this.refreshQuickProjection(updatedSource);
+    }
+
+    /** Merges live map layer IDs with exact source-only affinity selections. */
+    private refreshQuickLayerOptions(): void {
+        const ids = new Set(this.quickLayerAffinityIds);
+        for (const layer of this.mapInfoService.maps.allFeatureLayers()) {
+            if (layer.id) {
+                ids.add(layer.id);
+            }
+        }
+        this.quickLayerOptions = [...ids]
+            .sort((left, right) => left.localeCompare(right))
+            .map(value => ({label: value, value}));
     }
 
     /** Opens the style-definition documentation in a new browser tab. */
@@ -972,22 +1804,9 @@ export class StyleComponent implements OnDestroy {
             return;
         }
 
-        const currentTargetId = this.stateService.styleEditorTargetId;
-        const sameEditorSession = this.styleEditorVisible
-            && currentTargetId === style.id
-            && this.editorService.hasSession(this.styleEditorSessionId);
-        if (!sameEditorSession) {
-            if (this.styleEditorVisible && this.sourceWasModified && currentTargetId && currentTargetId !== style.id) {
-                this.messageService.showWarning('Discard or apply the current style edits before opening another style.');
-                return;
-            }
-            if (!this.prepareStyleEditorSession(style.id)) {
-                this.messageService.showError(`Could not load style source for ${style.id}.`);
-                return;
-            }
+        if (!this.openStyleEditor(style.id)) {
+            return;
         }
-
-        this.styleEditorVisible = true;
         this.revealStyleIssueLocation(issue);
     }
 

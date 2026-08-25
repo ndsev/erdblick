@@ -3,6 +3,7 @@ import {Subscription} from 'rxjs';
 import {MapInfoService} from './mapdata/map-info.service';
 import {
     ABOUT_DIALOG_LAYOUT_ID,
+    CACHE_RESET_DIALOG_LAYOUT_ID,
     DATASOURCES_EDITOR_DIALOG_LAYOUT_ID,
     KEYBOARD_DIALOG_LAYOUT_ID,
     LEGAL_INFO_DIALOG_LAYOUT_ID,
@@ -20,6 +21,7 @@ import {MenuItem} from "primeng/api";
 import {FeatureSearchService} from "./search/feature.search.service";
 import {InfoMessageService} from "./shared/info.service";
 import {StyleService} from "./styledata/style.service";
+import {StyleEditorRequestService} from "./styledata/style-editor-request.service";
 
 const MAIN_BAR_BREAKPOINT = '56em';
 const MAIN_BAR_MEDIA_QUERY = `(max-width: ${MAIN_BAR_BREAKPOINT})`;
@@ -30,10 +32,10 @@ const STYLE_YAML_IMPORT_MAX_BYTES = 1024 * 1024;
 const MENU_LABEL_MAX_LENGTH = 48;
 const MENU_LABEL_ELLIPSIS = "...";
 
-interface StyleSheetExportMenuNode {
+interface StyleSheetMenuNode {
     name: string;
     styleId?: string;
-    children: Map<string, StyleSheetExportMenuNode>;
+    children: Map<string, StyleSheetMenuNode>;
 }
 
 @Component({
@@ -142,6 +144,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                 private diagnostics: DiagnosticsFacadeService,
                 private featureSearchService: FeatureSearchService,
                 private styleService: StyleService,
+                private styleEditorRequestService: StyleEditorRequestService,
                 private infoMessageService: InfoMessageService,
                 private elementRef: ElementRef<HTMLElement>,
                 private ngZone: NgZone) {
@@ -509,7 +512,16 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     /** Builds the PrimeNG menu model for the current application and layout state. */
     private buildMenuItems(numViews: number, includeMobileMaps: boolean): MenuItem[] {
         const exportSearchItems = this.buildExportSearchItems();
-        const exportStyleSheetItems = this.buildExportStyleSheetItems();
+        const editStyleSheetItems = this.buildStyleSheetItems(
+            'Edit',
+            'edit',
+            styleId => { this.styleEditorRequestService.open(styleId); }
+        );
+        const exportStyleSheetItems = this.buildStyleSheetItems(
+            'Export',
+            'file_save',
+            styleId => { this.exportStyleSheet(styleId); }
+        );
         const menuItems: MenuItem[] = [
             {
                 name: 'File',
@@ -553,6 +565,13 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         icon: 'palette',
                         command: () => { this.openStylesDialog(); }
                     },
+                    {
+                        name: 'Styles',
+                        icon: 'palette',
+                        disabled: !editStyleSheetItems.length,
+                        items: editStyleSheetItems
+                    },
+                    {separator: true},
                     {
                         name: 'Datasources',
                         icon: 'data_table',
@@ -614,6 +633,11 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                 icon: 'build',
                 items: [
                     {
+                        name: 'Cache Reset',
+                        icon: 'cycle',
+                        command: () => { this.stateService.openDialog(CACHE_RESET_DIALOG_LAYOUT_ID); }
+                    },
+                    {
                         name: 'Performance Statistics',
                         icon: 'insights',
                         command: () => { this.openDiagnosticsPerformance(); }
@@ -670,15 +694,19 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }));
     }
 
-    /** Builds the submenu for exporting currently loaded style sheets. */
-    private buildExportStyleSheetItems(): MenuItem[] {
+    /** Builds a grouped submenu that applies an action to currently loaded style sheets. */
+    private buildStyleSheetItems(
+        actionName: string,
+        actionIcon: string,
+        action: (styleId: string) => void
+    ): MenuItem[] {
         const styles = Array.from(this.styleService.styles.values())
             .filter(style => !!style.source)
             .sort((left, right) => left.id.localeCompare(right.id));
         if (!styles.length) {
             return [];
         }
-        const root: StyleSheetExportMenuNode = {name: "", children: new Map()};
+        const root: StyleSheetMenuNode = {name: "", children: new Map()};
         for (const style of styles) {
             let current = root;
             for (const segment of this.styleSheetMenuSegments(style.id)) {
@@ -692,7 +720,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             current.styleId = style.id;
         }
         return Array.from(root.children.values())
-            .map(node => this.styleSheetExportMenuItem(node));
+            .map(node => this.styleSheetMenuItem(node, actionName, actionIcon, action));
     }
 
     /** Splits a style id into menu path segments, ignoring empty slash path parts. */
@@ -703,23 +731,28 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         return segments.length ? segments : [styleId];
     }
 
-    /** Converts one style-sheet export tree node into a PrimeNG menu item. */
-    private styleSheetExportMenuItem(node: StyleSheetExportMenuNode): MenuItem {
+    /** Converts one style-sheet tree node into a PrimeNG action menu item. */
+    private styleSheetMenuItem(
+        node: StyleSheetMenuNode,
+        actionName: string,
+        actionIcon: string,
+        action: (styleId: string) => void
+    ): MenuItem {
         const childItems = Array.from(node.children.values())
-            .map(childNode => this.styleSheetExportMenuItem(childNode));
+            .map(childNode => this.styleSheetMenuItem(childNode, actionName, actionIcon, action));
         const styleId = node.styleId;
         if (styleId && !childItems.length) {
             return {
                 name: this.ellipsizeMenuLabel(node.name, styleId),
                 icon: 'palette',
-                command: () => { this.exportStyleSheet(styleId); }
+                command: () => { action(styleId); }
             };
         }
         if (styleId) {
             childItems.unshift({
-                name: 'Export',
-                icon: 'file_save',
-                command: () => { this.exportStyleSheet(styleId); }
+                name: actionName,
+                icon: actionIcon,
+                command: () => { action(styleId); }
             });
         }
         return {

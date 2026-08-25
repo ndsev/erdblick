@@ -2,7 +2,7 @@ import {inject, NgModule, provideAppInitializer} from '@angular/core';
 import {BrowserModule} from '@angular/platform-browser';
 import {AppRoutingModule} from './app.routing.module';
 import {AppComponent} from './app.component';
-import {provideHttpClient} from "@angular/common/http";
+import {provideHttpClient, withFetch} from "@angular/common/http";
 import {DialogModule} from "primeng/dialog";
 import {BrowserAnimationsModule} from "@angular/platform-browser/animations";
 import {AnimateOnScroll} from "primeng/animateonscroll";
@@ -24,14 +24,15 @@ import {SearchPanelComponent} from "./search/search.panel.component";
 import {JumpTargetService} from "./search/jump.service";
 import {MapInfoService} from "./mapdata/map-info.service";
 import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
-import {MapRenderService} from "./mapdata/map-render.service";
 import {InspectionSelectionService} from "./inspection/inspection-selection.service";
 import {SliderModule} from "primeng/slider";
 import {StyleService} from "./styledata/style.service";
 import {FeatureSearchComponent} from "./search/feature.search.component";
 import {SearchStyleColorComponent} from "./search/search-style-color.component";
+import {SearchStyleRuleEditorComponent} from "./search/search-style-rule-editor.component";
 import {FeatureSearchDialogsComponent} from "./search/feature.search.dialogs.component";
 import {FeatureSearchExportDialogComponent} from "./search/feature-search-export.dialog.component";
+import {SearchStyleSaveDialogComponent} from "./search/search-style-save.dialog.component";
 import {MapPanelComponent} from "./mapdata/map.panel.component";
 import {InspectionPanelComponent} from "./inspection/inspection.panel.component";
 import {FeaturePanelComponent} from "./inspection/feature.panel.component";
@@ -124,6 +125,10 @@ import {SearchCompletionPopupComponent} from "./search/search-completion-popup.c
 import {SimfilExpressionInputComponent} from "./search/simfil-expression-input.component";
 import {AdvancedPreferencesComponent} from "./auxiliaries/advanced-preferences.component";
 import {AppConfigService} from "./shared/app-config.service";
+import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
+import {CoordinatesLegalTermsDialogComponent} from "./coords/coordinates-legal-terms-dialog.component";
+import {CacheResetComponent} from "./auxiliaries/cache-reset.component";
+import {MapPresetService} from "./styledata/map-preset.service";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -164,10 +169,11 @@ export const initializeServices = () => {
     const configService = inject(AppConfigService);
     const stateService = inject(AppStateService);
     const styleService = inject(StyleService);
+    const mapPresetService = inject(MapPresetService);
     const tileStream = inject(MapTileStreamService);
     const inspectionSelection = inject(InspectionSelectionService);
-    const mapRender = inject(MapRenderService);
     const coordService = inject(CoordinatesService);
+    const coordinatesPolicy = inject(CoordinatesPolicyService);
     inject(FeatureSearchService);
 
     return (async () => {
@@ -180,14 +186,15 @@ export const initializeServices = () => {
         updateGlobalSpinner('Initializing core library');
         await initializeLibrary();
         stateService.initializePersistence();
+        coordinatesPolicy.initialize();
         updateGlobalSpinner('Initializing coordinates');
         coordService.initialize();
         updateGlobalSpinner('Loading styles');
         await styleService.initializeStyles();
+        mapPresetService.initialize();
         updateGlobalSpinner('Initializing map data');
         await tileStream.initialize();
         inspectionSelection.initialize();
-        mapRender.initialize();
     })();
 }
 
@@ -204,6 +211,7 @@ export const initializeServices = () => {
         CoordinatesPanelComponent,
         FeatureSearchComponent,
         SearchStyleColorComponent,
+        SearchStyleRuleEditorComponent,
         FeatureSearchDialogsComponent,
         FeatureSearchExportDialogComponent,
         DatasourcesComponent,
@@ -232,7 +240,8 @@ export const initializeServices = () => {
         DiagnosticsPerformanceDialogComponent,
         DiagnosticsLogDialogComponent,
         DiagnosticsExportDialogComponent,
-        AdvancedPreferencesComponent
+        AdvancedPreferencesComponent,
+        CoordinatesLegalTermsDialogComponent
     ],
     bootstrap: [
         AppComponent
@@ -242,10 +251,12 @@ export const initializeServices = () => {
         BrowserAnimationsModule,
         AnimateOnScroll,
         AppRoutingModule,
+        CacheResetComponent,
         AppDialogComponent,
         AppPanelComponent,
         AppSurfaceHeaderComponent,
         AppConfirmPopupComponent,
+        SearchStyleSaveDialogComponent,
         SearchCompletionPopupComponent,
         SimfilExpressionInputComponent,
         DialogModule,
@@ -307,7 +318,6 @@ export const initializeServices = () => {
         MapInfoService,
         MapTileStreamService,
         InspectionSelectionService,
-        MapRenderService,
         MessageService,
         ConfirmationService,
         InfoMessageService,
@@ -318,7 +328,7 @@ export const initializeServices = () => {
         EditorService,
         RightClickMenuService,
         DialogService,
-        provideHttpClient(),
+        provideHttpClient(withFetch()),
         provideAnimationsAsync(),
         providePrimeNG({
             ripple: true,

@@ -9,7 +9,10 @@ import {
     catchError, Subject
 } from "rxjs";
 import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
-import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
+import {
+    coreLib,
+    uint8ArrayToWasmOrThrow
+} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
 import {filter} from "rxjs/operators";
 import {shortId4, sipHash64Hex} from "./hash";
@@ -22,6 +25,10 @@ import {
     StyleValidationIssue,
     StyleValidationReport
 } from "./style-validation.model";
+import {canonicalSearchStyleFilename} from "../search/search-style-sheet.converter";
+import {LayerPresetDefinition} from "./layer-preset.model";
+
+const STATIC_STYLE_URL_PREFIX = "/static-config/styles/";
 
 /** Original server-provided builtin style source kept for resets and comparisons. */
 interface BuiltinStyleBaseline {
@@ -54,14 +61,35 @@ export type FeatureStyleOptionWithStringType = {
     internal: boolean
 };
 
+/** Minimal embind vector surface used while copying native preset metadata into TypeScript. */
+interface WasmVector<T> {
+    size(): number;
+    get(index: number): T | undefined;
+    delete(): void;
+}
+
+/** Native style-preset value shape exposed by the generated embind bindings. */
+interface WasmLayerPreset {
+    id: string;
+    name: string;
+    values: WasmVector<{optionId: string; value: boolean}>;
+}
+
+/** Feature-layer style surface after the native preset bindings have been generated. */
+type FeatureLayerStyleWithPresets = FeatureLayerStyle & {
+    presets(): WasmVector<WasmLayerPreset>;
+};
+
 export interface ErdblickStyle {
     id: string,
     modified: boolean,
     imported: boolean,
     additional: boolean,
+    category: "base" | "search",
     source: string,
     featureLayerStyle: FeatureLayerStyle,
     options: Array<FeatureStyleOptionWithStringType>,
+    presets: LayerPresetDefinition[],
     shortId: string,
     key?: string,
     type?: string,
@@ -80,6 +108,11 @@ export interface ErdblickStyleGroup extends Record<string, any> {
     children: Array<ErdblickStyleGroup | ErdblickStyle>;
     visible: boolean,
     expanded: boolean
+}
+
+interface ImportedStyleStoreV2 {
+    schemaVersion: 2;
+    sources: string[];
 }
 
 /**
@@ -147,13 +180,62 @@ export class StyleService {
         }
     }
 
+    /** Registers validated source text as a normal imported style. */
+    importStyleYamlSource(styleData: string, initialVisibility?: boolean): string | undefined {
+        const sourceRef = this.createStyleSourceRef(styleData, "", undefined, false, true, false);
+        const report = this.validateStyleSource(styleData, sourceRef);
+        const styleId = report.source.styleName;
+        if (!report.valid || !styleId) {
+            return undefined;
+        }
+        const conflict = this.styleIdentityConflict(styleId);
+        if (conflict) {
+            this.infoMessageService.showError(`A style named ${styleId} already exists.`);
+            return undefined;
+        }
+        const importedStyleId = this.initializeStyle(styleData, "", undefined, false, true);
+        if (!importedStyleId) {
+            return undefined;
+        }
+        if (initialVisibility !== undefined) {
+            this.stateService.setStyleVisibility(importedStyleId, initialVisibility);
+            this.styles.get(importedStyleId)!.visible = initialVisibility;
+        }
+        ++this.importedStylesCount;
+        try {
+            this.saveImportedStyles();
+        } catch (error) {
+            this.removeActiveStyleEntry(importedStyleId);
+            this.stateService.removeStyleVisibility(importedStyleId);
+            this.importedStylesCount = Math.max(0, this.importedStylesCount - 1);
+            console.error("Could not persist imported style.", error);
+            this.infoMessageService.showError(
+                `Could not save “${importedStyleId}” in browser storage. No style was created.`);
+            return undefined;
+        }
+        this.reapplyStyle(importedStyleId);
+        return importedStyleId;
+    }
+
+    /** Resolves a collision using the ordinary exact style-name, then configured-URL convention. */
+    styleIdentityConflict(styleIdOrUrl: string): ErdblickStyle | undefined {
+        return this.styles.get(styleIdOrUrl)
+            ?? [...this.styles.values()].find(style =>
+                !style.imported && !!style.url && style.url === styleIdOrUrl);
+    }
+
+    /** Returns whether the ordinary style lifecycle already owns this exact name or URL. */
+    hasStyleIdentity(styleId: string): boolean {
+        return !!this.styleIdentityConflict(styleId);
+    }
+
     /** Normalizes a configured style URL against the config path. */
     private normalizeConfiguredStyleUrl(entry: StyleConfigEntry): StyleConfigEntry {
         const normalized: StyleConfigEntry = {...entry};
         if (!normalized.url.startsWith("http")
             && !normalized.url.startsWith("bundle")
             && !normalized.url.startsWith("/")) {
-            normalized.url = `bundle/styles/${normalized.url}`;
+            normalized.url = `${STATIC_STYLE_URL_PREFIX}${normalized.url}`;
         }
         return normalized;
     }
@@ -226,11 +308,12 @@ export class StyleService {
             return undefined;
         }
 
-        const [wasmStyle, options, report] = parsedStyleAndOptions;
+        const [wasmStyle, options, presets = [], report] = parsedStyleAndOptions;
         const styleId = wasmStyle.name();
         sourceRef.styleName = styleId;
-        if (report) {
-            this.styleValidationReportService.recordReport(report, sourceRef);
+        const normalizedReport = report ?? this.createSuccessReport(styleString, sourceRef, styleId);
+        if (normalizedReport.issues.length) {
+            this.styleValidationReportService.recordReport(normalizedReport, sourceRef);
         }
         const existingStyle = this.styles.get(styleId);
         const previousKnownStyle = knownStyleId ? this.styles.get(knownStyleId) : undefined;
@@ -252,14 +335,21 @@ export class StyleService {
         }
 
         const isVisible = this.stateService.getStyleVisibility(knownStyleId ?? styleId, wasmStyle.defaultEnabled());
+        const categoryReader = wasmStyle as Partial<Pick<FeatureLayerStyle, "category">>;
+        const styleCategory = typeof categoryReader.category === "function"
+            && categoryReader.category() === coreLib.StyleCategory.Search
+            ? "search"
+            : "base";
         this.styles.set(styleId, {
             id: styleId,
             modified: modified,
             imported: imported,
             additional: additional,
+            category: styleCategory,
             source: styleString,
             featureLayerStyle: wasmStyle,
             options: options,
+            presets,
             shortId: shortId4(styleId),
             key: `${this.styles.size}`,
             type: "Style",
@@ -380,36 +470,55 @@ export class StyleService {
             return false;
         }
 
-        try {
-            // Ensure content.source is a string or convert to string if needed
-            const blobContent = content.source;
-            // Create a blob from the content
-            const blob = new Blob([blobContent], { type: 'application/x-yaml;charset=utf-8' });
-            // Create a URL for the blob
-            const url = window.URL.createObjectURL(blob);
-            // Check if URL creation was successful
-            if (!url) {
-                console.error('Failed to create object URL for the blob.');
-                return false;
-            }
-            // Create a temporary anchor tag to trigger the download.
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${styleId}.yaml`;
-            // Trigger the download.
-            const event = new MouseEvent('click', {
-                view: window,
-                bubbles: true,
-                cancelable: true,
-            });
-            a.dispatchEvent(event);
+        return this.downloadYamlSource(content.source, canonicalSearchStyleFilename(styleId));
+    }
 
-            // Revoke the blob URL to free up resources.
-            window.URL.revokeObjectURL(url);
-        } catch (e) {
-            console.error('Error while exporting YAML file:', e);
+    /** Returns whether this builtin style is backed by the writable source config mount. */
+    canSaveStyleToSource(styleId: string): boolean {
+        const style = this.styles.get(styleId);
+        return this.configService.snapshot.serverConfig?.styleEditingEnabled === true
+            && !!style
+            && !style.imported
+            && style.url.startsWith(STATIC_STYLE_URL_PREFIX);
+    }
+
+    /** Returns the server-advertised source styles directory for user-facing warnings. */
+    getStyleEditingDirectory(): string | null {
+        return this.configService.snapshot.serverConfig?.styleEditingDirectory ?? null;
+    }
+
+    /** Writes one applied builtin style back to its source YAML and adopts it as the new baseline. */
+    async saveStyleToSource(styleId: string): Promise<boolean> {
+        const style = this.styles.get(styleId);
+        if (!style || !this.canSaveStyleToSource(styleId)) {
             return false;
         }
+
+        try {
+            await firstValueFrom(this.httpClient.put(style.url, style.source, {responseType: "text"}));
+        } catch (error) {
+            console.error(`Failed to save style ${styleId} to ${style.url}.`, error);
+            return false;
+        }
+
+        const sourceHash = sipHash64Hex(style.source);
+        style.modified = false;
+        style.sourceRef = {
+            ...style.sourceRef,
+            sourceKind: style.additional ? "additional" : "base",
+            sourceHash
+        };
+        this.builtinStyleBaselines.set(style.url, {id: style.id, source: style.source});
+        this.styleHashes.set(style.url, {
+            id: style.id,
+            sha256: sourceHash,
+            isModified: false,
+            isUpdated: false
+        });
+        const persistedHashes = this.loadStyleHashes();
+        persistedHashes.set(style.url, sourceHash);
+        localStorage.setItem("styleHashes", JSON.stringify([...persistedHashes]));
+        this.saveModifiedBuiltinStyles();
         return true;
     }
 
@@ -437,20 +546,7 @@ export class StyleService {
             return false;
         }
 
-        const sourceRef = this.createStyleSourceRef(styleData, "", file.name, false, true, false);
-        const report = this.validateStyleSource(styleData, sourceRef);
-        if (!report.valid) {
-            return false;
-        }
-
-        const styleId = this.initializeStyle(styleData, "", "", false, true);
-        if (!styleId) {
-            return false;
-        }
-        ++this.importedStylesCount;
-        this.saveImportedStyles();
-        this.reapplyStyle(styleId);
-        return true;
+        return !!this.importStyleYamlSource(styleData);
     }
 
     /** Deletes an imported style and restores a matching builtin style when one exists. */
@@ -475,6 +571,7 @@ export class StyleService {
         }
 
         this.removeActiveStyleEntry(styleId);
+        this.stateService.removeStyleVisibility(styleId);
         this.importedStylesCount = Math.max(0, this.importedStylesCount - 1);
         this.saveImportedStyles();
         this.styleGroups.next(this.computeStyleGroups());
@@ -510,6 +607,9 @@ export class StyleService {
         const newStyleId = this.initializeStyle(styleSource, style.url ?? '', styleId, modified, style.imported, style.additional === true);
         if (!newStyleId) {
             return undefined;
+        }
+        if (newStyleId !== styleId) {
+            this.stateService.removeStyleVisibility(styleId);
         }
         this.synchronizeLifecycleForStyle(this.styles.get(newStyleId));
 
@@ -585,24 +685,33 @@ export class StyleService {
 
     /** Persists imported styles to local storage. */
     saveImportedStyles() {
-        // Omit the 'parent' field which is injected by prime-ng,
-        // so we do not get cyclic object errors.
-        localStorage.setItem('importedStyleData', JSON.stringify(
-            [...this.styles].filter(([_, value]) => value.imported),
-            (key, value) => key === 'parent' ? undefined : value
-        ));
+        const store: ImportedStyleStoreV2 = {
+            schemaVersion: 2,
+            sources: [...this.styles.values()]
+                .filter(style => style.imported)
+                .map(style => style.source)
+        };
+        localStorage.setItem('importedStyleData', JSON.stringify(store));
     }
 
     /** Restores imported styles from local storage. */
     loadImportedStyles() {
         const importedStyleData = localStorage.getItem('importedStyleData');
-        if (importedStyleData) {
-            for (let [_, style] of JSON.parse(importedStyleData)) {
-                if (!this.initializeStyle(style.source, "", style.id, false, true)) {
-                    continue;
-                }
-                this.importedStylesCount++;
+        if (!importedStyleData) {
+            return;
+        }
+        try {
+            const store = JSON.parse(importedStyleData) as Partial<ImportedStyleStoreV2>;
+            if (store.schemaVersion !== 2 || !Array.isArray(store.sources)) {
+                return;
             }
+            for (const source of store.sources) {
+                if (typeof source === "string" && this.initializeStyle(source, "", undefined, false, true)) {
+                    this.importedStylesCount++;
+                }
+            }
+        } catch (error) {
+            console.error("Could not restore imported styles.", error);
         }
     }
 
@@ -643,6 +752,30 @@ export class StyleService {
         localStorage.removeItem('builtinStyleData');
     }
 
+    /** Triggers a browser download for YAML source text. */
+    private downloadYamlSource(source: string, filename: string): boolean {
+        try {
+            const blob = new Blob([source], {type: 'application/x-yaml;charset=utf-8'});
+            const url = window.URL.createObjectURL(blob);
+            if (!url) {
+                return false;
+            }
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = filename;
+            anchor.dispatchEvent(new MouseEvent('click', {
+                view: window,
+                bubbles: true,
+                cancelable: true
+            }));
+            window.URL.revokeObjectURL(url);
+            return true;
+        } catch (error) {
+            console.error('Error while exporting YAML file:', error);
+            return false;
+        }
+    }
+
     /** Validates style source text and records the resulting report. */
     validateStyleSource(
         styleString: string,
@@ -650,13 +783,19 @@ export class StyleService {
     ): StyleValidationReport {
         const parsed = this.parseWasmStyle(styleString, sourceRef);
         if (!parsed) {
+            const sourceHash =
+                sourceRef.sourceHash ?? sipHash64Hex(styleString);
+            if (this.lastValidationReport?.source.sourceHash ===
+                sourceHash) {
+                return this.lastValidationReport;
+            }
             this.styleValidationReportService.clearForSource(sourceRef);
             const report = this.createClientValidationFailureReport(styleString, sourceRef, 'Style source could not be parsed.');
             this.styleValidationReportService.recordReport(report, sourceRef);
             this.lastValidationReport = report;
             return report;
         }
-        const [style, , report] = parsed;
+        const [style, , , report] = parsed;
         style.delete?.();
         const normalized = report ?? this.createSuccessReport(styleString, sourceRef, style.name());
         this.styleValidationReportService.recordReport(normalized, sourceRef);
@@ -664,7 +803,7 @@ export class StyleService {
         return normalized;
     }
 
-    /** Parses one YAML style source through the WASM core and extracts its option metadata. */
+    /** Parses one YAML style source and copies native option and preset metadata from WASM. */
     parseWasmStyle(styleString: string, sourceRef?: StyleSourceRef) {
         const styleUint8Array = this.textEncoder.encode(styleString);
         const yamlStyleNameRegex = /^\s*name\s*:\s*(?:(["'])(.*?)\1|([^\r\n#]+))/m;
@@ -676,14 +815,18 @@ export class StyleService {
             sourceHash: sipHash64Hex(styleString)
         } as StyleSourceRef;
 
-        const result = uint8ArrayToWasm(
-            (wasmBuffer: any) => {
-                const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
-                if (featureLayerStyle) {
+        let result: unknown;
+        try {
+            result = uint8ArrayToWasmOrThrow(
+                (wasmBuffer: any) => {
+                    const featureLayerStyle = new coreLib.FeatureLayerStyle(wasmBuffer);
+                    if (!featureLayerStyle) {
+                        return undefined;
+                    }
                     const report = this.readWasmValidationReport(featureLayerStyle, fallbackSourceRef, styleString);
                     if (!report.loadable || ((featureLayerStyle as any).isValid && !(featureLayerStyle as any).isValid())) {
                         featureLayerStyle.delete?.();
-                        return [undefined, [], report];
+                        return [undefined, [], [], report];
                     }
                     // Transport FeatureStyleOptions from WASM array to JS.
                     const options: FeatureStyleOptionWithStringType[] = [];
@@ -703,22 +846,77 @@ export class StyleService {
                         options.push(option);
                     }
                     wasmOptions.delete();
-                    return [featureLayerStyle, options, report];
-                }
-                return undefined;
-            },
-            styleUint8Array);
+
+                    // Copy native style presets before releasing their embind vector handles.
+                    const presets: LayerPresetDefinition[] = [];
+                    const wasmPresets = (featureLayerStyle as FeatureLayerStyleWithPresets).presets();
+                    try {
+                        for (let i = 0; i < wasmPresets.size(); ++i) {
+                            const wasmPreset = wasmPresets.get(i);
+                            if (!wasmPreset) {
+                                continue;
+                            }
+                            const values: LayerPresetDefinition["values"] = [];
+                            try {
+                                for (let valueIndex = 0; valueIndex < wasmPreset.values.size(); ++valueIndex) {
+                                    const value = wasmPreset.values.get(valueIndex);
+                                    if (value) {
+                                        values.push({optionId: String(value.optionId), value: value.value});
+                                    }
+                                }
+                            } finally {
+                                wasmPreset.values.delete();
+                            }
+                            presets.push({
+                                id: String(wasmPreset.id),
+                                name: String(wasmPreset.name),
+                                values
+                            });
+                        }
+                    } finally {
+                        wasmPresets.delete();
+                    }
+                    return [featureLayerStyle, options, presets, report];
+                },
+                styleUint8Array);
+        } catch (error) {
+            const detail =
+                error instanceof Error
+                    ? error.message
+                    : String(error);
+            const message =
+                `Style source could not be parsed by WASM: ${detail}`;
+            console.error(
+                `WASM style parsing failed for "${yamlStyleName}".`,
+                error
+            );
+            this.erroredStyleIds.set(
+                yamlStyleName,
+                detail || "WASM Parse Error");
+            const report =
+                this.createClientValidationFailureReport(
+                    styleString,
+                    fallbackSourceRef,
+                    message);
+            this.lastValidationReport = report;
+            this.styleValidationReportService.recordReport(
+                report,
+                fallbackSourceRef);
+            return undefined;
+        }
 
         if (result) {
-            const [featureLayerStyle, options, report] = result as [
+            const [featureLayerStyle, options, presets, report] = result as [
                 FeatureLayerStyle | undefined,
                 FeatureStyleOptionWithStringType[],
+                LayerPresetDefinition[],
                 StyleValidationReport | undefined
             ];
             if (featureLayerStyle) {
-                return [featureLayerStyle, options, report] as [
+                return [featureLayerStyle, options, presets, report] as [
                     FeatureLayerStyle,
                     FeatureStyleOptionWithStringType[],
+                    LayerPresetDefinition[],
                     StyleValidationReport
                 ];
             }
@@ -726,6 +924,7 @@ export class StyleService {
                 report?.source.styleName ?? yamlStyleName,
                 report?.issues[0]?.message ?? 'Style validation failed');
             if (report) {
+                this.lastValidationReport = report;
                 this.styleValidationReportService.recordReport(report, fallbackSourceRef);
             }
             return undefined;
@@ -733,8 +932,15 @@ export class StyleService {
 
         console.error(`Encountered Uint8Array parsing issue in style "${yamlStyleName}" for the following YAML data:\n${styleString}`)
         this.erroredStyleIds.set(yamlStyleName, "YAML Parse Error");
+        const report =
+            this.createClientValidationFailureReport(
+                styleString,
+                fallbackSourceRef,
+                'Style source could not be parsed by WASM.');
+        this.lastValidationReport = report;
         this.styleValidationReportService.recordReport(
-            this.createClientValidationFailureReport(styleString, fallbackSourceRef, 'Style source could not be parsed by WASM.'));
+            report,
+            fallbackSourceRef);
         return undefined;
     }
 

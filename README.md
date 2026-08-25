@@ -16,7 +16,7 @@ Those documents now host the detailed instructions that previously lived in this
 | Mode | Description |
 | --- | --- |
 | Full | Default build that includes maps/layers panel, style editor, search, inspector, and diagnostics. |
-| Visualization-only | Lightweight bundle for kiosks or embeds. Only the canvas renders; configuration is provided via URL parameters or `config.json`. |
+| Visualization-only | Lightweight bundle for kiosks or embeds. Only the canvas renders; configuration is provided via URL parameters or `/static-config/config.json`. |
 
 Select a mode when running `./build-ui.bash <output-folder> [visualization-only]`. Integrations such as the MapViewer container use the `ERDBLICK_VARIANT` environment variable to pick the variant they embed. The [Setup Guide](docs/erdblick-setup.md) documents both workflows.
 
@@ -69,7 +69,7 @@ The `*.ndjson` files in `coverage/playwright/` are raw intermediate artifacts us
 
 ## Styling System
 
-- Styles live in `config/styles/*.yaml` and can be edited inside the UI.
+- Styles live in `config/styles/*.yaml`; a local MapViewer build can save editor changes directly back to those source files.
 - The rules reference Simfil expressions (`color-expression`, `filter`, etc.) and can target features, relations, or attribute geometries.
 - Import/export buttons store styles in browser `localStorage` for quick experimentation.
 

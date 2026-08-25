@@ -1,4 +1,15 @@
 @media only screen and (max-width: 56em) {
+  .pref-dialog,
+  .diagnostics-performance-dialog,
+  .diagnostics-log-dialog,
+  .map-layer-dialog,
+  .editor-dialog,
+  .style-compare-dialog {
+    .app-dialog-resize-handle {
+      display: none;
+    }
+  }
+
   .maps-close-button {
     position: absolute;
     top: 3em;
@@ -65,8 +76,11 @@
       max-height: calc(100vh - 11.5em);;
       border-radius: 0;
       margin-left: -3em;
-      resize: none;
       left: 3em;
+    }
+
+    .search-resize-handle {
+      display: none;
     }
 
     .p-dialog {
@@ -143,6 +157,7 @@
     .p-dialog {
       width: 100vw !important;
       height: calc(100vh - 3em) !important;
+      min-width: 0 !important;
       max-width: 100vw !important;
       max-height: calc(100vh - 3em) !important;
       margin: 0;
@@ -156,8 +171,11 @@
     }
 
     .p-dialog-content {
+      width: 100%;
+      min-width: 0;
       padding: 0.5em;
       border-radius: 0;
+      overflow-x: auto;
     }
 
     .tabs-container {

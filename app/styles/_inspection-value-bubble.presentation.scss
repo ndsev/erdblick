@@ -1,0 +1,143 @@
+@mixin base($interactive: false) {
+  --inspection-value-bubble-color: var(--p-primary-color);
+  --inspection-value-bubble-outline-style: solid;
+  --inspection-value-bubble-outline-width: 1px;
+
+  background: color-mix(in srgb, var(--inspection-value-bubble-color) 16%, var(--p-content-background));
+  border: var(--inspection-value-bubble-outline-width) var(--inspection-value-bubble-outline-style)
+    color-mix(in srgb, var(--inspection-value-bubble-color) 54%, var(--p-content-border-color));
+  border-radius: 0.18rem;
+  color: var(--p-content-color);
+  flex: 0 0 auto;
+  font: inherit;
+  line-height: 1.15;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0.04em 0.32em;
+  white-space: nowrap;
+
+  @if $interactive {
+    cursor: pointer;
+
+    &:hover {
+      background: color-mix(in srgb, var(--inspection-value-bubble-color) 30%, var(--p-content-background));
+      border-color: color-mix(in srgb, var(--inspection-value-bubble-color) 58%, var(--p-content-border-color));
+    }
+  }
+}
+
+@mixin variants {
+  .inspection-value-bubble-outline-1 {
+    --inspection-value-bubble-outline-style: dashed;
+  }
+
+  .inspection-value-bubble-outline-2 {
+    --inspection-value-bubble-outline-style: dotted;
+    --inspection-value-bubble-outline-width: 2px;
+  }
+
+  .inspection-value-bubble-outline-3 {
+    --inspection-value-bubble-outline-style: double;
+    --inspection-value-bubble-outline-width: 3px;
+  }
+
+  .inspection-value-bubble-outline-4 {
+    box-shadow:
+      inset 2px 0 0 color-mix(in srgb, var(--inspection-value-bubble-color) 72%, var(--p-content-color)),
+      inset -2px 0 0 color-mix(in srgb, var(--inspection-value-bubble-color) 72%, var(--p-content-color));
+  }
+
+  .inspection-value-bubble-outline-5 {
+    box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--inspection-value-bubble-color) 74%, var(--p-content-color));
+  }
+
+  .inspection-value-bubble-outline-6 {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--inspection-value-bubble-color) 64%, var(--p-content-color));
+  }
+
+  .inspection-value-bubble-outline-7 {
+    outline: 1px dotted color-mix(in srgb, var(--inspection-value-bubble-color) 88%, var(--p-content-color));
+    outline-offset: -3px;
+  }
+
+  .inspection-value-bubble-color-0 {
+    --inspection-value-bubble-color: var(--p-blue-500, #3b82f6);
+  }
+
+  .inspection-value-bubble-color-1 {
+    --inspection-value-bubble-color: var(--p-green-500, #22c55e);
+  }
+
+  .inspection-value-bubble-color-2 {
+    --inspection-value-bubble-color: var(--p-yellow-500, #eab308);
+  }
+
+  .inspection-value-bubble-color-3 {
+    --inspection-value-bubble-color: var(--p-orange-500, #f97316);
+  }
+
+  .inspection-value-bubble-color-4 {
+    --inspection-value-bubble-color: var(--p-pink-500, #ec4899);
+  }
+
+  .inspection-value-bubble-color-5 {
+    --inspection-value-bubble-color: var(--p-cyan-500, #06b6d4);
+  }
+
+  .inspection-value-bubble-color-6 {
+    --inspection-value-bubble-color: var(--p-teal-500, #14b8a6);
+  }
+
+  .inspection-value-bubble-color-7 {
+    --inspection-value-bubble-color: var(--p-purple-500, #a855f7);
+  }
+
+  .inspection-value-bubble-color-8 {
+    --inspection-value-bubble-color: var(--p-red-500, #ef4444);
+  }
+
+  .inspection-value-bubble-color-9 {
+    --inspection-value-bubble-color: var(--p-lime-500, #84cc16);
+  }
+
+  .inspection-value-bubble-stripe-1 {
+    background:
+      repeating-linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--inspection-value-bubble-color) 20%, transparent) 0 2px,
+        transparent 2px 5px
+      ),
+      color-mix(in srgb, var(--inspection-value-bubble-color) 14%, var(--p-content-background));
+  }
+
+  .inspection-value-bubble-stripe-2 {
+    background:
+      repeating-linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--inspection-value-bubble-color) 18%, transparent) 0 2px,
+        transparent 2px 6px
+      ),
+      color-mix(in srgb, var(--inspection-value-bubble-color) 14%, var(--p-content-background));
+  }
+
+  .inspection-value-bubble-stripe-3 {
+    background:
+      radial-gradient(
+        circle at 3px 3px,
+        color-mix(in srgb, var(--inspection-value-bubble-color) 30%, transparent) 0 1px,
+        transparent 1.5px
+      ),
+      color-mix(in srgb, var(--inspection-value-bubble-color) 14%, var(--p-content-background));
+    background-size: 6px 6px;
+  }
+
+  .inspection-value-bubble-stripe-4 {
+    background:
+      linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--inspection-value-bubble-color) 18%, transparent) 0 45%,
+        transparent 45% 100%
+      ),
+      color-mix(in srgb, var(--inspection-value-bubble-color) 14%, var(--p-content-background));
+  }
+}

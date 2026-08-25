@@ -54,6 +54,45 @@ test.describe('Inspection panels over TestMap/WayLayer', () => {
         await selectFeatureForInspection(page, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0], 'Way.1');
         const panels = page.getByTestId('inspection-container').getByTestId('inspection-panel');
         await expect(panels).toHaveCount(2);
+
+        const handles = panels.getByTestId('app-panel-resize-handle');
+        await expect(handles).toHaveCount(2);
+        const firstContent = panels.first().locator('.app-panel-content-resizable');
+        await expect(firstContent).toBeVisible();
+        expect(await firstContent.evaluate(element => getComputedStyle(element).resize)).toBe('none');
+        expect(await firstContent.evaluate(element => getComputedStyle(element).direction)).toBe('ltr');
+
+        const before = await firstContent.boundingBox();
+        const handleBox = await handles.first().boundingBox();
+        if (!before || !handleBox) {
+            throw new Error('Expected the stacked panel and its resize handle to be measurable');
+        }
+        const startX = handleBox.x + 3;
+        const startY = handleBox.y + handleBox.height - 3;
+        await page.mouse.move(startX, startY);
+        await page.mouse.down();
+        await page.mouse.move(startX, startY + 48);
+        await page.mouse.up();
+
+        await expect.poll(async () => (await firstContent.boundingBox())?.height ?? 0)
+            .toBeGreaterThan(before.height + 30);
+        const after = await firstContent.boundingBox();
+        if (!after) {
+            throw new Error('Expected the resized panel body to remain measurable');
+        }
+        const resizedHeight = after.height;
+        const panelId = await panels.first().evaluate(element =>
+            element.closest('inspection-panel')?.getAttribute('data-panel-id') ?? null
+        );
+        if (!panelId) {
+            throw new Error('Expected the resized inspection panel to expose its persisted layout id');
+        }
+        const persistedHeight = await page.evaluate(id => {
+            const layouts = JSON.parse(localStorage.getItem('dialogLayouts') ?? '{}');
+            return layouts[`inspection:${id}`]?.panelSize?.height as number | undefined;
+        }, panelId);
+        expect(persistedHeight).toBeDefined();
+        expect(Math.abs(persistedHeight! - resizedHeight)).toBeLessThanOrEqual(2);
     });
 
     test('collapsing a single docked inspection hides tree content and restores it on expand', async ({ page, request }) => {

@@ -33,12 +33,16 @@ The palette closes automatically when you click the map or another control, but 
 | **Mapget Tile ID** | `<tileId>` (integer without spaces) | Navigates to the requested tile by computing its bounding box. Useful for links copied from logs or SourceData tools. |
 | **WGS84 Lon-Lat Coordinates** | `lon, lat` or `lon lat [level]` (decimal) / `12°34'56"W 48°01'30"N [level]` (DMS) | Positions the active view on the provided longitude/latitude pair. An optional zoom `level` snaps to the matching tile. |
 | **WGS84 Lat-Lon Coordinates** | `lat, lon` or `lat lon [level]` (decimal/DMS) | Same as above but with the order reversed for users accustomed to `lat,lon` input. |
-| **Open WGS84 Lat-Lon in Google Maps** | Same patterns as "WGS84 Lat-Lon" | Opens a new Google Maps tab centered on the parsed coordinates and drops a marker in erdblick. |
-| **Open WGS84 Lat-Lon in OpenStreetMap** | Same patterns as "WGS84 Lat-Lon" | Opens OpenStreetMap in a new tab and marks the same position in erdblick. |
+| **Open in Google Maps** | Optional WGS84 coordinates | Opens Google Maps at the supplied coordinates, or at the current marker/viewport fallback location. |
+| **Open in Google Street View** | Optional WGS84 coordinates | Opens Google Street View at the supplied coordinates, or at the current marker/viewport fallback location. |
+| **Open in OpenStreetMap** | Optional WGS84 coordinates | Opens OpenStreetMap at the supplied coordinates, or at the current marker/viewport fallback location. |
+| **Open in Bing Maps** | Optional WGS84 coordinates | Opens Bing Maps at the supplied coordinates, or at the current marker/viewport fallback location. |
 | **Inspect Tile Layer Source Data** | `<tileId> ["Map Id"] ["Source Layer"]`<br/>Quotes are optional; escape spaces with `\ ` | Opens the SourceData inspector for the chosen tile/layer. The validator checks that the map ID exists and that the layer matches a known SourceData entry. |
 | **Feature ID Jump** | `FeatureType key1=value1 key2=value2 ...` | Locates a specific feature by its identifier fields, pans the active view to the match, and highlights it. Only feature types advertised by the loaded maps are offered. |
 
 All coordinate targets accept decimal or degree-minute-second formats. When you include a zoom level, erdblick converts the coordinates into a tile rectangle before animating the camera.
+
+The four **Open in** actions use explicit coordinates when the input is a valid WGS84 pair. With ordinary text or an empty input, they use the enabled marker position if one exists, otherwise the centre of the focused viewport. They only open the external service: they do not move the erdblick camera or create a marker. Right-click a map location and use **Open in…** for the same services at that exact location.
 <!-- --8<-- [end:jump-targets] -->
 
 ### Place-Name Location Search
@@ -80,7 +84,11 @@ Typing `tileId "Map" "SourceLayer"` is not the only way to reach SourceData:
 <!-- --8<-- [start:feature-search] -->
 Running **Search Loaded Features** opens a persistent feature-search session. Each session owns its query, selected map layers, selected views, streamed result set, visualization settings, diagnostics, and browser-state entry.
 
-The backend search runs through mapget. It searches the selected map/layer coverage for the current visible tiles, loads the source tile stages required for evaluation, and streams `TileSearchResultLayer` chunks back to erdblick. Results can appear while the backend is still searching and while the result tree is still being built.
+The backend search is an ordinary mapget `/filter` presentation. It evaluates
+the selected map/layer coverage and streams immutable `TileSubsetLayer`
+results. The same subset feeds styled map geometry and frame-budgeted result
+list ingestion, so matches can appear while backend work and tree construction
+are still in progress.
 
 Important controls:
 
@@ -88,7 +96,7 @@ Important controls:
 - **Enabled toggle** - disables a search without deleting it. A disabled search keeps its query and results visible but does not run, auto-update, or accept query edits until it is enabled again.
 - **Query input** - edit the Simfil expression inline. Press `Enter` to rerun. If the text differs from the active search, the refresh action becomes **Rerun search**.
 - **Map Layers** - restrict the search to selected maps and layers. This also narrows schema-aware completion and style-field pickers.
-- **Scope** - choose `Auto`, `Feature`, or `Attribute`. Feature scope evaluates once per feature. Attribute scope evaluates once per attribute/validity context and exposes `$name`, `$layer`, `$feature`, `$validityIndex`, and `$validityCount`. Auto chooses attribute scope when schema metadata proves that the query targets attribute-layer fields.
+- **Scope** - choose `Auto`, `Feature`, or `Attribute`. Feature scope evaluates once per feature. Attribute scope evaluates once per attribute/validity context and exposes `$name`, `$layer`, `$feature`, `$attributeIndex`, `$hasValidity`, `$validityIndex`, and `$validityCount`. Auto chooses attribute scope when schema metadata proves that the query targets attribute-layer fields.
 - **View** - in split view, choose where the result layer is visualized: left view, right view, or both. Auto-update follows the visible tiles of the selected view set.
 - **Auto update area** - when enabled, panning, zooming, layer changes, and split-view changes refresh the search area automatically. When disabled, use **Update area** to replace the search area with the current visible tiles without changing the query.
 - **Refresh / rerun** - refresh repeats the active search over its current area. When the query text is dirty, the same action becomes **Rerun search** and commits the edited query before searching.
@@ -102,7 +110,7 @@ Important controls:
 The **Results** tab is built for large streamed result sets.
 
 - **Progress** is split into backend search, result chunk ingress, and result-tree construction. A search can show matches before all progress phases are complete.
-- **Grouping** lets you organize results by map, layer, feature, and tile. Counts per branch keep large sets navigable.
+- **Grouping** lets you organize results by map, layer, feature, and tile. Counts per branch keep large sets navigable. Groups expand automatically once the search and frame-budgeted tree construction are complete; later manual collapse is preserved.
 - **Filtering** appears when the tree contains results and filters matched feature rows without rerunning the backend search.
 - **Selection** is a normal feature-selection entry point. Clicking a result focuses the map, opens or updates inspection, and highlights the matched feature.
 - **Attribute-scope selection** can focus a specific attribute/validity target instead of only the owning feature. When validity geometry is available, the map highlight follows that validity.
@@ -113,7 +121,7 @@ The **Results** tab is built for large streamed result sets.
 ## Result Visualization
 
 <!-- --8<-- [start:visualization] -->
-The **Visualization** tab controls how one search session is drawn on the map. These settings are separate from persistent YAML style sheets.
+The **Visualization** tab controls how one search session is drawn on the map. Its high-fidelity rules can also be saved as ordinary reusable YAML stylesheets.
 
 ### Result Density Map
 
@@ -141,11 +149,20 @@ Search style rules are evaluated only for the result layer of the current search
 - **Add Rule** creates another rule. Reset restores a rule to its generated defaults; delete removes it. Rule names are only local labels for keeping several result styles readable.
 - Rule headers show compact summaries for geometry, filters, color mode, and preview colors.
 - **Filter** conditions can use schema-backed field pickers, comparison operators, numeric inputs, enum value pickers, text values, or custom Simfil expressions. Multiple conditions inside one rule are combined for that rule.
-- **Geom** chooses the rendered kind: any geometry, line, polygon, mesh, point, or label. Geometry rules expose the relevant width, size and opacity controls for the selected kind.
+- **Geom** chooses one or more rendered geometry groups. **Any geometry** and **Label** are exclusive modes; line, surface, polygon, mesh, and point groups can be combined. Geometry rules expose the relevant width, radius, size, and opacity controls for the selection.
+- Automatic styles use a 20 px point rule and a 5 px combined line/surface rule so both geometry families remain legible without duplicating every concrete surface type.
 - **Labels** can use a selected field or a custom label expression. Common labels are speed-limit values, feature types, validation rule IDs, and issue IDs.
 - **Color** supports solid colors, numeric gradients, and categories for enum/string-like values. Category and gradient modes include a fallback color for missing or unmatched values. **Update from data** uses the Diagnostics/Values summaries from the current result set when available.
 
 Auto-created rules prefer fields mentioned by the query. Manual edits stop those rules from being replaced by later query changes.
+
+Use **Save** beside the high-fidelity controls to create a canonical stylesheet. The small save dialog accepts the exact stylesheet name, optional layer affinity, and a checked-by-default **Enable this style upon save** checkbox. Slashes in the name create the same groups used by the normal Styles tree. Empty affinity means any feature layer; selected layer IDs are stored as an escaped exact-match `layer` expression and apply to every map that uses that ID. **Save** creates the style and closes the dialog; **Save and Open** creates it and then opens the ordinary Style Editor. **Cancel** creates nothing. Saving is create-only: an empty rule list or a name/URL collision is rejected without overwriting anything. The generated source has `category: search`, `version: 2`, a root `default` matching the checkbox, one per-layer **Show &lt;stylesheet name&gt;** Boolean option that defaults on, and one flat top-level YAML rule per GUI rule. Every generated rule is gated by that option. The imported style's initial global visible state matches the save checkbox; once active, its per-layer option is available in Maps & Layers.
+
+Only high-fidelity style semantics are saved. The query, search scope, selected maps/layers, feature types, result views, density controls, and source-specific rule applicability remain outside the stylesheet. The saved YAML is registered immediately as a normal browser-imported style and appears under **Edit -> Styles Configurator -> Styles** with a **Search** tag.
+
+The adjacent **Saved styles** menu lists loaded stylesheets whose category is `search`. Selecting one projects every compatible rule into the current GUI as a detached copy. Root `default`, `layer`, and the generated per-layer visibility option govern ordinary stylesheet rendering; they do not alter the active search scope when rules are copied here. The converter removes its generated option gate from the detached rule copy. Editing that copy does not change the stylesheet, and later stylesheet edits do not change the search. A partially compatible stylesheet remains selectable and reports every rule omitted from the copy. A stylesheet with no compatible rules is shown in red and disabled.
+
+Edit a saved stylesheet from the ordinary Styles tree. The Style Editor opens on **Quick**, which reuses the rule controls, expands every rule initially, and also provides **Advanced** for authoritative YAML editing. Quick exposes the stylesheet name and exact layer-affinity IDs at the top; no selected layer means Any. An arbitrary existing affinity regex is shown as Custom and remains untouched until you explicitly replace or clear it. Quick changes update Advanced immediately. Rules or properties outside the current controls are preserved; a help icon beside the affected rule explains preserved or Advanced-only content. The switch in the dialog header enables or disables the currently loaded stylesheet immediately without changing its YAML `default`. Apply the editor changes to update the imported stylesheet, or use the ordinary **Export** action to download it.
 
 Use density markers for broad searches or early exploration. Switch to high-fi geometry and labels when the visible tile count is small enough that individual result geometry is more useful than aggregate buckets.
 <!-- --8<-- [end:visualization] -->

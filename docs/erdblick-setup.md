@@ -21,12 +21,12 @@ Some container images or products ship a prebuilt erdblick bundle in a directory
    ```bash
    mapget serve -w ~/Downloads/erdblick-dist
    ```
-4. Open the printed URL in your browser. The UI loads `config.json` from the bundle for style declarations and extension modules, then connects to the backend via the `/sources` and `/tiles` endpoints to discover data.
+4. Open the printed URL in your browser. The UI loads `/static-config/config.json` for style declarations and extension modules, then connects to the backend via the mapget catalog and interactive tile endpoints to discover data.
 
 ## Running from source
 
 1. Install Node.js LTS and PNPM (or npm) according to the requirements in `package.json`.
-2. From the erdblick repository root, run `./build-ui.bash .` for an optimized production bundle. Set `NG_DEVELOP=true` before running the script if you need source maps and more verbose stack traces. Advanced setups can also use `./ci/20_linux_rebuild.bash` as part of a larger build pipeline.
+2. From the erdblick repository root, run `./build-ui.bash .` for an optimized production bundle. Set `NG_DEVELOP=true` before running the script if you need a development build. Advanced setups can also use `./ci/20_linux_rebuild.bash`: its default profiling build keeps the release WASM and production Angular optimizer, but preserves JavaScript identifiers and source maps. Pass `production` for the compact deployment build.
 3. Serve the build output directory with `mapget serve -w <path-to-dist>` or run a development server with:
    ```bash
    npm install
@@ -54,19 +54,20 @@ sources:
 
 Whenever the YAML file changes, mapget applies the new sources immediately; erdblick will pick them up as soon as `/sources` reflects the update. If your backend exposes a writable `/config` endpoint, you can adjust data sources from inside erdblick via the DataSource editor—see the dedicated guide for that workflow.
 
-At startup erdblick loads bundled `config.json` first, then tries to read `/config` best-effort. If the response is HTTP `200` and contains an object at `erdblick`, non-empty values from that object override or extend the bundled config even when the datasource model is unavailable. If `/config` is missing, unreachable, or does not contain a valid `erdblick` object, erdblick continues with `config.json`.
+At startup erdblick loads `/static-config/config.json` first, then tries to read `/config` best-effort. If the response is HTTP `200` and contains an object at `erdblick`, non-empty values from that object override or extend the static config even when the datasource model is unavailable. If `/config` is missing, unreachable, or does not contain a valid `erdblick` object, erdblick continues with `/static-config/config.json`.
 
-The server `erdblick` object uses the same keys as `config.json`: `styles`, `extensionModules`, `surveys`, `backgroundLayers`, `defaultBackgroundLayerId`, and optional `state`. Empty arrays, empty objects, empty strings, and `null` values are treated as absent and do not clear bundled config.
+The server `erdblick` object uses the same keys as `config.json`: `styles`, `mapPresets`, `extensionModules`, `surveys`, `backgroundLayers`, `defaultBackgroundLayerId`, `coordinates-enabled`, `coordinates-legal-terms`, and optional `state`. Empty arrays, empty objects, and empty strings are normally treated as absent, except that a present server `mapPresets` list replaces the bundled list and `mapPresets: []` explicitly clears it.
 
 The `state` key uses the same snapshot shape exported by Advanced Preferences, not URL query parameter names. It seeds the viewer before local browser storage and URL parameters are applied.
 
 ## Customizing `config/`
 
-The `config/` directory in the erdblick source tree controls UI-side metadata:
+The `config/` directory used to build or host erdblick controls UI-side metadata:
 
 - `config/config.json` lists built-in style bundles and optional extension modules. Common keys:
-  - `styles`: array of `{ "id": "...", "url": "<file>.yaml" }`; plain filenames are requested from `bundle/styles/` and this list defines the base style set.
+  - `styles`: array of `{ "id": "...", "url": "<file>.yaml" }`; plain filenames are requested from `/static-config/styles/` and this list defines the base style set.
   - `additionalStyles`: optional array of extra style entries appended after the base style set. Entries use the same string or `{ "id": "...", "url": "..." }` shape as `styles`, but are tagged as additional in the UI.
+  - `mapPresets`: optional inline array of map-agnostic compositions. Each entry has `id`, `name`, optional `enabled`, and a non-empty `layerPresets` list whose entries identify an exact `layerId`, owning `styleId`, and embedded `presetId`. A map uses the components for layers it actually has, requires at least one matching component, and rejects references that are broken for a layer it does have. There is no external preset file or URL.
   - `extensionModules.distribVersions`: JavaScript file to display version provenance in the footer.
   - `extensionModules.jumpTargets`: JavaScript file that supplies additional jump-to shortcuts.
   - `surveys`: optional array configuring the in-app survey banner (`id`, `link`, `linkHtml`, optional `start`/`end` dates, `emoji`, and `background`); omit or leave empty to disable surveys.
@@ -74,30 +75,50 @@ The `config/` directory in the erdblick source tree controls UI-side metadata:
     - `xyz`: tiled raster sources with `urlTemplate`, `minZoom`, `maxZoom`, `tileSize`, optional `extent`, optional HTTP `headers`, and `defaultOpacity`. If `maxZoom` is omitted, erdblick now allows XYZ sources up to level 22; cap public providers explicitly when they stop earlier.
     - `wms`: deck.gl `WMSLayer` sources with `url`, `layers`, optional `version`, `crs`, `format`, `transparent`, optional HTTP `headers`, optional `vendorParameters`, and `defaultOpacity`.
   - `defaultBackgroundLayerId`: optional id of the background enabled by default for new views.
+  - `coordinates-enabled`: optional boolean default for the browser-local **Show coordinates** preference. The bundled default is `true`. This controls only the coordinate readout; marker enable/reset and focus controls remain available.
+  - `coordinates-legal-terms`: optional browser-reachable JSON, YAML, or YML document containing a non-empty `legal-terms` string. Supplying it forces the initial coordinate display off until the user accepts the terms.
 - `config/styles/*.yaml`: style sheets that appear in the Styles dialog.
 - `config/*.js`: optional modules referenced from `config.json`.
 - `images/backgrounds/*`: optional bundled XYZ raster tiles. The default config includes OpenStreetMap as the active background, an online Esri World Imagery entry for higher zoom satellite imagery, and a coarse bundled Blue Marble overview under `bundle/images/backgrounds/world-overview/...` for offline fallback. The `world-overview` path is kept stable for compatibility even though the user-facing layer name is now `Blue Marble`.
 
+The effective `mapPresets` list is configuration-owned and is not AppState or browser storage. A present server list replaces the static list, including when the server list is explicitly empty. When the server key is omitted, a valid static catalog remains effective. It is read-only without a writable server target; with a durable MapViewer YAML and `allow-post-config`, it becomes the initial writable catalog and the first change writes its complete value into the omitted key. If both sources omit the key, that same write capability exposes a writable empty catalog for first-time setup. The **Map Presets** tab is always visible. An empty native MapViewer catalog with configuration writes disabled reports: “Configuring map presets is not allowed. Modify the server configuration to allow access”. An empty static `config.json`-only deployment reports: “No map presets configured. Please, add map presets in the configuration”. When either read-only catalog is populated, a notice appears below the preset buttons and above the list. The native MapViewer notice repeats: “Configuring map presets is not allowed. Modify the server configuration to allow access”; the static-only notice reads: “Using static configuration. Modify the configuration to update map presets”. Valid survivors from malformed server input remain usable, but editing is disabled until the YAML is repaired.
+
+Native MapViewer deployments advertise a narrow, revision-guarded map-preset write capability when `allow-post-config` is enabled and the server catalog is valid. The list does not need to exist initially: the first successful mutation creates `erdblick.mapPresets` in the durable YAML. Add, availability toggles, and raw Apply send the complete list to registered-field `PATCH /config` using `If-Match`; conflicts refetch the authoritative catalog. While writable, a sticky warning states: “Changes to map presets are saved to the server configuration,” and the native host prints `ERDBLICK MAP PRESETS EDITING IS ENABLED` at startup. Static-only deployments, `allow-post-config: false` catalogs, and Python-launched Docker sessions are read-only because the latter mounts a disposable transformed YAML copy. Per-view selected map/layer presets remain ordinary browser state.
+
 The bundled overview layer is documented in `docs/erdblick-backgrounds.md`.
 
-Edit these files before running `build-ui.bash`, or replace them on disk after building by overlaying the `config/` directory in your deployment. For example, a Docker image might be started with:
+Standalone Angular builds copy these assets below `/static-config`. MapViewer instead publishes its own flat `config/` directory at that route, so style and extension-module files are not compiled into the frontend JavaScript.
+
+Packaged deployments can replace the runtime `static-config/` directory beside the `mapviewer` executable. For example, a Docker image can mount replacements at the corresponding packaged paths:
 
 ```bash
 docker run --rm -it -p 8089:8089 --name erdblick \
-  -v $HOME/custom-config.json:/srv/erdblick/config/config.json:ro \
-  -v $HOME/custom-styles:/srv/erdblick/config/styles:ro \
+  -v $HOME/custom-config.json:/srv/mapviewer/static-config/config.json:ro \
+  -v $HOME/custom-styles:/srv/mapviewer/static-config/styles:ro \
   erdblick:latest
 ```
 
-Adapt the target paths (`/srv/erdblick/...`) to match the layout used by your own packaging.
+Adapt the target paths to match the layout used by your own packaging.
 
-If the hosting backend supplies `/config.erdblick`, prefer that for deployment-specific defaults that should vary by backend instance. Keep `config/config.json` for bundle defaults that should travel with the erdblick build itself. Server-supplied paths use the same route assumptions as `config.json`; erdblick does not create new static routes for styles, modules, or background assets by itself.
+If the hosting backend supplies `/config.erdblick`, prefer that for deployment-specific defaults that should vary by backend instance. Keep `config/config.json` for defaults that should travel with the erdblick deployment. Server-supplied paths use the same route assumptions as `config.json`; erdblick does not create new static routes for styles, modules, background assets, or legal-term documents by itself.
+
+### MapViewer source-style editing
+
+When a locally built `mapviewer` can still access the `config/` directory from which it was compiled, it serves that directory directly at `/static-config`. The server advertises this development mode in the `erdblickRuntime` field of `/config`, mounts `/static-config/styles` as writable, and prints a prominent startup warning. The erdblick frontend shows the same persistent warning and adds **Save to Source** to the style editor. That action overwrites the existing YAML file in `config/styles/`; it does not create arbitrary files or make other static-config assets writable.
+
+The generated `config/config.json` remains a normal build artifact. Re-run CMake when `config.json.in` substitutions change. Editing or saving an existing YAML style requires neither a CMake step nor an Angular rebuild; reload or resynchronize the style in erdblick to read an external edit.
+
+If the source directory is unavailable, MapViewer falls back to the filtered `static-config/` copy beside the executable. That mode is read-only and does not expose the source-save action.
 
 ## Serving styles and resources
 
-Style entries that do not start with `http`, `bundle`, or `/` are resolved under `bundle/styles/`. Root-relative paths are requested as written and must be exposed by the hosting backend. Keep shared YAML definitions in a directory under source control, copy them into the bundle during build time, and expose the same directory through your deployment pipeline. Imported styles (via the browser UI) always live in each user’s `localStorage`; clearing site data or using the reset actions in the Preferences and Styles dialogs removes them.
+Style entries that do not start with `http`, `bundle`, or `/` are resolved under `/static-config/styles/`. Root-relative paths are requested as written and must be exposed by the hosting backend. Imported styles (via the browser UI) always live in each user’s `localStorage`; clearing site data or using the reset actions in the Preferences and Styles dialogs removes them.
 
 Backends may also provide an `additionalStyles` list in `/config.erdblick` to append deployment-specific style sheets after the base style list. Additional style URLs are loaded exactly like other browser resources: every URL must already be reachable through the web server. Erdblick itself does not expand wildcards, scan directories, mount host paths, or resolve relative filesystem paths against a backend YAML file. If a host application such as MapViewer accepts relative or absolute filesystem paths in its own YAML config, that application resolves them and publishes browser-reachable URLs before erdblick reads `/config.erdblick`.
+
+Coordinate legal terms follow the same browser-resource rule. Configure `coordinates-legal-terms` with a URL whose response is either `{"legal-terms": "legal text"}` or equivalent YAML. Erdblick renders the value as plain text. If the document is missing, unreadable, or does not contain the required string, coordinate display remains disabled. Hosting products such as MapViewer may mount a local document and rewrite the configured filesystem path to a public URL.
+
+Layer presets travel with their owning style sheet; there is no separately served preset document. Map presets are inline `mapPresets` configuration data and likewise are never resolved as browser-resource URLs. See `docs/erdblick-stylesystem.md` for the embedded layer-preset syntax and the configuration section above for map-level compositions.
 
 Additional styles are loaded after base styles. If an additional style has the same YAML `name:` as a base style, the additional style is active and the Styles dialog marks it with an **Additional** tag. A locally modified additional style takes precedence over its original additional style, which takes precedence over the base style. For colliding base/additional styles, the **Additional** tag opens a read-only comparison against the base style.
 
@@ -115,5 +136,5 @@ A few practical browser and platform choices can make erdblick feel noticeably s
 
 - Chromium-based browsers usually offer the highest WebGL throughput. Firefox and Safari work but may require higher tile limits to reach the same detail levels.
 - Enable GPU acceleration in the browser to keep deck.gl responsive.
-- Always serve the bundle through HTTP. Opening `index.html` directly from the filesystem fails because the UI fetches `config.json` via XHR.
-- In air-gapped deployments, host erdblick and the mapget backend on the same LAN and point `config.json` to internal URLs for extension modules so the UI avoids external lookups.
+- Always serve the bundle through HTTP. Opening `index.html` directly from the filesystem fails because the UI fetches `/static-config/config.json` via XHR.
+- In air-gapped deployments, host erdblick and the mapget backend on the same LAN and point `config.json` to internal URLs for external resources so the UI avoids external lookups.

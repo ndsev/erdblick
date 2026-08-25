@@ -1,4 +1,4 @@
-import {Component, OnDestroy} from "@angular/core";
+import {ChangeDetectorRef, Component, Input, OnDestroy} from "@angular/core";
 import {CoordinatesService} from "./coordinates.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService} from "../shared/appstate.service";
@@ -13,6 +13,7 @@ import {
     packedTileIdFromWgs84,
     packedTileIdOptionName
 } from "./nds-coordinate.util";
+import {subscribeCoordinateFrames} from "./coordinate-frame-stream";
 
 interface PanelOption {
     name: string,
@@ -23,11 +24,13 @@ interface PanelOption {
     selector: "coordinates-panel",
     template: `
         <div class="coordinates-container">
-            <p-button class="marker-button" (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip" 
+            <p-button class="marker-button" data-testid="map-marker-toggle"
+                      (click)="toggleMarker()" label="" [pTooltip]="markerButtonTooltip"
                       tooltipPosition="bottom" [styleClass]="isMarkerEnabled ? 'p-button-success' : 'p-button-primary'">
                 <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">{{ markerButtonIcon }}</span>
             </p-button>
-            <p-card *ngIf="longitude !== undefined && latitude !== undefined" class="coordinates-panel">
+            <p-card *ngIf="coordinatesVisible && longitude !== undefined && latitude !== undefined"
+                    class="coordinates-panel" data-testid="coordinates-display">
                 <p-multiSelect dropdownIcon="pi pi-list-check" [options]="displayOptions" [(ngModel)]="selectedOptions"
                                (ngModelChange)="updateSelectedOptions()" optionLabel="name" placeholder=""
                                class="coordinates-select" appendTo="body"/>
@@ -66,7 +69,8 @@ interface PanelOption {
                     </ng-container>
                 </div>
             </p-card>
-            <p-button *ngIf="isMarkerEnabled && markerPosition" class="marker-button" styleClass="p-button-primary"
+            <p-button *ngIf="isMarkerEnabled && markerPosition" class="marker-button"
+                      data-testid="map-marker-focus" styleClass="p-button-primary"
                       (click)="focusOnMarker(markerPosition)" label="" pTooltip="Focus on marker" tooltipPosition="bottom">
                 <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">loupe</span>
             </p-button>
@@ -75,12 +79,14 @@ interface PanelOption {
     standalone: false
 })
 /**
- * HUD panel for live coordinates, auxiliary projections, and tile ids.
+ * HUD controls for marker placement plus the independently gated coordinate readout.
  *
  * The panel follows the mouse by default and switches to the persisted marker
  * position once marker placement is enabled.
  */
 export class CoordinatesPanelComponent implements OnDestroy {
+
+    @Input() coordinatesVisible = true;
 
     longitude: number | undefined = undefined;
     latitude: number | undefined = undefined;
@@ -100,7 +106,8 @@ export class CoordinatesPanelComponent implements OnDestroy {
     constructor(public mapService: MapViewStateService,
                 public coordinatesService: CoordinatesService,
                 public clipboardService: ClipboardService,
-                public stateService: AppStateService) {
+                public stateService: AppStateService,
+                private changeDetector: ChangeDetectorRef) {
         for (let level = 0; level <= 15; level++) {
             this.displayOptions.push({name: packedTileIdOptionName(level)});
         }
@@ -109,7 +116,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
             this.stateService.markedPositionState
         ]).subscribe(([markerEnabled, markedPosition]) => {
             this.isMarkerEnabled = markerEnabled;
-            if (markedPosition.length === 2) {
+            if (markedPosition.length >= 2) {
                 this.longitude = markedPosition[0];
                 this.latitude = markedPosition[1];
                 if (this.isMarkerEnabled) {
@@ -136,18 +143,23 @@ export class CoordinatesPanelComponent implements OnDestroy {
             this.restoreSelectedOptions();
         }));
 
-        this.coordinatesService.mouseMoveCoordinates.subscribe(coordinates => {
+        this.subscriptions.push(subscribeCoordinateFrames(
+            this.coordinatesService.mouseMoveCoordinates,
+            coordinates => {
+            // Deck publishes outside Angular. Check only this HUD after applying the coalesced
+            // sample; entering the zone would check every open dialog on every pointer frame.
             if (!this.markerPosition && coordinates) {
                 this.longitude = GeoMath.toDegrees(coordinates.longitude);
                 this.latitude = GeoMath.toDegrees(coordinates.latitude);
                 this.updateValues();
             }
             this.restoreSelectedOptions();
-        });
+            this.changeDetector.detectChanges();
+        }));
     }
 
     /** Releases subscriptions to marker, coordinate, and option state streams. */
-    ngOnDestroy() {
+    ngOnDestroy(): void {
         this.subscriptions.forEach(sub => sub.unsubscribe());
     }
 

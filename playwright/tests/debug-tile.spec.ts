@@ -1,15 +1,20 @@
 import { expect, test } from '../fixtures/test';
-import { navigateToRoot } from '../utils/ui-helpers';
+import { requireTestMapSource } from '../utils/backend-helpers';
+import { TEST_LAYER_NAMES, TEST_MAP_NAMES } from '../utils/test-params';
+import {
+    navigateToRoot,
+    packedTileIdForTestPosition
+} from '../utils/ui-helpers';
 
 /**
- * End-to-end tests for the `window.ebDebug` debug tile integration.
+ * End-to-end tests for the supported `window.ebDebug` S4E2 integration.
  *
- * These specs verify that the application boots correctly, hides its global
- * loading spinner, and that invoking `ebDebug.showTestTile()` results in a
- * visible canvas in the primary map view.
+ * These specs verify that the application boots correctly and that the debug
+ * bridge reaches an exact feature through the inspection-only restricted
+ * `/tiles` path.
  */
 
-test.describe('Debug tile integration', () => {
+test.describe('Debug S4E2 integration', () => {
     test('boots application and hides global spinner', async ({ page }) => {
         await navigateToRoot(page);
 
@@ -22,20 +27,30 @@ test.describe('Debug tile integration', () => {
         await expect(mapContainer).toBeVisible();
     });
 
-    test('renders debug tile via ebDebug', async ({ page }) => {
+    test('loads one exact inspection feature via ebDebug', async ({ page, request }) => {
+        await requireTestMapSource(request);
         await navigateToRoot(page);
 
-        await page.evaluate(() => {
-            if (window.ebDebug) {
-                // Ask the debug bridge to render a synthetic test tile.
-                window.ebDebug.showTestTile();
-            } else {
-                throw new Error('window.ebDebug is not available');
+        const tileId = await packedTileIdForTestPosition(page);
+        const summary = await page.evaluate(
+            async ({mapId, layerId, tileId}) => {
+                const debugApi = window.ebDebug;
+                if (!debugApi) {
+                    throw new Error('window.ebDebug is not available');
+                }
+                const mapTileKey = debugApi.mapTileKey(mapId, layerId, tileId);
+                return debugApi.featureInspectionHoverSummary(mapTileKey, 'Way.0');
+            },
+            {
+                mapId: TEST_MAP_NAMES[0],
+                layerId: TEST_LAYER_NAMES[0],
+                tileId
             }
-        });
+        );
 
-        // A canvas should be present inside the primary map view.
-        const mapContainer = page.getByTestId('mapViewContainer-0').locator('canvas');
-        await expect(mapContainer.first()).toBeVisible();
+        expect(summary).toMatchObject({
+            featureId: 'Way.0'
+        });
+        expect(summary).not.toHaveProperty('error');
     });
 });

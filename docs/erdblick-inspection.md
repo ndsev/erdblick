@@ -15,6 +15,11 @@ You can open feature inspection from several entry points:
 
 Selections persist until you close the panel or clear the stored viewer state.
 
+When several rendered features overlap at the pointer, the drill-pick menu
+lists the individual candidates and offers a **Select all** action:
+
+![Drill-pick menu listing three overlapping CaptureFeature candidates](screenshots/20-drill-pick-context-menu.png)
+
 ## Working With Panels
 
 The inspection dock is a small workspace in its own right:
@@ -27,6 +32,11 @@ The inspection dock is a small workspace in its own right:
 - **Panel limit** – the default maximum number of simultaneous inspections is controlled by **Max Inspections** in Preferences.
 
 When you keep several locked panels around, use consistent colors and titles so later comparison work stays readable.
+
+While selection data is still pending, the dock opens an immediate loading
+shell instead of leaving the workspace without feedback:
+
+![Inspection dock showing its loading title and progress indicator](screenshots/28a-inspection-loading.png)
 
 ## Understanding the Tree
 
@@ -48,15 +58,52 @@ Erdblick also applies a few presentation rules that matter in practice:
 - simple scalar arrays are flattened into more readable comma-separated values
 - ByteArray-backed values are rendered as regular scalar inspection values so they can be copied and searched more easily
 
+Formatted scalar values can expose a compact preview from their value row. In
+this example, `formattedNotice` shows a titled preview with formatted text and
+a reference label. The presentation is sanitized and inert: formatting is
+retained, but attributes such as navigation targets are removed.
+
+![Formatted notice preview opened from an inspection value](screenshots/28d-formatted-value-preview.png)
+
+Datasource-specific inspection trees also preserve resolved hierarchies. The
+NDS.Classic POI example below expands a resolved collection from its top-level
+category through `Food` to the selected `Restaurant` leaf:
+
+![Resolved multi-level NDS.Classic POI category hierarchy](screenshots/36-classic-poi-hierarchy.png)
+
 ### Validity Display and Hovering
 
 When you hover validity-aware nodes in the tree, erdblick tries to highlight the most specific validity that matches the hovered attribute or subnode. If no single validity is the right match, it falls back to showing all validities attached to that node.
 
 `COMPLETE` means the attribute applies to the complete referenced geometry or feature scope.
 
-Validity details can include `geometryStage` and `geometryStageLabel` when a validity points at geometry from a staged payload. The label is shown for add-on/high-stage geometry where the stage name helps explain why a validity appears only after additional tile data has loaded.
+Validity details can include a semantic geometry name when a validity refers
+to a particular geometry such as `centerline` or `boundary`. Geometry names
+describe the source model; they do not encode presentation fidelity.
 
 Search result selections can point at the same validity targets. When a feature-search result was produced in attribute scope, selecting the result focuses the owning feature and highlights the matched attribute or validity when that target is available.
+
+These two frames keep the query, camera, and feature fixed before and after
+selecting its result. The selected state synchronizes Search, inspection, and
+the validity highlight on the map:
+
+![Matching feature before selecting its search result](screenshots/27a-interaction-neutral.png)
+
+![Selected search result synchronized with inspection and map validity](screenshots/27b-interaction-selected.png)
+
+The expanded inspection tree exposes relative, indexed-range, and exact
+attribute-point qualifiers on the same deterministic feature:
+
+![Feature validity and SourceData qualifiers in inspection](screenshots/28b-feature-validity-inspection.png)
+
+### Inspection data boundary
+
+Map rendering keeps only immutable filter subsets. When a panel needs the
+complete feature, erdblick requests that canonical ID through mapget's
+feature-restricted `/tiles` path. Cross-tile relation endpoints may first be
+resolved with `/locate`, then fetched from their owning tile. The complete
+feature wrapper is released with the inspection; it is never inserted into a
+viewport tile cache.
 
 ### Searching From Inspection
 

@@ -125,6 +125,79 @@
     padding-top: 0;
   }
 
+  .p-tree-node-content:has(.map-option-row.style-option-group-highlight) {
+    background: var(--p-highlight-background);
+  }
+
+  .map-option-row {
+    align-items: center;
+    display: flex;
+    min-width: 0;
+    width: 100%;
+
+    .checkbox-entry {
+      flex: 1 1 auto;
+    }
+
+    .style-option-edit-button {
+      display: none;
+      flex: 0 0 auto;
+
+      .p-button {
+        height: 1.45rem;
+        padding: 0;
+        width: 1.45rem;
+      }
+
+      .material-symbols-outlined {
+        font-size: 1rem;
+      }
+    }
+
+    &.style-option-group-highlight .style-option-edit-button {
+      display: inline-flex;
+    }
+  }
+
+  .style-preset-row {
+    align-items: center;
+    display: flex;
+    gap: 0.25em;
+    min-width: 0;
+    min-height: 2em;
+    width: 100%;
+
+    .style-preset-select {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .p-select {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .p-select-label {
+      padding-block: 0.25em;
+      font-size: 1em;
+    }
+
+    .style-preset-expand-button,
+    .style-option-edit-button {
+      flex: 0 0 auto;
+
+      .p-button {
+        height: 1.55rem;
+        padding: 0;
+        width: 1.55rem;
+      }
+
+      .material-symbols-outlined {
+        font-size: 1rem;
+      }
+    }
+  }
+
   .p-tree-root,
   .p-tree-root-children,
   .p-tree-node-children {
@@ -133,7 +206,8 @@
     padding-top: 0;
   }
 
-  .p-tree-node-children:has(> p-treenode > .p-tree-node > .p-tree-node-content .map-option-row) {
+  .p-tree-node-children:has(> p-treenode > .p-tree-node > .p-tree-node-content .map-option-row),
+  .p-tree-node-children:has(> p-treenode > .p-tree-node > .p-tree-node-content .style-preset-row) {
     gap: 0;
   }
 
@@ -303,9 +377,19 @@
       grid-column: 2;
       grid-row: 1;
       justify-self: end;
-      width: 4em;
-      flex: 0 0 4em;
+      width: auto;
+      flex: 0 0 auto;
       justify-content: flex-end;
+
+      .map-preset-select {
+        flex: 1 1 7em;
+        min-width: 5em;
+      }
+
+      .p-select-label {
+        font-size: 0.9em;
+        padding-block: 0.2em;
+      }
 
       button {
         width: 1.55em;
@@ -316,7 +400,16 @@
   }
 
   .map-tree-row {
-    grid-template-columns: minmax(0, 1fr) 4em;
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .map-tree-row.has-map-presets {
+    grid-template-columns: minmax(0, 1fr) minmax(8em, 13em);
+
+    .map-controls {
+      width: min(13em, 45vw);
+      flex: 0 1 13em;
+    }
   }
 
   .map-layer-row {
@@ -357,3 +450,24 @@
   }
 }
 
+.metadata-layer-popover {
+  width: min(30rem, calc(100vw - 1rem));
+
+  .p-popover-content {
+    padding: 0.35rem;
+  }
+
+  .metadata-layer-listbox,
+  .p-listbox {
+    width: 100%;
+    border: 0;
+  }
+
+  .metadata-layer-option {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

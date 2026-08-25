@@ -24,13 +24,15 @@
   }
 
   .p-dialog {
-    max-width: 25em;
+    width: fit-content;
+    max-width: calc(100vw - 0.3em);
     min-width: 25em;
     margin: 0 !important;
     position: absolute;
     bottom: 0;
     left: 0.15em;
-    overflow: auto;
+    overflow-x: auto;
+    overflow-y: auto;
     height: calc(100% - 2.5em);
   }
 
@@ -78,6 +80,40 @@
     *:focus-visible {
       outline: 2px solid var(--p-primary-500);
     }
+  }
+
+  .map-filter {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    display: flex;
+    flex: 0 0 auto;
+    padding: 0 0.25em 0.25em 0.25em;
+    background: var(--p-content-background);
+    border-bottom: 1px solid var(--p-content-border-color);
+
+    .input-container {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      width: 100%;
+
+      .filter-input {
+        width: 100%;
+        height: 1.75em;
+        border: solid 1px var(--p-content-border-color);
+        border-radius: 6px;
+        direction: ltr;
+      }
+
+      .clear-icon {
+        cursor: pointer;
+      }
+    }
+  }
+
+  .map-tree-message {
+    margin: 0.75em 0.5em;
   }
 
   .p-tree {
@@ -141,6 +177,8 @@
 
 .tile-grid-toggle-row,
 .tile-grid-mode-row,
+.tile-grid-level-row,
+.tile-grid-appearance-row,
 .background-toggle-row,
 .background-opacity-row,
 .background-details {
@@ -151,8 +189,73 @@
 
 .tile-grid-toggle-row,
 .tile-grid-mode-row,
+.tile-grid-level-row,
 .background-toggle-row {
   justify-content: space-between;
+}
+
+.tile-grid-level-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.25em;
+  width: max-content;
+
+  button {
+    width: 1.45rem;
+    height: 1.45rem;
+    box-shadow: none;
+  }
+
+  p-button {
+    line-height: 0;
+  }
+
+  input {
+    margin: 0;
+    border-radius: 0;
+    width: 2em;
+    text-align: center;
+    height: 1.45rem;
+    padding: 0;
+  }
+
+  .p-inputnumber-button {
+    width: 1.45rem;
+    text-align: center;
+    height: 1.45rem;
+    font-size: 0.9em;
+    padding: 0;
+  }
+
+  .p-inputnumber-decrement-button {
+    border-radius: var(--p-button-border-radius) 0 0 var(--p-button-border-radius);
+  }
+
+  .p-inputnumber-increment-button {
+    border-radius: 0 var(--p-button-border-radius) var(--p-button-border-radius) 0;
+  }
+}
+
+.tile-grid-appearance-row {
+  .tile-grid-color-picker,
+  .tile-grid-color-picker .p-colorpicker,
+  .tile-grid-color-picker .p-colorpicker input,
+  .tile-grid-color-picker .p-colorpicker-preview {
+    flex: 0 0 auto;
+    height: 1.5em;
+    width: 1.5em;
+  }
+
+  .tile-grid-opacity-value {
+    min-width: 2.75rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .tile-grid-opacity-slider {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
 }
 
 .tile-grid-radio-group {

@@ -1,9 +1,10 @@
-import {Component, OnDestroy, ViewContainerRef} from '@angular/core';
+import {AfterViewInit, Component, OnDestroy, ViewContainerRef} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
 import {MapInfoService} from "./mapdata/map-info.service";
 import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
 import {
     AppStateService,
+    CACHE_RESET_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
@@ -19,6 +20,9 @@ import {KeyboardService} from "./shared/keyboard.service";
 import {AppConfigService} from "./shared/app-config.service";
 import {StyleService} from "./styledata/style.service";
 import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
+import {
+    TileSubsetLayerRenderService
+} from "./mapview/deck/tile-subset-layer-render.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -31,6 +35,9 @@ declare let window: DebugWindow;
             <datasources></datasources>
             <advanced-preferences></advanced-preferences>
             <map-panel></map-panel>
+            @if (stateService.isDialogOpen(cacheResetDialogLayoutId)) {
+                <cache-reset-dialog></cache-reset-dialog>
+            }
             @if (stateService.isDialogOpen(diagnosticsPerformanceDialogLayoutId)) {
                 <diagnostics-performance-dialog></diagnostics-performance-dialog>
             }
@@ -48,10 +55,12 @@ declare let window: DebugWindow;
             }
             <keyboard-dialog></keyboard-dialog>
             <preferences></preferences>
+            <coordinates-legal-terms-dialog></coordinates-legal-terms-dialog>
             <survey></survey>
             <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
             <p-toast position="top-center" key="backend-connection" [baseZIndex]="9600"></p-toast>
             <p-toast position="top-center" key="backend-protocol" [baseZIndex]="9700"></p-toast>
+            <p-toast position="top-center" key="configuration-editing" [baseZIndex]="9800"></p-toast>
         }
         <legal-dialog></legal-dialog>
         <about-dialog></about-dialog>
@@ -66,7 +75,8 @@ declare let window: DebugWindow;
  * behaviors such as dialog stacking, drag-selection suppression, debug helpers,
  * and startup version loading.
  */
-export class AppComponent implements OnDestroy {
+export class AppComponent implements AfterViewInit, OnDestroy {
+    protected readonly cacheResetDialogLayoutId = CACHE_RESET_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsPerformanceDialogLayoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsLogDialogLayoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsExportDialogLayoutId = DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID;
@@ -82,6 +92,7 @@ export class AppComponent implements OnDestroy {
                 private httpClient: HttpClient,
                 private mapInfo: MapInfoService,
                 private tileStream: MapTileStreamService,
+                private subsetRenderer: TileSubsetLayerRenderService,
                 private styleService: StyleService,
                 private keyboardService: KeyboardService,
                 private viewContainerRef: ViewContainerRef,
@@ -96,15 +107,28 @@ export class AppComponent implements OnDestroy {
         this.bindDialogFocusStacking();
         this.bindDialogDragSelectionGuard();
         window.ebDebug = new ErdblickDebugApi(
-            this.mapInfo,
             this.tileStream,
-            this.styleService,
+            this.subsetRenderer,
             this.stateService
         );
 
         this.loadDistributionVersions();
 
         this.keyboardService.registerShortcut("Ctrl+x", this.openStatistics.bind(this), true);
+    }
+
+    /** Presents configuration-editing notices after the global toast host has subscribed. */
+    ngAfterViewInit() {
+        queueMicrotask(() => {
+            const serverConfig = this.configService.snapshot.serverConfig;
+            if (serverConfig.styleEditingEnabled || serverConfig.mapPresets.write) {
+                this.infoMessageService.showConfigurationEditingNotices(
+                    serverConfig.styleEditingEnabled
+                        ? serverConfig.styleEditingDirectory ?? ""
+                        : null,
+                    serverConfig.mapPresets.write);
+            }
+        });
     }
 
     /** Removes global dialog listeners installed during startup. */
@@ -159,7 +183,7 @@ export class AppComponent implements OnDestroy {
             return;
         }
 
-        const distribVersionsPath = `/config/${distribVersions}.js`;
+        const distribVersionsPath = `/static-config/${distribVersions}.js`;
         import(/* @vite-ignore */ distribVersionsPath)
             .then((plugin) => plugin.default() as Array<Versions>)
             .then((versions: Array<Versions>) => {

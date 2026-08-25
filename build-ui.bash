@@ -25,12 +25,22 @@ npm install
 echo "Building Angular distribution files."
 npm run lint
 
+# Profiling builds retain the production optimizer while preserving JavaScript
+# identifiers and source maps for browser performance tools.
+build_profile_configuration() {
+  local base_configuration="$1"
+  NG_BUILD_MANGLE=false npm run build -- -c "${base_configuration},profiling"
+}
+
 # Determine which build mode to use
 if [[ "$BUILD_MODE" == "all" ]]; then
   echo "Building all configurations..."
   if [[ -n "$NG_DEVELOP" ]]; then
     npm run build -- -c development
     npm run build -- -c visualization-only-dev
+  elif [[ -n "$ERDBLICK_PROFILE_BUILD" ]]; then
+    build_profile_configuration production
+    build_profile_configuration visualization-only
   else
     npm run build
     npm run build -- -c visualization-only
@@ -40,6 +50,10 @@ elif [[ -n "$NG_DEVELOP" && "$BUILD_MODE" == "visualization-only" ]]; then
   npm run build -- -c visualization-only-dev
 elif [[ -n "$NG_DEVELOP" ]]; then
   npm run build -- -c development
+elif [[ -n "$ERDBLICK_PROFILE_BUILD" && "$BUILD_MODE" == "visualization-only" ]]; then
+  build_profile_configuration visualization-only
+elif [[ -n "$ERDBLICK_PROFILE_BUILD" ]]; then
+  build_profile_configuration production
 elif [[ "$BUILD_MODE" == "visualization-only" ]]; then
   echo "Building in visualization-only mode."
   npm run build -- -c visualization-only

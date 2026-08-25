@@ -8,6 +8,7 @@ import {
     HostBinding,
     Input,
     OnChanges,
+    OnDestroy,
     Output,
     SimpleChanges,
     TemplateRef,
@@ -17,6 +18,15 @@ import {AccordionModule} from 'primeng/accordion';
 import {AppStateService, DEFAULT_DOCKED_EM_HEIGHT} from './appstate.service';
 
 export type AppPanelResizeMode = 'none' | 'vertical' | 'fill' | 'auto';
+
+interface AppPanelResizeSession {
+    pointerId: number;
+    startPointerY: number;
+    startHeight: number;
+    handle: HTMLElement;
+    bodyCursor: string;
+    bodyUserSelect: string;
+}
 
 @Component({
     selector: 'app-panel',
@@ -49,12 +59,22 @@ export type AppPanelResizeMode = 'none' | 'vertical' | 'fill' | 'auto';
                              [class.app-panel-content-resizable]="contentResizable"
                              [ngClass]="contentStyleClass"
                              [ngStyle]="contentStyle"
-                             [style.height.px]="fixedBodyHeightPx"
-                             (mouseup)="handleContentResizeEnd()">
+                             [style.height.px]="fixedBodyHeightPx">
                             @if (projectedContentTemplate) {
                                 <ng-container *ngTemplateOutlet="projectedContentTemplate"></ng-container>
                             }
                             <ng-content></ng-content>
+                            @if (contentResizable) {
+                                <div class="app-resize-handle app-resize-handle-sw app-resize-vertical app-panel-resize-handle"
+                                     data-testid="app-panel-resize-handle"
+                                     aria-hidden="true"
+                                     (pointerdown)="beginContentResize($event)"
+                                     (pointermove)="continueContentResize($event)"
+                                     (pointerup)="finishContentResize($event)"
+                                     (pointercancel)="finishContentResize($event)"
+                                     (lostpointercapture)="finishContentResize($event)">
+                                </div>
+                            }
                         </div>
                     </p-accordion-content>
                 </p-accordion-panel>
@@ -70,7 +90,7 @@ export type AppPanelResizeMode = 'none' | 'vertical' | 'fill' | 'auto';
     imports: [AccordionModule, NgClass, NgStyle, NgTemplateOutlet]
 })
 /** Generic docked surface wrapper backed by a single PrimeNG accordion item. */
-export class AppPanelComponent implements AfterViewInit, OnChanges {
+export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
     @ContentChild('header', {descendants: true, read: TemplateRef}) projectedHeaderTemplate?: TemplateRef<unknown>;
     @ContentChild('content', {descendants: true, read: TemplateRef}) projectedContentTemplate?: TemplateRef<unknown>;
     @ContentChild('footer', {descendants: true, read: TemplateRef}) projectedFooterTemplate?: TemplateRef<unknown>;
@@ -107,6 +127,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges {
     protected accordionValue: string | null = '0';
     private panelBodyHeightPx?: number;
     private viewInitialized = false;
+    private resizeSession?: AppPanelResizeSession;
 
     constructor(private readonly stateService: AppStateService) {}
 
@@ -123,6 +144,9 @@ export class AppPanelComponent implements AfterViewInit, OnChanges {
             || changes['maxBodyHeightEm']) {
             this.syncPanelLayout();
         }
+        if (!this.contentResizable) {
+            this.cancelContentResize();
+        }
     }
 
     /** Emits an initial show event once the docked surface is measurable. */
@@ -131,6 +155,11 @@ export class AppPanelComponent implements AfterViewInit, OnChanges {
         this.syncPanelLayout();
         this.onShow.emit();
         this.scheduleBodySizeChange();
+    }
+
+    /** Releases pointer capture and page-level styles if the panel is destroyed during resizing. */
+    ngOnDestroy(): void {
+        this.cancelContentResize();
     }
 
     /** Returns the docked panel host element. */
@@ -205,6 +234,9 @@ export class AppPanelComponent implements AfterViewInit, OnChanges {
     /** Persists and emits accordion collapse changes. */
     protected handleAccordionValueChange(value: string | number | string[] | number[] | null | undefined): void {
         const nextCollapsed = value !== '0';
+        if (nextCollapsed) {
+            this.cancelContentResize();
+        }
         this.collapsed = nextCollapsed;
         if (this.persistLayout && this.layoutId) {
             this.stateService.setPanelLayout(this.layoutId, {panelCollapsed: nextCollapsed});
@@ -256,22 +288,74 @@ export class AppPanelComponent implements AfterViewInit, OnChanges {
         this.applyBodyLayout(this.defaultBodyHeightPx(), false);
     }
 
-    protected handleContentResizeEnd(): void {
-        if (!this.contentResizable) {
+    /** Starts a pointer-captured, height-only resize of a stacked panel body. */
+    protected beginContentResize(event: PointerEvent): void {
+        if (event.button !== 0 || !this.contentResizable || this.resizeSession) {
             return;
         }
         const content = this.contentRef?.nativeElement;
-        if (!content) {
+        const handle = event.currentTarget;
+        if (!content || !(handle instanceof HTMLElement)) {
             return;
         }
-        const nextHeight = content.getBoundingClientRect().height;
-        if (!Number.isFinite(nextHeight) || nextHeight <= 0) {
+
+        const height = content.getBoundingClientRect().height;
+        if (!Number.isFinite(height) || height <= 0) {
             return;
         }
-        if (Math.abs(nextHeight - (this.panelBodyHeightPx ?? 0)) < 1) {
+        event.preventDefault();
+        event.stopPropagation();
+        const body = document.body;
+        this.resizeSession = {
+            pointerId: event.pointerId,
+            startPointerY: event.clientY,
+            startHeight: height,
+            handle,
+            bodyCursor: body.style.cursor,
+            bodyUserSelect: body.style.userSelect
+        };
+        this.panelBodyHeightPx = this.clampBodyHeightPx(height);
+        body.style.cursor = getComputedStyle(handle).cursor || 'row-resize';
+        body.style.userSelect = 'none';
+        handle.setPointerCapture(event.pointerId);
+    }
+
+    /** Applies the active resize pointer delta to the stacked panel body. */
+    protected continueContentResize(event: PointerEvent): void {
+        const session = this.resizeSession;
+        if (!session || event.pointerId !== session.pointerId) {
             return;
         }
-        this.applyBodyLayout(nextHeight, nextHeight > this.defaultBodyHeightPx() + 1);
+        event.preventDefault();
+        this.panelBodyHeightPx = this.clampBodyHeightPx(
+            session.startHeight + event.clientY - session.startPointerY
+        );
+        this.scheduleBodySizeChange();
+    }
+
+    /** Finishes panel resizing and persists the final clamped height once. */
+    protected finishContentResize(event: PointerEvent): void {
+        const session = this.resizeSession;
+        if (!session || event.pointerId !== session.pointerId) {
+            return;
+        }
+        const finalHeight = this.panelBodyHeightPx ?? session.startHeight;
+        this.cancelContentResize();
+        this.applyBodyLayout(finalHeight, finalHeight > this.defaultBodyHeightPx() + 1);
+    }
+
+    /** Cancels an active panel resize without changing the persisted layout. */
+    private cancelContentResize(): void {
+        const session = this.resizeSession;
+        if (!session) {
+            return;
+        }
+        this.resizeSession = undefined;
+        if (session.handle.hasPointerCapture(session.pointerId)) {
+            session.handle.releasePointerCapture(session.pointerId);
+        }
+        document.body.style.cursor = session.bodyCursor;
+        document.body.style.userSelect = session.bodyUserSelect;
     }
 
     private applyBodyLayout(heightPx: number, expanded: boolean): void {

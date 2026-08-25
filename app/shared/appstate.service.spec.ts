@@ -6,7 +6,11 @@ import type { Event, Router } from '@angular/router';
 import { NavigationEnd, NavigationStart } from '@angular/router';
 import { Cartographic } from '../integrations/geo';
 
-import { AppStateService } from './appstate.service';
+import {
+    AppStateService,
+    VIEW_SYNC_MOVEMENT,
+    VIEW_SYNC_POSITION
+} from './appstate.service';
 import {MapTreeNode} from "../mapdata/map.tree.model";
 
 // @ts-expect-error this is a mock router
@@ -133,7 +137,7 @@ describe('AppStateService', () => {
             id: 0,
             features: [feature(
                 "Intersection.545554858.3348",
-                "Features:Very-Large-Map:Road:22100770000d:0"
+                "Features:Very-Large-Map:Road:22100770000d"
             )],
             locked: true,
             size: [30, 20],
@@ -144,7 +148,8 @@ describe('AppStateService', () => {
         service.prune(new Map([
             ["Very-Large-Map", new MapTreeNode({
                 mapId: "Very-Large-Map",
-                nodeId: "Very-Large-Map",
+                sourceId: "Very-Large-Map",
+                stringPoolId: "Very-Large-Map",
                 maxParallelJobs: 1,
                 addOn: false,
                 extraJsonAttachment: {},
@@ -153,7 +158,7 @@ describe('AppStateService', () => {
         ]), new Map());
 
         expect(service.selection).toHaveLength(1);
-        expect(service.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:22100770000d:0");
+        expect(service.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:22100770000d");
     });
 
 
@@ -164,7 +169,7 @@ describe('AppStateService', () => {
             id: 0,
             features: [feature(
                 "Intersection.545554858.3348",
-                "Features:Very-Large-Map:Road:545554858:0"
+                "Features:Very-Large-Map:Road:545554858"
             )],
             locked: true,
             size: [30, 20],
@@ -175,7 +180,8 @@ describe('AppStateService', () => {
         service.prune(new Map([
             ["Very-Large-Map", new MapTreeNode({
                 mapId: "Very-Large-Map",
-                nodeId: "Very-Large-Map",
+                sourceId: "Very-Large-Map",
+                stringPoolId: "Very-Large-Map",
                 maxParallelJobs: 0,
                 addOn: false,
                 status: "initializing",
@@ -185,7 +191,7 @@ describe('AppStateService', () => {
         ]), new Map());
 
         expect(service.selection).toHaveLength(1);
-        expect(service.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:545554858:0");
+        expect(service.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:545554858");
     });
 
     it('preserves focused selection metadata while pruning unavailable selections', () => {
@@ -194,8 +200,8 @@ describe('AppStateService', () => {
         service.selection = [{
             id: 0,
             features: [
-                feature("Road.1", "Features:Very-Large-Map:Road:545554858:0"),
-                feature("Lane.1", "Features:Very-Large-Map:Lane:545554858:0"),
+                feature("Road.1", "Features:Very-Large-Map:Road:545554858"),
+                feature("Lane.1", "Features:Very-Large-Map:Lane:545554858"),
             ],
             locked: true,
             focused: true,
@@ -207,7 +213,8 @@ describe('AppStateService', () => {
         service.prune(new Map([
             ["Very-Large-Map", new MapTreeNode({
                 mapId: "Very-Large-Map",
-                nodeId: "Very-Large-Map",
+                sourceId: "Very-Large-Map",
+                stringPoolId: "Very-Large-Map",
                 maxParallelJobs: 1,
                 addOn: false,
                 extraJsonAttachment: {},
@@ -218,7 +225,7 @@ describe('AppStateService', () => {
         expect(service.selection).toHaveLength(1);
         expect(service.selection[0].focused).toBe(true);
         expect(service.selection[0].features).toEqual([
-            feature("Road.1", "Features:Very-Large-Map:Road:545554858:0"),
+            feature("Road.1", "Features:Very-Large-Map:Road:545554858"),
         ]);
     });
 
@@ -229,7 +236,7 @@ describe('AppStateService', () => {
             id: 0,
             features: [feature(
                 "Landmark.545666604.12",
-                "Features:Provider%2FSample Munich:Landmark:545666604:0"
+                "Features:Provider%2FSample Munich:Landmark:545666604"
             )],
             locked: true,
             focused: true,
@@ -241,7 +248,8 @@ describe('AppStateService', () => {
         service.prune(new Map([
             ["Provider/Sample Munich", new MapTreeNode({
                 mapId: "Provider/Sample Munich",
-                nodeId: "Provider/Sample Munich",
+                sourceId: "Provider/Sample Munich",
+                stringPoolId: "Provider/Sample Munich",
                 maxParallelJobs: 1,
                 addOn: false,
                 extraJsonAttachment: {},
@@ -253,11 +261,11 @@ describe('AppStateService', () => {
         expect(service.selection[0].focused).toBe(true);
         expect(service.selection[0].features[0]).toEqual(feature(
             "Landmark.545666604.12",
-            "Features:Provider%2FSample Munich:Landmark:545666604:0"
+            "Features:Provider%2FSample Munich:Landmark:545666604"
         ));
     });
 
-    it('clamps the low-fi tile threshold', () => {
+    it('clamps the LOD 3 tile threshold', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = {
             showError: vi.fn(),
@@ -268,19 +276,103 @@ describe('AppStateService', () => {
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
-        expect(service.lowFiTileThreshold).toBe(128);
+        expect(service.lod3TileThreshold).toBe(128);
 
-        service.lowFiTileThreshold = 1024;
-        expect(service.lowFiTileThreshold).toBe(1024);
+        service.lod3TileThreshold = 1024;
+        expect(service.lod3TileThreshold).toBe(1024);
 
-        service.lowFiTileThreshold = 9999;
-        expect(service.lowFiTileThreshold).toBe(4096);
+        service.lod3TileThreshold = 9999;
+        expect(service.lod3TileThreshold).toBe(4096);
 
         service.ngOnDestroy();
         routerStub.events.complete();
     });
 
-    it('enables deck antialiasing by default', () => {
+    it('normalizes the persisted subset-render worker preference', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(
+            routerStub as unknown as Router,
+            infoServiceStub()
+        );
+
+        expect(service.tileSubsetRenderWorkerCount).toBe(0);
+
+        service.tileSubsetRenderWorkerCount = 999;
+
+        expect(service.tileSubsetRenderWorkerCount).toBe(32);
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('persists a bounded drill-pick radius without adding it to shared URLs', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        expect(service.drillPickRadius).toBe(3);
+
+        service.drillPickRadius = 7.8;
+        expect(service.drillPickRadius).toBe(7);
+
+        service.drillPickRadius = -100;
+        expect(service.drillPickRadius).toBe(1);
+
+        service.drillPickRadius = 100;
+        expect(service.drillPickRadius).toBe(10);
+        expect(service.exportSnapshot()).toHaveProperty('drillPickRadius', 10);
+        expect((service as any).serializeUrlV2()).not.toHaveProperty('drillPickRadius');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('persists bounded feature zoom clearance without adding it to shared URLs', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        expect(service.featureZoomClearanceMeters).toBe(20);
+
+        service.featureZoomClearanceMeters = 37.5;
+        expect(service.featureZoomClearanceMeters).toBe(37.5);
+
+        service.featureZoomClearanceMeters = -1;
+        expect(service.featureZoomClearanceMeters).toBe(0);
+
+        service.featureZoomClearanceMeters = 101;
+        expect(service.featureZoomClearanceMeters).toBe(100);
+        expect(service.exportSnapshot()).toHaveProperty(
+            'featureZoomClearanceMeters',
+            100
+        );
+        expect((service as any).serializeUrlV2()).not.toHaveProperty(
+            'featureZoomClearanceMeters'
+        );
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it.each([
+        ['-5', 0],
+        ['120', 100],
+        ['"not-a-number"', 20]
+    ])('normalizes persisted feature zoom clearance %s to %s', async (stored, expected) => {
+        localStorage.setItem('featureZoomClearanceMeters', stored);
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const routerStub = createRouterStub();
+        const service = new AppStateService(
+            routerStub as unknown as Router,
+            infoServiceStub()
+        );
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.featureZoomClearanceMeters).toBe(expected);
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('enables optional rendering quality effects by default', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = {
             showError: vi.fn(),
@@ -292,6 +384,7 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
         expect(service.deckAntialiasingEnabled).toBe(true);
+        expect(service.contactShadingEnabled).toBe(true);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -387,7 +480,7 @@ describe('AppStateService', () => {
             {
                 id: 0,
                 features: [{
-                    mapTileKey: 'Features:MapA:Lane:606830446:0',
+                    mapTileKey: 'Features:MapA:Lane:545379780',
                     featureId: 'Lane.1:attribute#1'
                 }],
                 locked: true,
@@ -399,7 +492,7 @@ describe('AppStateService', () => {
                 id: 1,
                 features: [],
                 sourceData: {
-                    mapTileKey: 'SourceData:MapB:SourceData-LaneGeometryLayer-1:1143701358:0',
+                    mapTileKey: 'SourceData:MapB:SourceData-LaneGeometryLayer-1:1451349444',
                     address: 783783249845n
                 },
                 locked: true,
@@ -474,7 +567,7 @@ describe('AppStateService', () => {
         await flushMicrotasks();
 
         expect(service.selection[0].features[0]).toEqual({
-            mapTileKey: 'Features:Provider%2FSample Munich:Road:545555209:0',
+            mapTileKey: 'Features:Provider%2FSample Munich:Road:545555209',
             featureId: 'Road.545555209.387',
         });
 
@@ -603,7 +696,7 @@ describe('AppStateService', () => {
         service.selection = [{
             id: 0,
             features: [{
-                mapTileKey: 'Features:MapB:Road:21:0',
+                mapTileKey: 'Features:MapB:Road:21',
                 featureId: 'Road.1',
             }],
             locked: true,
@@ -738,18 +831,35 @@ describe('AppStateService', () => {
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        service.markedPositionState.next([11.141985707869166, 48.002375728153766]);
+        service.markedPositionState.next([11.141985707869166, 48.002375728153766, 125.123456789]);
         await flushMicrotasks();
 
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
             queryParams: expect.objectContaining({
                 v2: '1',
-                mp: '11.14198571,48.00237573',
+                mp: '11.14198571,48.00237573,125.12345679',
             }),
             queryParamsHandling: 'replace',
             replaceUrl: true,
         }));
 
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('preserves feature altitude when setting a marker position', () => {
+        const routerStub = createRouterStub();
+        const infoServiceStub = {
+            showError: vi.fn(),
+            showSuccess: vi.fn(),
+            registerDefaultContainer: vi.fn(),
+            showAlertDialogDefault: vi.fn()
+        } as any;
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+
+        service.setMarkerPosition(Cartographic.fromDegrees(11.25, 48.5, 127.75));
+
+        expect(service.markedPosition).toEqual([11.25, 48.5, 127.75]);
         service.ngOnDestroy();
         routerStub.events.complete();
     });
@@ -856,6 +966,10 @@ describe('AppStateService', () => {
         service.setBackgroundState(0, null, 42);
         service.viewTileBordersState.next(0, false);
         service.viewTileGridModeState.next(0, 'xyz');
+        service.viewTileGridLevelState.next(0, 18);
+        service.viewTileGridAutoLevelState.next(0, true);
+        service.viewTileGridColorState.next(0, '123abc');
+        service.viewTileGridOpacityState.next(0, 64);
         service.mapLayerConfig('m1', 'layerA', false, 9);
         service.setMapLayerConfig('m1', 'layerA', [{ autoLevel: false, visible: true, level: 7 }]);
 
@@ -869,6 +983,10 @@ describe('AppStateService', () => {
         expect(service.getBackgroundState(1)).toEqual({ layerId: null, opacity: 42 });
         expect(service.viewTileBordersState.getValue(1)).toBe(false);
         expect(service.viewTileGridModeState.getValue(1)).toBe('xyz');
+        expect(service.viewTileGridLevelState.getValue(1)).toBe(18);
+        expect(service.viewTileGridAutoLevelState.getValue(1)).toBe(true);
+        expect(service.viewTileGridColorState.getValue(1)).toBe('123abc');
+        expect(service.viewTileGridOpacityState.getValue(1)).toBe(64);
         expect(service.layerVisibilityState.getValue(1)).toEqual([true]);
         expect(service.layerVisibilityState.getValue(1)).not.toBe(service.layerVisibilityState.getValue(0));
         expect(service.layerZoomLevelState.getValue(1)).toEqual([7]);
@@ -897,6 +1015,157 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('writes a style-option batch atomically and emits style state once', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.layerNamesState.next(['m1/layerA']);
+        service.numViews = 2;
+        const nextSpy = vi.spyOn(service.stylesState, 'next');
+
+        service.setStyleOptionValuesBatch([
+            {
+                mapId: 'm1',
+                layerId: 'layerA',
+                shortStyleId: 'overlay',
+                optionId: 'first',
+                values: [true, false]
+            },
+            {
+                mapId: 'm1',
+                layerId: 'layerA',
+                shortStyleId: 'overlay',
+                optionId: 'second',
+                values: [true]
+            }
+        ]);
+
+        expect(nextSpy).toHaveBeenCalledTimes(1);
+        expect(service.styles.get('m1/layerA/overlay/first')).toEqual([true, false]);
+        expect(service.styles.get('m1/layerA/overlay/second')).toEqual([true, true]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects an invalid style-option batch before mutating any option', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.layerNamesState.next(['m1/layerA']);
+
+        expect(() => service.setStyleOptionValuesBatch([
+            {
+                mapId: 'm1',
+                layerId: 'layerA',
+                shortStyleId: 'overlay',
+                optionId: 'valid',
+                values: [true]
+            },
+            {
+                mapId: 'missing',
+                layerId: 'layer',
+                shortStyleId: 'overlay',
+                optionId: 'invalid',
+                values: [false]
+            }
+        ])).toThrow("Unknown map layer 'missing/layer'");
+        expect(service.styles.size).toBe(0);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('stores qualified layer and map preset selections outside snapshots', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.numViews = 2;
+
+        service.setLayerPresetSelection(0, 'Vendor/Map', 'Lane', {
+            styleId: 'NDS.Live/Lanes', presetId: 'lane-topology'
+        });
+        service.setLayerPresetSelection(1, 'Vendor/Map', 'Lane', {
+            styleId: 'NDS.Live/Lanes', presetId: 'lane-boundary'
+        });
+        service.setMapPresetSelection(0, 'Vendor/Map', 'network-topology');
+
+        expect(service.getLayerPresetSelection(0, 'Vendor/Map', 'Lane')).toEqual({
+            styleId: 'NDS.Live/Lanes', presetId: 'lane-topology'
+        });
+        expect(service.getLayerPresetSelection(1, 'Vendor/Map', 'Lane')).toEqual({
+            styleId: 'NDS.Live/Lanes', presetId: 'lane-boundary'
+        });
+        expect(service.getMapPresetSelection(0, 'Vendor/Map')).toBe('network-topology');
+        expect(service.exportSnapshot()).not.toHaveProperty('stylePresetSelection');
+        expect(service.exportSnapshot()).not.toHaveProperty('mapPresetSelection');
+
+        service.setLayerPresetSelection(0, 'Vendor/Map', 'Lane', null);
+        expect(service.getLayerPresetSelection(0, 'Vendor/Map', 'Lane')).toBeNull();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('retires browser-owned map-preset definitions and ignores legacy config state', () => {
+        localStorage.setItem('mapPresets', JSON.stringify([{id: 'legacy'}]));
+        localStorage.setItem('erdblickConfigDefaultStateMeta', JSON.stringify({
+            version: 1,
+            sourceHash: 'old',
+            entries: {
+                mapPresets: {owner: 'user', valueHash: 'old'},
+                unrelated: {owner: 'user', valueHash: 'keep'}
+            }
+        }));
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        const errors = service.seedConfigDefaultState({mapPresets: [{id: 'legacy'}]}, 'map-preset-config');
+
+        expect(errors).toEqual([]);
+        expect(localStorage.getItem('mapPresets')).toBeNull();
+        const metadata = JSON.parse(localStorage.getItem('erdblickConfigDefaultStateMeta')!);
+        expect(metadata.entries).not.toHaveProperty('mapPresets');
+        expect(service.exportSnapshot()).not.toHaveProperty('mapPresets');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('hydrates legacy unqualified layer-preset selections for unique owner migration', () => {
+        localStorage.setItem('stylePresetSelection', JSON.stringify([{
+            'Vendor/Map': {
+                Lane: 'legacy-lane-preset'
+            }
+        }]));
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        service.initializePersistence();
+
+        expect(service.getLayerPresetSelection(0, 'Vendor/Map', 'Lane')).toEqual({
+            styleId: '',
+            presetId: 'legacy-lane-preset'
+        });
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('provides non-URL hover-label defaults for the preview preferences', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        expect(service.hoverLabelsEnabled).toBe(true);
+        expect(service.hoverLabelFields).toEqual([{
+            expression: "id",
+            customExpression: false
+        }]);
+
+        const params = (service as any).serializeUrlV2();
+        expect(JSON.stringify(params)).not.toContain('hoverLabel');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('seeds each newly added view from the previous view when the view count keeps increasing', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
@@ -916,6 +1185,10 @@ describe('AppStateService', () => {
         service.setBackgroundState(1, null, 17);
         service.viewTileBordersState.next(1, false);
         service.viewTileGridModeState.next(1, 'xyz');
+        service.viewTileGridLevelState.next(1, 20);
+        service.viewTileGridAutoLevelState.next(1, true);
+        service.viewTileGridColorState.next(1, 'fedcba');
+        service.viewTileGridOpacityState.next(1, 71);
         service.setMapLayerConfig('m1', 'layerA', [
             { autoLevel: true, visible: true, level: 13 },
             { autoLevel: false, visible: false, level: 5 }
@@ -932,6 +1205,10 @@ describe('AppStateService', () => {
         expect(service.getBackgroundState(2)).toEqual({ layerId: null, opacity: 17 });
         expect(service.viewTileBordersState.getValue(2)).toBe(false);
         expect(service.viewTileGridModeState.getValue(2)).toBe('xyz');
+        expect(service.viewTileGridLevelState.getValue(2)).toBe(20);
+        expect(service.viewTileGridAutoLevelState.getValue(2)).toBe(true);
+        expect(service.viewTileGridColorState.getValue(2)).toBe('fedcba');
+        expect(service.viewTileGridOpacityState.getValue(2)).toBe(71);
         expect(service.layerVisibilityState.getValue(2)).toEqual([false]);
         expect(service.layerVisibilityState.getValue(2)).not.toBe(service.layerVisibilityState.getValue(1));
         expect(service.layerZoomLevelState.getValue(2)).toEqual([5]);
@@ -983,8 +1260,9 @@ describe('AppStateService', () => {
 
         const destination = Cartographic.fromDegrees(11.141985707869166, 48.002375728153766, 123.123456789123);
         const orientation = { heading: 1.123456789, pitch: -2.987654321, roll: 3.000000009 };
+        const position = [1.123456789, -2.987654321, 3.000000009] as const;
 
-        service.setView(0, destination, orientation);
+        service.setView(0, destination, orientation, position);
 
         const view = service.cameraViewDataState.getValue(0);
         expect(view.destination).toEqual({
@@ -997,6 +1275,87 @@ describe('AppStateService', () => {
             pitch: -2.98765432,
             roll: 3.00000001,
         });
+        expect(view.position).toEqual([1.12345679, -2.98765432, 3.00000001]);
+
+        const urlState = service.cameraViewDataState.appState.serialize(true);
+        expect(urlState).toMatchObject({
+            px: '1.12345679',
+            py: '-2.98765432',
+            pz: '3.00000001'
+        });
+
+        const storageState = service.cameraViewDataState.appState.serialize(false);
+        const restoredService = new AppStateService(
+            createRouterStub() as unknown as Router,
+            infoServiceStub
+        );
+        restoredService.cameraViewDataState.appState.deserialize(storageState!['cameraView']!);
+        expect(restoredService.cameraViewDataState.getValue(0).position)
+            .toEqual([1.12345679, -2.98765432, 3.00000001]);
+
+        service.ngOnDestroy();
+        restoredService.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('defaults legacy camera state to a zero map-centre offset', async () => {
+        const routerStub = createRouterStub({
+            lon: '11.5',
+            lat: '48.25',
+            alt: '1000',
+            h: '0.5',
+            p: '-0.75',
+            r: '0'
+        });
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.cameraViewDataState.getValue(0).position).toEqual([0, 0, 0]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('synchronizes the complete target-relative camera position across views', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.numViews = 2;
+        service.focusedView = 0;
+        const orientation = {heading: 0.25, pitch: -0.5, roll: 0};
+
+        service.setView(
+            0,
+            Cartographic.fromDegrees(11, 48, 1000),
+            orientation,
+            [0, 0, 125]
+        );
+        service.setView(
+            1,
+            Cartographic.fromDegrees(12, 49, 2000),
+            orientation,
+            [0, 0, 250]
+        );
+
+        service.viewSync = [VIEW_SYNC_POSITION];
+        service.setView(
+            0,
+            Cartographic.fromDegrees(13, 50, 3000),
+            orientation,
+            [0, 0, 375]
+        );
+        expect(service.cameraViewDataState.getValue(1).position).toEqual([0, 0, 375]);
+
+        service.viewSync = [VIEW_SYNC_MOVEMENT];
+        service.setView(
+            0,
+            Cartographic.fromDegrees(14, 51, 4000),
+            orientation,
+            [0, 0, 500]
+        );
+        expect(service.cameraViewDataState.getValue(0).position).toEqual([0, 0, 500]);
+        expect(service.cameraViewDataState.getValue(1).position).toEqual([0, 0, 375]);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -1390,6 +1749,33 @@ describe('AppStateService', () => {
         const secondRead = service.getInspectionTreeExpansionState(7)!;
         expect(secondRead.expandedNodes.get('root')).toBe(true);
         expect(secondRead.expansionSnapshotBeforeFullExpand?.get('root')).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('keeps SourceData column defaults and per-panel overrides out of the URL', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.selection = [{
+            id: 7,
+            features: [],
+            locked: false,
+            size: [30, 20],
+            color: '#ffffff',
+            undocked: false
+        }];
+
+        service.sourceDataInspectionDefaultColumns = ["schemaType"];
+        service.setInspectionTreeHiddenColumns(7, ["displayAddress"]);
+
+        expect(service.sourceDataInspectionDefaultColumns).toEqual(["schemaType"]);
+        expect(service.getInspectionTreeHiddenColumns(7)).toEqual(["displayAddress"]);
+        expect(service.sourceDataInspectionDefaultColumnsState.serialize(true)).toBeUndefined();
+        expect(service.inspectionTreeHiddenColumnsState.serialize(true)).toBeUndefined();
+
+        service.selection = [];
+        expect(service.getInspectionTreeHiddenColumns(7)).toBeUndefined();
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -1875,6 +2261,24 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('keeps coordinate preference and legal acceptance out of URLs and snapshots', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        service.coordinatesEnabledState.next(false);
+        service.coordinatesLegalTermsAcceptedState.next(true);
+
+        const snapshot = service.exportSnapshot();
+        const params = (service as any).serializeUrlV2();
+        expect(snapshot).not.toHaveProperty('coordinatesEnabled');
+        expect(snapshot).not.toHaveProperty('coordinatesLegalTermsAccepted');
+        expect(params).not.toHaveProperty('coordinatesEnabled');
+        expect(params).not.toHaveProperty('coordinatesLegalTermsAccepted');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('restores dialog visibility from dialogLayouts snapshot state', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
@@ -2094,13 +2498,33 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
-        const errors = service.seedConfigDefaultState({marker: true}, "cfg-hash-1");
+        const errors = service.seedConfigDefaultState({
+            marker: true,
+            featureZoomClearanceMeters: 35
+        }, "cfg-hash-1");
         expect(errors).toEqual([]);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
         expect(service.markerState.getValue()).toBe(true);
+        expect(service.featureZoomClearanceMeters).toBe(35);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('applies the coordinate config default without making it snapshot state', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        const errors = service.seedConfigDefaultState({coordinatesEnabled: false}, "coordinates-cfg");
+        expect(errors).toEqual([]);
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.coordinatesEnabledState.getValue()).toBe(false);
+        expect(service.exportSnapshot()).not.toHaveProperty('coordinatesEnabled');
 
         service.ngOnDestroy();
         routerStub.events.complete();

@@ -1,5 +1,6 @@
 import {
-    AppStateService
+    AppStateService,
+    type TileFeatureId
 } from "../shared/appstate.service";
 import {
     AfterViewInit,
@@ -16,7 +17,6 @@ import {
 import {MapInfoService} from "../mapdata/map-info.service";
 import {MapViewStateService, ViewRecalculationReason} from "./map-view-state.service";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
-import {MapRenderService} from "../mapdata/map-render.service";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {CoordinatesService} from "../coords/coordinates.service";
@@ -24,22 +24,50 @@ import {JumpTargetService} from "../search/jump.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {MenuItem} from "primeng/api";
 import {ContextMenu} from "primeng/contextmenu";
-import {RightClickMenuService, SourceDataDropdownOption, TileDiagnosticsMenuOption} from "./rightclickmenu.service";
+import {
+    FirstPersonViewMenuRequest,
+    RightClickMenuService,
+    SourceDataDropdownOption,
+    TileDiagnosticsMenuOption
+} from "./rightclickmenu.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {DeckMapView2D} from "./deck/deck-view2d";
 import {DeckMapView3D} from "./deck/deck-view3d";
 import {
     IRenderView,
-    MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT
+    MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT,
+    RenderNavigationTarget
 } from "./render-view.model";
 import {combineLatest, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
 import {environment} from "../environments/environment";
-import {Popover} from "primeng/popover";
 import {coreLib} from "../integrations/wasm";
 import {AppConfigService} from "../shared/app-config.service";
+import {StyleService} from "../styledata/style.service";
+import {ViewLayerController} from "./view-layer.controller";
+import {
+    TileSubsetLayerRenderService
+} from "./deck/tile-subset-layer-render.service";
+import {
+    ViewLayerDiagnosticsService
+} from "./view-layer-diagnostics.service";
+import {
+    StyleValidationReportService
+} from "../styledata/style-validation-report.service";
+import {CacheResetService} from "../mapdata/cache-reset.service";
+import {
+    HoverDetailService,
+    type HoverDetailField,
+    type HoverFeatureDetails
+} from "../mapdata/hover-detail.service";
+import {inspectionValueBubbleClasses} from "../inspection/inspection-value-bubble.presentation";
 
-
+interface PreparedContextMenuPosition {
+    screenPos: {x: number; y: number};
+    cartographic: {lon: number; lat: number; alt: number};
+    navigationTarget?: RenderNavigationTarget;
+    featureIds: TileFeatureId[];
+}
 
 @Component({
     selector: 'map-view',
@@ -59,6 +87,18 @@ import {AppConfigService} from "../shared/app-config.service";
                 </div>
             </div>
         }
+        @if (mapView?.isFirstPersonViewActive()) {
+            <p-button class="first-person-exit-button"
+                      [attr.data-testid]="'exit-first-person-view-' + viewIndex()"
+                      label="Exit First Person View"
+                      severity="primary"
+                      size="small"
+                      (onClick)="exitFirstPersonView()">
+                <ng-template #icon let-iconClass="class">
+                    <span [class]="iconClass + ' material-symbols-outlined'">ar_on_you</span>
+                </ng-template>
+            </p-button>
+        }
         @if (!environment.visualizationOnly && showSyncMenu) {
             <p-buttonGroup class="viewsync-select" data-testid="viewsync-select">
                 @for (option of stateService.syncOptions; track option.code) {
@@ -76,7 +116,29 @@ import {AppConfigService} from "../shared/app-config.service";
         }
         @if (!appModeService.isVisualizationOnly && !isNarrow) {
             <p-contextMenu #viewerContextMenu [model]="menuItems" (onShow)="onContextMenuShow()"
-                           (onHide)="onContextMenuHide()" appendTo="body"/>
+                           (onHide)="onContextMenuHide()" appendTo="body">
+                <ng-template #item let-item>
+                    <a pRipple class="p-contextmenu-item-link"
+                       [attr.data-automationid]="item.automationId"
+                       [attr.title]="item.title"
+                       (mouseenter)="onContextMenuItemHover(item)"
+                       (mouseleave)="onContextMenuItemHoverExit(item)">
+                        @if (item.icon) {
+                            <span class="p-contextmenu-item-icon" [ngClass]="item.icon"></span>
+                        }
+                        @if (item.mapIdLabel) {
+                            <p-tag class="picked-feature-map-tag"
+                                   severity="contrast"
+                                   [rounded]="true"
+                                   [value]="item.mapIdLabel"/>
+                        }
+                        <span class="p-contextmenu-item-label">{{ item.label }}</span>
+                        @if (item.items?.length) {
+                            <span class="p-contextmenu-submenu-icon pi pi-angle-right"></span>
+                        }
+                    </a>
+                </ng-template>
+            </p-contextMenu>
         }
         @if (!appModeService.isVisualizationOnly) {
             <sourcedatadialog></sourcedatadialog>
@@ -84,20 +146,33 @@ import {AppConfigService} from "../shared/app-config.service";
         @defer (when mapView) {
             <erdblick-view-ui [mapView]="mapView!" [is2D]="is2DMode"></erdblick-view-ui>
         }
-        <div #popoverAnchor class="popover-anchor"></div>
-        <p-popover #popover styleClass="feature-hover-popover">
-            <ng-template pTemplate="content">
-                @for (content of featureIdsContent; track $index) {
-                    {{ content }}<br>
+        @if (hoverDetailsContent.length) {
+            <div class="feature-hover-hud hover-label-surface"
+                 role="tooltip"
+                 [style.left.px]="hoverHudCenterX"
+                 [style.--hover-hud-layout-width]="hoverHudMaxWidth + 'px'">
+                @for (feature of hoverDetailsContent; track feature.featureId) {
+                    <div class="hover-label-feature">
+                        @if (feature.showFeatureId) {
+                            <span class="hover-label-feature-id">{{ feature.featureId }}</span>
+                        }
+                        @for (field of feature.fields; track $index) {
+                            <span class="hover-label-field"
+                                  [ngClass]="hoverValuePillClasses(field)">
+                                <span class="hover-label-key">{{ field.key }}</span>
+                                <span class="hover-label-value">{{ field.value }}</span>
+                            </span>
+                        }
+                    </div>
                 }
-            </ng-template>
-        </p-popover>
+            </div>
+        }
     `,
     standalone: false
 })
 /**
  * Host component for one interactive map view.
- * It owns renderer creation, hover popovers, right-click context-menu preparation, and view-local mode toggles.
+ * It owns renderer creation, hover details, right-click context-menu preparation, and view-local mode toggles.
  */
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 4;
@@ -121,6 +196,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     private modeSubscription?: Subscription;
     private hoverSubscription?: Subscription;
+    private firstPersonViewActiveSubscription?: Subscription;
+    private firstPersonViewRequestSubscription?: Subscription;
+    private rendererContextLostSubscription?: Subscription;
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
     private deckAntialiasingEnabled = true;
@@ -135,12 +213,17 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private viewerPointerCancelCapture?: (_event: PointerEvent) => void;
     private viewerContextMenuCapture?: (event: MouseEvent) => void;
     private layoutResizePrepareListener?: (event: Event) => void;
+    private hoverHudLayoutObserver?: ResizeObserver;
     private viewerSetupGeneration = 0;
+    private viewerSetupQueue: Promise<void> = Promise.resolve();
+    private layerController?: ViewLayerController;
+    private cacheResetSubscription?: Subscription;
 
-    @ViewChild('popover') featureIdsPopover!: Popover;
-    @ViewChild('popoverAnchor') anchorRef!: ElementRef<HTMLDivElement>;
     @ViewChild('viewerContextMenu') viewerContextMenu?: ContextMenu;
-    featureIdsContent: string[] = [];
+    hoverDetailsContent: HoverFeatureDetails[] = [];
+    hoverHudCenterX = 0;
+    hoverHudMaxWidth = 0;
+    private lastHoverFeatureIds: TileFeatureId[] = [];
 
     /**
      * Constructs the host component for one deck-backed view, wiring in the shared
@@ -149,7 +232,6 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     constructor(public mapService: MapInfoService,
                 public mapViewState: MapViewStateService,
                 public tileStream: MapTileStreamService,
-                public mapRender: MapRenderService,
                 public inspectionSelection: InspectionSelectionService,
                 public featureSearchService: FeatureSearchService,
                 public stateService: AppStateService,
@@ -159,6 +241,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 public coordinatesService: CoordinatesService,
                 public appModeService: AppModeService,
                 public configService: AppConfigService,
+                private styleService: StyleService,
+                private subsetRenderService: TileSubsetLayerRenderService,
+                private cacheResetService: CacheResetService,
+                private hoverDetails: HoverDetailService,
+                private viewLayerDiagnostics: ViewLayerDiagnosticsService,
+                private styleValidationReports: StyleValidationReportService,
                 private cdr: ChangeDetectorRef,
                 private ngZone: NgZone
     ) {
@@ -179,6 +267,26 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     /** Registers menu subscriptions and viewport-size listeners once the component inputs are available. */
     ngOnInit() {
+        this.layerController = this.ngZone.runOutsideAngular(() =>
+            new ViewLayerController(
+                this.viewIndex(),
+                this.mapService,
+                this.mapViewState,
+                this.tileStream,
+                this.styleService,
+                this.subsetRenderService,
+                this.featureSearchService,
+                this.inspectionSelection,
+                this.hoverDetails,
+                this.viewLayerDiagnostics,
+                this.styleValidationReports,
+                this.ngZone
+            )
+        );
+        this.cacheResetSubscription =
+            this.cacheResetService.completed$.subscribe(mapId => {
+                this.layerController?.refreshMap(mapId);
+            });
         this.subscriptions.push(
             this.menuService.menuItems.subscribe(items => {
                 this.menuItems = [...items];
@@ -208,11 +316,25 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.viewerContextMenu?.hide();
             })
         );
-
+        this.subscriptions.push(this.hoverDetails.valuesChanged.subscribe(mapTileKey => {
+            if (!this.lastHoverFeatureIds.length ||
+                (mapTileKey && !this.lastHoverFeatureIds.some(feature =>
+                    feature.mapTileKey === mapTileKey))) {
+                return;
+            }
+            this.refreshHoverDetailsHud();
+        }));
+        this.firstPersonViewRequestSubscription = this.menuService.firstPersonViewRequests.subscribe(request => {
+            if (request.viewIndex !== this.viewIndex()) {
+                return;
+            }
+            this.applyFirstPersonViewRequest(request);
+        });
         this.mediaQueryList = window.matchMedia('(max-width: 56em)');
         this.isNarrow = this.mediaQueryList.matches;
         this.mediaQueryChangeListener = (event: MediaQueryListEvent) => {
             this.isNarrow = event.matches;
+            this.mapView?.setDesktopDrillPickingEnabled(!event.matches);
             this.cdr.markForCheck();
         };
         this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
@@ -236,6 +358,18 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     /** Creates or recreates the renderer once app state is ready and the 2D/3D mode is known. */
     ngAfterViewInit() {
+        const viewerLayout = this.viewerElement.nativeElement.closest<HTMLElement>(".viewer-layout");
+        if (viewerLayout) {
+            const updateHoverHudBounds = () => {
+                const rect = viewerLayout.getBoundingClientRect();
+                this.hoverHudCenterX = rect.left + rect.width / 2;
+                this.hoverHudMaxWidth = Math.max(0, rect.width - 16);
+                this.cdr.markForCheck();
+            };
+            this.hoverHudLayoutObserver = new ResizeObserver(updateHoverHudBounds);
+            this.hoverHudLayoutObserver.observe(viewerLayout);
+            updateHoverHudBounds();
+        }
         this.setupViewerContextMenuHandling();
         this.modeSubscription = combineLatest([
             this.stateService.ready.pipe(filter(ready => ready)),
@@ -255,6 +389,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     /** Handles context-menu teardown and queued reopen requests when the menu is toggled while already open. */
     onContextMenuHide() {
         this.contextMenuVisible = false;
+        this.inspectionSelection.setHoveredFeatures([]);
         if (this.pendingContextMenuOpenEvent && this.viewerContextMenu) {
             const event = this.pendingContextMenuOpenEvent;
             this.pendingContextMenuOpenEvent = null;
@@ -276,35 +411,65 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.contextMenuVisible = true;
     }
 
+    /** Highlights the exact already-rendered feature represented by a context-menu row. */
+    onContextMenuItemHover(item: MenuItem): void {
+        const feature = item["hoverFeature"] as TileFeatureId | undefined;
+        if (feature) {
+            this.inspectionSelection.setHoveredFeatures([feature]);
+        }
+    }
+
+    /** Clears a context-menu-owned feature hover when the pointer leaves its row. */
+    onContextMenuItemHoverExit(item: MenuItem): void {
+        if (item["hoverFeature"]) {
+            this.inspectionSelection.setHoveredFeatures([]);
+        }
+    }
+
     /**
      * Recreate the viewer with different projection for 2D/3D modes
      */
     private async createViewerForMode(is2D: boolean, setupGeneration: number): Promise<IRenderView | undefined> {
+        this.rendererContextLostSubscription?.unsubscribe();
+        this.rendererContextLostSubscription = undefined;
         this.hoverSubscription?.unsubscribe();
         this.hoverSubscription = undefined;
+        this.lastHoverFeatureIds = [];
+        this.hoverDetailsContent = [];
+        this.firstPersonViewActiveSubscription?.unsubscribe();
+        this.firstPersonViewActiveSubscription = undefined;
         if (this.mapView) {
+            this.layerController?.detachScene();
             await this.ngZone.runOutsideAngular(() => this.mapView!.destroy());
             this.mapView = undefined;
         }
         const mapView: IRenderView = is2D
             ? new DeckMapView2D(
                 this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
-                this.mapRender, this.inspectionSelection, this.featureSearchService,
-                this.menuService, this.coordinatesService, this.stateService, this.configService
+                this.inspectionSelection, this.featureSearchService,
+                this.menuService, this.coordinatesService, this.stateService, this.configService,
+                this.layerController!
             )
             : new DeckMapView3D(
                 this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
-                this.mapRender, this.inspectionSelection, this.featureSearchService,
-                this.menuService, this.coordinatesService, this.stateService, this.configService
+                this.inspectionSelection, this.featureSearchService,
+                this.menuService, this.coordinatesService, this.stateService, this.configService,
+                this.layerController!
             );
+        mapView.setDesktopDrillPickingEnabled(!this.isNarrow);
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
         await this.ngZone.runOutsideAngular(() => mapView.setup());
         if (setupGeneration !== this.viewerSetupGeneration) {
-            await this.ngZone.runOutsideAngular(() => mapView.destroy({clearTileVisualizations: false}));
+            await this.ngZone.runOutsideAngular(() => mapView.destroy());
             return undefined;
         }
+        this.rendererContextLostSubscription = mapView.contextLost.subscribe(() => {
+            if (setupGeneration === this.viewerSetupGeneration) {
+                this.initializeViewer(this.is2DMode);
+            }
+        });
         this.mapView = mapView;
-        this.mapRender.rebuildTileVisualizationsForScene(this.viewIndex(), mapView.getSceneHandle());
+        this.layerController?.attachScene(mapView.getSceneHandle());
         this.viewerInitError = "";
         return mapView;
     }
@@ -325,11 +490,21 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             window.removeEventListener(MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT, this.layoutResizePrepareListener);
             this.layoutResizePrepareListener = undefined;
         }
+        this.hoverHudLayoutObserver?.disconnect();
+        this.hoverHudLayoutObserver = undefined;
         this.modeSubscription?.unsubscribe();
         this.hoverSubscription?.unsubscribe();
+        this.firstPersonViewActiveSubscription?.unsubscribe();
+        this.firstPersonViewRequestSubscription?.unsubscribe();
+        this.cacheResetSubscription?.unsubscribe();
+        this.rendererContextLostSubscription?.unsubscribe();
+        this.subscriptions.splice(0).forEach(subscription =>
+            subscription.unsubscribe());
         if (this.mapView) {
             this.ngZone.runOutsideAngular(() => this.mapView!.destroy()).then();
         }
+        this.layerController?.dispose();
+        this.layerController = undefined;
     }
 
     /**
@@ -338,78 +513,73 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      */
     private initializeViewer(mode2d: boolean) {
         const setupGeneration = ++this.viewerSetupGeneration;
-        this.createViewerForMode(mode2d, setupGeneration).catch((error) => {
+        // Persisted projection and antialiasing state may both emit while Angular creates the
+        // component. Serialize those rebuilds: two Deck instances must never initialize against
+        // the same container, because stale teardown would remove the current instance's canvas.
+        this.viewerSetupQueue = this.viewerSetupQueue.then(async () => {
             if (setupGeneration !== this.viewerSetupGeneration) {
                 return;
             }
-            console.error('Failed to initialize viewer:', error);
-            const detail = error instanceof Error ? error.message : String(error);
-            const summary = detail.split(" userAgent=")[0] || "WebGL2 context could not be created.";
-            this.viewerInitError = `${summary} ${MapViewComponent.WEBGL_SETUP_HINT}`;
-        }).finally(() => {
-            if (setupGeneration !== this.viewerSetupGeneration) {
-                return;
-            }
-            // Hide the global loading spinner
-            const spinner = document.getElementById('global-spinner-container');
-            if (spinner) {
-                spinner.style.display = 'none';
-            }
-            this.stateService.focusedView = this.stateService.focusedView.valueOf(); // Focus on the last focused view
-            const mapView = this.mapView;
-            if (!mapView) {
-                this.cdr.markForCheck();
-                return;
-            }
-            this.showSyncMenu = this.stateService.numViews > 1 && mapView.viewIndex > 0;
-            this.hoverSubscription = mapView.hoveredFeatureIds.subscribe(result => {
-                this.featureIdsContent = [];
-                if (!result || !result.featureIds.length) {
-                    this.featureIdsPopover.hide();
+            try {
+                await this.createViewerForMode(mode2d, setupGeneration);
+            } catch (error) {
+                if (setupGeneration !== this.viewerSetupGeneration) {
                     return;
                 }
-                const featureIdsContent: string[] = [];
-                result.featureIds.forEach((featureId) => {
-                    if (!featureId) {
-                        return;
+                console.error('Failed to initialize viewer:', error);
+                const detail = error instanceof Error ? error.message : String(error);
+                const summary = detail.split(" userAgent=")[0] || "WebGL2 context could not be created.";
+                this.viewerInitError = `${summary} ${MapViewComponent.WEBGL_SETUP_HINT}`;
+            } finally {
+                if (setupGeneration === this.viewerSetupGeneration) {
+                    const spinner = document.getElementById('global-spinner-container');
+                    if (spinner) {
+                        spinner.style.display = 'none';
                     }
-                    if (typeof featureId === "string") {
-                        if (featureId !== 'hover-highlight') {
-                            featureIdsContent.push(featureId);
-                        }
+                    this.stateService.focusedView = this.stateService.focusedView.valueOf();
+                    const mapView = this.mapView;
+                    if (!mapView) {
+                        this.cdr.markForCheck();
                     } else {
-                        if (featureId.featureId) {
-                            featureIdsContent.push(featureId.featureId);
-                        }
+                        this.showSyncMenu = this.stateService.numViews > 1 && mapView.viewIndex > 0;
+                        this.firstPersonViewActiveSubscription = mapView.firstPersonViewActive.subscribe(() => {
+                            this.cdr.markForCheck();
+                        });
+                        this.hoverSubscription = mapView.hoveredFeatureIds.subscribe(result => {
+                            this.lastHoverFeatureIds = result;
+                            this.refreshHoverDetailsHud();
+                        });
+                        this.mapViewState.requestViewRecalculation(ViewRecalculationReason.HoverPopover);
+                        this.cdr.markForCheck();
                     }
-                });
-                if (!featureIdsContent.length) {
-                    this.featureIdsContent = [];
-                    this.featureIdsPopover.hide();
-                    return;
                 }
-                this.featureIdsContent = featureIdsContent;
-                const canvasRect = mapView.getCanvasClientRect();
-                const x = result.position.x + canvasRect.left; // Add the offset from the canvas dom element.
-                const y = result.position.y + canvasRect.top;
-                const anchor = this.anchorRef.nativeElement;
-                anchor.style.position = 'fixed';
-                anchor.style.left = `${x - 16}px`;
-                anchor.style.top = `${y - 4}px`;
-                anchor.style.width = '1px';
-                anchor.style.height = '1px';
-                anchor.style.pointerEvents = 'none';
+            }
+        });
+    }
 
-                if (this.featureIdsPopover.overlayVisible) {
-                    this.featureIdsPopover.target = anchor;
-                    this.featureIdsPopover.align();
-                } else {
-                    this.featureIdsPopover.show(null, anchor);
-                }
+    /** Renders the latest picked feature values in the fixed bottom HUD without requesting data. */
+    private refreshHoverDetailsHud(): void {
+        this.hoverDetailsContent = this.lastHoverFeatureIds.length && this.mapView
+            ? this.hoverDetails.detailsFor(
+                this.viewIndex(),
+                this.lastHoverFeatureIds
+            )
+            : [];
+        // Deck emits outside Angular; update only this view instead of entering
+        // the zone and checking every open inspection/search panel.
+        this.cdr.detectChanges();
+    }
 
-            });
-            this.mapViewState.requestViewRecalculation(ViewRecalculationReason.HoverPopover);
-            this.cdr.markForCheck();
+    /** Applies the inspection value-bubble presentation to one joined hover key/value pill. */
+    protected hoverValuePillClasses(field: HoverDetailField): Record<string, boolean> {
+        return inspectionValueBubbleClasses({
+            kind: "scalar",
+            colorKey: field.colorKey,
+            label: field.key
+        }, {
+            varyColors: this.stateService.inspectionValueVaryColors,
+            varyOutlines: this.stateService.inspectionValueVaryOutlines,
+            varyStriping: this.stateService.inspectionValueVaryStriping
         });
     }
 
@@ -454,7 +624,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.rightPressMoved = false;
         };
         this.viewerPointerMoveCapture = (event: PointerEvent) => {
-            if (!this.rightPressStart || (event.buttons & 2) === 0 || this.rightPressMoved) {
+            if (!this.rightPressStart || this.rightPressMoved) {
                 return;
             }
             const dx = event.clientX - this.rightPressStart.x;
@@ -541,13 +711,30 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     /** Prepares source-data context and opens the PrimeNG context menu at the supplied screen position. */
     private openContextMenu(menu: ContextMenu, event: {clientX: number; clientY: number; pageX: number; pageY: number}) {
         this.menuService.closeAllContextMenus();
+        const screenPos = this.contextMenuScreenPosition(event);
+        const featureIds = screenPos && this.mapView
+            ? this.mapView.drillPickFeatures(
+                screenPos,
+                this.stateService.drillPickRadius,
+                this.stateService.inspectionsLimit
+            ).featureIds
+            : [];
+        this.menuService.setPickedFeatures(featureIds);
+        let contextPosition: PreparedContextMenuPosition | null = null;
         try {
-            this.prepareSourceDataContextMenu(event);
+            contextPosition = screenPos
+                ? this.contextMenuPosition(screenPos, featureIds)
+                : null;
+            this.prepareSourceDataContextMenu(contextPosition);
         } catch (error) {
             console.error("Failed to prepare source-data context menu.", error);
             this.menuService.tileIdsForSourceData.next([]);
             this.menuService.setTileDiagnosticsOptions([]);
         }
+        this.prepareFirstPersonViewContextMenu(contextPosition);
+        this.menuService.setExternalViewerLocation(contextPosition
+            ? {lon: contextPosition.cartographic.lon, lat: contextPosition.cartographic.lat}
+            : null);
         try {
             this.prepareFeatureSearchContextMenu();
         } catch (error) {
@@ -555,6 +742,82 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.menuService.setFeatureSearchScope(null);
         }
         menu.show(this.contextMenuShowEvent(event) as MouseEvent);
+    }
+
+    /** Converts a context-menu client position to CSS pixels relative to the render canvas. */
+    private contextMenuScreenPosition(event: {clientX: number; clientY: number}): {x: number; y: number} | null {
+        if (!this.mapView) {
+            return null;
+        }
+        this.stateService.focusedView = this.viewIndex();
+        const canvasRect = this.mapView.getCanvasClientRect();
+        return {
+            x: event.clientX - canvasRect.left,
+            y: event.clientY - canvasRect.top
+        };
+    }
+
+    /** Resolves the WGS84 position represented by a context-menu canvas position. */
+    private contextMenuPosition(
+        screenPos: {x: number; y: number},
+        featureIds: TileFeatureId[]
+    ): PreparedContextMenuPosition | null {
+        if (!this.mapView) {
+            return null;
+        }
+        const navigationTarget = this.is2DMode ? undefined : this.mapView.pickNavigationTarget(screenPos);
+        const cartographic = navigationTarget
+            ? {
+                lon: navigationTarget.position[0],
+                lat: navigationTarget.position[1],
+                alt: navigationTarget.position[2]
+            }
+            : this.mapView.pickCartographic(screenPos);
+        return cartographic ? {screenPos, cartographic, navigationTarget, featureIds} : null;
+    }
+
+    /** Applies a view-scoped ephemeral first-person request without persisting it in app state. */
+    private applyFirstPersonViewRequest(request: FirstPersonViewMenuRequest): void {
+        if (!this.mapView) {
+            return;
+        }
+        this.ngZone.runOutsideAngular(() => {
+            if (request.action === "enter") {
+                this.mapView?.enterFirstPersonView(request.target);
+            } else {
+                this.mapView?.exitFirstPersonView();
+            }
+        });
+        this.cdr.markForCheck();
+    }
+
+    /** Leaves this renderer's ephemeral first-person camera and restores its map camera. */
+    protected exitFirstPersonView(): void {
+        const mapView = this.mapView;
+        if (!mapView?.isFirstPersonViewActive()) {
+            return;
+        }
+        this.ngZone.runOutsideAngular(() => mapView.exitFirstPersonView());
+    }
+
+    /** Prepares enter only for an exact 3D feature target, while exit remains available over empty space. */
+    private prepareFirstPersonViewContextMenu(contextPosition: PreparedContextMenuPosition | null): void {
+        if (!this.mapView) {
+            this.menuService.setFirstPersonViewContext(null);
+            return;
+        }
+        const viewIndex = this.viewIndex();
+        if (this.mapView.isFirstPersonViewActive()) {
+            this.menuService.setFirstPersonViewContext({viewIndex, active: true});
+        } else if (!this.is2DMode && contextPosition?.navigationTarget) {
+            this.menuService.setFirstPersonViewContext({
+                viewIndex,
+                active: false,
+                target: contextPosition.navigationTarget
+            });
+        } else {
+            this.menuService.setFirstPersonViewContext(null);
+        }
     }
 
     /** Copies the event coordinates we need because the original pointer event may no longer be usable later. */
@@ -581,25 +844,19 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * Derives source-data tile choices from the clicked world position and updates the menu service.
      * The preferred tile tries to match picked feature tiles first, then visible feature levels.
      */
-    private prepareSourceDataContextMenu(event: {clientX: number; clientY: number}): void {
+    private prepareSourceDataContextMenu(contextPosition: PreparedContextMenuPosition | null): void {
         if (!this.mapView || this.appModeService.isVisualizationOnly) {
             this.resetPreparedSourceData(true);
             this.menuService.setTileDiagnosticsOptions([]);
             return;
         }
 
-        this.stateService.focusedView = this.viewIndex();
-        const canvasRect = this.mapView.getCanvasClientRect();
-        const screenPos = {
-            x: event.clientX - canvasRect.left,
-            y: event.clientY - canvasRect.top
-        };
-        const cartographic = this.mapView.pickCartographic(screenPos);
-        if (!cartographic) {
+        if (!contextPosition) {
             this.resetPreparedSourceData(true);
             this.menuService.setTileDiagnosticsOptions([]);
             return;
         }
+        const {featureIds, cartographic} = contextPosition;
 
         const tileIds = Array.from({length: MapViewComponent.SOURCE_DATA_TILE_LEVEL_COUNT}, (_, level) => {
             const tileId = coreLib.getTileIdFromPosition(cartographic.lon, cartographic.lat, level);
@@ -610,7 +867,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 disabled: this.mapService.findSourceDataMapsForTileId(tileId).length === 0
             };
         });
-        const preferredPickedTileId = this.preferredPickedTileId(screenPos, tileIds);
+        const preferredPickedTileId = this.preferredPickedTileId(featureIds, tileIds);
         const preferredVisibleLevelTileId = this.preferredVisibleLevelTileId(tileIds);
         this.menuService.preferredTileIdForSourceData =
             preferredPickedTileId ??
@@ -642,9 +899,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 continue;
             }
 
-            const tileKey = coreLib.getTileFeatureLayerKey(layer.mapId, layer.id, tileId);
-            const loadedTile = this.tileStream.loadedTileLayers.get(tileKey);
-            if (!loadedTile?.hasData() || loadedTile.numFeatures <= 0) {
+            if (this.layerController?.occupancyForTile(
+                tileId,
+                [{mapId: layer.mapId, layerId: layer.id}]
+            ) !== "non-empty") {
                 continue;
             }
 
@@ -681,22 +939,16 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     /** Chooses the deepest available source-data tile among the features picked under the cursor. */
     private preferredPickedTileId(
-        screenPos: {x: number; y: number},
+        featureIds: TileFeatureId[],
         tileIds: SourceDataDropdownOption[]
     ): number | null {
-        if (!this.mapView) {
-            return null;
-        }
         const availableTileIds = new Set(
             tileIds
                 .filter(tileId => !tileId.disabled)
                 .map(tileId => Number(tileId.id))
         );
         let bestTileId: number | null = null;
-        for (const featureId of this.mapView.pickFeature(screenPos)) {
-            if (!featureId) {
-                continue;
-            }
+        for (const featureId of featureIds) {
             const [, , tileId] = coreLib.parseMapTileKey(featureId.mapTileKey) as [string, string, number];
             if (!availableTileIds.has(tileId)) {
                 continue;
@@ -721,6 +973,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private resetPreparedSourceData(clearTileIds: boolean = false, clearOutline: boolean = true): void {
         this.menuService.preferredTileIdForSourceData = null;
         this.menuService.setFeatureSearchScope(null);
+        this.menuService.setExternalViewerLocation(null);
+        this.menuService.setFirstPersonViewContext(null);
+        this.menuService.setPickedFeatures([]);
         if (clearOutline) {
             this.menuService.tileOutline.next(null);
         }

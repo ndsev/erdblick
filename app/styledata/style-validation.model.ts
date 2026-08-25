@@ -5,9 +5,15 @@ export type StyleValidationImpact =
     | 'rule-skipped'
     | 'property-fallback'
     | 'option-skipped'
+    | 'preset-skipped'
     | 'runtime-sample-skipped';
 
-export type StyleSourceKind = 'base' | 'additional' | 'imported' | 'modified-builtin' | 'editor';
+export type StyleSourceKind =
+    | 'base'
+    | 'additional'
+    | 'imported'
+    | 'modified-builtin'
+    | 'editor';
 
 export interface StyleSourceRef {
     configId?: string;

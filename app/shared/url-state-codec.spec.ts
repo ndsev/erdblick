@@ -27,8 +27,7 @@ const testMapTileKeyFactory = (
     mapId: string,
     layerId: string,
     tileId: string,
-    stage: string
-) => coreLib.createMapTileKey(layerType, mapId, layerId, tileId, Number(stage || 0));
+) => coreLib.createMapTileKey(layerType, mapId, layerId, tileId);
 
 describe("URL state v2 codec", () => {
     it("round-trips adjacent prefix and suffix compressed map names", () => {
@@ -87,7 +86,7 @@ describe("URL state v2 codec", () => {
             {
                 id: 0,
                 features: [{
-                    mapTileKey: "Features:MapA:Lane:606830446:0",
+                    mapTileKey: "Features:MapA:Lane:606830446",
                     featureId: "Lane.545379780.24:attribute#1,validity#0",
                 }],
                 locked: false,
@@ -99,7 +98,7 @@ describe("URL state v2 codec", () => {
                 id: 3,
                 features: [],
                 sourceData: {
-                    mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:606830446:0",
+                    mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:606830446",
                     address: 783783249845n,
                 },
                 locked: false,
@@ -126,7 +125,7 @@ describe("URL state v2 codec", () => {
             {
                 id: 0,
                 features: [{
-                    mapTileKey: "Features:MapA:Lane:606830446:0",
+                    mapTileKey: "Features:MapA:Lane:606830446",
                     featureId: "Lane.545379780.24:attribute#1,validity#0",
                 }],
                 locked: true,
@@ -138,7 +137,7 @@ describe("URL state v2 codec", () => {
                 id: 3,
                 features: [],
                 sourceData: {
-                    mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:606830446:0",
+                    mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:606830446",
                     address: 783783249845n,
                 },
                 locked: true,
@@ -158,11 +157,11 @@ describe("URL state v2 codec", () => {
             id: 0,
             features: [
                 {
-                    mapTileKey: "Features:Island-3D:Display3D:545666604:0",
+                    mapTileKey: "Features:Island-3D:Display3D:545666604",
                     featureId: "DisplayMesh.545666604.8",
                 },
                 {
-                    mapTileKey: "Features:Provider%2FSample Munich:Landmark:545666604:0",
+                    mapTileKey: "Features:Provider%2FSample Munich:Landmark:545666604",
                     featureId: "Landmark.545666604.12",
                 },
             ],
@@ -187,11 +186,11 @@ describe("URL state v2 codec", () => {
             id: 0,
             features: [
                 {
-                    mapTileKey: "Features:Island-3D:Display3D:545666604:0",
+                    mapTileKey: "Features:Island-3D:Display3D:545666604",
                     featureId: "DisplayMesh.545666604.8",
                 },
                 {
-                    mapTileKey: "Features:Provider%2FSample Munich:Landmark:545666604:0",
+                    mapTileKey: "Features:Provider%2FSample Munich:Landmark:545666604",
                     featureId: "Landmark.545666604.12",
                 },
             ],
@@ -211,15 +210,15 @@ describe("URL state v2 codec", () => {
             id: 0,
             features: [
                 {
-                    mapTileKey: "Features:Provider%2FSample Munich:Lane:545555209:0",
+                    mapTileKey: "Features:Provider%2FSample Munich:Lane:545555209",
                     featureId: "Lane.545555209.16803",
                 },
                 {
-                    mapTileKey: "Features:Germany:Road:545666614:0",
+                    mapTileKey: "Features:Germany:Road:545666614",
                     featureId: "Road.545666614.1132",
                 },
                 {
-                    mapTileKey: "Features:Island-3D:Display3D:545666604:0",
+                    mapTileKey: "Features:Island-3D:Display3D:545666604",
                     featureId: "DisplayMesh.545666604.54",
                 },
             ],
@@ -251,15 +250,15 @@ describe("URL state v2 codec", () => {
             id: 0,
             features: [
                 {
-                    mapTileKey: "Features:Provider%2FSample Munich:Lane:545555209:0",
+                    mapTileKey: "Features:Provider%2FSample Munich:Lane:545555209",
                     featureId: "Lane.545555209.16803",
                 },
                 {
-                    mapTileKey: "Features:Germany:Road:545666614:0",
+                    mapTileKey: "Features:Germany:Road:545666614",
                     featureId: "Road.545666614.1132",
                 },
                 {
-                    mapTileKey: "Features:Island-3D:Display3D:545666604:0",
+                    mapTileKey: "Features:Island-3D:Display3D:545666604",
                     featureId: "DisplayMesh.545666604.54",
                 },
             ],

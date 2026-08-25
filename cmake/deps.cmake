@@ -41,7 +41,7 @@ if (NOT TARGET mapget-model)
     CPMAddPackage(
       NAME mapget
       GIT_REPOSITORY "https://github.com/ndsev/mapget.git"
-      GIT_TAG "v2026.3.4"
+      GIT_TAG "v2026.4.1"
       GIT_SHALLOW OFF
       OPTIONS
         "MAPGET_WITH_WHEEL OFF"
@@ -51,6 +51,18 @@ if (NOT TARGET mapget-model)
         "MAPGET_BUILD_EXAMPLES OFF"
         "MAPGET_VALIDATE_MODEL_COLUMNS OFF")
   endif()
+endif()
+
+if (NOT TARGET mapbox-earcut)
+  CPMAddPackage(
+    NAME mapbox-earcut-source
+    GITHUB_REPOSITORY mapbox/earcut.hpp
+    GIT_TAG v2.2.4
+    DOWNLOAD_ONLY YES)
+  add_library(mapbox-earcut INTERFACE)
+  target_include_directories(
+    mapbox-earcut
+    INTERFACE "${mapbox-earcut-source_SOURCE_DIR}/include")
 endif()
 
 if (NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten" AND NOT TARGET Catch2::Catch2WithMain)

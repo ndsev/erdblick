@@ -1,12 +1,6 @@
-import {BehaviorSubject} from "rxjs";
+import {BehaviorSubject, type Observable} from "rxjs";
 import {CameraViewState, TileFeatureId} from "../shared/appstate.service";
 import {Viewport} from "../../build/libs/core/erdblick-core";
-
-/** Hover pick payload emitted by a render view after a screen-space hover query. */
-export interface HoveredFeatureIds {
-    featureIds: (TileFeatureId | null)[];
-    position: {x: number, y: number};
-}
 
 /** WGS84 rectangle used for fit-to-bounds navigation requests. */
 export interface RenderRectangle {
@@ -23,57 +17,37 @@ export interface RenderVector3 {
     z: number;
 }
 
+/** Semantic source of a physical navigation target. */
+export type RenderNavigationTargetOrigin =
+    | "feature"
+    | "path"
+    | "gltf-proxy"
+    | "ground"
+    | "unknown";
+
+/** Physical surface used as a 3D navigation or first-person camera target. */
+export interface RenderNavigationTarget {
+    position: [longitude: number, latitude: number, altitude: number];
+    /** Application identities represented by the surface; empty for ground or identity-less geometry. */
+    featureIds: TileFeatureId[];
+    surfaceNormal?: [east: number, north: number, up: number];
+    origin?: RenderNavigationTargetOrigin;
+}
+
+/** Logical feature result returned by bounded rendered-object picking operations. */
+export interface RenderedFeaturePickResult {
+    /** Unique exact feature identities in renderer traversal order. */
+    featureIds: TileFeatureId[];
+}
+
 export type RenderBackend = "deck";
 
 export const MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT = "erdblick-map-view-layout-resize-prepare";
-
-/** Controls how much shared renderer state is torn down when a render view is destroyed. */
-export interface RenderViewDestroyOptions {
-    clearTileVisualizations?: boolean;
-}
 
 /** Opaque handle that lets visualizations talk to the currently active renderer implementation. */
 export interface IRenderSceneHandle {
     readonly renderer: RenderBackend;
     readonly scene: unknown;
-}
-
-/** Minimal tile/layer data surface required by the shared visualization scheduler. */
-export interface RenderableTileLayer {
-    mapTileKey: string;
-    nodeId: string;
-    mapName: string;
-    layerName: string;
-    tileId: number;
-    dataVersion: number;
-    disposed: boolean;
-    stats: Map<string, number[]>;
-
-    setRenderOrder(order: number): void;
-    renderOrder(): number;
-    setVertexCount(count: number): void;
-}
-
-/**
- * Contract implemented by tile visualizations regardless of renderer backend.
- * Instances are long-lived and can be marked dirty multiple times as tiles or style options change.
- */
-export interface ITileVisualization {
-    readonly viewIndex: number;
-    readonly styleId: string;
-    readonly tile: RenderableTileLayer;
-    styleOrder: number;
-    highFidelityStage: number;
-    prefersHighFidelity: boolean;
-    maxLowFiLod: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
-    showTileBorder: boolean;
-
-    render(sceneHandle: IRenderSceneHandle): Promise<boolean>;
-    destroy(sceneHandle: IRenderSceneHandle): void;
-    isDirty(): boolean;
-    renderRank(): number;
-    updateStatus(renderQueued?: boolean): void;
-    setStyleOption(optionId: string, value: string | number | boolean): boolean;
 }
 
 /**
@@ -82,13 +56,17 @@ export interface ITileVisualization {
  */
 export interface IRenderView {
     readonly viewIndex: number;
-    readonly hoveredFeatureIds: BehaviorSubject<HoveredFeatureIds | undefined>;
+    readonly hoveredFeatureIds: BehaviorSubject<TileFeatureId[]>;
+    readonly firstPersonViewActive: BehaviorSubject<boolean>;
+    /** Emits once when the browser invalidates this view's graphics context. */
+    readonly contextLost: Observable<void>;
 
     setup(): Promise<void>;
-    destroy(options?: RenderViewDestroyOptions): Promise<void>;
+    destroy(): Promise<void>;
     isAvailable(): boolean;
     requestRender(): void;
     prepareForLayoutResize(targetCssSize: {width: number; height: number}): void;
+    setDesktopDrillPickingEnabled(enabled: boolean): void;
 
     getCanvasClientRect(): DOMRect;
     getCameraHeadingDegrees(): number;
@@ -97,12 +75,19 @@ export interface IRenderView {
     getSceneMode(): unknown;
     getSceneHandle(): IRenderSceneHandle;
 
-    pickFeature(screenPos: {x: number; y: number}): (TileFeatureId | null)[];
     pickCartographic(screenPos: {x: number; y: number}): {lon: number; lat: number; alt: number} | undefined;
-
+    pickNavigationTarget(screenPos: {x: number; y: number}): RenderNavigationTarget | undefined;
+    drillPickFeatures(
+        screenPos: {x: number; y: number},
+        radius: number,
+        maxObjects: number
+    ): RenderedFeaturePickResult;
     setViewFromState(cameraData: CameraViewState): void;
     getViewState(): CameraViewState;
     computeViewport(): Viewport | undefined;
+    enterFirstPersonView(target: RenderNavigationTarget): void;
+    exitFirstPersonView(): void;
+    isFirstPersonViewActive(): boolean;
 
     moveUp(): void;
     moveDown(): void;

@@ -1,3 +1,5 @@
+@use "./inspection-value-bubble.presentation" as value-bubble;
+
 .view-ui-container {
   display: flex;
   gap: 0.25em;
@@ -207,14 +209,87 @@
   }
 }
 
-.p-popover.feature-hover-popover {
-  pointer-events: none;
-  background: color-mix(in srgb, var(--p-content-background) 68%, transparent);
-  border-color: color-mix(in srgb, var(--p-content-border-color) 70%, transparent);
-  backdrop-filter: blur(2px);
-
-  .p-popover-content {
-    background: transparent;
-  }
+.hover-label-surface {
+  background: var(--p-content-background);
 }
 
+.feature-hover-hud {
+  position: fixed;
+  // The component supplies the center and available width of viewer-layout,
+  // which is also the coordinate panel's containing block.
+  bottom: 2.25rem;
+  z-index: 30040;
+  pointer-events: none;
+  width: max-content;
+  max-width: min(70em, var(--hover-hud-layout-width));
+  padding: 0.25em 0.5em;
+  transform: translateX(-50%);
+  border: none;
+  border-radius: var(--p-button-border-radius);
+  font-size: 0.9em;
+  line-height: 1.25;
+  background: var(--p-content-background);
+  box-shadow: var(--p-card-shadow);
+
+  &::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-left: 0.45em solid transparent;
+    border-right: 0.45em solid transparent;
+    border-top: 0.45em solid var(--p-content-background);
+    transform: translateX(-50%);
+    filter: drop-shadow(0 1px 1px rgb(0 0 0 / 18%));
+  }
+
+  .hover-label-feature + .hover-label-feature {
+    margin-top: 0.25em;
+    padding-top: 0.25em;
+    border-top: 1px solid var(--p-content-border-color);
+  }
+
+  .hover-label-feature {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25em 0.45em;
+    max-width: 100%;
+  }
+
+  .hover-label-feature-id {
+    font-weight: 400;
+    overflow-wrap: anywhere;
+  }
+
+  .hover-label-field {
+    @include value-bubble.base;
+
+    align-items: center;
+    display: inline-flex;
+    min-width: 0;
+    padding: 0;
+  }
+
+  .hover-label-key {
+    background: color-mix(in srgb, var(--inspection-value-bubble-color) 16%, transparent);
+    font-weight: 600;
+    padding: 0.08em 0.38em;
+    white-space: nowrap;
+  }
+
+  .hover-label-value {
+    border-left: 1px solid color-mix(
+      in srgb,
+      var(--inspection-value-bubble-color) 46%,
+      var(--p-content-border-color)
+    );
+    font-weight: 400;
+    overflow-wrap: anywhere;
+    padding: 0.08em 0.38em;
+  }
+
+  @include value-bubble.variants;
+}

@@ -12,9 +12,9 @@
   }
 
   .resizable-container {
+    position: relative;
     min-width: 15em;
     min-height: 0;
-    resize: horizontal;
     overflow: auto;
     max-width: calc(100vw - 5em);
     max-height: calc(100vh - 10.5em);

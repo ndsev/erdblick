@@ -1,4 +1,5 @@
 import type {FeatureSearchAttributeScopeCandidate} from "../mapdata/map-runtime.model";
+import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import type {SearchStyleFieldOption} from "./search-style-color.util";
 
 export interface FeatureSearchAutoStyleOption extends SearchStyleFieldOption {
@@ -7,6 +8,7 @@ export interface FeatureSearchAutoStyleOption extends SearchStyleFieldOption {
     attrName?: string;
     attrLayerName?: string;
     featureType?: string;
+    mapLayers?: FeatureSearchMapLayerRef[];
 }
 
 export interface FeatureSearchAutoStyleAnalysis {
@@ -18,7 +20,7 @@ export interface FeatureSearchAutoStyleAnalysis {
     matchedEnumValues: string[];
 }
 
-/** Selects the first scalar field from the first resolved attribute scope. */
+/** Selects the most semantically relevant scalar field from the first resolved attribute scope. */
 export function preferredSearchAutoStyleField(
     options: FeatureSearchAutoStyleOption[],
     analysis: FeatureSearchAutoStyleAnalysis | undefined
@@ -26,7 +28,7 @@ export function preferredSearchAutoStyleField(
     return searchAutoStyleFieldOptions(options, analysis)[0];
 }
 
-/** Generates automatic search-result rules: one first scalar field per resolved attribute scope. */
+/** Generates automatic search-result rules: one ranked scalar field per resolved attribute scope. */
 export function searchAutoStyleFieldOptions(
     options: FeatureSearchAutoStyleOption[],
     analysis: FeatureSearchAutoStyleAnalysis | undefined
@@ -44,17 +46,73 @@ export function searchAutoStyleFieldOptions(
     const result: FeatureSearchAutoStyleOption[] = [];
     const seen = new Set<string>();
     for (const scope of uniqueScopes) {
-        const fieldOption = attributeOptions.find(option => searchStyleOptionMatchesAttributeScope(option, scope));
-        if (!fieldOption) {
+        const ranked = attributeOptions
+            .filter(option => searchStyleOptionMatchesAttributeScope(option, scope))
+            .map((option, index) => ({
+                option,
+                index,
+                rank: searchAutoStyleFieldRank(option, scope, analysis)
+            }))
+            .sort((left, right) =>
+                left.rank - right.rank || left.index - right.index);
+        const bestRank = ranked[0]?.rank;
+        if (bestRank === undefined) {
             continue;
         }
-        const key = searchAutoStyleFieldOptionKey(fieldOption);
-        if (!seen.has(key)) {
-            seen.add(key);
-            result.push(fieldOption);
+        // Heterogeneous schemas can expose the same semantic value at
+        // different paths. Keep every equally good path and let its explicit
+        // source-layer applicability select the correct generated rule.
+        for (const {option, rank, index} of ranked) {
+            if (rank !== bestRank) {
+                break;
+            }
+            if (bestRank > 1 && index !== ranked[0].index) {
+                continue;
+            }
+            const key = searchAutoStyleFieldOptionKey(option);
+            if (!seen.has(key)) {
+                seen.add(key);
+                result.push(option);
+            }
         }
     }
     return result;
+}
+
+/**
+ * Checks that source-specific candidate paths can be guarded with portable
+ * attribute/feature semantics before they become persisted search rules.
+ */
+export function searchAutoStyleFieldOptionsArePortable(
+    options: readonly FeatureSearchAutoStyleOption[],
+    analysis: FeatureSearchAutoStyleAnalysis | undefined
+): boolean {
+    if (!options.length
+        || analysis?.status !== "ready"
+        || analysis.concreteScope !== "attribute") {
+        return false;
+    }
+    const scopes = analysis.attributeScopes;
+    const covers = (
+        option: FeatureSearchAutoStyleOption,
+        scope: FeatureSearchAttributeScopeCandidate
+    ) => optionContexts(option).some(context =>
+        context.mapId === scope.mapId && context.layerId === scope.layerId);
+
+    // Every resolved scope needs a selected field that actually exists in its
+    // source context; otherwise a generic solid rule is safer.
+    if (scopes.some(scope => !options.some(option =>
+        option.attrName === scope.attrName && covers(option, scope)))) {
+        return false;
+    }
+
+    // A rule may safely miss another source context only if its feature type
+    // guard proves that the rule cannot run there.
+    return options.every(option => scopes
+        .filter(scope => scope.attrName === option.attrName && !covers(option, scope))
+        .every(scope => !!option.featureType
+            && !!scope.featureType
+            && option.featureType !== scope.featureType));
 }
 
 /** Restricts default-style candidates to resolved attribute scopes, without guessing from leaf names. */
@@ -117,4 +175,51 @@ export function searchAutoStyleFieldOptionKey(option: FeatureSearchAutoStyleOpti
 /** Automatic attribute styling only consumes real scalar attribute fields. */
 function isNativeAttributeScalar(option: FeatureSearchAutoStyleOption): boolean {
     return !!option.attrName && !option.value.startsWith("$") && option.valueKind !== "object" && option.valueKind !== "array";
+}
+
+/**
+ * Prefer the field named by the query/schema before falling back to useful
+ * schema types. Attribute names such as WARNING_SIGN naturally map to leaf
+ * fields such as warningSign; an enum field then gives the editor a populated
+ * categorical scale instead of an arbitrary solid rule.
+ */
+function searchAutoStyleFieldRank(
+    option: FeatureSearchAutoStyleOption,
+    scope: FeatureSearchAttributeScopeCandidate,
+    analysis: FeatureSearchAutoStyleAnalysis
+): number {
+    const leaf = option.value.split(".").at(-1) ?? option.value;
+    const normalizedLeaf = normalizedSemanticName(leaf);
+    if (normalizedLeaf &&
+        normalizedLeaf === normalizedSemanticName(scope.attrName)) {
+        return 0;
+    }
+    if (analysis.matchedFieldNames.some(name =>
+        normalizedSemanticName(name) === normalizedLeaf)) {
+        return 1;
+    }
+    const matchedEnums = new Set(analysis.matchedEnumValues);
+    if (option.enumValues?.some(value => matchedEnums.has(value))) {
+        return 2;
+    }
+    if (option.valueKind === "enum") {
+        return 3;
+    }
+    if (option.valueKind === "number" || option.valueKind === "integer") {
+        return 4;
+    }
+    return 5;
+}
+
+function normalizedSemanticName(value: string): string {
+    return value.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function optionContexts(option: FeatureSearchAutoStyleOption): FeatureSearchMapLayerRef[] {
+    if (option.mapLayers?.length) {
+        return option.mapLayers;
+    }
+    return option.mapId && option.layerId
+        ? [{mapId: option.mapId, layerId: option.layerId}]
+        : [];
 }

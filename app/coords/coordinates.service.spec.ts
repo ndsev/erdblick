@@ -43,7 +43,7 @@ describe('CoordinatesService', () => {
 
             await new Promise(resolve => setTimeout(resolve, 0));
 
-            expect(loaderSpy).toHaveBeenCalledWith('/config/jump_plugin.js');
+            expect(loaderSpy).toHaveBeenCalledWith('/static-config/jump_plugin.js');
         } finally {
             loaderSpy.mockRestore();
         }

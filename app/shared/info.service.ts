@@ -51,6 +51,34 @@ export class InfoMessageService {
         this.messageService.clear('backend-protocol');
     }
 
+    /** Shows the persistent notices for configuration-backed editing in one stacking toast host. */
+    showConfigurationEditingNotices(
+        sourceStyleDirectory: string | null,
+        mapPresetEditingEnabled: boolean
+    ) {
+        this.messageService.clear("configuration-editing");
+        if (sourceStyleDirectory !== null) {
+            this.messageService.add({
+                key: "configuration-editing",
+                severity: "warn",
+                summary: "Source Style Editing Enabled",
+                detail: sourceStyleDirectory
+                    ? `Saving a style will overwrite YAML files below ${sourceStyleDirectory}.`
+                    : "Saving a style will overwrite mapviewer source files.",
+                sticky: true
+            });
+        }
+        if (mapPresetEditingEnabled) {
+            this.messageService.add({
+                key: "configuration-editing",
+                severity: "warn",
+                summary: "Server Map Preset Editing Enabled",
+                detail: "Changes to map presets are saved to the server configuration.",
+                sticky: true
+            });
+        }
+    }
+
     /** Emits a warning toast through PrimeNG's global message service. */
     showWarning(message: string) {
         this.messageService.add({ key: 'tc', severity: 'warn', summary: 'Warning', detail: message });

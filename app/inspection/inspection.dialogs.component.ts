@@ -1,14 +1,14 @@
-import {Component, OnDestroy} from "@angular/core";
+import {ChangeDetectorRef, Component, OnDestroy} from "@angular/core";
 import {Subscription} from "rxjs";
 import {InspectionSelectionService} from "./inspection-selection.service";
-import {FeatureWrapper} from "../mapdata/features.model";
+import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {AppStateService, InspectionComparisonModel, InspectionPanelModel} from "../shared/appstate.service";
 
 @Component({
     selector: 'inspection-dialogs',
     template: `
         @for (panel of undockedPanels; track panel.id; let i = $index) {
-            @if (panel.features.length > 0 || panel.sourceData !== undefined) {
+            @if (panel.loading || panel.features.length > 0 || panel.sourceData !== undefined) {
                 <inspection-panel-dialog [panel]="panel" [dialogIndex]="i"></inspection-panel-dialog>
             }
         }
@@ -26,12 +26,15 @@ export class InspectionDialogsComponent implements OnDestroy {
     private readonly subscriptions = new Subscription();
 
     constructor(private mapService: InspectionSelectionService,
-                private stateService: AppStateService) {
+                private stateService: AppStateService,
+                private readonly cdr: ChangeDetectorRef) {
         this.subscriptions.add(this.mapService.selectionTopic.subscribe(panels => {
             this.undockedPanels = panels.filter(panel => panel.undocked);
+            this.cdr.markForCheck();
         }));
         this.subscriptions.add(this.stateService.inspectionComparisonState.subscribe(comparison => {
             this.comparison = comparison;
+            this.cdr.markForCheck();
         }));
     }
 

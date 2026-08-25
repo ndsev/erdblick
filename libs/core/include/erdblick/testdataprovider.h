@@ -262,15 +262,14 @@ public:
             label-color: "#00ccdd"
             label-outline-color: "#111111"
             label-outline-width: 1
-            label-font: "24px Helvetica"
+            label-font-family: Helvetica
+            label-size: 24
             label-background-color: "#00000000"
             label-background-padding: [7, 5]
-            label-horizontal-origin: "LEFT"
-            label-vertical-origin: "BASELINE"
+            label-text-anchor: start
+            label-alignment-baseline: bottom
             label-text-expression: "**.speedLimitKmh"
             label-text: "abc"
-            label-style: "FILL_AND_OUTLINE"
-            label-scale: 1
 
           - geometry:
               - line
@@ -282,14 +281,14 @@ public:
             label-color: "#00ccdd"
             label-outline-color: "#111111"
             label-outline-width: 1
-            label-font: "24px Helvetica"
+            label-font-family: Helvetica
+            label-size: 24
             label-background-color: "#00000000"
             label-background-padding: [7, 5]
-            label-horizontal-origin: "LEFT"
-            label-vertical-origin: "BASELINE"
+            label-text-anchor: start
+            label-alignment-baseline: bottom
             label-text-expression: "**.speedLimitKmh"
             label-text: "abc"
-            label-style: "FILL_AND_OUTLINE"
 
           - geometry:
               - line
@@ -301,14 +300,14 @@ public:
             label-color: "#00ccdd"
             label-outline-color: "#111111"
             label-outline-width: 1
-            label-font: "24px Helvetica"
+            label-font-family: Helvetica
+            label-size: 24
             label-background-color: "#00000000"
             label-background-padding: [7, 5]
-            label-horizontal-origin: "LEFT"
-            label-vertical-origin: "BASELINE"
+            label-text-anchor: start
+            label-alignment-baseline: bottom
             label-text-expression: "**.wayType as string"
             label-text: "abc"
-            label-style: "OUTLINE"
 
           - geometry:
               - line
@@ -320,14 +319,14 @@ public:
             label-color: "#00ccdd"
             label-outline-color: "#111111"
             label-outline-width: 1
-            label-font: "24px Helvetica"
+            label-font-family: Helvetica
+            label-size: 24
             label-background-color: "#00000000"
             label-background-padding: [7, 5]
-            label-horizontal-origin: "LEFT"
-            label-vertical-origin: "BASELINE"
+            label-text-anchor: start
+            label-alignment-baseline: bottom
             label-text-expression: "**.speedLimitKmh"
             label-text: "abc"
-            label-style: "FILL"
 
           - geometry:
               - line
@@ -343,14 +342,14 @@ public:
             label-color: "#00ccdd"
             label-outline-color: "#111111"
             label-outline-width: 1
-            label-font: "24px Helvetica"
+            label-font-family: Helvetica
+            label-size: 24
             label-background-color: "#00000000"
             label-background-padding: [7, 5]
-            label-horizontal-origin: "LEFT"
-            label-vertical-origin: "BASELINE"
+            label-text-anchor: start
+            label-alignment-baseline: bottom
             label-text-expression: "**.speedLimitKmh"
             label-text: "abc"
-            label-style: "FILL"
 
           - geometry:
               - polygon
@@ -390,14 +389,14 @@ public:
             label-color: "#00ccdd"
             label-outline-color: "#111111"
             label-outline-width: 1
-            label-font: "24px Helvetica"
+            label-font-family: Helvetica
+            label-size: 24
             label-background-color: "#00000000"
             label-background-padding: [7, 5]
-            label-horizontal-origin: "LEFT"
-            label-vertical-origin: "BASELINE"
+            label-text-anchor: start
+            label-alignment-baseline: bottom
             label-text-expression: "**.speedLimitKmh"
             label-text: "abc"
-            label-style: "OUTLINE"
 
           - geometry:
               - mesh
@@ -407,14 +406,14 @@ public:
             label-color: "#00ccdd"
             label-outline-color: "#111111"
             label-outline-width: 1
-            label-font: "24px Helvetica"
+            label-font-family: Helvetica
+            label-size: 24
             label-background-color: "#00000000"
             label-background-padding: [7, 5]
-            label-horizontal-origin: "LEFT"
-            label-vertical-origin: "BASELINE"
+            label-text-anchor: start
+            label-alignment-baseline: bottom
             label-text-expression: "**.speedLimitKmh"
             label-text: "abc"
-            label-style: "FILL"
 
           - type: "Diamond"
             aspect: relation

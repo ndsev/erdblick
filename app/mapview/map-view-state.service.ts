@@ -2,20 +2,37 @@ import {Injectable} from "@angular/core";
 import {Subject} from "rxjs";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {coreLib} from "../integrations/wasm";
-import {AppStateService, TileGridMode, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
+import {
+    AppStateService,
+    CameraViewState,
+    TileGridMode,
+    VIEW_SYNC_LAYERS,
+    VIEW_SYNC_MOVEMENT,
+    VIEW_SYNC_POSITION
+} from "../shared/appstate.service";
 import {RenderRectangle} from "./render-view.model";
 import {ViewVisualizationState} from "./view.visualization.model";
-import {Viewport} from "../../build/libs/core/erdblick-core";
-import {coarsenedTileLevel, tileGridVisibleCellCount} from "./tile-grid-visibility";
+import type {
+    FeatureLayerStyle,
+    Viewport
+} from "../../build/libs/core/erdblick-core";
+import {
+    autoTileGridLevel,
+    coarsenedTileLevel,
+    tileGridVisibleCellCount
+} from "./tile-grid-visibility";
+import {
+    clampPresentationLod,
+    clampStyleLod
+} from "../shared/lod-policy";
 
 export enum ViewRecalculationReason {
     AutoLevel = "auto-level",
     BackgroundSync = "background-sync",
-    FidelityThreshold = "fidelity-threshold",
+    LodThreshold = "lod-threshold",
     HoverPopover = "hover-popover",
     LayerLevel = "layer-level",
     NumViews = "num-views",
-    PinLowFi = "pin-lowfi",
     StyleChange = "style-change",
     SyncOptions = "sync-options",
     TileBorder = "tile-border",
@@ -23,6 +40,13 @@ export enum ViewRecalculationReason {
     TileLimit = "tile-limit",
     Viewport = "viewport",
     Visibility = "visibility"
+}
+
+/** One renderer-local camera preview routed from the focused view to a sibling. */
+export interface LiveCameraViewStateUpdate {
+    sourceView: number;
+    targetView: number;
+    cameraViewData: CameraViewState;
 }
 
 /**
@@ -37,6 +61,7 @@ export class MapViewStateService {
     readonly moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number, z?: number }>();
     readonly moveToRectangleTopic = new Subject<{ targetView: number, rectangle: RenderRectangle }>();
     readonly showLocationLabelTopic = new Subject<{ targetView: number, x: number, y: number, label: string }>();
+    readonly liveCameraViewStateTopic = new Subject<LiveCameraViewStateUpdate>();
     readonly viewVisualizationState: ViewVisualizationState[] = [];
 
     constructor(
@@ -56,9 +81,8 @@ export class MapViewStateService {
             this.mapInfo.reapplySyncOptionsForAllViews();
             this.requestViewRecalculation(ViewRecalculationReason.NumViews);
         });
-        this.stateService.pinLowFiToMaxLodState.subscribe(() => this.requestViewRecalculation(ViewRecalculationReason.PinLowFi));
-        this.stateService.lowFiTileThresholdState.subscribe(() =>
-            this.requestViewRecalculation(ViewRecalculationReason.FidelityThreshold));
+        this.stateService.lod3TileThresholdState.subscribe(() =>
+            this.requestViewRecalculation(ViewRecalculationReason.LodThreshold));
         this.mapInfo.layerStateChanged.subscribe(reason => this.requestViewRecalculation(reason));
     }
 
@@ -67,14 +91,72 @@ export class MapViewStateService {
         return this.viewVisualizationState[viewIndex];
     }
 
+    /**
+     * Routes a transient camera pose to synchronized sibling renderers without
+     * touching persisted AppState, storage, URL state, or Angular-bound consumers.
+     */
+    publishLiveCameraViewState(sourceView: number, sourceState: CameraViewState): void {
+        if (this.stateService.numViews < 2 ||
+            sourceView !== this.stateService.focusedView ||
+            sourceView < 0 || sourceView >= this.stateService.numViews) {
+            return;
+        }
+
+        const syncPosition = this.stateService.viewSync.includes(VIEW_SYNC_POSITION);
+        const syncMovement = this.stateService.viewSync.includes(VIEW_SYNC_MOVEMENT);
+        if (!syncPosition && !syncMovement) {
+            return;
+        }
+
+        const persistedSource = this.stateService.cameraViewDataState.getValue(sourceView);
+        const longitudeDelta = sourceState.destination.lon - persistedSource.destination.lon;
+        const latitudeDelta = sourceState.destination.lat - persistedSource.destination.lat;
+
+        for (let targetView = 0; targetView < this.stateService.numViews; targetView++) {
+            if (targetView === sourceView) {
+                continue;
+            }
+            const targetState = this.stateService.cameraViewDataState.getValue(targetView);
+            const cameraViewData: CameraViewState = syncPosition
+                ? {
+                    destination: {...sourceState.destination},
+                    orientation: {...sourceState.orientation},
+                    position: [...(sourceState.position ?? [0, 0, 0])]
+                }
+                : {
+                    destination: {
+                        lon: targetState.destination.lon + longitudeDelta,
+                        lat: targetState.destination.lat + latitudeDelta,
+                        alt: targetState.destination.alt
+                    },
+                    orientation: {...targetState.orientation},
+                    position: [...(targetState.position ?? [0, 0, 0])]
+                };
+            this.liveCameraViewStateTopic.next({sourceView, targetView, cameraViewData});
+        }
+    }
+
     /** Updates one view's viewport snapshot and schedules dependent stream/render refreshes. */
-    setViewport(viewIndex: number, viewport: Viewport) {
+    setViewport(
+        viewIndex: number,
+        viewport: Viewport,
+        canonicalCameraAltitudeMeters?: number,
+        metersPerPixel?: number
+    ) {
         const maxIndex = this.viewVisualizationState.length - 1;
         if (viewIndex > maxIndex) {
             console.warn(`Attempted to write @ viewIndex: ${viewIndex} but it is out of bounds (${maxIndex})`);
             return;
         }
-        this.viewVisualizationState[viewIndex].viewport = viewport;
+        const state = this.viewVisualizationState[viewIndex];
+        state.viewport = viewport;
+        if (Number.isFinite(canonicalCameraAltitudeMeters)) {
+            state.canonicalCameraAltitudeMeters =
+                Number(canonicalCameraAltitudeMeters);
+        }
+        if (Number.isFinite(metersPerPixel)) {
+            state.metersPerPixel = Number(metersPerPixel);
+        }
         this.requestViewRecalculation(ViewRecalculationReason.Viewport);
     }
 
@@ -91,16 +173,46 @@ export class MapViewStateService {
             state.recalculateTileIds(
                 tileLimit,
                 this.visibleFeatureLevelsInView(viewIndex),
-                this.stateService.cameraViewDataState.getValue(viewIndex).destination.alt,
-                this.stateService.pinLowFiToMaxLod,
-                this.stateService.lowFiTileThreshold
+                state.canonicalCameraAltitudeMeters ??
+                    this.stateService.cameraViewDataState
+                        .getValue(viewIndex).destination.alt
             );
         });
     }
 
-    /** Returns whether a view currently wants high-fidelity geometry for a tile id. */
-    prefersHighFidelityForTile(viewIndex: number, tileId: number): boolean {
-        return this.viewVisualizationState[viewIndex]?.getTileRenderPolicy(tileId).targetFidelity === "high";
+    /** Resolve one stylesheet's LOD from canonical viewport density at a tile level. */
+    styleLod(
+        viewIndex: number,
+        level: number,
+        style: FeatureLayerStyle
+    ): number {
+        const tileCount = this.styleVisibleTileCount(viewIndex, level);
+        return clampStyleLod(style.lodForVisibleTileCount(
+            tileCount,
+            this.stateService.lod3TileThreshold
+        ));
+    }
+
+    /** Resolve the continuous GPU LOD used to fade retained style records. */
+    stylePresentationLod(
+        viewIndex: number,
+        level: number,
+        style: FeatureLayerStyle
+    ): number {
+        return clampPresentationLod(style.presentationLodForVisibleTileCount(
+            this.styleVisibleTileCount(viewIndex, level),
+            this.stateService.lod3TileThreshold
+        ));
+    }
+
+    /** Return the canonical density shared by planning and GPU presentation LOD. */
+    private styleVisibleTileCount(viewIndex: number, level: number): number {
+        const state = this.viewVisualizationState[viewIndex];
+        const altitude = state?.canonicalCameraAltitudeMeters ??
+            this.stateService.cameraViewDataState
+                .getValue(viewIndex).destination.alt;
+        return state?.canonicalVisibleTileCountPerLevel.get(level) ??
+            Number(coreLib.getNumTileIdsForCanonicalCamera(altitude, level));
     }
 
     /** Returns whether search-result geometry should be rendered for one visible source tile. */
@@ -296,6 +408,57 @@ export class MapViewStateService {
         this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
     }
 
+    /** Sets the independent tile-grid level and refreshes affected overlays. */
+    setViewTileGridLevel(viewIndex: number, level: number): void {
+        this.mapInfo.setViewTileGridLevel(viewIndex, level);
+        this.mapInfo.syncViewsIfEnabled(viewIndex);
+        this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
+    }
+
+    /** Enables or disables viewport-based automatic tile-grid level selection. */
+    setViewTileGridAutoLevel(viewIndex: number, autoLevel: boolean): void {
+        if (autoLevel) {
+            const configuredLevel =
+                this.mapInfo.maps.getViewTileGridLevel(viewIndex);
+            this.mapInfo.setViewTileGridLevel(
+                viewIndex,
+                this.autoSelectedTileGridLevel(viewIndex, configuredLevel)
+            );
+        }
+        this.mapInfo.setViewTileGridAutoLevel(viewIndex, autoLevel);
+        this.mapInfo.syncViewsIfEnabled(viewIndex);
+        this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
+    }
+
+    /** Returns whether the tile grid follows the viewport-based auto-level heuristic. */
+    isViewTileGridAutoLevelEnabled(viewIndex: number): boolean {
+        return this.mapInfo.isViewTileGridAutoLevelEnabled(viewIndex);
+    }
+
+    /** Returns the configured grid level or its viewport-derived value in auto mode. */
+    getEffectiveViewTileGridLevel(viewIndex: number): number {
+        const configuredLevel =
+            this.mapInfo.maps.getViewTileGridLevel(viewIndex);
+        if (!this.mapInfo.maps.getViewTileGridAutoLevel(viewIndex)) {
+            return configuredLevel;
+        }
+        return this.autoSelectedTileGridLevel(viewIndex, configuredLevel);
+    }
+
+    /** Sets the tile-grid line colour and refreshes affected overlays. */
+    setViewTileGridColor(viewIndex: number, color: string): void {
+        this.mapInfo.setViewTileGridColor(viewIndex, color);
+        this.mapInfo.syncViewsIfEnabled(viewIndex);
+        this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
+    }
+
+    /** Sets the tile-grid opacity percentage and refreshes affected overlays. */
+    setViewTileGridOpacity(viewIndex: number, opacity: number): void {
+        this.mapInfo.setViewTileGridOpacity(viewIndex, opacity);
+        this.mapInfo.syncViewsIfEnabled(viewIndex);
+        this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
+    }
+
     /** Persists an explicit layer level for one view and refreshes visible tiles. */
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
         this.mapInfo.setMapLayerLevel(viewIndex, mapId, layerId, level);
@@ -353,7 +516,23 @@ export class MapViewStateService {
         }
     }
 
-    /** Chooses the deepest advertised level whose tile density stays below the auto-level threshold. */
+    /** Chooses the automatic grid level solely from canonical camera altitude. */
+    private autoSelectedTileGridLevel(
+        viewIndex: number,
+        fallbackLevel: number
+    ): number {
+        const canonicalAltitude =
+            this.viewVisualizationState[viewIndex]?.canonicalCameraAltitudeMeters;
+        if (!Number.isFinite(canonicalAltitude)) {
+            return fallbackLevel;
+        }
+        return autoTileGridLevel(
+            Number(canonicalAltitude),
+            this.mapInfo.maps.getViewTileGridMode(viewIndex)
+        );
+    }
+
+    /** Chooses the deepest advertised level whose canonical tile density stays below the threshold. */
     private autoSelectedMapLayerLevel(viewIndex: number, mapId: string, layerId: string, fallbackLevel: number): number;
     private autoSelectedMapLayerLevel(viewIndex: number, mapId: string, layerId: string, fallbackLevel: null): number | null;
     private autoSelectedMapLayerLevel(
@@ -366,15 +545,19 @@ export class MapViewStateService {
         if (!advertisedLevels.length) {
             return fallbackLevel;
         }
-        const viewport = this.viewVisualizationState[viewIndex]?.viewport;
-        if (!viewport || viewport.width <= 0 || viewport.height <= 0) {
+        const canonicalAltitude =
+            this.viewVisualizationState[viewIndex]?.canonicalCameraAltitudeMeters;
+        if (!Number.isFinite(canonicalAltitude)) {
             return fallbackLevel === null
                 ? advertisedLevels[advertisedLevels.length - 1]
                 : this.clampLayerLevelToAdvertised(fallbackLevel, advertisedLevels);
         }
         for (let index = advertisedLevels.length - 1; index >= 0; index--) {
             const candidateLevel = advertisedLevels[index];
-            const visibleTileCount = coreLib.getNumTileIds(viewport, candidateLevel);
+            const visibleTileCount = coreLib.getNumTileIdsForCanonicalCamera(
+                Number(canonicalAltitude),
+                candidateLevel
+            );
             if (visibleTileCount <= MapViewStateService.AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES) {
                 return candidateLevel;
             }

@@ -36,7 +36,7 @@ export class CoordinatesService {
             return;
         }
 
-        const jumpTargetsPath = `/config/${jumpTargetsConfig}.js`;
+        const jumpTargetsPath = `/static-config/${jumpTargetsConfig}.js`;
         this.loadJumpTargetsModule(jumpTargetsPath).then((plugin) => {
             const {getAuxCoordinates, getAuxTileIds} = plugin;
             if (typeof getAuxCoordinates === "function") {
