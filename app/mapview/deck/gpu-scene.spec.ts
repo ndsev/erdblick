@@ -747,10 +747,12 @@ describe("GpuScene contribution lifecycle", () => {
       );
       scene.finishRender(reservation);
     };
-    install("tied-a", 1, 0, 16);
-    install("tied-b", 2, 0, 17);
-    for (let zIndex = 1; zIndex <= 512; zIndex++) {
-      install(`unique-${zIndex}`, zIndex + 2, zIndex, 0);
+    const tiedCount = 5;
+    for (let index = 0; index < tiedCount; ++index) {
+      install(`tied-${index}`, index + 1, 0, 16 + index);
+    }
+    for (let zIndex = 1; zIndex <= 4096; zIndex++) {
+      install(`unique-${zIndex}`, zIndex + tiedCount, zIndex, 0);
     }
 
     scene.publishPresentation();
@@ -758,8 +760,12 @@ describe("GpuScene contribution lifecycle", () => {
       device,
       "erdblick-gpu-z-index-table",
     ).writes.at(-1)!.data as Float32Array;
-    expect(ranked[0]).not.toBe(ranked[4]);
-    expect(ranked[8]).toBeGreaterThan(Math.max(ranked[0], ranked[4]));
+    const tiedOffsets = Array.from(
+      { length: tiedCount },
+      (_, index) => ranked[index * 4],
+    );
+    expect(new Set(tiedOffsets).size).toBe(tiedCount);
+    expect(ranked[tiedCount * 4]).toBeGreaterThan(Math.max(...tiedOffsets));
   });
 
   it("bounds dense depth ranks without collapsing isolated authored tiers", () => {
@@ -767,7 +773,7 @@ describe("GpuScene contribution lifecycle", () => {
     const zIndices = [
       -20,
       -19,
-      ...Array.from({ length: 1025 }, (_, index) => index * 0.0001),
+      ...Array.from({ length: 4097 }, (_, index) => index * 0.0001),
     ];
     zIndices.forEach((zIndex, index) => {
       const reservation = scene.prepareRender(
@@ -792,19 +798,23 @@ describe("GpuScene contribution lifecycle", () => {
       "erdblick-gpu-z-index-table",
     ).writes.at(-1)!.data as Float32Array;
     const offsets = zIndices.map((_, index) => ranked[index * 4]);
-    expect(new Set(offsets).size).toBeLessThanOrEqual(1024);
+    expect(new Set(offsets).size).toBeLessThanOrEqual(4096);
     expect(offsets[0]).toBeLessThan(offsets[1]);
     expect(offsets[1]).toBeLessThan(offsets[2]);
     expect(offsets.at(-1)).toBeGreaterThan(offsets[2]);
   });
 
-  it("reserves depth separation between dense integral tiers", () => {
+  it("preserves sparse ranks above a dense authored band", () => {
     const { device, scene } = createScene();
     const lowTier = Array.from(
-      { length: 1025 },
+      { length: 4097 },
       (_, index) => index * 0.0001,
     );
-    const zIndices = [...lowTier, 65536];
+    const highTier = Array.from(
+      { length: 8 },
+      (_, index) => 65536 + (index + 1) / 32,
+    );
+    const zIndices = [...lowTier, ...highTier];
     zIndices.forEach((zIndex, index) => {
       const reservation = scene.prepareRender(
         "origin",
@@ -838,6 +848,7 @@ describe("GpuScene contribution lifecycle", () => {
     const tierSpacing =
       offsets[lowTier.length] - offsets[lowTier.length - 1];
     expect(tierSpacing / minimumSpacing).toBeGreaterThanOrEqual(7.9);
+    expect(new Set(offsets.slice(lowTier.length)).size).toBe(highTier.length);
   });
 
   it("keeps contribution and z-index lookups unchanged until publication", () => {

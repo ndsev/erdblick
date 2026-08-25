@@ -18,8 +18,10 @@ import { GpuRangeAllocator, type GpuRecordRange } from "./gpu-range-allocator";
 const LOOKUP_TEXTURE_WIDTH = 1024;
 const MAX_PICKING_INDEX = 0x00ff_fffe;
 const MAX_ACTIVATION_TOKEN = 0x00ff_ffff;
-const TARGET_DEPTH_STEPS = 1024;
-const PREFERRED_TIER_GAP_STEPS = 8;
+// A 24-bit depth buffer still has multiple representable values per logical
+// step across MAX_LOCAL_CLIP_SPACE_BIAS at this budget.
+const TARGET_DEPTH_STEPS = 4096;
+const PREFERRED_BAND_GAP_STEPS = 8;
 // Keep synchronized with kGpuDepthTieBucketCount: packets retain exactly the
 // hash bits consumed by this power-of-two allocator.
 const MAX_TIE_BUCKETS = 32;
@@ -46,7 +48,9 @@ interface NormalizedZIndexEntry {
  * Dense Classic styles then exhaust the safe depth budget before repeated ranks
  * receive even a second slot. Power-of-two per-rank buckets retain the hash's
  * spatial low-bit distribution while spending the remaining budget on the most
- * heavily contended ranks first.
+ * heavily contended ranks first. When authored ranks alone overflow the budget,
+ * distant semantic bands share it independently so a dense source-order band
+ * cannot collapse every casing/fill rank in a sparse band.
  */
 function allocateDepthRanks(
   orderedZIndices: readonly number[],
@@ -54,45 +58,100 @@ function allocateDepthRanks(
 ): { allocations: Map<number, DepthRankAllocation>; slotCount: number } {
   if (orderedZIndices.length > TARGET_DEPTH_STEPS) {
     // A 24-bit depth buffer cannot represent an unbounded exact lattice inside
-    // the deliberately tiny local bias interval. Reserve several slots at
-    // integral authored-tier boundaries before distributing the remainder
-    // across fractions. This keeps independently styled semantic bands apart
-    // even when thousands of source-order fractions share one tier.
-    let tierCount = 1;
-    for (let index = 1; index < orderedZIndices.length; ++index) {
-      if (
-        Math.floor(orderedZIndices[index]) !==
-        Math.floor(orderedZIndices[index - 1])
-      ) {
-        ++tierCount;
+    // the deliberately tiny local bias interval. Allocate the budget fairly
+    // between authored bands so a sparse high band (for example Road)
+    // keeps its internal casing/fill ranks instead of being swallowed by a
+    // dense low band (for example BMD source order).
+    const bands: Array<{
+      values: number[];
+      slotCount: number;
+    }> = [];
+    for (const value of orderedZIndices) {
+      const band = bands.at(-1);
+      if (!band || value - band.values.at(-1)! > 1) {
+        bands.push({ values: [value], slotCount: 1 });
+      } else {
+        band.values.push(value);
       }
     }
-    const preserveTiers = tierCount <= TARGET_DEPTH_STEPS;
-    const tierTransitions = preserveTiers ? tierCount - 1 : 0;
-    const tierGap = tierTransitions > 0
+    const allocations = new Map<number, DepthRankAllocation>();
+    if (bands.length > TARGET_DEPTH_STEPS) {
+      orderedZIndices.forEach((value, index) => {
+        allocations.set(value, {
+          firstSlot: Math.floor(
+            (index * (TARGET_DEPTH_STEPS - 1)) /
+              (orderedZIndices.length - 1),
+          ),
+          tieBucketCount: 1,
+        });
+      });
+      return { allocations, slotCount: TARGET_DEPTH_STEPS };
+    }
+
+    const transitionCount = bands.length - 1;
+    const extraGap = transitionCount > 0
       ? Math.min(
-          PREFERRED_TIER_GAP_STEPS,
-          Math.floor((TARGET_DEPTH_STEPS - 1) / tierTransitions),
+          PREFERRED_BAND_GAP_STEPS - 1,
+          Math.floor(
+            (TARGET_DEPTH_STEPS - bands.length) / transitionCount,
+          ),
         )
       : 0;
-    const ordinalSlots = TARGET_DEPTH_STEPS - 1 - tierTransitions * tierGap;
-    const allocations = new Map<number, DepthRankAllocation>();
-    let tier = 0;
-    orderedZIndices.forEach((value, index) => {
-      if (
-        index > 0 &&
-        Math.floor(value) !== Math.floor(orderedZIndices[index - 1])
-      ) {
-        ++tier;
-      }
-      allocations.set(value, {
-        firstSlot:
-          (preserveTiers ? tier * tierGap : 0) +
-          Math.floor((index * ordinalSlots) / (orderedZIndices.length - 1)),
-        tieBucketCount: 1,
-      });
+    const valueSlotBudget = TARGET_DEPTH_STEPS - transitionCount * extraGap;
+    // Water-fill the smallest bands first: sparse semantic bands retain every
+    // authored rank while dense source-order bands share the remaining slots.
+    let remainingSlots = valueSlotBudget;
+    const bandsBySize = [...bands].sort(
+      (left, right) => left.values.length - right.values.length,
+    );
+    bandsBySize.forEach((band, index) => {
+      band.slotCount = Math.min(
+        band.values.length,
+        Math.floor(remainingSlots / (bandsBySize.length - index)),
+      );
+      remainingSlots -= band.slotCount;
     });
-    return { allocations, slotCount: TARGET_DEPTH_STEPS };
+
+    let firstBandSlot = 0;
+    for (const [bandIndex, band] of bands.entries()) {
+      firstBandSlot += bandIndex === 0 ? 0 : extraGap;
+      // Dense tiled datasets commonly repeat their lowest rank as a backing
+      // plane. Preserve its semantic tie buckets and a gap before compressing
+      // the remaining ranks, otherwise the backing and first detail rank fight.
+      const leadingTieCount =
+        tieBreakersByZIndex.get(band.values[0])?.size ?? 0;
+      const maximumLeadingBuckets = band.slotCount < band.values.length
+        ? Math.min(
+            MAX_TIE_BUCKETS,
+            band.slotCount - PREFERRED_BAND_GAP_STEPS,
+          )
+        : 1;
+      const leadingTieBucketCount =
+        leadingTieCount > 1 && maximumLeadingBuckets >= 2
+        ? Math.min(
+            2 ** Math.ceil(Math.log2(leadingTieCount)),
+            2 ** Math.floor(Math.log2(maximumLeadingBuckets)),
+          )
+        : 1;
+      const leadingReservation = leadingTieBucketCount > 1
+        ? leadingTieBucketCount + PREFERRED_BAND_GAP_STEPS - 1
+        : 0;
+      const rankSlotCount = band.slotCount - leadingReservation;
+      band.values.forEach((value, index) => {
+        const ordinal = rankSlotCount === 1
+          ? 0
+          : Math.floor(
+              (index * (rankSlotCount - 1)) / (band.values.length - 1),
+            );
+        allocations.set(value, {
+          firstSlot:
+            firstBandSlot + (index === 0 ? 0 : leadingReservation + ordinal),
+          tieBucketCount: index === 0 ? leadingTieBucketCount : 1,
+        });
+      });
+      firstBandSlot += band.slotCount;
+    }
+    return { allocations, slotCount: Math.max(1, firstBandSlot) };
   }
 
   const bucketCounts = new Map<number, number>(
