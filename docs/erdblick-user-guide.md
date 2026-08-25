@@ -6,6 +6,7 @@ This is the entry point for all erdblick end-user documentation. Each section li
 - [Basic UI Layout Guide](erdblick-ui-basics.md) – Tour of panels, navigation controls, inspector slots, and toolbar actions.
 - [Search Guide](erdblick-search.md) – Jump-to targets, feature search expressions, history, and troubleshooting.
 - [Style System Guide](erdblick-stylesystem.md) – Managing styles in the UI, YAML structure, expression context, and debugging tips.
+- [Style 2.0 Migration Guide](erdblick-style-2.0-migration-guide.md) – Required and recommended changes for styles authored for MapViewer 2026.3.1.
 - [Split-Screen Usage Guide](erdblick-split.md) – Opening the second viewport, synchronization modes, and comparison workflows.
 - [Inspection Guide](erdblick-inspection.md) – Working with multi-panel inspection, filters, GeoJSON export, and SourceData links.
 - [SourceData Inspection Guide](erdblick-sourcedata.md) – Opening blobs from the map, from inspector links, or via search commands.

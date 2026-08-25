@@ -4,6 +4,10 @@ Erdblick stylesheets are YAML presentation programs. Schema version 2 is
 planned into mapget `/filter` channels and rendered from immutable
 `TileSubsetLayer` values.
 
+Styles authored for MapViewer 2026.3.1 use a breaking older contract. See the
+[Style 2.0 Migration Guide](erdblick-style-2.0-migration-guide.md) before
+updating those files.
+
 ![erdblick UI](screenshots/style-controls.png)
 
 ## Managing Styles in the UI
@@ -88,7 +92,7 @@ version: 2
 options:
   - id: showRoads
     label: Show roads
-    type: boolean
+    type: bool
     default: true
 
 presets:
@@ -240,8 +244,7 @@ Common primitive fields include:
 - `arrow` / `arrow-expression`;
 - outline color/width;
 - icon URL/expression;
-- label text/expression, font, color, `label-opacity`, outline, background, padding, origin,
-  pixel offset, height reference, `label-collision`, and `label-collision-priority`.
+- label text/expression plus the Deck-oriented text fields described below.
 
 Literal values are resolved without projection. Every expression-backed field
 is collected by the planner and transported in the appropriate field list.
@@ -275,6 +278,71 @@ inside one rendered style layer. `label-collision-priority` is an integer from
 `-1000` to `1000`; larger values win. Collision filtering is intentionally
 opt-in because diagnostic labels often need to remain visible even when they
 overlap.
+
+Label presentation maps directly to Deck's `TextLayer` vocabulary, with a
+`label-` prefix to keep it separate from geometry presentation:
+
+| Style field | Deck `TextLayer` property |
+|---|---|
+| `label-text`, `label-text-expression` | `getText` |
+| `label-color` | `getColor` |
+| `label-size` | `getSize` |
+| `label-angle` | `getAngle` |
+| `label-text-anchor` | `getTextAnchor` (`start`, `middle`, `end`) |
+| `label-alignment-baseline` | `getAlignmentBaseline` (`top`, `center`, `bottom`) |
+| `label-pixel-offset` | `getPixelOffset` |
+| `label-background-color` | `getBackgroundColor` |
+| `label-border-color`, `label-border-width` | `getBorderColor`, `getBorderWidth` |
+| `label-font-family`, `label-font-weight` | `fontFamily`, `fontWeight` |
+| `label-size-scale`, `label-size-units` | `sizeScale`, `sizeUnits` |
+| `label-size-min-pixels`, `label-size-max-pixels` | `sizeMinPixels`, `sizeMaxPixels` |
+| `label-background` | `background` |
+| `label-background-padding` | `backgroundPadding` |
+| `label-background-border-radius` | `backgroundBorderRadius` |
+| `label-outline-color`, `label-outline-width` | `outlineColor`, `outlineWidth` |
+| `label-line-height` | `lineHeight` |
+| `label-word-break`, `label-max-width` | `wordBreak`, `maxWidth` |
+
+`label-background-padding` accepts Deck's two-value `[x, y]` and four-value
+`[left, top, right, bottom]` forms. `label-background-border-radius` accepts
+one value or Deck's four-corner array. Background color alone does not enable
+the rectangle; set `label-background: true`. `label-outline-width` is relative
+to text size, as in Deck, and automatically enables its signed-distance-field
+font rendering path.
+
+```yaml
+label-text-expression: displayName
+label-font-family: Noto Sans
+label-font-weight: 700
+label-size: 16
+label-size-units: pixels
+label-text-anchor: start
+label-alignment-baseline: bottom
+label-background: true
+label-background-color: "#14202d"
+label-background-padding: [5, 3]
+label-background-border-radius: 3
+```
+
+`label-opacity` remains an erdblick convenience multiplier over label fill,
+outline, background, and border alpha. `billboard` and `depth-test` are shared
+presentation fields that map to the corresponding Deck layer behavior. Text is
+presented in a final overlay after scene compositors such as contact shading.
+That pass preserves scene color but resets scene depth, so map geometry cannot
+occlude or post-process labels; `depth-test` only orders labels within the text
+overlay.
+`characterSet` stays automatic so streamed labels can introduce characters
+without requiring stylesheet maintenance. Atlas tuning and TextLayer content
+boxes are renderer-internal and are not part of the style contract.
+
+Styles using the old Cesium-shaped label fields must migrate explicitly:
+split `label-font` into family, numeric weight, and size; replace horizontal
+and vertical origins with `label-text-anchor` and
+`label-alignment-baseline`; and replace `label-scale` with
+`label-size-scale`. `label-style` is replaced by the outline fields.
+Eye offsets and height references have no TextLayer equivalent and are
+rejected; use `label-pixel-offset` for a screen displacement or `offset` for a
+physical displacement.
 
 `lateral-offset-unit` changes only the first (lateral) component of `offset`
 and `offset-increment`. Meter offsets are baked into projected geometry.
@@ -811,7 +879,9 @@ is at least that minimum:
 ```
 
 Explicit hover and selection masks remain visible even when the corresponding
-base entry is hidden by `min-lod-expression`.
+base entry is hidden by `min-lod-expression`. Ordinary retained entries fade
+through the continuous interval before their minimum integer LOD instead of
+switching opacity at one hard threshold.
 
 `fidelity` is parser shorthand only: `low`, `high`, and `any` become
 `lod-range: [0, 2]`, `[3, 7]`, and `[0, 7]`, respectively. There is no separate
