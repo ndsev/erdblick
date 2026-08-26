@@ -25,6 +25,26 @@ interface LocateResponse {
     }>>;
 }
 
+/** Camera target plus an optional exact coordinate at which to place the persistent marker. */
+export interface SearchJump {
+    target: number[] | Rectangle;
+    markerPosition?: number[];
+}
+
+/** Legacy plugin jump values and the richer built-in jump representation. */
+export type SearchJumpResult = number[] | Rectangle | SearchJump;
+
+/** Normalizes plugin and built-in jump results while preserving point markers for legacy array targets. */
+export function normalizeSearchJumpResult(result: SearchJumpResult): SearchJump {
+    if (Array.isArray(result)) {
+        return {target: result, markerPosition: result};
+    }
+    if ("target" in result) {
+        return result;
+    }
+    return {target: result};
+}
+
 /**
  * One action offered by the omnibox-style search panel.
  *
@@ -41,7 +61,7 @@ export interface SearchTarget {
     acceptsEmptyInput?: boolean;
     saveToHistory?: (value: string) => boolean;
     payload?: unknown;
-    jump?: (value: string, payload?: unknown) => number[] | Rectangle | undefined;
+    jump?: (value: string, payload?: unknown) => SearchJumpResult | undefined;
     execute?: (value: string, payload?: unknown) => void;
     validate: (value: string) => boolean;
 }
@@ -100,7 +120,11 @@ export class JumpTargetService {
         this.markedPosition.subscribe(position => {
             if (position.length >= 2) {
                 this.stateService.setMarkerState(true);
-                this.stateService.setMarkerPosition(Cartographic.fromDegrees(position[1], position[0]));
+                this.stateService.setMarkerPosition(Cartographic.fromDegrees(
+                    position[1],
+                    position[0],
+                    position[2] ?? 0
+                ));
             }
         });
     }
