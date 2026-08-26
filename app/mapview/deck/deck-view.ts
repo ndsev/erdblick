@@ -113,7 +113,6 @@ import {
     tileGridExtentForLevel,
     tileGridLatToNormY,
     tileGridLonToNormX,
-    tileGridNormYToLat,
     tileGridVisibleCellCount,
     wrapColumnIntoExtent,
     type TileGridLevelExtent
@@ -3837,8 +3836,6 @@ export abstract class DeckMapView implements IRenderView {
                 extent.south,
                 extent.north,
                 [extent.level],
-                localMin,
-                localSize,
                 extent.coversFullWorldX
             ),
             localMin,
@@ -3879,8 +3876,6 @@ export abstract class DeckMapView implements IRenderView {
                 extent.south,
                 extent.north,
                 [level],
-                localMin,
-                localSize,
                 extent.coversFullWorldX
             ),
             localMin,
@@ -3905,8 +3900,8 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /**
-     * Builds one or more overlay polygons covering the requested bounds.
-     * NDS mode may split the latitude range into bands so each band gets its own correction curve.
+     * Builds one or two overlay polygons covering the requested bounds.
+     * Full-world extents remain split to avoid deck's unstable 360-degree LNGLAT primitive.
      */
     private buildTileGridOverlayData(
         west: number,
@@ -3914,52 +3909,23 @@ export abstract class DeckMapView implements IRenderView {
         south: number,
         north: number,
         levels: number[],
-        localMin: [number, number],
-        localSize: [number, number],
         coversFullWorldX: boolean
     ): TileGridOverlayDatum[] {
-        const polygonsForBounds = (bandSouth: number, bandNorth: number): [number, number][][] => {
-            if (!coversFullWorldX) {
-                return [[
-                    [west, bandSouth],
-                    [west, bandNorth],
-                    [east, bandNorth],
-                    [east, bandSouth]
-                ]];
-            }
-            return this.tileGridFullWorldPolygons(
+        const polygons = coversFullWorldX
+            ? this.tileGridFullWorldPolygons(
                 -180,
                 180,
-                bandSouth,
-                bandNorth,
+                south,
+                north,
                 this.tileGridFullWorldSplitLongitude(levels)
-            );
-        };
-
-        if (this.tileGridMode !== "nds") {
-            return polygonsForBounds(south, north).map(polygon => ({
-                polygon,
-                ndsYCorrection: [0, 1, 0]
-            }));
-        }
-
-        const bandCount = this.tileGridNdsBandCount(north, south);
-        const mercatorNorth = tileGridLatToNormY(north, "xyz");
-        const mercatorSouth = tileGridLatToNormY(south, "xyz");
-        const data: TileGridOverlayDatum[] = [];
-        for (let bandIndex = 0; bandIndex < bandCount; bandIndex++) {
-            const t0 = bandIndex / bandCount;
-            const t1 = (bandIndex + 1) / bandCount;
-            const bandMercatorNorth = mercatorNorth + (mercatorSouth - mercatorNorth) * t0;
-            const bandMercatorSouth = mercatorNorth + (mercatorSouth - mercatorNorth) * t1;
-            const bandNorth = tileGridNormYToLat(bandMercatorNorth, "xyz");
-            const bandSouth = tileGridNormYToLat(bandMercatorSouth, "xyz");
-            const ndsYCorrection = this.tileGridNdsBandCorrection(localMin[1], localSize[1], bandNorth, bandSouth);
-            for (const polygon of polygonsForBounds(bandSouth, bandNorth)) {
-                data.push({polygon, ndsYCorrection});
-            }
-        }
-        return data;
+            )
+            : [[
+                [west, south],
+                [west, north],
+                [east, north],
+                [east, south]
+            ]] as [number, number][][];
+        return polygons.map(polygon => ({polygon}));
     }
 
     /**
@@ -4002,88 +3968,6 @@ export abstract class DeckMapView implements IRenderView {
         const finestColCount = this.tileGridMode === "nds" ? finestRowCount * 2 : finestRowCount;
         const splitNormX = 0.5 + 0.5 / Math.max(2, finestColCount);
         return -180 + 360 * splitNormX;
-    }
-
-    /**
-     * Computes the local Y correction that bends the linear NDS field toward Mercator.
-     * The correction stays centered on the latitude midpoint to preserve precision.
-     */
-    private tileGridNdsBandCount(north: number, south: number): number {
-        const mercatorNorth = tileGridLatToNormY(north, "xyz");
-        const mercatorSouth = tileGridLatToNormY(south, "xyz");
-        const mercatorSpan = Math.abs(mercatorSouth - mercatorNorth);
-        if (mercatorSpan >= 0.75) {
-            return 8;
-        }
-        if (mercatorSpan >= 0.4) {
-            return 4;
-        }
-        if (mercatorSpan >= 0.18) {
-            return 2;
-        }
-        return 1;
-    }
-
-    /**
-     * Fits a local quadratic for one latitude band in global overlay space.
-     * The rasterizer interpolates the NDS Y values linearly in Mercator space,
-     * so we fit the inverse of that distortion over each band separately.
-     */
-    private tileGridNdsBandCorrection(
-        localMinY: number,
-        localSizeY: number,
-        north: number,
-        south: number
-    ): [number, number, number] {
-        if (localSizeY <= 1e-9) {
-            return [0, 1, 0];
-        }
-        const northLocalY = this.tileGridLocalNdsY(north, localMinY, localSizeY);
-        const southLocalY = this.tileGridLocalNdsY(south, localMinY, localSizeY);
-        const mercatorNorthY = tileGridLatToNormY(north, "xyz");
-        const mercatorSouthY = tileGridLatToNormY(south, "xyz");
-        const mercatorMidY = 0.5 * (mercatorNorthY + mercatorSouthY);
-        const midpointLat = tileGridNormYToLat(mercatorMidY, "xyz");
-        const midpointInputY = 0.5 * (northLocalY + southLocalY);
-        const midpointOutputY = this.tileGridLocalNdsY(midpointLat, localMinY, localSizeY);
-        return this.tileGridQuadraticThroughPoints(
-            northLocalY,
-            northLocalY,
-            midpointInputY,
-            midpointOutputY,
-            southLocalY,
-            southLocalY
-        );
-    }
-
-    /** Converts a latitude to shader-local NDS Y coordinates for one overlay extent. */
-    private tileGridLocalNdsY(lat: number, localMinY: number, localSizeY: number): number {
-        const ndsY = tileGridLatToNormY(lat, "nds");
-        return (ndsY - localMinY) / Math.max(1e-6, localSizeY);
-    }
-
-    /** Fits a quadratic through three samples; used for NDS-to-Mercator correction bands. */
-    private tileGridQuadraticThroughPoints(
-        x0: number,
-        y0: number,
-        x1: number,
-        y1: number,
-        x2: number,
-        y2: number
-    ): [number, number, number] {
-        const d0 = (x0 - x1) * (x0 - x2);
-        const d1 = (x1 - x0) * (x1 - x2);
-        const d2 = (x2 - x0) * (x2 - x1);
-        if (Math.abs(d0) < 1e-9 || Math.abs(d1) < 1e-9 || Math.abs(d2) < 1e-9) {
-            return [0, 1, 0];
-        }
-        const l0 = y0 / d0;
-        const l1 = y1 / d1;
-        const l2 = y2 / d2;
-        const quadratic = l0 + l1 + l2;
-        const linear = -l0 * (x1 + x2) - l1 * (x0 + x2) - l2 * (x0 + x1);
-        const constant = l0 * x1 * x2 + l1 * x0 * x2 + l2 * x0 * x1;
-        return [constant, linear, quadratic];
     }
 
     /** Normalizes longitude into the conventional [-180, 180] range. */
