@@ -138,6 +138,12 @@ export interface DeckPresentationDebugSnapshot {
     pickingFragmentation: number;
     zIndexHighWater: number;
     maxZIndexUpdateMs: number;
+    lastContributionLookupRows: number;
+    lastZIndexLookupRows: number;
+    lookupUploadedBytes: number;
+    lookupUploadCount: number;
+    lookupGrowthCount: number;
+    fatalPresentationFailures: number;
     labels: number;
     stores: number;
     capacityRecords: number;
@@ -316,6 +322,12 @@ export class TileSubsetLayerRenderService {
             pickingFragmentation: 0,
             zIndexHighWater: 0,
             maxZIndexUpdateMs: 0,
+            lastContributionLookupRows: 0,
+            lastZIndexLookupRows: 0,
+            lookupUploadedBytes: 0,
+            lookupUploadCount: 0,
+            lookupGrowthCount: 0,
+            fatalPresentationFailures: 0,
             labels: 0,
             stores: 0,
             capacityRecords: 0,
@@ -339,6 +351,12 @@ export class TileSubsetLayerRenderService {
                 result.maxZIndexUpdateMs,
                 scene.zIndexUpdateMs
             );
+            result.lastContributionLookupRows += scene.lastContributionLookupRows;
+            result.lastZIndexLookupRows += scene.lastZIndexLookupRows;
+            result.lookupUploadedBytes += scene.lookupUploadedBytes;
+            result.lookupUploadCount += scene.lookupUploadCount;
+            result.lookupGrowthCount += scene.lookupGrowthCount;
+            result.fatalPresentationFailures += scene.fatalPresentationFailures;
             result.labels += scene.labels;
             result.stores += scene.stores.length;
             for (const store of scene.stores) {

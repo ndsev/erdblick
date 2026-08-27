@@ -327,7 +327,7 @@ export abstract class DeckMapView implements IRenderView {
 
     hoveredFeatureIds = new BehaviorSubject<TileFeatureId[]>([]);
     readonly firstPersonViewActive = new BehaviorSubject(false);
-    readonly contextLost = new Subject<void>();
+    readonly rendererInvalidated = new Subject<void>();
 
     private ignoreNextCamAppStateUpdate = false;
     private suppressDeckViewStateEvent = false;
@@ -676,7 +676,8 @@ export abstract class DeckMapView implements IRenderView {
         eventManager?.off("pointerleave", deckInternals._onPointerMove);
         this.gpuScene = new GpuScene(
             this.deckDevice!,
-            reason => this.requestGpuSceneRender(reason)
+            reason => this.requestGpuSceneRender(reason),
+            error => this.invalidateGpuScene(error)
         );
         this.gpuVectorDisabledPickIndices.clear();
         this.semanticZIndexService.bindScene(
@@ -696,6 +697,12 @@ export abstract class DeckMapView implements IRenderView {
                 pickingFragmentation: 0,
                 zIndexHighWater: 0,
                 zIndexUpdateMs: 0,
+                lastContributionLookupRows: 0,
+                lastZIndexLookupRows: 0,
+                lookupUploadedBytes: 0,
+                lookupUploadCount: 0,
+                lookupGrowthCount: 0,
+                fatalPresentationFailures: 0,
                 labels: 0,
                 stores: []
             }
@@ -847,7 +854,7 @@ export abstract class DeckMapView implements IRenderView {
         this.navigationTargetOverlay = null;
         this.lastCanvasCssSize = undefined;
         this.clippedLayoutCanvasCssSize = undefined;
-        this.contextLost.complete();
+        this.rendererInvalidated.complete();
         const container = document.getElementById(this.canvasId);
         if (container) {
             container.innerHTML = "";
@@ -1061,10 +1068,17 @@ export abstract class DeckMapView implements IRenderView {
         return canvas;
     }
 
+    /** Requests view recreation after an unsafe partial GPU scene publication. */
+    private invalidateGpuScene(error: unknown): void {
+        console.error("GPU scene publication failed; recreating the renderer.", error);
+        this.cancelGpuSceneRedraw();
+        this.rendererInvalidated.next();
+    }
+
     /** Requests view recreation instead of attempting to replay invalid GPU resources. */
     private readonly deckContextLost = (event: Event): void => {
         event.preventDefault();
-        this.contextLost.next();
+        this.rendererInvalidated.next();
     };
 
     /** Creates the WebGL2 context and reports useful diagnostics when Chromium rejects it. */

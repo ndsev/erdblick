@@ -50,26 +50,48 @@ class FakeBuffer {
 class FakeTexture {
   destroyed = false;
   failNextWrite = false;
+  successfulWritesBeforeFailure: number | null = null;
   readonly writes: Array<{ data: ArrayBufferView; options: unknown }> = [];
+  readonly values: Float32Array;
 
   constructor(
     readonly id: string,
     readonly width: number,
     readonly height: number,
-  ) {}
+  ) {
+    this.values = new Float32Array(width * height * 4);
+  }
 
   /** Records one compact origin, contribution, or mask-table upload. */
   writeData(data: ArrayBufferView, options: unknown): void {
-    if (this.failNextWrite) {
+    if (this.failNextWrite || this.successfulWritesBeforeFailure === 0) {
       this.failNextWrite = false;
+      this.successfulWritesBeforeFailure = null;
       throw new Error("Synthetic texture upload failure.");
     }
-    this.writes.push({
-      data: new Float32Array(
-        data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
-      ),
-      options,
-    });
+    if (this.successfulWritesBeforeFailure !== null) {
+      this.successfulWritesBeforeFailure -= 1;
+    }
+    const copied = new Float32Array(
+      data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
+    );
+    this.writes.push({ data: copied, options });
+    const region = options as {
+      x?: number;
+      y?: number;
+      width: number;
+      height: number;
+    };
+    const x = region.x ?? 0;
+    const y = region.y ?? 0;
+    for (let row = 0; row < region.height; ++row) {
+      const sourceOffset = row * region.width * 4;
+      const destinationOffset = ((y + row) * this.width + x) * 4;
+      this.values.set(
+        copied.subarray(sourceOffset, sourceOffset + region.width * 4),
+        destinationOffset,
+      );
+    }
   }
 
   /** Marks the old allocation destroyed after geometric growth. */
@@ -305,14 +327,16 @@ function pointPacket(
 function createScene() {
   const device = new FakeDevice();
   const redraw = vi.fn();
+  const fatal = vi.fn();
   return {
     device,
     redraw,
-    scene: new GpuScene(device as unknown as Device, redraw),
+    fatal,
+    scene: new GpuScene(device as unknown as Device, redraw, fatal),
   };
 }
 
-/** Return the currently published texture after transactional replacements. */
+/** Return the latest live allocation for one scene lookup. */
 function activeTexture(device: FakeDevice, id: string): FakeTexture {
   const texture = [...device.textures]
     .reverse()
@@ -634,7 +658,7 @@ describe("GpuScene contribution lifecycle", () => {
     expect(scene.snapshot().zIndexHighWater).toBe(2);
     scene.publishPresentation();
     const texture = activeTexture(device, "erdblick-gpu-z-index-table");
-    const ranked = texture.writes.at(-1)!.data as Float32Array;
+    const ranked = texture.values;
     expect(ranked[4]).toBeGreaterThan(ranked[0]);
   });
 
@@ -666,7 +690,7 @@ describe("GpuScene contribution lifecycle", () => {
 
     scene.publishPresentation();
     const zTexture = activeTexture(device, "erdblick-gpu-z-index-table");
-    const ranked = zTexture.writes.at(-1)!.data as Float32Array;
+    const ranked = zTexture.values;
     expect(ranked[0]).toBe(ranked[4]);
     expect(ranked[1]).toBe(0);
     expect(ranked[5]).toBe(0);
@@ -674,8 +698,7 @@ describe("GpuScene contribution lifecycle", () => {
       device,
       "erdblick-gpu-contribution-table",
     );
-    const contributions = contributionTexture.writes.at(-1)!
-      .data as Float32Array;
+    const contributions = contributionTexture.values;
     expect(contributions[1]).toBe(7);
     expect(contributions[5]).toBe(7);
   });
@@ -712,7 +735,7 @@ describe("GpuScene contribution lifecycle", () => {
     const ranked = activeTexture(
       device,
       "erdblick-gpu-z-index-table",
-    ).writes.at(-1)!.data as Float32Array;
+    ).values;
     expect(ranked[0]).not.toBe(ranked[4]);
   });
 
@@ -750,7 +773,7 @@ describe("GpuScene contribution lifecycle", () => {
     const ranked = activeTexture(
       device,
       "erdblick-gpu-z-index-table",
-    ).writes.at(-1)!.data as Float32Array;
+    ).values;
     expect(ranked[0]).toBe(ranked[4]);
     expect(ranked[8]).toBeGreaterThan(ranked[0]);
   });
@@ -796,7 +819,7 @@ describe("GpuScene contribution lifecycle", () => {
     const ranked = activeTexture(
       device,
       "erdblick-gpu-z-index-table",
-    ).writes.at(-1)!.data as Float32Array;
+    ).values;
     const tiedOffsets = Array.from(
       { length: tiedCount },
       (_, index) => ranked[index * 4],
@@ -833,7 +856,7 @@ describe("GpuScene contribution lifecycle", () => {
     const ranked = activeTexture(
       device,
       "erdblick-gpu-z-index-table",
-    ).writes.at(-1)!.data as Float32Array;
+    ).values;
     const offsets = zIndices.map((_, index) => ranked[index * 4]);
     expect(new Set(offsets).size).toBeLessThanOrEqual(4096);
     expect(offsets[0]).toBeLessThan(offsets[1]);
@@ -873,7 +896,7 @@ describe("GpuScene contribution lifecycle", () => {
     const ranked = activeTexture(
       device,
       "erdblick-gpu-z-index-table",
-    ).writes.at(-1)!.data as Float32Array;
+    ).values;
     const offsets = zIndices.map((_, index) => ranked[index * 4]);
     const distinctOffsets = [...new Set(offsets)].sort(
       (left, right) => left - right,
@@ -935,6 +958,80 @@ describe("GpuScene contribution lifecycle", () => {
       activeTexture(device, "erdblick-gpu-contribution-table"),
     ).toBeTruthy();
     expect(activeTexture(device, "erdblick-gpu-z-index-table")).toBeTruthy();
+  });
+
+  it("uploads only a new row when an admission reuses the order domain", () => {
+    const { device, scene } = createScene();
+    const install = (identity: string, tileId: number) => {
+      const reservation = scene.prepareRender(
+        "origin",
+        [11, 48, 0],
+        [
+          {
+            identity,
+            mapTileKey: `Features:Map:Layer:${tileId}:0`,
+            styleOrder: 0,
+            lod: 7,
+          },
+        ],
+      );
+      scene.applyPacket(pointPacket(reservation, { zIndex: 10 }), reservation);
+      scene.finishRender(reservation);
+    };
+    install("first", 1);
+    install("second", 2);
+    scene.publishPresentation();
+    const texture = activeTexture(device, "erdblick-gpu-z-index-table");
+    const writeCount = texture.writes.length;
+
+    install("third", 3);
+    scene.publishPresentation();
+
+    expect(activeTexture(device, "erdblick-gpu-z-index-table")).toBe(texture);
+    expect(texture.writes).toHaveLength(writeCount + 1);
+    expect(texture.writes.at(-1)).toMatchObject({
+      data: { byteLength: 16 },
+      options: { x: 2, y: 0, width: 1, height: 1 },
+    });
+    expect(scene.snapshot()).toMatchObject({
+      lastContributionLookupRows: 1,
+      lastZIndexLookupRows: 1,
+    });
+  });
+
+  it("rewrites only signatures affected by a real order-domain change", () => {
+    const { device, scene } = createScene();
+    const install = (identity: string, tileId: number, zIndex: number) => {
+      const reservation = scene.prepareRender(
+        "origin",
+        [11, 48, 0],
+        [
+          {
+            identity,
+            mapTileKey: `Features:Map:Layer:${tileId}:0`,
+            styleOrder: 0,
+            lod: 7,
+          },
+        ],
+      );
+      scene.applyPacket(pointPacket(reservation, { zIndex }), reservation);
+      scene.finishRender(reservation);
+    };
+    install("lower", 1, 10);
+    install("upper", 2, 20);
+    scene.publishPresentation();
+    const texture = activeTexture(device, "erdblick-gpu-z-index-table");
+    const writeCount = texture.writes.length;
+
+    install("middle", 3, 15);
+    scene.publishPresentation();
+
+    expect(texture.writes).toHaveLength(writeCount + 1);
+    expect(texture.writes.at(-1)).toMatchObject({
+      data: { byteLength: 32 },
+      options: { x: 1, y: 0, width: 2, height: 1 },
+    });
+    expect(scene.snapshot().lastZIndexLookupRows).toBe(2);
   });
 
   it("rejects a superseded packet without replacing the visible revision", () => {
@@ -1044,8 +1141,8 @@ describe("GpuScene contribution lifecycle", () => {
     scene.finishRender(retry);
   });
 
-  it("does not publish a revision whose exact-order lookup upload fails", () => {
-    const { device, scene } = createScene();
+  it("poisons the scene when an in-place exact-order upload fails", () => {
+    const { fatal, scene } = createScene();
     const input = [
       {
         identity: "tile",
@@ -1073,28 +1170,53 @@ describe("GpuScene contribution lifecycle", () => {
       replacement,
     );
     scene.finishRender(replacement);
-    device.failNextTextureWriteId = "erdblick-gpu-z-index-table";
+    (presentedZIndex as unknown as FakeTexture).failNextWrite = true;
 
-    expect(() => scene.publishPresentation()).toThrow(/Synthetic texture/);
+    expect(scene.publishPresentation()).toBe(false);
 
     expect(scene.presentationRevision).toBe(presentedRevision);
     expect(scene.contributionTexture).toBe(presentedContribution);
     expect(scene.zIndexTexture).toBe(presentedZIndex);
+    expect(fatal).toHaveBeenCalledOnce();
+    expect(scene.snapshot().fatalPresentationFailures).toBe(1);
+    expect(fatal.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ message: "Synthetic texture upload failure." }),
+    );
+    expect(scene.publishPresentation()).toBe(false);
+    expect(fatal).toHaveBeenCalledOnce();
+    expect(() => scene.prepareRender("origin", [11, 48, 0], input)).toThrow(
+      /poisoned/,
+    );
     expect(scene.snapshot()).toMatchObject({
       activeContributionCount: 1,
       pickingHighWater: 2,
       zIndexHighWater: 2,
     });
-    expect(scene.resolvePick(0)).toEqual([
-      {
-        mapTileKey: "Features:Map:Layer:1:0",
-        featureId: "Road.1",
-      },
-    ]);
   });
 
-  it("keeps the prior presentation when predecessor deactivation fails", () => {
-    const { device, scene } = createScene();
+  it("poisons the scene when initial lookup allocation fails", () => {
+    const { device, fatal, scene } = createScene();
+    const input = [
+      {
+        identity: "tile",
+        mapTileKey: "Features:Map:Layer:1:0",
+        styleOrder: 0,
+        lod: 7,
+      },
+    ];
+    const reservation = scene.prepareRender("origin", [11, 48, 0], input);
+    scene.applyPacket(pointPacket(reservation, { zIndex: 10 }), reservation);
+    scene.finishRender(reservation);
+    device.failNextTextureWriteId = "erdblick-gpu-contribution-table";
+
+    expect(scene.publishPresentation()).toBe(false);
+
+    expect(scene.presentationRevision).toBe(0);
+    expect(fatal).toHaveBeenCalledOnce();
+  });
+
+  it("poisons the scene when predecessor deactivation fails", () => {
+    const { device, fatal, scene } = createScene();
     const input = [
       {
         identity: "tile",
@@ -1128,17 +1250,54 @@ describe("GpuScene contribution lifecycle", () => {
       replacement,
     );
     scene.finishRender(replacement);
-    device.failNextTextureWriteId = "erdblick-gpu-contribution-table";
+    contributionLookup.failNextWrite = true;
 
-    expect(() => scene.publishPresentation()).toThrow(/Synthetic texture/);
+    expect(scene.publishPresentation()).toBe(false);
     expect(scene.presentationRevision).toBe(presentedRevision);
     expect(contributionLookup.destroyed).toBe(false);
-    expect(scene.resolvePick(0)).toEqual([
+    expect(fatal).toHaveBeenCalledOnce();
+  });
+
+  it("recovers fatally after a later range fails in one in-place batch", () => {
+    const { device, fatal, scene } = createScene();
+    const input = (identity: string, tileId: number) => [
       {
-        mapTileKey: "Features:Map:Layer:1:0",
-        featureId: "Road.1",
+        identity,
+        mapTileKey: `Features:Map:Layer:${tileId}:0`,
+        styleOrder: 0,
+        lod: 7,
       },
-    ]);
+    ];
+    for (const [identity, tileId] of [
+      ["replace", 1],
+      ["retained", 2],
+    ] as const) {
+      const reservation = scene.prepareRender(
+        "origin",
+        [11, 48, 0],
+        input(identity, tileId),
+      );
+      scene.applyPacket(pointPacket(reservation, { zIndex: 10 }), reservation);
+      scene.finishRender(reservation);
+    }
+    scene.publishPresentation();
+    const presentedRevision = scene.presentationRevision;
+    const texture = activeTexture(device, "erdblick-gpu-contribution-table");
+    const writeCount = texture.writes.length;
+    const replacement = scene.prepareRender(
+      "origin",
+      [11, 48, 0],
+      input("replace", 1),
+    );
+    scene.applyPacket(pointPacket(replacement, { zIndex: 10 }), replacement);
+    scene.finishRender(replacement);
+    texture.successfulWritesBeforeFailure = 1;
+
+    expect(scene.publishPresentation()).toBe(false);
+
+    expect(texture.writes).toHaveLength(writeCount + 1);
+    expect(scene.presentationRevision).toBe(presentedRevision);
+    expect(fatal).toHaveBeenCalledOnce();
   });
 
   it("publishes a storage generation when inactive staging grows a shared buffer", () => {
@@ -1352,14 +1511,15 @@ describe("GpuScene contribution lifecycle", () => {
     expect(contributionTexture.writes.length).toBe(writesBeforePublication);
 
     scene.publishPresentation();
-    expect(contributionTexture.writes.length).toBe(writesBeforePublication);
+    expect(contributionTexture.writes.length).toBeGreaterThan(
+      writesBeforePublication,
+    );
     const publishedTexture = activeTexture(
       device,
       "erdblick-gpu-contribution-table",
     );
-    expect(publishedTexture).not.toBe(contributionTexture);
-    const publishedValues = publishedTexture.writes.at(-1)!
-      .data as Float32Array;
+    expect(publishedTexture).toBe(contributionTexture);
+    const publishedValues = publishedTexture.values;
     const publishedToken =
       publishedValues[replacement.contributions[0].slot * 4 + 2];
     expect(publishedToken).toBe(replacement.contributions[0].activationToken);
@@ -1468,7 +1628,7 @@ describe("GpuScene contribution lifecycle", () => {
       ),
     ).toHaveLength(zIndexTextureCount);
     const table = activeTexture(device, "erdblick-gpu-contribution-table");
-    const values = table.writes.at(-1)!.data as Float32Array;
+    const values = table.values;
     expect(values[reservation.contributions[0].slot * 4 + 1]).toBe(3.5);
     expect(scene.setContributionLod("tile", 3.5)).toBe(false);
   });
