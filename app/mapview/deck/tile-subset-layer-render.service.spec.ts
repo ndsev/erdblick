@@ -95,6 +95,88 @@ function completedTile(
 }
 
 describe("TileSubsetLayerRenderService GPU admission", () => {
+    it("preloads one emitted worker module and reuses its cached source", async () => {
+        const workerSources: Array<string | URL> = [];
+        const workerModuleUrl = "https://viewer.test/worker-HASH.js";
+        const cachedWorkerUrl = "blob:cached-subset-render-worker";
+
+        class TestWorker {
+            private messageListener:
+                ((event: MessageEvent) => void) | null = null;
+
+            onmessage: ((event: MessageEvent) => void) | null = null;
+            onerror: ((event: ErrorEvent) => void) | null = null;
+
+            /** Records the source used for each worker construction. */
+            constructor(source: string | URL) {
+                workerSources.push(source);
+            }
+
+            /** Stores the module-load listener installed by the render service. */
+            addEventListener(type: string, listener: (event: MessageEvent) => void): void {
+                if (type === "message") {
+                    this.messageListener = listener;
+                }
+            }
+
+            /** Clears the listener after the one-time worker handshake. */
+            removeEventListener(type: string, listener: (event: MessageEvent) => void): void {
+                if (type === "message" && this.messageListener === listener) {
+                    this.messageListener = null;
+                }
+            }
+
+            /** Responds to initialization exactly like the real worker module. */
+            postMessage(message: {type: string}): void {
+                if (message.type !== "TileSubsetLayerRenderWorkerInit") {
+                    return;
+                }
+                queueMicrotask(() => this.messageListener?.({
+                    data: {
+                        type: "TileSubsetLayerRenderWorkerReady",
+                        scriptUrl: workerModuleUrl
+                    }
+                } as MessageEvent));
+            }
+
+            /** Matches the Worker lifecycle surface used by failure cleanup. */
+            terminate(): void {}
+        }
+
+        const fetchWorker = vi.fn(async () => ({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            blob: async () => new Blob(["worker source"])
+        }));
+        const createObjectUrl = vi.spyOn(URL, "createObjectURL")
+            .mockReturnValue(cachedWorkerUrl);
+        vi.stubGlobal("Worker", TestWorker);
+        vi.stubGlobal("fetch", fetchWorker);
+        try {
+            const service = new TileSubsetLayerRenderService();
+            const internal = service as any;
+
+            await service.preloadWorkerSource();
+            await internal.initializeWorkers(3);
+
+            expect(workerSources).toHaveLength(3);
+            expect(workerSources[0]).toBeInstanceOf(URL);
+            expect(workerSources.slice(1)).toEqual([
+                cachedWorkerUrl,
+                cachedWorkerUrl
+            ]);
+            expect(fetchWorker).toHaveBeenCalledOnce();
+            expect(fetchWorker).toHaveBeenCalledWith(workerModuleUrl, {
+                cache: "force-cache"
+            });
+            expect(createObjectUrl).toHaveBeenCalledOnce();
+        } finally {
+            createObjectUrl.mockRestore();
+            vi.unstubAllGlobals();
+        }
+    });
+
     it("retains subset bytes and leaves their worker clone to structured clone", async () => {
         const service = new TileSubsetLayerRenderService();
         const internal = service as any;

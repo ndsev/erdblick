@@ -180,6 +180,7 @@ export class TileSubsetLayerRenderService {
     private readonly ready: ReadyRender[] = [];
     private readonly latestSignatureByVisualization = new Map<string, string>();
     private initialization: Promise<void> = Promise.resolve();
+    private workerBlobUrl: string | null = null;
     private nextTaskId = 0;
     private latestNativeRenderMs = 0;
     private readonly deckFrameIntervalsMsByView = new Map<number, number[]>();
@@ -219,6 +220,20 @@ export class TileSubsetLayerRenderService {
                     console.error("Could not resize subset render workers.", error)
                 );
         });
+    }
+
+    /**
+     * Loads and caches the emitted worker module during application startup.
+     * The bootstrap worker reports Angular's final hashed URL because the
+     * bundler only resolves that URL inside the Worker constructor.
+     */
+    preloadWorkerSource(): Promise<void> {
+        if (!this.workerBlobUrl) {
+            this.initialization = this.initialization
+                .catch(() => undefined)
+                .then(() => this.initializeWorkers(1));
+        }
+        return this.initialization;
     }
 
     /** Return the currently configured worker-credit ceiling. */
@@ -570,42 +585,63 @@ export class TileSubsetLayerRenderService {
         return this.initialization;
     }
 
-    /** Initialize missing workers concurrently while preserving stable indices. */
+    /** Initialize missing workers from one cached module source. */
     private async initializeWorkers(targetCount: number): Promise<void> {
         const missing = Array.from(
             {length: targetCount},
             (_, index) => index
         ).filter(index => !this.workers[index]);
+
+        if (!this.workerBlobUrl && missing.length) {
+            const bootstrapIndex = missing.shift()!;
+            const workerModuleUrl = await this.initializeWorker(bootstrapIndex);
+            try {
+                this.workerBlobUrl = await this.fetchWorkerBlobUrl(workerModuleUrl);
+            } catch (error) {
+                this.workers[bootstrapIndex]?.terminate();
+                this.workers[bootstrapIndex] = null;
+                this.removeIdleWorker(bootstrapIndex);
+                this.resetWorkerState(bootstrapIndex);
+                throw error;
+            }
+        }
         await Promise.all(missing.map(index => this.initializeWorker(index)));
     }
 
-    /** Creates one worker and publishes it only after its WASM handshake succeeds. */
-    private async initializeWorker(index: number): Promise<void> {
-        const worker = new Worker(
-            new URL("./tile-subset-layer-render.worker", import.meta.url),
-            {type: "module"}
-        );
+    /** Fetches the final hashed worker module once for reuse through a blob URL. */
+    private async fetchWorkerBlobUrl(workerModuleUrl: string): Promise<string> {
+        const response = await fetch(workerModuleUrl, {cache: "force-cache"});
+        if (!response.ok) {
+            throw new Error(
+                `Failed to fetch subset render worker module ` +
+                `(${response.status} ${response.statusText}).`
+            );
+        }
+        return URL.createObjectURL(await response.blob());
+    }
+
+    /** Creates one worker and publishes it after its module-load handshake. */
+    private async initializeWorker(index: number): Promise<string> {
+        const worker = this.workerBlobUrl
+            ? new Worker(this.workerBlobUrl, {type: "module"})
+            : new Worker(
+                new URL("./tile-subset-layer-render.worker", import.meta.url),
+                {type: "module"}
+            );
+        let workerModuleUrl: string;
         try {
-            await new Promise<void>((resolve, reject) => {
-                const timeout = setTimeout(
-                    () => reject(new Error(
-                        "Timed out initializing a subset render worker."
-                    )),
-                    10_000
-                );
+            workerModuleUrl = await new Promise<string>((resolve, reject) => {
                 const onMessage = (
                     event: MessageEvent<TileSubsetLayerRenderWorkerOutbound>
                 ) => {
                     if (event.data.type !== "TileSubsetLayerRenderWorkerReady") {
                         return;
                     }
-                    clearTimeout(timeout);
                     worker.removeEventListener("message", onMessage);
                     worker.removeEventListener("error", onError);
-                    resolve();
+                    resolve(event.data.scriptUrl);
                 };
                 const onError = (error: ErrorEvent) => {
-                    clearTimeout(timeout);
                     worker.removeEventListener("message", onMessage);
                     reject(error);
                 };
@@ -625,6 +661,7 @@ export class TileSubsetLayerRenderService {
         this.workers[index] = worker;
         this.resetWorkerState(index);
         this.idleWorkers.push(index);
+        return workerModuleUrl;
     }
 
     /** Takes one idle worker which is inside the current active prefix. */
@@ -857,7 +894,8 @@ export class TileSubsetLayerRenderService {
         this.resetWorkerState(workerIndex);
         this.initialization = this.initialization
             .catch(() => undefined)
-            .then(() => this.initializeWorker(workerIndex));
+            .then(() => this.initializeWorker(workerIndex))
+            .then(() => undefined);
         this.initialization.then(() => this.pump())
             .then(() => this.capacityChanged.next())
             .catch(error => console.error(
