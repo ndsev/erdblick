@@ -1413,7 +1413,7 @@ export class GpuScene {
     };
   }
 
-  /** Find one local record across the bounded fragment list and decode only it. */
+  /** Find one local record across the fragment sequence and decode only it. */
   private packedPick(
     installed: InstalledContribution,
     localPickIndex: number,
