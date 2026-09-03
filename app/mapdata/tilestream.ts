@@ -93,6 +93,11 @@ interface QueuedTransportFrame {
     version: {major: number; minor: number; patch: number};
 }
 
+interface DecodedTransportFrames {
+    frames: QueuedTransportFrame[];
+    consumedBytes: number;
+}
+
 export interface MapTileStreamTransportCompressionStats {
     totalPullResponses: number;
     totalPullGzipResponses: number;
@@ -152,17 +157,173 @@ export interface MapTileStreamDebugState {
 }
 
 /**
+ * Transport-independent TileLayerStream framing, parser ownership, and data callbacks.
+ *
+ * Both the long-lived interactive websocket and bounded POST /tiles responses carry
+ * the same VTLV protocol. Transport subclasses only own connection lifecycle and
+ * control-message semantics.
+ */
+export abstract class MapTileStreamClientBase {
+    protected readonly decoder = new TextDecoder();
+    protected readonly protocolVersion: {major: number; minor: number};
+    protected readonly ownsParser: boolean;
+    public parser: TileLayerParser;
+    private parserDestroyed = false;
+
+    onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
+    onFeatures: ((payload: Uint8Array) => void) | null = null;
+    onSourceData: ((payload: Uint8Array) => void) | null = null;
+    onSubsets: ((payload: Uint8Array) => void) | null = null;
+    onFields: ((frame: Uint8Array) => void) | null = null;
+    onProtocolMismatch: ((mismatch: MapTileStreamProtocolMismatch) => void) | null = null;
+
+    protected constructor(parser?: TileLayerParser) {
+        this.ownsParser = !parser;
+        this.parser = parser ?? new coreLib.TileLayerParser();
+        this.protocolVersion = {
+            major: coreLib.tileLayerStreamProtocolMajor(),
+            minor: coreLib.tileLayerStreamProtocolMinor()
+        };
+    }
+
+    withFeaturesCallback(callback: (payload: Uint8Array) => void) {
+        this.onFeatures = callback;
+        return this;
+    }
+
+    withSourceDataCallback(callback: (payload: Uint8Array) => void) {
+        this.onSourceData = callback;
+        return this;
+    }
+
+    withSubsetsCallback(callback: (payload: Uint8Array) => void) {
+        this.onSubsets = callback;
+        return this;
+    }
+
+    withFieldsCallback(callback: (frame: Uint8Array) => void) {
+        this.onFields = callback;
+        return this;
+    }
+
+    withProtocolMismatchCallback(callback: (mismatch: MapTileStreamProtocolMismatch) => void) {
+        this.onProtocolMismatch = callback;
+        return this;
+    }
+
+    setDataSourceInfoJson(json: string) {
+        return this.setDataSourceInfoBuffer(new TextEncoder().encode(json));
+    }
+
+    setDataSourceInfoBuffer(buffer: Uint8Array) {
+        uint8ArrayToWasm((wasmBuffer: any) => {
+            this.parser.setDataSourceInfo(wasmBuffer);
+        }, buffer);
+        return this;
+    }
+
+    /** Decode every complete frame and retain a trailing partial frame for streamed HTTP chunks. */
+    protected decodeAvailableFrames(bytes: Uint8Array): DecodedTransportFrames {
+        const frames: QueuedTransportFrame[] = [];
+        let offset = 0;
+        while (offset + MAP_TILE_STREAM_HEADER_SIZE <= bytes.length) {
+            const header = this.readFrameHeader(bytes, offset);
+            const frameEnd = offset + MAP_TILE_STREAM_HEADER_SIZE + header.payloadLength;
+            if (frameEnd > bytes.length) {
+                break;
+            }
+            frames.push({
+                bytes: bytes.subarray(offset, frameEnd),
+                type: header.type,
+                version: header.version
+            });
+            offset = frameEnd;
+        }
+        return {frames, consumedBytes: offset};
+    }
+
+    /** Dispatch one data-bearing frame shared by interactive and REST transports. */
+    protected dispatchDataFrame(
+        bytes: Uint8Array,
+        type: number,
+        acceptUntaggedPayload: boolean = true
+    ): boolean {
+        if (type === MAP_TILE_STREAM_TYPE_END_OF_STREAM) {
+            return true;
+        }
+        if (type === MAP_TILE_STREAM_TYPE_FIELDS) {
+            uint8ArrayToWasm((wasmBuffer: any) => {
+                this.parser.readFieldDictUpdate(wasmBuffer);
+            }, bytes);
+            this.onFields?.(bytes);
+            return true;
+        }
+        if (type === MAP_TILE_STREAM_TYPE_FEATURES) {
+            if (acceptUntaggedPayload) {
+                this.onFeatures?.(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
+            }
+            return true;
+        }
+        if (type === MAP_TILE_STREAM_TYPE_SOURCEDATA) {
+            if (acceptUntaggedPayload) {
+                this.onSourceData?.(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
+            }
+            return true;
+        }
+        if (type === MAP_TILE_STREAM_TYPE_SUBSETS) {
+            this.onSubsets?.(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
+            return true;
+        }
+        return false;
+    }
+
+    protected isCompatibleProtocol(version: {major: number; minor: number}): boolean {
+        return version.major === this.protocolVersion.major
+            && version.minor === this.protocolVersion.minor;
+    }
+
+    protected protocolMismatch(version: {major: number; minor: number; patch: number}): Error {
+        this.onProtocolMismatch?.({actual: version, expected: this.protocolVersion});
+        return new Error(
+            `Unsupported mapget tile-stream protocol ${version.major}.${version.minor}.${version.patch}; `
+            + `expected ${this.protocolVersion.major}.${this.protocolVersion.minor}.x.`
+        );
+    }
+
+    protected destroyParser(): void {
+        if (!this.parserDestroyed && this.ownsParser && this.parser) {
+            this.parserDestroyed = true;
+            this.parser.delete();
+        }
+    }
+
+    private readFrameHeader(bytes: Uint8Array, offset: number) {
+        const view = new DataView(
+            bytes.buffer,
+            bytes.byteOffset + offset,
+            MAP_TILE_STREAM_HEADER_SIZE
+        );
+        return {
+            version: {
+                major: view.getUint16(0, true),
+                minor: view.getUint16(2, true),
+                patch: view.getUint16(4, true)
+            },
+            type: view.getUint8(6),
+            payloadLength: view.getUint32(7, true)
+        };
+    }
+}
+
+/**
  * WebSocket client for `/interactive` plus the optional `/interactive/payload` pull loop.
  * It hides frame parsing, request chunking, status tracking, and adaptive pull budgeting
  * behind callback-style hooks that `MapTileStreamService` can consume from outside Angular.
  */
-export class MapTileStreamClient {
+export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
     private socket: WebSocket | null = null;
     private connecting: Promise<void> | null = null;
-    private readonly decoder = new TextDecoder();
     private readonly encoder = new TextEncoder();
-    private readonly protocolVersion: {major: number; minor: number};
-    public parser: TileLayerParser;
     private lastRequestPromise: Promise<void> | null = null;
     private awaitingCompletion: boolean = false;
     private completionPromise: Promise<MapTileStreamStatusPayload> | null = null;
@@ -206,7 +367,6 @@ export class MapTileStreamClient {
     private activeStreamPath: string;
     private usingLegacyWebSocketFallback: boolean = false;
     private usingLegacyPullFallback: boolean = false;
-    private readonly ownsParser: boolean;
     private protocolMismatchReported: boolean = false;
     private protocolMismatchActive: boolean = false;
     private transportFailureActive: boolean = false;
@@ -215,11 +375,6 @@ export class MapTileStreamClient {
     /** True until the current socket identifies its datasource-catalog revision. */
     private awaitingSocketSourcesRevision: boolean = false;
 
-    onFrame: ((frame: Uint8Array, type: number) => void) | null = null;
-    onFeatures: ((payload: Uint8Array) => void) | null = null;
-    onSourceData: ((payload: Uint8Array) => void) | null = null;
-    onSubsets: ((payload: Uint8Array) => void) | null = null;
-    onFields: ((frame: Uint8Array) => void) | null = null;
     onStatus: ((status: MapTileStreamStatusPayload) => void) | null = null;
     onFilterStatus: ((status: MapTileStreamFilterStatusPayload) => void) | null = null;
     onSourceCatalogChanged: ((change: MapTileStreamSourceCatalogChangePayload) => void) | null = null;
@@ -227,44 +382,11 @@ export class MapTileStreamClient {
     onOpen: (() => void) | null = null;
     onError: ((event: Event) => void) | null = null;
     onClose: ((event: CloseEvent) => void) | null = null;
-    onProtocolMismatch: ((mismatch: MapTileStreamProtocolMismatch) => void) | null = null;
 
     /** Creates or adopts the parser and remembers the relative backend path for websocket and pull calls. */
     constructor(private path: string = "/interactive", parser?: TileLayerParser) {
+        super(parser);
         this.activeStreamPath = path;
-        this.ownsParser = !parser;
-        this.parser = parser ?? new coreLib.TileLayerParser();
-        // The parser and framing version come from the same mapget build in
-        // WASM. Keeping a second TypeScript version inevitably drifts during
-        // dependency upgrades and cannot describe what this client can parse.
-        this.protocolVersion = {
-            major: coreLib.tileLayerStreamProtocolMajor(),
-            minor: coreLib.tileLayerStreamProtocolMinor()
-        };
-    }
-
-    /** Registers the callback that receives feature payload frames without the transport header. */
-    withFeaturesCallback(callback: (payload: Uint8Array) => void) {
-        this.onFeatures = callback;
-        return this;
-    }
-
-    /** Registers the callback that receives source-data payload frames without the transport header. */
-    withSourceDataCallback(callback: (payload: Uint8Array) => void) {
-        this.onSourceData = callback;
-        return this;
-    }
-
-    /** Registers the callback that receives subset payload frames without the transport header. */
-    withSubsetsCallback(callback: (payload: Uint8Array) => void) {
-        this.onSubsets = callback;
-        return this;
-    }
-
-    /** Registers the callback that receives field-dictionary update frames. */
-    withFieldsCallback(callback: (frame: Uint8Array) => void) {
-        this.onFields = callback;
-        return this;
     }
 
     /** Registers the callback that receives parsed interactive-stream status payloads. */
@@ -334,26 +456,6 @@ export class MapTileStreamClient {
         return this;
     }
 
-    /** Registers a VTLV protocol-mismatch callback. */
-    withProtocolMismatchCallback(callback: (mismatch: MapTileStreamProtocolMismatch) => void) {
-        this.onProtocolMismatch = callback;
-        return this;
-    }
-
-    /** Seeds the parser with datasource info from JSON text. */
-    setDataSourceInfoJson(json: string) {
-        const buffer = new TextEncoder().encode(json);
-        return this.setDataSourceInfoBuffer(buffer);
-    }
-
-    /** Seeds the parser with datasource info from a serialized buffer. */
-    setDataSourceInfoBuffer(buffer: Uint8Array) {
-        uint8ArrayToWasm((wasmBuffer: any) => {
-            this.parser.setDataSourceInfo(wasmBuffer);
-        }, buffer);
-        return this;
-    }
-
     /** Returns true while the websocket connection is open. */
     isOpen(): boolean {
         return this.socket?.readyState === WebSocket.OPEN;
@@ -407,9 +509,7 @@ export class MapTileStreamClient {
         this.clearPendingFrames();
         this.frameLoop.dispose();
         this.resetCompletionPromise();
-        if (this.ownsParser && this.parser) {
-            this.parser.delete();
-        }
+        this.destroyParser();
     }
 
     /** Drops queued frames that have not yet been handed to the parser or render pipeline. */
@@ -1061,33 +1161,11 @@ export class MapTileStreamClient {
             throw new Error("Unexpected WebSocket message payload.");
         }
 
-        if (bytes.length < MAP_TILE_STREAM_HEADER_SIZE) {
-            throw new Error("Tile stream frame is smaller than its header.");
-        }
-
-        const frames: QueuedTransportFrame[] = [];
-        let offset = 0;
-        while (offset + MAP_TILE_STREAM_HEADER_SIZE <= bytes.length) {
-            const header = this.readFrameHeader(bytes, offset);
-            const type = header.type;
-            const payloadLength = header.payloadLength;
-            const frameEnd = offset + MAP_TILE_STREAM_HEADER_SIZE + payloadLength;
-            if (frameEnd > bytes.length) {
-                throw new Error("Tile stream frame size does not match its header.");
-            }
-
-            frames.push({
-                bytes: bytes.subarray(offset, frameEnd),
-                type,
-                version: header.version
-            });
-            offset = frameEnd;
-        }
-
-        if (offset !== bytes.length) {
+        const decoded = this.decodeAvailableFrames(bytes);
+        if (decoded.consumedBytes !== bytes.length) {
             throw new Error("Tile stream frame alignment is invalid.");
         }
-        return frames;
+        return decoded.frames;
     }
 
     /** Applies compatibility checks and dispatches one frame at its FIFO turn. */
@@ -1098,26 +1176,6 @@ export class MapTileStreamClient {
             return;
         }
         this.handleFrame(frame.bytes, frame.type);
-    }
-
-    /** Reads the fixed-size VTLV header emitted by mapget's TileLayerStream writer. */
-    private readFrameHeader(bytes: Uint8Array, offset: number) {
-        const view = new DataView(bytes.buffer, bytes.byteOffset + offset, MAP_TILE_STREAM_HEADER_SIZE);
-        return {
-            version: {
-                major: view.getUint16(0, true),
-                minor: view.getUint16(2, true),
-                patch: view.getUint16(4, true)
-            },
-            type: view.getUint8(6),
-            payloadLength: view.getUint32(7, true)
-        };
-    }
-
-    /** Returns whether a VTLV frame can be parsed by this frontend build. */
-    private isCompatibleProtocol(version: {major: number; minor: number}): boolean {
-        return version.major === this.protocolVersion.major
-            && version.minor === this.protocolVersion.minor;
     }
 
     /** Reports one protocol mismatch and stops the active transport because following frame parsing is unsafe. */
@@ -1140,9 +1198,6 @@ export class MapTileStreamClient {
 
     /** Dispatches one parsed transport frame to the parser, callbacks, or completion tracking. */
     private handleFrame(bytes: Uint8Array, type: number): void {
-        if (type === MAP_TILE_STREAM_TYPE_END_OF_STREAM) {
-            return;
-        }
         try {
             if (type === MAP_TILE_STREAM_TYPE_STATUS) {
                 const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
@@ -1212,53 +1267,13 @@ export class MapTileStreamClient {
                 return;
             }
 
-            if (type === MAP_TILE_STREAM_TYPE_FIELDS) {
-                // Field dictionaries are string-pool-keyed prerequisites for feature/subset payloads.
-                // They can legitimately arrive after a newer request context has superseded
-                // their original request, while the already-accepted feature payload still
-                // remains cached. Keep them additive across request churn; datasource reloads
-                // close/reset the stream so dictionaries cannot leak across metadata epochs.
-                uint8ArrayToWasm((wasmBuffer: any) => {
-                    this.parser.readFieldDictUpdate(wasmBuffer);
-                }, bytes);
-                if (this.onFields) {
-                    this.onFields(bytes);
-                }
-                return;
-            }
-
-            if (type === MAP_TILE_STREAM_TYPE_FEATURES) {
-                if (!this.acceptsCurrentPayloadFrame()) {
-                    return;
-                }
-                if (this.onFeatures) {
-                    this.onFeatures(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
-                }
-                return;
-            }
-
-            if (type === MAP_TILE_STREAM_TYPE_SOURCEDATA) {
-                if (!this.acceptsCurrentPayloadFrame()) {
-                    return;
-                }
-                if (this.onSourceData) {
-                    this.onSourceData(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
-                }
-                return;
-            }
-
-            if (type === MAP_TILE_STREAM_TYPE_SUBSETS) {
-                // A pull response can cross a same-generation coverage update:
-                // the server has already marked its subset tile forwarded,
-                // while the newer request-context frame may be processed first.
-                // Unlike complete feature/source-data frames, every subset
-                // carries filterId + generation + tile identity and the owning
-                // FilterSubscriptionRef applies the exact current-coverage
-                // gate. Rejecting it by untagged request context here loses a
-                // valid result permanently.
-                if (this.onSubsets) {
-                    this.onSubsets(bytes.slice(MAP_TILE_STREAM_HEADER_SIZE));
-                }
+            // Subsets remain ungated because they carry filter/generation identity;
+            // complete tile payloads use the active interactive request context.
+            if (this.dispatchDataFrame(
+                bytes,
+                type,
+                this.acceptsCurrentPayloadFrame()
+            )) {
                 return;
             }
 
@@ -1542,3 +1557,149 @@ export class MapTileStreamClient {
     }
 
 }
+
+/**
+ * One-shot HTTP client for complete feature/source-data tiles.
+ *
+ * Fetch response chunks do not preserve VTLV frame boundaries, so this client
+ * incrementally accumulates bytes while sharing all framing and payload parsing
+ * with the interactive transport base.
+ */
+export class MapTileStreamClientTiles extends MapTileStreamClientBase {
+    private controller: AbortController | null = null;
+    private inputBuffer = new Uint8Array(64 * 1024);
+    private inputLength = 0;
+    private requestInFlight = false;
+    private destroyed = false;
+    private endOfStreamReceived = false;
+
+    constructor(private readonly path: string = "/tiles", parser?: TileLayerParser) {
+        super(parser);
+    }
+
+    /** POST one bounded request envelope and resolve after its EndOfStream frame. */
+    async request(tileLayerRequests: any[]): Promise<void> {
+        if (this.destroyed) {
+            throw new Error("Tile HTTP client has already been destroyed.");
+        }
+        if (this.requestInFlight) {
+            throw new Error("Tile HTTP client already has a request in flight.");
+        }
+        this.requestInFlight = true;
+        this.endOfStreamReceived = false;
+        this.inputLength = 0;
+        const controller = new AbortController();
+        this.controller = controller;
+        try {
+            const response = await fetch(new URL(this.path, document.baseURI), {
+                method: "POST",
+                cache: "no-store",
+                headers: {
+                    "Accept": "application/binary",
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    responseType: "binary",
+                    stringPoolOffsets: this.parser.getFieldDictOffsets(),
+                    requests: tileLayerRequests
+                }),
+                signal: controller.signal
+            });
+            if (!response.ok) {
+                const detail = (await response.text()).trim();
+                throw new Error(
+                    `Tile request failed with HTTP ${response.status}`
+                    + (detail ? `: ${detail}` : ".")
+                );
+            }
+            if (response.body) {
+                const reader = response.body.getReader();
+                try {
+                    while (true) {
+                        const {done, value} = await reader.read();
+                        if (done) {
+                            break;
+                        }
+                        if (value?.length) {
+                            this.acceptChunk(value);
+                        }
+                    }
+                } finally {
+                    reader.releaseLock();
+                }
+            } else {
+                this.acceptChunk(new Uint8Array(await response.arrayBuffer()));
+            }
+            if (this.inputLength !== 0) {
+                throw new Error("Tile HTTP response ended inside a VTLV frame.");
+            }
+            if (!this.endOfStreamReceived) {
+                throw new Error("Tile HTTP response ended without EndOfStream.");
+            }
+        } finally {
+            if (this.controller === controller) {
+                this.controller = null;
+            }
+            this.requestInFlight = false;
+        }
+    }
+
+    /** Abort an in-flight fetch and release an owned parser. */
+    destroy(): void {
+        if (this.destroyed) {
+            return;
+        }
+        this.destroyed = true;
+        this.controller?.abort();
+        this.controller = null;
+        this.inputLength = 0;
+        this.destroyParser();
+    }
+
+    /** Append an arbitrary fetch chunk, dispatch all complete frames, and retain the tail. */
+    private acceptChunk(chunk: Uint8Array): void {
+        this.ensureInputCapacity(this.inputLength + chunk.length);
+        this.inputBuffer.set(chunk, this.inputLength);
+        this.inputLength += chunk.length;
+
+        const decoded = this.decodeAvailableFrames(
+            this.inputBuffer.subarray(0, this.inputLength)
+        );
+        for (const frame of decoded.frames) {
+            if (!this.isCompatibleProtocol(frame.version)) {
+                throw this.protocolMismatch(frame.version);
+            }
+            if (frame.type === MAP_TILE_STREAM_TYPE_END_OF_STREAM) {
+                this.endOfStreamReceived = true;
+            }
+            if (!this.dispatchDataFrame(frame.bytes, frame.type)) {
+                this.onFrame?.(frame.bytes, frame.type);
+            }
+        }
+        if (decoded.consumedBytes > 0) {
+            this.inputBuffer.copyWithin(
+                0,
+                decoded.consumedBytes,
+                this.inputLength
+            );
+            this.inputLength -= decoded.consumedBytes;
+        }
+    }
+
+    /** Grow geometrically so a large tile split into many HTTP chunks stays linear-time. */
+    private ensureInputCapacity(required: number): void {
+        if (required <= this.inputBuffer.length) {
+            return;
+        }
+        let capacity = this.inputBuffer.length;
+        while (capacity < required) {
+            capacity *= 2;
+        }
+        const replacement = new Uint8Array(capacity);
+        replacement.set(this.inputBuffer.subarray(0, this.inputLength));
+        this.inputBuffer = replacement;
+    }
+}
+
+// Preserve the established import name for the interactive viewport transport.
+export {MapTileStreamClientInteractive as MapTileStreamClient};
