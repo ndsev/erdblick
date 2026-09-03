@@ -1293,7 +1293,7 @@ export abstract class DeckMapView implements IRenderView {
         maxObjects: number
     ): RenderedFeaturePickResult {
         if (!this.deck) {
-            return {featureIds: []};
+            return {topFeatureIds: [], featureIds: []};
         }
         const pickedObjects = this.deck.pickMultipleObjects({
             x: screenPos.x,
@@ -1303,11 +1303,9 @@ export abstract class DeckMapView implements IRenderView {
             layerIds: this.drillPickLayerIds(),
             unproject3D: false
         });
-        return {
-            featureIds: this.uniqueFeatureIdsFromPickingInfos(
-                pickedObjects,
-                maxObjects)
-        };
+        return this.featurePickResultFromPickingInfos(
+            pickedObjects,
+            maxObjects);
     }
 
     /** Returns the current top-level layer ids explicitly marked as ordinary feature representations. */
@@ -1348,15 +1346,12 @@ export abstract class DeckMapView implements IRenderView {
         return result;
     }
 
-    /**
-     * Orders GPU vector picks by rendered z-index and primitive pass before
-     * expanding merged objects and deduplicating exact feature identities.
-     * Non-vector picks retain Deck's relative and absolute candidate positions.
-     */
-    private uniqueFeatureIdsFromPickingInfos(
+    /** Orders picks, preserving the first render object's atomic feature group while flattening all hits. */
+    private featurePickResultFromPickingInfos(
         pickedObjects: PickingInfo[],
         maxFeatures = Number.POSITIVE_INFINITY
-    ): TileFeatureId[] {
+    ): RenderedFeaturePickResult {
+        let topFeatureIds: TileFeatureId[] = [];
         const featureIds: TileFeatureId[] = [];
         const seen = new Set<string>();
         const candidates = pickedObjects.map((picked, index) => ({
@@ -1375,7 +1370,25 @@ export abstract class DeckMapView implements IRenderView {
             const picked = candidate.order === undefined
                 ? candidate.picked
                 : orderedVectorPicks[vectorPickIndex++].picked;
+            const groupFeatureIds: TileFeatureId[] = [];
+            const groupSeen = new Set<string>();
             for (const featureId of this.featureIdsFromPickingInfo(picked)) {
+                const identity = `${featureId.mapTileKey}\u0000${featureId.featureId}`;
+                if (!groupSeen.has(identity)) {
+                    groupSeen.add(identity);
+                    groupFeatureIds.push(featureId);
+                }
+            }
+            if (!groupFeatureIds.length) {
+                continue;
+            }
+            if (!topFeatureIds.length) {
+                // One rendered point can represent several server-grouped
+                // features. Preserve that atomic membership independently of
+                // the flat, bounded context-menu result.
+                topFeatureIds = groupFeatureIds;
+            }
+            for (const featureId of groupFeatureIds) {
                 const identity = `${featureId.mapTileKey}\u0000${featureId.featureId}`;
                 if (seen.has(identity)) {
                     continue;
@@ -1383,11 +1396,11 @@ export abstract class DeckMapView implements IRenderView {
                 seen.add(identity);
                 featureIds.push(featureId);
                 if (featureIds.length >= maxFeatures) {
-                    return featureIds;
+                    return {topFeatureIds, featureIds};
                 }
             }
         }
-        return featureIds;
+        return {topFeatureIds, featureIds};
     }
 
     /** Resolve ordering metadata for one GPU vector picking result. */
@@ -2309,10 +2322,10 @@ export abstract class DeckMapView implements IRenderView {
                 !this.isHoverSampleLocal(position, radius)) {
                 return;
             }
-            const featureIds = this.uniqueFeatureIdsFromPickingInfos(
+            const featureIds = this.featurePickResultFromPickingInfos(
                 picked,
                 DeckMapView.HOVER_PICK_MAX_OBJECTS
-            );
+            ).featureIds;
             const topFeatureIds = generation === this.topHoverFeatureGeneration
                 ? this.topHoverFeatureIds
                 : [];
@@ -2402,27 +2415,26 @@ export abstract class DeckMapView implements IRenderView {
         const screenPosition = {x: info.x, y: info.y};
         const useDesktopDrillPick = this.desktopDrillPickingEnabled
             && (!srcEvent?.pointerType || srcEvent.pointerType === "mouse");
-        let pickedFeatureIds = useDesktopDrillPick
+        let featureIds = useDesktopDrillPick
             ? this.drillPickFeatures(
                 screenPosition,
                 this.stateService.drillPickRadius,
                 this.stateService.inspectionsLimit
-            ).featureIds
-            : this.featureIdsFromPickingInfo(info);
+            ).topFeatureIds
+            : this.featurePickResultFromPickingInfos([info]).topFeatureIds;
         // Deck's speculative pointer-down picker is intentionally disabled. Touch taps therefore
         // perform their bounded pick here, after the recognizer has ruled out a drag.
-        if (!pickedFeatureIds.length && !useDesktopDrillPick) {
-            pickedFeatureIds = this.drillPickFeatures(
+        if (!featureIds.length && !useDesktopDrillPick) {
+            featureIds = this.drillPickFeatures(
                 screenPosition,
                 this.stateService.drillPickRadius,
                 1
-            ).featureIds;
+            ).topFeatureIds;
         }
-        // Primary click means "the top rendered feature". Multi-selection is
-        // deliberately explicit through Ctrl-click or the context menu's
-        // Select all action, so dense geometry cannot unexpectedly open a
-        // large inspection set.
-        const featureIds = pickedFeatureIds.slice(0, 1);
+        // Primary click means "the top rendered object". A server-grouped
+        // point is one object with several semantic members, all of which
+        // belong to the click; unrelated lower objects remain context-menu
+        // selections only.
         const featurePosition = featureIds.length
             ? this.markerPositionForFeature(
                 info,

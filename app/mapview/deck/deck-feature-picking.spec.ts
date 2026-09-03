@@ -108,6 +108,7 @@ describe("Deck rendered-feature picking", () => {
             unproject3D: false
         });
         expect(result).toEqual({
+            topFeatureIds: [{mapTileKey: "map-b/tile", featureId: "feature-7"}],
             featureIds: [{mapTileKey: "map-b/tile", featureId: "feature-7"}]
         });
     });
@@ -122,7 +123,7 @@ describe("Deck rendered-feature picking", () => {
                     mapTileKey: address === 0
                         ? "map-a/tile"
                         : "map-b/tile",
-                    featureId: "feature-4"
+                    featureId: address === 2 ? "feature-5" : "feature-4"
                 }]
             }
         };
@@ -130,13 +131,13 @@ describe("Deck rendered-feature picking", () => {
             {
                 layer: mergedLayer,
                 object: {
-                    featureAddresses: [0, 0, 1, 2]
+                    featureAddresses: [0, 0, 1]
                 }
             },
             {
                 layer: mergedLayer,
                 object: {
-                    featureAddresses: [1]
+                    featureAddresses: [2]
                 }
             }
         ]);
@@ -145,10 +146,17 @@ describe("Deck rendered-feature picking", () => {
             pickMultipleObjects
         };
 
-        expect(view.drillPickFeatures({x: 0, y: 0}, 1, 2).featureIds).toEqual([
-            {mapTileKey: "map-a/tile", featureId: "feature-4"},
-            {mapTileKey: "map-b/tile", featureId: "feature-4"}
-        ]);
+        expect(view.drillPickFeatures({x: 0, y: 0}, 1, 3)).toEqual({
+            topFeatureIds: [
+                {mapTileKey: "map-a/tile", featureId: "feature-4"},
+                {mapTileKey: "map-b/tile", featureId: "feature-4"}
+            ],
+            featureIds: [
+                {mapTileKey: "map-a/tile", featureId: "feature-4"},
+                {mapTileKey: "map-b/tile", featureId: "feature-4"},
+                {mapTileKey: "map-b/tile", featureId: "feature-5"}
+            ]
+        });
     });
 
     it("orders vector candidates by z-index without moving external picks", () => {
@@ -191,13 +199,16 @@ describe("Deck rendered-feature picking", () => {
             ])
         };
 
-        expect(view.drillPickFeatures({x: 0, y: 0}, 4, 4).featureIds)
-            .toEqual([
-                {mapTileKey: "map/tile", featureId: "feature-2"},
-                {mapTileKey: "external/tile", featureId: "feature-7"},
-                {mapTileKey: "map/tile", featureId: "feature-1"},
-                {mapTileKey: "map/tile", featureId: "feature-0"}
-            ]);
+        const result = view.drillPickFeatures({x: 0, y: 0}, 4, 4);
+        expect(result.topFeatureIds).toEqual([
+            {mapTileKey: "map/tile", featureId: "feature-2"}
+        ]);
+        expect(result.featureIds).toEqual([
+            {mapTileKey: "map/tile", featureId: "feature-2"},
+            {mapTileKey: "external/tile", featureId: "feature-7"},
+            {mapTileKey: "map/tile", featureId: "feature-1"},
+            {mapTileKey: "map/tile", featureId: "feature-0"}
+        ]);
     });
 
     it("selects only the top unique feature on primary click", () => {
@@ -217,7 +228,10 @@ describe("Deck rendered-feature picking", () => {
             mouseClickCoordinates: {next: vi.fn()}
         };
         view.menuService = {tileOutline: {next: vi.fn()}};
-        view.drillPickFeatures = vi.fn(() => ({featureIds: [top, lower]}));
+        view.drillPickFeatures = vi.fn(() => ({
+            topFeatureIds: [top],
+            featureIds: [top, lower]
+        }));
         view.pickCartographic = vi.fn(() => null);
 
         view.onClick(
@@ -227,6 +241,39 @@ describe("Deck rendered-feature picking", () => {
 
         expect(view.inspectionSelection.inspectFeatureIds)
             .toHaveBeenCalledWith([top], false);
+    });
+
+    it("selects every member of the top merged point without selecting lower objects", () => {
+        const view = createView() as any;
+        const first = {mapTileKey: "map/tile", featureId: "merged-a"};
+        const second = {mapTileKey: "map/tile", featureId: "merged-b"};
+        const lower = {mapTileKey: "map/tile", featureId: "lower"};
+        view.desktopDrillPickingEnabled = true;
+        view.stateService = {
+            focusedView: 0,
+            drillPickRadius: 2,
+            inspectionsLimit: 10,
+            marker: false,
+            unsetUnlockedSelections: vi.fn()
+        };
+        view.inspectionSelection = {inspectFeatureIds: vi.fn()};
+        view.coordinatesService = {
+            mouseClickCoordinates: {next: vi.fn()}
+        };
+        view.menuService = {tileOutline: {next: vi.fn()}};
+        view.drillPickFeatures = vi.fn(() => ({
+            topFeatureIds: [first, second],
+            featureIds: [first, second, lower]
+        }));
+        view.pickCartographic = vi.fn(() => null);
+
+        view.onClick(
+            {x: 10, y: 20},
+            {srcEvent: {button: 0, pointerType: "mouse", ctrlKey: false}}
+        );
+
+        expect(view.inspectionSelection.inspectFeatureIds)
+            .toHaveBeenCalledWith([first, second], false);
     });
 
     it("picks after a touch tap when no pointer-down picking info is available", () => {
@@ -245,7 +292,10 @@ describe("Deck rendered-feature picking", () => {
             mouseClickCoordinates: {next: vi.fn()}
         };
         view.menuService = {tileOutline: {next: vi.fn()}};
-        view.drillPickFeatures = vi.fn(() => ({featureIds: [tapped]}));
+        view.drillPickFeatures = vi.fn(() => ({
+            topFeatureIds: [tapped],
+            featureIds: [tapped]
+        }));
         view.pickCartographic = vi.fn(() => null);
 
         view.onClick(
@@ -256,6 +306,47 @@ describe("Deck rendered-feature picking", () => {
         expect(view.drillPickFeatures).toHaveBeenCalledWith({x: 10, y: 20}, 5, 1);
         expect(view.inspectionSelection.inspectFeatureIds)
             .toHaveBeenCalledWith([tapped], false);
+    });
+
+    it("preserves merged membership from the direct touch pick", () => {
+        const view = createView() as any;
+        const first = {mapTileKey: "map/tile", featureId: "merged-a"};
+        const second = {mapTileKey: "map/tile", featureId: "merged-b"};
+        const mergedLayer = {
+            props: {
+                subsetPickResolver: (address: number) =>
+                    address === 1 ? [first] : [second]
+            }
+        };
+        view.desktopDrillPickingEnabled = false;
+        view.stateService = {
+            focusedView: 0,
+            drillPickRadius: 5,
+            inspectionsLimit: 10,
+            marker: false,
+            unsetUnlockedSelections: vi.fn()
+        };
+        view.inspectionSelection = {inspectFeatureIds: vi.fn()};
+        view.coordinatesService = {
+            mouseClickCoordinates: {next: vi.fn()}
+        };
+        view.menuService = {tileOutline: {next: vi.fn()}};
+        view.drillPickFeatures = vi.fn();
+        view.pickCartographic = vi.fn(() => null);
+
+        view.onClick(
+            {
+                x: 10,
+                y: 20,
+                layer: mergedLayer,
+                object: {featureAddresses: [1, 2]}
+            },
+            {srcEvent: {button: 0, pointerType: "touch", ctrlKey: false}}
+        );
+
+        expect(view.drillPickFeatures).not.toHaveBeenCalled();
+        expect(view.inspectionSelection.inspectFeatureIds)
+            .toHaveBeenCalledWith([first, second], false);
     });
 
     it("separates the configured-radius anchor and deep hover queries", async () => {

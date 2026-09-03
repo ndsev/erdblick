@@ -36,6 +36,8 @@ export interface RenderNavigationTarget {
 
 /** Logical feature result returned by bounded rendered-object picking operations. */
 export interface RenderedFeaturePickResult {
+    /** Exact feature identities represented by the first resolved render object. */
+    topFeatureIds: TileFeatureId[];
     /** Unique exact feature identities in renderer traversal order. */
     featureIds: TileFeatureId[];
 }
