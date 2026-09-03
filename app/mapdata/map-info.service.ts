@@ -85,6 +85,10 @@ export class MapInfoService {
         this.maps$ = new BehaviorSubject<MapLayerTree>(
             new MapLayerTree([], this.stateService, this.styleService, this.mapPresetService)
         );
+        this.stateService.urlStateApplied.subscribe(() => {
+            this.configureTreeParameters();
+            this.layerStateChanged.next("url-state");
+        });
     }
 
     /** Returns the mutable map tree owned by the map info service. */

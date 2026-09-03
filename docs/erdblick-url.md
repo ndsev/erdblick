@@ -91,6 +91,14 @@ You do not need to set these parameters manually for normal usage, but they make
 
 Legacy `osm` links from older releases are still accepted during startup and are migrated to the new `bg` state automatically.
 
+## Presentation Embedding
+
+A paired presentation can load erdblick once and apply later URL states without reloading the iframe document. Start the framed viewer with `embed=presentation`; after application initialization, erdblick announces a versioned `postMessage` capability to its parent. The parent can then submit complete query strings using the same URL format documented above.
+
+Erdblick replaces rather than merges each submitted query, hydrates its existing typed application state, refreshes the derived map/layer/style tree, and acknowledges completion. The acknowledgement means local state reconciliation is complete; tile downloads and progressive rendering may still continue. Messages are accepted only from the direct parent, the first valid HTTP(S) parent origin is pinned for the document lifetime, and requests cannot change the iframe origin or path.
+
+This is a narrow embedding transport, not a general automation API. Browser-local stylesheet source text, transient menus, hover state, and in-progress gestures remain outside the URL contract. Deploy the presentation and erdblick as a compatible pair; unsupported viewers are not detected through a timeout or silently reloaded.
+
 ## Style Option Encoding in the URL
 
 Style option values can vary by stylesheet, map layer, and view. To keep URLs compact, erdblick encodes all option values for a given style into a single query parameter whose name and value are structured strings:

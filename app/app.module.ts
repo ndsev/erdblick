@@ -131,6 +131,7 @@ import {CacheResetComponent} from "./auxiliaries/cache-reset.component";
 import {MapPresetService} from "./styledata/map-preset.service";
 import {TileSubsetLayerRenderService} from
     "./mapview/deck/tile-subset-layer-render.service";
+import {PresentationStateBridgeService} from "./shared/presentation-state-bridge.service";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -177,6 +178,7 @@ export const initializeServices = () => {
     const coordService = inject(CoordinatesService);
     const coordinatesPolicy = inject(CoordinatesPolicyService);
     const subsetRenderService = inject(TileSubsetLayerRenderService);
+    const presentationBridge = inject(PresentationStateBridgeService);
     inject(FeatureSearchService);
 
     return (async () => {
@@ -200,6 +202,7 @@ export const initializeServices = () => {
         updateGlobalSpinner('Initializing map data');
         await tileStream.initialize();
         inspectionSelection.initialize();
+        presentationBridge.initialize();
     })();
 }
 

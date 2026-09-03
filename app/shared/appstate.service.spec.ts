@@ -130,6 +130,44 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('replaces and hydrates URL state through the explicit runtime boundary', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        // @ts-expect-error this is a call to mock router
+        routerStub.navigate.mockClear();
+        const appliedMarkerValues: boolean[] = [];
+        service.urlStateApplied.subscribe(() => {
+            appliedMarkerValues.push(service.markerState.getValue());
+        });
+
+        await service.replaceUrlState({v2: '1', m: '1'});
+
+        expect(routerStub.navigate).toHaveBeenCalledWith([], {
+            queryParams: {v2: '1', m: '1'},
+            queryParamsHandling: 'replace',
+            replaceUrl: true,
+        });
+        expect(service.markerState.getValue()).toBe(true);
+        expect(appliedMarkerValues).toEqual([true]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects explicit URL replacement before persistence is ready', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        await expect(service.replaceUrlState({v2: '1'})).rejects.toThrow('before AppStateService is ready');
+        expect(routerStub.navigate).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('keeps selected features with packed tile ids during datasource pruning', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
@@ -777,6 +815,8 @@ describe('AppStateService', () => {
             showAlertDialogDefault: vi.fn()
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const urlStateApplied = vi.fn();
+        service.urlStateApplied.subscribe(urlStateApplied);
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -797,6 +837,7 @@ describe('AppStateService', () => {
         await flushMicrotasks();
 
         expect(service.markerState.getValue()).toBe(false);
+        expect(urlStateApplied).toHaveBeenCalledTimes(1);
 
         vi.advanceTimersByTime(100);
         await flushMicrotasks();

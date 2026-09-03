@@ -40,6 +40,10 @@ declare global {
             ) => Promise<Record<string, unknown>>;
             /** Application state used to drive the same selection path as picking and search. */
             stateService: {
+                readonly numViews: number;
+                readonly mode2dState: {
+                    getValue(viewIndex: number): boolean;
+                };
                 setSelection: (
                     features: Array<{mapTileKey: string; featureId: string}>
                 ) => void;

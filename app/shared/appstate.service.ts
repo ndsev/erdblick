@@ -1,6 +1,6 @@
 import {Injectable, OnDestroy} from "@angular/core";
 import {NavigationEnd, NavigationStart, Params, Router} from "@angular/router";
-import {BehaviorSubject, skip, Subscription, take} from "rxjs";
+import {BehaviorSubject, skip, Subject, Subscription, take} from "rxjs";
 import {filter} from "rxjs/operators";
 import {Cartographic, GeoMath} from "../integrations/geo";
 import {AppState, AppStateOptions, Boolish, MapViewState, StyleState} from "./app-state";
@@ -486,6 +486,8 @@ export class AppStateService implements OnDestroy {
     private readonly mapViewStates: Array<MapViewState<unknown>> = [];
     private readonly inspectionTreeExpansionStates = new Map<number, InspectionTreeExpansionState>();
     readonly ready = new BehaviorSubject<boolean>(false);
+    /** Emits synchronously after a runtime URL-state hydration has completed. */
+    readonly urlStateApplied = new Subject<void>();
 
     private readonly stateSubscriptions: Subscription[] = [];
 
@@ -1169,10 +1171,7 @@ export class AppStateService implements OnDestroy {
                 if (!this.isReady) {
                     return;
                 }
-                this.cancelPendingStateSync();
-                this.withHydration(() => {
-                    this.hydrateFromUrl(this.currentBrowserQueryParams());
-                });
+                this.applyHydratedUrlState(this.currentBrowserQueryParams());
             }
         });
 
@@ -1207,6 +1206,21 @@ export class AppStateService implements OnDestroy {
 
         this.isReady = true;
         this.ready.next(true);
+    }
+
+    /** Replaces the current query and hydrates it without navigating the browser document. */
+    async replaceUrlState(params: Params): Promise<void> {
+        if (!this.isReady) {
+            throw new Error("URL state cannot be replaced before AppStateService is ready.");
+        }
+
+        this.cancelPendingStateSync();
+        await this.router.navigate([], {
+            queryParams: params,
+            queryParamsHandling: "replace",
+            replaceUrl: true
+        });
+        this.applyHydratedUrlState(params);
     }
 
     /** Flushes all state slots to storage and URL after a batch update. */
@@ -1705,6 +1719,13 @@ export class AppStateService implements OnDestroy {
                 this.deserializeStateSafely(state, params);
             }
         });
+    }
+
+    /** Applies one runtime URL state and notifies derived projections after hydration. */
+    private applyHydratedUrlState(params: Params): void {
+        this.cancelPendingStateSync();
+        this.hydrateFromUrl(params);
+        this.urlStateApplied.next();
     }
 
     /** Keeps one malformed persisted state entry from aborting startup hydration. */
