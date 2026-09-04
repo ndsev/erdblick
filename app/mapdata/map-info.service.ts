@@ -85,9 +85,9 @@ export class MapInfoService {
         this.maps$ = new BehaviorSubject<MapLayerTree>(
             new MapLayerTree([], this.stateService, this.styleService, this.mapPresetService)
         );
-        this.stateService.urlStateApplied.subscribe(() => {
+        this.stateService.stateApplied.subscribe(() => {
             this.configureTreeParameters();
-            this.layerStateChanged.next("url-state");
+            this.layerStateChanged.next("external-state");
         });
     }
 

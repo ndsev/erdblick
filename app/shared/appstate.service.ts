@@ -486,8 +486,8 @@ export class AppStateService implements OnDestroy {
     private readonly mapViewStates: Array<MapViewState<unknown>> = [];
     private readonly inspectionTreeExpansionStates = new Map<number, InspectionTreeExpansionState>();
     readonly ready = new BehaviorSubject<boolean>(false);
-    /** Emits synchronously after a runtime URL-state hydration has completed. */
-    readonly urlStateApplied = new Subject<void>();
+    /** Emits synchronously after an externally supplied state replacement has completed. */
+    readonly stateApplied = new Subject<void>();
 
     private readonly stateSubscriptions: Subscription[] = [];
 
@@ -1223,6 +1223,29 @@ export class AppStateService implements OnDestroy {
         this.applyHydratedUrlState(params);
     }
 
+    /**
+     * Atomically replaces presentation-controlled state from a native snapshot.
+     * Unlike the user-facing snapshot import, omitted persisted states are reset so
+     * every presentation slide describes a complete and repeatable viewer state.
+     */
+    replaceSnapshotState(snapshot: unknown): string[] {
+        if (!this.isReady) {
+            throw new Error("Snapshot state cannot be replaced before AppStateService is ready.");
+        }
+
+        const normalizedResult = this.normalizeSnapshot(snapshot);
+        if (normalizedResult.errors.length) {
+            return normalizedResult.errors;
+        }
+
+        this.cancelPendingStateSync();
+        this.withHydration(() => {
+            this.applyNormalizedSnapshot(normalizedResult.normalized!, true);
+        });
+        this.stateApplied.next();
+        return [];
+    }
+
     /** Flushes all state slots to storage and URL after a batch update. */
     private syncAllStates() {
         this.statePool.values().forEach(state => this.onStateChanged(state, true));
@@ -1725,7 +1748,7 @@ export class AppStateService implements OnDestroy {
     private applyHydratedUrlState(params: Params): void {
         this.cancelPendingStateSync();
         this.hydrateFromUrl(params);
-        this.urlStateApplied.next();
+        this.stateApplied.next();
     }
 
     /** Keeps one malformed persisted state entry from aborting startup hydration. */
@@ -1986,49 +2009,35 @@ export class AppStateService implements OnDestroy {
         if (normalizedResult.errors.length) {
             return normalizedResult.errors;
         }
-        const normalized = normalizedResult.normalized!;
-        const keys = Object.keys(normalized);
-        const errors: string[] = [];
+        this.applyNormalizedSnapshot(normalizedResult.normalized!, false);
+        return [];
+    }
 
-        for (const key of keys) {
-            const state = this.statePool.get(key);
-            if (!state) {
-                if (this.validateStyleOptionSnapshotEntry(key, normalized[key], errors)) {
-                    continue;
-                }
-                errors.push(`Unknown snapshot state '${key}'.`);
-                continue;
-            }
+    /** Applies a validated snapshot in state-registration order. */
+    private applyNormalizedSnapshot(
+        normalized: Record<string, unknown>,
+        replaceMissing: boolean
+    ): void {
+        for (const [key, state] of this.statePool.entries()) {
             if (!state.isSnapshotState()) {
                 continue;
             }
-            try {
-                state.validateSnapshotValue(normalized[key]);
-            } catch (error: any) {
-                errors.push(`Invalid value for '${key}': ${error?.message ?? 'schema validation failed'}`);
+            if (Object.prototype.hasOwnProperty.call(normalized, key)) {
+                state.applySnapshotValue(normalized[key]);
+            } else if (replaceMissing) {
+                state.resetToDefault();
             }
-        }
-        if (errors.length) {
-            return errors;
         }
 
-        for (const key of keys) {
-            const state = this.statePool.get(key);
-            if (!state) {
-                continue;
-            }
-            if (!state.isSnapshotState()) {
-                continue;
-            }
-            state.applySnapshotValue(normalized[key]);
-        }
         const styleOptionEntries = this.extractStyleOptionSnapshotEntries(normalized);
+        if (replaceMissing) {
+            this.stylesState.next(new Map());
+        }
         if (Object.keys(styleOptionEntries).length) {
             this.deserializeStateSafely(this.stylesState, styleOptionEntries);
             this.stylesState.next(new Map(this.stylesState.getValue()));
         }
         this.pendingOpenDialogs.clear();
-        return [];
     }
 
     /** Normalizes legacy snapshot shapes before schema validation is applied. */

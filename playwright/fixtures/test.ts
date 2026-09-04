@@ -44,6 +44,7 @@ declare global {
                 readonly mode2dState: {
                     getValue(viewIndex: number): boolean;
                 };
+                exportSnapshot(): Record<string, unknown>;
                 setSelection: (
                     features: Array<{mapTileKey: string; featureId: string}>
                 ) => void;

@@ -14,7 +14,7 @@ async function presentationMessages(page: import("@playwright/test").Page): Prom
     ).presentationMessages ?? []);
 }
 
-test("presentation URL state is applied without reloading the framed application", async ({page}) => {
+test("presentation snapshot state is applied without reloading the framed application", async ({page}) => {
     await page.goto("/");
     await page.waitForSelector("#global-spinner-container", {state: "hidden"});
     const origin = new URL(page.url()).origin;
@@ -37,10 +37,10 @@ test("presentation URL state is applied without reloading the framed application
         iframe.id = "presentation-mapviewer";
         iframe.src = frameSource;
         document.body.replaceChildren(iframe);
-    }, `${origin}/?embed=presentation&m2d=0&n=1&v2=1`);
+    }, `${origin}/?embed=presentation`);
 
     await expect.poll(async () => (await presentationMessages(page)).some(message =>
-        message.type === "erdblick:presentation:ready" && message.version === 1
+        message.type === "erdblick:presentation:ready" && message.version === 2
     )).toBe(true);
     const child = page.frames().find(frame => frame.parentFrame() === page.mainFrame());
     if (!child) {
@@ -49,14 +49,34 @@ test("presentation URL state is applied without reloading the framed application
     await expect.poll(() => child.evaluate(() => !!window.ebDebug)).toBe(true);
     const initialTimeOrigin = await child.evaluate(() => performance.timeOrigin);
 
-    await page.evaluate(targetOrigin => {
+    const presentationState = await child.evaluate(() => {
+        const snapshot = window.ebDebug!.stateService.exportSnapshot() as Record<string, unknown>;
+        const duplicateViewValue = (name: string): void => {
+            const values = snapshot[name];
+            if (Array.isArray(values) && values.length) {
+                snapshot[name] = [structuredClone(values[0]), structuredClone(values[0])];
+            }
+        };
+        snapshot["numberOfViews"] = 2;
+        for (const name of [
+            "cameraView", "layerSyncOptions", "background", "visibility", "tileBorders",
+            "tileGridMode", "tileGridLevel", "tileGridAutoLevel", "tileGridColor",
+            "tileGridOpacity", "zoomLevel", "autoZoomLevel"
+        ]) {
+            duplicateViewValue(name);
+        }
+        snapshot["mode2d"] = [true, false];
+        return snapshot;
+    });
+
+    await page.evaluate(({targetOrigin, state}) => {
         document.querySelector<HTMLIFrameElement>("iframe")?.contentWindow?.postMessage({
-            type: "erdblick:presentation:apply-url-state",
-            version: 1,
+            type: "erdblick:presentation:apply-state",
+            version: 2,
             requestId: 1,
-            search: "?embed=presentation&m2d=1%2C0&n=2&v2=1"
+            state
         }, targetOrigin);
-    }, origin);
+    }, {targetOrigin: origin, state: presentationState});
 
     await expect.poll(async () => (await presentationMessages(page)).some(message =>
         message.type === "erdblick:presentation:result"

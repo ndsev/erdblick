@@ -9,16 +9,16 @@ import type {ErdblickStyle, StyleService} from "../styledata/style.service";
 import type {MapPresetService} from "../styledata/map-preset.service";
 import type {InfoMessageService} from "../shared/info.service";
 
-describe("MapInfoService URL-state reconciliation", () => {
+describe("MapInfoService external-state reconciliation", () => {
     it("reapplies layer and style state without relying on a view-count change", () => {
-        const urlStateApplied = new Subject<void>();
+        const stateApplied = new Subject<void>();
         let visible = true;
         let level = 13;
         let optionValue = false;
         const stateService = {
             ready: new BehaviorSubject(true),
             numViewsState: new BehaviorSubject(1),
-            urlStateApplied,
+            stateApplied,
             mapLayerConfig: vi.fn(() => [{autoLevel: false, level, visible}]),
             styleOptionValues: vi.fn(() => [optionValue]),
             getLayerPresetSelection: vi.fn(() => null),
@@ -100,12 +100,12 @@ describe("MapInfoService URL-state reconciliation", () => {
         visible = false;
         level = 9;
         optionValue = true;
-        urlStateApplied.next();
+        stateApplied.next();
 
         expect(stateService.numViewsState.getValue()).toBe(1);
         expect(layer.viewConfig[0]).toEqual({autoLevel: false, level: 9, visible: false});
         expect(option.value).toEqual([true]);
-        expect(reasons).toEqual(["url-state"]);
+        expect(reasons).toEqual(["external-state"]);
         tree.destroy();
     });
 });

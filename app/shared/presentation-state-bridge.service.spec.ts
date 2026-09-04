@@ -18,7 +18,7 @@ interface FramedWindowFixture {
 }
 
 /** Creates the small Window surface used by the opt-in bridge. */
-function framedWindow(search = "?embed=presentation&v2=1"): FramedWindowFixture {
+function framedWindow(search = "?embed=presentation"): FramedWindowFixture {
     let listener: ((event: MessageEvent<unknown>) => void) | undefined;
     const parentPostMessage = vi.fn();
     const parent = {postMessage: parentPostMessage} as unknown as Window;
@@ -44,13 +44,13 @@ function framedWindow(search = "?embed=presentation&v2=1"): FramedWindowFixture 
     };
 }
 
-/** Creates one valid URL-state request. */
-function request(requestId: number, search: string): Record<string, unknown> {
+/** Creates one valid native-state request. */
+function request(requestId: number, state: Record<string, unknown>): Record<string, unknown> {
     return {
         type: PRESENTATION_BRIDGE_APPLY,
         version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
         requestId,
-        search
+        state
     };
 }
 
@@ -63,7 +63,7 @@ async function flushMicrotasks(): Promise<void> {
 
 describe("PresentationStateBridgeService", () => {
     it("activates only in a framed presentation document and announces readiness", () => {
-        const stateService = {replaceUrlState: vi.fn()} as unknown as AppStateService;
+        const stateService = {replaceSnapshotState: vi.fn()} as unknown as AppStateService;
         const fixture = framedWindow();
         const service = new PresentationStateBridgeService(stateService);
 
@@ -76,7 +76,7 @@ describe("PresentationStateBridgeService", () => {
         service.ngOnDestroy();
         expect(fixture.removeEventListener).toHaveBeenCalledWith("message", expect.any(Function));
 
-        const plainFrame = framedWindow("?v2=1");
+        const plainFrame = framedWindow("");
         expect(new PresentationStateBridgeService(stateService).initialize(plainFrame.host)).toBe(false);
 
         const topLevel = framedWindow();
@@ -84,27 +84,18 @@ describe("PresentationStateBridgeService", () => {
         expect(new PresentationStateBridgeService(stateService).initialize(topLevel.host)).toBe(false);
     });
 
-    it("applies a valid opaque query and acknowledges the completed state", async () => {
-        const replaceUrlState = vi.fn().mockResolvedValue(undefined);
+    it("applies native snapshot state and acknowledges completion", async () => {
+        const replaceSnapshotState = vi.fn().mockReturnValue([]);
         const fixture = framedWindow();
-        const service = new PresentationStateBridgeService({replaceUrlState} as unknown as AppStateService);
+        const service = new PresentationStateBridgeService({replaceSnapshotState} as unknown as AppStateService);
         service.initialize(fixture.host);
         fixture.parentPostMessage.mockClear();
 
-        fixture.dispatch(request(
-            7,
-            "?embed=presentation&v2=1&n=2&m2d=1%2C0&l=&tag=one&tag=two"
-        ));
+        const state = {numberOfViews: 2, mode2d: [true, false]};
+        fixture.dispatch(request(7, state));
         await flushMicrotasks();
 
-        expect(replaceUrlState).toHaveBeenCalledWith({
-            embed: "presentation",
-            v2: "1",
-            n: "2",
-            m2d: "1,0",
-            l: "",
-            tag: ["one", "two"]
-        });
+        expect(replaceSnapshotState).toHaveBeenCalledWith(state);
         expect(fixture.parentPostMessage).toHaveBeenCalledWith({
             type: PRESENTATION_BRIDGE_RESULT,
             version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
@@ -113,28 +104,50 @@ describe("PresentationStateBridgeService", () => {
         }, "http://deck.test");
     });
 
-    it("rejects malformed input and ignores foreign sources or a changed parent origin", async () => {
-        const replaceUrlState = vi.fn().mockResolvedValue(undefined);
+    it("reports semantic rejection without exposing validation details", async () => {
+        const replaceSnapshotState = vi.fn().mockReturnValue(["Invalid value for 'mode2d'."]);
         const fixture = framedWindow();
-        const service = new PresentationStateBridgeService({replaceUrlState} as unknown as AppStateService);
+        const service = new PresentationStateBridgeService({replaceSnapshotState} as unknown as AppStateService);
+        const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
         service.initialize(fixture.host);
         fixture.parentPostMessage.mockClear();
 
-        fixture.dispatch(request(1, "?embed=presentation&v2=1"), "http://deck.test", {} as Window);
-        fixture.dispatch(request(2, "?embed=presentation&v2=0"));
-        fixture.dispatch(request(3, "?embed=presentation&v2=1"));
-        await flushMicrotasks();
-        fixture.dispatch(request(4, "?embed=presentation&v2=1"), "http://other.test");
-        fixture.dispatch({...request(5, "?embed=presentation&v2=1"), version: 2});
+        fixture.dispatch(request(4, {mode2d: "wrong"}));
         await flushMicrotasks();
 
-        expect(replaceUrlState).toHaveBeenCalledTimes(1);
+        expect(fixture.parentPostMessage).toHaveBeenCalledWith({
+            type: PRESENTATION_BRIDGE_RESULT,
+            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
+            requestId: 4,
+            ok: false,
+            error: "invalid-state"
+        }, "http://deck.test");
+        expect(fixture.parentPostMessage.mock.calls.flat().join(" ")).not.toContain("mode2d");
+        warning.mockRestore();
+    });
+
+    it("rejects malformed envelopes and ignores foreign sources or a changed parent origin", async () => {
+        const replaceSnapshotState = vi.fn().mockReturnValue([]);
+        const fixture = framedWindow();
+        const service = new PresentationStateBridgeService({replaceSnapshotState} as unknown as AppStateService);
+        service.initialize(fixture.host);
+        fixture.parentPostMessage.mockClear();
+
+        fixture.dispatch(request(1, {marker: true}), "http://deck.test", {} as Window);
+        fixture.dispatch({...request(2, {marker: true}), state: []});
+        fixture.dispatch(request(3, {marker: true}));
+        await flushMicrotasks();
+        fixture.dispatch(request(4, {marker: false}), "http://other.test");
+        fixture.dispatch({...request(5, {marker: false}), version: 1});
+        await flushMicrotasks();
+
+        expect(replaceSnapshotState).toHaveBeenCalledTimes(1);
         expect(fixture.parentPostMessage.mock.calls).toContainEqual([{
             type: PRESENTATION_BRIDGE_RESULT,
             version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
             requestId: 2,
             ok: false,
-            error: "invalid-search"
+            error: "invalid-message"
         }, "http://deck.test"]);
         expect(fixture.parentPostMessage.mock.calls).toContainEqual([{
             type: PRESENTATION_BRIDGE_RESULT,
@@ -147,28 +160,28 @@ describe("PresentationStateBridgeService", () => {
     });
 
     it("serializes applications and retains only the latest waiting request", async () => {
-        let finishFirst: (() => void) | undefined;
-        const first = new Promise<void>(resolve => {
+        let finishFirst: ((errors: string[]) => void) | undefined;
+        const first = new Promise<string[]>(resolve => {
             finishFirst = resolve;
         });
-        const replaceUrlState = vi.fn()
+        const replaceSnapshotState = vi.fn()
             .mockImplementationOnce(() => first)
-            .mockResolvedValue(undefined);
+            .mockReturnValue([]);
         const fixture = framedWindow();
-        const service = new PresentationStateBridgeService({replaceUrlState} as unknown as AppStateService);
+        const service = new PresentationStateBridgeService({replaceSnapshotState} as unknown as AppStateService);
         service.initialize(fixture.host);
         fixture.parentPostMessage.mockClear();
 
-        fixture.dispatch(request(1, "?embed=presentation&v2=1&n=1"));
-        fixture.dispatch(request(2, "?embed=presentation&v2=1&n=2"));
-        fixture.dispatch(request(3, "?embed=presentation&v2=1&n=3"));
-        expect(replaceUrlState).toHaveBeenCalledTimes(1);
+        fixture.dispatch(request(1, {marker: false}));
+        fixture.dispatch(request(2, {marker: true}));
+        fixture.dispatch(request(3, {marker: false, numberOfViews: 2}));
+        expect(replaceSnapshotState).toHaveBeenCalledTimes(1);
 
-        finishFirst?.();
+        finishFirst?.([]);
         await flushMicrotasks();
 
-        expect(replaceUrlState).toHaveBeenCalledTimes(2);
-        expect(replaceUrlState).toHaveBeenLastCalledWith(expect.objectContaining({n: "3"}));
+        expect(replaceSnapshotState).toHaveBeenCalledTimes(2);
+        expect(replaceSnapshotState).toHaveBeenLastCalledWith({marker: false, numberOfViews: 2});
         const resultIds = fixture.parentPostMessage.mock.calls
             .map(([message]) => message as {type?: string; requestId?: number})
             .filter(message => message.type === PRESENTATION_BRIDGE_RESULT)

@@ -139,7 +139,7 @@ describe('AppStateService', () => {
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
         const appliedMarkerValues: boolean[] = [];
-        service.urlStateApplied.subscribe(() => {
+        service.stateApplied.subscribe(() => {
             appliedMarkerValues.push(service.markerState.getValue());
         });
 
@@ -815,8 +815,8 @@ describe('AppStateService', () => {
             showAlertDialogDefault: vi.fn()
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
-        const urlStateApplied = vi.fn();
-        service.urlStateApplied.subscribe(urlStateApplied);
+        const stateApplied = vi.fn();
+        service.stateApplied.subscribe(stateApplied);
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -837,7 +837,7 @@ describe('AppStateService', () => {
         await flushMicrotasks();
 
         expect(service.markerState.getValue()).toBe(false);
-        expect(urlStateApplied).toHaveBeenCalledTimes(1);
+        expect(stateApplied).toHaveBeenCalledTimes(1);
 
         vi.advanceTimersByTime(100);
         await flushMicrotasks();
@@ -2404,6 +2404,80 @@ describe('AppStateService', () => {
         expect(errors).toEqual([]);
         expect(service.markerState.getValue()).toBe(true);
         expect(service.isDialogOpen('preferences-dialog')).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects presentation snapshot replacement before persistence is ready', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        expect(() => service.replaceSnapshotState({marker: true}))
+            .toThrow('before AppStateService is ready');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('validates presentation snapshot replacement before mutating any state', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+        const stateApplied = vi.fn();
+        service.stateApplied.subscribe(stateApplied);
+
+        service.markerState.next(false);
+        const errors = service.replaceSnapshotState({
+            marker: true,
+            unknownPresentationState: 1
+        });
+
+        expect(errors).not.toEqual([]);
+        expect(service.markerState.getValue()).toBe(false);
+        expect(stateApplied).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('replaces presentation state, resets omissions, and clears stale style options without persistence', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        service.markerState.next(true);
+        service.mapsOpenState.next(true);
+        service.layerNamesState.next(['m1/layerA']);
+        service.stylesState.next(new Map([
+            ['m1/layerA/overlay/stale', [true]]
+        ]));
+        await flushMicrotasks();
+        localStorage.clear();
+        // @ts-expect-error this is a call to mock router
+        routerStub.navigate.mockClear();
+        const appliedSnapshots: Array<Record<string, unknown>> = [];
+        service.stateApplied.subscribe(() => appliedSnapshots.push(service.exportSnapshot()));
+
+        const errors = service.replaceSnapshotState({
+            numberOfViews: 1,
+            marker: false,
+            layerNames: ['m2/layerB'],
+            'overlay~0~opacity': '0.75'
+        });
+        await flushMicrotasks();
+
+        expect(errors).toEqual([]);
+        expect(service.markerState.getValue()).toBe(false);
+        expect(service.mapsOpenState.getValue()).toBe(false);
+        expect(service.layerNamesState.getValue()).toEqual(['m2/layerB']);
+        expect(service.stylesState.getValue().has('m1/layerA/overlay/stale')).toBe(false);
+        expect(service.stylesState.getValue().get('m2/layerB/overlay/opacity')).toEqual(['0.75']);
+        expect(appliedSnapshots).toHaveLength(1);
+        expect(routerStub.navigate).not.toHaveBeenCalled();
+        expect(localStorage.length).toBe(0);
 
         service.ngOnDestroy();
         routerStub.events.complete();
