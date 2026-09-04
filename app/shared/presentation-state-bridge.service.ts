@@ -1,4 +1,5 @@
 import {Injectable, OnDestroy} from "@angular/core";
+import type {Params} from "@angular/router";
 import {AppStateService} from "./appstate.service";
 import type {CameraViewState} from "./appstate.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
@@ -6,6 +7,7 @@ import {MapViewStateService} from "../mapview/map-view-state.service";
 export const PRESENTATION_BRIDGE_PROTOCOL_VERSION = 2;
 export const PRESENTATION_BRIDGE_READY = "erdblick:presentation:ready";
 export const PRESENTATION_BRIDGE_APPLY = "erdblick:presentation:apply-state";
+export const PRESENTATION_BRIDGE_APPLY_URL_STATE = "erdblick:presentation:apply-url-state";
 export const PRESENTATION_BRIDGE_RESULT = "erdblick:presentation:result";
 export const PRESENTATION_BRIDGE_START_FLIGHT = "erdblick:presentation:start-camera-flight";
 export const PRESENTATION_BRIDGE_STOP_FLIGHT = "erdblick:presentation:stop-camera-flight";
@@ -27,13 +29,22 @@ interface PresentationCameraFlight {
     waypoints: PresentationCameraWaypoint[];
 }
 
-interface PresentationApplyRequest {
+interface PresentationApplyStateRequest {
     requestId: number;
+    kind: "snapshot";
     state: Record<string, unknown>;
     origin: string;
 }
 
-type PresentationBridgeError = "invalid-message" | "invalid-state" | "state-application-failed";
+interface PresentationApplyUrlRequest {
+    requestId: number;
+    kind: "url";
+    params: Params;
+    origin: string;
+}
+
+type PresentationApplyRequest = PresentationApplyStateRequest | PresentationApplyUrlRequest;
+type PresentationBridgeError = "invalid-message" | "invalid-search" | "invalid-state" | "state-application-failed";
 
 /** Applies native state snapshots requested by an explicitly embedded presentation parent. */
 @Injectable({providedIn: "root"})
@@ -109,19 +120,36 @@ export class PresentationStateBridgeService implements OnDestroy {
         if (this.parentOrigin && event.origin !== this.parentOrigin) {
             return;
         }
-        if (event.data["version"] !== PRESENTATION_BRIDGE_PROTOCOL_VERSION
-            || !isStateObject(event.data["state"])) {
+        if (event.data["version"] !== PRESENTATION_BRIDGE_PROTOCOL_VERSION) {
             this.postResult(requestId, event.origin, false, "invalid-message");
             return;
         }
 
+        let request: PresentationApplyRequest;
+        if (event.data["type"] === PRESENTATION_BRIDGE_APPLY) {
+            if (!isStateObject(event.data["state"])) {
+                this.postResult(requestId, event.origin, false, "invalid-message");
+                return;
+            }
+            request = {
+                requestId,
+                kind: "snapshot",
+                state: event.data["state"],
+                origin: event.origin
+            };
+        } else {
+            const params = typeof event.data["search"] === "string"
+                ? presentationParams(event.data["search"])
+                : null;
+            if (!params) {
+                this.postResult(requestId, event.origin, false, "invalid-search");
+                return;
+            }
+            request = {requestId, kind: "url", params, origin: event.origin};
+        }
+
         this.parentOrigin ??= event.origin;
         this.stopCameraFlight();
-        const request: PresentationApplyRequest = {
-            requestId,
-            state: event.data["state"],
-            origin: event.origin
-        };
         if (this.applying) {
             this.queuedRequest = request;
             return;
@@ -194,9 +222,9 @@ export class PresentationStateBridgeService implements OnDestroy {
         let request: PresentationApplyRequest | undefined = firstRequest;
         while (request && this.browserWindow) {
             try {
-                const errors = await Promise.resolve(
-                    this.stateService.replaceSnapshotState(request.state)
-                );
+                const errors = request.kind === "snapshot"
+                    ? await Promise.resolve(this.stateService.replaceSnapshotState(request.state))
+                    : await this.applyUrlState(request.params);
                 if (errors.length) {
                     console.warn("[PresentationStateBridge] Rejected presentation state.", errors);
                     this.postResult(request.requestId, request.origin, false, "invalid-state");
@@ -210,6 +238,12 @@ export class PresentationStateBridgeService implements OnDestroy {
             this.queuedRequest = undefined;
         }
         this.applying = false;
+    }
+
+    /** Keeps query-authored presentation scenes compatible with native-snapshot scenes. */
+    private async applyUrlState(params: Params): Promise<string[]> {
+        await this.stateService.replaceUrlState(params);
+        return [];
     }
 
     /** Replies only to the pinned parent and never includes application state. */
@@ -237,7 +271,8 @@ export class PresentationStateBridgeService implements OnDestroy {
 function isApplyMessage(value: unknown): value is Record<string, unknown> {
     return typeof value === "object"
         && value !== null
-        && (value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_APPLY;
+        && ((value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_APPLY
+            || (value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_APPLY_URL_STATE);
 }
 
 function isStartFlightMessage(value: unknown): value is Record<string, unknown> {
@@ -375,4 +410,27 @@ function isConcreteOrigin(origin: string): boolean {
     } catch {
         return false;
     }
+}
+
+/** Validates the query-only compatibility contract without interpreting its application state. */
+function presentationParams(search: string): Params | null {
+    if (!search.startsWith("?") || search.includes("#")) {
+        return null;
+    }
+    const source = new URLSearchParams(search.slice(1));
+    if (!hasSingleValue(source, "embed", "presentation") || !hasSingleValue(source, "v2", "1")) {
+        return null;
+    }
+
+    const params = Object.create(null) as Params;
+    for (const key of new Set(source.keys())) {
+        const values = source.getAll(key);
+        params[key] = values.length === 1 ? values[0] : values;
+    }
+    return params;
+}
+
+function hasSingleValue(params: URLSearchParams, key: string, value: string): boolean {
+    const values = params.getAll(key);
+    return values.length === 1 && values[0] === value;
 }

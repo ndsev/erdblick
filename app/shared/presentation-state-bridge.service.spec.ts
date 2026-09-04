@@ -4,6 +4,7 @@ import type {AppStateService} from "./appstate.service";
 import type {MapViewStateService} from "../mapview/map-view-state.service";
 import {
     PRESENTATION_BRIDGE_APPLY,
+    PRESENTATION_BRIDGE_APPLY_URL_STATE,
     PRESENTATION_BRIDGE_PROTOCOL_VERSION,
     PRESENTATION_BRIDGE_READY,
     PRESENTATION_BRIDGE_RESULT,
@@ -113,6 +114,37 @@ describe("PresentationStateBridgeService", () => {
             type: PRESENTATION_BRIDGE_RESULT,
             version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
             requestId: 7,
+            ok: true
+        }, "http://deck.test");
+    });
+
+    it("also applies query-authored presentation state through protocol v2", async () => {
+        const replaceUrlState = vi.fn().mockResolvedValue(undefined);
+        const fixture = framedWindow();
+        const service = new PresentationStateBridgeService(
+            {replaceUrlState} as unknown as AppStateService,
+            mapViewStateFixture()
+        );
+        service.initialize(fixture.host);
+        fixture.parentPostMessage.mockClear();
+
+        fixture.dispatch({
+            type: PRESENTATION_BRIDGE_APPLY_URL_STATE,
+            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
+            requestId: 8,
+            search: "?v2=1&embed=presentation&map=Provider%2FSample%20San%20Francisco"
+        });
+        await flushMicrotasks();
+
+        expect(replaceUrlState).toHaveBeenCalledWith(expect.objectContaining({
+            embed: "presentation",
+            map: "Provider/Sample San Francisco",
+            v2: "1"
+        }));
+        expect(fixture.parentPostMessage).toHaveBeenCalledWith({
+            type: PRESENTATION_BRIDGE_RESULT,
+            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
+            requestId: 8,
             ok: true
         }, "http://deck.test");
     });
