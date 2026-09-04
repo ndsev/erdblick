@@ -1759,6 +1759,15 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
+            this.mapViewState.presentationCameraViewStateTopic.subscribe(update => {
+                if (update.targetView !== this._viewIndex) {
+                    return;
+                }
+                this.applyCameraViewState(update.cameraViewData, true);
+            })
+        );
+
+        this.subscriptions.push(
             this.stateService.backgroundState.pipe(this._viewIndex).subscribe(() => {
                 this.updateBackgroundLayer();
             })
