@@ -55,9 +55,11 @@ export interface TileSubsetLayerRenderTask {
     lineSimplificationToleranceMeters: number;
 }
 
-/** Handshake sent after the worker module and WASM runtime are ready. */
+/** Handshake sent as soon as the worker module is loaded. */
 export interface TileSubsetLayerRenderWorkerReady {
     type: "TileSubsetLayerRenderWorkerReady";
+    /** Final bundled URL used by the browser, suitable for main-thread caching. */
+    scriptUrl: string;
 }
 
 /** One-time worker initialization request. */
@@ -112,7 +114,10 @@ export interface TileSubsetRenderBridge {
     glbAttachmentName?: string;
 }
 
-/** Direct worker result: bounded packet fragments plus the temporary GLTF bridge. */
+/**
+ * Direct worker result: individually bounded packet fragments plus the GLTF bridge.
+ * The render service drains `packets` during admission before resolving its caller.
+ */
 export interface TileSubsetLayerRenderBuffers {
     packets: Uint8Array[];
     bridge: TileSubsetRenderBridge;

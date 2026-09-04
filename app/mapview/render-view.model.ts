@@ -36,6 +36,8 @@ export interface RenderNavigationTarget {
 
 /** Logical feature result returned by bounded rendered-object picking operations. */
 export interface RenderedFeaturePickResult {
+    /** Exact feature identities represented by the first resolved render object. */
+    topFeatureIds: TileFeatureId[];
     /** Unique exact feature identities in renderer traversal order. */
     featureIds: TileFeatureId[];
 }
@@ -58,8 +60,8 @@ export interface IRenderView {
     readonly viewIndex: number;
     readonly hoveredFeatureIds: BehaviorSubject<TileFeatureId[]>;
     readonly firstPersonViewActive: BehaviorSubject<boolean>;
-    /** Emits once when the browser invalidates this view's graphics context. */
-    readonly contextLost: Observable<void>;
+    /** Emits when this renderer generation can no longer be used safely. */
+    readonly rendererInvalidated: Observable<void>;
 
     setup(): Promise<void>;
     destroy(): Promise<void>;

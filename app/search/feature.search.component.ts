@@ -1968,10 +1968,19 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.styleAttributeOptionsLoading = false;
             this.styleAttributeOptions = [];
             this.styleScalarAttributeOptions = [];
-            if (this.shouldRefreshAutoStyleRule()) {
+            if (this.shouldAttemptAutoStyleRule(session)) {
+                this.tryCreateAutoStyleRule(session);
+            } else if (this.shouldRefreshAutoStyleRule()) {
                 this.refreshAutoStyleRule(session);
             }
             return false;
+        }
+        // Paint a generic result immediately. Schema-field enumeration may be
+        // delayed behind a broad Classic query; once it completes below, the
+        // auto-generated solid rule is replaced with the richer field rule.
+        if (this.styleAttributeOptions.length === 0 &&
+            this.shouldAttemptAutoStyleRule(session)) {
+            this.tryCreateAutoStyleRule(session);
         }
         if (this.resultPanelIndex !== "style"
             && this.styleAttributeOptions.length === 0

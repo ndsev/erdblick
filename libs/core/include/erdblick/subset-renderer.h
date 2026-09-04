@@ -80,10 +80,10 @@ public:
     [[nodiscard]] NativeJsValue renderBridgeResult() const;
     /** Build the validated packet bytes for native callers and tests. */
     [[nodiscard]] std::vector<std::byte> renderPacketBytes() const;
-    /** Build all bounded packet fragments for native callers and tests. */
+    /** Build all individually bounded packet fragments for native callers and tests. */
     [[nodiscard]] std::vector<std::vector<std::byte>>
     renderPacketFragmentsBytes() const;
-    /** Return the complete bounded packet sequence as JavaScript Uint8Arrays. */
+    /** Return the complete packet sequence as individually bounded JavaScript arrays. */
     [[nodiscard]] NativeJsValue renderPackets() const;
     /** Return the number of source geometry vertices inspected by this run. */
     [[nodiscard]] uint32_t vertexCount() const;

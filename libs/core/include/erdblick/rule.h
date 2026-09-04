@@ -298,10 +298,14 @@ public:
 
     /** Return the regex used to filter attribute types, if any. */
     [[nodiscard]] std::optional<std::regex> const& attributeType() const;
+    /** Return the original attribute-name regex transported to mapget. */
+    [[nodiscard]] std::optional<std::string> const& attributeTypePattern() const;
     /** Return the optional simfil filter applied inside matched attributes. */
     [[nodiscard]] std::optional<std::string> const& attributeFilter() const;
     /** Return the regex used to filter attribute layer names, if any. */
     [[nodiscard]] std::optional<std::regex> const& attributeLayerType() const;
+    /** Return the original attribute-layer regex transported to mapget. */
+    [[nodiscard]] std::optional<std::string> const& attributeLayerTypePattern() const;
     /** Return whether the rule explicitly requests validity geometry instead of host geometry. */
     [[nodiscard]] std::optional<bool> const& attributeValidityGeometry() const;
     /** Report whether this rule can emit a label. */
@@ -512,8 +516,10 @@ private:
     bool relationMergeTwoWay_ = false;
 
     std::optional<std::regex> attributeType_;
+    std::optional<std::string> attributeTypePattern_;
     std::optional<std::string> attributeFilter_;
     std::optional<std::regex> attributeLayerType_;
+    std::optional<std::string> attributeLayerTypePattern_;
     std::optional<bool> attributeValidityGeometry_;
     BranchMode branchMode_ = BranchMode::None;
     std::vector<FeatureStyleRule> subRules_;

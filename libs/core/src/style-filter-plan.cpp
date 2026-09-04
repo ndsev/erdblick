@@ -203,9 +203,39 @@ Predicate exactGroupPredicate(
 
 Predicate attributeEntryPredicate(FeatureStyleRule const& rule)
 {
-    return rule.attributeFilter()
+    auto regexLiteral = [](std::string_view pattern) {
+        std::string result = "re\"";
+        result.reserve(pattern.size() + 4U);
+        for (auto const character : pattern) {
+            if (character == '"') {
+                result.push_back('\\');
+            }
+            result.push_back(character);
+        }
+        result.push_back('"');
+        return result;
+    };
+    auto result = rule.attributeFilter()
         ? Predicate{*rule.attributeFilter()}
         : Predicate{};
+    if (auto const& pattern = rule.attributeTypePattern()) {
+        result = conjunction(
+            std::move(result),
+            Predicate{"$name == " + regexLiteral(*pattern)});
+    }
+    if (auto const& pattern = rule.attributeLayerTypePattern()) {
+        result = conjunction(
+            std::move(result),
+            Predicate{"$layer == " + regexLiteral(*pattern)});
+    }
+    if (auto const& hasValidity = rule.attributeValidityGeometry()) {
+        result = conjunction(
+            std::move(result),
+            Predicate{
+                std::string("$hasValidity == ") +
+                (*hasValidity ? "true" : "false")});
+    }
+    return result;
 }
 
 bool membershipUsesMergeCount(

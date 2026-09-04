@@ -688,7 +688,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
 
     if (yaml["attribute-type"].IsDefined()) {
         // Parse an attribute type regular expression, e.g. `SPEED_LIMIT_.*`
-        attributeType_ = yaml["attribute-type"].as<std::string>();
+        attributeTypePattern_ = yaml["attribute-type"].as<std::string>();
+        attributeType_ = *attributeTypePattern_;
     }
     if (yaml["attribute-filter"].IsDefined()) {
         // Parse an attribute based on its field value, e.g. `speedLimitKmh > 100`
@@ -696,7 +697,9 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     }
     if (yaml["attribute-layer-type"].IsDefined()) {
         // Parse an attribute type regular expression, e.g. `Road.*Layer`
-        attributeLayerType_ = yaml["attribute-layer-type"].as<std::string>();
+        attributeLayerTypePattern_ =
+            yaml["attribute-layer-type"].as<std::string>();
+        attributeLayerType_ = *attributeLayerTypePattern_;
     }
     if (yaml["attribute-validity-geom"].IsDefined()) {
         // Parse an attribute validity requirement: any, required, or none
@@ -1853,6 +1856,11 @@ std::optional<std::regex> const& FeatureStyleRule::attributeType() const
     return attributeType_;
 }
 
+std::optional<std::string> const& FeatureStyleRule::attributeTypePattern() const
+{
+    return attributeTypePattern_;
+}
+
 std::optional<std::string> const& FeatureStyleRule::attributeFilter() const
 {
     return attributeFilter_;
@@ -1861,6 +1869,11 @@ std::optional<std::string> const& FeatureStyleRule::attributeFilter() const
 std::optional<std::regex> const& FeatureStyleRule::attributeLayerType() const
 {
     return attributeLayerType_;
+}
+
+std::optional<std::string> const& FeatureStyleRule::attributeLayerTypePattern() const
+{
+    return attributeLayerTypePattern_;
 }
 
 std::optional<bool> const& FeatureStyleRule::attributeValidityGeometry() const

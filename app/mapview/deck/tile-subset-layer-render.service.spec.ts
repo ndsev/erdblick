@@ -13,6 +13,12 @@ const EMPTY_SCENE = {
     pickingFragmentation: 7,
     zIndexHighWater: 8,
     zIndexUpdateMs: 9,
+    lastContributionLookupRows: 10,
+    lastZIndexLookupRows: 11,
+    lookupUploadedBytes: 12,
+    lookupUploadCount: 13,
+    lookupGrowthCount: 14,
+    fatalPresentationFailures: 15,
     labels: 8,
     stores: [{
         materialKey: 1n,
@@ -95,6 +101,88 @@ function completedTile(
 }
 
 describe("TileSubsetLayerRenderService GPU admission", () => {
+    it("preloads one emitted worker module and reuses its cached source", async () => {
+        const workerSources: Array<string | URL> = [];
+        const workerModuleUrl = "https://viewer.test/worker-HASH.js";
+        const cachedWorkerUrl = "blob:cached-subset-render-worker";
+
+        class TestWorker {
+            private messageListener:
+                ((event: MessageEvent) => void) | null = null;
+
+            onmessage: ((event: MessageEvent) => void) | null = null;
+            onerror: ((event: ErrorEvent) => void) | null = null;
+
+            /** Records the source used for each worker construction. */
+            constructor(source: string | URL) {
+                workerSources.push(source);
+            }
+
+            /** Stores the module-load listener installed by the render service. */
+            addEventListener(type: string, listener: (event: MessageEvent) => void): void {
+                if (type === "message") {
+                    this.messageListener = listener;
+                }
+            }
+
+            /** Clears the listener after the one-time worker handshake. */
+            removeEventListener(type: string, listener: (event: MessageEvent) => void): void {
+                if (type === "message" && this.messageListener === listener) {
+                    this.messageListener = null;
+                }
+            }
+
+            /** Responds to initialization exactly like the real worker module. */
+            postMessage(message: {type: string}): void {
+                if (message.type !== "TileSubsetLayerRenderWorkerInit") {
+                    return;
+                }
+                queueMicrotask(() => this.messageListener?.({
+                    data: {
+                        type: "TileSubsetLayerRenderWorkerReady",
+                        scriptUrl: workerModuleUrl
+                    }
+                } as MessageEvent));
+            }
+
+            /** Matches the Worker lifecycle surface used by failure cleanup. */
+            terminate(): void {}
+        }
+
+        const fetchWorker = vi.fn(async () => ({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            blob: async () => new Blob(["worker source"])
+        }));
+        const createObjectUrl = vi.spyOn(URL, "createObjectURL")
+            .mockReturnValue(cachedWorkerUrl);
+        vi.stubGlobal("Worker", TestWorker);
+        vi.stubGlobal("fetch", fetchWorker);
+        try {
+            const service = new TileSubsetLayerRenderService();
+            const internal = service as any;
+
+            await service.preloadWorkerSource();
+            await internal.initializeWorkers(3);
+
+            expect(workerSources).toHaveLength(3);
+            expect(workerSources[0]).toBeInstanceOf(URL);
+            expect(workerSources.slice(1)).toEqual([
+                cachedWorkerUrl,
+                cachedWorkerUrl
+            ]);
+            expect(fetchWorker).toHaveBeenCalledOnce();
+            expect(fetchWorker).toHaveBeenCalledWith(workerModuleUrl, {
+                cache: "force-cache"
+            });
+            expect(createObjectUrl).toHaveBeenCalledOnce();
+        } finally {
+            createObjectUrl.mockRestore();
+            vi.unstubAllGlobals();
+        }
+    });
+
     it("retains subset bytes and leaves their worker clone to structured clone", async () => {
         const service = new TileSubsetLayerRenderService();
         const internal = service as any;
@@ -272,6 +360,12 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
             activeOrigins: 10,
             zIndexHighWater: 16,
             maxZIndexUpdateMs: 9,
+            lastContributionLookupRows: 20,
+            lastZIndexLookupRows: 22,
+            lookupUploadedBytes: 24,
+            lookupUploadCount: 26,
+            lookupGrowthCount: 28,
+            fatalPresentationFailures: 30,
             stores: 1,
             capacityRecords: 100,
             allocatedBytes: 1_600
@@ -347,6 +441,8 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
                 inFlight: 1,
                 completed: 0
             });
+            expect((service as any).ready[0].buffers.packets[0].byteLength)
+                .toBe(0);
             expect(callbacks).toHaveLength(1);
 
             callbacks.shift()!();
@@ -357,6 +453,31 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
                 inFlight: 0,
                 completed: 1
             });
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it("admits render revisions containing more than eight fragments", () => {
+        const callbacks: Array<() => void> = [];
+        vi.stubGlobal("setTimeout", vi.fn((callback: () => void) => {
+            callbacks.push(callback);
+            return callbacks.length;
+        }));
+        try {
+            const service = new TileSubsetLayerRenderService();
+            const {admit, resolve, reject} = completedTile(
+                service,
+                true,
+                Array.from({length: 9}, () => new Uint8Array(128))
+            );
+
+            callbacks.shift()!();
+
+            expect(admit).toHaveBeenCalledTimes(9);
+            expect(resolve).toHaveBeenCalledTimes(1);
+            expect(resolve.mock.calls[0][0].packets).toEqual([]);
+            expect(reject).not.toHaveBeenCalled();
         } finally {
             vi.unstubAllGlobals();
         }

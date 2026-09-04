@@ -14,7 +14,7 @@ import {TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {
-    MapTileStreamClient,
+    MapTileStreamClientTiles,
 } from "../mapdata/tilestream";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {Column, InspectionTreeComponent} from "./inspection.tree.component";
@@ -22,7 +22,6 @@ import {
     expandSingleChildSourceDataPaths,
     sourceDataTreePresentation
 } from "./sourcedata-tree.presentation";
-import {waitForSourceDataRequest} from "./source-data-request";
 import {
     MapTileStreamService,
     RetainedTileExpiryOwner
@@ -212,7 +211,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         }
     }
 
-    /** Fetches and parses one source-data layer over the WebSocket source-data endpoint. */
+    /** Fetches and parses one source-data layer through the bounded POST /tiles endpoint. */
     async loadSourceDataLayer(mapTileKey: string) : Promise<LoadedSourceDataLayer> {
         const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
         if (!this.mapService.isMapLayerReady(mapId, layerId)) {
@@ -221,69 +220,58 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
                 ? this.mapService.dataSourceStatusText(map.info)
                 : "Map layer is not available.");
         }
-        const requestBody = {
-            requests: [{
-                mapId: mapId,
-                layerId: layerId,
-                tileIds: [Number(tileId)]
-            }]
-        };
+        const requests = [{
+            mapId: mapId,
+            layerId: layerId,
+            tileIds: [Number(tileId)]
+        }];
 
         let layer: TileSourceDataLayer | null = null;
         let expiresAtMs: number | null = null;
-        const socket = new MapTileStreamClient("/interactive");
+        const transport = new MapTileStreamClientTiles("/tiles");
         const dataSourceInfoJson = this.mapService.getDataSourceInfoJson();
         if (dataSourceInfoJson) {
-            socket.setDataSourceInfoJson(dataSourceInfoJson);
+            transport.setDataSourceInfoJson(dataSourceInfoJson);
         }
 
-        const sourceDataReceived = new Promise<void>((resolve, reject) => {
-            socket.withSourceDataCallback((payload) => {
-                try {
-                    const metadata = uint8ArrayToWasm((wasmBlob) =>
-                        socket.parser.readTileLayerMetadata(wasmBlob),
-                    payload) as unknown as {
-                        conversionTimestampMs?: number;
-                        ttlMs?: number;
-                    };
-                    const timestamp = Number(metadata.conversionTimestampMs);
-                    const ttl = Number(metadata.ttlMs);
-                    const expiry = Number.isFinite(timestamp) &&
-                        Number.isFinite(ttl) && ttl > 0
-                        ? timestamp + ttl
-                        : null;
-                    expiresAtMs = expiry !== null && Number.isFinite(expiry)
-                        ? expiry
-                        : null;
-                    const parsedLayer = uint8ArrayToWasm((wasmBlob) => {
-                        return socket.parser.readTileSourceDataLayer(wasmBlob);
-                    }, payload);
-                    if (!parsedLayer) {
-                        reject(new Error(this.noSourceDataMessage(mapTileKey)));
-                        return;
-                    }
-                    const currentLayer = layer as TileSourceDataLayer | null;
-                    currentLayer?.delete();
-                    layer = parsedLayer;
-                    resolve();
-                } catch (err) {
-                    reject(err instanceof Error ? err : new Error(`${err}`));
-                }
-            });
+        transport.withSourceDataCallback((payload) => {
+            const metadata = uint8ArrayToWasm((wasmBlob) =>
+                transport.parser.readTileLayerMetadata(wasmBlob),
+            payload) as unknown as {
+                conversionTimestampMs?: number;
+                ttlMs?: number;
+            };
+            const timestamp = Number(metadata.conversionTimestampMs);
+            const ttl = Number(metadata.ttlMs);
+            const expiry = Number.isFinite(timestamp) &&
+                Number.isFinite(ttl) && ttl > 0
+                ? timestamp + ttl
+                : null;
+            expiresAtMs = expiry !== null && Number.isFinite(expiry)
+                ? expiry
+                : null;
+            const parsedLayer = uint8ArrayToWasm((wasmBlob) => {
+                return transport.parser.readTileSourceDataLayer(wasmBlob);
+            }, payload);
+            if (!parsedLayer) {
+                throw new Error(this.noSourceDataMessage(mapTileKey));
+            }
+            const currentLayer = layer as TileSourceDataLayer | null;
+            currentLayer?.delete();
+            layer = parsedLayer;
         });
 
         try {
-            socket.sendRequest(requestBody);
-            await waitForSourceDataRequest(
-                socket.waitForCompletion(),
-                sourceDataReceived
-            );
+            await transport.request(requests);
+            if (!layer) {
+                throw new Error(this.noSourceDataMessage(mapTileKey));
+            }
         } catch (err) {
             const currentLayer = layer as TileSourceDataLayer | null;
             currentLayer?.delete();
             throw err instanceof Error ? err : new Error(`${err}`);
         } finally {
-            socket.destroy();
+            transport.destroy();
         }
 
         const loadedLayer = layer as TileSourceDataLayer | null;

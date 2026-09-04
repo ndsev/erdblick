@@ -9,7 +9,6 @@ const TILE_GRID_WORLD_RING: [number, number][] = [
     [180, TILE_GRID_LAT_LIMIT],
     [-180, TILE_GRID_LAT_LIMIT]
 ];
-const TILE_GRID_IDENTITY_CORRECTION: [number, number, number] = [0, 1, 0];
 const TILE_GRID_EMPTY_TEXEL = new Uint8Array([0, 0, 0, 0]);
 
 export const TILE_STATE_KIND_NONE = 0;
@@ -42,43 +41,31 @@ function clamp(value: number, minValue: number, maxValue: number): number {
 }
 
 const TILE_GRID_COMMON_VERTEX_DECL = `const float TILE_GRID_WORLD_SIZE = 512.0;
-in vec3 tileGridNdsCorrectionCoefficients;
-out vec2 tileGridLocal01;
-out vec3 tileGridNdsCorrection;`;
+out vec2 tileGridProjected01;`;
 
 /** Generates the shared vertex-stage projection code used by both grid and tile-state overlays. */
-function tileGridCommonVertexFilter(uniformName: string): string {
+function tileGridCommonVertexFilter(): string {
     return `vec2 projectedCoords = (geometry.position.xy + project.commonOrigin.xy) / TILE_GRID_WORLD_SIZE;
-if (${uniformName}.gridMode > 0.5) {
-    vec2 normalizedCoords = vec2(
-        projectedCoords.x,
-        clamp((90.0 - geometry.worldPosition.y) / 180.0, 0.0, 1.0)
-    );
-    tileGridLocal01 = (normalizedCoords - ${uniformName}.localMin) / ${uniformName}.localSize;
-} else {
-    tileGridLocal01 = (projectedCoords - ${uniformName}.localMin) / ${uniformName}.localSize;
-}
-tileGridNdsCorrection = tileGridNdsCorrectionCoefficients;`;
+tileGridProjected01 = projectedCoords;`;
 }
 
-/** Generates the shared fragment helper that remaps interpolated local coordinates for NDS mode. */
+/** Generates the shared fragment helper that converts projected coordinates into the selected grid space. */
 function tileGridCommonFragmentDecl(uniformName: string): string {
-    return `in vec2 tileGridLocal01;
-in vec3 tileGridNdsCorrection;
+    return `const float TILE_GRID_PI = 3.14159265358979323846;
+in vec2 tileGridProjected01;
+
+float tile_grid_mercator_to_nds_y(float mercatorY) {
+    float mercatorN = TILE_GRID_PI * (1.0 - 2.0 * clamp(mercatorY, 0.0, 1.0));
+    float latitudeRadians = atan(0.5 * (exp(mercatorN) - exp(-mercatorN)));
+    return (0.5 * TILE_GRID_PI - latitudeRadians) / TILE_GRID_PI;
+}
 
 vec2 tile_grid_local_coords() {
-    vec2 localCoords = tileGridLocal01;
+    vec2 normalizedCoords = tileGridProjected01;
     if (${uniformName}.gridMode > 0.5) {
-        float localY = clamp(localCoords.y, 0.0, 1.0);
-        localCoords.y = clamp(
-            tileGridNdsCorrection.x
-                + tileGridNdsCorrection.y * localY
-                + tileGridNdsCorrection.z * localY * localY,
-            0.0,
-            1.0
-        );
+        normalizedCoords.y = tile_grid_mercator_to_nds_y(normalizedCoords.y);
     }
-    return localCoords;
+    return (normalizedCoords - ${uniformName}.localMin) / ${uniformName}.localSize;
 }`;
 }
 
@@ -193,22 +180,6 @@ uniform sampler2D tileGridStateOverlayTexture;
     }
 };
 
-/** Returns the per-datum NDS quadratic correction, defaulting to the identity mapping. */
-function tileGridDatumCorrection(datum: TileGridOverlayDatum): [number, number, number] {
-    return datum.ndsYCorrection ?? TILE_GRID_IDENTITY_CORRECTION;
-}
-
-/** Adds the custom per-datum NDS correction attribute required by both overlay layers. */
-function addTileGridCorrectionAttribute(layer: SolidPolygonLayer<TileGridOverlayDatum, any>): void {
-    layer.getAttributeManager()?.add({
-        tileGridNdsCorrectionCoefficients: {
-            size: 3,
-            stepMode: "dynamic",
-            accessor: (datum: TileGridOverlayDatum) => tileGridDatumCorrection(datum)
-        }
-    });
-}
-
 /** Creates the texture that backs the tile-state overlay, falling back to a transparent 1x1 texel. */
 function createTileStateTexture(device: any, imageData: ImageData | null): Texture {
     if (!imageData) {
@@ -241,10 +212,9 @@ function createTileStateTexture(device: any, imageData: ImageData | null): Textu
     });
 }
 
-/** Single overlay polygon plus its optional per-band NDS correction coefficients. */
+/** Single polygon covering a contiguous tile-grid overlay region. */
 export interface TileGridOverlayDatum {
     polygon: [number, number][];
-    ndsYCorrection?: [number, number, number];
 }
 
 /** Props for the shader-driven tile-grid line overlay. */
@@ -272,17 +242,11 @@ interface TileGridStateOverlayLayerState {
 
 /**
  * Single-layer screen-space tile grid overlay rendered by shader evaluation.
- * The per-datum NDS correction allows different latitude bands to carry their
- * own local approximation while still sharing one logical layer.
+ * Exact fragment-space Mercator conversion keeps NDS grid coordinates
+ * continuous across the triangles that form each overlay polygon.
  */
 export class TileGridOverlayLayer extends SolidPolygonLayer<TileGridOverlayDatum, TileGridOverlayLayerProps> {
     static override layerName = "TileGridOverlayLayer";
-
-    /** Installs the custom attribute that carries the NDS correction coefficients per polygon. */
-    override initializeState(): void {
-        super.initializeState();
-        addTileGridCorrectionAttribute(this);
-    }
 
     /** Injects the custom shader modules and fragment logic that renders the grid in screen space. */
     override getShaders(type: any): any {
@@ -299,11 +263,15 @@ export class TileGridOverlayLayer extends SolidPolygonLayer<TileGridOverlayDatum
                 "vs:#decl": `${existingVsDecl}
 ${TILE_GRID_COMMON_VERTEX_DECL}`,
                 "vs:DECKGL_FILTER_COLOR": `${existingVsFilter}
-${tileGridCommonVertexFilter("tileGridOverlay")}`,
+${tileGridCommonVertexFilter()}`,
                 "fs:#decl": `${existingDecl}
 ${tileGridCommonFragmentDecl("tileGridOverlay")}
 
 float tile_grid_line_mask(vec2 localCoords) {
+    if (any(lessThan(localCoords, vec2(-0.0001))) ||
+        any(greaterThan(localCoords, vec2(1.0001)))) {
+        return 0.0;
+    }
     vec2 tileCoords = localCoords * vec2(
         tileGridOverlay.subdivisionX,
         tileGridOverlay.subdivisionY
@@ -371,10 +339,9 @@ export class TileGridStateOverlayLayer extends SolidPolygonLayer<TileGridOverlay
 
     declare state: SolidPolygonLayer<TileGridOverlayDatum, TileGridStateOverlayLayerProps>["state"] & TileGridStateOverlayLayerState;
 
-    /** Creates the initial empty texture and installs the shared NDS correction attribute. */
+    /** Creates the initial empty texture used until tile-state data is available. */
     override initializeState(): void {
         super.initializeState();
-        addTileGridCorrectionAttribute(this);
         this.state.tileStateTexture = createTileStateTexture(this.context.device, null);
     }
 
@@ -409,7 +376,7 @@ export class TileGridStateOverlayLayer extends SolidPolygonLayer<TileGridOverlay
                 "vs:#decl": `${existingVsDecl}
 ${TILE_GRID_COMMON_VERTEX_DECL}`,
                 "vs:DECKGL_FILTER_COLOR": `${existingVsFilter}
-${tileGridCommonVertexFilter("tileGridStateOverlay")}`,
+${tileGridCommonVertexFilter()}`,
                 "fs:#decl": `${existingDecl}
 ${tileGridCommonFragmentDecl("tileGridStateOverlay")}
 
@@ -447,5 +414,5 @@ color = vec4(stateColor.rgb, stateColor.a * layer.opacity);`
 
 /** Returns the default full-world quad used when callers need a single overlay datum. */
 export function tileGridOverlayData(): TileGridOverlayDatum[] {
-    return [{polygon: TILE_GRID_WORLD_RING, ndsYCorrection: TILE_GRID_IDENTITY_CORRECTION}];
+    return [{polygon: TILE_GRID_WORLD_RING}];
 }

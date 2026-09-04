@@ -338,6 +338,12 @@ export interface GpuSceneSnapshot {
   pickingFragmentation: number;
   zIndexHighWater: number;
   zIndexUpdateMs: number;
+  lastContributionLookupRows: number;
+  lastZIndexLookupRows: number;
+  lookupUploadedBytes: number;
+  lookupUploadCount: number;
+  lookupGrowthCount: number;
+  fatalPresentationFailures: number;
   labels: number;
   stores: GpuPrimitiveStoreSnapshot[];
 }
@@ -382,16 +388,44 @@ interface FloatLookupUpdate {
   values: ArrayLike<number>;
 }
 
-interface PreparedFloatLookupReplacement {
-  /** Publish the prepared texture into the staging generation. */
-  commit(): void;
-  /** Destroy an unpublished allocation after another preparation failed. */
-  discard(): void;
+/** Coalesce independently dirtied one-texel rows into contiguous uploads. */
+function coalesceLookupRows(
+  rows: ReadonlyMap<number, Float32Array>,
+): FloatLookupUpdate[] {
+  const slots = [...rows.keys()].sort((left, right) => left - right);
+  const updates: FloatLookupUpdate[] = [];
+  for (let firstIndex = 0; firstIndex < slots.length; ) {
+    let lastIndex = firstIndex;
+    while (
+      lastIndex + 1 < slots.length &&
+      slots[lastIndex + 1] === slots[lastIndex] + 1
+    ) {
+      lastIndex += 1;
+    }
+    const values = new Float32Array((lastIndex - firstIndex + 1) * 4);
+    for (let index = firstIndex; index <= lastIndex; ++index) {
+      values.set(rows.get(slots[index])!, (index - firstIndex) * 4);
+    }
+    updates.push({ firstSlot: slots[firstIndex], values });
+    firstIndex = lastIndex + 1;
+  }
+  return updates;
 }
 
-interface PreparedSceneOrder {
-  contribution: PreparedFloatLookupReplacement;
-  zIndex?: PreparedFloatLookupReplacement;
+/** Return a stable key for every input that can affect one z-index lookup row. */
+function zIndexOrderSignature(entry: GpuZIndexEntryView): string {
+  const authored = Number.isFinite(entry.value);
+  const normalized = authored && entry.value !== 0 ? entry.value : 0;
+  const tieBreaker = authored ? entry.tieBreaker >>> 0 : 0;
+  return `${authored ? "a" : "u"}:${normalized}:${tieBreaker}:${entry.semanticGroup >>> 0}`;
+}
+
+/** Compare already-rounded GPU lookup rows without allocating another view. */
+function lookupRowsEqual(
+  left: Float32Array | undefined,
+  right: Float32Array,
+): boolean {
+  return !!left && left.every((value, index) => value === right[index]);
 }
 
 /**
@@ -407,6 +441,9 @@ class FloatLookupTable {
   private renderTexture: Texture | null = null;
   private readonly retiredTextures: Texture[] = [];
   private _revision = 0;
+  private _uploadedBytes = 0;
+  private _uploadCount = 0;
+  private _growthCount = 0;
 
   /** Create a lazily allocated lookup with a fixed texel layout per scene slot. */
   constructor(
@@ -425,55 +462,13 @@ class FloatLookupTable {
 
   /** Replace contiguous slots with bounded row-wise texture uploads. */
   setRange(firstSlot: number, values: ArrayLike<number>): void {
-    const valuesPerSlot = this.texelsPerSlot * 4;
-    if (values.length % valuesPerSlot !== 0) {
-      throw new Error(`Lookup range '${this.id}' has an invalid value count.`);
-    }
-    const slotCount = values.length / valuesPerSlot;
-    if (slotCount === 0) {
-      return;
-    }
-    const source =
-      values instanceof Float32Array ? values : Float32Array.from(values);
-    this.ensureCapacity(firstSlot + slotCount);
-    const valueOffset = firstSlot * valuesPerSlot;
-    let texelOffset = firstSlot * this.texelsPerSlot;
-    let remainingTexels = slotCount * this.texelsPerSlot;
-    let sourceValue = 0;
-    while (remainingTexels > 0) {
-      const x = texelOffset % LOOKUP_TEXTURE_WIDTH;
-      const y = Math.floor(texelOffset / LOOKUP_TEXTURE_WIDTH);
-      const width = Math.min(remainingTexels, LOOKUP_TEXTURE_WIDTH - x);
-      this.gpuTexture!.writeData(
-        source.subarray(sourceValue, sourceValue + width * 4),
-        { x, y, width, height: 1 },
-      );
-      texelOffset += width;
-      sourceValue += width * 4;
-      remainingTexels -= width;
-    }
-    this.values.set(source, valueOffset);
-    this._revision += 1;
+    this.setRanges([{ firstSlot, values }]);
   }
 
-  /**
-   * Prepare a complete replacement without mutating the visible lookup.
-   *
-   * Presentation changes use this path to upload the next lookup generation
-   * before retiring the texture still referenced by Deck's current models.
-   */
-  prepareReplacement(
-    updates: readonly FloatLookupUpdate[],
-  ): PreparedFloatLookupReplacement {
-    if (!updates.length) {
-      return {
-        commit: () => {},
-        discard: () => {},
-      };
-    }
+  /** Validate a batch before its first potentially visible texture write. */
+  validateRanges(updates: readonly FloatLookupUpdate[]): void {
     const valuesPerSlot = this.texelsPerSlot * 4;
-    let requiredSlots = this.capacitySlots;
-    const normalized = updates.map(({ firstSlot, values }) => {
+    for (const { firstSlot, values } of updates) {
       if (!Number.isSafeInteger(firstSlot) || firstSlot < 0) {
         throw new Error(`Lookup range '${this.id}' has an invalid first slot.`);
       }
@@ -482,6 +477,22 @@ class FloatLookupTable {
           `Lookup range '${this.id}' has an invalid value count.`,
         );
       }
+      const slotCount = values.length / valuesPerSlot;
+      if (!Number.isSafeInteger(firstSlot + slotCount)) {
+        throw new Error(`Lookup range '${this.id}' exceeds its slot space.`);
+      }
+    }
+  }
+
+  /** Apply validated ranges directly, growing the allocation only when needed. */
+  setRanges(updates: readonly FloatLookupUpdate[]): void {
+    if (!updates.length) {
+      return;
+    }
+    this.validateRanges(updates);
+    const valuesPerSlot = this.texelsPerSlot * 4;
+    let requiredSlots = this.capacitySlots;
+    const normalized = updates.map(({ firstSlot, values }) => {
       const source =
         values instanceof Float32Array ? values : Float32Array.from(values);
       requiredSlots = Math.max(
@@ -490,64 +501,35 @@ class FloatLookupTable {
       );
       return { firstSlot, source };
     });
-    const requiredTexels = requiredSlots * this.texelsPerSlot;
-    let height = Math.max(1, this.gpuTexture?.height ?? 1);
-    while (height * LOOKUP_TEXTURE_WIDTH < requiredTexels) {
-      height *= 2;
-    }
-    const nextValues = new Float32Array(height * LOOKUP_TEXTURE_WIDTH * 4);
-    nextValues.set(this.values);
+    this.ensureCapacity(requiredSlots);
     for (const { firstSlot, source } of normalized) {
-      nextValues.set(source, firstSlot * valuesPerSlot);
-    }
-    const nextTexture = this.device.createTexture({
-      id: this.id,
-      dimension: "2d",
-      format: "rgba32float",
-      width: LOOKUP_TEXTURE_WIDTH,
-      height,
-      usage: Texture.SAMPLE | Texture.COPY_DST,
-      sampler: {
-        minFilter: "nearest",
-        magFilter: "nearest",
-        addressModeU: "clamp-to-edge",
-        addressModeV: "clamp-to-edge",
-      },
-    });
-    try {
-      nextTexture.writeData(nextValues, {
-        width: LOOKUP_TEXTURE_WIDTH,
-        height,
-      });
-    } catch (error) {
-      nextTexture.destroy();
-      throw error;
-    }
-    let settled = false;
-    return {
-      commit: () => {
-        if (settled) {
-          throw new Error(
-            `Lookup replacement '${this.id}' is already settled.`,
-          );
-        }
-        settled = true;
-        const previous = this.gpuTexture;
-        this.gpuTexture = nextTexture;
-        this.values = nextValues;
-        this.capacitySlots = Math.floor(
-          (height * LOOKUP_TEXTURE_WIDTH) / this.texelsPerSlot,
+      const slotCount = source.length / valuesPerSlot;
+      if (slotCount === 0) {
+        continue;
+      }
+      let texelOffset = firstSlot * this.texelsPerSlot;
+      let remainingTexels = slotCount * this.texelsPerSlot;
+      let sourceValue = 0;
+      while (remainingTexels > 0) {
+        const x = texelOffset % LOOKUP_TEXTURE_WIDTH;
+        const y = Math.floor(texelOffset / LOOKUP_TEXTURE_WIDTH);
+        const width = Math.min(
+          remainingTexels,
+          LOOKUP_TEXTURE_WIDTH - x,
         );
-        this._revision += 1;
-        this.retireOrDestroy(previous);
-      },
-      discard: () => {
-        if (!settled) {
-          settled = true;
-          nextTexture.destroy();
-        }
-      },
-    };
+        this.gpuTexture!.writeData(
+          source.subarray(sourceValue, sourceValue + width * 4),
+          { x, y, width, height: 1 },
+        );
+        this._uploadedBytes += width * 4 * Float32Array.BYTES_PER_ELEMENT;
+        this._uploadCount += 1;
+        texelOffset += width;
+        sourceValue += width * 4;
+        remainingTexels -= width;
+      }
+      this.values.set(source, firstSlot * valuesPerSlot);
+    }
+    this._revision += 1;
   }
 
   /** Mark a recycled slot inactive while preserving the texture allocation. */
@@ -574,6 +556,9 @@ class FloatLookupTable {
     this.retiredTextures.length = 0;
     this.values = new Float32Array();
     this.capacitySlots = 0;
+    this._uploadedBytes = 0;
+    this._uploadCount = 0;
+    this._growthCount = 0;
     this._revision += 1;
   }
 
@@ -583,6 +568,21 @@ class FloatLookupTable {
 
   get revision(): number {
     return this._revision;
+  }
+
+  /** Cumulative bytes accepted by texture uploads in this allocation lifetime. */
+  get uploadedBytes(): number {
+    return this._uploadedBytes;
+  }
+
+  /** Cumulative successful texture write calls in this allocation lifetime. */
+  get uploadCount(): number {
+    return this._uploadCount;
+  }
+
+  /** Number of geometrically amortized allocation growths. */
+  get growthCount(): number {
+    return this._growthCount;
   }
 
   /** Publish the latest staging allocation without invalidating the displayed one. */
@@ -627,6 +627,9 @@ class FloatLookupTable {
         width: LOOKUP_TEXTURE_WIDTH,
         height,
       });
+      this._uploadedBytes += nextValues.byteLength;
+      this._uploadCount += 1;
+      this._growthCount += 1;
     } catch (error) {
       nextTexture.destroy();
       throw error;
@@ -699,6 +702,21 @@ export class GpuScene {
     number,
     Map<number, number>
   >();
+  private readonly pendingContributionLookupRows = new Map<
+    number,
+    Float32Array
+  >();
+  private readonly zIndexEntryBySignature = new Map<
+    string,
+    GpuZIndexEntryView
+  >();
+  private readonly zIndexSlotsBySignature = new Map<string, Set<number>>();
+  private readonly zIndexSignatureBySlot = new Map<number, string>();
+  private readonly encodedZIndexRowsBySignature = new Map<
+    string,
+    Float32Array
+  >();
+  private readonly pendingZIndexLookupSlots = new Set<number>();
   private pickOwnerSlots = new Uint32Array();
   private readonly activeContributionBySlot = new Map<
     number,
@@ -726,12 +744,17 @@ export class GpuScene {
   private authoredZIndexReferenceCount = 0;
   private sceneOrderDirty = false;
   private lastZIndexUpdateMs = 0;
+  private lastContributionLookupRows = 0;
+  private lastZIndexLookupRows = 0;
+  private fatalPresentationFailures = 0;
+  private poisoned = false;
   private destroyed = false;
 
   /** Own all persistent vector buffers and semantic lookup tables for one view. */
   constructor(
     private readonly device: Device,
     private readonly requestRedraw: (reason: string) => void,
+    private readonly reportFatalError: (error: unknown) => void = () => {},
   ) {
     this.originLookup = new FloatLookupTable(
       device,
@@ -1091,8 +1114,10 @@ export class GpuScene {
           // Deck frames that still draw the previous buffer generation.
           this.presentationReleases.push(previous);
           this.changeSceneOrderReferences(previous, -1);
+          this.queueContributionLookupClear(previous.contributionSlot);
         }
         this.changeSceneOrderReferences(item.installed, 1);
+        this.queueContributionLookupUpdate(item.installed);
         item.reserved.installed = true;
         item.entry.active = item.installed;
         this.publishPickOwner(item.installed);
@@ -1127,6 +1152,7 @@ export class GpuScene {
   accepts(reservation: GpuSceneRenderReservation): boolean {
     return (
       !this.destroyed &&
+      !this.poisoned &&
       !reservation.released &&
       reservation.sceneGeneration === this.generation
     );
@@ -1149,7 +1175,9 @@ export class GpuScene {
     }
     for (const reserved of reservation.contributions) {
       if (!reserved.installed) {
-        this.contributionLookup.clear(reserved.slot);
+        if (!this.poisoned) {
+          this.contributionLookup.clear(reserved.slot);
+        }
         this.contributionSlots.release({
           firstRecord: reserved.slot,
           recordCount: 1,
@@ -1174,6 +1202,7 @@ export class GpuScene {
 
   /** Remove many producers as one store-prune, revision, and redraw transaction. */
   removeContributions(identities: Iterable<string>): boolean {
+    this.ensureAlive();
     let labelsChanged = false;
     let sceneChanged = false;
     for (const identity of new Set(identities)) {
@@ -1187,6 +1216,7 @@ export class GpuScene {
         labelsChanged ||= entry.active.labels.length > 0;
         this.presentationReleases.push(entry.active);
         this.changeSceneOrderReferences(entry.active, -1);
+        this.queueContributionLookupClear(entry.active.contributionSlot);
         entry.active = null;
         sceneChanged = true;
       }
@@ -1202,6 +1232,7 @@ export class GpuScene {
 
   /** Change one active producer's GPU and label LOD without regenerating geometry. */
   setContributionLod(identity: string, lod: number): boolean {
+    this.ensureAlive();
     if (!Number.isFinite(lod) || lod < 0 || lod > 7) {
       throw new Error("GPU scene LOD is outside its 0..7 range.");
     }
@@ -1214,6 +1245,7 @@ export class GpuScene {
       return false;
     }
     entry.active.lod = lod;
+    this.queueContributionLookupUpdate(entry.active);
     this._revision += 1;
     this.requestRedraw("GPU contribution LOD changed");
     return true;
@@ -1381,7 +1413,7 @@ export class GpuScene {
     };
   }
 
-  /** Find one local record across the bounded fragment list and decode only it. */
+  /** Find one local record across the fragment sequence and decode only it. */
   private packedPick(
     installed: InstalledContribution,
     localPickIndex: number,
@@ -1531,6 +1563,12 @@ export class GpuScene {
     this.zIndexReferenceCounts.clear();
     this.tieBreakerReferenceCountsByZIndex.clear();
     this.semanticZIndexReferenceCounts.clear();
+    this.pendingContributionLookupRows.clear();
+    this.zIndexEntryBySignature.clear();
+    this.zIndexSlotsBySignature.clear();
+    this.zIndexSignatureBySlot.clear();
+    this.encodedZIndexRowsBySignature.clear();
+    this.pendingZIndexLookupSlots.clear();
     this.authoredZIndexReferenceCount = 0;
     this.sceneOrderDirty = false;
     this.activeContributionBySlot.clear();
@@ -1551,28 +1589,31 @@ export class GpuScene {
 
   /** Publish admitted material buffers as one coherent model-visible scene revision. */
   publishPresentation(): boolean {
+    if (this.poisoned) {
+      return false;
+    }
     this.ensureAlive();
     if (this._presentationRevision === this._revision) {
       return false;
     }
-    const order = this.prepareSceneOrder();
-    order.contribution.commit();
-    order.zIndex?.commit();
-    if (order.zIndex) {
-      this.sceneOrderDirty = false;
+    try {
+      this.updateSceneOrderLookups();
+      for (const installed of this.presentationReleases) {
+        this.releaseInstalled(installed);
+      }
+      this.presentationReleases.length = 0;
+      for (const store of this.storesByMaterial.values()) {
+        store.publish();
+      }
+      this.originLookup.publish();
+      this.contributionLookup.publish();
+      this.zIndexLookup.publish();
+      this._presentationRevision = this._revision;
+      return true;
+    } catch (error) {
+      this.poison(error);
+      return false;
     }
-    for (const installed of this.presentationReleases) {
-      this.releaseInstalled(installed, false);
-    }
-    this.presentationReleases.length = 0;
-    for (const store of this.storesByMaterial.values()) {
-      store.publish();
-    }
-    this.originLookup.publish();
-    this.contributionLookup.publish();
-    this.zIndexLookup.publish();
-    this._presentationRevision = this._revision;
-    return true;
   }
 
   /** Release superseded GPU allocations after visible and mask models have rebound. */
@@ -1645,6 +1686,21 @@ export class GpuScene {
       pickingFragmentation: this.pickingRanges.fragmentedRecords,
       zIndexHighWater: this.zIndexRanges.highWaterRecord,
       zIndexUpdateMs: this.lastZIndexUpdateMs,
+      lastContributionLookupRows: this.lastContributionLookupRows,
+      lastZIndexLookupRows: this.lastZIndexLookupRows,
+      lookupUploadedBytes:
+        this.originLookup.uploadedBytes +
+        this.contributionLookup.uploadedBytes +
+        this.zIndexLookup.uploadedBytes,
+      lookupUploadCount:
+        this.originLookup.uploadCount +
+        this.contributionLookup.uploadCount +
+        this.zIndexLookup.uploadCount,
+      lookupGrowthCount:
+        this.originLookup.growthCount +
+        this.contributionLookup.growthCount +
+        this.zIndexLookup.growthCount,
+      fatalPresentationFailures: this.fatalPresentationFailures,
       labels: this.labelCount,
       stores: [...this.storesByMaterial.values()].map((store) =>
         store.snapshot(),
@@ -1783,13 +1839,7 @@ export class GpuScene {
   }
 
   /** Release all ranges and semantic metadata owned by one old revision. */
-  private releaseInstalled(
-    installed: InstalledContribution,
-    clearContributionLookup = true,
-  ): void {
-    if (clearContributionLookup) {
-      this.contributionLookup.clear(installed.contributionSlot);
-    }
+  private releaseInstalled(installed: InstalledContribution): void {
     this.contributionSlots.release({
       firstRecord: installed.contributionSlot,
       recordCount: 1,
@@ -1817,7 +1867,9 @@ export class GpuScene {
 
   /** Roll back ranges which were uploaded but never published as active. */
   private discardStaged(installed: InstalledContribution): void {
-    this.contributionLookup.clear(installed.contributionSlot);
+    if (!this.poisoned) {
+      this.contributionLookup.clear(installed.contributionSlot);
+    }
     if (
       this.activeContributionBySlot.get(installed.contributionSlot) ===
       installed
@@ -1875,16 +1927,39 @@ export class GpuScene {
     return removed;
   }
 
+  /** Queue one contribution row for the next coherent scene publication. */
+  private queueContributionLookupUpdate(
+    installed: InstalledContribution,
+  ): void {
+    this.pendingContributionLookupRows.set(
+      installed.contributionSlot,
+      new Float32Array([
+        installed.pickingRange?.firstRecord ?? -1,
+        installed.lod,
+        installed.activationToken,
+        installed.zIndexRange?.firstRecord ?? -1,
+      ]),
+    );
+  }
+
+  /** Queue one retired contribution slot to become inert at publication. */
+  private queueContributionLookupClear(slot: number): void {
+    this.pendingContributionLookupRows.set(slot, new Float32Array(4));
+  }
+
   /**
-   * Maintain the compact ordering domain as contributions enter and leave.
-   * Additions always need a new z-index upload, while removals only require a
-   * rerank when the last reference to an ordering value disappears.
+   * Maintain ordering-domain counts and reverse references as contributions change.
+   *
+   * A newly allocated row is always dirty. Existing rows are revisited only
+   * when an authored value, tie bucket, or semantic group enters or leaves the
+   * active domain and therefore may change its encoded mapping.
    */
   private changeSceneOrderReferences(
     installed: InstalledContribution,
     delta: -1 | 1,
   ): void {
     let domainChanged = false;
+    let mappingRequired = false;
     const update = (references: Map<number, number>, key: number): void => {
       const previous = references.get(key) ?? 0;
       const next = previous + delta;
@@ -1901,7 +1976,46 @@ export class GpuScene {
       }
     };
     const hadAuthoredZIndex = this.authoredZIndexReferenceCount > 0;
-    for (const entry of installed.zIndices) {
+    if (
+      installed.zIndices.length > 0 &&
+      (!installed.zIndexRange ||
+        installed.zIndexRange.recordCount !== installed.zIndices.length)
+    ) {
+      throw new Error("GPU scene contribution has an invalid z-index range.");
+    }
+    installed.zIndices.forEach((entry, index) => {
+      const slot = installed.zIndexRange!.firstRecord + index;
+      const signature = zIndexOrderSignature(entry);
+      if (delta > 0) {
+        if (this.zIndexSignatureBySlot.has(slot)) {
+          throw new Error("GPU scene z-index slot is already active.");
+        }
+        this.zIndexSignatureBySlot.set(slot, signature);
+        let slots = this.zIndexSlotsBySignature.get(signature);
+        if (!slots) {
+          slots = new Set<number>();
+          this.zIndexSlotsBySignature.set(signature, slots);
+          this.zIndexEntryBySignature.set(signature, entry);
+        }
+        slots.add(slot);
+        this.pendingZIndexLookupSlots.add(slot);
+        mappingRequired ||= !this.encodedZIndexRowsBySignature.has(signature);
+      } else {
+        if (this.zIndexSignatureBySlot.get(slot) !== signature) {
+          throw new Error("GPU scene z-index slot references are unbalanced.");
+        }
+        this.zIndexSignatureBySlot.delete(slot);
+        this.pendingZIndexLookupSlots.delete(slot);
+        const slots = this.zIndexSlotsBySignature.get(signature);
+        if (!slots?.delete(slot)) {
+          throw new Error("GPU scene z-index signature is missing its slot.");
+        }
+        if (slots.size === 0) {
+          this.zIndexSlotsBySignature.delete(signature);
+          this.zIndexEntryBySignature.delete(signature);
+          this.encodedZIndexRowsBySignature.delete(signature);
+        }
+      }
       const authored = Number.isFinite(entry.value);
       const normalized = authored ? entry.value : 0;
       const value = normalized === 0 ? 0 : normalized;
@@ -1941,129 +2055,143 @@ export class GpuScene {
           this.semanticZIndexReferenceCounts.delete(semanticGroup);
         }
       }
-    }
+    });
     if (this.authoredZIndexReferenceCount < 0) {
       throw new Error("GPU scene authored z-index references are unbalanced.");
     }
     domainChanged ||=
       hadAuthoredZIndex !== (this.authoredZIndexReferenceCount > 0);
-    this.sceneOrderDirty ||=
-      (delta > 0 && installed.zIndices.length > 0) || domainChanged;
+    this.sceneOrderDirty ||= domainChanged || mappingRequired;
   }
 
   /**
-   * Prepare one globally coherent exact-order table for the next presentation.
+   * Publish only lookup rows changed by the next coherent presentation.
    *
    * Tile-local ranks are invalid once contributions share persistent material
    * buffers: the same authored value can otherwise receive a different depth in
-   * each tile and let lower geometry occlude its neighbors. The ordering domain
-   * is maintained incrementally as contributions change, and pure LOD updates
-   * bypass the exact-order texture rebuild entirely.
+   * each tile and let lower geometry occlude its neighbors. Domain changes still
+   * resolve globally, but reverse references limit uploads to signatures whose
+   * encoded rows actually changed.
    */
-  private prepareSceneOrder(): PreparedSceneOrder {
-    const active: InstalledContribution[] = [];
-    for (const entry of this.contributionByIdentity.values()) {
-      if (entry.active) {
-        active.push(entry.active);
-      }
-    }
-    const contributionUpdates: FloatLookupUpdate[] = active.map(
-      (installed) => ({
-        firstSlot: installed.contributionSlot,
-        values: [
-          installed.pickingRange?.firstRecord ?? -1,
-          installed.lod,
-          installed.activationToken,
-          installed.zIndexRange?.firstRecord ?? -1,
-        ],
-      }),
-    );
-    contributionUpdates.push(
-      ...this.presentationReleases.map((installed) => ({
-        firstSlot: installed.contributionSlot,
-        values: [0, 0, 0, 0],
-      })),
-    );
-    const contribution =
-      this.contributionLookup.prepareReplacement(contributionUpdates);
-    if (!this.sceneOrderDirty) {
-      return { contribution };
-    }
-
+  private updateSceneOrderLookups(): void {
+    const domainWasDirty = this.sceneOrderDirty;
     const startedAt = performance.now();
-    try {
-      const orderedZIndices = [...this.zIndexReferenceCounts.keys()].sort(
-        (left, right) => left - right,
-      );
-      const depthRanks = allocateDepthRanks(
-        orderedZIndices,
-        this.tieBreakerReferenceCountsByZIndex,
-      );
-      const compactSemanticGroups = new Map(
-        [...this.semanticZIndexReferenceCounts.keys()]
-          .sort((left, right) => left - right)
-          .map((group, index) => [group, index + 1]),
-      );
-      const semanticDepthByGroup = new Map<number, Map<number, number>>();
-      for (const [group, references] of
-        this.semanticZIndexReferenceCounts) {
-        const ordered = [...references.keys()].sort(
-          (left, right) => left - right,
-        );
-        const depths = new Map<number, number>();
-        ordered.forEach((value, rank) => {
-          depths.set(value, 1 - (rank + 1) / (ordered.length + 1));
-        });
-        semanticDepthByGroup.set(group, depths);
-      }
-      const step = this.authoredZIndexReferenceCount > 0
-        ? MAX_LOCAL_CLIP_SPACE_BIAS / depthRanks.slotCount
-        : 0;
-      const zIndexUpdates: FloatLookupUpdate[] = [];
-      for (const installed of active) {
-        if (!installed.zIndexRange) {
+    const contributionUpdates = coalesceLookupRows(
+      this.pendingContributionLookupRows,
+    );
+    const dirtyZIndexSlots = new Set(this.pendingZIndexLookupSlots);
+    const nextEncodedRows = domainWasDirty
+      ? this.resolveEncodedZIndexRows()
+      : null;
+    if (nextEncodedRows) {
+      for (const [signature, row] of nextEncodedRows) {
+        if (
+          lookupRowsEqual(
+            this.encodedZIndexRowsBySignature.get(signature),
+            row,
+          )
+        ) {
           continue;
         }
-        const values = new Float32Array(installed.zIndices.length * 4);
-        installed.zIndices.forEach((entry, index) => {
-          const authored = Number.isFinite(entry.value);
-          const normalized = authored ? entry.value : 0;
-          const value = normalized === 0 ? 0 : normalized;
-          const tieBreaker = entry.tieBreaker >>> 0;
-          const semanticGroup = entry.semanticGroup >>> 0;
-          const offset = index * 4;
-          const allocation = depthRanks.allocations.get(value);
-          if (!allocation) {
-            return;
-          }
-          // The renderer puts a Morton tile phase in the low bits. Power-of-two
-          // masking preserves that spatial coloring instead of randomly letting
-          // neighboring tile-edge geometry collide in the same depth bucket.
-          const tieOrdinal = authored
-            ? tieBreaker & (allocation.tieBucketCount - 1)
-            : 0;
-          values[offset] = (allocation.firstSlot + tieOrdinal) * step;
-          if (semanticGroup !== 0) {
-            values[offset + 1] =
-              compactSemanticGroups.get(semanticGroup) ?? 0;
-            values[offset + 2] =
-              semanticDepthByGroup
-                .get(semanticGroup)
-                ?.get(value) ?? 0.5;
-          }
-        });
-        zIndexUpdates.push({
-          firstSlot: installed.zIndexRange.firstRecord,
-          values,
-        });
+        for (const slot of this.zIndexSlotsBySignature.get(signature) ?? []) {
+          dirtyZIndexSlots.add(slot);
+        }
       }
-      const zIndex = this.zIndexLookup.prepareReplacement(zIndexUpdates);
-      this.lastZIndexUpdateMs = performance.now() - startedAt;
-      return { contribution, zIndex };
-    } catch (error) {
-      contribution.discard();
-      throw error;
     }
+    const encodedRows = nextEncodedRows ?? this.encodedZIndexRowsBySignature;
+    const zIndexRows = new Map<number, Float32Array>();
+    for (const slot of dirtyZIndexSlots) {
+      const signature = this.zIndexSignatureBySlot.get(slot);
+      if (!signature) {
+        continue;
+      }
+      const row = encodedRows.get(signature);
+      if (!row) {
+        throw new Error("GPU scene z-index signature has no encoded row.");
+      }
+      zIndexRows.set(slot, row);
+    }
+    const zIndexUpdates = coalesceLookupRows(zIndexRows);
+
+    // Validate both tables before the first in-place write. GPU failures after
+    // this point poison the scene instead of invoking an expensive rollback.
+    this.contributionLookup.validateRanges(contributionUpdates);
+    this.zIndexLookup.validateRanges(zIndexUpdates);
+    this.contributionLookup.setRanges(contributionUpdates);
+    this.zIndexLookup.setRanges(zIndexUpdates);
+
+    this.lastContributionLookupRows =
+      this.pendingContributionLookupRows.size;
+    this.lastZIndexLookupRows = zIndexRows.size;
+    this.pendingContributionLookupRows.clear();
+    this.pendingZIndexLookupSlots.clear();
+    if (nextEncodedRows) {
+      this.encodedZIndexRowsBySignature.clear();
+      for (const [signature, row] of nextEncodedRows) {
+        this.encodedZIndexRowsBySignature.set(signature, row);
+      }
+      this.sceneOrderDirty = false;
+    }
+    if (domainWasDirty || zIndexRows.size > 0) {
+      this.lastZIndexUpdateMs = performance.now() - startedAt;
+    }
+  }
+
+  /** Resolve each unique active order signature into its rounded GPU row. */
+  private resolveEncodedZIndexRows(): Map<string, Float32Array> {
+    const orderedZIndices = [...this.zIndexReferenceCounts.keys()].sort(
+      (left, right) => left - right,
+    );
+    const depthRanks = allocateDepthRanks(
+      orderedZIndices,
+      this.tieBreakerReferenceCountsByZIndex,
+    );
+    const compactSemanticGroups = new Map(
+      [...this.semanticZIndexReferenceCounts.keys()]
+        .sort((left, right) => left - right)
+        .map((group, index) => [group, index + 1]),
+    );
+    const semanticDepthByGroup = new Map<number, Map<number, number>>();
+    for (const [group, references] of
+      this.semanticZIndexReferenceCounts) {
+      const ordered = [...references.keys()].sort(
+        (left, right) => left - right,
+      );
+      const depths = new Map<number, number>();
+      ordered.forEach((value, rank) => {
+        depths.set(value, 1 - (rank + 1) / (ordered.length + 1));
+      });
+      semanticDepthByGroup.set(group, depths);
+    }
+    const step = this.authoredZIndexReferenceCount > 0
+      ? MAX_LOCAL_CLIP_SPACE_BIAS / depthRanks.slotCount
+      : 0;
+    const result = new Map<string, Float32Array>();
+    for (const [signature, entry] of this.zIndexEntryBySignature) {
+      const authored = Number.isFinite(entry.value);
+      const normalized = authored ? entry.value : 0;
+      const value = normalized === 0 ? 0 : normalized;
+      const allocation = depthRanks.allocations.get(value);
+      if (!allocation) {
+        throw new Error("GPU scene z-index value has no depth allocation.");
+      }
+      // The renderer puts a Morton tile phase in the low bits. Power-of-two
+      // masking preserves that spatial coloring instead of randomly letting
+      // neighboring tile-edge geometry collide in the same depth bucket.
+      const tieOrdinal = authored
+        ? (entry.tieBreaker >>> 0) & (allocation.tieBucketCount - 1)
+        : 0;
+      const row = new Float32Array(4);
+      row[0] = (allocation.firstSlot + tieOrdinal) * step;
+      const semanticGroup = entry.semanticGroup >>> 0;
+      if (semanticGroup !== 0) {
+        row[1] = compactSemanticGroups.get(semanticGroup) ?? 0;
+        row[2] =
+          semanticDepthByGroup.get(semanticGroup)?.get(value) ?? 0.5;
+      }
+      result.set(signature, row);
+    }
+    return result;
   }
 
   /** Remove one semantic pick from both sparse target and dense index tables. */
@@ -2265,7 +2393,9 @@ export class GpuScene {
     }
     this.originsByIdentity.delete(entry.identity);
     this.originsByKey.delete(entry.key);
-    this.originLookup.clear(entry.slot);
+    if (!this.poisoned) {
+      this.originLookup.clear(entry.slot);
+    }
     this.originSlots.release({ firstRecord: entry.slot, recordCount: 1 });
   }
 
@@ -2291,10 +2421,23 @@ export class GpuScene {
     return key;
   }
 
-  /** Reject new ownership after context teardown while allowing stale jobs to retire. */
+  /** Permanently reject this renderer generation after an unsafe partial publish. */
+  private poison(error: unknown): void {
+    if (this.poisoned || this.destroyed) {
+      return;
+    }
+    this.poisoned = true;
+    this.fatalPresentationFailures += 1;
+    this.reportFatalError(error);
+  }
+
+  /** Reject new ownership after fatal publication or context teardown. */
   private ensureAlive(): void {
     if (this.destroyed) {
       throw new Error("GPU scene has already been destroyed.");
+    }
+    if (this.poisoned) {
+      throw new Error("GPU scene is poisoned after a presentation failure.");
     }
   }
 }

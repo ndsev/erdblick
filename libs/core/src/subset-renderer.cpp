@@ -1267,8 +1267,11 @@ void TileSubsetLayerRenderer::renderAttribute(
             : std::nullopt,
         .hasValidity = entry->hasValidity(),
     };
-    forEachAdmittedRule(
-        topLevelRule,
+    // Attribute channels normally arrive prefiltered by mapget. Re-evaluate
+    // the projected rule here as a cheap semantic guard: an over-broad or
+    // older server plan must not turn unrelated copied attributes into GPU
+    // geometry for a leaf rule.
+    topLevelRule.forEachMatchingRule(
         context,
         entryEval,
         [&](FeatureStyleRule const& rule) {

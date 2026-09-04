@@ -3,6 +3,7 @@
 
 #include "erdblick/style-filter-plan.h"
 #include "mapget/model/info.h"
+#include "simfil/simfil.h"
 
 #include <nlohmann/json.hpp>
 
@@ -409,6 +410,47 @@ rules:
     REQUIRE(
         group.entryFields_[2] ==
         "count($features.*) as string");
+}
+
+TEST_CASE(
+    "Attribute metadata selectors participate in server entry admission",
+    "[erdblick.style-plan]")
+{
+    auto parsed = style(R"yaml(
+name: AttributeAdmission
+version: 2
+rules:
+  - scope: attribute
+    type: Road
+    geometry: line
+    attribute-type: 'DRIVING_(AUTOMATION|"SPECIAL")'
+    attribute-layer-type: 'LaneRules.*'
+    attribute-validity-geom: required
+    attribute-filter: enabled
+)yaml");
+    REQUIRE(parsed.isValid());
+
+    auto const plan = planStyleFilter(
+        parsed,
+        *plannerLayerInfo(),
+        FeatureStyleRule::NoHighlight,
+        FeatureStyleRule::kMaximumLod);
+
+    REQUIRE(plan.valid);
+    REQUIRE(plan.channels.size() == 1U);
+    auto const& entryFilter = plan.channels.front().entryFilter_;
+    REQUIRE(entryFilter);
+    CHECK(entryFilter->find("enabled") != std::string::npos);
+    CHECK(
+        entryFilter->find(
+            R"filter($name == re"DRIVING_(AUTOMATION|\"SPECIAL\")")filter") !=
+        std::string::npos);
+    CHECK(
+        entryFilter->find(R"filter($layer == re"LaneRules.*")filter") !=
+        std::string::npos);
+    CHECK(entryFilter->find("$hasValidity == true") != std::string::npos);
+    simfil::Environment environment(simfil::Environment::WithNewStringCache);
+    CHECK(static_cast<bool>(simfil::compile(environment, *entryFilter, false)));
 }
 
 TEST_CASE(

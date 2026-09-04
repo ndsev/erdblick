@@ -23,9 +23,6 @@ inline constexpr uint16_t kGpuRenderPacketHeaderBytes = 160U;
 /** Hard worker-output ceiling used to keep one transferable packet bounded. */
 inline constexpr uint32_t kGpuRenderPacketMaxBytes = 4U * 1024U * 1024U;
 
-/** Maximum fragments retained for one worker task before admission. */
-inline constexpr uint32_t kGpuRenderPacketMaxFragments = 8U;
-
 /** Packet-level lifecycle marker; only the final fragment may complete a revision. */
 enum class GpuRenderPacketFlag : uint32_t {
     None = 0U,

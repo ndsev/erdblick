@@ -3,7 +3,8 @@ import {BehaviorSubject, Subject} from "rxjs";
 import {MapInfoService} from "./map-info.service";
 import {
     MapTileRequestStatus,
-    MapTileStreamClient,
+    MapTileStreamClientInteractive,
+    MapTileStreamClientTiles,
     type MapTileStreamFilterStatusPayload,
     type MapTileStreamSourceCatalogChangePayload,
     type MapTileStreamStatusPayload,
@@ -63,7 +64,7 @@ export class MapTileStreamService {
     readonly filterStatusReceived =
         new Subject<MapTileStreamFilterStatusPayload>();
 
-    private tileStream: MapTileStreamClient | null = null;
+    private tileStream: MapTileStreamClientInteractive | null = null;
     private readonly filterSubscriptionsById =
         new Map<string, FilterSubscriptionRef>();
     private nextFilterSubscriptionId = 0;
@@ -119,7 +120,7 @@ export class MapTileStreamService {
     }
 
     async initialize(): Promise<void> {
-        this.tileStream = new MapTileStreamClient(
+        this.tileStream = new MapTileStreamClientInteractive(
             "/interactive",
             this.mapInfo.tileLayerParser
         );
@@ -472,27 +473,13 @@ export class MapTileStreamService {
             );
         }
 
-        const transport = new MapTileStreamClient(
+        const transport = new MapTileStreamClientTiles(
             "/tiles",
             this.mapInfo.tileLayerParser
         );
         transport.onFields = () =>
             this.mapInfo.invalidateFieldDictBlobCache();
-        transport.setPullCompressionEnabled(
-            this.stateService.tilePullCompressionEnabled
-        );
         const tiles = new Map<string, InspectionFeatureTile>();
-        let expectedFeatureTileCount: number | null = null;
-        let resolveFeatureTilesReady: () => void = () => {};
-        const featureTilesReady = new Promise<void>(resolve => {
-            resolveFeatureTilesReady = resolve;
-        });
-        const resolveFeatureTilesIfReady = () => {
-            if (expectedFeatureTileCount !== null &&
-                tiles.size >= expectedFeatureTileCount) {
-                resolveFeatureTilesReady();
-            }
-        };
         transport.onFeatures = blob => {
             try {
                 const tile = new InspectionFeatureTile(
@@ -500,7 +487,6 @@ export class MapTileStreamService {
                     blob
                 );
                 tiles.set(tile.mapTileKey, tile);
-                resolveFeatureTilesIfReady();
                 if (tile.legalInfo) {
                     this.mapInfo.setLegalInfo(tile.mapName, tile.legalInfo);
                 }
@@ -508,17 +494,6 @@ export class MapTileStreamService {
                 console.error("Could not decode inspection feature tile.", error);
             }
         };
-        let rejectProtocolMismatch: (error: Error) => void = () => {};
-        const protocolMismatch = new Promise<never>((_, reject) => {
-            rejectProtocolMismatch = reject;
-        });
-        transport.onProtocolMismatch = mismatch => rejectProtocolMismatch(
-            new Error(
-                `Inspection request received protocol ${mismatch.actual.major}.` +
-                `${mismatch.actual.minor}.${mismatch.actual.patch}.`
-            )
-        );
-
         const requests = [...groups.values()].map(group => ({
             mapId: group.mapId,
             layerId: group.layerId,
@@ -530,10 +505,6 @@ export class MapTileStreamService {
         }));
         let timeout: ReturnType<typeof setTimeout> | undefined;
         try {
-            const updateResult = await transport.updateRequest(requests);
-            if (updateResult !== "sent") {
-                return [];
-            }
             const timeoutPromise = new Promise<never>((_, reject) => {
                 timeout = setTimeout(
                     () => reject(new Error(
@@ -542,40 +513,15 @@ export class MapTileStreamService {
                     30_000
                 );
             });
-            const status = await Promise.race([
-                transport.waitForCompletion(),
-                protocolMismatch,
+            await Promise.race([
+                transport.request(requests),
                 timeoutPromise
             ]);
-
-            // Terminal status travels over the websocket while tile values can
-            // still be in parallel pull responses. A successful request is not
-            // consumable until every promised feature tile has crossed that
-            // transport boundary.
-            expectedFeatureTileCount = status.requests.reduce(
-                (count, requestStatus) => {
-                    if (requestStatus.status !== MapTileRequestStatus.Success) {
-                        return count;
-                    }
-                    const request = requests[requestStatus.index];
-                    return count + (request?.tileIds.length ?? 0);
-                },
-                0
-            );
-            resolveFeatureTilesIfReady();
-            if (tiles.size < expectedFeatureTileCount) {
-                await Promise.race([
-                    featureTilesReady,
-                    protocolMismatch,
-                    timeoutPromise
-                ]);
-            }
-
-            const failures = status.requests.filter(request =>
-                request.status !== MapTileRequestStatus.Success
-            );
-            if (failures.length) {
-                console.warn("Inspection feature request was incomplete.", failures);
+            if (tiles.size < distinctTileCount) {
+                console.warn(
+                    "Inspection feature request returned fewer tiles than requested.",
+                    {requested: distinctTileCount, received: tiles.size}
+                );
             }
         } finally {
             if (timeout) {
