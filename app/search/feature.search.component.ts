@@ -1983,6 +1983,10 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.tryCreateAutoStyleRule(session);
         }
         if (this.resultPanelIndex !== "style"
+            && session.schemaAnalysis.concreteScope !== "attribute") {
+            return false;
+        }
+        if (this.resultPanelIndex !== "style"
             && this.styleAttributeOptions.length === 0
             && !this.shouldAttemptAutoStyleRule(session)
             && !this.shouldRefreshAutoStyleRule()) {

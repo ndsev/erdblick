@@ -1541,6 +1541,12 @@ TEST_CASE("Feature search auto-scope accepts Classic direct speed-limit fields",
     REQUIRE(speedLimitField->contains("numericRange"));
     REQUIRE(speedLimitField->at("numericRange").at("min").get<double>() == 0.0);
     REQUIRE(speedLimitField->at("numericRange").at("max").get<double>() == 255.0);
+    REQUIRE(std::ranges::none_of(styleFields, [](auto const& field) {
+        return field.at("path").template get<std::string>().starts_with("$feature");
+    }));
+    REQUIRE(std::ranges::any_of(styleFields, [](auto const& field) {
+        return field.at("path") == "$name";
+    }));
 }
 
 TEST_CASE("Feature search auto-scope keeps all shared enum attribute scopes", "[erdblick.search]")
