@@ -1549,6 +1549,56 @@ TEST_CASE("Feature search auto-scope accepts Classic direct speed-limit fields",
     }));
 }
 
+TEST_CASE("Feature styling preserves JSON metadata through the attributes alias", "[erdblick.search]")
+{
+    auto layer = classicSpeedLimitLayerInfoJson();
+    auto& definitions = layer["featureModelSchema"]["$defs"];
+    definitions["GuidanceLayer"]["properties"]["SPEED_LIMIT"]["anyOf"][1]["items"] = {
+        {"$ref", "#/$defs/GuidanceLayer/properties/SPEED_LIMIT/anyOf/0"}
+    };
+    definitions["FeatureProperties"]["properties"]["nested"] = {
+        {"type", "object"},
+        {"properties", {
+            {"attributes", {{"type", "boolean"}}},
+            {"properties", {{"type", "string"}, {"enum", {"A", "B"}}}},
+            {"laneGroup", {
+                {"$ref", "#/$defs/LaneGroup"}
+            }}
+        }}
+    };
+    definitions["LaneGroup"] = {
+        {"type", "object"},
+        {"properties", {{"numLaneConnectivityElements", {
+            {"type", "integer"}, {"minimum", 0}, {"maximum", 65535}
+        }}}}
+    };
+    TileLayerParser parser;
+    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({{
+        {"stringPoolId", "AliasTest"}, {"mapId", "AliasMap"},
+        {"layers", {{"NDS.Classic-Routing", layer}}}
+    }}).dump()));
+    auto fields = parser.searchStyleFieldsForQuery("true", "feature", nlohmann::json::object());
+    for (auto const& suffix : {
+             "layer.Guidance.SPEED_LIMIT.speedLimit", "nested.attributes",
+             "nested.properties", "nested.laneGroup.numLaneConnectivityElements"}) {
+        INFO(suffix);
+        auto find = [&](std::string const& prefix) {
+            return std::ranges::find_if(fields, [&](auto const& field) {
+                return field.at("path") == prefix + suffix;
+            });
+        };
+        auto canonical = find("properties.");
+        auto alias = find("attributes.");
+        REQUIRE(canonical != fields.end());
+        REQUIRE(alias != fields.end());
+        REQUIRE(alias->at("valueKind") == canonical->at("valueKind"));
+        REQUIRE(alias->at("valueKind") != "unknown");
+        for (auto key : {"numericRange", "enumValues"}) {
+            REQUIRE(alias->value(key, nlohmann::json{}) == canonical->value(key, nlohmann::json{}));
+        }
+    }
+}
+
 TEST_CASE("Feature search auto-scope keeps all shared enum attribute scopes", "[erdblick.search]")
 {
     auto datasource = nlohmann::json{

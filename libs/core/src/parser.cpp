@@ -1077,6 +1077,13 @@ void collectSchemaFieldPaths(
         auto const path = appendFieldPathSegment(basePath, field);
         auto const childSchema = registry->childSchema(schemaId, field);
         auto const* childJson = schemaChildForField(rootSchema, schemaJson, field);
+        // Feature.attributes is a compiled alias, not a JSON Schema property.
+        // Follow it only when the registry identifies the same child; nested
+        // source fields literally named "attributes" must keep their own type.
+        if (!childJson && field == "attributes" && childSchema != simfil::NoSchemaId
+            && childSchema == registry->childSchema(schemaId, "properties")) {
+            childJson = schemaChildForField(rootSchema, schemaJson, "properties");
+        }
         auto metadata = schemaMetadata(rootSchema, childJson, registry, childSchema);
         paths.push_back({
             path,

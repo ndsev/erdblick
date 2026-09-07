@@ -213,6 +213,12 @@ Search result subsets never hydrate or share a complete source tile.
 
 ## Completion and schema analysis
 
+Style-field discovery must follow compiled schema aliases when reading JSON
+metadata. In particular, mapget's feature-root `attributes` alias points to
+`properties`; both paths must expose identical numeric bounds and enum symbols.
+This is a schema-identity check, not a global spelling substitution: nested
+source fields literally named `attributes` retain their own metadata.
+
 The completion worker uses datasource `featureModelSchema` plus parser-owned
 string/schema state. It provides:
 
