@@ -2,12 +2,90 @@ import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 
 import {AppModule} from "../app.module";
+import {
+    searchAutoStyleFieldOptions,
+    searchAutoStyleFieldOptionsArePortable
+} from "./feature-search-auto-style.util";
 import {FeatureSearchComponent} from "./feature.search.component";
 import {SearchStyleRuleDraftCodec} from "./search-style-rule-editor.model";
 
 void AppModule;
 
 describe("Feature Search automatic rule geometry", () => {
+    it("merges a Classic warning-sign field across attribute layers into one portable option", () => {
+        const component = Object.create(FeatureSearchComponent.prototype) as any;
+        component.styleAttributeOptions = [];
+        component.styleScalarAttributeOptions = [];
+        component.styleAttributeOptionsLoading = true;
+        component.isStyleFieldCandidateActive = () => true;
+        component.shouldRefreshAutoStyleRule = () => false;
+        const session = {
+            definition: {searchStyleRules: [{}]}
+        };
+
+        component.applyStyleAttributeOptions(session, [{
+            path: "warningSign",
+            mapId: "Classic",
+            layerId: "NDS.Classic-Routing",
+            attrName: "WARNING_SIGN",
+            attrLayerName: "Guidance",
+            featureType: "Link",
+            valueKind: "enum",
+            enumValues: ["DANGER"]
+        }, {
+            path: "warningSign",
+            mapId: "Classic",
+            layerId: "NDS.Classic-Lane",
+            attrName: "WARNING_SIGN",
+            attrLayerName: "Lane",
+            featureType: "Lane",
+            valueKind: "enum",
+            enumValues: ["OTHER_DANGER"]
+        }], false);
+
+        expect(component.styleScalarAttributeOptions).toHaveLength(1);
+        const warningSign = component.styleScalarAttributeOptions[0];
+        expect(warningSign).toMatchObject({
+            label: "warningSign (2 scopes)",
+            value: "warningSign",
+            attrName: "WARNING_SIGN",
+            attrLayerName: undefined,
+            featureType: undefined,
+            enumValues: ["DANGER", "OTHER_DANGER"],
+            mapLayers: [{
+                mapId: "Classic",
+                layerId: "NDS.Classic-Lane"
+            }, {
+                mapId: "Classic",
+                layerId: "NDS.Classic-Routing"
+            }]
+        });
+
+        const analysis = {
+            status: "ready" as const,
+            concreteScope: "attribute" as const,
+            attributeScopes: [{
+                attrName: "WARNING_SIGN",
+                attrLayerName: "Guidance",
+                featureType: "Link",
+                mapId: "Classic",
+                layerId: "NDS.Classic-Routing"
+            }, {
+                attrName: "WARNING_SIGN",
+                attrLayerName: "Lane",
+                featureType: "Lane",
+                mapId: "Classic",
+                layerId: "NDS.Classic-Lane"
+            }],
+            matchedFieldNames: ["warningSign"],
+            matchedEnumValues: []
+        };
+        const selected = searchAutoStyleFieldOptions(component.styleScalarAttributeOptions, analysis);
+
+        expect(selected).toEqual([warningSign]);
+        expect(searchAutoStyleFieldOptionsArePortable(selected, analysis)).toBe(true);
+    });
+
     it("uses one 20 px point rule and one 5 px non-point rule", () => {
         const component = Object.create(FeatureSearchComponent.prototype) as any;
         const codec = new SearchStyleRuleDraftCodec();
