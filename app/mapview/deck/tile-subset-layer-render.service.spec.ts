@@ -441,6 +441,8 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
                 inFlight: 1,
                 completed: 0
             });
+            expect((service as any).ready[0].buffers.packets[0].byteLength)
+                .toBe(0);
             expect(callbacks).toHaveLength(1);
 
             callbacks.shift()!();
@@ -451,6 +453,31 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
                 inFlight: 0,
                 completed: 1
             });
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it("admits render revisions containing more than eight fragments", () => {
+        const callbacks: Array<() => void> = [];
+        vi.stubGlobal("setTimeout", vi.fn((callback: () => void) => {
+            callbacks.push(callback);
+            return callbacks.length;
+        }));
+        try {
+            const service = new TileSubsetLayerRenderService();
+            const {admit, resolve, reject} = completedTile(
+                service,
+                true,
+                Array.from({length: 9}, () => new Uint8Array(128))
+            );
+
+            callbacks.shift()!();
+
+            expect(admit).toHaveBeenCalledTimes(9);
+            expect(resolve).toHaveBeenCalledTimes(1);
+            expect(resolve.mock.calls[0][0].packets).toEqual([]);
+            expect(reject).not.toHaveBeenCalled();
         } finally {
             vi.unstubAllGlobals();
         }

@@ -1077,6 +1077,13 @@ void collectSchemaFieldPaths(
         auto const path = appendFieldPathSegment(basePath, field);
         auto const childSchema = registry->childSchema(schemaId, field);
         auto const* childJson = schemaChildForField(rootSchema, schemaJson, field);
+        // Feature.attributes is a compiled alias, not a JSON Schema property.
+        // Follow it only when the registry identifies the same child; nested
+        // source fields literally named "attributes" must keep their own type.
+        if (!childJson && field == "attributes" && childSchema != simfil::NoSchemaId
+            && childSchema == registry->childSchema(schemaId, "properties")) {
+            childJson = schemaChildForField(rootSchema, schemaJson, "properties");
+        }
         auto metadata = schemaMetadata(rootSchema, childJson, registry, childSchema);
         paths.push_back({
             path,
@@ -1968,8 +1975,9 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
     std::set<std::string> seen;
 
     if (concreteScope == "attribute") {
-        // Attribute-scope rules can style both the matched attribute value and
-        // selected feature-level fields through the `$feature` overlay.
+        // Attribute-scope pickers expose the matched value and cheap overlay
+        // metadata. Feature-level `$feature` expressions remain available as
+        // manually authored expressions without expanding every feature schema.
         auto const allScopes = collectAttributeScopes(info_, selectedLayers);
         auto const& scopes = discoveredAttributeScopes.empty() ? allScopes : discoveredAttributeScopes;
         for (auto const& attrScope : scopes) {
@@ -2032,49 +2040,6 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                     overlayFieldMetadata(overlayField));
             }
 
-            addSearchStyleField(
-                fields,
-                seen,
-                "$feature",
-                attrScope.mapId,
-                attrScope.layerId,
-                attrScope.attrName,
-                attrScope.attrLayerName,
-                attrScope.featureType,
-                overlayFieldMetadata("$feature"));
-            auto const* featureSchemaJson = attrScope.layerInfo
-                ? schemaForRegistryKey(rootSchema, attrScope.registry, "Feature:" + attrScope.featureType)
-                : nullptr;
-            std::vector<SearchStyleFieldPath> featurePaths;
-            std::set<simfil::SchemaId> activeFeatureSchemas;
-            collectSchemaFieldPaths(
-                featurePaths,
-                attrScope.registry,
-                attrScope.featureSchema,
-                featureSchemaJson,
-                rootSchema,
-                "$feature",
-                activeFeatureSchemas);
-            for (auto const& path : featurePaths) {
-                auto metadata = SearchStyleSchemaMetadata{
-                    path.valueKind,
-                    path.enumValues,
-                    path.numericMinimum,
-                    path.numericMaximum};
-                if (path.path == "$feature.typeId") {
-                    metadata = typeIdSchemaMetadata({attrScope.featureType});
-                }
-                addSearchStyleField(
-                    fields,
-                    seen,
-                    path.path,
-                    attrScope.mapId,
-                    attrScope.layerId,
-                    attrScope.attrName,
-                    attrScope.attrLayerName,
-                    attrScope.featureType,
-                    std::move(metadata));
-            }
         }
     }
     else {

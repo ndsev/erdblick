@@ -15,8 +15,7 @@ import type {
 } from "./gpu-scene";
 import {gpuIconAtlasService} from "./gpu-icon-atlas.service";
 import {
-    GPU_RENDER_PACKET_MAX_BYTES,
-    GPU_RENDER_PACKET_MAX_FRAGMENTS
+    GPU_RENDER_PACKET_MAX_BYTES
 } from "./gpu-render-packet";
 
 const AUTO_WORKER_MIN = 2;
@@ -25,6 +24,7 @@ const WORKER_CAP = 32;
 const MAX_ADMISSION_PACKETS_PER_TASK = 16;
 const MAX_ADMISSION_BYTES_PER_TASK = 4 * 1024 * 1024;
 const MAX_ADMISSION_TIME_MS = 4;
+const ADMITTED_PACKET = new Uint8Array(0);
 
 /** Choose a bounded worker count that leaves half the logical CPUs for the UI. */
 export function getTileSubsetLayerRenderAutoWorkerCount(): number {
@@ -735,7 +735,6 @@ export class TileSubsetLayerRenderService {
             return;
         }
         if (!result.packets || !result.packets.length ||
-            result.packets.length > GPU_RENDER_PACKET_MAX_FRAGMENTS ||
             result.packets.some(packet =>
                 !(packet instanceof Uint8Array) ||
                 packet.byteLength === 0 ||
@@ -841,10 +840,15 @@ export class TileSubsetLayerRenderService {
             this.releaseWorker(workerIndex, pending.task.taskId);
             return true;
         }
+        // Scene admission copies the packet into owned GPU/store state. Drop
+        // the transferred backing buffer immediately so an arbitrarily long
+        // revision does not remain fully resident until its final fragment.
+        buffers.packets[ready.nextPacketIndex] = ADMITTED_PACKET;
         ready.nextPacketIndex += 1;
         if (ready.nextPacketIndex < buffers.packets.length) {
             return false;
         }
+        buffers.packets.length = 0;
         this.latestNativeRenderMs = Number.isFinite(buffers.timings.totalMs)
             ? buffers.timings.totalMs
             : 0;

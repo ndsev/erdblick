@@ -1884,6 +1884,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             // guard; retain no misleading source-specific discriminator.
             target.featureType = undefined;
         }
+        if (target.attrLayerName !== source.attrLayerName) {
+            target.attrLayerName = undefined;
+        }
         const mapLayers = target.mapLayers ?? [];
         if (!mapLayers.some(ref =>
             ref.mapId === source.mapId &&
@@ -1896,13 +1899,12 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         target.mapLayers = mapLayers;
     }
 
-    /** Keeps attribute fields separate by semantic attribute, while still merging the same attribute across layers. */
+    /** Merges the same semantic attribute field across attribute and source layers. */
     private searchStyleFieldAggregationKey(option: FeatureSearchStyleFieldCandidate): string {
         return option.attrName
             ? [
                 option.path,
-                option.attrName,
-                option.attrLayerName ?? ""
+                option.attrName
             ].join("\n")
             : option.path;
     }
@@ -1968,9 +1970,22 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.styleAttributeOptionsLoading = false;
             this.styleAttributeOptions = [];
             this.styleScalarAttributeOptions = [];
-            if (this.shouldRefreshAutoStyleRule()) {
+            if (this.shouldAttemptAutoStyleRule(session)) {
+                this.tryCreateAutoStyleRule(session);
+            } else if (this.shouldRefreshAutoStyleRule()) {
                 this.refreshAutoStyleRule(session);
             }
+            return false;
+        }
+        // Paint a generic result immediately. Schema-field enumeration may be
+        // delayed behind a broad Classic query; once it completes below, the
+        // auto-generated solid rule is replaced with the richer field rule.
+        if (this.styleAttributeOptions.length === 0 &&
+            this.shouldAttemptAutoStyleRule(session)) {
+            this.tryCreateAutoStyleRule(session);
+        }
+        if (this.resultPanelIndex !== "style"
+            && session.schemaAnalysis.concreteScope !== "attribute") {
             return false;
         }
         if (this.resultPanelIndex !== "style"

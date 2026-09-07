@@ -229,7 +229,7 @@ public:
     /** Encode and validate the complete transferable packet. */
     [[nodiscard]] std::vector<std::byte> build() const;
 
-    /** Split an oversized revision into a bounded sequence of complete packet fragments. */
+    /** Split an oversized revision into individually bounded packet fragments. */
     [[nodiscard]] std::vector<std::vector<std::byte>> buildFragments() const;
 
     /** Number of contribution descriptors currently present in the packet. */

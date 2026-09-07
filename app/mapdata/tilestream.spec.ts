@@ -3,11 +3,13 @@ import {coreLib} from '../integrations/wasm';
 import {
     MAP_TILE_STREAM_HEADER_SIZE,
     MAP_TILE_STREAM_TYPE_FIELDS,
+    MAP_TILE_STREAM_TYPE_END_OF_STREAM,
     MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT,
     MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE,
     MAP_TILE_STREAM_TYPE_STATUS,
     MAP_TILE_STREAM_TYPE_SUBSETS,
-    MapTileStreamClient
+    MapTileStreamClient,
+    MapTileStreamClientTiles
 } from './tilestream';
 
 function currentProtocolVersion() {
@@ -46,6 +48,55 @@ function packedFrames(...frames: Uint8Array[]): ArrayBuffer {
 }
 
 describe('MapTileStreamClient', () => {
+    it('streams POST /tiles across arbitrary HTTP chunk boundaries without opening a websocket', async () => {
+        const payload = new Uint8Array(packedFrames(
+            jsonFrame(41, {ordinal: 1}),
+            jsonFrame(42, {ordinal: 2}),
+            jsonFrame(MAP_TILE_STREAM_TYPE_END_OF_STREAM, {})
+        ));
+        const chunks = [
+            payload.slice(0, 3),
+            payload.slice(3, 17),
+            payload.slice(17, payload.length - 5),
+            payload.slice(payload.length - 5)
+        ];
+        const fetchMock = vi.fn().mockResolvedValue(new Response(
+            new ReadableStream({
+                start(controller) {
+                    for (const chunk of chunks) {
+                        controller.enqueue(chunk);
+                    }
+                    controller.close();
+                }
+            }),
+            {status: 200, headers: {"Content-Type": "application/binary"}}
+        ));
+        vi.stubGlobal("fetch", fetchMock);
+        const client = new MapTileStreamClientTiles("/tiles");
+        const observedTypes: number[] = [];
+        client.onFrame = (_frame, type) => observedTypes.push(type);
+        try {
+            await client.request([{
+                mapId: "Map",
+                layerId: "Layer",
+                tileIds: [7]
+            }]);
+
+            expect(observedTypes).toEqual([41, 42]);
+            expect(fetchMock).toHaveBeenCalledOnce();
+            const [url, init] = fetchMock.mock.calls[0];
+            expect(new URL(url).pathname).toBe("/tiles");
+            expect(init.method).toBe("POST");
+            expect(JSON.parse(init.body)).toMatchObject({
+                responseType: "binary",
+                requests: [{mapId: "Map", layerId: "Layer", tileIds: [7]}]
+            });
+        } finally {
+            client.destroy();
+            vi.unstubAllGlobals();
+        }
+    });
+
     it('chunks one logical pending snapshot with aligned tile-indexed fields', () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;
