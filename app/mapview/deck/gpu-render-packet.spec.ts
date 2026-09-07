@@ -115,6 +115,19 @@ describe("GpuRenderPacketView", () => {
         });
     });
 
+    it("accepts revision sequences longer than eight fragments", () => {
+        const bytes = emptyPacket();
+        const view = new DataView(bytes.buffer);
+        view.setUint32(24, 8, true);
+        view.setUint32(36, 9, true);
+
+        expect(new GpuRenderPacketView(bytes)).toMatchObject({
+            fragmentIndex: 8,
+            fragmentCount: 9,
+            revisionComplete: true
+        });
+    });
+
     it("rejects nonzero reserved descriptor bytes", () => {
         const bytes = ownedPacket();
         new DataView(bytes.buffer).setUint32(276, 1, true);

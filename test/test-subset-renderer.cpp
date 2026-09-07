@@ -1659,6 +1659,79 @@ rules:
 }
 
 TEST_CASE(
+    "TileSubsetLayerRenderer defensively reapplies attribute leaf selectors",
+    "[erdblick.subset-renderer]")
+{
+    auto info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>(
+        "SubsetRendererAttributeAdmissionPool");
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        mapget::TileId::fromWgs84(11.0, 48.0, 13),
+        "SubsetRendererAttributeAdmissionPool",
+        "TestMap",
+        info,
+        strings,
+        "attribute-admission",
+        1);
+    subset->setGeometryAnchor({11.0, 48.0, 0.0});
+
+    auto featureId = subset->newFeatureId(
+        "Road",
+        {{"roadId", int64_t{14}}});
+    auto channel = subset->newChannel(
+        "style-rule:0",
+        mapget::Scope::Attribute,
+        1U << static_cast<uint8_t>(mapget::GeomType::Line),
+        "centerline");
+    auto append = [&](uint32_t attributeIndex,
+                      bool hasValidity,
+                      std::string_view layer,
+                      std::string_view name) {
+        channel->newAttributeValidityEntry(
+            featureId,
+            lineGeometry(*subset, "centerline"),
+            attributeIndex,
+            hasValidity,
+            0,
+            1,
+            {},
+            {},
+            layer,
+            name);
+    };
+    append(0, false, "LaneRulesLayer", "DRIVING_AUTOMATION_CLEARANCE");
+    append(1, false, "LaneRulesLayer", "SPEED_LIMIT");
+    append(2, false, "OtherLayer", "DRIVING_AUTOMATION_CLEARANCE");
+    append(3, true, "LaneRulesLayer", "DRIVING_AUTOMATION_CLEARANCE");
+
+    auto style = rendererStyle(R"yaml(
+name: AttributeAdmissionGuard
+version: 2
+rules:
+  - type: Road
+    scope: attribute
+    geometry: line
+    geometry-name: centerline
+    attribute-type: DRIVING_AUTOMATION_CLEARANCE
+    attribute-layer-type: LaneRules.*
+    attribute-validity-geom: none
+    color: "#ffffff"
+)yaml");
+    REQUIRE(style.isValid());
+
+    TileSubsetLayerRenderer renderer(
+        0,
+        "Features:TestMap:Road:0",
+        style,
+        static_cast<int>(FeatureStyleRule::NoHighlight),
+        FeatureStyleRule::kMaximumLod);
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+
+    REQUIRE(RendererPacketView(renderer).paths().size() == 1U);
+}
+
+TEST_CASE(
     "Shared interaction rules render complete attributes with double arrows",
     "[erdblick.subset-renderer]")
 {

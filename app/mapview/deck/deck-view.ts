@@ -113,7 +113,6 @@ import {
     tileGridExtentForLevel,
     tileGridLatToNormY,
     tileGridLonToNormX,
-    tileGridNormYToLat,
     tileGridVisibleCellCount,
     wrapColumnIntoExtent,
     type TileGridLevelExtent
@@ -328,7 +327,7 @@ export abstract class DeckMapView implements IRenderView {
 
     hoveredFeatureIds = new BehaviorSubject<TileFeatureId[]>([]);
     readonly firstPersonViewActive = new BehaviorSubject(false);
-    readonly contextLost = new Subject<void>();
+    readonly rendererInvalidated = new Subject<void>();
 
     private ignoreNextCamAppStateUpdate = false;
     private suppressDeckViewStateEvent = false;
@@ -677,7 +676,8 @@ export abstract class DeckMapView implements IRenderView {
         eventManager?.off("pointerleave", deckInternals._onPointerMove);
         this.gpuScene = new GpuScene(
             this.deckDevice!,
-            reason => this.requestGpuSceneRender(reason)
+            reason => this.requestGpuSceneRender(reason),
+            error => this.invalidateGpuScene(error)
         );
         this.gpuVectorDisabledPickIndices.clear();
         this.semanticZIndexService.bindScene(
@@ -697,6 +697,12 @@ export abstract class DeckMapView implements IRenderView {
                 pickingFragmentation: 0,
                 zIndexHighWater: 0,
                 zIndexUpdateMs: 0,
+                lastContributionLookupRows: 0,
+                lastZIndexLookupRows: 0,
+                lookupUploadedBytes: 0,
+                lookupUploadCount: 0,
+                lookupGrowthCount: 0,
+                fatalPresentationFailures: 0,
                 labels: 0,
                 stores: []
             }
@@ -848,7 +854,7 @@ export abstract class DeckMapView implements IRenderView {
         this.navigationTargetOverlay = null;
         this.lastCanvasCssSize = undefined;
         this.clippedLayoutCanvasCssSize = undefined;
-        this.contextLost.complete();
+        this.rendererInvalidated.complete();
         const container = document.getElementById(this.canvasId);
         if (container) {
             container.innerHTML = "";
@@ -1062,10 +1068,17 @@ export abstract class DeckMapView implements IRenderView {
         return canvas;
     }
 
+    /** Requests view recreation after an unsafe partial GPU scene publication. */
+    private invalidateGpuScene(error: unknown): void {
+        console.error("GPU scene publication failed; recreating the renderer.", error);
+        this.cancelGpuSceneRedraw();
+        this.rendererInvalidated.next();
+    }
+
     /** Requests view recreation instead of attempting to replay invalid GPU resources. */
     private readonly deckContextLost = (event: Event): void => {
         event.preventDefault();
-        this.contextLost.next();
+        this.rendererInvalidated.next();
     };
 
     /** Creates the WebGL2 context and reports useful diagnostics when Chromium rejects it. */
@@ -1280,7 +1293,7 @@ export abstract class DeckMapView implements IRenderView {
         maxObjects: number
     ): RenderedFeaturePickResult {
         if (!this.deck) {
-            return {featureIds: []};
+            return {topFeatureIds: [], featureIds: []};
         }
         const pickedObjects = this.deck.pickMultipleObjects({
             x: screenPos.x,
@@ -1290,11 +1303,9 @@ export abstract class DeckMapView implements IRenderView {
             layerIds: this.drillPickLayerIds(),
             unproject3D: false
         });
-        return {
-            featureIds: this.uniqueFeatureIdsFromPickingInfos(
-                pickedObjects,
-                maxObjects)
-        };
+        return this.featurePickResultFromPickingInfos(
+            pickedObjects,
+            maxObjects);
     }
 
     /** Returns the current top-level layer ids explicitly marked as ordinary feature representations. */
@@ -1335,15 +1346,12 @@ export abstract class DeckMapView implements IRenderView {
         return result;
     }
 
-    /**
-     * Orders GPU vector picks by rendered z-index and primitive pass before
-     * expanding merged objects and deduplicating exact feature identities.
-     * Non-vector picks retain Deck's relative and absolute candidate positions.
-     */
-    private uniqueFeatureIdsFromPickingInfos(
+    /** Orders picks, preserving the first render object's atomic feature group while flattening all hits. */
+    private featurePickResultFromPickingInfos(
         pickedObjects: PickingInfo[],
         maxFeatures = Number.POSITIVE_INFINITY
-    ): TileFeatureId[] {
+    ): RenderedFeaturePickResult {
+        let topFeatureIds: TileFeatureId[] = [];
         const featureIds: TileFeatureId[] = [];
         const seen = new Set<string>();
         const candidates = pickedObjects.map((picked, index) => ({
@@ -1362,7 +1370,25 @@ export abstract class DeckMapView implements IRenderView {
             const picked = candidate.order === undefined
                 ? candidate.picked
                 : orderedVectorPicks[vectorPickIndex++].picked;
+            const groupFeatureIds: TileFeatureId[] = [];
+            const groupSeen = new Set<string>();
             for (const featureId of this.featureIdsFromPickingInfo(picked)) {
+                const identity = `${featureId.mapTileKey}\u0000${featureId.featureId}`;
+                if (!groupSeen.has(identity)) {
+                    groupSeen.add(identity);
+                    groupFeatureIds.push(featureId);
+                }
+            }
+            if (!groupFeatureIds.length) {
+                continue;
+            }
+            if (!topFeatureIds.length) {
+                // One rendered point can represent several server-grouped
+                // features. Preserve that atomic membership independently of
+                // the flat, bounded context-menu result.
+                topFeatureIds = groupFeatureIds;
+            }
+            for (const featureId of groupFeatureIds) {
                 const identity = `${featureId.mapTileKey}\u0000${featureId.featureId}`;
                 if (seen.has(identity)) {
                     continue;
@@ -1370,11 +1396,11 @@ export abstract class DeckMapView implements IRenderView {
                 seen.add(identity);
                 featureIds.push(featureId);
                 if (featureIds.length >= maxFeatures) {
-                    return featureIds;
+                    return {topFeatureIds, featureIds};
                 }
             }
         }
-        return featureIds;
+        return {topFeatureIds, featureIds};
     }
 
     /** Resolve ordering metadata for one GPU vector picking result. */
@@ -2296,10 +2322,10 @@ export abstract class DeckMapView implements IRenderView {
                 !this.isHoverSampleLocal(position, radius)) {
                 return;
             }
-            const featureIds = this.uniqueFeatureIdsFromPickingInfos(
+            const featureIds = this.featurePickResultFromPickingInfos(
                 picked,
                 DeckMapView.HOVER_PICK_MAX_OBJECTS
-            );
+            ).featureIds;
             const topFeatureIds = generation === this.topHoverFeatureGeneration
                 ? this.topHoverFeatureIds
                 : [];
@@ -2389,27 +2415,26 @@ export abstract class DeckMapView implements IRenderView {
         const screenPosition = {x: info.x, y: info.y};
         const useDesktopDrillPick = this.desktopDrillPickingEnabled
             && (!srcEvent?.pointerType || srcEvent.pointerType === "mouse");
-        let pickedFeatureIds = useDesktopDrillPick
+        let featureIds = useDesktopDrillPick
             ? this.drillPickFeatures(
                 screenPosition,
                 this.stateService.drillPickRadius,
                 this.stateService.inspectionsLimit
-            ).featureIds
-            : this.featureIdsFromPickingInfo(info);
+            ).topFeatureIds
+            : this.featurePickResultFromPickingInfos([info]).topFeatureIds;
         // Deck's speculative pointer-down picker is intentionally disabled. Touch taps therefore
         // perform their bounded pick here, after the recognizer has ruled out a drag.
-        if (!pickedFeatureIds.length && !useDesktopDrillPick) {
-            pickedFeatureIds = this.drillPickFeatures(
+        if (!featureIds.length && !useDesktopDrillPick) {
+            featureIds = this.drillPickFeatures(
                 screenPosition,
                 this.stateService.drillPickRadius,
                 1
-            ).featureIds;
+            ).topFeatureIds;
         }
-        // Primary click means "the top rendered feature". Multi-selection is
-        // deliberately explicit through Ctrl-click or the context menu's
-        // Select all action, so dense geometry cannot unexpectedly open a
-        // large inspection set.
-        const featureIds = pickedFeatureIds.slice(0, 1);
+        // Primary click means "the top rendered object". A server-grouped
+        // point is one object with several semantic members, all of which
+        // belong to the click; unrelated lower objects remain context-menu
+        // selections only.
         const featurePosition = featureIds.length
             ? this.markerPositionForFeature(
                 info,
@@ -3837,8 +3862,6 @@ export abstract class DeckMapView implements IRenderView {
                 extent.south,
                 extent.north,
                 [extent.level],
-                localMin,
-                localSize,
                 extent.coversFullWorldX
             ),
             localMin,
@@ -3879,8 +3902,6 @@ export abstract class DeckMapView implements IRenderView {
                 extent.south,
                 extent.north,
                 [level],
-                localMin,
-                localSize,
                 extent.coversFullWorldX
             ),
             localMin,
@@ -3905,8 +3926,8 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /**
-     * Builds one or more overlay polygons covering the requested bounds.
-     * NDS mode may split the latitude range into bands so each band gets its own correction curve.
+     * Builds one or two overlay polygons covering the requested bounds.
+     * Full-world extents remain split to avoid deck's unstable 360-degree LNGLAT primitive.
      */
     private buildTileGridOverlayData(
         west: number,
@@ -3914,52 +3935,23 @@ export abstract class DeckMapView implements IRenderView {
         south: number,
         north: number,
         levels: number[],
-        localMin: [number, number],
-        localSize: [number, number],
         coversFullWorldX: boolean
     ): TileGridOverlayDatum[] {
-        const polygonsForBounds = (bandSouth: number, bandNorth: number): [number, number][][] => {
-            if (!coversFullWorldX) {
-                return [[
-                    [west, bandSouth],
-                    [west, bandNorth],
-                    [east, bandNorth],
-                    [east, bandSouth]
-                ]];
-            }
-            return this.tileGridFullWorldPolygons(
+        const polygons = coversFullWorldX
+            ? this.tileGridFullWorldPolygons(
                 -180,
                 180,
-                bandSouth,
-                bandNorth,
+                south,
+                north,
                 this.tileGridFullWorldSplitLongitude(levels)
-            );
-        };
-
-        if (this.tileGridMode !== "nds") {
-            return polygonsForBounds(south, north).map(polygon => ({
-                polygon,
-                ndsYCorrection: [0, 1, 0]
-            }));
-        }
-
-        const bandCount = this.tileGridNdsBandCount(north, south);
-        const mercatorNorth = tileGridLatToNormY(north, "xyz");
-        const mercatorSouth = tileGridLatToNormY(south, "xyz");
-        const data: TileGridOverlayDatum[] = [];
-        for (let bandIndex = 0; bandIndex < bandCount; bandIndex++) {
-            const t0 = bandIndex / bandCount;
-            const t1 = (bandIndex + 1) / bandCount;
-            const bandMercatorNorth = mercatorNorth + (mercatorSouth - mercatorNorth) * t0;
-            const bandMercatorSouth = mercatorNorth + (mercatorSouth - mercatorNorth) * t1;
-            const bandNorth = tileGridNormYToLat(bandMercatorNorth, "xyz");
-            const bandSouth = tileGridNormYToLat(bandMercatorSouth, "xyz");
-            const ndsYCorrection = this.tileGridNdsBandCorrection(localMin[1], localSize[1], bandNorth, bandSouth);
-            for (const polygon of polygonsForBounds(bandSouth, bandNorth)) {
-                data.push({polygon, ndsYCorrection});
-            }
-        }
-        return data;
+            )
+            : [[
+                [west, south],
+                [west, north],
+                [east, north],
+                [east, south]
+            ]] as [number, number][][];
+        return polygons.map(polygon => ({polygon}));
     }
 
     /**
@@ -4002,88 +3994,6 @@ export abstract class DeckMapView implements IRenderView {
         const finestColCount = this.tileGridMode === "nds" ? finestRowCount * 2 : finestRowCount;
         const splitNormX = 0.5 + 0.5 / Math.max(2, finestColCount);
         return -180 + 360 * splitNormX;
-    }
-
-    /**
-     * Computes the local Y correction that bends the linear NDS field toward Mercator.
-     * The correction stays centered on the latitude midpoint to preserve precision.
-     */
-    private tileGridNdsBandCount(north: number, south: number): number {
-        const mercatorNorth = tileGridLatToNormY(north, "xyz");
-        const mercatorSouth = tileGridLatToNormY(south, "xyz");
-        const mercatorSpan = Math.abs(mercatorSouth - mercatorNorth);
-        if (mercatorSpan >= 0.75) {
-            return 8;
-        }
-        if (mercatorSpan >= 0.4) {
-            return 4;
-        }
-        if (mercatorSpan >= 0.18) {
-            return 2;
-        }
-        return 1;
-    }
-
-    /**
-     * Fits a local quadratic for one latitude band in global overlay space.
-     * The rasterizer interpolates the NDS Y values linearly in Mercator space,
-     * so we fit the inverse of that distortion over each band separately.
-     */
-    private tileGridNdsBandCorrection(
-        localMinY: number,
-        localSizeY: number,
-        north: number,
-        south: number
-    ): [number, number, number] {
-        if (localSizeY <= 1e-9) {
-            return [0, 1, 0];
-        }
-        const northLocalY = this.tileGridLocalNdsY(north, localMinY, localSizeY);
-        const southLocalY = this.tileGridLocalNdsY(south, localMinY, localSizeY);
-        const mercatorNorthY = tileGridLatToNormY(north, "xyz");
-        const mercatorSouthY = tileGridLatToNormY(south, "xyz");
-        const mercatorMidY = 0.5 * (mercatorNorthY + mercatorSouthY);
-        const midpointLat = tileGridNormYToLat(mercatorMidY, "xyz");
-        const midpointInputY = 0.5 * (northLocalY + southLocalY);
-        const midpointOutputY = this.tileGridLocalNdsY(midpointLat, localMinY, localSizeY);
-        return this.tileGridQuadraticThroughPoints(
-            northLocalY,
-            northLocalY,
-            midpointInputY,
-            midpointOutputY,
-            southLocalY,
-            southLocalY
-        );
-    }
-
-    /** Converts a latitude to shader-local NDS Y coordinates for one overlay extent. */
-    private tileGridLocalNdsY(lat: number, localMinY: number, localSizeY: number): number {
-        const ndsY = tileGridLatToNormY(lat, "nds");
-        return (ndsY - localMinY) / Math.max(1e-6, localSizeY);
-    }
-
-    /** Fits a quadratic through three samples; used for NDS-to-Mercator correction bands. */
-    private tileGridQuadraticThroughPoints(
-        x0: number,
-        y0: number,
-        x1: number,
-        y1: number,
-        x2: number,
-        y2: number
-    ): [number, number, number] {
-        const d0 = (x0 - x1) * (x0 - x2);
-        const d1 = (x1 - x0) * (x1 - x2);
-        const d2 = (x2 - x0) * (x2 - x1);
-        if (Math.abs(d0) < 1e-9 || Math.abs(d1) < 1e-9 || Math.abs(d2) < 1e-9) {
-            return [0, 1, 0];
-        }
-        const l0 = y0 / d0;
-        const l1 = y1 / d1;
-        const l2 = y2 / d2;
-        const quadratic = l0 + l1 + l2;
-        const linear = -l0 * (x1 + x2) - l1 * (x0 + x2) - l2 * (x0 + x1);
-        const constant = l0 * x1 * x2 + l1 * x0 * x2 + l2 * x0 * x1;
-        return [constant, linear, quadratic];
     }
 
     /** Normalizes longitude into the conventional [-180, 180] range. */

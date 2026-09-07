@@ -14,6 +14,10 @@ const SUPPORTED_SEARCH_STYLE_OPERATORS = new Set(["=", "!=", "<", "<=", ">", ">=
 const ALL_GEOMETRY_TYPES = ["point", "line", "polygon", "mesh", "aabb", "gltf"];
 const SEARCH_STYLE_VISIBILITY_OPTION_ID = "showSearchStyle";
 const SEARCH_STYLE_VISIBILITY_FILTER = `${SEARCH_STYLE_VISIBILITY_OPTION_ID} == true`;
+// Search results are semantic overlays. The maximum exact JavaScript integer
+// keeps them above every ordinary authored z-index while retaining physical
+// depth testing, so occluded results do not shine through foreground geometry.
+const SEARCH_RESULT_Z_INDEX = Number.MAX_SAFE_INTEGER;
 const SUPPORTED_RULE_KEYS = new Set([
     "geometry",
     "scope",
@@ -34,7 +38,8 @@ const SUPPORTED_RULE_KEYS = new Set([
     "label-background-color",
     "label-background-padding",
     "billboard",
-    "depth-test"
+    "depth-test",
+    "z-index"
 ]);
 
 export type StyleSheetCategory = "base" | "search";
@@ -253,6 +258,7 @@ export function featureSearchRuleToStyleRule(
     Object.assign(result, searchStyleColorProperties(rule.color));
     result["width"] = width;
     result["opacity"] = label ? 0 : opacity;
+    result["z-index"] = SEARCH_RESULT_Z_INDEX;
     if (label && rule.labelExpression?.trim()) {
         result["label-text-expression"] = rule.labelExpression.trim();
         result["label-color"] = labelColor(rule.color);

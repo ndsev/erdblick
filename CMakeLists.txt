@@ -40,12 +40,35 @@ if (NOT COMMAND CPMAddPackage)
 endif ()
 include(cmake/deps.cmake)
 
+# Emscripten's TypeScript-definition generation invokes `tsc` while linking.
+# Make the repository's locked TypeScript toolchain available before that link
+# instead of falling back to a potentially incompatible runner installation.
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+  set(ERDBLICK_NPM_INSTALL_MARKER
+    "${CMAKE_CURRENT_SOURCE_DIR}/node_modules/.bin/tsc")
+  add_custom_command(
+    OUTPUT "${ERDBLICK_NPM_INSTALL_MARKER}"
+    COMMAND npm ci
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/package.json"
+      "${CMAKE_CURRENT_SOURCE_DIR}/package-lock.json"
+    COMMENT "Installing locked erdblick Node.js dependencies"
+    VERBATIM)
+  add_custom_target(erdblick-npm-dependencies
+    DEPENDS "${ERDBLICK_NPM_INSTALL_MARKER}")
+endif()
+
 # Erdblick Core Library
 add_subdirectory(libs/core)
 
-if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
   add_subdirectory(test)
 else()
+  add_dependencies(erdblick-core erdblick-npm-dependencies)
+  set_property(TARGET erdblick-core PROPERTY RULE_LAUNCH_LINK
+    "${CMAKE_COMMAND} -E env PATH=${CMAKE_CURRENT_SOURCE_DIR}/node_modules/.bin:$ENV{PATH}")
+
   # Angular Build
   add_custom_target(erdblick-ui ALL
     COMMAND bash "${CMAKE_SOURCE_DIR}/build-ui.bash" "${CMAKE_SOURCE_DIR}" all

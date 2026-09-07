@@ -1413,10 +1413,6 @@ GpuRenderPacketBuilder::buildFragments() const
 
     std::vector<GpuRenderPacketData> fragments;
     auto appendFragment = [&](GpuRenderPacketData&& fragment) {
-        if (fragments.size() >= kGpuRenderPacketMaxFragments) {
-            throw std::length_error(
-                "GPU render task exceeds its bounded fragment count.");
-        }
         fragments.push_back(std::move(fragment));
     };
 
@@ -1608,8 +1604,12 @@ GpuRenderPacketBuilder::buildFragments() const
         appendFragment(std::move(fragment));
     }
 
+    if (fragments.size() > std::numeric_limits<uint32_t>::max()) {
+        throw std::length_error(
+            "GPU render fragment count exceeds its uint32 range.");
+    }
     auto const fragmentCount = static_cast<uint32_t>(fragments.size());
-    if (fragmentCount < 2U || fragmentCount > kGpuRenderPacketMaxFragments) {
+    if (fragmentCount < 2U) {
         throw std::length_error("GPU render fragment count is invalid.");
     }
     std::vector<std::vector<std::byte>> result;

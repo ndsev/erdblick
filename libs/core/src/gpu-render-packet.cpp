@@ -339,7 +339,6 @@ void validateLogicalOwnership(GpuRenderPacketData const& packet)
             GpuRenderPacketFlag::RevisionComplete)) != 0U;
     if ((packetFlags & ~kKnownPacketFlags) != 0U ||
         packet.fragmentCount == 0U ||
-        packet.fragmentCount > kGpuRenderPacketMaxFragments ||
         packet.fragmentIndex >= packet.fragmentCount ||
         revisionComplete !=
             (packet.fragmentIndex + 1U == packet.fragmentCount))
@@ -989,7 +988,6 @@ GpuRenderPacketInfo GpuRenderPacketCodec::validate(
             GpuRenderPacketFlag::RevisionComplete)) != 0U;
     if ((packetFlags & ~kKnownPacketFlags) != 0U ||
         fragmentCount == 0U ||
-        fragmentCount > kGpuRenderPacketMaxFragments ||
         fragmentIndex >= fragmentCount ||
         revisionComplete != (fragmentIndex + 1U == fragmentCount))
     {

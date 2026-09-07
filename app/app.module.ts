@@ -129,6 +129,8 @@ import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
 import {CoordinatesLegalTermsDialogComponent} from "./coords/coordinates-legal-terms-dialog.component";
 import {CacheResetComponent} from "./auxiliaries/cache-reset.component";
 import {MapPresetService} from "./styledata/map-preset.service";
+import {TileSubsetLayerRenderService} from
+    "./mapview/deck/tile-subset-layer-render.service";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -174,6 +176,7 @@ export const initializeServices = () => {
     const inspectionSelection = inject(InspectionSelectionService);
     const coordService = inject(CoordinatesService);
     const coordinatesPolicy = inject(CoordinatesPolicyService);
+    const subsetRenderService = inject(TileSubsetLayerRenderService);
     inject(FeatureSearchService);
 
     return (async () => {
@@ -185,6 +188,8 @@ export const initializeServices = () => {
         );
         updateGlobalSpinner('Initializing core library');
         await initializeLibrary();
+        updateGlobalSpinner('Loading render worker');
+        await subsetRenderService.preloadWorkerSource();
         stateService.initializePersistence();
         coordinatesPolicy.initialize();
         updateGlobalSpinner('Initializing coordinates');

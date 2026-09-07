@@ -10,7 +10,13 @@ import {
 } from "@angular/core";
 import {GeoMath, Rectangle} from "../integrations/geo";
 import {InfoMessageService} from "../shared/info.service";
-import {SearchTarget, JumpTargetService} from "./jump.service";
+import {
+    JumpTargetService,
+    normalizeSearchJumpResult,
+    SearchJump,
+    SearchJumpResult,
+    SearchTarget
+} from "./jump.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppStateService} from "../shared/appstate.service";
 import {KeyboardService} from "../shared/keyboard.service";
@@ -58,10 +64,9 @@ interface SearchHistoryViewEntry extends SearchHistoryEntry {
     label: string;
 }
 
-interface ParsedCoordinateJump {
-    target: Rectangle | number[];
+interface ParsedCoordinateJump extends SearchJump {
     label: string;
-    coords: number[];
+    markerPosition: number[];
     x?: number;
     y?: number;
     level?: number;
@@ -304,7 +309,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             name: "NDS X-Y Coordinates",
             label: label,
             enabled: ndsXyValid,
-            jump: (value: string) => { return this.parseNdsCoordinates(value, true)?.target },
+            jump: (value: string) => this.parseNdsCoordinates(value, true),
             validate: (value: string) => { return this.validateNdsCoordinates(value, true) }
         });
 
@@ -323,7 +328,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             name: "NDS Y-X Coordinates",
             label: label,
             enabled: ndsYxValid,
-            jump: (value: string) => { return this.parseNdsCoordinates(value, false)?.target },
+            jump: (value: string) => this.parseNdsCoordinates(value, false),
             validate: (value: string) => { return this.validateNdsCoordinates(value, false) }
         });
 
@@ -342,7 +347,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             name: "Morton Code Coordinates",
             label: label,
             enabled: mortonValid,
-            jump: (value: string) => { return this.parseMortonCoordinates(value)?.target },
+            jump: (value: string) => this.parseMortonCoordinates(value),
             validate: (value: string) => { return this.validateMortonCoordinates(value) }
         });
 
@@ -361,7 +366,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             name: "WGS84 Lon-Lat Coordinates",
             label: label,
             enabled: lonLatValid,
-            jump: (value: string) => { return this.parseWgs84Coordinates(value, true)?.target },
+            jump: (value: string) => this.parseWgs84Coordinates(value, true),
             validate: (value: string) => { return this.validateWGS84(value, true) }
         });
 
@@ -380,7 +385,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             name: "WGS84 Lat-Lon Coordinates",
             label: label,
             enabled: latLonValid,
-            jump: (value: string) => { return this.parseWgs84Coordinates(value, false)?.target },
+            jump: (value: string) => this.parseWgs84Coordinates(value, false),
             validate: (value: string) => { return this.validateWGS84(value, false) }
         });
 
@@ -965,13 +970,13 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 return {
                     target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
                     label: isLonLat ? `lon = ${lon} | lat = ${lat} | level = ${level}` : `lat = ${lat} | lon = ${lon} | level = ${level}`,
-                    coords: [lat, lon]
+                    markerPosition: [lat, lon]
                 };
             }
             return {
                 target: [lat, lon, 0],
                 label: isLonLat ? `lon = ${lon} | lat = ${lat}` : `lat = ${lat} | lon = ${lon}`,
-                coords: [lat, lon]
+                markerPosition: [lat, lon]
             };
         }
         return undefined;
@@ -1010,7 +1015,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             return {
                 target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
                 label,
-                coords: [parsed.lat, parsed.lon],
+                markerPosition: [parsed.lat, parsed.lon],
                 x: parsed.x,
                 y: parsed.y,
                 level: parsed.level
@@ -1019,7 +1024,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         return {
             target: [parsed.lat, parsed.lon, 0],
             label,
-            coords: [parsed.lat, parsed.lon],
+            markerPosition: [parsed.lat, parsed.lon],
             x: parsed.x,
             y: parsed.y
         };
@@ -1040,7 +1045,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             return {
                 target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
                 label,
-                coords: [parsed.lat, parsed.lon],
+                markerPosition: [parsed.lat, parsed.lon],
                 x: parsed.x,
                 y: parsed.y,
                 level: parsed.level
@@ -1049,7 +1054,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         return {
             target: [parsed.lat, parsed.lon, 0],
             label,
-            coords: [parsed.lat, parsed.lon],
+            markerPosition: [parsed.lat, parsed.lon],
             x: parsed.x,
             y: parsed.y
         };
@@ -1072,14 +1077,13 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     /**
      * Dispatches the parsed jump target either as a camera move or a rectangle fit request.
      */
-    jumpToLocation(coordinates: number[] | undefined | Rectangle, label?: string | null) {
-        if (coordinates === null) {
-            return;
-        }
-        if (coordinates === undefined) {
+    jumpToLocation(result: SearchJumpResult | undefined, label?: string | null) {
+        if (result === undefined) {
             this.messageService.showError("Could not parse coordinates from the input.");
             return;
         }
+        const jump = normalizeSearchJumpResult(result);
+        const coordinates = jump.target;
         const targetViewIndex = this.stateService.focusedView;
         if (Array.isArray(coordinates)) {
             let lat = coordinates[0];
@@ -1101,7 +1105,6 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                     label
                 });
             }
-            this.jumpService.markedPosition.next(coordinates);
         } else {
             this.mapService.moveToRectangleTopic.next({
                 targetView: targetViewIndex,
@@ -1112,6 +1115,9 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                     north: GeoMath.toDegrees(coordinates.north),
                 }
             });
+        }
+        if (jump.markerPosition) {
+            this.jumpService.markedPosition.next(jump.markerPosition);
         }
     }
 
@@ -1169,7 +1175,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         if (!parsed || !this.validateWGS84(value, false)) {
             return undefined;
         }
-        return {lat: parsed.coords[0], lon: parsed.coords[1]};
+        return {lat: parsed.markerPosition[0], lon: parsed.markerPosition[1]};
     }
 
     /** Distinguishes malformed two-coordinate input from ordinary search text. */
@@ -1190,7 +1196,8 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     validateWGS84(value: string, isLonLat: boolean = false) {
         const result = this.parseWgs84Coordinates(value, isLonLat);
         if (result) {
-            return result.coords[0] >= -90 && result.coords[0] <= 90 && result.coords[1] >= -180 && result.coords[1] <= 180;
+            return result.markerPosition[0] >= -90 && result.markerPosition[0] <= 90 &&
+                result.markerPosition[1] >= -180 && result.markerPosition[1] <= 180;
         }
         return false;
     }

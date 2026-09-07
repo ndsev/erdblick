@@ -276,12 +276,12 @@ function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
     }
 }
 
-/** Initialize WASM once, then transfer packet and bridge buffers without copies. */
+/** Acknowledge module loading before lazily initializing WASM for the first render. */
 self.onmessage = async (event: MessageEvent<TileSubsetLayerRenderWorkerInbound>) => {
     if (event.data.type === "TileSubsetLayerRenderWorkerInit") {
-        await initializeLibrary();
         const ready: TileSubsetLayerRenderWorkerReady = {
-            type: "TileSubsetLayerRenderWorkerReady"
+            type: "TileSubsetLayerRenderWorkerReady",
+            scriptUrl: self.location.href
         };
         self.postMessage(ready);
         return;

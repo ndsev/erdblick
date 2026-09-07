@@ -195,6 +195,36 @@ export class DiagnosticsDatasource implements OnDestroy {
                 "ms"
             );
             addLiveStat(
+                ["Rendering", "GPU Scene", "Last Contribution Lookup Rows"],
+                presentation.lastContributionLookupRows,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "GPU Scene", "Last Z-Index Lookup Rows"],
+                presentation.lastZIndexLookupRows,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "GPU Scene", "Lookup Uploaded Data"],
+                presentation.lookupUploadedBytes / (1024 * 1024),
+                "MiB"
+            );
+            addLiveStat(
+                ["Rendering", "GPU Scene", "Lookup Upload Operations"],
+                presentation.lookupUploadCount,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "GPU Scene", "Lookup Growths"],
+                presentation.lookupGrowthCount,
+                "count"
+            );
+            addLiveStat(
+                ["Rendering", "GPU Scene", "Fatal Presentation Failures"],
+                presentation.fatalPresentationFailures,
+                "count"
+            );
+            addLiveStat(
                 ["Rendering", "GPU Scene", "Primitive Stores"],
                 presentation.stores,
                 "count"

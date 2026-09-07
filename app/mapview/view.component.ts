@@ -198,7 +198,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private hoverSubscription?: Subscription;
     private firstPersonViewActiveSubscription?: Subscription;
     private firstPersonViewRequestSubscription?: Subscription;
-    private rendererContextLostSubscription?: Subscription;
+    private rendererInvalidatedSubscription?: Subscription;
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
     private deckAntialiasingEnabled = true;
@@ -430,8 +430,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * Recreate the viewer with different projection for 2D/3D modes
      */
     private async createViewerForMode(is2D: boolean, setupGeneration: number): Promise<IRenderView | undefined> {
-        this.rendererContextLostSubscription?.unsubscribe();
-        this.rendererContextLostSubscription = undefined;
+        this.rendererInvalidatedSubscription?.unsubscribe();
+        this.rendererInvalidatedSubscription = undefined;
         this.hoverSubscription?.unsubscribe();
         this.hoverSubscription = undefined;
         this.lastHoverFeatureIds = [];
@@ -463,7 +463,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             await this.ngZone.runOutsideAngular(() => mapView.destroy());
             return undefined;
         }
-        this.rendererContextLostSubscription = mapView.contextLost.subscribe(() => {
+        this.rendererInvalidatedSubscription = mapView.rendererInvalidated.subscribe(() => {
             if (setupGeneration === this.viewerSetupGeneration) {
                 this.initializeViewer(this.is2DMode);
             }
@@ -497,7 +497,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.firstPersonViewActiveSubscription?.unsubscribe();
         this.firstPersonViewRequestSubscription?.unsubscribe();
         this.cacheResetSubscription?.unsubscribe();
-        this.rendererContextLostSubscription?.unsubscribe();
+        this.rendererInvalidatedSubscription?.unsubscribe();
         this.subscriptions.splice(0).forEach(subscription =>
             subscription.unsubscribe());
         if (this.mapView) {

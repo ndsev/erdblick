@@ -2,7 +2,8 @@ import "@angular/compiler";
 import {beforeAll, describe, expect, it, vi} from 'vitest';
 import {Subject} from 'rxjs';
 import {coreLib, initializeLibrary} from '../integrations/wasm';
-import {JumpTargetService} from './jump.service';
+import {Rectangle} from '../integrations/geo';
+import {JumpTargetService, normalizeSearchJumpResult} from './jump.service';
 
 beforeAll(async () => {
     await initializeLibrary();
@@ -251,16 +252,33 @@ describe('JumpTargetService', () => {
         expect(coreLib.parseMapTileKey(key)).toEqual(['m1', 'Metadata-RegistryMetadata', 0]);
     });
 
-    it('forwards markedPosition to AppStateService using Cartographic.fromDegrees', () => {
+    it('forwards latitude, longitude, and altitude to AppStateService in the expected order', () => {
         const {service, stateService} = createService();
 
-        service.markedPosition.next([90, 90]);
+        service.markedPosition.next([48.25, 11.75, 125]);
 
         expect(stateService.setMarkerState).toHaveBeenCalledWith(true);
         expect(stateService.setMarkerPosition).toHaveBeenCalledTimes(1);
         const arg = (stateService.setMarkerPosition as any).mock.calls[0][0];
-        expect(arg.longitude.toFixed(2)).toBe("1.57");
-        expect(arg.latitude.toFixed(2)).toBe("1.57");
+        expect(arg.longitude).toBeCloseTo(11.75 * Math.PI / 180);
+        expect(arg.latitude).toBeCloseTo(48.25 * Math.PI / 180);
+        expect(arg.height).toBe(125);
+    });
+
+    it('keeps exact marker coordinates when a coordinate jump targets a tile rectangle', () => {
+        const rectangle = Rectangle.fromDegrees(11, 48, 12, 49);
+
+        expect(normalizeSearchJumpResult({
+            target: rectangle,
+            markerPosition: [48.25, 11.75]
+        })).toEqual({
+            target: rectangle,
+            markerPosition: [48.25, 11.75]
+        });
+        expect(normalizeSearchJumpResult([48.25, 11.75, 125])).toEqual({
+            target: [48.25, 11.75, 125],
+            markerPosition: [48.25, 11.75, 125]
+        });
     });
 
     it('highlightByJumpTargetFilter chooses the first non-error feature jump action', async () => {

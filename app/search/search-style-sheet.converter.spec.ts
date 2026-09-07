@@ -72,6 +72,7 @@ describe("search style sheet codec", () => {
         expect(parsed.rules[0]).not.toHaveProperty("all-of");
         expect(parsed.rules[0]).not.toHaveProperty("scope");
         expect(parsed.rules[0].geometry).toEqual(["line"]);
+        expect(parsed.rules[0]["z-index"]).toBe(Number.MAX_SAFE_INTEGER);
         expect(parsed.rules[0].filter).toBe("showSearchStyle == true and (speed >= 80)");
         expect(parsed.rules[1].filter).toBe("showSearchStyle == true");
         expect(parsed.rules[1].width).toBe(8);

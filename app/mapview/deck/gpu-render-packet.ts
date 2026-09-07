@@ -1,9 +1,8 @@
 export const GPU_RENDER_PACKET_ABI_VERSION = 18;
 export const GPU_RENDER_PACKET_HEADER_BYTES = 160;
-// One oversized packet is still admitted by itself, so this ceiling is also
-// the maximum unavoidable geometry upload burst from one worker task.
+// One oversized fragment is still admitted by itself, so this ceiling is also
+// the maximum unavoidable geometry upload burst from one admission task.
 export const GPU_RENDER_PACKET_MAX_BYTES = 4 * 1024 * 1024;
-export const GPU_RENDER_PACKET_MAX_FRAGMENTS = 8;
 
 const GPU_RENDER_PACKET_MAGIC = 0x50475245;
 const STREAM_DESCRIPTOR_BYTES = 48;
@@ -473,7 +472,6 @@ export class GpuRenderPacketView {
     if (
       (flags & ~GpuRenderPacketFlag.RevisionComplete) !== 0 ||
       this.fragmentCount === 0 ||
-      this.fragmentCount > GPU_RENDER_PACKET_MAX_FRAGMENTS ||
       this.fragmentIndex >= this.fragmentCount ||
       this.revisionComplete !== (this.fragmentIndex + 1 === this.fragmentCount)
     ) {
