@@ -1,5 +1,6 @@
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
+import type {StyleService} from "../styledata/style.service";
 import type {AppStateService} from "./appstate.service";
 import type {MapViewStateService} from "../mapview/map-view-state.service";
 import {
@@ -19,6 +20,11 @@ interface FramedWindowFixture {
     parentPostMessage: ReturnType<typeof vi.fn>;
     dispatch(data: unknown, origin?: string, source?: MessageEventSource): void;
     removeEventListener: ReturnType<typeof vi.fn>;
+}
+
+/** Provides the style owner without loading WASM in bridge unit tests. */
+function styleServiceFixture(): StyleService {
+    return {reconcilePresentationStyles: vi.fn()} as unknown as StyleService;
 }
 
 function mapViewStateFixture(): MapViewStateService {
@@ -73,10 +79,39 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe("PresentationStateBridgeService", () => {
+    it("orbits a geographic target continuously and stops when the scene leaves", () => {
+        let frame: FrameRequestCallback | undefined;
+        const fixture = framedWindow();
+        Object.assign(fixture.host, {
+            performance: {now: () => 0},
+            requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {frame = callback; return 1;}),
+            cancelAnimationFrame: vi.fn()
+        });
+        const view = mapViewStateFixture();
+        const next = vi.mocked(view.presentationCameraViewStateTopic.next);
+        const service = new PresentationStateBridgeService({} as AppStateService, view, styleServiceFixture());
+        service.initialize(fixture.host);
+        fixture.dispatch({type: PRESENTATION_BRIDGE_START_FLIGHT, version: 2, flight: {
+            durationMs: 120_000, pingPong: false, canvasOnly: true,
+            orbit: {center: [11.5755, 48.1372, 520], radius: 1100, height: 700}
+        }});
+        frame?.(0);
+        const first = next.mock.calls.at(-1)![0]!.cameraViewData;
+        expect(first.destination.lat).toBeGreaterThan(48.1372);
+        expect(first.destination.alt).toBeCloseTo(1220);
+        frame?.(30_000);
+        expect(next.mock.calls.at(-1)![0]!.cameraViewData.destination.lon).toBeGreaterThan(11.5755);
+        frame?.(120_000);
+        expect(next.mock.calls.at(-1)![0]!.cameraViewData).toEqual(first);
+        fixture.dispatch({type: PRESENTATION_BRIDGE_STOP_FLIGHT, version: 2});
+        expect(fixture.host.cancelAnimationFrame).toHaveBeenCalled();
+        expect(document.body.classList.contains('presentation-canvas-only')).toBe(false);
+        service.ngOnDestroy();
+    });
     it("activates only in a framed presentation document and announces readiness", () => {
         const stateService = {replaceSnapshotState: vi.fn()} as unknown as AppStateService;
         const fixture = framedWindow();
-        const service = new PresentationStateBridgeService(stateService, mapViewStateFixture());
+        const service = new PresentationStateBridgeService(stateService, mapViewStateFixture(), styleServiceFixture());
 
         expect(service.initialize(fixture.host)).toBe(true);
         expect(fixture.parentPostMessage).toHaveBeenCalledWith({
@@ -88,11 +123,11 @@ describe("PresentationStateBridgeService", () => {
         expect(fixture.removeEventListener).toHaveBeenCalledWith("message", expect.any(Function));
 
         const plainFrame = framedWindow("");
-        expect(new PresentationStateBridgeService(stateService, mapViewStateFixture()).initialize(plainFrame.host)).toBe(false);
+        expect(new PresentationStateBridgeService(stateService, mapViewStateFixture(), styleServiceFixture()).initialize(plainFrame.host)).toBe(false);
 
         const topLevel = framedWindow();
         Object.defineProperty(topLevel.host, "parent", {value: topLevel.host});
-        expect(new PresentationStateBridgeService(stateService, mapViewStateFixture()).initialize(topLevel.host)).toBe(false);
+        expect(new PresentationStateBridgeService(stateService, mapViewStateFixture(), styleServiceFixture()).initialize(topLevel.host)).toBe(false);
     });
 
     it("applies native snapshot state and acknowledges completion", async () => {
@@ -100,7 +135,7 @@ describe("PresentationStateBridgeService", () => {
         const fixture = framedWindow();
         const service = new PresentationStateBridgeService(
             {replaceSnapshotState} as unknown as AppStateService,
-            mapViewStateFixture()
+            mapViewStateFixture(), styleServiceFixture()
         );
         service.initialize(fixture.host);
         fixture.parentPostMessage.mockClear();
@@ -123,7 +158,7 @@ describe("PresentationStateBridgeService", () => {
         const fixture = framedWindow();
         const service = new PresentationStateBridgeService(
             {replaceUrlState} as unknown as AppStateService,
-            mapViewStateFixture()
+            mapViewStateFixture(), styleServiceFixture()
         );
         service.initialize(fixture.host);
         fixture.parentPostMessage.mockClear();
@@ -140,7 +175,7 @@ describe("PresentationStateBridgeService", () => {
             embed: "presentation",
             map: "Provider/Sample San Francisco",
             v2: "1"
-        }));
+        }), true);
         expect(fixture.parentPostMessage).toHaveBeenCalledWith({
             type: PRESENTATION_BRIDGE_RESULT,
             version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
@@ -154,7 +189,7 @@ describe("PresentationStateBridgeService", () => {
         const fixture = framedWindow();
         const service = new PresentationStateBridgeService(
             {replaceSnapshotState} as unknown as AppStateService,
-            mapViewStateFixture()
+            mapViewStateFixture(), styleServiceFixture()
         );
         const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
         service.initialize(fixture.host);
@@ -179,7 +214,7 @@ describe("PresentationStateBridgeService", () => {
         const fixture = framedWindow();
         const service = new PresentationStateBridgeService(
             {replaceSnapshotState} as unknown as AppStateService,
-            mapViewStateFixture()
+            mapViewStateFixture(), styleServiceFixture()
         );
         service.initialize(fixture.host);
         fixture.parentPostMessage.mockClear();
@@ -221,7 +256,7 @@ describe("PresentationStateBridgeService", () => {
         const fixture = framedWindow();
         const service = new PresentationStateBridgeService(
             {replaceSnapshotState} as unknown as AppStateService,
-            mapViewStateFixture()
+            mapViewStateFixture(), styleServiceFixture()
         );
         service.initialize(fixture.host);
         fixture.parentPostMessage.mockClear();
@@ -260,7 +295,7 @@ describe("PresentationStateBridgeService", () => {
         } as unknown as MapViewStateService;
         const service = new PresentationStateBridgeService(
             {replaceSnapshotState: vi.fn()} as unknown as AppStateService,
-            mapViewState
+            mapViewState, styleServiceFixture()
         );
         service.initialize(fixture.host);
 

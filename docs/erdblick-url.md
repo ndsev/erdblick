@@ -99,6 +99,25 @@ Erdblick replaces rather than merges each submitted query, hydrates its existing
 
 This is a narrow embedding transport, not a general automation API. Browser-local stylesheet source text, transient menus, hover state, and in-progress gestures remain outside the URL contract. Deploy the presentation and erdblick as a compatible pair; unsupported viewers are not detected through a timeout or silently reloaded.
 
+Omitted presentation state resets to detached defaults. Imported local styles are
+retained for editing but disabled unless the submitted state explicitly enables
+them. Their YAML sources are not deleted or rewritten by a scene transition.
+
+The same version-2 bridge accepts `erdblick:presentation:start-camera-flight`
+and `erdblick:presentation:stop-camera-flight`. A flight carries `durationMs`
+(1,000–300,000), `pingPong`, `canvasOnly`, and either 2–64 camera `waypoints`
+or an `orbit`. An orbit uses `center: [longitude, latitude, altitude]`, plus
+`radius` and `height` in metres (1–100,000); it requires `pingPong: false`.
+Longitude/latitude are degrees, altitude is the target's world elevation,
+and height is above that target. Latitude is limited to ±80 degrees.
+The orbit repeats at constant speed with continuous endpoint tangents.
+Applying another scene or stopping the flight cancels motion and restores UI.
+Flights do not write browser history or persisted camera state.
+
+While the embedded canvas has focus, Shift+R sends
+`erdblick:presentation:review-toggle` to the parent using the same bridge version.
+Text-entry fields retain normal typing behavior.
+
 ## Style Option Encoding in the URL
 
 Style option values can vary by stylesheet, map layer, and view. To keep URLs compact, erdblick encodes all option values for a given style into a single query parameter whose name and value are structured strings:

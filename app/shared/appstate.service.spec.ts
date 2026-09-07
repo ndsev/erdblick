@@ -2409,6 +2409,23 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('resets omitted query-scene state and replaces camera and style options', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+        service.mapsOpenState.next(true);
+        service.stylesState.next(new Map([['old/Lane/style/topology', [true]]]));
+        await service.replaceUrlState({v2: '1', n: '1', lon: '11.66', lat: '48.25', alt: '128000', map: 'Very-Large-Map', l: 'Road:0', v: '1'}, true);
+        expect(service.mapsOpenState.getValue()).toBe(false);
+        expect(service.stylesState.getValue().has('old/Lane/style/topology')).toBe(false);
+        expect(service.layerNamesState.getValue()).toEqual(['Very-Large-Map/Road']);
+        expect(service.cameraViewDataState.getValue(0).destination.lon).toBeCloseTo(11.66);
+        expect(service.cameraViewDataState.getValue(0).destination.lat).toBeCloseTo(48.25);
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('rejects presentation snapshot replacement before persistence is ready', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());

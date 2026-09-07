@@ -1209,7 +1209,7 @@ export class AppStateService implements OnDestroy {
     }
 
     /** Replaces the current query and hydrates it without navigating the browser document. */
-    async replaceUrlState(params: Params): Promise<void> {
+    async replaceUrlState(params: Params, resetMissing = false): Promise<void> {
         if (!this.isReady) {
             throw new Error("URL state cannot be replaced before AppStateService is ready.");
         }
@@ -1220,6 +1220,9 @@ export class AppStateService implements OnDestroy {
             queryParamsHandling: "replace",
             replaceUrl: true
         });
+        if (resetMissing) {
+            this.withHydration(() => this.applyNormalizedSnapshot({}, true));
+        }
         this.applyHydratedUrlState(params);
     }
 

@@ -3,6 +3,8 @@ import type {Params} from "@angular/router";
 import {AppStateService} from "./appstate.service";
 import type {CameraViewState} from "./appstate.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
+import {StyleService} from "../styledata/style.service";
+import {addMetersToLngLat} from "@math.gl/web-mercator";
 
 export const PRESENTATION_BRIDGE_PROTOCOL_VERSION = 2;
 export const PRESENTATION_BRIDGE_READY = "erdblick:presentation:ready";
@@ -27,6 +29,7 @@ interface PresentationCameraFlight {
     pingPong: boolean;
     canvasOnly: boolean;
     waypoints: PresentationCameraWaypoint[];
+    loop: boolean;
 }
 
 interface PresentationApplyStateRequest {
@@ -57,7 +60,8 @@ export class PresentationStateBridgeService implements OnDestroy {
 
     constructor(
         private readonly stateService: AppStateService,
-        private readonly mapViewState: MapViewStateService
+        private readonly mapViewState: MapViewStateService,
+        private readonly styleService: StyleService
     ) {}
 
     /** Enables the bridge for a framed document carrying the presentation opt-in. */
@@ -72,6 +76,7 @@ export class PresentationStateBridgeService implements OnDestroy {
 
         this.browserWindow = browserWindow;
         browserWindow.addEventListener("message", this.handleMessage);
+        browserWindow.addEventListener("keydown", this.handleReviewShortcut, {capture: true});
         browserWindow.parent.postMessage({
             type: PRESENTATION_BRIDGE_READY,
             version: PRESENTATION_BRIDGE_PROTOCOL_VERSION
@@ -82,11 +87,26 @@ export class PresentationStateBridgeService implements OnDestroy {
     /** Removes the global listener and drops work that has not started yet. */
     ngOnDestroy(): void {
         this.browserWindow?.removeEventListener("message", this.handleMessage);
+        this.browserWindow?.removeEventListener("keydown", this.handleReviewShortcut, {capture: true});
         this.stopCameraFlight();
         this.browserWindow = undefined;
         this.parentOrigin = undefined;
         this.queuedRequest = undefined;
     }
+
+    /** Forwards the presentation shortcut when the embedded canvas owns keyboard focus. */
+    private readonly handleReviewShortcut = (event: KeyboardEvent): void => {
+        const target = event.target;
+        if (!event.shiftKey || event.ctrlKey || event.altKey || event.metaKey
+            || event.key.toLowerCase() !== "r"
+            || (target instanceof Element && target.closest("input,textarea,select,[contenteditable=true]"))) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.browserWindow?.parent.postMessage({
+            type: "erdblick:presentation:review-toggle",
+            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION
+        }, this.parentOrigin ?? "*");
+    };
 
     private readonly handleMessage = (event: MessageEvent<unknown>): void => {
         const browserWindow = this.browserWindow;
@@ -188,13 +208,14 @@ export class PresentationStateBridgeService implements OnDestroy {
             const reverse = flight.pingPong && cycle % 2 === 1;
             const travelling = elapsedInCycle < flight.durationMs || turnDurationMs === 0;
             const travelProgress = Math.min(1, elapsedInCycle / flight.durationMs);
-            const easedTravelProgress = smootherStep(travelProgress);
+            const easedTravelProgress = flight.loop ? travelProgress : smootherStep(travelProgress);
             const pathProgress = reverse ? 1 - easedTravelProgress : easedTravelProgress;
             const cameraViewData = interpolateFlight(
                 flight.waypoints,
-                travelling ? pathProgress : reverse ? 0 : 1
+                travelling ? pathProgress : reverse ? 0 : 1,
+                flight.loop
             );
-            cameraViewData.orientation.heading += cycle * Math.PI;
+            if (flight.pingPong) cameraViewData.orientation.heading += cycle * Math.PI;
             if (!travelling) {
                 const turnProgress = (elapsedInCycle - flight.durationMs) / turnDurationMs;
                 cameraViewData.orientation.heading += Math.PI * smootherStep(turnProgress);
@@ -229,6 +250,7 @@ export class PresentationStateBridgeService implements OnDestroy {
                     console.warn("[PresentationStateBridge] Rejected presentation state.", errors);
                     this.postResult(request.requestId, request.origin, false, "invalid-state");
                 } else {
+                    this.styleService.reconcilePresentationStyles();
                     this.postResult(request.requestId, request.origin, true);
                 }
             } catch {
@@ -242,7 +264,7 @@ export class PresentationStateBridgeService implements OnDestroy {
 
     /** Keeps query-authored presentation scenes compatible with native-snapshot scenes. */
     private async applyUrlState(params: Params): Promise<string[]> {
-        await this.stateService.replaceUrlState(params);
+        await this.stateService.replaceUrlState(params, true);
         return [];
     }
 
@@ -293,6 +315,31 @@ function presentationCameraFlight(value: unknown): PresentationCameraFlight | nu
         return null;
     }
     const raw = value as Record<string, unknown>;
+    // Orbit is authored by its target and metre offsets; reuse the flight lifecycle and protocol.
+    if (raw["orbit"] !== undefined) {
+        const orbit = raw["orbit"];
+        if (!isStateObject(orbit) || !Array.isArray(orbit["center"])
+            || orbit["center"].length !== 3
+            || !orbit["center"].every(v => typeof v === "number" && Number.isFinite(v))
+            || Math.abs(orbit["center"][0]) > 180 || Math.abs(orbit["center"][1]) > 80
+            || typeof orbit["radius"] !== "number" || !Number.isFinite(orbit["radius"])
+            || orbit["radius"] < 1 || orbit["radius"] > 100_000
+            || typeof orbit["height"] !== "number" || !Number.isFinite(orbit["height"])
+            || orbit["height"] < 1 || orbit["height"] > 100_000
+            || raw["pingPong"] !== false) return null;
+        const center = orbit["center"] as number[];
+        const radius = orbit["radius"];
+        const height = orbit["height"];
+        const waypoints = Array.from({length: 49}, (_, i) => {
+            const angle = i * Math.PI * 2 / 48;
+            const [lon, lat, alt] = addMetersToLngLat(center,
+                [Math.sin(angle) * radius, Math.cos(angle) * radius, height]);
+            return {lon, lat, alt, heading: angle + Math.PI,
+                pitch: -Math.atan2(height, radius), roll: 0};
+        });
+        const result = presentationCameraFlight({...raw, orbit: undefined, waypoints});
+        return result ? {...result, loop: true} : null;
+    }
     if (!Number.isFinite(raw["durationMs"])
         || Number(raw["durationMs"]) < 1_000
         || Number(raw["durationMs"]) > 300_000
@@ -330,22 +377,24 @@ function presentationCameraFlight(value: unknown): PresentationCameraFlight | nu
         turnDurationMs,
         pingPong: raw["pingPong"],
         canvasOnly,
-        waypoints
+        waypoints,
+        loop: false
     };
 }
 
 /** Interpolates equal-duration segments with continuous position and orientation tangents. */
 function interpolateFlight(
     waypoints: PresentationCameraWaypoint[],
-    progress: number
+    progress: number,
+    loop = false
 ): CameraViewState {
     const segmentPosition = Math.min(1, Math.max(0, progress)) * (waypoints.length - 1);
     const segmentIndex = Math.min(waypoints.length - 2, Math.floor(segmentPosition));
     const amount = segmentPosition - segmentIndex;
     const from = waypoints[segmentIndex];
     const to = waypoints[segmentIndex + 1];
-    const before = waypoints[Math.max(0, segmentIndex - 1)];
-    const after = waypoints[Math.min(waypoints.length - 1, segmentIndex + 2)];
+    const before = waypoints[loop && segmentIndex === 0 ? waypoints.length - 2 : Math.max(0, segmentIndex - 1)];
+    const after = waypoints[loop && segmentIndex + 2 === waypoints.length ? 1 : Math.min(waypoints.length - 1, segmentIndex + 2)];
     const spline = (field: "lon" | "lat" | "alt" | "pitch" | "roll") => catmullRom(
         before[field], from[field], to[field], after[field], amount
     );

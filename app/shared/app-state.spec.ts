@@ -5,6 +5,31 @@ import { z } from 'zod';
 import { AppState, Boolish, MapViewState, StyleState } from './app-state';
 
 describe('AppState', () => {
+    it('does not let in-place edits poison defaults across repeated resets', () => {
+        const original = {enabled: {} as Record<string, boolean>, values: [1]};
+        const state = new AppState(new Map(), {
+            name: 'editable', defaultValue: original,
+            schema: z.object({enabled: z.record(z.string(), z.boolean()), values: z.array(z.number())})
+        });
+        state.getValue().enabled['New Style'] = true;
+        state.getValue().values.push(2);
+        expect(original).toEqual({enabled: {}, values: [1]});
+        state.resetToDefault();
+        expect(state.getValue()).toEqual({enabled: {}, values: [1]});
+        state.getValue().enabled['Another Style'] = true;
+        state.resetToDefault();
+        expect(state.getValue()).toEqual({enabled: {}, values: [1]});
+    });
+    it('retains Map state types and detaches mutable default entries', () => {
+        const state = new AppState(new Map(), {
+            name: 'map', defaultValue: new Map([['option', [true]]]),
+            schema: z.map(z.string(), z.array(z.boolean()))
+        });
+        state.getValue().get('option')!.push(false);
+        state.resetToDefault();
+        expect(state.getValue()).toEqual(new Map([['option', [true]]]));
+        expect(state.getValue()).not.toBe(state.defaultValue);
+    });
     it('serializes boolean values to compact JSON for storage', () => {
         const pool = new Map<string, AppState<unknown>>();
         const state = new AppState(pool, {

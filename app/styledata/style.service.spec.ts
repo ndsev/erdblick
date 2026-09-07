@@ -45,6 +45,21 @@ const createService = (config: any = {styles: []}) => {
 };
 
 describe('StyleService', () => {
+    it('keeps imported styles opt-in across presentation scenes without deleting them', () => {
+        const {service, stateService} = createService();
+        const parse = vi.spyOn(service as any, 'parseWasmStyle').mockReturnValue([
+            {name: () => 'Demo Road', defaultEnabled: () => true}, []
+        ]);
+        (service as any).initializeStyle('name: Demo Road', '', undefined, false, true);
+        stateService.removeStyleVisibility('Demo Road');
+        service.reconcilePresentationStyles();
+        expect(service.styles.get('Demo Road')?.visible).toBe(false);
+        expect(service.styles.has('Demo Road')).toBe(true);
+        stateService.setStyleVisibility('Demo Road', true);
+        service.reconcilePresentationStyles();
+        expect(service.styles.get('Demo Road')?.visible).toBe(true);
+        parse.mockRestore();
+    });
     beforeEach(() => {
         localStorage.clear();
         vi.restoreAllMocks();
