@@ -4,6 +4,19 @@ import type {FeatureSearchStyleRule} from "../shared/feature-search-state";
 import {SearchStyleRuleDraftCodec} from "./search-style-rule-editor.model";
 
 describe("SearchStyleRuleDraftCodec", () => {
+    it.each(["gradient", "categories"] as const)("round-trips and toggles %s fallback", mode => {
+        const codec = new SearchStyleRuleDraftCodec();
+        const rule: FeatureSearchStyleRule = {geometry: ["line"], filter: [], width: 2, opacity: 1,
+            color: {mode, field: "speed", stops: [{value: 10, color: "#123456"}]}};
+        const drafts = codec.toDrafts([rule]);
+        expect(drafts[0].color.fallbackEnabled).toBe(false);
+        expect(codec.fromDrafts(drafts)[0].color).not.toHaveProperty("fallbackColor");
+        drafts[0].color.fallbackEnabled = true;
+        drafts[0].color.fallbackColor = "#654321";
+        expect(codec.fromDrafts(drafts)[0].color).toHaveProperty("fallbackColor", "#654321");
+        drafts[0].color.fallbackEnabled = false;
+        expect(codec.fromDrafts(drafts)[0].color).not.toHaveProperty("fallbackColor");
+    });
     it("round-trips high-fidelity geometry, point radius and expression intent", () => {
         const codec = new SearchStyleRuleDraftCodec();
         const rules: FeatureSearchStyleRule[] = [{

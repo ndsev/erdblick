@@ -79,6 +79,79 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe("PresentationStateBridgeService", () => {
+    it("does not start delayed motion after the parent has left the scene", async () => {
+        const fixture = framedWindow();
+        const camera = {destination: {lon: 11, lat: 48, alt: 100}, orientation: {heading: 0, pitch: -1, roll: 0}};
+        let complete!: () => void;
+        const state = {cameraViewDataState: {getValue: () => camera},
+            replaceUrlState: () => new Promise<void>(resolve => {complete = resolve;})} as unknown as AppStateService;
+        const view = mapViewStateFixture();
+        const bridge = new PresentationStateBridgeService(state, view, styleServiceFixture());
+        bridge.initialize(fixture.host);
+        fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2, requestId: 1,
+            search: '?embed=presentation&v2=1', transitionMs: 2000});
+        fixture.dispatch({type: PRESENTATION_BRIDGE_STOP_FLIGHT, version: 2});
+        complete();
+        await flushMicrotasks();
+        expect(view.presentationCameraViewStateTopic.next).not.toHaveBeenCalled();
+        bridge.ngOnDestroy();
+    });
+    it("opens an authored docked selection even alongside a floating source-data panel", async () => {
+        const fixture = framedWindow();
+        const state = {replaceUrlState: vi.fn(async () => {}), isDockOpen: false, dockActiveTab: 'search', selection: [
+            {undocked: false, features: [{featureId: 'Road.1'}]},
+            {undocked: true, features: [], sourceData: {mapTileKey: 'SourceData:map:layer:1'}}
+        ]} as unknown as AppStateService;
+        const bridge = new PresentationStateBridgeService(state, mapViewStateFixture(), styleServiceFixture());
+        bridge.initialize(fixture.host);
+        fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2, requestId: 1,
+            search: '?embed=presentation&v2=1&sel=fixture'});
+        await flushMicrotasks();
+        expect(state.isDockOpen).toBe(true);
+        expect(state.dockActiveTab).toBe('inspection');
+        bridge.ngOnDestroy();
+    });
+    it("interpolates a keyframe once, takes the short heading route, and keeps the authored destination", async () => {
+        const fixture = framedWindow();
+        let frame: FrameRequestCallback | undefined;
+        Object.assign(fixture.host, {requestAnimationFrame: vi.fn(callback => { frame = callback; return 1; }),
+            cancelAnimationFrame: vi.fn(), matchMedia: () => ({matches: false})});
+        const from = {destination: {lon: 11, lat: 48, alt: 100}, orientation: {heading: 6.2, pitch: -1, roll: 0}};
+        const to = {destination: {lon: 12, lat: 49, alt: 10000}, orientation: {heading: 0.1, pitch: -0.5, roll: 0}};
+        let camera = from;
+        const state = {cameraViewDataState: {getValue: () => camera},
+            replaceUrlState: vi.fn(async () => { camera = to; })} as unknown as AppStateService;
+        const view = mapViewStateFixture();
+        const next = vi.mocked(view.presentationCameraViewStateTopic.next);
+        const bridge = new PresentationStateBridgeService(state, view, styleServiceFixture());
+        bridge.initialize(fixture.host);
+        fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2, requestId: 1,
+            search: '?embed=presentation&v2=1&alt=10000', transitionMs: 2000});
+        await flushMicrotasks();
+        expect(next).toHaveBeenLastCalledWith({targetView: 0, cameraViewData: from});
+        frame!(0); frame!(1000);
+        const middle = next.mock.lastCall![0].cameraViewData;
+        expect(middle.destination.alt).toBeCloseTo(1000);
+        expect(middle.orientation.heading).toBeGreaterThan(6.2);
+        frame!(2000);
+        expect(next).toHaveBeenLastCalledWith({targetView: 0, cameraViewData: to});
+        expect(camera).toBe(to);
+        expect(fixture.host.requestAnimationFrame).toHaveBeenCalledTimes(3);
+        bridge.ngOnDestroy();
+    });
+
+    it("rejects unbounded camera transition durations", async () => {
+        const fixture = framedWindow();
+        const state = {replaceUrlState: vi.fn()} as unknown as AppStateService;
+        const bridge = new PresentationStateBridgeService(state, mapViewStateFixture(), styleServiceFixture());
+        bridge.initialize(fixture.host);
+        for (const transitionMs of [-1, 10001, NaN, '2000']) {
+            fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2, requestId: 1,
+                search: '?embed=presentation&v2=1&alt=100', transitionMs});
+        }
+        expect(state.replaceUrlState).not.toHaveBeenCalled();
+        bridge.ngOnDestroy();
+    });
     it("orbits a geographic target continuously and stops when the scene leaves", () => {
         let frame: FrameRequestCallback | undefined;
         const fixture = framedWindow();

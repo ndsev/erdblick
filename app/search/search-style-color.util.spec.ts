@@ -20,6 +20,11 @@ import {
 } from "./search-style-color.util";
 
 describe("search style color helpers", () => {
+    it.each(["gradient", "categories"] as const)("omits a disabled %s fallback from generated YAML properties", mode => {
+        const properties = searchStyleColorProperties({mode, field: "speed",
+            stops: [{value: 10, color: "#123456"}]});
+        expect(properties["color-scale"]).not.toHaveProperty("fallback");
+    });
     it("uses the fallback while a color scale has no usable stops", () => {
         expect(searchStyleColorProperties({
             mode: "categories",

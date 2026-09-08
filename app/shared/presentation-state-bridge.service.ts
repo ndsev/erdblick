@@ -44,6 +44,8 @@ interface PresentationApplyUrlRequest {
     kind: "url";
     params: Params;
     origin: string;
+    transitionMs: number;
+    fromCamera?: CameraViewState;
 }
 
 type PresentationApplyRequest = PresentationApplyStateRequest | PresentationApplyUrlRequest;
@@ -57,6 +59,8 @@ export class PresentationStateBridgeService implements OnDestroy {
     private applying = false;
     private queuedRequest?: PresentationApplyRequest;
     private flightFrame?: number;
+    private transitionPose?: CameraViewState;
+    private motionGeneration = 0;
 
     constructor(
         private readonly stateService: AppStateService,
@@ -165,7 +169,13 @@ export class PresentationStateBridgeService implements OnDestroy {
                 this.postResult(requestId, event.origin, false, "invalid-search");
                 return;
             }
-            request = {requestId, kind: "url", params, origin: event.origin};
+            const transitionMs = event.data["transitionMs"] ?? 0;
+            if (typeof transitionMs !== "number" || !Number.isFinite(transitionMs) || transitionMs < 0 || transitionMs > 10000) {
+                this.postResult(requestId, event.origin, false, "invalid-message");
+                return;
+            }
+            request = {requestId, kind: "url", params, origin: event.origin, transitionMs,
+                fromCamera: this.transitionPose ? structuredClone(this.transitionPose) : undefined};
         }
 
         this.parentOrigin ??= event.origin;
@@ -230,10 +240,12 @@ export class PresentationStateBridgeService implements OnDestroy {
     }
 
     private stopCameraFlight(): void {
+        this.motionGeneration++;
         if (this.flightFrame !== undefined && this.browserWindow) {
             this.browserWindow.cancelAnimationFrame(this.flightFrame);
         }
         this.flightFrame = undefined;
+        this.transitionPose = undefined;
         this.browserWindow?.document?.body.classList.remove("presentation-canvas-only");
     }
 
@@ -243,6 +255,10 @@ export class PresentationStateBridgeService implements OnDestroy {
         let request: PresentationApplyRequest | undefined = firstRequest;
         while (request && this.browserWindow) {
             try {
+                const duration = request.kind === "url" ? request.transitionMs : 0;
+                const motionGeneration = this.motionGeneration;
+                const from = duration > 0 ? (request.kind === "url" ? request.fromCamera : undefined)
+                    ?? structuredClone(this.stateService.cameraViewDataState.getValue(0)) : undefined;
                 const errors = request.kind === "snapshot"
                     ? await Promise.resolve(this.stateService.replaceSnapshotState(request.state))
                     : await this.applyUrlState(request.params);
@@ -251,6 +267,9 @@ export class PresentationStateBridgeService implements OnDestroy {
                     this.postResult(request.requestId, request.origin, false, "invalid-state");
                 } else {
                     this.styleService.reconcilePresentationStyles();
+                    if (from && !this.queuedRequest && motionGeneration === this.motionGeneration) {
+                        this.transitionCamera(from, structuredClone(this.stateService.cameraViewDataState.getValue(0)), duration);
+                    }
                     this.postResult(request.requestId, request.origin, true);
                 }
             } catch {
@@ -265,7 +284,47 @@ export class PresentationStateBridgeService implements OnDestroy {
     /** Keeps query-authored presentation scenes compatible with native-snapshot scenes. */
     private async applyUrlState(params: Params): Promise<string[]> {
         await this.stateService.replaceUrlState(params, true);
+        // A URL encodes whether each inspection is docked, but not the dock's
+        // open state. Make authored docked selections visible after replacement.
+        if (this.stateService.selection?.some(panel => !panel.undocked && panel.features.length > 0)) {
+            this.stateService.dockActiveTab = "inspection";
+            this.stateService.isDockOpen = true;
+        }
         return [];
+    }
+
+    /** One bounded camera transition; persistent state remains the exact authored destination. */
+    private transitionCamera(from: CameraViewState, to: CameraViewState, durationMs: number): void {
+        const host = this.browserWindow;
+        if (!host || host.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+        let start: number | undefined;
+        const emit = (cameraViewData: CameraViewState) => {
+            this.transitionPose = cameraViewData;
+            this.mapViewState.presentationCameraViewStateTopic.next({targetView: 0, cameraViewData});
+        };
+        const mix = (a: number, b: number, t: number) => a + (b - a) * t;
+        const frame = (time: number) => {
+            if (!this.browserWindow) return;
+            start ??= time;
+            const progress = Math.min(1, (time - start) / durationMs);
+            const t = smootherStep(progress);
+            const angle = (a: number, b: number) => mix(a, unwrapAngle(b, a), t);
+            emit(progress === 1 ? to : {
+                destination: {
+                    lon: mix(from.destination.lon, from.destination.lon + ((to.destination.lon - from.destination.lon + 540) % 360 - 180), t),
+                    lat: mix(from.destination.lat, to.destination.lat, t),
+                    // Log altitude makes both globe-to-city and metre-scale changes legible.
+                    alt: Math.exp(mix(Math.log(Math.max(1, from.destination.alt)), Math.log(Math.max(1, to.destination.alt)), t))
+                },
+                orientation: {heading: angle(from.orientation.heading, to.orientation.heading),
+                    pitch: mix(from.orientation.pitch, to.orientation.pitch, t), roll: angle(from.orientation.roll, to.orientation.roll)},
+                position: [0, 1, 2].map(i => mix(from.position?.[i] ?? 0, to.position?.[i] ?? 0, t)) as [number, number, number]
+            });
+            this.flightFrame = progress < 1 ? host.requestAnimationFrame(frame) : undefined;
+            if (progress === 1) this.transitionPose = undefined;
+        };
+        emit(from);
+        this.flightFrame = host.requestAnimationFrame(frame);
     }
 
     /** Replies only to the pinned parent and never includes application state. */

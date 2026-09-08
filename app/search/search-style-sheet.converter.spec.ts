@@ -52,6 +52,15 @@ describe("search style sheet codec", () => {
         layerIds: readonly string[] = []
     ) => ({name, defaultEnabled, layerIds});
 
+    it.each(["gradient", "categories"] as const)("preserves an omitted %s fallback through YAML", mode => {
+        const rule: FeatureSearchStyleRule = {geometry: ["line"], filter: [], width: 2,
+            color: {mode, field: "speed", stops: [{value: 10, color: "#123456"}]}};
+        const saved = convertSearchStyleRulesToYaml(saveOptions("No fallback"), [rule]);
+        expect((load(saved.source) as any).rules[0]["color-scale"]).not.toHaveProperty("fallback");
+        const loaded = projectStyleSourceForSearch(saved.source, "feature");
+        expect(loaded.rules[0].color).not.toHaveProperty("fallbackColor");
+    });
+
     it("emits deterministic exact-name category-search YAML with flat rules", () => {
         const first = convertSearchStyleRulesToYaml(saveOptions("Team/Road emphasis"), rules);
         const second = convertSearchStyleRulesToYaml(saveOptions("Team/Road emphasis"), rules);
