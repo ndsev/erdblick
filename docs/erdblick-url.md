@@ -99,7 +99,11 @@ Erdblick replaces rather than merges each submitted query, hydrates its existing
 
 This is a narrow embedding transport, not a general automation API. Browser-local stylesheet source text, transient menus, hover state, and in-progress gestures remain outside the URL contract. Deploy the presentation and erdblick as a compatible pair; unsupported viewers are not detected through a timeout or silently reloaded.
 
-Omitted presentation state resets to detached defaults. Imported local styles are
+The optional protocol-v2 `reset` flag defaults to true. Omitted presentation state
+then resets to detached defaults; `reset: false` hydrates the query while preserving
+unaddressed state and open panels. A full reset dismisses runtime searches without
+deleting their saved definitions. Those definitions reopen when edited or after a
+viewer reload, rather than on an unrelated catalog refresh. Imported local styles are
 retained for editing but disabled unless the submitted state explicitly enables
 them. Their YAML sources are not deleted or rewritten by a scene transition.
 

@@ -368,6 +368,8 @@ export class FeatureSearchService {
 
     private searchRunCounter = 0;
     private searchSessionCounter = 0;
+    /** Definitions dismissed by a scene reset stay saved, but do not reopen on catalog refresh. */
+    private presentationDismissedSearches = new Map<string, string>();
     private searchPresentationRevision = 0;
 
     readonly sessionsChanged = new BehaviorSubject<FeatureSearchSession[]>([]);
@@ -638,6 +640,15 @@ export class FeatureSearchService {
 
     /** Reconciles persisted feature-search definitions with runtime sessions. */
     private reconcileFeatureSearchState(definitions: FeatureSearchStateEntry[]): void {
+        const currentIds = new Set(definitions.map(definition => definition.id));
+        for (const id of this.presentationDismissedSearches.keys()) {
+            if (!currentIds.has(id)) this.presentationDismissedSearches.delete(id);
+        }
+        definitions = definitions.filter(definition => {
+            if (this.presentationDismissedSearches.get(definition.id) === JSON.stringify(definition)) return false;
+            this.presentationDismissedSearches.delete(definition.id);
+            return true;
+        });
         const definitionById = new Map(definitions.map(definition => [definition.id, definition]));
         let structuralChange = false;
 
@@ -1316,7 +1327,15 @@ export class FeatureSearchService {
         });
     }
 
-    /** Closes one search session and removes its dock and marker state. */
+    /** Dismisses all runtime searches for a new scene, retaining saved definitions for later edits or reload. */
+    dismissForPresentation(): void {
+        for (const definition of this.stateService.featureSearches) {
+            this.presentationDismissedSearches.set(definition.id, JSON.stringify(definition));
+        }
+        for (const session of [...this.searchSessions]) this.closeRuntimeSearch(session.id);
+    }
+
+    /** Closes one search session and removes its persisted definition. */
     closeSearch(sessionId: string): void {
         if (this.stateService.featureSearches.some(entry => entry.id === sessionId)) {
             this.stateService.removeFeatureSearch(sessionId);

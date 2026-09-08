@@ -79,6 +79,25 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe("PresentationStateBridgeService", () => {
+    it("honors false reset policy and rejects a malformed reset flag", async () => {
+        const fixture = framedWindow();
+        const replaceUrlState = vi.fn().mockResolvedValue(undefined);
+        const service = new PresentationStateBridgeService(
+            {replaceUrlState} as unknown as AppStateService,
+            mapViewStateFixture(), styleServiceFixture()
+        );
+        service.initialize(fixture.host);
+        fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
+            requestId: 20, search: "?embed=presentation&v2=1", reset: false});
+        await flushMicrotasks();
+        expect(replaceUrlState).toHaveBeenCalledWith(expect.anything(), false);
+        replaceUrlState.mockClear();
+        fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
+            requestId: 21, search: "?embed=presentation&v2=1", reset: "false"});
+        await flushMicrotasks();
+        expect(replaceUrlState).not.toHaveBeenCalled();
+        service.ngOnDestroy();
+    });
     it("does not start delayed motion after the parent has left the scene", async () => {
         const fixture = framedWindow();
         const camera = {destination: {lon: 11, lat: 48, alt: 100}, orientation: {heading: 0, pitch: -1, roll: 0}};

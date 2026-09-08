@@ -99,17 +99,18 @@ import {
             </div>
 
             @if (viewDraft.mode !== 'solid') {
-                <label class="search-style-color-fallback">
-                    <input type="checkbox" [ngModel]="viewDraft.fallbackEnabled !== false"
-                           (ngModelChange)="setFallbackEnabled($event)">
-                    Fallback color
+                <div class="search-style-color-fallback">
+                    <label [for]="modeInputId + '-fallback'">Fallback color</label>
+                    <p-toggleswitch [inputId]="modeInputId + '-fallback'"
+                                   [ngModel]="viewDraft.fallbackEnabled !== false"
+                                   (ngModelChange)="setFallbackEnabled($event)"></p-toggleswitch>
                     @if (viewDraft.fallbackEnabled !== false) {
                         <p-colorpicker [ngModel]="viewDraft.fallbackColor" appendTo="body"
                                        [overlayOptions]="colorPickerOverlayOptions"
                                        aria-label="Fallback color"
                                        (ngModelChange)="setFallbackColor($event)"></p-colorpicker>
                     }
-                </label>
+                </div>
             }
 
             @if (colorWarning) {

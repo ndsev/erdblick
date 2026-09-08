@@ -1,9 +1,10 @@
-import {Injectable, OnDestroy} from "@angular/core";
+import {Injectable, OnDestroy, Optional} from "@angular/core";
 import type {Params} from "@angular/router";
 import {AppStateService} from "./appstate.service";
 import type {CameraViewState} from "./appstate.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {StyleService} from "../styledata/style.service";
+import {FeatureSearchService} from "../search/feature.search.service";
 import {addMetersToLngLat} from "@math.gl/web-mercator";
 
 export const PRESENTATION_BRIDGE_PROTOCOL_VERSION = 2;
@@ -45,6 +46,7 @@ interface PresentationApplyUrlRequest {
     params: Params;
     origin: string;
     transitionMs: number;
+    reset: boolean;
     fromCamera?: CameraViewState;
 }
 
@@ -65,7 +67,8 @@ export class PresentationStateBridgeService implements OnDestroy {
     constructor(
         private readonly stateService: AppStateService,
         private readonly mapViewState: MapViewStateService,
-        private readonly styleService: StyleService
+        private readonly styleService: StyleService,
+        @Optional() private readonly searchService?: FeatureSearchService
     ) {}
 
     /** Enables the bridge for a framed document carrying the presentation opt-in. */
@@ -170,11 +173,16 @@ export class PresentationStateBridgeService implements OnDestroy {
                 return;
             }
             const transitionMs = event.data["transitionMs"] ?? 0;
+            const reset = event.data["reset"] ?? true;
+            if (typeof reset !== "boolean") {
+                this.postResult(requestId, event.origin, false, "invalid-message");
+                return;
+            }
             if (typeof transitionMs !== "number" || !Number.isFinite(transitionMs) || transitionMs < 0 || transitionMs > 10000) {
                 this.postResult(requestId, event.origin, false, "invalid-message");
                 return;
             }
-            request = {requestId, kind: "url", params, origin: event.origin, transitionMs,
+            request = {requestId, kind: "url", params, origin: event.origin, transitionMs, reset,
                 fromCamera: this.transitionPose ? structuredClone(this.transitionPose) : undefined};
         }
 
@@ -261,11 +269,12 @@ export class PresentationStateBridgeService implements OnDestroy {
                     ?? structuredClone(this.stateService.cameraViewDataState.getValue(0)) : undefined;
                 const errors = request.kind === "snapshot"
                     ? await Promise.resolve(this.stateService.replaceSnapshotState(request.state))
-                    : await this.applyUrlState(request.params);
+                    : await this.applyUrlState(request.params, request.reset);
                 if (errors.length) {
                     console.warn("[PresentationStateBridge] Rejected presentation state.", errors);
                     this.postResult(request.requestId, request.origin, false, "invalid-state");
                 } else {
+                    if (request.kind === "snapshot" || request.reset) this.searchService?.dismissForPresentation();
                     this.styleService.reconcilePresentationStyles();
                     if (from && !this.queuedRequest && motionGeneration === this.motionGeneration) {
                         this.transitionCamera(from, structuredClone(this.stateService.cameraViewDataState.getValue(0)), duration);
@@ -282,8 +291,8 @@ export class PresentationStateBridgeService implements OnDestroy {
     }
 
     /** Keeps query-authored presentation scenes compatible with native-snapshot scenes. */
-    private async applyUrlState(params: Params): Promise<string[]> {
-        await this.stateService.replaceUrlState(params, true);
+    private async applyUrlState(params: Params, reset: boolean): Promise<string[]> {
+        await this.stateService.replaceUrlState(params, reset);
         // A URL encodes whether each inspection is docked, but not the dock's
         // open state. Make authored docked selections visible after replacement.
         if (this.stateService.selection?.some(panel => !panel.undocked && panel.features.length > 0)) {
