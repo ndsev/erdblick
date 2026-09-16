@@ -2,7 +2,12 @@
 
 The SourceData inspector lets you read the raw payloads that underlie the visible features. Use it when you need to verify converter input, inspect service metadata, or debug why a feature looks different from its original source.
 
-![SourceData inspector](screenshots/sourcedata-inspection.png)
+![A selected San Francisco road, its source-data link buttons, and the highlighted speed-limit source record](screenshots/inspection-source-data.png)
+
+The **selected road (1)** exposes converted feature attributes. Use the
+**source links (2)** beside an attribute to open its referenced raw data. The
+**source record (3)** shows the original `SPEED_LIMIT_IMPERIAL` value of
+`50` mph, with the referenced range highlighted in the raw tree.
 
 ## Ways to Open SourceData
 
@@ -24,7 +29,7 @@ narrows it to the corresponding metadata entry:
 
 ![Map metadata list filtered to Metadata-ServiceDefinition](screenshots/03-metadata-search.png)
 
-![Shortcut from inspector to SourceData](screenshots/goto-sourcedata.png)
+The source-link buttons highlighted above open the matching raw record.
 
 ## Dedicated SourceData Panels
 
@@ -74,7 +79,6 @@ an earlier visit, and scrolls the raw tree to the first matching row.
 The selected source range remains aligned with its feature inspection while
 the optional Address and Type columns expose the raw record boundaries:
 
-![Selected SourceData range with Address and Type columns](screenshots/28c-source-data-reference.png)
 
 ## Hints for Efficient Debugging
 

@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_STATE_SNAPSHOT, TEST_VIEW_POSITIONS } from '../utils/test-params';
 import { loadStateSnapshotLocalStorageEntries } from '../utils/state-snapshots';
+import type {ErdblickDebugApi} from '../../app/app.debugapi.component';
 
 const DARK_MODE_KEY = 'ui.darkMode';
 const FORCED_DARK_MODE_SETTING = 'on';
@@ -28,8 +29,10 @@ declare global {
          * we only describe the surface we rely on.
          */
         ebDebug?: {
+            subsetRenderQueue: ErdblickDebugApi['subsetRenderQueue'];
+            subsetRenderPresentation: ErdblickDebugApi['subsetRenderPresentation'];
             /** Builds the canonical feature-layer tile key for a map/layer/tile tuple. */
-            mapTileKey: (mapId: string, layerId: string, tileId: string | number | bigint) => string;
+            mapTileKey: ErdblickDebugApi['mapTileKey'];
             /** Exposes the initialized native core for deterministic coordinate helpers. */
             coreLib: () => any;
             /** Loads one exact feature through the inspection-only restricted tile path. */
@@ -39,16 +42,7 @@ declare global {
                 keyFilter?: string
             ) => Promise<Record<string, unknown>>;
             /** Application state used to drive the same selection path as picking and search. */
-            stateService: {
-                readonly numViews: number;
-                readonly mode2dState: {
-                    getValue(viewIndex: number): boolean;
-                };
-                exportSnapshot(): Record<string, unknown>;
-                setSelection: (
-                    features: Array<{mapTileKey: string; featureId: string}>
-                ) => void;
-            };
+            stateService: ErdblickDebugApi['stateService'];
             /**
              * Serialised camera setter used for synchronising camera positions
              * across views in tests.
@@ -77,7 +71,9 @@ function appendCoverage(entries: unknown[], kind: 'js' | 'css'): void {
         return;
     }
 
-    const outDir = path.join(process.cwd(), 'coverage', 'playwright');
+    const outDir = process.env['EB_PLAYWRIGHT_COVERAGE_DIR']
+        ? path.resolve(process.env['EB_PLAYWRIGHT_COVERAGE_DIR'])
+        : path.join(process.cwd(), 'coverage', 'playwright');
     fs.mkdirSync(outDir, { recursive: true });
 
     const outFile = path.join(outDir, `v8-${kind}-coverage.ndjson`);
@@ -99,6 +95,7 @@ function appendCoverage(entries: unknown[], kind: 'js' | 'css'): void {
  */
 type SnapshotFixtures = {
     stateSnapshot: string | null;
+    darkMode: 'on' | 'off' | 'auto';
 };
 
 /** Computes the packed tile id that contains one deterministic test viewport position. */
@@ -111,11 +108,12 @@ async function packedTileIdForTestPosition(locationIndex = 0): Promise<number> {
 
 export const test = base.extend<SnapshotFixtures>({
     stateSnapshot: [TEST_STATE_SNAPSHOT, { option: true }],
-    context: async ({ context, stateSnapshot }, use) => {
+    darkMode: [FORCED_DARK_MODE_SETTING, {option: true}],
+    context: async ({ context, stateSnapshot, darkMode }, use) => {
         const snapshotEntries = loadStateSnapshotLocalStorageEntries(stateSnapshot);
         await context.addInitScript(([key, value]) => {
             window.localStorage.setItem(key, value);
-        }, [DARK_MODE_KEY, FORCED_DARK_MODE_SETTING]);
+        }, [DARK_MODE_KEY, darkMode]);
         if (snapshotEntries) {
             await context.addInitScript((entries) => {
                 for (const [key, value] of Object.entries(entries)) {

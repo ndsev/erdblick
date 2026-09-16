@@ -51,3 +51,17 @@ When you report a problem, including a few concrete details makes it much easier
 - Screenshot of the diagnostics/statistics view plus any visible errors.
 - The URL that reproduces the issue for you.
 - Relevant snippets of your backend configuration (for example the mapget configuration YAML that defines your sources) if the bug affects only specific maps or layers.
+
+## Recovering from a datasource tile error
+
+With the tile grid enabled, a red tile overlay indicates a failed tile request.
+The diagnostics error count is also available with the grid hidden. Open the log
+to identify the datasource and error, restore the source or correct its
+configuration, then reload the view. Reloading alone cannot repair an
+unavailable source.
+
+
+Here the source is available again: the red overlay has disappeared and the
+**status popover (1)** shows completed loading. See the
+[failed-tile example](erdblick-diagnostics.md#tile-loading-overlays) for the
+corresponding error state.

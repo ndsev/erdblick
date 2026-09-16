@@ -16,7 +16,7 @@ import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
                 @if (!environment.visualizationOnly) {
                     <main-bar></main-bar>
                     <coordinates-panel [coordinatesVisible]="coordinatesPolicy.effectiveEnabled"></coordinates-panel>
-                    <div class="dock-toggle" (click)="toggleDock()">
+                    <div class="dock-toggle" data-testid="dock-toggle" (click)="toggleDock()">
                         @if (stateService.isDockOpen) {
                             <span class="material-symbols-outlined" pTooltip="Collapse dock">
                                 chevron_forward

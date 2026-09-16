@@ -2,7 +2,11 @@
 
 Inspection is the fastest way to understand a selected feature in erdblick. Each selection opens a panel with attributes, relations, geometry, validity information, and links back to SourceData. Panels can stay docked, be undocked into dialogs, or participate in the comparison dialog.
 
-![erdblick UI](screenshots/feature-inspection-multi.png)
+![A locked lane and a transient selection from NDS.Island-6](screenshots/inspection-multiple.png)
+
+Click a panel title to lock its selection while exploring another feature.
+The unlocked panel shows the transient selection and is reused on the next click.
+Selection colors connect each inspection to its geometry on the map.
 
 ## Building a Selection
 
@@ -18,7 +22,7 @@ Selections persist until you close the panel or clear the stored viewer state.
 When several rendered features overlap at the pointer, the drill-pick menu
 lists the individual candidates and offers a **Select all** action:
 
-![Drill-pick menu listing three overlapping CaptureFeature candidates](screenshots/20-drill-pick-context-menu.png)
+![Drill-pick menu for overlapping San Francisco lane and road features](screenshots/20-drill-pick-context-menu.png)
 
 ## Working With Panels
 
@@ -34,13 +38,16 @@ The inspection dock is a small workspace in its own right:
 When you keep several locked panels around, use consistent colors and titles so later comparison work stays readable.
 
 While selection data is still pending, the dock opens an immediate loading
-shell instead of leaving the workspace without feedback:
+shell instead of leaving the workspace without feedback.
 
-![Inspection dock showing its loading title and progress indicator](screenshots/28a-inspection-loading.png)
 
 ## Understanding the Tree
 
-![erdblick UI](screenshots/feature-inspection-details.png)
+![NDS.Island-6 lane attributes and source references](screenshots/inspection-details.png)
+
+The **selected lane** has a **120 km/h speed-limit attribute (2)**.
+The surrounding tree keeps identifiers, basic attributes, attribute layers,
+relations, and geometry together.
 
 The tree view mirrors the internal inspection model rather than a flattened table:
 
@@ -67,7 +74,8 @@ retained, but attributes such as navigation targets are removed.
 
 Datasource-specific inspection trees also preserve resolved hierarchies. The
 NDS.Classic POI example below expands a resolved collection from its top-level
-category through `Food` to the selected `Restaurant` leaf:
+structure to the selected `Restaurant` leaf. The collection also contains
+its resolved parent categories, including `Food` and `Top level`:
 
 ![Resolved multi-level NDS.Classic POI category hierarchy](screenshots/36-classic-poi-hierarchy.png)
 
@@ -83,18 +91,12 @@ describe the source model; they do not encode presentation fidelity.
 
 Search result selections can point at the same validity targets. When a feature-search result was produced in attribute scope, selecting the result focuses the owning feature and highlights the matched attribute or validity when that target is available.
 
-These two frames keep the query, camera, and feature fixed before and after
-selecting its result. The selected state synchronizes Search, inspection, and
-the validity highlight on the map:
+Use **Highlight Attr/Validity** in the attribute row menu to pin a validity
+highlight. Here, the intersection's `PROHIBITED_TRANSITION` attribute marks
+three forbidden turns. The highlight stays visible when the pointer leaves
+the inspection tree.
 
-![Matching feature before selecting its search result](screenshots/27a-interaction-neutral.png)
-
-![Selected search result synchronized with inspection and map validity](screenshots/27b-interaction-selected.png)
-
-The expanded inspection tree exposes relative, indexed-range, and exact
-attribute-point qualifiers on the same deterministic feature:
-
-![Feature validity and SourceData qualifiers in inspection](screenshots/28b-feature-validity-inspection.png)
+![Pinned prohibited-turn validities at a Berlin intersection](screenshots/27b-interaction-selected.png)
 
 ### Inspection data boundary
 
@@ -106,6 +108,11 @@ feature wrapper is released with the inspection; it is never inserted into a
 viewport tile cache.
 
 ### Searching From Inspection
+
+![The attribute row menu offers Search for key/value](screenshots/inspection-search-menu.png)
+
+Open the row menu on `laneGroupId` and choose **Search for key/value**
+to find other features in the same group.
 
 The row action menu contains two search helpers for rows that expose a search path:
 
@@ -132,9 +139,17 @@ Typical workflow:
 5. Use the Search panel to inspect, group, style, or export all matching results.
 6. Keep the original inspection locked and compare selected search results beside it when you need a reference/candidate workflow.
 
+![The generated search retains the inspected map and layer](screenshots/inspection-search-results.png)
+
+The generated search inherits the **map and layer (1)** from the inspected
+lane, with the original attribute still visible alongside its results.
+
 ## Comparison Dialog
 
-![erdblick UI](screenshots/feature-inspection-comparison.png)
+![Speed-limit comparison between two NDS.Island-6 lanes](screenshots/inspection-comparison.png)
+
+Use the **shared filter (1)** to bring the same attribute into view for both
+features. This example compares their `speedLimitKmh` values.
 
 The panel action menu can open the **Inspection Comparison** dialog. This is the best way to compare several features side by side without manually arranging multiple docked panels.
 

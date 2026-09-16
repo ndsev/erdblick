@@ -4,6 +4,11 @@ Erdblick exposes loading, rendering, backend, and logging state directly in the 
 
 ## Status at a Glance
 
+![Tile and backend status in the progress popover](screenshots/diagnostics-progress.png)
+
+The **status popover (1)** brings tile progress and backend connection state
+together, with actions to open statistics, inspect logs, or export diagnostics.
+
 The top-right side of the main bar contains the diagnostics indicator:
 
 - While tiles are still being fetched or rendered, it shows a spinner.
@@ -22,12 +27,20 @@ Click the indicator to open the progress popover. It shows:
 
 ## Tile Loading Overlays
 
-Erdblick draws tile-status overlays directly on the map, even when tile borders are disabled:
+Enable the tile grid to see tile-status overlays directly on the map:
 
 - **Empty**: translucent gray fill
 - **Error**: translucent red fill
 
 These overlays are the fastest way to distinguish "still loading", "loaded but empty", and "backend error".
+The spinner stops once all work has completed or failed; failed tiles remain
+in the error count and do not count as successfully loaded.
+
+![A failed overlay tile shown in red with its error count](screenshots/tile-error.png)
+
+The **status popover (1)** reports failed tiles while the red overlay marks
+the affected area. Other road data remains visible. Check the log for the failing
+datasource before reloading.
 
 ## Performance Statistics
 
@@ -50,7 +63,10 @@ the currently filtered loaded tiles:
 
 The Peak, Average, and Min columns are available for every performance metric.
 
-![Performance statistics with Age, Peak, Average, and Min](screenshots/16-performance-age-min.png)
+![Performance statistics for the Munich city scene](screenshots/performance.png)
+
+Use the **layer and tile filters** to narrow the measurements to the data
+you are investigating. Values describe the current session, not a benchmark.
 
 Use it when:
 
