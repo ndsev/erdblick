@@ -1203,13 +1203,15 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                 const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
                 const payloadText = this.decoder.decode(payloadBytes);
                 const payload = JSON.parse(payloadText) as MapTileStreamStatusPayload;
-                if (!this.matchesCurrentRequest(payload.requestId)) {
-                    return;
-                }
+                // Filter progress belongs to a filter generation, which can span
+                // viewport requests. Its subscriber validates that identity.
                 if (payload.type === MAP_TILE_STREAM_FILTER_STATUS_TYPE) {
                     if (this.onFilterStatus) {
                         this.onFilterStatus(payload as unknown as MapTileStreamFilterStatusPayload);
                     }
+                    return;
+                }
+                if (!this.matchesCurrentRequest(payload.requestId)) {
                     return;
                 }
                 if (this.onStatus) {

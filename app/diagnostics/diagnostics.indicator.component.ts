@@ -150,11 +150,13 @@ export class DiagnosticsIndicatorComponent implements AfterViewInit, OnDestroy {
     /** Shows the spinner while backend or rendering progress is still incomplete. */
     private shouldShowSpinner(snapshot: DiagnosticsSnapshot): boolean {
         return !this.isCounterComplete(snapshot.progress.backend)
-            || !this.isCounterComplete(snapshot.progress.rendered);
+            || !this.isCounterComplete(snapshot.progress.rendered, snapshot.tiles.errors);
     }
 
     /** Treats counters with no total as already complete to avoid spinner lockup. */
-    private isCounterComplete(counter: ProgressCounter): boolean {
-        return !counter.total || counter.done >= counter.total;
+    private isCounterComplete(counter: ProgressCounter, errors = 0): boolean {
+        // Failed tiles are terminal work, while the displayed loaded count
+        // continues to describe only successful tiles.
+        return !counter.total || counter.done + errors >= counter.total;
     }
 }

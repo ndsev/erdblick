@@ -337,6 +337,29 @@ describe('MapTileStreamClient', () => {
         }
     });
 
+    it('delivers generation-scoped filter errors after request-context negotiation', () => {
+        const client = new MapTileStreamClient('/interactive');
+        const filterStatus = vi.fn();
+        const requestStatus = vi.fn();
+        try {
+            client.withFilterStatusCallback(filterStatus);
+            client.withStatusCallback(requestStatus);
+            client['latestRequestedRequestId'] = 3;
+            client['handleFrame'](jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context', requestId: 3
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+            const status = {
+                type: 'mapget.filter.status', filterId: 'roads', generation: 7,
+                state: 'Failed', error: 'source unavailable'
+            };
+            client['handleFrame'](jsonFrame(MAP_TILE_STREAM_TYPE_STATUS, status), MAP_TILE_STREAM_TYPE_STATUS);
+            expect(filterStatus).toHaveBeenCalledWith(status);
+            expect(requestStatus).not.toHaveBeenCalled();
+        } finally {
+            client.destroy();
+        }
+    });
+
     it('stores sourcesRevision from request-context frames', async () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;
