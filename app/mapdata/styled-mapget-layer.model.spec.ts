@@ -2,20 +2,26 @@ import {Subject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 import {FilterTileState} from "./filter-tile-state.model";
 import {StyledMapgetLayer} from "./styled-mapget-layer.model";
+import {partitionKey, tilePartition} from "./partition.model";
 
 describe("StyledMapgetLayer presentation refs", () => {
     it("publishes one removal event for a complete coverage delta", () => {
         const layer = Object.create(StyledMapgetLayer.prototype) as any;
         const first = new FilterTileState(
-            "map", "layer", 41, "map/layer/41", 1
+            "map", "layer", tilePartition(41), "map/layer/41", 1
         );
         const second = new FilterTileState(
-            "map", "layer", 42, "map/layer/42", 1
+            "map", "layer", tilePartition(42), "map/layer/42", 1
         );
         layer.disposed = false;
-        layer.coverage = {tileIds: [41, 42]};
+        layer.coverage = {
+            partitions: [tilePartition(41), tilePartition(42)]
+        };
         layer.coverageVersionValue = 0;
-        layer.tileStates = new Map([[41, first], [42, second]]);
+        layer.tileStates = new Map([
+            [partitionKey(first.partition), first],
+            [partitionKey(second.partition), second]
+        ]);
         layer.retiredTileStates = new Map();
         layer.tileStatePresentationRefs = new Map();
         layer.events = new Subject();
@@ -34,8 +40,8 @@ describe("StyledMapgetLayer presentation refs", () => {
             states: [first, second]
         }]);
         expect(layer.retiredTileStates).toEqual(new Map([
-            [41, first],
-            [42, second]
+            [partitionKey(first.partition), first],
+            [partitionKey(second.partition), second]
         ]));
     });
 
@@ -48,7 +54,7 @@ describe("StyledMapgetLayer presentation refs", () => {
         const state = new FilterTileState(
             "map",
             "layer",
-            42,
+            tilePartition(42),
             "map/layer/42",
             1
         );
@@ -56,7 +62,7 @@ describe("StyledMapgetLayer presentation refs", () => {
 
         layer.retainTileState(state);
         layer.retainTileState(state);
-        layer.retiredTileStates.set(state.tileId, state);
+        layer.retiredTileStates.set(state.partitionKey, state);
         layer.disposeRetiredTileStates();
 
         expect(state.subsetBlob).not.toBeNull();
@@ -84,7 +90,7 @@ describe("StyledMapgetLayer presentation refs", () => {
         const state = new FilterTileState(
             "map",
             "layer",
-            42,
+            tilePartition(42),
             "map/layer/42",
             1
         );
@@ -96,7 +102,7 @@ describe("StyledMapgetLayer presentation refs", () => {
             sourceId: "source",
             mapId: "map",
             layerId: "layer",
-            tileId: 42,
+            partition: tilePartition(42),
             name: "mesh.glb",
             incarnation: 0
         });

@@ -61,7 +61,7 @@ public:
 
         /** Source-data backlink attached to an inspection node. */
         struct SourceDataReference {
-            int32_t tileId_;
+            mapget::PartitionId partitionId_;
             uint64_t address_;
             std::string layerId_;
             std::string qualifier_;

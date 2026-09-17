@@ -21,4 +21,18 @@ export class MapgetLayer {
         this.key = `${mapId}/${layerId}`;
         Object.freeze(this);
     }
+
+    /** Addressing mode advertised by mapget; omitted means legacy tile mode. */
+    get partitionKind(): "tile" | "object" {
+        return this.info.partitionKind === "object" ? "object" : "tile";
+    }
+
+    /** Fixed spatial level used only to discover object associations. */
+    get tileAssociationLevel(): number | null {
+        const level = Number(this.info.tileAssociationLevel);
+        return this.partitionKind === "object" &&
+            Number.isInteger(level) && level >= 0 && level <= 15
+            ? level
+            : null;
+    }
 }

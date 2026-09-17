@@ -48,6 +48,7 @@ import {
     clampLod3TileThreshold,
     DEFAULT_LOD3_TILE_THRESHOLD
 } from "./lod-policy";
+import {parseMapPartitionKey} from "../mapdata/partition.model";
 
 export {
     AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
@@ -3859,9 +3860,9 @@ export class AppStateService implements OnDestroy {
         let selectionChanged = false;
 
         const parseKey = (tileKey: string): {mapId: string; mapLayerId: string} | undefined => {
-            let parsed: [string, string, number];
+            let parsed: [string, string, unknown];
             try {
-                parsed = coreLib.parseMapTileKey(tileKey) as [string, string, number];
+                parsed = parseMapPartitionKey(coreLib, tileKey);
             } catch {
                 return undefined;
             }

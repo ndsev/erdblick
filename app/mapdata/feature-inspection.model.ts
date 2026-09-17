@@ -5,6 +5,11 @@ import type {
 import {uint8ArrayToWasm} from "../integrations/wasm";
 import type {TileFeatureId} from "../shared/appstate.service";
 import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
+import {
+    parsePartition,
+    partitionKey,
+    type PartitionId
+} from "./partition.model";
 
 /**
  * One feature-restricted `/tiles` response retained only by inspection models.
@@ -17,7 +22,9 @@ export class InspectionFeatureTile {
     readonly stringPoolId: string;
     readonly mapName: string;
     readonly layerName: string;
-    readonly tileId: number;
+    readonly partition: PartitionId;
+    readonly partitionKey: string;
+    readonly tileId: number | null;
     readonly legalInfo: string;
     readonly numFeatures: number;
     readonly conversionTimestampMs: number | null;
@@ -31,11 +38,12 @@ export class InspectionFeatureTile {
         const metadata = uint8ArrayToWasm(
             data => parser.readTileLayerMetadata(data),
             blob
-        ) as {
+        ) as unknown as {
             id: string;
             stringPoolId: string;
             mapName: string;
             layerName: string;
+            partition: unknown;
             tileId: number;
             legalInfo?: string;
             numFeatures: number;
@@ -46,7 +54,11 @@ export class InspectionFeatureTile {
         this.stringPoolId = metadata.stringPoolId;
         this.mapName = metadata.mapName;
         this.layerName = metadata.layerName;
-        this.tileId = Number(metadata.tileId);
+        this.partition = parsePartition(metadata.partition);
+        this.partitionKey = partitionKey(this.partition);
+        this.tileId = this.partition.kind === "tile"
+            ? this.partition.id
+            : null;
         this.legalInfo = metadata.legalInfo ?? "";
         this.numFeatures = Math.max(0, Math.floor(Number(metadata.numFeatures)));
         const timestamp = Number(metadata.conversionTimestampMs);

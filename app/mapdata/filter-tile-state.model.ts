@@ -1,4 +1,9 @@
 import type {TileSubsetDelivery} from "./filter-subscription.model";
+import {
+    partitionKey,
+    partitionsEqual,
+    type PartitionId
+} from "./partition.model";
 
 export type FilterTileStatus = "pending" | "ready" | "error";
 
@@ -6,7 +11,7 @@ export interface TileSubsetDependency {
     sourceTileKey: string;
     mapId: string;
     layerId: string;
-    tileId: number;
+    partition: PartitionId;
     sourceFeatureCount: number;
 }
 
@@ -52,11 +57,21 @@ export class FilterTileState {
     constructor(
         readonly mapId: string,
         readonly layerId: string,
-        readonly tileId: number,
+        readonly partition: PartitionId,
         readonly mapTileKey: string,
         generation: number
     ) {
         this.pendingGeneration = generation;
+    }
+
+    /** Stable tagged key used by presentation maps and expiry ownership. */
+    get partitionKey(): string {
+        return partitionKey(this.partition);
+    }
+
+    /** Compatibility accessor for genuinely spatial tile-only consumers. */
+    get tileId(): number | null {
+        return this.partition.kind === "tile" ? this.partition.id : null;
     }
 
     /** Retain the previous ready value while marking a newer generation pending. */
@@ -89,7 +104,7 @@ export class FilterTileState {
     ): boolean {
         if (delivery.mapId !== this.mapId ||
             delivery.layerId !== this.layerId ||
-            delivery.tileId !== this.tileId ||
+            !partitionsEqual(delivery.partition, this.partition) ||
             delivery.mapTileKey !== this.mapTileKey) {
             throw new Error(
                 `Subset identity mismatch: expected '${this.mapTileKey}', got '${delivery.mapTileKey}'.`
@@ -116,7 +131,7 @@ export class FilterTileState {
         const localDependencies = dependencies.filter(dependency =>
             dependency.mapId === this.mapId &&
             dependency.layerId === this.layerId &&
-            Number(dependency.tileId) === this.tileId
+            partitionsEqual(dependency.partition, this.partition)
         );
         let sourceFeatureCount: number | null = null;
         if (localDependencies.length === 1) {

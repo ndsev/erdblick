@@ -1439,7 +1439,10 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         tileLayer.stringPoolId(),
         tileLayer.id().mapId_,
         tileLayer.id().layerId_,
-        tileLayer.tileId().value(),
+        *JsValue::fromPartition(tileLayer.partitionId()),
+        tileLayer.partitionId().kind() == mapget::PartitionKind::Tile
+            ? tileLayer.tileId().value()
+            : 0,
         tileLayer.legalInfo() ? *tileLayer.legalInfo() : "",
         tileLayer.error() ? *tileLayer.error() : "",
         numFeatures,
@@ -1464,7 +1467,7 @@ TileLayerParser::TileSubsetLayerMetadata TileLayerParser::readTileSubsetLayerMet
             {"sourceTileKey", JsValue(dependency.sourceTileKey_.toString())},
             {"mapId", JsValue(dependency.sourceTileKey_.mapId_)},
             {"layerId", JsValue(dependency.sourceTileKey_.layerId_)},
-            {"tileId", JsValue(dependency.sourceTileKey_.tileId_.value())},
+            {"partition", JsValue::fromPartition(dependency.sourceTileKey_.partitionId_)},
             {"sourceFeatureCount", JsValue(dependency.sourceFeatureCount_)},
         }));
     }

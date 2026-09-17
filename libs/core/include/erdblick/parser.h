@@ -59,6 +59,9 @@ public:
         std::string stringPoolId;
         std::string mapName;
         std::string layerName;
+        /** Tagged partition identity; object ids remain decimal strings. */
+        NativeJsValue partition;
+        /** Tile-only compatibility field; zero for object partitions. */
         int32_t tileId;
         std::string legalInfo;
         std::string error;

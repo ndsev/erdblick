@@ -1,4 +1,10 @@
 import type {MapTileStreamFilterStatusPayload} from "./tilestream";
+import {
+    partitionJson,
+    partitionKey,
+    partitionsEqual,
+    type PartitionId
+} from "./partition.model";
 
 /** JSON scalar values accepted by mapget filter bindings. */
 export type FilterBindingValue = null | boolean | number | string;
@@ -38,10 +44,10 @@ export interface FilterSubscriptionDefinition {
 
 /** Mutable output demand for one filter definition. Order is significant. */
 export interface FilterSubscriptionCoverage {
-    tileIds: number[];
-    priorityTileIds?: number[];
+    partitions: PartitionId[];
+    priorityPartitions?: PartitionId[];
     roots?: Array<{
-        tileId: number;
+        partition: PartitionId;
         typeId?: string;
         featureId: string | Array<string | number>;
     }>;
@@ -54,7 +60,8 @@ export interface TileSubsetDelivery {
     readonly generation: number;
     readonly mapId: string;
     readonly layerId: string;
-    readonly tileId: number;
+    readonly partition: PartitionId;
+    readonly partitionKey: string;
     readonly mapTileKey: string;
     readonly stringPoolId: string;
     readonly conversionTimestampMs: number | null;
@@ -63,7 +70,7 @@ export interface TileSubsetDelivery {
         sourceTileKey: string;
         mapId: string;
         layerId: string;
-        tileId: number;
+        partition: PartitionId;
         sourceFeatureCount: number;
     }>;
     readonly issues: Array<{
@@ -94,7 +101,10 @@ export interface FilterSubscriptionCallbacks {
         delivery: TileSubsetDelivery,
         remainsPending: boolean
     ): FilterTileInstallResult;
-    onTilesPending?(tileIds: readonly number[], generation: number): void;
+    onPartitionsPending?(
+        partitions: readonly PartitionId[],
+        generation: number
+    ): void;
     onStatus?(status: MapTileStreamFilterStatusPayload): void;
     onError?(message: string): void;
     onRequestSynchronized?(): void;
@@ -104,13 +114,16 @@ export interface FilterSubscriptionCallbacks {
 export interface FilterSubscriptionOwner {
     updateFilterSubscription(ref: FilterSubscriptionRef, force: boolean): void;
     releaseFilterSubscription(ref: FilterSubscriptionRef): void;
-    updateFilterTileExpiry?(
+    updateFilterPartitionExpiry?(
         ref: FilterSubscriptionRef,
-        tileId: number,
+        partition: PartitionId,
         valueVersion: number,
         expiresAtMs: number | null
     ): void;
-    cancelFilterTileExpiries?(ref: FilterSubscriptionRef, tileIds?: readonly number[]): void;
+    cancelFilterPartitionExpiries?(
+        ref: FilterSubscriptionRef,
+        partitions?: readonly PartitionId[]
+    ): void;
 }
 
 function cloneDefinition(definition: FilterSubscriptionDefinition): FilterSubscriptionDefinition {
@@ -125,9 +138,16 @@ function cloneDefinition(definition: FilterSubscriptionDefinition): FilterSubscr
 
 function cloneCoverage(coverage: FilterSubscriptionCoverage): FilterSubscriptionCoverage {
     return {
-        tileIds: [...coverage.tileIds],
-        ...(coverage.priorityTileIds ? {priorityTileIds: [...coverage.priorityTileIds]} : {}),
-        ...(coverage.roots ? {roots: structuredClone(coverage.roots)} : {})
+        partitions: coverage.partitions.map(partitionJson),
+        ...(coverage.priorityPartitions ? {
+            priorityPartitions: coverage.priorityPartitions.map(partitionJson)
+        } : {}),
+        ...(coverage.roots ? {
+            roots: coverage.roots.map(root => ({
+                ...structuredClone(root),
+                partition: partitionJson(root.partition)
+            }))
+        } : {})
     };
 }
 
@@ -160,19 +180,34 @@ function rootsEqual(
     return leftRoots.length === rightRoots.length &&
         leftRoots.every((root, index) => {
             const other = rightRoots[index];
-            return root.tileId === other.tileId &&
+            return partitionsEqual(root.partition, other.partition) &&
                 root.typeId === other.typeId &&
                 featureIdsEqual(root.featureId, other.featureId);
         });
 }
 
-/** Compares ordered coverage structurally; tile and root order are semantic. */
+function orderedPartitionsEqual(
+    left: readonly PartitionId[] | undefined,
+    right: readonly PartitionId[] | undefined
+): boolean {
+    const leftValues = left ?? [];
+    const rightValues = right ?? [];
+    return leftValues.length === rightValues.length &&
+        leftValues.every((value, index) =>
+            partitionsEqual(value, rightValues[index])
+        );
+}
+
+/** Compares ordered coverage structurally; partition and root order are semantic. */
 export function filterSubscriptionCoverageEqual(
     left: FilterSubscriptionCoverage,
     right: FilterSubscriptionCoverage
 ): boolean {
-    return orderedValuesEqual(left.tileIds, right.tileIds) &&
-        orderedValuesEqual(left.priorityTileIds, right.priorityTileIds) &&
+    return orderedPartitionsEqual(left.partitions, right.partitions) &&
+        orderedPartitionsEqual(
+            left.priorityPartitions,
+            right.priorityPartitions
+        ) &&
         rootsEqual(left.roots, right.roots);
 }
 
@@ -180,7 +215,7 @@ export function filterSubscriptionCoverageEqual(
  * One independently owned filter demand.
  *
  * Definition and exact-root replacement advance the semantic generation.
- * Tile coverage and priority changes retain it, allowing mapget to preserve
+ * Partition coverage and priority changes retain it, allowing mapget to preserve
  * overlapping pending work. The transport never stores delivered
  * subsets: the callback receives the immutable byte value and its metadata.
  */
@@ -190,10 +225,10 @@ export class FilterSubscriptionRef {
     private generationValue = 1;
     private releasedValue = false;
     private suspendedValue = false;
-    private readonly coveredTileIds = new Set<number>();
-    private readonly pendingTileIds = new Set<number>();
-    private readonly acceptedValueVersionsByTile = new Map<number, number>();
-    private readonly expiredWhileSuspended = new Map<number, number>();
+    private readonly coveredPartitions = new Map<string, PartitionId>();
+    private readonly pendingPartitionKeys = new Set<string>();
+    private readonly acceptedValueVersionsByPartition = new Map<string, number>();
+    private readonly expiredWhileSuspended = new Map<string, number>();
 
     constructor(
         private readonly owner: FilterSubscriptionOwner,
@@ -204,8 +239,8 @@ export class FilterSubscriptionRef {
     ) {
         this.definitionValue = cloneDefinition(definition);
         this.coverageValue = cloneCoverage(coverage);
-        this.resetCoveredTiles();
-        this.resetPendingTiles();
+        this.resetCoveredPartitions();
+        this.resetPendingPartitions();
     }
 
     get generation(): number {
@@ -221,20 +256,20 @@ export class FilterSubscriptionRef {
     }
 
     /** Number of output keys currently projected into the backend snapshot. */
-    get pendingTileCount(): number {
+    get pendingPartitionCount(): number {
         return this.releasedValue || this.suspendedValue
             ? 0
-            : this.pendingTileIds.size;
+            : this.pendingPartitionKeys.size;
     }
 
     /** Returns whether one covered output is currently awaiting acceptance. */
-    isPending(tileId: number): boolean {
-        return this.pendingTileIds.has(Number(tileId));
+    isPending(partition: PartitionId): boolean {
+        return this.pendingPartitionKeys.has(partitionKey(partition));
     }
 
     /** Returns whether one output identity still belongs to current coverage. */
-    covers(tileId: number): boolean {
-        return this.coveredTileIds.has(Number(tileId));
+    covers(partition: PartitionId): boolean {
+        return this.coveredPartitions.has(partitionKey(partition));
     }
 
     /** Replaces both immutable definition and output coverage as one generation. */
@@ -251,7 +286,7 @@ export class FilterSubscriptionRef {
         }
         this.definitionValue = nextDefinition;
         this.coverageValue = nextCoverage;
-        this.resetCoveredTiles();
+        this.resetCoveredPartitions();
         this.advanceGeneration();
     }
 
@@ -269,24 +304,40 @@ export class FilterSubscriptionRef {
             nextCoverage.roots,
             this.coverageValue.roots
         );
-        const previousTileIds = new Set(this.coverageValue.tileIds);
-        const nextTileIds = new Set(nextCoverage.tileIds);
-        const removedTileIds = [...previousTileIds]
-            .filter(tileId => !nextTileIds.has(tileId));
+        const previousPartitions = new Map(
+            this.coverageValue.partitions.map(partition => [
+                partitionKey(partition),
+                partition
+            ])
+        );
+        const nextPartitions = new Map(
+            nextCoverage.partitions.map(partition => [
+                partitionKey(partition),
+                partition
+            ])
+        );
+        const removedPartitions = [...previousPartitions]
+            .filter(([key]) => !nextPartitions.has(key))
+            .map(([, partition]) => partition);
         this.coverageValue = nextCoverage;
-        this.resetCoveredTiles();
-        for (const tileId of removedTileIds) {
-            this.pendingTileIds.delete(tileId);
-            this.acceptedValueVersionsByTile.delete(tileId);
-            this.expiredWhileSuspended.delete(tileId);
+        this.resetCoveredPartitions();
+        for (const partition of removedPartitions) {
+            const key = partitionKey(partition);
+            this.pendingPartitionKeys.delete(key);
+            this.acceptedValueVersionsByPartition.delete(key);
+            this.expiredWhileSuspended.delete(key);
         }
-        for (const tileId of nextCoverage.tileIds) {
-            if (!previousTileIds.has(tileId)) {
-                this.pendingTileIds.add(tileId);
+        for (const partition of nextCoverage.partitions) {
+            const key = partitionKey(partition);
+            if (!previousPartitions.has(key)) {
+                this.pendingPartitionKeys.add(key);
             }
         }
-        if (removedTileIds.length) {
-            this.owner.cancelFilterTileExpiries?.(this, removedTileIds);
+        if (removedPartitions.length) {
+            this.owner.cancelFilterPartitionExpiries?.(
+                this,
+                removedPartitions
+            );
         }
         if (rootsChanged) {
             this.advanceGeneration();
@@ -318,18 +369,21 @@ export class FilterSubscriptionRef {
             return;
         }
         this.suspendedValue = false;
-        const expiredTileIds = [...this.expiredWhileSuspended]
-            .filter(([tileId, valueVersion]) =>
-                this.acceptedValueVersionsByTile.get(tileId) === valueVersion
+        const expiredPartitions = [...this.expiredWhileSuspended]
+            .filter(([key, valueVersion]) =>
+                this.acceptedValueVersionsByPartition.get(key) === valueVersion
             )
-            .map(([tileId]) => tileId);
+            .flatMap(([key]) => {
+                const partition = this.coveredPartitions.get(key);
+                return partition ? [partition] : [];
+            });
         this.expiredWhileSuspended.clear();
-        for (const tileId of expiredTileIds) {
-            this.pendingTileIds.add(tileId);
+        for (const partition of expiredPartitions) {
+            this.pendingPartitionKeys.add(partitionKey(partition));
         }
-        if (expiredTileIds.length) {
-            this.callbacks.onTilesPending?.(
-                expiredTileIds,
+        if (expiredPartitions.length) {
+            this.callbacks.onPartitionsPending?.(
+                expiredPartitions,
                 this.generationValue
             );
         }
@@ -342,24 +396,34 @@ export class FilterSubscriptionRef {
             return;
         }
         this.releasedValue = true;
-        this.owner.cancelFilterTileExpiries?.(this);
+        this.owner.cancelFilterPartitionExpiries?.(this);
         this.owner.releaseFilterSubscription(this);
     }
 
     /** Internal canonical request object serialized into `/interactive`. */
     requestJson(): Record<string, unknown> {
-        const tileIds = this.coverageValue.tileIds
-            .filter(tileId => this.pendingTileIds.has(tileId));
-        const pending = new Set(tileIds);
-        const priorityTileIds = (this.coverageValue.priorityTileIds ?? [])
-            .filter(tileId => pending.has(tileId));
+        const partitions = this.coverageValue.partitions
+            .filter(partition =>
+                this.pendingPartitionKeys.has(partitionKey(partition))
+            );
+        const pending = new Set(partitions.map(partitionKey));
+        const priorityPartitions =
+            (this.coverageValue.priorityPartitions ?? [])
+                .filter(partition => pending.has(partitionKey(partition)));
         const roots = (this.coverageValue.roots ?? [])
-            .filter(root => pending.has(root.tileId));
+            .filter(root => pending.has(partitionKey(root.partition)));
         return {
             ...cloneDefinition(this.definitionValue),
-            tileIds,
-            ...(priorityTileIds.length ? {priorityTileIds} : {}),
-            ...(roots.length ? {roots: structuredClone(roots)} : {}),
+            partitions: partitions.map(partitionJson),
+            ...(priorityPartitions.length ? {
+                priorityPartitions: priorityPartitions.map(partitionJson)
+            } : {}),
+            ...(roots.length ? {
+                roots: roots.map(root => ({
+                    ...structuredClone(root),
+                    partition: partitionJson(root.partition)
+                }))
+            } : {}),
             filterId: this.filterId,
             generation: this.generationValue
         };
@@ -375,7 +439,7 @@ export class FilterSubscriptionRef {
     accept(delivery: TileSubsetDelivery): FilterSubsetAdmission {
         if (this.releasedValue || this.suspendedValue ||
             delivery.generation !== this.generationValue ||
-            !this.covers(delivery.tileId)) {
+            !this.covers(delivery.partition)) {
             return "benign-rejection";
         }
         const expiresAtMs = delivery.conversionTimestampMs !== null &&
@@ -395,21 +459,24 @@ export class FilterSubscriptionRef {
         if (installResult.status === "superseded") {
             return "benign-rejection";
         }
-        this.acceptedValueVersionsByTile.set(
-            delivery.tileId,
+        this.acceptedValueVersionsByPartition.set(
+            delivery.partitionKey,
             installResult.valueVersion
         );
         if (remainsPending) {
-            this.pendingTileIds.add(delivery.tileId);
-            this.owner.cancelFilterTileExpiries?.(this, [delivery.tileId]);
+            this.pendingPartitionKeys.add(delivery.partitionKey);
+            this.owner.cancelFilterPartitionExpiries?.(
+                this,
+                [delivery.partition]
+            );
             // An already-expired handoff can leave the logical body unchanged,
             // so bypass suppression and give mapget a fresh reconciliation.
             this.owner.updateFilterSubscription(this, true);
         } else {
-            this.pendingTileIds.delete(delivery.tileId);
-            this.owner.updateFilterTileExpiry?.(
+            this.pendingPartitionKeys.delete(delivery.partitionKey);
+            this.owner.updateFilterPartitionExpiry?.(
                 this,
-                delivery.tileId,
+                delivery.partition,
                 installResult.valueVersion,
                 finiteExpiry
             );
@@ -419,35 +486,48 @@ export class FilterSubscriptionRef {
     }
 
     /** Internal scheduler boundary; expires only the installed value incarnation. */
-    expireTiles(tokens: ReadonlyArray<{tileId: number; valueVersion: number}>): void {
+    expirePartitions(tokens: ReadonlyArray<{
+        partitionKey: string;
+        valueVersion: number;
+    }>): void {
         if (this.releasedValue) {
             return;
         }
-        const tileIds = tokens
+        const partitions = tokens
             .filter(token =>
-                this.acceptedValueVersionsByTile.get(token.tileId) ===
+                this.acceptedValueVersionsByPartition.get(token.partitionKey) ===
                     token.valueVersion
             )
-            .map(token => token.tileId);
-        if (!tileIds.length) {
+            .flatMap(token => {
+                const partition = this.coveredPartitions.get(
+                    token.partitionKey
+                );
+                return partition ? [partition] : [];
+            });
+        if (!partitions.length) {
             return;
         }
         if (this.suspendedValue) {
             for (const token of tokens) {
-                if (this.acceptedValueVersionsByTile.get(token.tileId) ===
+                if (this.acceptedValueVersionsByPartition.get(
+                    token.partitionKey
+                ) ===
                     token.valueVersion) {
                     this.expiredWhileSuspended.set(
-                        token.tileId,
+                        token.partitionKey,
                         token.valueVersion
                     );
                 }
             }
             return;
         }
-        for (const tileId of tileIds) {
-            this.pendingTileIds.add(tileId);
+        for (const partition of partitions) {
+            this.pendingPartitionKeys.add(partitionKey(partition));
         }
-        this.callbacks.onTilesPending?.(tileIds, this.generationValue);
+        this.callbacks.onPartitionsPending?.(
+            partitions,
+            this.generationValue
+        );
         this.owner.updateFilterSubscription(this, true);
     }
 
@@ -478,25 +558,25 @@ export class FilterSubscriptionRef {
     }
 
     private advanceGeneration(): void {
-        this.owner.cancelFilterTileExpiries?.(this);
+        this.owner.cancelFilterPartitionExpiries?.(this);
         this.generationValue += 1;
-        this.resetPendingTiles();
+        this.resetPendingPartitions();
         this.owner.updateFilterSubscription(this, true);
     }
 
-    private resetPendingTiles(): void {
-        this.pendingTileIds.clear();
-        this.acceptedValueVersionsByTile.clear();
+    private resetPendingPartitions(): void {
+        this.pendingPartitionKeys.clear();
+        this.acceptedValueVersionsByPartition.clear();
         this.expiredWhileSuspended.clear();
-        for (const tileId of this.coverageValue.tileIds) {
-            this.pendingTileIds.add(tileId);
+        for (const partition of this.coverageValue.partitions) {
+            this.pendingPartitionKeys.add(partitionKey(partition));
         }
     }
 
-    private resetCoveredTiles(): void {
-        this.coveredTileIds.clear();
-        for (const tileId of this.coverageValue.tileIds) {
-            this.coveredTileIds.add(tileId);
+    private resetCoveredPartitions(): void {
+        this.coveredPartitions.clear();
+        for (const partition of this.coverageValue.partitions) {
+            this.coveredPartitions.set(partitionKey(partition), partition);
         }
     }
 

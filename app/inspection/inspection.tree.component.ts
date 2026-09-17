@@ -37,6 +37,7 @@ import {
 } from "./inspection-html.presentation";
 import {expandPathToFirstHighlightedRow} from "./inspection-tree-highlight";
 import {inspectionValueBubbleClasses} from "./inspection-value-bubble.presentation";
+import {parseMapPartitionKey} from "../mapdata/partition.model";
 
 /** Column definition used by the inspection tree's generic table renderer. */
 export interface Column {
@@ -1349,7 +1350,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             return undefined;
         }
         try {
-            const [mapId, layerId] = coreLib.parseMapTileKey(mapTileKey);
+            const [mapId, layerId] = parseMapPartitionKey(coreLib, mapTileKey);
             if (mapId && layerId) {
                 return {mapId, layerId};
             }

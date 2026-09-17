@@ -103,7 +103,7 @@ export class TileSubsetLayerVisualization {
         readonly owner: StyledMapgetLayer,
         readonly state: FilterTileState,
         readonly renderKey: string,
-        private readonly coordinateOrigin: [number, number, number],
+        private coordinateOrigin: [number, number, number] | null,
         private readonly renderService: TileSubsetLayerRenderService,
         private readonly styleValidationReports: StyleValidationReportService,
         lod: number,
@@ -147,7 +147,7 @@ export class TileSubsetLayerVisualization {
         overlays: readonly TileSubsetInteractionOverlay[]
     ): void {
         this.interactionOverlays = overlays;
-        if (!this.sceneHandle) {
+        if (!this.sceneHandle || !this.coordinateOrigin) {
             return;
         }
         this.maskController(this.sceneHandle)?.setOverlays(
@@ -228,7 +228,9 @@ export class TileSubsetLayerVisualization {
         if (!scene) {
             return false;
         }
-        const renderOrigin = this.coordinateOrigin;
+        const renderOrigin: [number, number, number] =
+            this.coordinateOrigin ?? [0, 0, 0];
+        const nativeOrigin = this.state.partition.kind === "object";
         const signature = [
             `${this.state.mapTileKey}:${this.state.valueVersion}`,
             this.owner.plannedLod,
@@ -236,7 +238,7 @@ export class TileSubsetLayerVisualization {
             this.owner.style.id,
             this.owner.renderStyleKey,
             this.owner.styleOrder,
-            ...renderOrigin,
+            nativeOrigin ? "native-origin" : renderOrigin.join(","),
             this.sceneRevision,
             gpuIconAtlasService.catalogVersion
         ].join("|");
@@ -248,8 +250,10 @@ export class TileSubsetLayerVisualization {
         const sceneRevision = this.sceneRevision;
         const startedAt = performance.now();
         const reservation = scene.prepareRender(
-            `${this.viewIndex}:${this.renderKey}`,
-            renderOrigin,
+            `${this.viewIndex}:${nativeOrigin
+                ? this.state.mapTileKey
+                : this.renderKey}`,
+            nativeOrigin ? null : renderOrigin,
             [{
                 identity: this.contributionIdentity(this.state),
                 mapTileKey: this.state.mapTileKey,
@@ -270,8 +274,7 @@ export class TileSubsetLayerVisualization {
                 viewIndex: this.viewIndex,
                 renderKey: this.renderKey,
                 mapTileKey: this.state.mapTileKey,
-                tileId: this.state.tileId,
-                coordinateOrigin: renderOrigin,
+                ...(nativeOrigin ? {} : {coordinateOrigin: renderOrigin}),
                 sceneGeneration: reservation.sceneGeneration,
                 packetSequence: reservation.packetSequence,
                 iconCatalogVersion: gpuIconAtlasService.catalogVersion,
@@ -315,6 +318,27 @@ export class TileSubsetLayerVisualization {
                     packet,
                     reservation
                 );
+            }, buffers => {
+                if (!this.isRenderCurrent(
+                    sceneHandle,
+                    scene,
+                    reservation,
+                    signature,
+                    sceneRevision,
+                    valueVersion
+                )) {
+                    throw new StaleSubsetRenderError();
+                }
+                const origin = this.parseCoordinateOrigin(
+                    buffers.bridge.coordinateOrigin
+                );
+                if (!origin) {
+                    throw new Error(
+                        "Subset renderer returned an invalid geometry anchor."
+                    );
+                }
+                scene.resolveRenderOrigin(reservation, origin);
+                this.coordinateOrigin = origin;
             });
             if (!admitted.result || !this.isRenderCurrent(
                 sceneHandle,
@@ -561,12 +585,6 @@ export class TileSubsetLayerVisualization {
         }
         this.requestMissingIcons(applied.resourceRequests);
         const maskController = this.maskController(sceneHandle);
-        maskController?.setOverlays(
-            this.interactionMaskOwnerId(),
-            this.contributionIdentities,
-            this.coordinateOrigin,
-            this.interactionOverlays
-        );
         const origin = this.parseCoordinateOrigin(
             result.bridge.coordinateOrigin
         );
@@ -575,9 +593,17 @@ export class TileSubsetLayerVisualization {
             this.interactionGltf = null;
             return applied.issues;
         }
+        this.coordinateOrigin = origin;
+        maskController?.setOverlays(
+            this.interactionMaskOwnerId(),
+            this.contributionIdentities,
+            origin,
+            this.interactionOverlays
+        );
         const preparedGltf = await this.gltfPresentation.prepare(
             result.bridge,
-            (sceneHandle.scene as DeckScene | undefined)?.device ?? null
+            (sceneHandle.scene as DeckScene | undefined)?.device ?? null,
+            origin
         );
         if (this.disposed ||
             signature !== this.requestedSignature ||

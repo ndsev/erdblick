@@ -11,6 +11,10 @@ import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import type {AppSurfaceHeaderAction, AppSurfaceHeaderActionCommandEvent} from "../shared/app-surface-header.component";
 import {displayFeatureId} from "../shared/tile-feature-id";
+import {
+    parseMapPartitionKey,
+    partitionKeySuffix
+} from "../mapdata/partition.model";
 
 @Component({
     selector: 'inspection-panel-dialog',
@@ -152,9 +156,14 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     private updateHeaderFor(panel: InspectionPanelModel<FeatureWrapper>) {
         if (panel.sourceData !== undefined) {
             const selection = panel.sourceData!;
-            const [mapId, layerId, tileId] = coreLib.parseMapTileKey(selection.mapTileKey);
-            this.isMetadata = tileId === 0;
-            this.title = this.isMetadata ? `${mapId}:` : `${tileId}.`;
+            const [mapId, layerId, partition] = parseMapPartitionKey(
+                coreLib,
+                selection.mapTileKey
+            );
+            this.isMetadata = partition.kind === "tile" && partition.id === 0;
+            this.title = this.isMetadata
+                ? `${mapId}:`
+                : `${partitionKeySuffix(partition)}.`;
             const map = this.mapService.maps.maps.get(mapId);
             if (map) {
                 this.layerMenuItems = Array.from(map.layers.values())
@@ -167,7 +176,12 @@ export class InspectionPanelDialogComponent implements OnDestroy {
                             disabled: item.id === layerId,
                             command: () => {
                                 const sourceData = { ...selection };
-                                sourceData.mapTileKey = coreLib.getSourceDataLayerKey(mapId, item.id, tileId);
+                                sourceData.mapTileKey = coreLib.createMapTileKey(
+                                    "SourceData",
+                                    mapId,
+                                    item.id,
+                                    partitionKeySuffix(partition)
+                                );
                                 sourceData.address = undefined;
                                 this.stateService.setSelection(sourceData, panel.id);
                             }

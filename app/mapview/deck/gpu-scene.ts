@@ -198,6 +198,7 @@ interface OriginEntry {
   key: bigint;
   slot: number;
   position: [number, number, number];
+  resolved: boolean;
   inFlightReferences: number;
   activeReferences: number;
 }
@@ -779,7 +780,7 @@ export class GpuScene {
    */
   prepareRender(
     originIdentity: string,
-    originPosition: [number, number, number],
+    originPosition: [number, number, number] | null,
     inputs: readonly GpuSceneContributionInput[],
   ): GpuSceneRenderReservation {
     this.ensureAlive();
@@ -890,6 +891,42 @@ export class GpuScene {
   }
 
   /**
+   * Resolve a native-selected geometry anchor before the first packet is
+   * admitted. Only an uninstalled placeholder origin may change; subsequent
+   * revisions must reproduce the same physical coordinate exactly.
+   */
+  resolveRenderOrigin(
+    reservation: GpuSceneRenderReservation,
+    position: [number, number, number],
+  ): void {
+    this.ensureAlive();
+    if (!this.accepts(reservation) || reservation.released) {
+      throw new Error("Cannot resolve an inactive GPU render origin.");
+    }
+    if (this.stagedRenderByReservation.has(reservation)) {
+      throw new Error("GPU render origin was resolved after packet admission.");
+    }
+    if (position.some(value => !Number.isFinite(value))) {
+      throw new Error("GPU render origin contains a non-finite coordinate.");
+    }
+    const entry = this.originsByIdentity.get(reservation.origin.identity);
+    if (!entry || entry.key !== reservation.origin.key ||
+      entry.slot !== reservation.origin.slot) {
+      throw new Error("GPU render origin reservation is no longer current.");
+    }
+    if (entry.resolved &&
+      entry.position.every((value, index) => value === position[index])) {
+      reservation.origin.position = [...position];
+      return;
+    }
+    if (entry.resolved || entry.activeReferences > 0) {
+      throw new Error("A resolved GPU origin identity changed coordinates.");
+    }
+    this.updateOriginPosition(entry, position);
+    reservation.origin.position = [...position];
+  }
+
+  /**
    * Stage one bounded packet fragment and atomically publish its revision only
    * after the explicit final fragment supplies complete semantic metadata.
    */
@@ -957,6 +994,11 @@ export class GpuScene {
           if (!origin) {
             throw new Error(
               "GPU packet references an origin which is no longer reserved.",
+            );
+          }
+          if (!origin.resolved) {
+            throw new Error(
+              "GPU packet references an unresolved geometry origin.",
             );
           }
           item = {
@@ -2310,35 +2352,41 @@ export class GpuScene {
   /** Reserve one stable origin slot and upload its float64 high/low decomposition. */
   private reserveOrigin(
     identity: string,
-    position: [number, number, number],
+    position: [number, number, number] | null,
   ): OriginEntry {
     const existing = this.originsByIdentity.get(identity);
     if (existing) {
-      if (existing.position.some((value, index) => value !== position[index])) {
+      if (position !== null && existing.resolved &&
+        existing.position.some((value, index) => value !== position[index])) {
         throw new Error("A GPU origin identity changed coordinates.");
+      }
+      if (position !== null && !existing.resolved) {
+        this.updateOriginPosition(existing, position);
       }
       return existing;
     }
     const key = this.uniqueHash(identity, "gpu-origin-v1", this.originsByKey);
     const slotRange = this.originSlots.allocate(1);
+    const initialPosition: [number, number, number] = position ?? [0, 0, 0];
     const entry: OriginEntry = {
       identity,
       key,
       slot: slotRange.firstRecord,
-      position: [...position],
+      position: [...initialPosition],
+      resolved: position !== null,
       inFlightReferences: 0,
       activeReferences: 0,
     };
-    const high = position.map((value) => Math.fround(value));
+    const high = initialPosition.map((value) => Math.fround(value));
     try {
       this.originLookup.set(entry.slot, [
         high[0],
         high[1],
         high[2],
         1,
-        position[0] - high[0],
-        position[1] - high[1],
-        position[2] - high[2],
+        initialPosition[0] - high[0],
+        initialPosition[1] - high[1],
+        initialPosition[2] - high[2],
         0,
       ]);
     } catch (error) {
@@ -2348,6 +2396,26 @@ export class GpuScene {
     this.originsByIdentity.set(identity, entry);
     this.originsByKey.set(key, entry);
     return entry;
+  }
+
+  /** Publish a newly known origin into its existing stable lookup slot. */
+  private updateOriginPosition(
+    entry: OriginEntry,
+    position: [number, number, number],
+  ): void {
+    const high = position.map((value) => Math.fround(value));
+    this.originLookup.set(entry.slot, [
+      high[0],
+      high[1],
+      high[2],
+      1,
+      position[0] - high[0],
+      position[1] - high[1],
+      position[2] - high[2],
+      0,
+    ]);
+    entry.position = [...position];
+    entry.resolved = true;
   }
 
   /** Reserve one collision-checked producer identity; revisions own GPU slots. */

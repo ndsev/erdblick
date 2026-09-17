@@ -55,8 +55,7 @@ export interface TileSubsetLayerRenderRequest {
     viewIndex: number;
     renderKey: string;
     mapTileKey: string;
-    tileId: number;
-    coordinateOrigin: [number, number, number];
+    coordinateOrigin?: [number, number, number];
     sceneGeneration: number;
     packetSequence: number;
     iconCatalogVersion: number;
@@ -81,6 +80,7 @@ export interface TileSubsetLayerRenderRequest {
 interface PendingRender {
     task: TileSubsetLayerRenderTask;
     admit: (packet: Uint8Array) => void;
+    prepare: (buffers: TileSubsetLayerRenderBuffers) => void;
     resolve: (value: TileSubsetLayerRenderBuffers) => void;
     reject: (reason?: unknown) => void;
     queuedAt: number;
@@ -442,7 +442,9 @@ export class TileSubsetLayerRenderService {
      */
     render(
         request: TileSubsetLayerRenderRequest,
-        admit: (packet: Uint8Array) => void = () => undefined
+        admit: (packet: Uint8Array) => void = () => undefined,
+        prepare: (buffers: TileSubsetLayerRenderBuffers) => void =
+            () => undefined
     ): Promise<TileSubsetLayerRenderBuffers> {
         this.latestSignatureByVisualization.set(
             request.visualizationId,
@@ -458,6 +460,7 @@ export class TileSubsetLayerRenderService {
             this.queue.push({
                 task,
                 admit,
+                prepare,
                 resolve,
                 reject,
                 queuedAt: performance.now()
@@ -750,15 +753,24 @@ export class TileSubsetLayerRenderService {
             return;
         }
         this.recordWorkerCaches(workerIndex, pending.task);
+        const buffers: TileSubsetLayerRenderBuffers = {
+            packets: result.packets,
+            bridge: result.bridge,
+            vertexCount: result.vertexCount,
+            timings: result.timings
+        };
+        try {
+            pending.prepare(buffers);
+        } catch (error) {
+            this.failedTaskCount += 1;
+            pending.reject(error);
+            this.releaseWorker(workerIndex, pending.task.taskId);
+            return;
+        }
         this.ready.push({
             workerIndex,
             pending,
-            buffers: {
-                packets: result.packets,
-                bridge: result.bridge,
-                vertexCount: result.vertexCount,
-                timings: result.timings
-            },
+            buffers,
             nativeMs,
             roundTripMs,
             nextPacketIndex: 0

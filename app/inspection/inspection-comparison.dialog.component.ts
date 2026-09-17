@@ -44,7 +44,7 @@ interface ComparisonExpiryOwner extends RetainedTileExpiryOwner {
     key: string;
     localId: number;
     mapTileKey: string;
-    tileId: number;
+    tileId: string;
     epoch: number;
     revision: number;
     featureIds: Array<{mapTileKey: string; featureId: string}>;
@@ -404,7 +404,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
                     key,
                     localId: column.localId,
                     mapTileKey,
-                    tileId: Number(features[0].featureTile.tileId),
+                    tileId: features[0].featureTile.partitionKey,
                     epoch: 0,
                     revision,
                     featureIds: [],
@@ -424,7 +424,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
                 );
             this.tileStream.updateRetainedTileExpiry?.(
                 owner,
-                Number.isFinite(owner.tileId) ? owner.tileId : 0,
+                owner.tileId,
                 owner.epoch,
                 expiries.length ? Math.min(...expiries) : null
             );
@@ -433,7 +433,10 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     private async renewComparisonOwner(
         owner: ComparisonExpiryOwner,
-        tokens: ReadonlyArray<{tileId: number; valueVersion: number}>
+        tokens: ReadonlyArray<{
+            tileId: string | number;
+            valueVersion: number;
+        }>
     ): Promise<void> {
         if (this.comparisonExpiryOwners.get(owner.key) !== owner ||
             owner.revision !== this.comparisonRevision ||

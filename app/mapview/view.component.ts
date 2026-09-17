@@ -949,7 +949,13 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         );
         let bestTileId: number | null = null;
         for (const featureId of featureIds) {
-            const [, , tileId] = coreLib.parseMapTileKey(featureId.mapTileKey) as [string, string, number];
+            const parsed = this.tileStream.parseMapTileKeySafe(
+                featureId.mapTileKey
+            );
+            if (!parsed) {
+                continue;
+            }
+            const [, , tileId] = parsed;
             if (!availableTileIds.has(tileId)) {
                 continue;
             }

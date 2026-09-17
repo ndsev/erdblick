@@ -45,6 +45,8 @@ export interface LayerInfoItem extends Record<string, any> {
     type: string;
     version: { major: number, minor: number, patch: number };
     zoomLevels: Array<number>;
+    partitionKind?: "tile" | "object";
+    tileAssociationLevel?: number;
 }
 
 /** Expected structure of a list entry in the /sources endpoint. */

@@ -4,6 +4,13 @@ import {ViewLayerController} from "./view-layer.controller";
 import {TileSubsetLayerVisualization} from
     "./deck/tile-subset-layer.visualization";
 import {coreLib} from "../integrations/wasm";
+import {
+    objectPartition,
+    partitionKey,
+    tilePartition
+} from "../mapdata/partition.model";
+
+const tileKey = (id: number) => partitionKey(tilePartition(id));
 
 describe("ViewLayerController", () => {
     it("reconciles hover masks without rebuilding regular presentation demand", async () => {
@@ -76,11 +83,11 @@ describe("ViewLayerController", () => {
             layer: existingLayer,
             subscription: {unsubscribe: vi.fn()},
             visualizations: new Map(),
-            visualizationKeyByTileId: new Map(),
-            pendingTiles: new Map(),
+            visualizationKeyByPartition: new Map(),
+            pendingPartitions: new Map(),
             disposeLayer: true,
             replacementSlot: "Map/Road/regular/style",
-            replacementTileIds: new Set()
+            replacementPartitionKeys: new Set()
         };
         controller.mapInfo = {
             mapgetLayers: () => [mapgetLayer],
@@ -104,6 +111,7 @@ describe("ViewLayerController", () => {
         controller.retiringRegularLayers = new Map();
         controller.pendingVisualizationRenders = new Set();
         controller.localInteractionVisualizationsWithOverlays = new Set();
+        controller.tilePartitionsByCoverage = new WeakMap();
         controller.featureSearch = {searchStyledLayersForView: () => []};
         controller.interactionReconcileRequired = false;
         controller.lastInteractionViewportSignature = "unchanged";
@@ -139,7 +147,7 @@ describe("ViewLayerController", () => {
             const visualization = {destroy: vi.fn()};
             const layer = {
                 identity: {mapId, presentationKind},
-                tileStates: new Map([[7, {}]]),
+                tileStates: new Map([[tileKey(7), {}]]),
                 refresh: vi.fn(),
                 dispose: vi.fn()
             };
@@ -147,11 +155,11 @@ describe("ViewLayerController", () => {
                 layer,
                 subscription: {unsubscribe: vi.fn()},
                 visualizations: new Map([["visual", visualization]]),
-                visualizationKeyByTileId: new Map([[7, "visual"]]),
-                pendingTiles: new Map(),
+                visualizationKeyByPartition: new Map([[tileKey(7), "visual"]]),
+                pendingPartitions: new Map(),
                 disposeLayer,
                 replacementSlot: null,
-                replacementTileIds: new Set(),
+                replacementPartitionKeys: new Set(),
                 visualization
             };
         };
@@ -197,22 +205,22 @@ describe("ViewLayerController", () => {
         ).mockImplementation(() => undefined);
         const owned = {
             layer: {identity: {presentationKind: "regular"}},
-            pendingTiles: new Map([[7, {
+            pendingPartitions: new Map([[tileKey(7), {
                 state: {},
                 lod: 1,
                 preservedContributionIdentity: "retained-contribution"
             }]])
         };
 
-        controller.discardPendingTile(owned, 7);
+        controller.discardPendingTile(owned, tileKey(7));
 
-        expect(owned.pendingTiles.size).toBe(0);
+        expect(owned.pendingPartitions.size).toBe(0);
         expect(retireContribution).toHaveBeenCalledWith(
             controller.sceneHandle,
             "retained-contribution"
         );
         expect(controller.scheduleInteractionPresenceReconcile)
-            .toHaveBeenCalledWith(owned.layer, 7);
+            .toHaveBeenCalledWith(owned.layer, tileKey(7));
     });
 
     it("keeps inherited contribution ownership across pending state updates", () => {
@@ -222,11 +230,17 @@ describe("ViewLayerController", () => {
         controller.presentationLod = vi.fn(() => 2);
         controller.lineSimplificationToleranceMeters = vi.fn(() => 4);
         controller.schedulePendingTiles = vi.fn();
-        const previousState = {tileId: 7};
-        const nextState = {tileId: 7};
+        const previousState = {
+            partition: tilePartition(7),
+            partitionKey: tileKey(7)
+        };
+        const nextState = {
+            partition: tilePartition(7),
+            partitionKey: tileKey(7)
+        };
         const owned = {
             layer: {},
-            pendingTiles: new Map([[7, {
+            pendingPartitions: new Map([[tileKey(7), {
                 state: previousState,
                 lod: 1,
                 preservedContributionIdentity: "retained-contribution"
@@ -235,7 +249,7 @@ describe("ViewLayerController", () => {
 
         controller.enqueueTile(owned, nextState);
 
-        expect(owned.pendingTiles.get(7)).toEqual({
+        expect(owned.pendingPartitions.get(tileKey(7))).toEqual({
             state: nextState,
             lod: 2,
             lineSimplificationToleranceMeters: 4,
@@ -340,7 +354,10 @@ describe("ViewLayerController", () => {
         ) as any;
         const visualization = {
             owner: {identity: {presentationKind: "regular"}},
-            state: {tileId: 7},
+            state: {
+                partition: tilePartition(7),
+                partitionKey: tileKey(7)
+            },
             render: vi.fn().mockResolvedValue(true)
         };
         controller.sceneHandle = {scene: {}};
@@ -359,7 +376,7 @@ describe("ViewLayerController", () => {
         expect(controller.applyLocalInteractionOverlays)
             .toHaveBeenCalledWith(visualization);
         expect(controller.scheduleInteractionPresenceReconcile)
-            .toHaveBeenCalledWith(visualization.owner, 7);
+            .toHaveBeenCalledWith(visualization.owner, tileKey(7));
         expect(controller.diagnostics.notifyChanged).toHaveBeenCalledOnce();
     });
 
@@ -370,9 +387,9 @@ describe("ViewLayerController", () => {
         const visualization = {destroy: vi.fn()};
         const owned = {
             layer: {identity: {presentationKind: "regular"}},
-            pendingTiles: new Map(),
+            pendingPartitions: new Map(),
             visualizations: new Map([["tile-7", visualization]]),
-            visualizationKeyByTileId: new Map([[7, "tile-7"]])
+            visualizationKeyByPartition: new Map([[tileKey(7), "tile-7"]])
         };
         controller.sceneHandle = {scene: {}};
         controller.pendingVisualizationRenders = new Set([visualization]);
@@ -380,12 +397,12 @@ describe("ViewLayerController", () => {
             new Set([visualization]);
         controller.scheduleInteractionPresenceReconcile = vi.fn();
 
-        controller.removeTileVisualization(owned, 7);
+        controller.removeTileVisualization(owned, tileKey(7));
 
         expect(visualization.destroy)
             .toHaveBeenCalledWith(controller.sceneHandle);
         expect(controller.scheduleInteractionPresenceReconcile)
-            .toHaveBeenCalledWith(owned.layer, 7);
+            .toHaveBeenCalledWith(owned.layer, tileKey(7));
     });
 
     it("reconciles presence only for interaction targets in the changed tile", () => {
@@ -403,17 +420,17 @@ describe("ViewLayerController", () => {
             }]}]},
             hoverIdsTopic: {getValue: () => []}
         };
-        controller.parseFeatureTileId = vi.fn(target => ({
+        controller.parseFeaturePartition = vi.fn(target => ({
             mapId: "Map",
             layerId: "Road",
-            tileId: target.mapTileKey === "tile-7" ? 7 : 8
+            partition: tilePartition(target.mapTileKey === "tile-7" ? 7 : 8)
         }));
         controller.scheduleInteractionReconcile = vi.fn();
 
-        controller.scheduleInteractionPresenceReconcile(layer, 8);
+        controller.scheduleInteractionPresenceReconcile(layer, tileKey(8));
         expect(controller.scheduleInteractionReconcile).not.toHaveBeenCalled();
 
-        controller.scheduleInteractionPresenceReconcile(layer, 7);
+        controller.scheduleInteractionPresenceReconcile(layer, tileKey(7));
         expect(controller.scheduleInteractionReconcile).toHaveBeenCalledOnce();
     });
 
@@ -455,10 +472,10 @@ describe("ViewLayerController", () => {
         ) as any;
         const matching = {};
         const unrelated = {};
-        controller.parseFeatureTileId = vi.fn(target => ({
+        controller.parseFeaturePartition = vi.fn(target => ({
             mapId: "Map",
             layerId: "Road",
-            tileId: target.featureId === "Road.7" ? 7 : 8
+            partition: tilePartition(target.featureId === "Road.7" ? 7 : 8)
         }));
         controller.styledLayers = new Map([["regular", {
             layer: {
@@ -469,9 +486,9 @@ describe("ViewLayerController", () => {
                 ["tile-7", matching],
                 ["tile-8", unrelated]
             ]),
-            visualizationKeyByTileId: new Map([
-                [7, "tile-7"],
-                [8, "tile-8"]
+            visualizationKeyByPartition: new Map([
+                [tileKey(7), "tile-7"],
+                [tileKey(8), "tile-8"]
             ])
         }]]);
         controller.retiringRegularLayers = new Map();
@@ -497,10 +514,10 @@ describe("ViewLayerController", () => {
         const visualization = {
             hasLocalInteractionTarget: vi.fn(() => true)
         };
-        controller.parseFeatureTileId = vi.fn(() => ({
+        controller.parseFeaturePartition = vi.fn(() => ({
             mapId: "Map",
             layerId: "Road",
-            tileId: 7
+            partition: tilePartition(7)
         }));
         controller.styledLayers = new Map([["regular", {
             layer: {
@@ -508,7 +525,7 @@ describe("ViewLayerController", () => {
                 mapgetLayer: {key: "Map/Road"}
             },
             visualizations: new Map([["tile-7", visualization]]),
-            visualizationKeyByTileId: new Map([[7, "tile-7"]])
+            visualizationKeyByPartition: new Map([[tileKey(7), "tile-7"]])
         }]]);
         controller.retiringRegularLayers = new Map();
 
@@ -531,10 +548,10 @@ describe("ViewLayerController", () => {
             layerId: "Lane"
         };
         controller.viewIndex = 0;
-        controller.parseFeatureTileId = vi.fn(() => ({
+        controller.parseFeaturePartition = vi.fn(() => ({
             mapId: mapgetLayer.mapId,
             layerId: mapgetLayer.layerId,
-            tileId: 545379780
+            partition: tilePartition(545379780)
         }));
         controller.mapInfo = {
             mapgetLayer: vi.fn(() => mapgetLayer),
@@ -549,7 +566,7 @@ describe("ViewLayerController", () => {
         expect(controller.resolveInteractionTargetLayer({
             mapTileKey: "Features:Islands/Island-6-Local:Lane:545379780:0",
             featureId: "Lane.545379780.75"
-        })).toEqual({mapgetLayer, tileId: 545379780});
+        })).toEqual({mapgetLayer, partition: tilePartition(545379780)});
         expect(controller.mapInfo.maps.getMapLayerVisibility)
             .not.toHaveBeenCalled();
         expect(controller.viewState.getEffectiveMapLayerLevel)
@@ -657,14 +674,58 @@ describe("ViewLayerController", () => {
         const controller = Object.create(
             ViewLayerController.prototype
         ) as any;
-        const layer = {setCoverage: vi.fn()};
-        const tileIds = [1, 2, 3];
-        const priorityTileIds = [2, 1, 3];
+        const layer = {setPartitionCoverage: vi.fn()};
+        const partitions = [1, 2, 3].map(tilePartition);
+        const priorityPartitions = [2, 1, 3].map(tilePartition);
         controller.regularCoverageByLayer = new WeakMap();
 
-        controller.setRegularCoverage(layer, tileIds, priorityTileIds);
-        controller.setRegularCoverage(layer, tileIds, priorityTileIds);
+        controller.setRegularCoverage(layer, partitions, priorityPartitions);
+        controller.setRegularCoverage(layer, partitions, priorityPartitions);
 
-        expect(layer.setCoverage).toHaveBeenCalledOnce();
+        expect(layer.setPartitionCoverage).toHaveBeenCalledOnce();
+    });
+
+    it("discovers object coverage at the advertised association level", async () => {
+        const controller = Object.create(
+            ViewLayerController.prototype
+        ) as any;
+        const layer = {
+            key: "SmartMap/Road",
+            tileAssociationLevel: 13
+        };
+        const partitions = [
+            objectPartition("9007199254740993"),
+            objectPartition("18446744073709551615")
+        ];
+        controller.disposed = false;
+        controller.viewIndex = 3;
+        controller.objectCoverageByLayer = new Map();
+        controller.viewState = {
+            visibleTileIdsForLevel: vi.fn(() => [101, 102])
+        };
+        controller.tileStream = {
+            discoverObjectPartitions: vi.fn(async () => ({
+                associations: partitions.map((partition, index) => ({
+                    partition,
+                    discoveryTileId: 101 + index
+                })),
+                expiresAtMs: null
+            }))
+        };
+        controller.scheduleReconcile = vi.fn();
+
+        expect(controller.objectPartitionsForViewport(layer)).toEqual([]);
+        await vi.waitFor(() =>
+            expect(controller.scheduleReconcile).toHaveBeenCalledOnce()
+        );
+
+        expect(controller.viewState.visibleTileIdsForLevel)
+            .toHaveBeenCalledWith(3, 13);
+        expect(controller.tileStream.discoverObjectPartitions)
+            .toHaveBeenCalledWith(layer, [101, 102]);
+        expect(controller.objectPartitionsForViewport(layer))
+            .toStrictEqual(partitions);
+        expect(controller.tileStream.discoverObjectPartitions)
+            .toHaveBeenCalledOnce();
     });
 });

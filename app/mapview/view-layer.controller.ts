@@ -57,6 +57,13 @@ import type {GpuSceneSnapshot} from "./deck/gpu-scene";
 import {INTERACTION_STYLE_ORDER_BASE} from
     "./deck/tile-subset-interaction.model";
 import {MAX_STYLE_LOD} from "../shared/lod-policy";
+import {
+    parseMapPartitionKey,
+    parsePartition,
+    partitionKey,
+    tilePartition,
+    type PartitionId
+} from "../mapdata/partition.model";
 
 export type ViewTileOccupancy = "unknown" | "empty" | "non-empty" | "error";
 
@@ -64,8 +71,8 @@ interface OwnedStyledLayer {
     layer: StyledMapgetLayer;
     subscription: Subscription;
     visualizations: Map<string, TileSubsetLayerVisualization>;
-    visualizationKeyByTileId: Map<number, string>;
-    pendingTiles: Map<number, {
+    visualizationKeyByPartition: Map<string, string>;
+    pendingPartitions: Map<string, {
         state: FilterTileState;
         lod: number;
         lineSimplificationToleranceMeters: number;
@@ -73,7 +80,14 @@ interface OwnedStyledLayer {
     }>;
     disposeLayer: boolean;
     replacementSlot: string | null;
-    replacementTileIds: Set<number>;
+    replacementPartitionKeys: Set<string>;
+}
+
+interface ObjectLayerCoverageState {
+    discoverySignature: string;
+    requestVersion: number;
+    partitions: readonly PartitionId[];
+    timer: ReturnType<typeof setTimeout> | null;
 }
 
 interface RetiringRegularLayer {
@@ -106,8 +120,17 @@ export class ViewLayerController {
         new Set<TileSubsetLayerVisualization>();
     private readonly regularCoverageByLayer = new WeakMap<
         StyledMapgetLayer,
-        {tileIds: readonly number[]; priorityTileIds: readonly number[]}
+        {
+            partitions: readonly PartitionId[];
+            priorityPartitions: readonly PartitionId[];
+        }
     >();
+    private readonly tilePartitionsByCoverage = new WeakMap<
+        readonly number[],
+        readonly PartitionId[]
+    >();
+    private readonly objectCoverageByLayer =
+        new Map<MapgetLayer, ObjectLayerCoverageState>();
     private interactionLayerAffinityCache =
         new WeakMap<ErdblickStyle, Map<string, boolean>>();
     private interactionFilterPlanCache =
@@ -294,7 +317,9 @@ export class ViewLayerController {
                     styled.mapgetLayer.layerId !== source.layerId) {
                     continue;
                 }
-                const state = styled.tileStates.get(tileId);
+                const state = styled.tileStates.get(
+                    partitionKey(tilePartition(tileId))
+                );
                 if (!state) {
                     continue;
                 }
@@ -347,6 +372,12 @@ export class ViewLayerController {
         this.retiringRegularLayers.clear();
         this.pendingVisualizationRenders.clear();
         this.localInteractionOverlaysByLayer.clear();
+        for (const state of this.objectCoverageByLayer.values()) {
+            if (state.timer !== null) {
+                clearTimeout(state.timer);
+            }
+        }
+        this.objectCoverageByLayer.clear();
         this.hoverDetails.clearView(this.viewIndex);
         this.renderService.clearDeckFrameTime(this.viewIndex);
         this.renderService.clearDeckPresentationDiagnostics(this.viewIndex);
@@ -472,7 +503,11 @@ export class ViewLayerController {
             .searchStyledLayersForView(this.viewIndex)) {
             parts.push(layer.ownerId, String(layer.coverageVersion));
             const levelSamples = new Map<number, number>();
-            for (const tileId of layer.tileStates.keys()) {
+            for (const state of layer.tileStates.values()) {
+                if (state.partition.kind !== "tile") {
+                    continue;
+                }
+                const tileId = state.partition.id;
                 const level = Number(coreLib.getTileLevel(tileId));
                 if (!levelSamples.has(level)) {
                     levelSamples.set(level, tileId);
@@ -499,8 +534,8 @@ export class ViewLayerController {
             mapgetLayer: MapgetLayer;
             style: ErdblickStyle;
             styleOrder: number;
-            tileIds: readonly number[];
-            priorityTileIds: readonly number[];
+            partitions: readonly PartitionId[];
+            priorityPartitions: readonly PartitionId[];
             options: Record<string, boolean | number | string>;
             plannedLod: number;
             plan: StyleFilterPlan;
@@ -509,8 +544,8 @@ export class ViewLayerController {
         }>();
         const hoverDetailCoverage: Array<{
             mapgetLayer: MapgetLayer;
-            tileIds: readonly number[];
-            priorityTileIds: readonly number[];
+            partitions: readonly PartitionId[];
+            priorityPartitions: readonly PartitionId[];
         }> = [];
         const orderedStyles = [...this.styleService.styles.values()]
             .filter(style => style.visible);
@@ -528,6 +563,9 @@ export class ViewLayerController {
                 mapgetLayer.layerId
             );
             const visibleTileIds = this.viewState.visibleTileIdsForLevel(this.viewIndex, level);
+            const partitions = mapgetLayer.partitionKind === "object"
+                ? this.objectPartitionsForViewport(mapgetLayer)
+                : this.tilePartitionsForCoverage(visibleTileIds);
             for (let styleOrder = 0; styleOrder < orderedStyles.length; ++styleOrder) {
                 const style = orderedStyles[styleOrder];
                 if (!style.featureLayerStyle.hasLayerAffinity(mapgetLayer.layerId)) {
@@ -564,8 +602,8 @@ export class ViewLayerController {
                     mapgetLayer,
                     style,
                     styleOrder,
-                    tileIds: visibleTileIds,
-                    priorityTileIds: visibleTileIds,
+                    partitions,
+                    priorityPartitions: partitions,
                     options,
                     plannedLod,
                     plan,
@@ -578,8 +616,8 @@ export class ViewLayerController {
             }
             hoverDetailCoverage.push({
                 mapgetLayer,
-                tileIds: visibleTileIds,
-                priorityTileIds: visibleTileIds
+                partitions,
+                priorityPartitions: partitions
             });
         }
         this.hoverDetails.reconcileView(this.viewIndex, hoverDetailCoverage);
@@ -661,12 +699,13 @@ export class ViewLayerController {
                         layer,
                         subscription: this.subscribeToStyledLayer(layer),
                         visualizations: new Map(),
-                        visualizationKeyByTileId: new Map(),
-                        pendingTiles: new Map(),
+                        visualizationKeyByPartition: new Map(),
+                        pendingPartitions: new Map(),
                         disposeLayer: true,
                         replacementSlot: next.replacementSlot,
-                        replacementTileIds:
-                            new Set(next.priorityTileIds)
+                        replacementPartitionKeys: new Set(
+                            next.priorityPartitions.map(partitionKey)
+                        )
                     };
                     this.styledLayers.set(key, owned);
                 } catch (error) {
@@ -675,13 +714,13 @@ export class ViewLayerController {
                 }
             }
             owned.layer.styleOrder = next.styleOrder;
-            owned.replacementTileIds =
-                new Set(next.priorityTileIds);
+            owned.replacementPartitionKeys =
+                new Set(next.priorityPartitions.map(partitionKey));
             owned.layer.setOptions(next.options);
             this.setRegularCoverage(
                 owned.layer,
-                next.tileIds,
-                next.priorityTileIds
+                next.partitions,
+                next.priorityPartitions
             );
             this.reconcileOwnedVisualizations(owned);
             this.releaseRegularFallbackWhenReady(owned);
@@ -773,7 +812,7 @@ export class ViewLayerController {
     /** Releases every render and attachment resource while retaining the transport owner. */
     private clearOwnedVisualizations(owned: OwnedStyledLayer): void {
         const hadInstalledVisualizations = owned.visualizations.size > 0;
-        for (const tileId of [...owned.pendingTiles.keys()]) {
+        for (const tileId of [...owned.pendingPartitions.keys()]) {
             this.discardPendingTile(owned, tileId);
         }
         for (const visualization of owned.visualizations.values()) {
@@ -784,7 +823,7 @@ export class ViewLayerController {
             visualization.destroy(this.sceneHandle);
         }
         owned.visualizations.clear();
-        owned.visualizationKeyByTileId.clear();
+        owned.visualizationKeyByPartition.clear();
         if (hadInstalledVisualizations) {
             this.scheduleInteractionPresenceReconcile(owned.layer);
         }
@@ -830,16 +869,16 @@ export class ViewLayerController {
     private regularReplacementIsReady(
         owned: OwnedStyledLayer
     ): boolean {
-        if (!owned.replacementTileIds.size) {
+        if (!owned.replacementPartitionKeys.size) {
             return true;
         }
         if (!this.sceneHandle) {
             return false;
         }
-        for (const tileId of owned.replacementTileIds) {
+        for (const tileId of owned.replacementPartitionKeys) {
             const state = owned.layer.tileStates.get(tileId);
             const visualizationKey =
-                owned.visualizationKeyByTileId.get(tileId);
+                owned.visualizationKeyByPartition.get(tileId);
             const visualization = visualizationKey
                 ? owned.visualizations.get(visualizationKey)
                 : undefined;
@@ -916,11 +955,11 @@ export class ViewLayerController {
                     layer,
                     subscription: this.subscribeToStyledLayer(layer),
                     visualizations: new Map(),
-                    visualizationKeyByTileId: new Map(),
-                    pendingTiles: new Map(),
+                    visualizationKeyByPartition: new Map(),
+                    pendingPartitions: new Map(),
                     disposeLayer: false,
                     replacementSlot: null,
-                    replacementTileIds: new Set()
+                    replacementPartitionKeys: new Set()
                 };
                 this.styledLayers.set(key, owned);
             }
@@ -976,8 +1015,8 @@ export class ViewLayerController {
             presentationId: string;
             options: Record<string, boolean | number | string>;
             plan: StyleFilterPlan;
-            tileIds: number[];
-            roots: Array<{tileId: number; featureId: string}>;
+            partitions: PartitionId[];
+            roots: Array<{partition: PartitionId; featureId: string}>;
             styleOrder: number;
             plannedLod: number;
         }>();
@@ -989,14 +1028,14 @@ export class ViewLayerController {
         for (const group of groups) {
             const byLayer = new Map<string, {
                 mapgetLayer: MapgetLayer;
-                features: Array<TileFeatureId & {tileId: number}>;
+                features: Array<TileFeatureId & {partition: PartitionId}>;
             }>();
             for (const feature of group.features) {
                 const resolved = this.resolveInteractionTargetLayer(feature);
                 if (!resolved) {
                     continue;
                 }
-                const {mapgetLayer, tileId} = resolved;
+                const {mapgetLayer, partition} = resolved;
                 let entry = byLayer.get(mapgetLayer.key);
                 if (!entry) {
                     entry = {mapgetLayer, features: []};
@@ -1006,7 +1045,7 @@ export class ViewLayerController {
                     candidate.mapTileKey === feature.mapTileKey &&
                     candidate.featureId === feature.featureId
                 )) {
-                    entry.features.push({...feature, tileId});
+                    entry.features.push({...feature, partition});
                 }
             }
 
@@ -1034,9 +1073,15 @@ export class ViewLayerController {
                     }
                     const remoteAllowed = group.kind !== "hover" ||
                         this.inspection.remoteHoverHighlightAllowed;
-                    const targetLevel = Number(coreLib.getTileLevel(
-                        features[0].tileId
-                    ));
+                    const targetLevel = features[0].partition.kind === "tile"
+                        ? Number(coreLib.getTileLevel(
+                            features[0].partition.id
+                        ))
+                        : this.viewState.getEffectiveMapLayerLevel(
+                            this.viewIndex,
+                            mapgetLayer.mapId,
+                            mapgetLayer.layerId
+                        );
                     const plannedLod = this.viewState.styleLod(
                         this.viewIndex,
                         targetLevel,
@@ -1141,7 +1186,7 @@ export class ViewLayerController {
                     // interaction targets and style options did not change.
                     const identitySignature = sipHash64Hex(JSON.stringify({
                         filterPlan: remotePlan.plan,
-                        tileIds: remotePlan.tileIds,
+                        partitions: remotePlan.partitions,
                         roots: remotePlan.roots,
                         options
                     }));
@@ -1164,7 +1209,7 @@ export class ViewLayerController {
                         presentationId,
                         options,
                         plan: remotePlan.plan,
-                        tileIds: remotePlan.tileIds,
+                        partitions: remotePlan.partitions,
                         roots: remotePlan.roots,
                         styleOrder: styleIndex +
                             (group.kind === "hover"
@@ -1216,11 +1261,11 @@ export class ViewLayerController {
                         layer,
                         subscription: this.subscribeToStyledLayer(layer),
                         visualizations: new Map(),
-                        visualizationKeyByTileId: new Map(),
-                        pendingTiles: new Map(),
+                        visualizationKeyByPartition: new Map(),
+                        pendingPartitions: new Map(),
                         disposeLayer: true,
                         replacementSlot: null,
-                        replacementTileIds: new Set()
+                        replacementPartitionKeys: new Set()
                     };
                     this.styledLayers.set(key, owned);
                 } catch (error) {
@@ -1229,9 +1274,9 @@ export class ViewLayerController {
                 }
             }
             owned.layer.styleOrder = next.styleOrder;
-            owned.layer.setCoverage(
-                next.tileIds,
-                next.tileIds,
+            owned.layer.setPartitionCoverage(
+                next.partitions,
+                next.partitions,
                 next.roots
             );
             this.reconcileOwnedVisualizations(owned);
@@ -1378,30 +1423,33 @@ export class ViewLayerController {
         >
     ): Set<TileSubsetLayerVisualization> {
         const result = new Set<TileSubsetLayerVisualization>();
-        const tileIdsByLayer = new Map<string, Set<number>>();
+        const partitionKeysByLayer = new Map<string, Set<string>>();
         for (const [layerKey, overlays] of overlaysByLayer) {
-            const tileIds = new Set<number>();
+            const partitionKeys = new Set<string>();
             for (const overlay of overlays.values()) {
                 for (const target of overlay.targets) {
-                    const parsed = this.parseFeatureTileId(target);
+                    const parsed = this.parseFeaturePartition(target);
                     if (parsed) {
-                        tileIds.add(parsed.tileId);
+                        partitionKeys.add(partitionKey(parsed.partition));
                     }
                 }
             }
-            if (tileIds.size) {
-                tileIdsByLayer.set(layerKey, tileIds);
+            if (partitionKeys.size) {
+                partitionKeysByLayer.set(layerKey, partitionKeys);
             }
         }
         const collect = (owned: OwnedStyledLayer) => {
             const kind = owned.layer.identity.presentationKind;
-            const tileIds = tileIdsByLayer.get(owned.layer.mapgetLayer.key);
-            if ((kind !== "regular" && kind !== "search") || !tileIds) {
+            const partitionKeys = partitionKeysByLayer.get(
+                owned.layer.mapgetLayer.key
+            );
+            if ((kind !== "regular" && kind !== "search") ||
+                !partitionKeys) {
                 return;
             }
-            for (const tileId of tileIds) {
+            for (const key of partitionKeys) {
                 const visualizationKey =
-                    owned.visualizationKeyByTileId.get(tileId);
+                    owned.visualizationKeyByPartition.get(key);
                 const visualization = visualizationKey
                     ? owned.visualizations.get(visualizationKey)
                     : undefined;
@@ -1422,13 +1470,13 @@ export class ViewLayerController {
     /** Resolve one exact interaction target independently of base-layer visibility. */
     private resolveInteractionTargetLayer(feature: TileFeatureId): {
         mapgetLayer: MapgetLayer;
-        tileId: number;
+        partition: PartitionId;
     } | null {
-        const parsed = this.parseFeatureTileId(feature);
+        const parsed = this.parseFeaturePartition(feature);
         if (!parsed) {
             return null;
         }
-        const {mapId, layerId, tileId} = parsed;
+        const {mapId, layerId, partition} = parsed;
         const mapgetLayer = this.mapInfo.mapgetLayer(mapId, layerId);
         if (!mapgetLayer) {
             return null;
@@ -1436,7 +1484,7 @@ export class ViewLayerController {
         // A hidden ordinary layer has no local contribution by definition;
         // its exact selected/hovered tile is therefore authored-fallback
         // demand, not ineligible interaction demand.
-        return {mapgetLayer, tileId};
+        return {mapgetLayer, partition};
     }
 
     /** Test exact entity presence in any regular/search contribution for this map layer. */
@@ -1444,7 +1492,7 @@ export class ViewLayerController {
         mapgetLayer: MapgetLayer,
         target: TileFeatureId
     ): boolean {
-        const parsed = this.parseFeatureTileId(target);
+        const parsed = this.parseFeaturePartition(target);
         if (!parsed || parsed.mapId !== mapgetLayer.mapId ||
             parsed.layerId !== mapgetLayer.layerId) {
             return false;
@@ -1456,7 +1504,9 @@ export class ViewLayerController {
                 return false;
             }
             const visualizationKey =
-                owned.visualizationKeyByTileId.get(parsed.tileId);
+                owned.visualizationKeyByPartition.get(
+                    partitionKey(parsed.partition)
+                );
             const visualization = visualizationKey
                 ? owned.visualizations.get(visualizationKey)
                 : undefined;
@@ -1474,17 +1524,18 @@ export class ViewLayerController {
     /** Re-evaluate local-versus-authored highlighting after scene geometry changes. */
     private scheduleInteractionPresenceReconcile(
         layer: StyledMapgetLayer,
-        tileId?: number
+        changedPartitionKey?: string
     ): void {
         const kind = layer.identity.presentationKind;
         if (kind !== "regular" && kind !== "search") {
             return;
         }
         const matchesChangedPresentation = (target: TileFeatureId) => {
-            const parsed = this.parseFeatureTileId(target);
+            const parsed = this.parseFeaturePartition(target);
             return parsed?.mapId === layer.mapgetLayer.mapId &&
                 parsed.layerId === layer.mapgetLayer.layerId &&
-                (tileId === undefined || parsed.tileId === tileId);
+                (changedPartitionKey === undefined ||
+                    partitionKey(parsed.partition) === changedPartitionKey);
         };
         const relevantTargetExists =
             this.inspection.selectionIdsTopic.getValue().some(panel =>
@@ -1496,19 +1547,22 @@ export class ViewLayerController {
         }
     }
 
-    /** Decode a semantic target through the authoritative WASM MapTileKey parser. */
-    private parseFeatureTileId(feature: TileFeatureId): {
+    /** Decode a semantic target through the authoritative partition-key parser. */
+    private parseFeaturePartition(feature: TileFeatureId): {
         mapId: string;
         layerId: string;
-        tileId: number;
+        partition: PartitionId;
     } | null {
         try {
-            const [mapId, layerId, tileId] =
-                coreLib.parseMapTileKey(feature.mapTileKey);
-            const numericTileId = Number(tileId);
-            return Number.isInteger(numericTileId)
-                ? {mapId, layerId, tileId: numericTileId}
-                : null;
+            const [mapId, layerId, partition] = parseMapPartitionKey(
+                coreLib,
+                feature.mapTileKey
+            );
+            return {
+                mapId: String(mapId),
+                layerId: String(layerId),
+                partition
+            };
         } catch (_error) {
             return null;
         }
@@ -1519,7 +1573,7 @@ export class ViewLayerController {
         const layers = new Map<string, {
             mapId: string;
             layerId: string;
-            tileId: number;
+            partition: PartitionId;
         }>();
         const features = [
             ...this.inspection.selectionIdsTopic.getValue()
@@ -1527,7 +1581,7 @@ export class ViewLayerController {
             ...this.inspection.hoverIdsTopic.getValue()
         ];
         for (const feature of features) {
-            const parsed = this.parseFeatureTileId(feature);
+            const parsed = this.parseFeaturePartition(feature);
             if (!parsed) {
                 continue;
             }
@@ -1542,7 +1596,7 @@ export class ViewLayerController {
             .sort((left, right) =>
                 left.mapId.localeCompare(right.mapId) ||
                 left.layerId.localeCompare(right.layerId))
-            .map(({mapId, layerId, tileId}) => {
+            .map(({mapId, layerId, partition}) => {
                 const visible = this.mapInfo.maps.getMapLayerVisibility(
                     this.viewIndex,
                     mapId,
@@ -1555,7 +1609,13 @@ export class ViewLayerController {
                         layerId
                     )
                     : -1;
-                const targetLevel = Number(coreLib.getTileLevel(tileId));
+                const targetLevel = partition.kind === "tile"
+                    ? Number(coreLib.getTileLevel(partition.id))
+                    : this.viewState.getEffectiveMapLayerLevel(
+                        this.viewIndex,
+                        mapId,
+                        layerId
+                    );
                 const parts: Array<string | number> = [
                     mapId,
                     layerId,
@@ -1586,7 +1646,7 @@ export class ViewLayerController {
         for (const [key, visualization] of [...owned.visualizations]) {
             const state = visualization.state;
             const retained =
-                owned.layer.tileStates.get(state.tileId) === state &&
+                owned.layer.tileStates.get(state.partitionKey) === state &&
                 this.presentationStillDemanded(owned.layer, state);
             const lod = this.presentationLod(owned.layer, state);
             const lineSimplificationToleranceMeters =
@@ -1609,15 +1669,15 @@ export class ViewLayerController {
 
         for (const state of owned.layer.tileStates.values()) {
             if (this.shouldVisualize(owned.layer, state) &&
-                !owned.visualizationKeyByTileId.has(state.tileId)) {
+                !owned.visualizationKeyByPartition.has(state.partitionKey)) {
                 this.enqueueTile(owned, state);
             }
         }
 
-        for (const [tileId, pending] of [...owned.pendingTiles]) {
-            if (owned.layer.tileStates.get(tileId) !== pending.state ||
+        for (const [key, pending] of [...owned.pendingPartitions]) {
+            if (owned.layer.tileStates.get(key) !== pending.state ||
                 !this.shouldVisualize(owned.layer, pending.state)) {
-                this.discardPendingTile(owned, tileId);
+                this.discardPendingTile(owned, key);
             }
         }
         this.schedulePendingTiles();
@@ -1631,14 +1691,16 @@ export class ViewLayerController {
         if (!this.shouldVisualize(owned.layer, state)) {
             return;
         }
-        const existingKey = owned.visualizationKeyByTileId.get(state.tileId);
+        const existingKey = owned.visualizationKeyByPartition.get(
+            state.partitionKey
+        );
         if (!existingKey) {
             this.enqueueTile(owned, state);
             return;
         }
         const visualization = owned.visualizations.get(existingKey);
         if (!visualization) {
-            owned.visualizationKeyByTileId.delete(state.tileId);
+            owned.visualizationKeyByPartition.delete(state.partitionKey);
             this.enqueueTile(owned, state);
             return;
         }
@@ -1660,8 +1722,8 @@ export class ViewLayerController {
         state: FilterTileState,
         preservedContributionIdentity: string | null = null
     ): void {
-        const previous = owned.pendingTiles.get(state.tileId);
-        owned.pendingTiles.set(state.tileId, {
+        const previous = owned.pendingPartitions.get(state.partitionKey);
+        owned.pendingPartitions.set(state.partitionKey, {
             state,
             lod: this.presentationLod(owned.layer, state),
             lineSimplificationToleranceMeters:
@@ -1677,19 +1739,19 @@ export class ViewLayerController {
     /** Drop one pending successor and retire any installed contribution it inherited. */
     private discardPendingTile(
         owned: OwnedStyledLayer,
-        tileId: number
+        key: string
     ): void {
-        const pending = owned.pendingTiles.get(tileId);
+        const pending = owned.pendingPartitions.get(key);
         if (!pending) {
             return;
         }
-        owned.pendingTiles.delete(tileId);
+        owned.pendingPartitions.delete(key);
         if (pending.preservedContributionIdentity) {
             TileSubsetLayerVisualization.retireContribution(
                 this.sceneHandle,
                 pending.preservedContributionIdentity
             );
-            this.scheduleInteractionPresenceReconcile(owned.layer, tileId);
+            this.scheduleInteractionPresenceReconcile(owned.layer, key);
         }
     }
 
@@ -1752,25 +1814,28 @@ export class ViewLayerController {
         if (!this.sceneHandle) {
             return false;
         }
-        for (const [tileId, pending] of owned.pendingTiles) {
-            if (owned.layer.tileStates.get(tileId) !== pending.state ||
+        for (const [key, pending] of owned.pendingPartitions) {
+            if (owned.layer.tileStates.get(key) !== pending.state ||
                 !this.shouldVisualize(owned.layer, pending.state) ||
-                owned.visualizationKeyByTileId.has(tileId)) {
-                this.discardPendingTile(owned, tileId);
+                owned.visualizationKeyByPartition.has(key)) {
+                this.discardPendingTile(owned, key);
                 continue;
             }
             // The new visualization takes responsibility for the stable
             // contribution identity retained by its predecessor.
-            owned.pendingTiles.delete(tileId);
+            owned.pendingPartitions.delete(key);
             const visualizationKey = [
-                `tile-${tileId}`,
+                `partition-${encodeURIComponent(key)}`,
                 `s${pending.lineSimplificationToleranceMeters}`
             ].join("/");
+            const coordinateOrigin = pending.state.partition.kind === "tile"
+                ? tileCoordinateOrigin(pending.state.partition.id)
+                : null;
             const visualization = new TileSubsetLayerVisualization(
                 owned.layer,
                 pending.state,
                 visualizationKey,
-                tileCoordinateOrigin(tileId),
+                coordinateOrigin,
                 this.renderService,
                 this.styleValidationReports,
                 pending.lod,
@@ -1779,7 +1844,7 @@ export class ViewLayerController {
                 item => this.queueVisualizationRender(item)
             );
             owned.visualizations.set(visualizationKey, visualization);
-            owned.visualizationKeyByTileId.set(tileId, visualizationKey);
+            owned.visualizationKeyByPartition.set(key, visualizationKey);
             this.startVisualizationRender(visualization);
             return true;
         }
@@ -1789,23 +1854,23 @@ export class ViewLayerController {
     /** Remove one tile and its exact GPU contribution without touching siblings. */
     private removeTileVisualization(
         owned: OwnedStyledLayer,
-        tileId: number
+        key: string
     ): void {
-        this.discardPendingTile(owned, tileId);
-        const key = owned.visualizationKeyByTileId.get(tileId);
-        if (!key) {
+        this.discardPendingTile(owned, key);
+        const visualizationKey = owned.visualizationKeyByPartition.get(key);
+        if (!visualizationKey) {
             return;
         }
-        owned.visualizationKeyByTileId.delete(tileId);
-        const visualization = owned.visualizations.get(key);
+        owned.visualizationKeyByPartition.delete(key);
+        const visualization = owned.visualizations.get(visualizationKey);
         if (!visualization) {
             return;
         }
-        owned.visualizations.delete(key);
+        owned.visualizations.delete(visualizationKey);
         this.pendingVisualizationRenders.delete(visualization);
         this.localInteractionVisualizationsWithOverlays.delete(visualization);
         visualization.destroy(this.sceneHandle);
-        this.scheduleInteractionPresenceReconcile(owned.layer, tileId);
+        this.scheduleInteractionPresenceReconcile(owned.layer, key);
     }
 
     /** Remove one coverage delta as a single scene and diagnostics transaction. */
@@ -1815,12 +1880,14 @@ export class ViewLayerController {
     ): void {
         const visualizations: TileSubsetLayerVisualization[] = [];
         for (const state of states) {
-            this.discardPendingTile(owned, state.tileId);
-            const key = owned.visualizationKeyByTileId.get(state.tileId);
+            this.discardPendingTile(owned, state.partitionKey);
+            const key = owned.visualizationKeyByPartition.get(
+                state.partitionKey
+            );
             if (!key) {
                 continue;
             }
-            owned.visualizationKeyByTileId.delete(state.tileId);
+            owned.visualizationKeyByPartition.delete(state.partitionKey);
             const visualization = owned.visualizations.get(key);
             if (!visualization) {
                 continue;
@@ -1855,11 +1922,13 @@ export class ViewLayerController {
         this.pendingVisualizationRenders.delete(visualization);
         this.localInteractionVisualizationsWithOverlays.delete(visualization);
         const state = visualization.state;
-        if (state && owned.visualizationKeyByTileId.get(state.tileId) === key) {
-            owned.visualizationKeyByTileId.delete(state.tileId);
+        if (state && owned.visualizationKeyByPartition.get(
+            state.partitionKey
+        ) === key) {
+            owned.visualizationKeyByPartition.delete(state.partitionKey);
         }
         const preserve = requeue && !!state &&
-            owned.layer.tileStates.get(state.tileId) === state &&
+            owned.layer.tileStates.get(state.partitionKey) === state &&
             this.shouldVisualize(owned.layer, state);
         const preservedContributionIdentity = visualization.destroy(
             this.sceneHandle,
@@ -1868,7 +1937,7 @@ export class ViewLayerController {
         if (!preservedContributionIdentity) {
             this.scheduleInteractionPresenceReconcile(
                 owned.layer,
-                state?.tileId
+                state?.partitionKey
             );
         }
         if (preserve && state) {
@@ -1909,7 +1978,7 @@ export class ViewLayerController {
                 this.applyLocalInteractionOverlays(visualization);
                 this.scheduleInteractionPresenceReconcile(
                     visualization.owner,
-                    visualization.state.tileId
+                    visualization.state.partitionKey
                 );
                 this.diagnostics.notifyChanged();
             })
@@ -1926,9 +1995,16 @@ export class ViewLayerController {
         if (layer.identity.presentationKind !== "regular") {
             return MAX_STYLE_LOD;
         }
+        const level = state.partition.kind === "tile"
+            ? Number(coreLib.getTileLevel(state.partition.id))
+            : this.viewState.getEffectiveMapLayerLevel(
+                this.viewIndex,
+                layer.mapgetLayer.mapId,
+                layer.mapgetLayer.layerId
+            );
         return this.viewState.stylePresentationLod(
             this.viewIndex,
-            Number(coreLib.getTileLevel(state.tileId)),
+            level,
             layer.featureLayerStyle
         );
     }
@@ -1944,7 +2020,7 @@ export class ViewLayerController {
         layer: StyledMapgetLayer,
         state: FilterTileState
     ): boolean {
-        if (layer.tileStates.get(state.tileId) !== state) {
+        if (layer.tileStates.get(state.partitionKey) !== state) {
             return false;
         }
         if (layer.identity.presentationKind !== "search" ||
@@ -1954,7 +2030,7 @@ export class ViewLayerController {
         return this.featureSearch.shouldRenderSearchStyledLayer(
             this.viewIndex,
             layer,
-            state.tileId
+            state.partition
         );
     }
 
@@ -1972,22 +2048,119 @@ export class ViewLayerController {
         return this.featureSearch.shouldRenderSearchStyledLayer(
             this.viewIndex,
             layer,
-            state.tileId
+            state.partition
         );
+    }
+
+    /**
+     * Return the last complete object union and asynchronously refresh it when
+     * the fixed-level discovery footprint or semantic TTL changes.
+     */
+    private objectPartitionsForViewport(
+        layer: MapgetLayer
+    ): readonly PartitionId[] {
+        const level = layer.tileAssociationLevel;
+        if (level === null) {
+            return [];
+        }
+        const discoveryTileIds = this.viewState.visibleTileIdsForLevel(
+            this.viewIndex,
+            level
+        );
+        const signature = discoveryTileIds.join(",");
+        let state = this.objectCoverageByLayer.get(layer);
+        if (!state) {
+            state = {
+                discoverySignature: "",
+                requestVersion: 0,
+                partitions: [],
+                timer: null
+            };
+            this.objectCoverageByLayer.set(layer, state);
+        }
+        if (state.discoverySignature === signature) {
+            return state.partitions;
+        }
+        state.discoverySignature = signature;
+        const requestVersion = ++state.requestVersion;
+        if (state.timer !== null) {
+            clearTimeout(state.timer);
+            state.timer = null;
+        }
+        void this.tileStream.discoverObjectPartitions(layer, discoveryTileIds)
+            .then(coverage => {
+                if (this.disposed || state!.requestVersion !== requestVersion ||
+                    state!.discoverySignature !== signature) {
+                    return;
+                }
+                state!.partitions = coverage.associations.map(
+                    association => association.partition
+                );
+                if (coverage.expiresAtMs !== null) {
+                    const delay = Math.min(
+                        0x7fff_ffff,
+                        Math.max(
+                            0,
+                            Math.ceil(coverage.expiresAtMs - Date.now()) + 1
+                        )
+                    );
+                    state!.timer = setTimeout(() => {
+                        state!.timer = null;
+                        if (!this.disposed &&
+                            state!.discoverySignature === signature) {
+                            state!.discoverySignature = "";
+                            this.scheduleReconcile();
+                        }
+                    }, delay);
+                }
+                this.scheduleReconcile();
+            })
+            .catch(error => {
+                if (!this.disposed && state!.requestVersion === requestVersion) {
+                    console.error(
+                        `Object discovery failed for '${layer.key}'.`,
+                        error
+                    );
+                    state!.timer = setTimeout(() => {
+                        state!.timer = null;
+                        if (!this.disposed &&
+                            state!.discoverySignature === signature) {
+                            state!.discoverySignature = "";
+                            this.scheduleReconcile();
+                        }
+                    }, 1_000);
+                }
+            });
+        return state.partitions;
+    }
+
+    /** Preserve cached viewport-array identity across its tagged representation. */
+    private tilePartitionsForCoverage(
+        tileIds: readonly number[]
+    ): readonly PartitionId[] {
+        let partitions = this.tilePartitionsByCoverage.get(tileIds);
+        if (!partitions) {
+            partitions = tileIds.map(tilePartition);
+            this.tilePartitionsByCoverage.set(tileIds, partitions);
+        }
+        return partitions;
     }
 
     /** Avoid rescanning unchanged large coverage arrays on non-viewport reconciliations. */
     private setRegularCoverage(
         layer: StyledMapgetLayer,
-        tileIds: readonly number[],
-        priorityTileIds: readonly number[]
+        partitions: readonly PartitionId[],
+        priorityPartitions: readonly PartitionId[]
     ): void {
         const previous = this.regularCoverageByLayer.get(layer);
-        if (previous?.tileIds === tileIds &&
-            previous.priorityTileIds === priorityTileIds) {
+        if (previous?.partitions === partitions &&
+            previous.priorityPartitions === priorityPartitions) {
             return;
         }
-        layer.setCoverage(tileIds, priorityTileIds);
-        this.regularCoverageByLayer.set(layer, {tileIds, priorityTileIds});
+        layer.setPartitionCoverage(partitions, priorityPartitions);
+        this.regularCoverageByLayer.set(layer, {
+            partitions,
+            priorityPartitions
+        });
     }
 }

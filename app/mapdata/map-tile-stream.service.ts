@@ -36,13 +36,25 @@ import {
 import {InfoMessageService} from "../shared/info.service";
 import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
 import {TileExpiryScheduler} from "./tile-expiry-scheduler";
+import {
+    parseMapPartitionKey,
+    parsePartition,
+    partitionJson,
+    partitionKey,
+    partitionKeySuffix,
+    type ObjectPartitionId,
+    type PartitionId
+} from "./partition.model";
+import type {MapgetLayer} from "./mapget-layer.model";
 
 export interface RetainedTileExpiryOwner {
     expireTiles(tokens: ReadonlyArray<{
-        tileId: number;
+        tileId: string | number;
         valueVersion: number;
     }>): void;
 }
+
+type StreamExpiryOwner = RetainedTileExpiryOwner | FilterSubscriptionRef;
 
 export interface BackendRequestProgress {
     done: number;
@@ -50,6 +62,32 @@ export interface BackendRequestProgress {
     allDone: boolean;
     requestId?: number;
 }
+
+export interface ObjectPartitionAssociation {
+    readonly partition: ObjectPartitionId;
+    readonly bounds?: readonly [number, number, number, number];
+    readonly discoveryTileId: number;
+}
+
+export interface ObjectDiscoveryCoverage {
+    readonly associations: readonly ObjectPartitionAssociation[];
+    readonly expiresAtMs: number | null;
+}
+
+interface ObjectDiscoveryTileValue {
+    readonly objects: ReadonlyArray<{
+        partition: ObjectPartitionId;
+        bounds?: readonly [number, number, number, number];
+    }>;
+    readonly expiresAtMs: number | null;
+}
+
+interface ObjectDiscoveryCacheEntry {
+    value?: ObjectDiscoveryTileValue;
+    pending?: Promise<ObjectDiscoveryTileValue>;
+}
+
+const MAX_OBJECT_DISCOVERY_CACHE_TILES = 4096;
 
 /**
  * Owns interactive filter transport and attachment refs.
@@ -77,8 +115,17 @@ export class MapTileStreamService {
     private updateRequestedWhilePaused = false;
     private forceNextUpdate = false;
     private readonly tileExpiryScheduler =
-        new TileExpiryScheduler<RetainedTileExpiryOwner>(
-            (owner, tokens) => owner.expireTiles(tokens)
+        new TileExpiryScheduler<StreamExpiryOwner, string | number>(
+            (owner, tokens) => {
+                if (owner instanceof FilterSubscriptionRef) {
+                    owner.expirePartitions(tokens.map(token => ({
+                        partitionKey: String(token.tileId),
+                        valueVersion: token.valueVersion
+                    })));
+                } else {
+                    owner.expireTiles(tokens);
+                }
+            }
         );
     private readonly updateDebounceMs = 25;
     private readonly acknowledgementQuietMs = 100;
@@ -101,6 +148,8 @@ export class MapTileStreamService {
         refs: Set<TileAttachmentRef>;
         promise: Promise<TileAttachmentValue | null>;
     }>();
+    private readonly objectDiscoveryCache =
+        new WeakMap<MapgetLayer, Map<number, ObjectDiscoveryCacheEntry>>();
 
     constructor(
         private readonly stateService: AppStateService,
@@ -208,10 +257,244 @@ export class MapTileStreamService {
         // Most styled layers are created immediately before their first
         // viewport reconciliation. Avoid sending an empty generation that has
         // no output demand and will be replaced a few milliseconds later.
-        if (coverage.tileIds.length > 0) {
+        if (coverage.partitions.length > 0) {
             this.updateFilterSubscription(ref, true);
         }
         return ref;
+    }
+
+    /**
+     * Resolve visible spatial discovery tiles into one ordered object union.
+     * Per-tile results are cached only for their advertised semantic lifetime;
+     * concurrent callers share the same bounded HTTP batch.
+     */
+    async discoverObjectPartitions(
+        layer: MapgetLayer,
+        discoveryTileIds: readonly number[]
+    ): Promise<ObjectDiscoveryCoverage> {
+        if (layer.partitionKind !== "object" ||
+            layer.tileAssociationLevel === null) {
+            throw new Error(
+                `Layer '${layer.key}' does not advertise object discovery.`
+            );
+        }
+        const uniqueTiles = [...new Set(discoveryTileIds.map(Number))];
+        if (!uniqueTiles.length) {
+            return {associations: [], expiresAtMs: null};
+        }
+        let cache = this.objectDiscoveryCache.get(layer);
+        if (!cache) {
+            cache = new Map();
+            this.objectDiscoveryCache.set(layer, cache);
+        }
+        const now = Date.now();
+        const missing = uniqueTiles.filter(tileId => {
+            const entry = cache!.get(tileId);
+            return !entry?.pending && (!entry?.value ||
+                (entry.value.expiresAtMs !== null &&
+                    now >= entry.value.expiresAtMs));
+        });
+        for (let offset = 0; offset < missing.length; offset += 256) {
+            const tileIds = missing.slice(offset, offset + 256);
+            const batch = this.fetchObjectDiscoveryBatch(layer, tileIds);
+            tileIds.forEach((tileId, index) => {
+                const pending = batch.then(values => values[index]);
+                const entry: ObjectDiscoveryCacheEntry = {pending};
+                cache!.set(tileId, entry);
+                pending.then(value => {
+                    if (cache!.get(tileId) === entry) {
+                        cache!.set(tileId, {value});
+                    }
+                }).catch(() => {
+                    if (cache!.get(tileId) === entry) {
+                        cache!.delete(tileId);
+                    }
+                });
+            });
+        }
+        const values = await Promise.all(uniqueTiles.map(async tileId => {
+            const entry = cache!.get(tileId);
+            if (entry?.pending) {
+                return entry.pending;
+            }
+            if (entry?.value) {
+                return entry.value;
+            }
+            throw new Error(
+                `Object discovery cache lost tile '${tileId}'.`
+            );
+        }));
+        this.trimObjectDiscoveryCache(cache, new Set(uniqueTiles));
+        const seen = new Set<string>();
+        const associations: ObjectPartitionAssociation[] = [];
+        let expiresAtMs: number | null = null;
+        values.forEach((value, tileIndex) => {
+            if (value.expiresAtMs !== null) {
+                expiresAtMs = expiresAtMs === null
+                    ? value.expiresAtMs
+                    : Math.min(expiresAtMs, value.expiresAtMs);
+            }
+            for (const object of value.objects) {
+                const key = partitionKey(object.partition);
+                if (seen.has(key)) {
+                    continue;
+                }
+                seen.add(key);
+                associations.push({
+                    partition: object.partition,
+                    ...(object.bounds ? {bounds: object.bounds} : {}),
+                    discoveryTileId: uniqueTiles[tileIndex]
+                });
+            }
+        });
+        return {associations, expiresAtMs};
+    }
+
+    /** Bound long-running pan sessions without evicting current or in-flight discovery. */
+    private trimObjectDiscoveryCache(
+        cache: Map<number, ObjectDiscoveryCacheEntry>,
+        protectedTileIds: ReadonlySet<number>
+    ): void {
+        if (cache.size <= MAX_OBJECT_DISCOVERY_CACHE_TILES) {
+            return;
+        }
+        for (const [tileId, entry] of cache) {
+            if (cache.size <= MAX_OBJECT_DISCOVERY_CACHE_TILES) {
+                break;
+            }
+            if (!entry.pending && !protectedTileIds.has(tileId)) {
+                cache.delete(tileId);
+            }
+        }
+    }
+
+    /** Load one server-limited discovery batch and validate every response slot. */
+    private async fetchObjectDiscoveryBatch(
+        layer: MapgetLayer,
+        tileIds: readonly number[]
+    ): Promise<ObjectDiscoveryTileValue[]> {
+        const response = await fetch("/objects/discover", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                requests: [{
+                    mapId: layer.mapId,
+                    layerId: layer.layerId,
+                    ...(layer.sourceId ? {sourceId: layer.sourceId} : {}),
+                    tileIds
+                }]
+            })
+        });
+        if (!response.ok) {
+            throw new Error(
+                `Object discovery for '${layer.key}' failed with ` +
+                `${response.status} ${response.statusText}.`
+            );
+        }
+        const body = await response.json() as {responses?: unknown[]};
+        if (!Array.isArray(body.responses) ||
+            body.responses.length !== tileIds.length) {
+            throw new Error(
+                `Object discovery for '${layer.key}' returned an ` +
+                "incomplete response."
+            );
+        }
+        const byTile = new Map<number, ObjectDiscoveryTileValue>();
+        for (const raw of body.responses) {
+            const item = raw as {
+                mapId?: unknown;
+                layerId?: unknown;
+                tileId?: unknown;
+                sourceId?: unknown;
+                status?: unknown;
+                message?: unknown;
+                timestamp?: unknown;
+                ttlMs?: unknown;
+                objects?: unknown;
+            };
+            const tileId = Number(item.tileId);
+            if (item.mapId !== layer.mapId ||
+                item.layerId !== layer.layerId ||
+                item.sourceId !== (layer.sourceId || undefined) ||
+                !tileIds.includes(tileId) ||
+                byTile.has(tileId)) {
+                throw new Error(
+                    `Object discovery for '${layer.key}' returned an ` +
+                    "unexpected identity."
+                );
+            }
+            if (item.status === "failed") {
+                throw new Error(
+                    `Object discovery for '${layer.key}' tile ${tileId} ` +
+                    `failed: ${String(item.message ?? "unknown error")}`
+                );
+            }
+            if (item.status !== "success" && item.status !== "unavailable") {
+                throw new Error(
+                    `Object discovery for '${layer.key}' returned invalid status.`
+                );
+            }
+            const timestamp = Number(item.timestamp);
+            const ttlMs = Number(item.ttlMs);
+            const expiresAtMs = timestamp + ttlMs;
+            if (!Number.isSafeInteger(timestamp) || timestamp < 0 ||
+                !Number.isSafeInteger(ttlMs) || ttlMs < 0 ||
+                !Number.isSafeInteger(expiresAtMs)) {
+                throw new Error(
+                    `Object discovery for '${layer.key}' returned invalid freshness.`
+                );
+            }
+            const objects = item.status === "success"
+                ? this.parseDiscoveredObjects(item.objects, layer.key)
+                : [];
+            byTile.set(tileId, {
+                objects,
+                expiresAtMs: ttlMs === 0 ? null : expiresAtMs
+            });
+        }
+        return tileIds.map(tileId => byTile.get(tileId)!);
+    }
+
+    /** Parse lossless object references and optional WGS84 bounds. */
+    private parseDiscoveredObjects(
+        value: unknown,
+        layerKey: string
+    ): ObjectDiscoveryTileValue["objects"] {
+        if (!Array.isArray(value)) {
+            throw new Error(
+                `Object discovery for '${layerKey}' returned invalid objects.`
+            );
+        }
+        return value.map(raw => {
+            const item = raw as {id?: unknown; bounds?: unknown};
+            const partition = parsePartition({
+                kind: "object",
+                id: item.id
+            });
+            if (partition.kind !== "object") {
+                throw new Error("Object discovery returned a tile partition.");
+            }
+            if (item.bounds === undefined) {
+                return {partition};
+            }
+            if (!Array.isArray(item.bounds) || item.bounds.length !== 4 ||
+                item.bounds.some(coordinate =>
+                    typeof coordinate !== "number" ||
+                    !Number.isFinite(coordinate)
+                ) ||
+                item.bounds[0] < -180 || item.bounds[0] > 180 ||
+                item.bounds[2] < -180 || item.bounds[2] > 180 ||
+                item.bounds[1] < -90 || item.bounds[3] > 90 ||
+                item.bounds[1] > item.bounds[3]) {
+                throw new Error(
+                    `Object discovery for '${layerKey}' returned invalid bounds.`
+                );
+            }
+            return {
+                partition,
+                bounds: item.bounds as [number, number, number, number]
+            };
+        });
     }
 
     updateFilterSubscription(
@@ -229,9 +512,9 @@ export class MapTileStreamService {
         }
     }
 
-    updateFilterTileExpiry(
+    updateFilterPartitionExpiry(
         ref: FilterSubscriptionRef,
-        tileId: number,
+        partition: PartitionId,
         valueVersion: number,
         expiresAtMs: number | null
     ): void {
@@ -240,12 +523,12 @@ export class MapTileStreamService {
             return;
         }
         if (expiresAtMs === null) {
-            this.tileExpiryScheduler.cancel(ref, tileId);
+            this.tileExpiryScheduler.cancel(ref, partitionKey(partition));
             return;
         }
         this.tileExpiryScheduler.schedule(
             ref,
-            tileId,
+            partitionKey(partition),
             valueVersion,
             expiresAtMs
         );
@@ -254,7 +537,7 @@ export class MapTileStreamService {
     /** Shares the application's indexed one-timer heap with retained non-subset tiles. */
     updateRetainedTileExpiry(
         owner: RetainedTileExpiryOwner,
-        tileId: number,
+        tileId: string | number,
         valueVersion: number,
         expiresAtMs: number | null
     ): void {
@@ -279,13 +562,13 @@ export class MapTileStreamService {
         this.tileExpiryScheduler.cancelOwner(owner);
     }
 
-    cancelFilterTileExpiries(
+    cancelFilterPartitionExpiries(
         ref: FilterSubscriptionRef,
-        tileIds?: readonly number[]
+        partitions?: readonly PartitionId[]
     ): void {
-        if (tileIds) {
-            for (const tileId of tileIds) {
-                this.tileExpiryScheduler.cancel(ref, tileId);
+        if (partitions) {
+            for (const partition of partitions) {
+                this.tileExpiryScheduler.cancel(ref, partitionKey(partition));
             }
             return;
         }
@@ -296,7 +579,7 @@ export class MapTileStreamService {
         if (this.filterSubscriptionsById.get(ref.filterId) !== ref) {
             return;
         }
-        this.cancelFilterTileExpiries(ref);
+        this.cancelFilterPartitionExpiries(ref);
         this.filterSubscriptionsById.delete(ref.filterId);
         this.scheduleUpdate();
     }
@@ -304,7 +587,7 @@ export class MapTileStreamService {
     retainTileAttachment(request: {
         mapId: string;
         layerId: string;
-        tileId: number;
+        partition: PartitionId;
         name: string;
         sourceId?: string;
         incarnation?: number;
@@ -312,7 +595,7 @@ export class MapTileStreamService {
         const key = [
             request.mapId,
             request.layerId,
-            Math.trunc(request.tileId),
+            partitionKey(request.partition),
             request.name,
             Math.max(0, Math.trunc(request.incarnation ?? 0))
         ].map(value => encodeURIComponent(String(value))).join("/");
@@ -441,35 +724,40 @@ export class MapTileStreamService {
         const groups = new Map<string, {
             mapId: string;
             layerId: string;
-            tiles: Map<number, string[]>;
+            partitions: Map<string, {
+                partition: PartitionId;
+                ids: string[];
+            }>;
         }>();
         for (const feature of requested) {
-            const parsed = this.parseMapTileKeySafe(feature.mapTileKey);
+            const parsed = this.parseMapPartitionKeySafe(feature.mapTileKey);
             if (!parsed) {
                 continue;
             }
-            const [mapId, layerId, tileId] = parsed;
+            const [mapId, layerId, partition] = parsed;
             const groupKey = `${mapId}\n${layerId}`;
             let group = groups.get(groupKey);
             if (!group) {
-                group = {mapId, layerId, tiles: new Map()};
+                group = {mapId, layerId, partitions: new Map()};
                 groups.set(groupKey, group);
             }
-            let ids = group.tiles.get(tileId);
-            if (!ids) {
-                ids = [];
-                group.tiles.set(tileId, ids);
+            const key = partitionKey(partition);
+            let entry = group.partitions.get(key);
+            if (!entry) {
+                entry = {partition, ids: []};
+                group.partitions.set(key, entry);
             }
             const baseId = stripFeatureInspectionTarget(feature.featureId);
-            if (!ids.includes(baseId)) {
-                ids.push(baseId);
+            if (!entry.ids.includes(baseId)) {
+                entry.ids.push(baseId);
             }
         }
-        const distinctTileCount = [...groups.values()]
-            .reduce((count, group) => count + group.tiles.size, 0);
-        if (distinctTileCount > MAX_NUM_TILES_TO_LOAD) {
+        const distinctPartitionCount = [...groups.values()]
+            .reduce((count, group) => count + group.partitions.size, 0);
+        if (distinctPartitionCount > MAX_NUM_TILES_TO_LOAD) {
             throw new Error(
-                `Inspection feature request exceeds ${MAX_NUM_TILES_TO_LOAD} tiles.`
+                `Inspection feature request exceeds ` +
+                `${MAX_NUM_TILES_TO_LOAD} partitions.`
             );
         }
 
@@ -497,10 +785,12 @@ export class MapTileStreamService {
         const requests = [...groups.values()].map(group => ({
             mapId: group.mapId,
             layerId: group.layerId,
-            tileIds: [...group.tiles.keys()],
-            featureIds: [...group.tiles].map(([tileId, ids]) => ({
-                tileId,
-                ids
+            partitions: [...group.partitions.values()].map(entry =>
+                partitionJson(entry.partition)
+            ),
+            featureIds: [...group.partitions.values()].map(entry => ({
+                partition: partitionJson(entry.partition),
+                ids: entry.ids
             }))
         }));
         let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -517,10 +807,10 @@ export class MapTileStreamService {
                 transport.request(requests),
                 timeoutPromise
             ]);
-            if (tiles.size < distinctTileCount) {
+            if (tiles.size < distinctPartitionCount) {
                 console.warn(
-                    "Inspection feature request returned fewer tiles than requested.",
-                    {requested: distinctTileCount, received: tiles.size}
+                    "Inspection feature request returned fewer partitions than requested.",
+                    {requested: distinctPartitionCount, received: tiles.size}
                 );
             }
         } finally {
@@ -546,16 +836,23 @@ export class MapTileStreamService {
         requested: TileFeatureId[]
     ): Promise<Array<TileFeatureId | null>> {
         const requests = requested.map(feature => {
-            const parsed = this.parseMapTileKeySafe(feature.mapTileKey);
+            const parsed = this.parseMapPartitionKeySafe(feature.mapTileKey);
             return parsed
                 ? {
                     mapId: parsed[0],
+                    layerId: parsed[1],
+                    partition: partitionJson(parsed[2]),
                     featureId: stripFeatureInspectionTarget(feature.featureId)
                 }
                 : null;
         });
         const validRequests = requests.filter(
-            (request): request is {mapId: string; featureId: string} => !!request
+            (request): request is {
+                mapId: string;
+                layerId: string;
+                partition: PartitionId;
+                featureId: string;
+            } => !!request
         );
         if (!validRequests.length) {
             return requested.map(() => null);
@@ -574,6 +871,7 @@ export class MapTileStreamService {
             const payload = await response.json() as {
                 responses?: Array<Array<{
                     tileId?: string;
+                    partitionKey?: string;
                     canonicalFeatureId?: string;
                 }>>;
             };
@@ -584,20 +882,26 @@ export class MapTileStreamService {
                 }
                 const candidates = [...(payload.responses?.[validIndex++] ?? [])]
                     .filter(candidate =>
-                        typeof candidate.tileId === "string" &&
-                        this.parseMapTileKeySafe(candidate.tileId) !== null
+                        typeof (candidate.partitionKey ?? candidate.tileId) ===
+                            "string" &&
+                        this.parseMapPartitionKeySafe(
+                            candidate.partitionKey ?? candidate.tileId!
+                        ) !== null
                     )
                     .sort((left, right) =>
-                        String(left.tileId).localeCompare(String(right.tileId)) ||
+                        String(left.partitionKey ?? left.tileId).localeCompare(
+                            String(right.partitionKey ?? right.tileId)
+                        ) ||
                         String(left.canonicalFeatureId ?? "")
                             .localeCompare(String(right.canonicalFeatureId ?? ""))
                     );
                 const candidate = candidates[0];
-                if (!candidate?.tileId) {
+                const mapTileKey = candidate?.partitionKey ?? candidate?.tileId;
+                if (!mapTileKey) {
                     return null;
                 }
                 return {
-                    mapTileKey: candidate.tileId,
+                    mapTileKey,
                     featureId: candidate.canonicalFeatureId ??
                         request.featureId
                 };
@@ -613,12 +917,18 @@ export class MapTileStreamService {
     }
 
     parseMapTileKeySafe(tileKey: string): [string, string, number] | null {
+        const parsed = this.parseMapPartitionKeySafe(tileKey);
+        return parsed?.[2].kind === "tile"
+            ? [parsed[0], parsed[1], parsed[2].id]
+            : null;
+    }
+
+    /** Parse a generic MapPartitionKey without narrowing an object id. */
+    parseMapPartitionKeySafe(
+        key: string
+    ): [string, string, PartitionId] | null {
         try {
-            const [mapId, layerId, tileId] = coreLib.parseMapTileKey(tileKey);
-            const numericTileId = Number(tileId);
-            return Number.isInteger(numericTileId)
-                ? [mapId, layerId, numericTileId]
-                : null;
+            return parseMapPartitionKey(coreLib, key);
         } catch (_error) {
             return null;
         }
@@ -725,7 +1035,7 @@ export class MapTileStreamService {
             tileExpiry: {
                 scheduledTiles: this.tileExpiryScheduler.size,
                 pendingFilterTiles: [...this.filterSubscriptionsById.values()]
-                    .reduce((count, ref) => count + ref.pendingTileCount, 0)
+                .reduce((count, ref) => count + ref.pendingPartitionCount, 0)
             },
             activeFilters: [...this.filterSubscriptionsById.values()].map(ref => ({
                 filterId: ref.filterId,
@@ -814,8 +1124,8 @@ export class MapTileStreamService {
                 // subscription both avoids useless startup work and cancels
                 // previously sent coverage when its last tile disappears.
                 .filter(request =>
-                    Array.isArray(request["tileIds"]) &&
-                    request["tileIds"].length > 0
+                    Array.isArray(request["partitions"]) &&
+                    request["partitions"].length > 0
                 );
             const updateResult =
                 await this.tileStream?.updateRequest(requests, force);
@@ -851,6 +1161,7 @@ export class MapTileStreamService {
             layer: {
                 mapName: string;
                 layerName: string;
+                partition: unknown;
                 tileId: number;
                 legalInfo?: string;
                 stringPoolId?: string;
@@ -894,13 +1205,8 @@ export class MapTileStreamService {
         try {
             const mapId = String(metadata.layer.mapName);
             const layerId = String(metadata.layer.layerName);
-            const tileId = Number(metadata.layer.tileId);
-            if (!Number.isInteger(tileId)) {
-                throw new Error(
-                    `Filter '${filterId}' supplied an invalid tile id.`
-                );
-            }
-            if (!subscription.covers(tileId)) {
+            const partition = parsePartition(metadata.layer.partition);
+            if (!subscription.covers(partition)) {
                 return;
             }
             const scalarFields =
@@ -924,11 +1230,13 @@ export class MapTileStreamService {
                 generation,
                 mapId,
                 layerId,
-                tileId,
-                mapTileKey: coreLib.getTileFeatureLayerKey(
+                partition,
+                partitionKey: partitionKey(partition),
+                mapTileKey: coreLib.createMapTileKey(
+                    "Features",
                     mapId,
                     layerId,
-                    tileId
+                    partitionKeySuffix(partition)
                 ),
                 stringPoolId: String(metadata.layer.stringPoolId ?? ""),
                 conversionTimestampMs:
@@ -1024,7 +1332,7 @@ export class MapTileStreamService {
         request: {
             mapId: string;
             layerId: string;
-            tileId: number;
+            partition: PartitionId;
             name: string;
             sourceId?: string;
             incarnation?: number;
@@ -1034,7 +1342,7 @@ export class MapTileStreamService {
         const query = new URLSearchParams({
             mapId: request.mapId,
             layerId: request.layerId,
-            tileId: String(Math.trunc(request.tileId)),
+            partition: JSON.stringify(partitionJson(request.partition)),
             name: request.name
         });
         if (request.sourceId) {

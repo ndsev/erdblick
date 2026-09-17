@@ -143,6 +143,52 @@ describe('MapTileStreamClient', () => {
         }
     });
 
+    it('keeps tagged object partitions aligned while chunking', () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        try {
+            const partitions = [
+                {kind: "object", id: "9007199254740993"},
+                {kind: "object", id: "18446744073709551615"},
+                {kind: "tile", id: -1}
+            ];
+            const pieces = tileStream.partitionRequestGroup({
+                mapId: "Map",
+                layerId: "Layer",
+                partitions,
+                priorityPartitions: [...partitions].reverse(),
+                roots: partitions.map(partition => ({
+                    partition,
+                    featureId: `${partition.kind}-${partition.id}`
+                })),
+                featureIds: partitions.map(partition => ({
+                    partition,
+                    ids: [`feature-${partition.id}`]
+                }))
+            }, 2);
+
+            expect(pieces.flatMap((piece: any) => piece.partitions))
+                .toEqual(partitions);
+            for (const piece of pieces) {
+                const membership = new Set(
+                    piece.partitions.map((partition: unknown) =>
+                        JSON.stringify(partition))
+                );
+                for (const field of [
+                    "priorityPartitions",
+                    "roots",
+                    "featureIds"
+                ]) {
+                    expect(piece[field].every((value: any) => membership.has(
+                        JSON.stringify(value.partition ?? value)
+                    ))).toBe(true);
+                }
+            }
+        } finally {
+            client.destroy();
+        }
+    });
+
     it('can force an otherwise identical ordinary pending snapshot', async () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;
