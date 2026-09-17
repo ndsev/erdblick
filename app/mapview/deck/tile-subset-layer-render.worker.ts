@@ -189,11 +189,13 @@ function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
 
         const renderStartedAt = performance.now();
         renderer = rendererFor(task);
-        renderer.setCoordinateOrigin(
-            task.coordinateOrigin[0],
-            task.coordinateOrigin[1],
-            task.coordinateOrigin[2]
-        );
+        if (task.coordinateOrigin) {
+            renderer.setCoordinateOrigin(
+                task.coordinateOrigin[0],
+                task.coordinateOrigin[1],
+                task.coordinateOrigin[2]
+            );
+        }
         renderer.setLineSimplificationTolerance(
             task.lineSimplificationToleranceMeters
         );

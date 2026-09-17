@@ -800,10 +800,13 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         if (this.byteLength(encoded) <= TARGET_TILE_REQUEST_CHUNK_BYTES) {
             return [request];
         }
-        const tileIds = Array.isArray(request?.tileIds)
-            ? request.tileIds
+        const partitionField = Array.isArray(request?.partitions)
+            ? "partitions"
+            : "tileIds";
+        const partitions = Array.isArray(request?.[partitionField])
+            ? request[partitionField]
             : [];
-        if (tileIds.length <= 1) {
+        if (partitions.length <= 1) {
             if (this.byteLength(encoded) > MAX_TILE_REQUEST_MESSAGE_BYTES) {
                 throw new Error(
                     `Single interactive request group exceeds ` +
@@ -820,7 +823,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         const encodedBytes = this.byteLength(encoded);
         const targetBytes = TARGET_TILE_REQUEST_CHUNK_BYTES * 0.85;
         const pieceCount = Math.min(
-            tileIds.length,
+            partitions.length,
             Math.max(2, Math.ceil(encodedBytes / targetBytes))
         );
         return this.partitionRequestGroup(request, pieceCount).flatMap(piece =>
@@ -834,22 +837,31 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
 
     /** Partitions one request and all tile-indexed side arrays in linear time. */
     private partitionRequestGroup(request: any, pieceCount: number): any[] {
-        const tileIds = Array.isArray(request?.tileIds)
-            ? request.tileIds
+        const partitionField = Array.isArray(request?.partitions)
+            ? "partitions"
+            : "tileIds";
+        const partitions = Array.isArray(request?.[partitionField])
+            ? request[partitionField]
             : [];
-        const tileCountPerPiece = Math.ceil(tileIds.length / pieceCount);
+        const partitionCountPerPiece = Math.ceil(
+            partitions.length / pieceCount
+        );
         const pieces: Array<Record<string, any>> = Array.from(
             {length: pieceCount},
             (_, index) => ({
                 ...request,
-                tileIds: tileIds.slice(
-                    index * tileCountPerPiece,
-                    Math.min(tileIds.length, (index + 1) * tileCountPerPiece)
+                [partitionField]: partitions.slice(
+                    index * partitionCountPerPiece,
+                    Math.min(
+                        partitions.length,
+                        (index + 1) * partitionCountPerPiece
+                    )
                 )
             })
-        ).filter(piece => piece["tileIds"].length > 0);
+        ).filter(piece => piece[partitionField].length > 0);
 
         const indexedFields = [
+            "priorityPartitions",
             "priorityTileIds",
             "roots",
             "featureIds"
@@ -857,10 +869,12 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         if (!indexedFields.some(field => Array.isArray(request?.[field]))) {
             return pieces;
         }
-        const pieceByTileId = new Map<string, number>();
+        const pieceByPartition = new Map<string, number>();
+        const keyFor = (value: unknown) =>
+            typeof value === "object" ? JSON.stringify(value) : String(value);
         pieces.forEach((piece, pieceIndex) => {
-            for (const tileId of piece["tileIds"]) {
-                pieceByTileId.set(String(tileId), pieceIndex);
+            for (const partition of piece[partitionField]) {
+                pieceByPartition.set(keyFor(partition), pieceIndex);
             }
         });
         for (const field of indexedFields) {
@@ -872,10 +886,11 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                 piece[field] = [];
             }
             for (const value of values) {
-                const tileId = field === "priorityTileIds"
+                const partition = field === "priorityTileIds" ||
+                    field === "priorityPartitions"
                     ? value
-                    : value?.tileId;
-                const pieceIndex = pieceByTileId.get(String(tileId));
+                    : value?.partition ?? value?.tileId;
+                const pieceIndex = pieceByPartition.get(keyFor(partition));
                 if (pieceIndex !== undefined) {
                     pieces[pieceIndex][field].push(value);
                 }
@@ -1203,13 +1218,15 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                 const payloadBytes = bytes.slice(MAP_TILE_STREAM_HEADER_SIZE);
                 const payloadText = this.decoder.decode(payloadBytes);
                 const payload = JSON.parse(payloadText) as MapTileStreamStatusPayload;
-                if (!this.matchesCurrentRequest(payload.requestId)) {
-                    return;
-                }
+                // Filter progress belongs to a filter generation, which can span
+                // viewport requests. Its subscriber validates that identity.
                 if (payload.type === MAP_TILE_STREAM_FILTER_STATUS_TYPE) {
                     if (this.onFilterStatus) {
                         this.onFilterStatus(payload as unknown as MapTileStreamFilterStatusPayload);
                     }
+                    return;
+                }
+                if (!this.matchesCurrentRequest(payload.requestId)) {
                     return;
                 }
                 if (this.onStatus) {

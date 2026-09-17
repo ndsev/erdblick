@@ -394,6 +394,11 @@ int32_t TileFeatureLayer::tileId() const
     return model_->tileId().value();
 }
 
+NativeJsValue TileFeatureLayer::partition() const
+{
+    return *JsValue::fromPartition(model_->partitionId());
+}
+
 /**
  * Gets the number of features in the tile.
  * @return The number of features.
@@ -414,8 +419,10 @@ uint64_t TileFeatureLayer::numVertices() const
  */
 mapget::Point TileFeatureLayer::center() const
 {
-    auto result = mapget::Point(model_->tileId().centerWgs84());
-    result.z = model_->tileId().level();
+    auto result = model_->geometryAnchor();
+    if (model_->partitionId().kind() == mapget::PartitionKind::Tile) {
+        result.z = model_->tileId().level();
+    }
     return result;
 }
 
@@ -667,6 +674,11 @@ int32_t TileSubsetLayer::tileId() const
     return model_->tileId().value();
 }
 
+NativeJsValue TileSubsetLayer::partition() const
+{
+    return *JsValue::fromPartition(model_->partitionId());
+}
+
 std::string TileSubsetLayer::filterId() const
 {
     return model_->filterId();
@@ -706,7 +718,7 @@ NativeJsValue TileSubsetLayer::dependencies() const
             {"sourceTileKey", JsValue(dependency.sourceTileKey_.toString())},
             {"mapId", JsValue(dependency.sourceTileKey_.mapId_)},
             {"layerId", JsValue(dependency.sourceTileKey_.layerId_)},
-            {"tileId", JsValue(dependency.sourceTileKey_.tileId_.value())},
+            {"partition", JsValue::fromPartition(dependency.sourceTileKey_.partitionId_)},
             {"sourceFeatureCount", JsValue(dependency.sourceFeatureCount_)},
         }));
     }

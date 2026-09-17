@@ -2,7 +2,11 @@
 
 Erdblick can render two map views side by side. Each pane keeps its own camera state, layer configuration, and per-layer style options, while the built-in sync controls let you share selected parts of that state. This guide explains how to open split view, focus a specific pane, and use the sync options effectively.
 
-![Split view UI](screenshots/split.png)
+![San Francisco lane topology in plan view beside cinematic lane geometry in perspective](screenshots/split-lane-comparison.png)
+
+The same junction is shown in **plan view (1)** and **perspective (2)** with
+different lane styles. The **sync controls (3)** link movement while keeping
+the projections and styles independent.
 
 ## Opening, Closing, and Focusing Views
 
@@ -60,7 +64,10 @@ Once split view is active, a few recurring patterns make it easier to compare da
 - **Search comparison** - run the same query against different map/layer selections, bind one search to the left view and another to the right view, then group results by map/layer or use result labels/categories to compare distributions.
 - **2D vs 3D** - enable `lay` and `pos`, disable `proj`. Switch only one pane to 2D, leaving the other in 3D to compare interactions.
 
-![Split view search selector](screenshots/split-search-view-selector.png)
+![Split view search selector](screenshots/split-search-scope.png)
+
+Use the **search view selector** to choose which view supplies the active
+map layers. Here both panes show local NDS.Island-6 data with different projections.
 
 ## Tips and Troubleshooting
 

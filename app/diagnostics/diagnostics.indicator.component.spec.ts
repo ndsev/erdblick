@@ -59,6 +59,14 @@ describe("DiagnosticsIndicatorComponent", () => {
         expect(detectChanges).not.toHaveBeenCalled();
         component.ngAfterViewInit();
 
+        const failed = snapshot(1, 2, 1);
+        failed.progress.backend = {done: 2, total: 2};
+        snapshot$.next(failed);
+        expect(component.showSpinner).toBe(false);
+        expect(component.hasError).toBe(true);
+        expect(component.snapshot.tiles.loaded).toBe(1);
+        detectChanges.mockClear();
+
         snapshot$.next(snapshot(2, 2));
 
         expect(component.snapshot.tiles.loaded).toBe(2);

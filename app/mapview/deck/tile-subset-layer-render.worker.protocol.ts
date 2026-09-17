@@ -24,9 +24,8 @@ export interface TileSubsetLayerRenderTask {
     viewIndex: number;
     renderKey: string;
     mapTileKey: string;
-    tileId: number;
-    /** Common WGS84 origin assigned by the persistent scene. */
-    coordinateOrigin: [number, number, number];
+    /** Omitted for object partitions so WASM uses the model's geometry anchor. */
+    coordinateOrigin?: [number, number, number];
     sceneGeneration: number;
     packetSequence: number;
     iconCatalogVersion: number;

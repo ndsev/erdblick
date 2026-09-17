@@ -8,7 +8,11 @@ Styles authored for MapViewer 2026.3.1 use a breaking older contract. See the
 [Style 2.0 Migration Guide](erdblick-style-2.0-migration-guide.md) before
 updating those files.
 
-![erdblick UI](screenshots/style-controls.png)
+![A lane speed palette and its result on NDS.Island-6](screenshots/style-lane-speeds.png)
+
+This example colors NDS.Island-6 lane centerlines by their speed-limit
+attribute: teal for 100 km/h and amber for 120 km/h. The Advanced tab exposes
+the YAML rules; **Export** saves the sheet for reuse in another session.
 
 ## Managing Styles in the UI
 
@@ -30,15 +34,20 @@ focusing an option highlights the contiguous group supplied by the same style
 sheet. The first visible row in that group has a brush button which opens the
 sheet in the editor.
 
-The **Edit -> Styles** submenu provides a direct path to a loaded style sheet,
-without first opening the complete configurator:
+Open **Edit -> Styles Configurator** to manage loaded sheets, enable style
+groups and import additional YAML styles. The **Edit -> Styles** submenu also
+provides a direct path to an individual loaded sheet.
 
-![Direct main-bar path to a loaded style sheet](screenshots/12a-mainbar-direct-style-menu.png)
+![Style management and its Edit menu entry](screenshots/style-menu.png)
+
+Use the edit button beside a style to open its rules.
 
 From **Maps & Layers**, hover or focus an option group and use the brush on its
 first row to edit the owning sheet directly:
 
-![Direct style action from a Maps and Layers option group](screenshots/12b-maps-direct-style-action.png)
+![Editing the lane style from its option group](screenshots/style-layer-action.png)
+
+The **brush** opens the sheet that owns this group of lane options.
 
 ## YAML Styles and Search Result Styles
 
@@ -647,19 +656,19 @@ missing from an existing component layer rejects the composition for that map.
 Equivalent partial compositions are shown only once. Selecting a map preset
 never filters unrelated layers or options from the Maps panel.
 
-The road example below shows a map-level preset selector together with the
-embedded **Surface Colors** layer preset and its expanded Boolean option:
+The lane example below shows the **Cinematic preset** with its expanded
+Boolean options. Selecting a preset applies its named combination; expanding
+it lets you inspect and change the individual options.
 
-![Road layer and map-level presets](screenshots/05a-road-and-map-presets.png)
+![Cinematic SF lanes and their expanded preset options](screenshots/style-lane-presets.png)
 
-Grid building and intersection layers expose their own preset families:
+Grid buildings offer typed and uniform presets. Intersections have a separate
+visibility option.
 
-![Grid building and intersection presets](screenshots/05b-grid-building-intersection-presets.png)
 
 The generic geometry sheet offers separate presets for lines, points, surfaces,
-and all geometry together:
+and all geometry together.
 
-![Generic geometry preset selector with All Geometry active](screenshots/05c-generic-geometry-presets.png)
 
 Datasource-specific style sheets expose named combinations through the same
 layer preset control. The examples below show named selections and their
@@ -667,7 +676,13 @@ rendered states for existing datasource layers.
 
 ![NDS.Live Lane Cinematic and Lane Topology presets in split view](screenshots/31a-live-lanes-cinematic-topology.png)
 
-![NDS.Live Display 2D Features and 3D Boxes presets in split view](screenshots/33-live-display-2d-3d.png)
+![Local NDS.Island-3D textured meshes and 3D Boxes in split view](screenshots/33-live-display-2d-3d.png)
+
+![Textured NDS.Island-3D meshes in Berlin](screenshots/island-display3d.png)
+
+The Display style renders textured meshes from the local NDS.Island-3D
+filestore. Vector color and height rules apply to their supported geometry
+types; the mesh textures shown here come from the dataset.
 
 ![NDS.Classic BMD layer with the All preset selected](screenshots/34-classic-bmd-all-features.png)
 
@@ -681,9 +696,7 @@ Changing an option reconciles the selector to the unique preset matching the
 new values. These two frames keep the camera and panel geometry fixed while
 switching from **Surface Colors** to **Uniform Roads**:
 
-![Road preset with surface colors](screenshots/06a-road-preset-surface.png)
 
-![Road preset reconciled to uniform roads](screenshots/06b-road-preset-uniform.png)
 
 ## Point grouping and `$mergeCount`
 

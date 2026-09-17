@@ -83,6 +83,8 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     protected readonly featureSearchExportDialogLayoutId = FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID;
 
     title: string = "erdblick";
+    private readonly presentationEmbed =
+        new URLSearchParams(window.location.search).get("embed") === "presentation";
     private detachDialogFocusListener?: () => void;
     private detachDialogDragStartListener?: () => void;
     private detachDialogDragEndListener?: () => void;
@@ -119,6 +121,9 @@ export class AppComponent implements AfterViewInit, OnDestroy {
 
     /** Presents configuration-editing notices after the global toast host has subscribed. */
     ngAfterViewInit() {
+        if (this.presentationEmbed) {
+            return;
+        }
         queueMicrotask(() => {
             const serverConfig = this.configService.snapshot.serverConfig;
             if (serverConfig.styleEditingEnabled || serverConfig.mapPresets.write) {

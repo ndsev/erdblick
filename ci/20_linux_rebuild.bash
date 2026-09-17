@@ -36,5 +36,14 @@ esac
 #
 # Note: a stale build dir can have `FETCHCONTENT_UPDATES_DISCONNECTED=ON` in `build/CMakeCache.txt`,
 # which prevents FetchContent/CPM dependencies from fetching new tags during reconfigure.
-emcmake cmake --preset "$CMAKE_PRESET" -DFETCHCONTENT_UPDATES_DISCONNECTED=OFF
+# Reuse the generator of an existing build tree, including trees configured by
+# MapViewer. A preset's Ninja default must not invalidate a Makefiles build.
+configure_args=(--preset "$CMAKE_PRESET" -DFETCHCONTENT_UPDATES_DISCONNECTED=OFF)
+if [[ -f build/CMakeCache.txt ]]; then
+    existing_generator=$(sed -n 's/^CMAKE_GENERATOR:INTERNAL=//p' build/CMakeCache.txt)
+    if [[ -n "$existing_generator" ]]; then
+        configure_args+=(-G "$existing_generator")
+    fi
+fi
+emcmake cmake "${configure_args[@]}"
 cmake --build --preset "$CMAKE_PRESET" -- -j"$(nproc)"

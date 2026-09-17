@@ -20,6 +20,10 @@ import {
     type StyledMapgetLayerEvent
 } from "./styled-mapget-layer.model";
 import {MAX_STYLE_LOD} from "../shared/lod-policy";
+import {
+    partitionKey,
+    type PartitionId
+} from "./partition.model";
 
 export type HoverDetailField = {key: string; value: string; colorKey: string};
 export type HoverFeatureDetails = {
@@ -42,8 +46,8 @@ export class HoverDetailService implements OnDestroy {
     private readonly subscriptions = new Subscription();
     private readonly desiredCoverageByView = new Map<number, Array<{
         mapgetLayer: MapgetLayer;
-        tileIds: readonly number[];
-        priorityTileIds: readonly number[];
+        partitions: readonly PartitionId[];
+        priorityPartitions: readonly PartitionId[];
     }>>();
     private readonly layers = new Map<string, {
         layer: StyledMapgetLayer;
@@ -87,23 +91,23 @@ export class HoverDetailService implements OnDestroy {
         viewIndex: number,
         coverage: ReadonlyArray<{
             mapgetLayer: MapgetLayer;
-            tileIds: readonly number[];
-            priorityTileIds: readonly number[];
+            partitions: readonly PartitionId[];
+            priorityPartitions: readonly PartitionId[];
         }>
     ): void {
         const previous = this.desiredCoverageByView.get(viewIndex);
         if (previous?.length === coverage.length &&
             previous.every((entry, index) =>
                 entry.mapgetLayer === coverage[index].mapgetLayer &&
-                entry.tileIds === coverage[index].tileIds &&
-                entry.priorityTileIds ===
-                    coverage[index].priorityTileIds)) {
+                entry.partitions === coverage[index].partitions &&
+                entry.priorityPartitions ===
+                    coverage[index].priorityPartitions)) {
             return;
         }
         this.desiredCoverageByView.set(viewIndex, coverage.map(entry => ({
             mapgetLayer: entry.mapgetLayer,
-            tileIds: entry.tileIds,
-            priorityTileIds: entry.priorityTileIds
+            partitions: entry.partitions,
+            priorityPartitions: entry.priorityPartitions
         })));
         this.reconcileLayersForView(viewIndex);
     }
@@ -144,7 +148,9 @@ export class HoverDetailService implements OnDestroy {
                 continue;
             }
             seen.add(identity);
-            const parsed = this.tileStream.parseMapTileKeySafe(target.mapTileKey);
+            const parsed = this.tileStream.parseMapPartitionKeySafe(
+                target.mapTileKey
+            );
             const values = parsed
                 ? this.valuesForFeature(
                     viewIndex,
@@ -230,9 +236,9 @@ export class HoverDetailService implements OnDestroy {
                 owned = this.createLayer(viewIndex, coverage.mapgetLayer, expressions);
                 this.layers.set(key, owned);
             }
-            owned.layer.setCoverage(
-                coverage.tileIds,
-                coverage.priorityTileIds
+            owned.layer.setPartitionCoverage(
+                coverage.partitions,
+                coverage.priorityPartitions
             );
         }
     }
@@ -289,7 +295,7 @@ export class HoverDetailService implements OnDestroy {
             for (const state of event.states) {
                 this.decodedTiles.delete(this.decodedTileKey(
                     layer,
-                    state.tileId
+                    state.partitionKey
                 ));
             }
             this.valuesChanged.next(null);
@@ -298,7 +304,10 @@ export class HoverDetailService implements OnDestroy {
         if (event.type !== "tile-ready") {
             return;
         }
-        this.decodedTiles.delete(this.decodedTileKey(layer, event.state.tileId));
+        this.decodedTiles.delete(this.decodedTileKey(
+            layer,
+            event.state.partitionKey
+        ));
         this.valuesChanged.next(event.state.mapTileKey);
     }
 
@@ -307,7 +316,7 @@ export class HoverDetailService implements OnDestroy {
         viewIndex: number,
         mapId: string,
         layerId: string,
-        tileId: number,
+        partition: PartitionId,
         featureId: string
     ): Map<string, unknown> | undefined {
         const owned = this.layers.get(this.layerIdentityKey(
@@ -315,11 +324,12 @@ export class HoverDetailService implements OnDestroy {
             mapId,
             layerId
         ));
-        const state = owned?.layer.tileStates.get(tileId);
+        const key = partitionKey(partition);
+        const state = owned?.layer.tileStates.get(key);
         if (!owned || !state?.subsetBlob || state.status !== "ready") {
             return undefined;
         }
-        const cacheKey = this.decodedTileKey(owned.layer, tileId);
+        const cacheKey = this.decodedTileKey(owned.layer, key);
         let cached = this.decodedTiles.get(cacheKey);
         if (!cached || cached.valueVersion !== state.valueVersion) {
             const valuesByFeatureId = this.decodeTile(
@@ -485,8 +495,8 @@ export class HoverDetailService implements OnDestroy {
     }
 
     /** Builds the small LRU key for one concrete subset generation. */
-    private decodedTileKey(layer: StyledMapgetLayer, tileId: number): string {
-        return `${layer.ownerId}/${tileId}`;
+    private decodedTileKey(layer: StyledMapgetLayer, key: string): string {
+        return `${layer.ownerId}/${key}`;
     }
 
     /** Releases one hidden layer and every decoded tile derived from it. */

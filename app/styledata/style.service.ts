@@ -1137,6 +1137,17 @@ export class StyleService {
         }
     }
 
+    /** Keeps local demo-created styles available, but opt-in on each authored presentation scene. */
+    reconcilePresentationStyles(): void {
+        for (const style of this.styles.values()) {
+            if (style.imported) {
+                this.stateService.setStyleVisibility(style.id,
+                    this.stateService.getStyleVisibility(style.id, false));
+            }
+        }
+        this.reapplyAllStyles();
+    }
+
     /** Reapplies a style by removing and re-adding it to downstream consumers when visible. */
     reapplyStyle(styleId: string) {
         if (!this.styles.has(styleId)) {

@@ -1760,4 +1760,61 @@ describe("GpuScene contribution lifecycle", () => {
     expect(redraw).toHaveBeenCalledOnce();
     expect(redraw).toHaveBeenCalledWith("GPU scene contributions removed");
   });
+
+  it("resolves and reuses one native object origin across presentations", () => {
+    const { scene } = createScene();
+    const input = (identity: string) => [{
+      identity,
+      mapTileKey: `Features:Map:Object/object/${identity}`,
+      styleOrder: 0,
+      lod: 7,
+    }];
+    const first = scene.prepareRender("object-origin", null, input("first"));
+    const concurrent = scene.prepareRender(
+      "object-origin",
+      null,
+      input("concurrent"),
+    );
+    const position: [number, number, number] = [11.25, 48.5, 321];
+
+    scene.resolveRenderOrigin(first, position);
+    scene.resolveRenderOrigin(concurrent, position);
+    expect(first.origin.position).toEqual(position);
+    expect(concurrent.origin.position).toEqual(position);
+    scene.applyPacket(pointPacket(first), first);
+    scene.applyPacket(pointPacket(concurrent), concurrent);
+    scene.finishRender(first);
+    scene.finishRender(concurrent);
+
+    const later = scene.prepareRender("object-origin", null, input("later"));
+    expect(later.origin.position).toEqual(position);
+    expect(() => scene.resolveRenderOrigin(later, [12, 49, 0])).toThrow(
+      /changed coordinates/,
+    );
+    scene.resolveRenderOrigin(later, position);
+    scene.applyPacket(pointPacket(later), later);
+    scene.finishRender(later);
+    expect(scene.snapshot().activeContributionCount).toBe(3);
+  });
+
+  it("requires native object origins before admission, including zero", () => {
+    const { scene } = createScene();
+    const input = [{
+      identity: "object",
+      mapTileKey: "Features:Map:Object/object/0",
+      styleOrder: 0,
+      lod: 7,
+    }];
+    const unresolved = scene.prepareRender("object-origin", null, input);
+    expect(() => scene.applyPacket(
+      pointPacket(unresolved),
+      unresolved,
+    )).toThrow(/unresolved geometry origin/);
+    scene.finishRender(unresolved);
+
+    const zero = scene.prepareRender("object-origin", null, input);
+    scene.resolveRenderOrigin(zero, [0, 0, 0]);
+    expect(scene.applyPacket(pointPacket(zero), zero)).not.toBeNull();
+    scene.finishRender(zero);
+  });
 });

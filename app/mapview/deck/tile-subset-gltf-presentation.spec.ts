@@ -92,7 +92,11 @@ describe("TileSubsetGltfPresentation", () => {
     it("does not retain an attachment before a Deck device exists", async () => {
         const {owner, result, presentation} = fixture();
 
-        expect(await presentation.prepare(result as any, null)).toBeNull();
+        expect(await presentation.prepare(
+            result as any,
+            null,
+            [13, 52, 7]
+        )).toBeNull();
         expect(owner.retainAttachment).not.toHaveBeenCalled();
     });
 
@@ -102,17 +106,25 @@ describe("TileSubsetGltfPresentation", () => {
             owner,
             result,
             assetRef,
+            assetStore,
             presentation
         } = fixture();
         const device = {};
 
-        const prepared = await presentation.prepare(result as any, device as any);
+        const prepared = await presentation.prepare(
+            result as any,
+            device as any,
+            [13, 52, 7]
+        );
 
         expect(owner.retainAttachment).toHaveBeenCalledWith(
             expect.objectContaining({tileId: 545666604}),
             "display3d-545666604.glb"
         );
         expect(prepared?.attachmentRef).toBe(attachmentRef);
+        expect(assetStore.retain).toHaveBeenCalledWith(expect.objectContaining({
+            tilePosition: [13, 52, 7]
+        }));
         presentation.discard(prepared);
         expect(assetRef.release).toHaveBeenCalledOnce();
         expect(attachmentRef.release).toHaveBeenCalledOnce();
@@ -131,7 +143,11 @@ describe("TileSubsetGltfPresentation", () => {
             finish = resolve;
         });
 
-        const preparing = presentation.prepare(result as any, {} as any);
+        const preparing = presentation.prepare(
+            result as any,
+            {} as any,
+            [13, 52, 7]
+        );
         presentation.destroy(null);
 
         expect(attachmentRef.release).toHaveBeenCalledOnce();
@@ -148,7 +164,11 @@ describe("TileSubsetGltfPresentation", () => {
             presentation
         } = fixture();
         const device = {};
-        const prepared = await presentation.prepare(result as any, device as any);
+        const prepared = await presentation.prepare(
+            result as any,
+            device as any,
+            [13, 52, 7]
+        );
         const registry = {
             upsertShared: vi.fn(),
             removeShared: vi.fn()

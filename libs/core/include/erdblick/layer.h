@@ -28,6 +28,9 @@ struct TileFeatureLayer
     /** Retrieves the signed packed NDS.Live tile ID. */
     int32_t tileId() const;
 
+    /** Return the tagged tile/object identity without narrowing object IDs. */
+    NativeJsValue partition() const;
+
     /**
      * Gets the number of features in the tile.
      * @return The number of features.
@@ -145,6 +148,9 @@ struct TileSubsetLayer
 
     /** Return the signed packed output tile id. */
     int32_t tileId() const;
+
+    /** Return the tagged tile/object identity without narrowing object IDs. */
+    NativeJsValue partition() const;
 
     /** Return the transport subscription identity. */
     std::string filterId() const;

@@ -19,6 +19,7 @@ import {
 } from "../search/external-viewer.service";
 import type {RenderNavigationTarget} from "./render-view.model";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
+import {parseMapPartitionKey} from "../mapdata/partition.model";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {
@@ -169,11 +170,10 @@ export class RightClickMenuService {
         const rows: PickedFeatureMenuRow[] = [];
         const seen = new Set<string>();
         for (const feature of features) {
-            const [mapId, layerId] = coreLib.parseMapTileKey(feature.mapTileKey) as [
-                string,
-                string,
-                number
-            ];
+            const [mapId, layerId] = parseMapPartitionKey(
+                coreLib,
+                feature.mapTileKey
+            );
             const identity = JSON.stringify([mapId, layerId, feature.featureId]);
             if (seen.has(identity)) {
                 continue;

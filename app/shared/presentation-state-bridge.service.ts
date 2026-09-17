@@ -1,0 +1,553 @@
+import {Injectable, OnDestroy, Optional} from "@angular/core";
+import type {Params} from "@angular/router";
+import {AppStateService} from "./appstate.service";
+import type {CameraViewState} from "./appstate.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {StyleService} from "../styledata/style.service";
+import {FeatureSearchService} from "../search/feature.search.service";
+import {addMetersToLngLat} from "@math.gl/web-mercator";
+
+export const PRESENTATION_BRIDGE_PROTOCOL_VERSION = 2;
+export const PRESENTATION_BRIDGE_READY = "erdblick:presentation:ready";
+export const PRESENTATION_BRIDGE_APPLY = "erdblick:presentation:apply-state";
+export const PRESENTATION_BRIDGE_APPLY_URL_STATE = "erdblick:presentation:apply-url-state";
+export const PRESENTATION_BRIDGE_RESULT = "erdblick:presentation:result";
+export const PRESENTATION_BRIDGE_START_FLIGHT = "erdblick:presentation:start-camera-flight";
+export const PRESENTATION_BRIDGE_STOP_FLIGHT = "erdblick:presentation:stop-camera-flight";
+
+interface PresentationCameraWaypoint {
+    lon: number;
+    lat: number;
+    alt: number;
+    heading: number;
+    pitch: number;
+    roll: number;
+}
+
+interface PresentationCameraFlight {
+    durationMs: number;
+    turnDurationMs: number;
+    pingPong: boolean;
+    canvasOnly: boolean;
+    waypoints: PresentationCameraWaypoint[];
+    loop: boolean;
+}
+
+interface PresentationApplyStateRequest {
+    requestId: number;
+    kind: "snapshot";
+    state: Record<string, unknown>;
+    origin: string;
+}
+
+interface PresentationApplyUrlRequest {
+    requestId: number;
+    kind: "url";
+    params: Params;
+    origin: string;
+    transitionMs: number;
+    reset: boolean;
+    fromCamera?: CameraViewState;
+}
+
+type PresentationApplyRequest = PresentationApplyStateRequest | PresentationApplyUrlRequest;
+type PresentationBridgeError = "invalid-message" | "invalid-search" | "invalid-state" | "state-application-failed";
+
+/** Applies native state snapshots requested by an explicitly embedded presentation parent. */
+@Injectable({providedIn: "root"})
+export class PresentationStateBridgeService implements OnDestroy {
+    private browserWindow?: Window;
+    private parentOrigin?: string;
+    private applying = false;
+    private queuedRequest?: PresentationApplyRequest;
+    private flightFrame?: number;
+    private transitionPose?: CameraViewState;
+    private motionGeneration = 0;
+
+    constructor(
+        private readonly stateService: AppStateService,
+        private readonly mapViewState: MapViewStateService,
+        private readonly styleService: StyleService,
+        @Optional() private readonly searchService?: FeatureSearchService
+    ) {}
+
+    /** Enables the bridge for a framed document carrying the presentation opt-in. */
+    initialize(browserWindow: Window = window): boolean {
+        if (this.browserWindow) {
+            return true;
+        }
+        if (browserWindow.parent === browserWindow
+            || new URLSearchParams(browserWindow.location.search).get("embed") !== "presentation") {
+            return false;
+        }
+
+        this.browserWindow = browserWindow;
+        browserWindow.addEventListener("message", this.handleMessage);
+        browserWindow.addEventListener("keydown", this.handleReviewShortcut, {capture: true});
+        browserWindow.parent.postMessage({
+            type: PRESENTATION_BRIDGE_READY,
+            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION
+        }, "*");
+        return true;
+    }
+
+    /** Removes the global listener and drops work that has not started yet. */
+    ngOnDestroy(): void {
+        this.browserWindow?.removeEventListener("message", this.handleMessage);
+        this.browserWindow?.removeEventListener("keydown", this.handleReviewShortcut, {capture: true});
+        this.stopCameraFlight();
+        this.browserWindow = undefined;
+        this.parentOrigin = undefined;
+        this.queuedRequest = undefined;
+    }
+
+    /** Forwards the presentation shortcut when the embedded canvas owns keyboard focus. */
+    private readonly handleReviewShortcut = (event: KeyboardEvent): void => {
+        const target = event.target;
+        if (!event.shiftKey || event.ctrlKey || event.altKey || event.metaKey
+            || event.key.toLowerCase() !== "r"
+            || (target instanceof Element && target.closest("input,textarea,select,[contenteditable=true]"))) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.browserWindow?.parent.postMessage({
+            type: "erdblick:presentation:review-toggle",
+            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION
+        }, this.parentOrigin ?? "*");
+    };
+
+    private readonly handleMessage = (event: MessageEvent<unknown>): void => {
+        const browserWindow = this.browserWindow;
+        if (!browserWindow || event.source !== browserWindow.parent) {
+            return;
+        }
+
+        if (isStopFlightMessage(event.data)) {
+            if (this.acceptsControlMessage(event.origin, event.data)) {
+                this.stopCameraFlight();
+            }
+            return;
+        }
+        if (isStartFlightMessage(event.data)) {
+            if (this.acceptsControlMessage(event.origin, event.data)) {
+                const flight = presentationCameraFlight(event.data["flight"]);
+                if (flight) {
+                    this.startCameraFlight(flight);
+                }
+            }
+            return;
+        }
+        if (!isApplyMessage(event.data)) {
+            return;
+        }
+
+        const requestId = event.data["requestId"];
+        if (!isRequestId(requestId) || !isConcreteOrigin(event.origin)) {
+            return;
+        }
+        if (this.parentOrigin && event.origin !== this.parentOrigin) {
+            return;
+        }
+        if (event.data["version"] !== PRESENTATION_BRIDGE_PROTOCOL_VERSION) {
+            this.postResult(requestId, event.origin, false, "invalid-message");
+            return;
+        }
+
+        let request: PresentationApplyRequest;
+        if (event.data["type"] === PRESENTATION_BRIDGE_APPLY) {
+            if (!isStateObject(event.data["state"])) {
+                this.postResult(requestId, event.origin, false, "invalid-message");
+                return;
+            }
+            request = {
+                requestId,
+                kind: "snapshot",
+                state: event.data["state"],
+                origin: event.origin
+            };
+        } else {
+            const params = typeof event.data["search"] === "string"
+                ? presentationParams(event.data["search"])
+                : null;
+            if (!params) {
+                this.postResult(requestId, event.origin, false, "invalid-search");
+                return;
+            }
+            const transitionMs = event.data["transitionMs"] ?? 0;
+            const reset = event.data["reset"] ?? true;
+            if (typeof reset !== "boolean") {
+                this.postResult(requestId, event.origin, false, "invalid-message");
+                return;
+            }
+            if (typeof transitionMs !== "number" || !Number.isFinite(transitionMs) || transitionMs < 0 || transitionMs > 10000) {
+                this.postResult(requestId, event.origin, false, "invalid-message");
+                return;
+            }
+            request = {requestId, kind: "url", params, origin: event.origin, transitionMs, reset,
+                fromCamera: this.transitionPose ? structuredClone(this.transitionPose) : undefined};
+        }
+
+        this.parentOrigin ??= event.origin;
+        this.stopCameraFlight();
+        if (this.applying) {
+            this.queuedRequest = request;
+            return;
+        }
+        void this.applyRequests(request);
+    };
+
+    /** Pins presentation control to the same concrete parent and protocol version. */
+    private acceptsControlMessage(origin: string, data: Record<string, unknown>): boolean {
+        if (!isConcreteOrigin(origin)
+            || data["version"] !== PRESENTATION_BRIDGE_PROTOCOL_VERSION
+            || (this.parentOrigin && this.parentOrigin !== origin)) {
+            return false;
+        }
+        this.parentOrigin ??= origin;
+        return true;
+    }
+
+    /** Publishes interpolated camera poses without writing browser history or persisted app state. */
+    private startCameraFlight(flight: PresentationCameraFlight): void {
+        this.stopCameraFlight();
+        const browserWindow = this.browserWindow;
+        if (!browserWindow) {
+            return;
+        }
+        browserWindow.document?.body.classList.toggle("presentation-canvas-only", flight.canvasOnly);
+        const startedAt = browserWindow.performance.now();
+        const frame = (now: number) => {
+            if (!this.browserWindow) {
+                return;
+            }
+            const turnDurationMs = flight.pingPong ? flight.turnDurationMs : 0;
+            const cycleDurationMs = flight.durationMs + turnDurationMs;
+            const cycle = Math.floor((now - startedAt) / cycleDurationMs);
+            const elapsedInCycle = (now - startedAt) % cycleDurationMs;
+            const reverse = flight.pingPong && cycle % 2 === 1;
+            const travelling = elapsedInCycle < flight.durationMs || turnDurationMs === 0;
+            const travelProgress = Math.min(1, elapsedInCycle / flight.durationMs);
+            const easedTravelProgress = flight.loop ? travelProgress : smootherStep(travelProgress);
+            const pathProgress = reverse ? 1 - easedTravelProgress : easedTravelProgress;
+            const cameraViewData = interpolateFlight(
+                flight.waypoints,
+                travelling ? pathProgress : reverse ? 0 : 1,
+                flight.loop
+            );
+            if (flight.pingPong) cameraViewData.orientation.heading += cycle * Math.PI;
+            if (!travelling) {
+                const turnProgress = (elapsedInCycle - flight.durationMs) / turnDurationMs;
+                cameraViewData.orientation.heading += Math.PI * smootherStep(turnProgress);
+            }
+            this.mapViewState.presentationCameraViewStateTopic.next({
+                targetView: 0,
+                cameraViewData
+            });
+            this.flightFrame = this.browserWindow.requestAnimationFrame(frame);
+        };
+        this.flightFrame = browserWindow.requestAnimationFrame(frame);
+    }
+
+    private stopCameraFlight(): void {
+        this.motionGeneration++;
+        if (this.flightFrame !== undefined && this.browserWindow) {
+            this.browserWindow.cancelAnimationFrame(this.flightFrame);
+        }
+        this.flightFrame = undefined;
+        this.transitionPose = undefined;
+        this.browserWindow?.document?.body.classList.remove("presentation-canvas-only");
+    }
+
+    /** Serializes state changes and retains only the newest waiting request. */
+    private async applyRequests(firstRequest: PresentationApplyRequest): Promise<void> {
+        this.applying = true;
+        let request: PresentationApplyRequest | undefined = firstRequest;
+        while (request && this.browserWindow) {
+            try {
+                const duration = request.kind === "url" ? request.transitionMs : 0;
+                const motionGeneration = this.motionGeneration;
+                const from = duration > 0 ? (request.kind === "url" ? request.fromCamera : undefined)
+                    ?? structuredClone(this.stateService.cameraViewDataState.getValue(0)) : undefined;
+                const errors = request.kind === "snapshot"
+                    ? await Promise.resolve(this.stateService.replaceSnapshotState(request.state))
+                    : await this.applyUrlState(request.params, request.reset);
+                if (errors.length) {
+                    console.warn("[PresentationStateBridge] Rejected presentation state.", errors);
+                    this.postResult(request.requestId, request.origin, false, "invalid-state");
+                } else {
+                    if (request.kind === "snapshot" || request.reset) this.searchService?.dismissForPresentation();
+                    this.styleService.reconcilePresentationStyles();
+                    if (from && !this.queuedRequest && motionGeneration === this.motionGeneration) {
+                        this.transitionCamera(from, structuredClone(this.stateService.cameraViewDataState.getValue(0)), duration);
+                    }
+                    this.postResult(request.requestId, request.origin, true);
+                }
+            } catch {
+                this.postResult(request.requestId, request.origin, false, "state-application-failed");
+            }
+            request = this.queuedRequest;
+            this.queuedRequest = undefined;
+        }
+        this.applying = false;
+    }
+
+    /** Keeps query-authored presentation scenes compatible with native-snapshot scenes. */
+    private async applyUrlState(params: Params, reset: boolean): Promise<string[]> {
+        await this.stateService.replaceUrlState(params, reset);
+        // A URL encodes whether each inspection is docked, but not the dock's
+        // open state. Make authored docked selections visible after replacement.
+        if (this.stateService.selection?.some(panel => !panel.undocked && panel.features.length > 0)) {
+            this.stateService.dockActiveTab = "inspection";
+            this.stateService.isDockOpen = true;
+        }
+        return [];
+    }
+
+    /** One bounded camera transition; persistent state remains the exact authored destination. */
+    private transitionCamera(from: CameraViewState, to: CameraViewState, durationMs: number): void {
+        const host = this.browserWindow;
+        if (!host || host.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+        let start: number | undefined;
+        const emit = (cameraViewData: CameraViewState) => {
+            this.transitionPose = cameraViewData;
+            this.mapViewState.presentationCameraViewStateTopic.next({targetView: 0, cameraViewData});
+        };
+        const mix = (a: number, b: number, t: number) => a + (b - a) * t;
+        const frame = (time: number) => {
+            if (!this.browserWindow) return;
+            start ??= time;
+            const progress = Math.min(1, (time - start) / durationMs);
+            const t = smootherStep(progress);
+            const angle = (a: number, b: number) => mix(a, unwrapAngle(b, a), t);
+            emit(progress === 1 ? to : {
+                destination: {
+                    lon: mix(from.destination.lon, from.destination.lon + ((to.destination.lon - from.destination.lon + 540) % 360 - 180), t),
+                    lat: mix(from.destination.lat, to.destination.lat, t),
+                    // Log altitude makes both globe-to-city and metre-scale changes legible.
+                    alt: Math.exp(mix(Math.log(Math.max(1, from.destination.alt)), Math.log(Math.max(1, to.destination.alt)), t))
+                },
+                orientation: {heading: angle(from.orientation.heading, to.orientation.heading),
+                    pitch: mix(from.orientation.pitch, to.orientation.pitch, t), roll: angle(from.orientation.roll, to.orientation.roll)},
+                position: [0, 1, 2].map(i => mix(from.position?.[i] ?? 0, to.position?.[i] ?? 0, t)) as [number, number, number]
+            });
+            this.flightFrame = progress < 1 ? host.requestAnimationFrame(frame) : undefined;
+            if (progress === 1) this.transitionPose = undefined;
+        };
+        emit(from);
+        this.flightFrame = host.requestAnimationFrame(frame);
+    }
+
+    /** Replies only to the pinned parent and never includes application state. */
+    private postResult(
+        requestId: number,
+        origin: string,
+        ok: boolean,
+        error?: PresentationBridgeError
+    ): void {
+        const browserWindow = this.browserWindow;
+        if (!browserWindow || (this.parentOrigin && origin !== this.parentOrigin)) {
+            return;
+        }
+        browserWindow.parent.postMessage({
+            type: PRESENTATION_BRIDGE_RESULT,
+            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
+            requestId,
+            ok,
+            ...(error ? {error} : {})
+        }, origin);
+    }
+}
+
+/** Narrows unrelated window messages without responding to them. */
+function isApplyMessage(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object"
+        && value !== null
+        && ((value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_APPLY
+            || (value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_APPLY_URL_STATE);
+}
+
+function isStartFlightMessage(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object"
+        && value !== null
+        && (value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_START_FLIGHT;
+}
+
+function isStopFlightMessage(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object"
+        && value !== null
+        && (value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_STOP_FLIGHT;
+}
+
+/** Rejects oversized and non-finite motion programs at the trust boundary. */
+function presentationCameraFlight(value: unknown): PresentationCameraFlight | null {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return null;
+    }
+    const raw = value as Record<string, unknown>;
+    // Orbit is authored by its target and metre offsets; reuse the flight lifecycle and protocol.
+    if (raw["orbit"] !== undefined) {
+        const orbit = raw["orbit"];
+        if (!isStateObject(orbit) || !Array.isArray(orbit["center"])
+            || orbit["center"].length !== 3
+            || !orbit["center"].every(v => typeof v === "number" && Number.isFinite(v))
+            || Math.abs(orbit["center"][0]) > 180 || Math.abs(orbit["center"][1]) > 80
+            || typeof orbit["radius"] !== "number" || !Number.isFinite(orbit["radius"])
+            || orbit["radius"] < 1 || orbit["radius"] > 100_000
+            || typeof orbit["height"] !== "number" || !Number.isFinite(orbit["height"])
+            || orbit["height"] < 1 || orbit["height"] > 100_000
+            || raw["pingPong"] !== false) return null;
+        const center = orbit["center"] as number[];
+        const radius = orbit["radius"];
+        const height = orbit["height"];
+        const waypoints = Array.from({length: 49}, (_, i) => {
+            const angle = i * Math.PI * 2 / 48;
+            const [lon, lat, alt] = addMetersToLngLat(center,
+                [Math.sin(angle) * radius, Math.cos(angle) * radius, height]);
+            return {lon, lat, alt, heading: angle + Math.PI,
+                pitch: -Math.atan2(height, radius), roll: 0};
+        });
+        const result = presentationCameraFlight({...raw, orbit: undefined, waypoints});
+        return result ? {...result, loop: true} : null;
+    }
+    if (!Number.isFinite(raw["durationMs"])
+        || Number(raw["durationMs"]) < 1_000
+        || Number(raw["durationMs"]) > 300_000
+        || typeof raw["pingPong"] !== "boolean"
+        || !Array.isArray(raw["waypoints"])
+        || raw["waypoints"].length < 2
+        || raw["waypoints"].length > 64) {
+        return null;
+    }
+    const waypointFields = ["lon", "lat", "alt", "heading", "pitch", "roll"] as const;
+    const waypoints: PresentationCameraWaypoint[] = [];
+    for (const value of raw["waypoints"]) {
+        if (typeof value !== "object" || value === null || Array.isArray(value)) {
+            return null;
+        }
+        const waypoint = value as Record<string, unknown>;
+        if (!waypointFields.every(field => typeof waypoint[field] === "number"
+            && Number.isFinite(waypoint[field]))) {
+            return null;
+        }
+        waypoints.push(Object.fromEntries(
+            waypointFields.map(field => [field, waypoint[field]])
+        ) as unknown as PresentationCameraWaypoint);
+    }
+    const turnDurationMs = raw["turnDurationMs"] === undefined ? 0 : Number(raw["turnDurationMs"]);
+    if (!Number.isFinite(turnDurationMs) || turnDurationMs < 0 || turnDurationMs > 30_000) {
+        return null;
+    }
+    const canvasOnly = raw["canvasOnly"] ?? false;
+    if (typeof canvasOnly !== "boolean") {
+        return null;
+    }
+    return {
+        durationMs: Number(raw["durationMs"]),
+        turnDurationMs,
+        pingPong: raw["pingPong"],
+        canvasOnly,
+        waypoints,
+        loop: false
+    };
+}
+
+/** Interpolates equal-duration segments with continuous position and orientation tangents. */
+function interpolateFlight(
+    waypoints: PresentationCameraWaypoint[],
+    progress: number,
+    loop = false
+): CameraViewState {
+    const segmentPosition = Math.min(1, Math.max(0, progress)) * (waypoints.length - 1);
+    const segmentIndex = Math.min(waypoints.length - 2, Math.floor(segmentPosition));
+    const amount = segmentPosition - segmentIndex;
+    const from = waypoints[segmentIndex];
+    const to = waypoints[segmentIndex + 1];
+    const before = waypoints[loop && segmentIndex === 0 ? waypoints.length - 2 : Math.max(0, segmentIndex - 1)];
+    const after = waypoints[loop && segmentIndex + 2 === waypoints.length ? 1 : Math.min(waypoints.length - 1, segmentIndex + 2)];
+    const spline = (field: "lon" | "lat" | "alt" | "pitch" | "roll") => catmullRom(
+        before[field], from[field], to[field], after[field], amount
+    );
+    const heading0 = unwrapAngle(before.heading, from.heading);
+    const heading2 = unwrapAngle(to.heading, from.heading);
+    const heading3 = unwrapAngle(after.heading, heading2);
+    return {
+        destination: {
+            lon: spline("lon"),
+            lat: spline("lat"),
+            alt: spline("alt")
+        },
+        orientation: {
+            heading: catmullRom(heading0, from.heading, heading2, heading3, amount),
+            pitch: spline("pitch"),
+            roll: spline("roll")
+        },
+        position: [0, 0, 0]
+    };
+}
+
+/** Quintic easing gives both translation and the endpoint turn zero velocity and acceleration. */
+function smootherStep(value: number): number {
+    const t = Math.min(1, Math.max(0, value));
+    return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+/** Uniform Catmull–Rom interpolation is appropriate for the route's evenly spaced samples. */
+function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): number {
+    const t2 = t * t;
+    const t3 = t2 * t;
+    return 0.5 * (
+        2 * p1
+        + (-p0 + p2) * t
+        + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+        + (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+    );
+}
+
+/** Selects the representation of an angle nearest to a reference angle. */
+function unwrapAngle(value: number, reference: number): number {
+    const tau = Math.PI * 2;
+    return reference + ((value - reference + Math.PI) % tau + tau) % tau - Math.PI;
+}
+
+/** Accepts monotonic presentation request identifiers without coercion. */
+function isRequestId(value: unknown): value is number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+/** Performs the cheap envelope check; AppStateService owns semantic validation. */
+function isStateObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Rejects opaque origins because they cannot be pinned as a postMessage target. */
+function isConcreteOrigin(origin: string): boolean {
+    try {
+        const parsed = new URL(origin);
+        return (parsed.protocol === "http:" || parsed.protocol === "https:")
+            && parsed.origin === origin;
+    } catch {
+        return false;
+    }
+}
+
+/** Validates the query-only compatibility contract without interpreting its application state. */
+function presentationParams(search: string): Params | null {
+    if (!search.startsWith("?") || search.includes("#")) {
+        return null;
+    }
+    const source = new URLSearchParams(search.slice(1));
+    if (!hasSingleValue(source, "embed", "presentation") || !hasSingleValue(source, "v2", "1")) {
+        return null;
+    }
+
+    const params = Object.create(null) as Params;
+    for (const key of new Set(source.keys())) {
+        const values = source.getAll(key);
+        params[key] = values.length === 1 ? values[0] : values;
+    }
+    return params;
+}
+
+function hasSingleValue(params: URLSearchParams, key: string, value: string): boolean {
+    const values = params.getAll(key);
+    return values.length === 1 && values[0] === value;
+}

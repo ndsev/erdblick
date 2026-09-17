@@ -130,6 +130,44 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('replaces and hydrates URL state through the explicit runtime boundary', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        // @ts-expect-error this is a call to mock router
+        routerStub.navigate.mockClear();
+        const appliedMarkerValues: boolean[] = [];
+        service.stateApplied.subscribe(() => {
+            appliedMarkerValues.push(service.markerState.getValue());
+        });
+
+        await service.replaceUrlState({v2: '1', m: '1'});
+
+        expect(routerStub.navigate).toHaveBeenCalledWith([], {
+            queryParams: {v2: '1', m: '1'},
+            queryParamsHandling: 'replace',
+            replaceUrl: true,
+        });
+        expect(service.markerState.getValue()).toBe(true);
+        expect(appliedMarkerValues).toEqual([true]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects explicit URL replacement before persistence is ready', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        await expect(service.replaceUrlState({v2: '1'})).rejects.toThrow('before AppStateService is ready');
+        expect(routerStub.navigate).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('keeps selected features with packed tile ids during datasource pruning', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
@@ -777,6 +815,8 @@ describe('AppStateService', () => {
             showAlertDialogDefault: vi.fn()
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const stateApplied = vi.fn();
+        service.stateApplied.subscribe(stateApplied);
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -797,6 +837,7 @@ describe('AppStateService', () => {
         await flushMicrotasks();
 
         expect(service.markerState.getValue()).toBe(false);
+        expect(stateApplied).toHaveBeenCalledTimes(1);
 
         vi.advanceTimersByTime(100);
         await flushMicrotasks();
@@ -2363,6 +2404,97 @@ describe('AppStateService', () => {
         expect(errors).toEqual([]);
         expect(service.markerState.getValue()).toBe(true);
         expect(service.isDialogOpen('preferences-dialog')).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('resets omitted query-scene state and replaces camera and style options', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+        service.mapsOpenState.next(true);
+        service.stylesState.next(new Map([['old/Lane/style/topology', [true]]]));
+        await service.replaceUrlState({v2: '1', n: '1', lon: '11.66', lat: '48.25', alt: '128000', map: 'Very-Large-Map', l: 'Road:0', v: '1'}, true);
+        expect(service.mapsOpenState.getValue()).toBe(false);
+        expect(service.stylesState.getValue().has('old/Lane/style/topology')).toBe(false);
+        expect(service.layerNamesState.getValue()).toEqual(['Very-Large-Map/Road']);
+        expect(service.cameraViewDataState.getValue(0).destination.lon).toBeCloseTo(11.66);
+        expect(service.cameraViewDataState.getValue(0).destination.lat).toBeCloseTo(48.25);
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects presentation snapshot replacement before persistence is ready', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        expect(() => service.replaceSnapshotState({marker: true}))
+            .toThrow('before AppStateService is ready');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('validates presentation snapshot replacement before mutating any state', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+        const stateApplied = vi.fn();
+        service.stateApplied.subscribe(stateApplied);
+
+        service.markerState.next(false);
+        const errors = service.replaceSnapshotState({
+            marker: true,
+            unknownPresentationState: 1
+        });
+
+        expect(errors).not.toEqual([]);
+        expect(service.markerState.getValue()).toBe(false);
+        expect(stateApplied).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('replaces presentation state, resets omissions, and clears stale style options without persistence', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        service.markerState.next(true);
+        service.mapsOpenState.next(true);
+        service.layerNamesState.next(['m1/layerA']);
+        service.stylesState.next(new Map([
+            ['m1/layerA/overlay/stale', [true]]
+        ]));
+        await flushMicrotasks();
+        localStorage.clear();
+        // @ts-expect-error this is a call to mock router
+        routerStub.navigate.mockClear();
+        const appliedSnapshots: Array<Record<string, unknown>> = [];
+        service.stateApplied.subscribe(() => appliedSnapshots.push(service.exportSnapshot()));
+
+        const errors = service.replaceSnapshotState({
+            numberOfViews: 1,
+            marker: false,
+            layerNames: ['m2/layerB'],
+            'overlay~0~opacity': '0.75'
+        });
+        await flushMicrotasks();
+
+        expect(errors).toEqual([]);
+        expect(service.markerState.getValue()).toBe(false);
+        expect(service.mapsOpenState.getValue()).toBe(false);
+        expect(service.layerNamesState.getValue()).toEqual(['m2/layerB']);
+        expect(service.stylesState.getValue().has('m1/layerA/overlay/stale')).toBe(false);
+        expect(service.stylesState.getValue().get('m2/layerB/overlay/opacity')).toEqual(['0.75']);
+        expect(appliedSnapshots).toHaveLength(1);
+        expect(routerStub.navigate).not.toHaveBeenCalled();
+        expect(localStorage.length).toBe(0);
 
         service.ngOnDestroy();
         routerStub.events.complete();

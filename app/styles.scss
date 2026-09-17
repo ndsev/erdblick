@@ -24,3 +24,34 @@
 @use "./styles/coordinates.panel.component.style" as *;
 @use "./styles/datasources.component.style" as *;
 @use "./styles/responsive.style" as *;
+
+/* Presentation flights may explicitly request a canvas-only scene. */
+body.presentation-canvas-only {
+  overflow: hidden;
+
+  main-bar,
+  coordinates-panel,
+  .dock-toggle,
+  .collapsible-dock,
+  erdblick-view-ui,
+  .viewsync-select,
+  .first-person-exit-button,
+  .feature-hover-hud,
+  app-root > datasources,
+  app-root > advanced-preferences,
+  app-root > map-panel,
+  app-root > style-panel,
+  app-root > inspection-dialogs,
+  app-root > feature-search-dialogs,
+  app-root > keyboard-dialog,
+  app-root > preferences,
+  app-root > survey,
+  app-root > p-toast {
+    display: none !important;
+  }
+
+  .viewer-layout {
+    flex-basis: 100% !important;
+    width: 100% !important;
+  }
+}

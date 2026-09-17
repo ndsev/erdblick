@@ -42,6 +42,8 @@ export interface SearchStyleColorDraft {
     gradientStops: SearchStyleGradientStopDraft[];
     categoryStops: SearchStyleCategoryStopDraft[];
     fallbackColor: string;
+    /** False omits the scale fallback: unmatched values are not rendered. */
+    fallbackEnabled?: boolean;
 }
 
 export interface SearchStyleGradientValueTag {
@@ -92,7 +94,7 @@ export function searchStyleColorProperties(
             mode: color.mode === "gradient" ? "linear" : "categorical",
             expression,
             stops,
-            fallback
+            ...(color.fallbackColor === undefined ? {} : {fallback})
         }
     };
 }
@@ -166,6 +168,7 @@ export function defaultSearchStyleColorDraft(field: string): SearchStyleColorDra
         mode: "gradient",
         field,
         customField: false,
+        fallbackEnabled: true,
         solidColor: DEFAULT_SEARCH_STYLE_SOLID_COLOR,
         gradientStops: [],
         categoryStops: [],
@@ -179,6 +182,7 @@ export function cloneSearchStyleColorDraft(draft: SearchStyleColorDraft): Search
         field: draft.field,
         customField: !!draft.customField,
         categoryValueKind: draft.categoryValueKind,
+        fallbackEnabled: draft.fallbackEnabled !== false,
         solidColor: normalizeHexColor(draft.solidColor),
         gradientStops: draft.gradientStops.map(stop => ({
             id: stop.id,

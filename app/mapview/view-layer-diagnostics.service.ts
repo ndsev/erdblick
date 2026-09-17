@@ -3,6 +3,7 @@ import {BehaviorSubject, Subject} from "rxjs";
 import type {StyledMapgetLayer} from "../mapdata/styled-mapget-layer.model";
 import type {PresentationKind} from "../mapdata/styled-mapget-layer.model";
 import type {FilterTileState} from "../mapdata/filter-tile-state.model";
+import {partitionKeySuffix} from "../mapdata/partition.model";
 
 export interface SubsetDiagnosticsTile {
     viewIndex: number;
@@ -10,7 +11,7 @@ export interface SubsetDiagnosticsTile {
     presentationKind: PresentationKind;
     mapName: string;
     layerName: string;
-    tileId: number;
+    tileId: number | string;
     mapTileKey: string;
     conversionTimestampMs: number | null;
     ready: boolean;
@@ -288,7 +289,7 @@ export class ViewLayerDiagnosticsService {
                         presentationKind: layer.identity.presentationKind,
                         mapName: state.mapId,
                         layerName: state.layerId,
-                        tileId: state.tileId,
+                        tileId: partitionKeySuffix(state.partition),
                         mapTileKey: state.mapTileKey,
                         conversionTimestampMs: includeSourceInfo
                             ? state.conversionTimestampMs

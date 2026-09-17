@@ -301,6 +301,7 @@ export abstract class DeckMapView implements IRenderView {
     protected readonly _viewIndex: number;
     readonly canvasId: string;
     protected deck: DeckGlDeck<DeckView> | null = null;
+    private deckContainer: HTMLDivElement | null = null;
     protected readonly layerRegistry = new DeckLayerRegistry();
     protected readonly interactionOutlineService =
         new DeckInteractionOutlineService(this.layerRegistry);
@@ -553,6 +554,7 @@ export abstract class DeckMapView implements IRenderView {
         if (!container) {
             throw new Error(`Deck container #${this.canvasId} not found.`);
         }
+        this.deckContainer = container;
         container.innerHTML = "";
         const canvas = this.createDeckCanvas(container);
         canvas.addEventListener("pointerenter", this.deckCanvasPointerEnter);
@@ -855,7 +857,10 @@ export abstract class DeckMapView implements IRenderView {
         this.lastCanvasCssSize = undefined;
         this.clippedLayoutCanvasCssSize = undefined;
         this.rendererInvalidated.complete();
-        const container = document.getElementById(this.canvasId);
+        // A splitter rebuild can already have mounted a replacement container with the same id.
+        // Clear only the element captured by this renderer, never its successor found via document.
+        const container = this.deckContainer;
+        this.deckContainer = null;
         if (container) {
             container.innerHTML = "";
         }
@@ -1763,6 +1768,15 @@ export abstract class DeckMapView implements IRenderView {
                 // Live split-view motion stays in Deck. The settled AppState update
                 // owns tile coverage, persistence, URL state, and Angular UI work.
                 this.applyCameraViewState(update.cameraViewData, false);
+            })
+        );
+
+        this.subscriptions.push(
+            this.mapViewState.presentationCameraViewStateTopic.subscribe(update => {
+                if (update.targetView !== this._viewIndex) {
+                    return;
+                }
+                this.applyCameraViewState(update.cameraViewData, true);
             })
         );
 

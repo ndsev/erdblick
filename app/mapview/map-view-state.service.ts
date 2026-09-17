@@ -62,6 +62,11 @@ export class MapViewStateService {
     readonly moveToRectangleTopic = new Subject<{ targetView: number, rectangle: RenderRectangle }>();
     readonly showLocationLabelTopic = new Subject<{ targetView: number, x: number, y: number, label: string }>();
     readonly liveCameraViewStateTopic = new Subject<LiveCameraViewStateUpdate>();
+    /** Presentation-only camera poses; consumers update both rendering and tile coverage. */
+    readonly presentationCameraViewStateTopic = new Subject<{
+        targetView: number;
+        cameraViewData: CameraViewState;
+    }>();
     readonly viewVisualizationState: ViewVisualizationState[] = [];
 
     constructor(

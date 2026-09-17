@@ -4,6 +4,7 @@
 #include "simfil/model/nodes.h"
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cctype>
 #include <cstdint>
 #include <iostream>
@@ -124,11 +125,11 @@ InspectionConverter::InspectionNode& convertSourceDataReferences(const model_ptr
 
     const auto& model = modelNode->model();
     const auto& strings = model.strings();
-    const auto tileId = model.tileId().value();
+    const auto partitionId = model.partitionId();
 
-    modelNode->forEachReference([tileId, &node](const SourceDataReferenceItem& item) {
+    modelNode->forEachReference([partitionId, &node](const SourceDataReferenceItem& item) {
         node.sourceDataRefs_.push_back(Ref{
-            .tileId_ = tileId,
+            .partitionId_ = partitionId,
             .address_ = item.address().u64(),
             .layerId_ = std::string{item.layerId()},
             .qualifier_ = std::string{item.qualifier()}
@@ -1148,10 +1149,30 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
         push("mapId", "mapId", ValueType::String)->value_ = convertString(featurePtr->model().mapId());
         push("layerId", "layerId", ValueType::String)->value_ = convertString(featurePtr->model().layerInfo()->layerId_);
 
-        for (auto const& [key, value]: featurePtr->id()->keyValuePairs()) {
+        auto const featureIdParts = featurePtr->id()->keyValuePairs();
+        auto const layerInfo = featurePtr->model().layerInfo();
+        auto const compositionIndex = layerInfo->matchingFeatureIdCompositionIndex(
+            featurePtr->typeId(),
+            featureIdParts,
+            false);
+        auto const* composition = compositionIndex
+            ? &layerInfo->getTypeInfo(featurePtr->typeId())->uniqueIdCompositions_[*compositionIndex]
+            : nullptr;
+        for (auto const& [key, value]: featureIdParts) {
             auto &field = current_->children_.emplace_back();
             field.key_ = convertString(key);
-            field.value_ = JsValue::fromVariant(value);
+            auto const isUnsigned64 = composition && std::ranges::any_of(
+                *composition,
+                [key](auto const& part) {
+                    return part.idPartLabel_ == key && part.datatype_ == IdPartDataType::U64;
+                });
+            if (isUnsigned64 && std::holds_alternative<int64_t>(value)) {
+                field.value_ = convertString(std::to_string(
+                    std::bit_cast<uint64_t>(std::get<int64_t>(value))));
+            }
+            else {
+                field.value_ = JsValue::fromVariant(value);
+            }
             field.type_ = ValueType::String;
             field.geoJsonPath_ = convertString(key).toString();
         }
@@ -1908,7 +1929,7 @@ JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& m
                     LayerType::SourceData,
                     std::string(mapId),
                     ref.layerId_,
-                    mapget::TileId::fromValue(ref.tileId_)).toString())},
+                    ref.partitionId_).toString())},
                 {"address", JsValue(ref.address_)},
                 {"qualifier", JsValue(ref.qualifier_)},
             }));

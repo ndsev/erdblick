@@ -12,10 +12,12 @@
 #include "nlohmann/json.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -60,6 +62,27 @@ std::shared_ptr<mapget::LayerInfo> lineTestLayerInfo()
                 "name": "Way",
                 "uniqueIdCompositions": [[
                     {"partId": "wayId", "datatype": "U32"}
+                ]]
+            }
+        ]
+    })json"));
+}
+
+/** Build an object-backed layer whose container identifier spans the full unsigned domain. */
+std::shared_ptr<mapget::LayerInfo> objectInspectionLayerInfo()
+{
+    return mapget::LayerInfo::fromJson(nlohmann::json::parse(R"json(
+    {
+        "layerId": "Road",
+        "type": "Features",
+        "partitionKind": "object",
+        "tileAssociationLevel": 13,
+        "featureTypes": [
+            {
+                "name": "Road",
+                "uniqueIdCompositions": [[
+                    {"partId": "tileId", "datatype": "U64"},
+                    {"partId": "roadId", "datatype": "U32"}
                 ]]
             }
         ]
@@ -713,6 +736,31 @@ TEST_CASE("FeatureInspection", "[erdblick.inspection]")
             }
         }
         REQUIRE_FALSE(hasFeatureRoot);
+    }
+}
+
+TEST_CASE("FeatureInspection preserves unsigned 64-bit identifier rows", "[erdblick.inspection]")
+{
+    constexpr auto objectId = uint64_t{9007199254740993ULL};
+    constexpr auto maximumObjectId = std::numeric_limits<uint64_t>::max();
+    auto layer = std::make_shared<mapget::TileFeatureLayer>(
+        mapget::PartitionId::object(objectId),
+        "InspectionObjectNode",
+        "InspectionObjectMap",
+        objectInspectionLayerInfo(),
+        std::make_shared<simfil::StringPool>());
+
+    for (auto const id : {objectId, maximumObjectId}) {
+        auto feature = layer->newFeature("Road", {
+            {"tileId", std::bit_cast<int64_t>(id)},
+            {"roadId", int64_t{1}},
+        });
+        auto inspection = InspectionConverter().convert(feature);
+        auto const* identifiers = findInspectionNodeByKey(*inspection, "Identifiers");
+        REQUIRE(identifiers);
+        auto const* objectIdNode = findInspectionDirectChildByKey(*identifiers, "tileId");
+        REQUIRE(objectIdNode);
+        REQUIRE(objectIdNode->value("value", std::string{}) == std::to_string(id));
     }
 }
 

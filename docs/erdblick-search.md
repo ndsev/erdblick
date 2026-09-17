@@ -1,8 +1,5 @@
 # Search Guide
 
-![erdblick UI](screenshots/search-pallette.png)
-![erdblick UI](screenshots/search-in-progress.png)
-
 Erdblick has two search surfaces:
 
 - The palette, opened with `Ctrl+K` or the magnifier icon, starts jump targets, utility actions, and feature searches.
@@ -22,6 +19,15 @@ Erdblick's search palette unifies jump targets, utility actions, and the Simfil-
 
 The palette closes automatically when you click the map or another control, but search history and partially typed queries are preserved until you clear them.
 <!-- --8<-- [end:overview] -->
+
+![Schema completion over NDS.Island-6 lanes](screenshots/search-palette.png)
+
+Choose an action from the palette after completing the expression.
+
+![Actions for a feature query](screenshots/search-action-palette.png)
+
+**Schema suggestions (1)** distinguish fields, enum values, and constants.
+This example starts a speed-limit query with `SPEED_`.
 
 ## Built-in Jump and Utility Targets
 
@@ -57,7 +63,9 @@ Location results are sorted by population when the provider supplies it, then by
 Use **Edit -> Settings -> Location Matches** to control how many location matches the palette asks providers to return. The default is 10; the supported range is 1 to 50.
 <!-- --8<-- [end:location-search] -->
 
-![Place-name location search](screenshots/search-location-matches.png)
+![Offline Munich place-name matches above the city map](screenshots/search-location.png)
+
+**Offline place matches (1)** come from MapViewer's built-in location lookup.
 
 ### Feature Jump Targets
 
@@ -118,6 +126,12 @@ The **Results** tab is built for large streamed result sets.
 - **Export as JSON** writes the search configuration and/or result data for offline analysis. Exports preserve enough map/layer/result metadata to reopen the investigation context and are useful before closing a bookmarked search. Treat the exact JSON fields as an integration format, not as a hand-edited user format.
 <!-- --8<-- [end:results] -->
 
+![Matching NDS.Island-6 lane attributes grouped by map](screenshots/search-results.png)
+
+The query `**.speedLimitKmh >= 80` finds lane speed-limit attributes.
+**Search scope** restricts the dataset and evaluation scope;
+**Matching lanes** lists concrete results ready for inspection.
+
 ## Result Visualization
 
 <!-- --8<-- [start:visualization] -->
@@ -152,7 +166,7 @@ Search style rules are evaluated only for the result layer of the current search
 - **Geom** chooses one or more rendered geometry groups. **Any geometry** and **Label** are exclusive modes; line, surface, polygon, mesh, and point groups can be combined. Geometry rules expose the relevant width, radius, size, and opacity controls for the selection.
 - Automatic styles use a 20 px point rule and a 5 px combined line/surface rule so both geometry families remain legible without duplicating every concrete surface type.
 - **Labels** can use a selected field or a custom label expression. Common labels are speed-limit values, feature types, validation rule IDs, and issue IDs.
-- **Color** supports solid colors, numeric gradients, and categories for enum/string-like values. Category and gradient modes include a fallback color for missing or unmatched values. **Update from data** uses the Diagnostics/Values summaries from the current result set when available.
+- **Color** supports solid colors, numeric gradients, and categories for enum/string-like values. In category and gradient modes, **Fallback color** controls how missing or unmatched values are drawn. Uncheck it to omit those values from rendering; the setting survives saving and reopening the stylesheet. Incomplete scales still use a temporary solid colour until valid stops are supplied. **Update from data** uses the Diagnostics/Values summaries from the current result set when available.
 
 Auto-created rules prefer fields mentioned by the query. Manual edits stop those rules from being replaced by later query changes.
 

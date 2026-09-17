@@ -51,6 +51,9 @@ struct JsValue
      */
     static JsValue fromGlobal(std::string const& globalName);
 
+    /** Convert a tagged native partition without narrowing an object ID. */
+    static JsValue fromPartition(mapget::PartitionId const& partition);
+
     /**
      * Construct an Object as a new JS or JSON dictionary with provided initializers.
      * @param initializers An initializer list of key-value pairs.

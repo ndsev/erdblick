@@ -45,6 +45,7 @@ function completedTile(
     const resolve = vi.fn();
     const reject = vi.fn();
     const admit = vi.fn();
+    const prepare = vi.fn();
     const task = {
         taskId,
         visualizationId,
@@ -65,6 +66,7 @@ function completedTile(
     internal.inFlight.set(taskId, {
         task,
         admit,
+        prepare,
         resolve,
         reject,
         queuedAt: 0,
@@ -97,7 +99,7 @@ function completedTile(
             totalMs: 3
         }
     });
-    return {admit, resolve, reject};
+    return {admit, prepare, resolve, reject};
 }
 
 describe("TileSubsetLayerRenderService GPU admission", () => {
@@ -216,6 +218,7 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
         internal.queue.push({
             task,
             admit: vi.fn(),
+            prepare: vi.fn(),
             resolve,
             reject,
             queuedAt: performance.now()
@@ -298,6 +301,7 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
         internal.queue.push({
             task,
             admit: vi.fn(),
+            prepare: vi.fn(),
             resolve: vi.fn(),
             reject,
             queuedAt: performance.now()
@@ -389,8 +393,10 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
         }));
         try {
             const service = new TileSubsetLayerRenderService();
-            const {admit, resolve, reject} = completedTile(service);
+            const {admit, prepare, resolve, reject} = completedTile(service);
 
+            expect(prepare).toHaveBeenCalledOnce();
+            expect(admit).not.toHaveBeenCalled();
             expect(resolve).not.toHaveBeenCalled();
             expect(reject).not.toHaveBeenCalled();
             expect(service.debugSnapshot()).toMatchObject({
@@ -568,6 +574,7 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
                 internal.inFlight.set(task.taskId, {
                     task,
                     admit: admits[index],
+                    prepare: vi.fn(),
                     resolve: resolves[index],
                     reject: vi.fn(),
                     queuedAt: 0,
@@ -645,6 +652,7 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
                 tileId: 1
             },
             admit: vi.fn(),
+            prepare: vi.fn(),
             resolve: vi.fn(),
             reject,
             queuedAt: 0,

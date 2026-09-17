@@ -14,6 +14,10 @@ import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 import type {AppSurfaceHeaderAction, AppSurfaceHeaderActionCommandEvent} from "../shared/app-surface-header.component";
 import {displayFeatureId} from "../shared/tile-feature-id";
 import {AppPanelComponent} from "../shared/app-panel.component";
+import {
+    parseMapPartitionKey,
+    partitionKeySuffix
+} from "../mapdata/partition.model";
 
 /** Select option for switching between source-data layers within one inspected tile. */
 interface SourceLayerMenuItem {
@@ -173,9 +177,15 @@ export class InspectionPanelComponent {
             const panel = this.panel();
             if (panel.sourceData !== undefined) {
                 const selection = panel.sourceData!;
-                const [mapId, layerId, tileId] = coreLib.parseMapTileKey(selection.mapTileKey);
-                this.isMetadata = tileId === 0;
-                this.title = this.isMetadata ? `${mapId}:` : `${tileId}.`;
+                const [mapId, layerId, partition] = parseMapPartitionKey(
+                    coreLib,
+                    selection.mapTileKey
+                );
+                this.isMetadata = partition.kind === "tile" &&
+                    partition.id === 0;
+                this.title = this.isMetadata
+                    ? `${mapId}:`
+                    : `${partitionKeySuffix(partition)}.`;
                 const map = this.mapService.maps.maps.get(mapId);
                 if (map) {
                     this.layerMenuItems = Array.from(map.layers.values())
@@ -193,7 +203,12 @@ export class InspectionPanelComponent {
                                 disabled: item.id === layerId,
                                 command: () => {
                                     let sourceData = {...selection};
-                                    sourceData.mapTileKey = coreLib.getSourceDataLayerKey(mapId, item.id, tileId);
+                                    sourceData.mapTileKey = coreLib.createMapTileKey(
+                                        "SourceData",
+                                        mapId,
+                                        item.id,
+                                        partitionKeySuffix(partition)
+                                    );
                                     sourceData.address = undefined;
                                     this.stateService.setSelection(sourceData, this.panel().id);
                                 },

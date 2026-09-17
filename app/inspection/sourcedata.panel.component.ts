@@ -26,6 +26,12 @@ import {
     MapTileStreamService,
     RetainedTileExpiryOwner
 } from "../mapdata/map-tile-stream.service";
+import {
+    parseMapPartitionKey,
+    partitionJson,
+    partitionKey,
+    partitionKeySuffix
+} from "../mapdata/partition.model";
 
 interface LoadedSourceDataLayer {
     layer: TileSourceDataLayer;
@@ -140,7 +146,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
     }
 
     expireTiles(tokens: ReadonlyArray<{
-        tileId: number;
+        tileId: string | number;
         valueVersion: number;
     }>): void {
         if (!tokens.some(token => token.valueVersion === this.valueEpoch)) {
@@ -183,11 +189,11 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             this.errorMessage = "";
             this.staleErrorMessage = "";
             this.selectItemWithAddress(address);
-            const [, , tileId] = coreLib.parseMapTileKey(mapTileKey);
+            const [, , partition] = parseMapPartitionKey(coreLib, mapTileKey);
             const epoch = ++this.valueEpoch;
             this.tileStream.updateRetainedTileExpiry?.(
                 this,
-                Number(tileId),
+                partitionKey(partition),
                 epoch,
                 loaded.expiresAtMs
             );
@@ -213,7 +219,10 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
 
     /** Fetches and parses one source-data layer through the bounded POST /tiles endpoint. */
     async loadSourceDataLayer(mapTileKey: string) : Promise<LoadedSourceDataLayer> {
-        const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
+        const [mapId, layerId, partition] = parseMapPartitionKey(
+            coreLib,
+            mapTileKey
+        );
         if (!this.mapService.isMapLayerReady(mapId, layerId)) {
             const map = this.mapService.maps.maps.get(mapId);
             throw new Error(map
@@ -223,7 +232,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         const requests = [{
             mapId: mapId,
             layerId: layerId,
-            tileIds: [Number(tileId)]
+            partitions: [partitionJson(partition)]
         }];
 
         let layer: TileSourceDataLayer | null = null;
@@ -288,11 +297,15 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         return {layer: loadedLayer, expiresAtMs};
     }
 
-    /** Builds a user-facing empty-state message for a tile without source data. */
+    /** Builds a user-facing empty-state message for a partition without source data. */
     private noSourceDataMessage(mapTileKey: string): string {
-        const [mapId, layerId, tileId] = coreLib.parseMapTileKey(mapTileKey);
+        const [mapId, layerId, partition] = parseMapPartitionKey(
+            coreLib,
+            mapTileKey
+        );
         const layerName = this.mapService.layerNameForSourceDataLayerId(String(layerId), String(layerId).startsWith("Metadata"));
-        return `No source data for tile ${tileId} (${layerName}) of map ${mapId}.`;
+        return `No source data for ${partition.kind} ` +
+            `${partitionKeySuffix(partition)} (${layerName}) of map ${mapId}.`;
     }
 
     /** Replaces the tree with an error state and notifies the parent panel. */

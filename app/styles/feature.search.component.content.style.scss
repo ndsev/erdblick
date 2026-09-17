@@ -843,6 +843,7 @@ search-style-rule-editor {
   }
 
   .search-style-color-mode-row,
+  .search-style-color-fallback,
   .search-style-color-solid-row,
   .search-style-color-actions,
   .search-style-color-stop-row {
@@ -850,6 +851,10 @@ search-style-rule-editor {
     display: flex;
     flex-wrap: wrap;
     gap: var(--feature-search-style-control-gap);
+  }
+
+  .search-style-color-fallback {
+    label { color: var(--p-text-muted-color); font-weight: 600; }
   }
 
   .search-style-color-mode-row {

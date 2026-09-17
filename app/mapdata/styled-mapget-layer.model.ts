@@ -24,6 +24,12 @@ import {
     FilterTileState
 } from "./filter-tile-state.model";
 import type {MapTileStreamFilterStatusPayload} from "./tilestream";
+import {
+    partitionKey,
+    partitionKeySuffix,
+    tilePartition,
+    type PartitionId
+} from "./partition.model";
 
 export type PresentationKind =
     | "regular"
@@ -69,16 +75,16 @@ export class StyledMapgetLayer {
     readonly ownerId: string;
     readonly renderStyleKey: string;
     readonly events = new Subject<StyledMapgetLayerEvent>();
-    readonly tileStates = new Map<number, FilterTileState>();
+    readonly tileStates = new Map<string, FilterTileState>();
     readonly filterPlan: StyleFilterPlan;
     readonly filterRef: FilterSubscriptionRef;
     latestStatus: MapTileStreamFilterStatusPayload | null = null;
     styleOrder = 0;
-    private coverage: FilterSubscriptionCoverage = {tileIds: []};
+    private coverage: FilterSubscriptionCoverage = {partitions: []};
     private coverageVersionValue = 0;
     private disposed = false;
     private options: Record<string, boolean | number | string>;
-    private readonly retiredTileStates = new Map<number, FilterTileState>();
+    private readonly retiredTileStates = new Map<string, FilterTileState>();
     private readonly tileStatePresentationRefs =
         new Map<FilterTileState, number>();
 
@@ -121,8 +127,8 @@ export class StyledMapgetLayer {
             {
                 onTile: (delivery, remainsPending) =>
                     this.acceptTile(delivery, remainsPending),
-                onTilesPending: (tileIds, generation) =>
-                    this.markTilesPending(tileIds, generation),
+                onPartitionsPending: (partitions, generation) =>
+                    this.markPartitionsPending(partitions, generation),
                 onStatus: status => this.acceptStatus(status),
                 onError: message => this.acceptError(message),
                 onRequestSynchronized: () => this.disposeRetiredTileStates()
@@ -152,13 +158,38 @@ export class StyledMapgetLayer {
     setCoverage(
         tileIds: readonly number[],
         priorityTileIds: readonly number[] = [],
+        roots: Array<{
+            tileId: number;
+            typeId?: string;
+            featureId: string | Array<string | number>;
+        }> | undefined = undefined
+    ): void {
+        this.setPartitionCoverage(
+            tileIds.map(tilePartition),
+            priorityTileIds.map(tilePartition),
+            roots?.map(root => ({
+                partition: tilePartition(root.tileId),
+                typeId: root.typeId,
+                featureId: root.featureId
+            }))
+        );
+    }
+
+    /** Replace exact tagged partition demand without duplicating object associations. */
+    setPartitionCoverage(
+        partitions: readonly PartitionId[],
+        priorityPartitions: readonly PartitionId[] = [],
         roots: FilterSubscriptionCoverage["roots"] = undefined
     ): void {
         this.assertLive();
-        const orderedTileIds = [...tileIds].map(Number);
+        const orderedPartitions = partitions.map(partition => ({...partition}));
         const nextCoverage: FilterSubscriptionCoverage = {
-            tileIds: orderedTileIds,
-            ...(priorityTileIds.length ? {priorityTileIds: [...priorityTileIds]} : {}),
+            partitions: orderedPartitions,
+            ...(priorityPartitions.length ? {
+                priorityPartitions: priorityPartitions.map(partition => ({
+                    ...partition
+                }))
+            } : {}),
             ...(roots?.length ? {roots: structuredClone(roots)} : {})
         };
         if (filterSubscriptionCoverageEqual(
@@ -167,19 +198,19 @@ export class StyledMapgetLayer {
         )) {
             return;
         }
-        const demanded = new Set(orderedTileIds);
+        const demanded = new Set(orderedPartitions.map(partitionKey));
         const removedStates: FilterTileState[] = [];
-        for (const [tileId, state] of this.tileStates) {
-            if (demanded.has(tileId)) {
+        for (const [key, state] of this.tileStates) {
+            if (demanded.has(key)) {
                 continue;
             }
-            this.tileStates.delete(tileId);
+            this.tileStates.delete(key);
             removedStates.push(state);
             if (this.filterRef.suspended &&
                 !this.tileStatePresentationRefs.has(state)) {
                 state.dispose();
             } else {
-                this.retiredTileStates.set(tileId, state);
+                this.retiredTileStates.set(key, state);
             }
         }
         if (removedStates.length) {
@@ -192,31 +223,33 @@ export class StyledMapgetLayer {
         if (this.generation !== previousGeneration) {
             this.disposeRetiredTileStates();
         }
-        for (const tileId of orderedTileIds) {
-            let state = this.tileStates.get(tileId);
+        for (const partition of orderedPartitions) {
+            const key = partitionKey(partition);
+            let state = this.tileStates.get(key);
             let restored = false;
             if (!state) {
-                state = this.retiredTileStates.get(tileId);
+                state = this.retiredTileStates.get(key);
                 if (state) {
-                    this.retiredTileStates.delete(tileId);
+                    this.retiredTileStates.delete(key);
                     restored = true;
                 } else {
-                    const mapTileKey = coreLib.getTileFeatureLayerKey(
+                    const mapTileKey = coreLib.createMapTileKey(
+                        "Features",
                         this.mapgetLayer.mapId,
                         this.mapgetLayer.layerId,
-                        tileId
+                        partitionKeySuffix(partition)
                     );
                     state = new FilterTileState(
                         this.mapgetLayer.mapId,
                         this.mapgetLayer.layerId,
-                        tileId,
+                        partition,
                         mapTileKey,
                         this.generation
                     );
                 }
-                this.tileStates.set(tileId, state);
+                this.tileStates.set(key, state);
             }
-            if (this.filterRef.isPending(tileId)) {
+            if (this.filterRef.isPending(partition)) {
                 state.markPending(this.generation);
             }
             if (restored && state.status === "ready") {
@@ -275,7 +308,7 @@ export class StyledMapgetLayer {
             sourceId: this.mapgetLayer.sourceId,
             mapId: this.mapgetLayer.mapId,
             layerId: this.mapgetLayer.layerId,
-            tileId: state.tileId,
+            partition: state.partition,
             name,
             incarnation: state.valueVersion
         });
@@ -297,8 +330,8 @@ export class StyledMapgetLayer {
         const count = this.tileStatePresentationRefs.get(state) ?? 0;
         if (count <= 1) {
             this.tileStatePresentationRefs.delete(state);
-            if (this.retiredTileStates.get(state.tileId) === state) {
-                this.retiredTileStates.delete(state.tileId);
+            if (this.retiredTileStates.get(state.partitionKey) === state) {
+                this.retiredTileStates.delete(state.partitionKey);
                 state.dispose();
             }
             return;
@@ -365,7 +398,7 @@ export class StyledMapgetLayer {
         if (this.disposed || delivery.generation !== this.generation) {
             return {status: "superseded"};
         }
-        const state = this.tileStates.get(delivery.tileId);
+        const state = this.tileStates.get(delivery.partitionKey);
         if (!state) {
             return {status: "superseded"};
         }
@@ -384,15 +417,15 @@ export class StyledMapgetLayer {
     }
 
     /** Mark retained values stale while their ordinary replacement is pending. */
-    private markTilesPending(
-        tileIds: readonly number[],
+    private markPartitionsPending(
+        partitions: readonly PartitionId[],
         generation: number
     ): void {
         if (this.disposed || generation !== this.generation) {
             return;
         }
-        const states = tileIds.flatMap(tileId => {
-            const state = this.tileStates.get(tileId);
+        const states = partitions.flatMap(partition => {
+            const state = this.tileStates.get(partitionKey(partition));
             if (!state) {
                 return [];
             }
@@ -423,12 +456,12 @@ export class StyledMapgetLayer {
 
     /** Releases values removed from presentation coverage once transport state agrees. */
     private disposeRetiredTileStates(): void {
-        for (const [tileId, state] of [...this.retiredTileStates]) {
+        for (const [key, state] of [...this.retiredTileStates]) {
             if (this.tileStatePresentationRefs.has(state)) {
                 continue;
             }
             state.dispose();
-            this.retiredTileStates.delete(tileId);
+            this.retiredTileStates.delete(key);
         }
     }
 
