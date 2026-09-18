@@ -180,6 +180,13 @@ Inspection is also a useful handoff tool:
 - **GeoJSON export** – export the current inspected selection as a GeoJSON FeatureCollection.
 - **Browser history** – the browser’s Back and Forward buttons walk through previous inspection layouts.
 
+Point geometries share a preview budget of 256 coordinates per selected feature,
+including features with several point-cloud clusters. A truncated geometry shows
+its full point count and how many coordinates are previewed. Lines, polygons and
+meshes retain their existing coordinate display. Full feature GeoJSON is generated
+when you choose an export action; it includes all coordinates, including those
+omitted from the inspection preview.
+
 ## Tips
 
 - Use the color picker to encode meaning, for example "reference" vs. "candidate".

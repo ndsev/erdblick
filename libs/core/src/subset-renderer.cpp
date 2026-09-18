@@ -414,9 +414,11 @@ TileSubsetLayerRenderer::ProjectedGeometryCache::find(
     auto const active = std::span(entries).first(activeCount);
     auto const found = std::ranges::find(
         active,
-        std::pair{address, simplified},
+        // ModelNodeAddress has an implicit bool conversion, but no equality
+        // operator. Compare its packed value so distinct geometries stay distinct.
+        std::pair{address.value_, simplified},
         [](ProjectedGeometryCacheEntry const& entry) {
-            return std::pair{entry.address, entry.simplified};
+            return std::pair{entry.address.value_, entry.simplified};
         });
     return found == active.end() ? nullptr : &*found;
 }

@@ -376,7 +376,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     filterText = input<string | undefined>();
     filterTextChange = output<string>();
     showFilter = input<boolean>(true);
-    geoJson = input<string>();
+    geoJson = input<string | (() => string)>();
     enableSourceDataNavigation = input<boolean>(true);
     featureIds = input<string[]>([]);
     defaultVisibleColumnKeys = input<readonly string[] | undefined>(undefined);
@@ -1732,7 +1732,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Copies the panel GeoJSON payload to the clipboard when available. */
     copyGeoJson() {
-        const data = this.geoJson();
+        const data = this.resolveGeoJson();
         if (!data) {
             return;
         }
@@ -1741,7 +1741,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Downloads the current inspection GeoJSON as a `.geojson` file. */
     downloadGeoJson() {
-        const data = this.geoJson();
+        const data = this.resolveGeoJson();
         if (!data) {
             return;
         }
@@ -1759,7 +1759,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the current inspection GeoJSON in a separate tab via a blob URL. */
     openGeoJsonInNewTab() {
-        const data = this.geoJson();
+        const data = this.resolveGeoJson();
         if (!data) {
             return;
         }
@@ -1768,6 +1768,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         window.open(url, '_blank');
         setTimeout(() => URL.revokeObjectURL(url), 10_000);
         this.messageService.showSuccess('Opened GeoJSON in new tab');
+    }
+
+    /** Resolve potentially large feature exports only for an explicit export action. */
+    private resolveGeoJson(): string | undefined {
+        const value = this.geoJson();
+        return typeof value === "function" ? value() : value;
     }
 
     private geoJsonFilename(): string {

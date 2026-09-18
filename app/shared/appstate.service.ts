@@ -1333,6 +1333,45 @@ export class AppStateService implements OnDestroy {
         this.stylesState.next(nextStyles);
     }
 
+    /** Compacts surviving views after their renderers have stopped publishing state. */
+    retainViews(viewIndices: readonly number[], cameras: ReadonlyMap<number, CameraViewState>): void {
+        // Read every slot before notifying synchronous subscribers. Preset selections
+        // belong here too, even though they are excluded from whole-app snapshots.
+        const states = this.mapViewStates.map(state => ({
+            state,
+            values: viewIndices.map(index => cloneStateValue(
+                state === this.cameraViewDataState
+                    ? cameras.get(index) ?? state.getValue(index)
+                    : state.getValue(index)
+            ))
+        }));
+        const styles = new Map<string, (string | number | boolean)[]>();
+        for (const [key, values] of this.styles) {
+            const retained: (string | number | boolean)[] = [];
+            viewIndices.forEach((index, target) => {
+                if (values[index] !== undefined) {
+                    retained[target] = values[index];
+                }
+            });
+            styles.set(key, retained);
+        }
+        const searches = this.featureSearchState.getValue().map(search => ({
+            ...search,
+            selectedViewIndices: search.selectedViewIndices
+                .map(index => viewIndices.indexOf(index))
+                .filter(index => index >= 0)
+        }));
+        const focusedView = Math.max(0, viewIndices.indexOf(this.focusedView));
+        for (const {state, values} of states) {
+            state.appState.next(values);
+        }
+        this.stylesState.next(styles);
+        this.featureSearchState.next(searches);
+        this.focusedViewState.next(focusedView);
+        // Count subscribers rebuild the tree and components from the compacted state.
+        this.numViewsState.next(viewIndices.length);
+    }
+
     /** Subscribes to all persisted state slots so storage and URL remain in sync. */
     private setupStateSubscriptions() {
         if (this.subscriptionsSetup) return;

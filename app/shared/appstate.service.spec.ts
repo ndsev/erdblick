@@ -1056,6 +1056,83 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it.each([0, 1])('retains the other view when view %i is removed', (removed) => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.numViews = 2;
+        service.layerNamesState.next(['m1/layerA']);
+        for (const index of [0, 1]) {
+            service.cameraViewDataState.next(index, {
+                destination: {lon: 11 + index, lat: 48 + index, alt: 1000 + index},
+                orientation: {heading: index, pitch: -0.5, roll: 0},
+                position: [index, index + 1, index + 2]
+            });
+            service.mode2dState.next(index, index === 0);
+            service.setLayerSyncOption(index, index === 1);
+            service.setBackgroundState(index, index === 0 ? 'osm' : null, 20 + index);
+            service.layerVisibilityState.next(index, [index === 1]);
+            service.layerZoomLevelState.next(index, [12 + index]);
+            service.layerAutoZoomLevelState.next(index, [index === 0]);
+            service.viewTileBordersState.next(index, index === 1);
+            service.viewTileGridModeState.next(index, index === 0 ? 'nds' : 'xyz');
+            service.viewTileGridLevelState.next(index, 8 + index);
+            service.viewTileGridAutoLevelState.next(index, index === 0);
+            service.viewTileGridColorState.next(index, index === 0 ? '123abc' : 'abcdef');
+            service.viewTileGridOpacityState.next(index, 30 + index);
+            service.setMapPresetSelection(index, 'm1', `map-preset-${index}`);
+            service.setLayerPresetSelection(index, 'm1', 'layerA', {styleId: 'overlay', presetId: `preset-${index}`});
+        }
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.2, 0.8]);
+        const searches = [[0], [1], [0, 1]].map(selectedViewIndices =>
+            service.addFeatureSearch({query: 'Way', selectedViewIndices}));
+        service.setSelection([feature('Way.1')]);
+        const selection = service.selectionState.getValue();
+        const survivor = 1 - removed;
+        const slots = [service.cameraViewDataState, service.mode2dState, service.layerSyncOptionsState,
+            service.backgroundState, service.layerVisibilityState, service.layerZoomLevelState,
+            service.layerAutoZoomLevelState, service.viewTileBordersState, service.viewTileGridModeState,
+            service.viewTileGridLevelState, service.viewTileGridAutoLevelState, service.viewTileGridColorState,
+            service.viewTileGridOpacityState, service.layerPresetSelectionState, service.mapPresetSelectionState];
+        const expected = slots.map(slot => slot.getValue(survivor));
+        service.focusedView = removed;
+        service.viewSync = [VIEW_SYNC_POSITION];
+
+        service.retainViews([survivor], new Map());
+
+        expect(service.numViews).toBe(1);
+        expect(service.focusedView).toBe(0);
+        slots.forEach((slot, index) => {
+            expect(slot.appState.getValue()).toEqual([expected[index]]);
+        });
+        expect(service.styles.get('m1/layerA/overlay/opacity')).toEqual([survivor ? 0.8 : 0.2]);
+        expect(service.selectionState.getValue()).toBe(selection);
+        expect(service.featureSearches).toEqual(searches.map(search => ({
+            ...search, selectedViewIndices: search.selectedViewIndices.includes(survivor) ? [0] : []
+        })));
+        expect(service.viewSync).toEqual([VIEW_SYNC_POSITION]);
+
+        service.numViews = 2;
+        expect(service.cameraViewDataState.getValue(1)).toEqual(expected[0]);
+        expect(service.layerVisibilityState.getValue(1)).toEqual(expected[4]);
+        expect(service.styles.get('m1/layerA/overlay/opacity')).toEqual(survivor ? [0.8, 0.8] : [0.2, 0.2]);
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('retains sparse defaults and a live camera without propagating synchronization', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.numViewsState.next(3);
+        const camera = {...service.cameraViewDataState.getValue(2), position: [1, 2, 3] as [number, number, number]};
+        const defaultBackground = service.backgroundState.getValue(2);
+        service.retainViews([0, 2], new Map([[2, camera]]));
+        expect(service.backgroundState.appState.getValue()).toEqual([defaultBackground, defaultBackground]);
+        expect(service.cameraViewDataState.getValue(1)).toEqual(camera);
+        expect(service.cameraViewDataState.getValue(0).position).not.toEqual(camera.position);
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('writes a style-option batch atomically and emits style state once', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());

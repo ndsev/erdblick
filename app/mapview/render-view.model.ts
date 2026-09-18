@@ -44,6 +44,16 @@ export interface RenderedFeaturePickResult {
 
 export type RenderBackend = "deck";
 
+/** Camera handoff when a view-count change recreates the surviving renderer. */
+export interface RenderViewCameraState {
+    camera: CameraViewState;
+    firstPerson?: {
+        position: [longitude: number, latitude: number, altitude: number];
+        bearing: number;
+        pitch: number;
+    };
+}
+
 export const MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT = "erdblick-map-view-layout-resize-prepare";
 
 /** Opaque handle that lets visualizations talk to the currently active renderer implementation. */
@@ -86,6 +96,8 @@ export interface IRenderView {
     ): RenderedFeaturePickResult;
     setViewFromState(cameraData: CameraViewState): void;
     getViewState(): CameraViewState;
+    prepareForViewRemoval(): RenderViewCameraState;
+    restoreCameraState(state: RenderViewCameraState): void;
     computeViewport(): Viewport | undefined;
     enterFirstPersonView(target: RenderNavigationTarget): void;
     exitFirstPersonView(): void;

@@ -82,13 +82,21 @@ export class FeaturePanelComponent implements OnDestroy {
         { key: "value", header: "Value", width: '0*', transform: this.formatData.bind(this) }
     ];
     filterOptions = new FeatureFilterOptions();
-    geoJson: string = "";
+    /** Serialize complete geometry only when the user requests an export. */
+    geoJson = (): string => this.exportGeoJson();
     featureIds: string[] = [];
     selectedFeatures?: FeatureWrapper[];
     loading: boolean = false;
     firstHighlightedItemIndex?: number;
     private rebuildQueued = false;
     private destroyed = false;
+
+    /** Export the full current selection, skipping wrappers whose native tile was released. */
+    private exportGeoJson(): string {
+        const features = (this.selectedFeatures ?? []).map(wrapper =>
+            wrapper.peek((feature: Feature) => feature.geojson() as string)).filter(value => value !== null);
+        return `{"type":"FeatureCollection","features":[${features.join(",")}]}`;
+    }
 
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
@@ -139,14 +147,13 @@ export class FeaturePanelComponent implements OnDestroy {
         });
     }
 
-    /** Re-reads GeoJSON and inspection trees from the selected feature values. */
+    /** Re-reads bounded inspection trees from the selected feature values. */
     private rebuildInspectionTree() {
         const previousExpansionState = this.captureTreeExpansionState(this.treeData);
         const panel = this.panel();
         this.selectedFeatures = panel.features ?? [];
         this.loading = panel.loading === true;
         if (!this.selectedFeatures.length) {
-            this.geoJson = `{"type":"FeatureCollection","features":[]}`;
             this.featureIds = [];
             this.treeData = [];
             this.firstHighlightedItemIndex = undefined;
@@ -159,12 +166,10 @@ export class FeaturePanelComponent implements OnDestroy {
         this.loading = false;
 
         const selectedFeatureInspectionModels: InspectionModelData[][] = [];
-        const selectedFeatureGeoJsonTexts: string[] = [];
         this.selectedFeatures.forEach(featureWrapper => {
             try {
                 featureWrapper.peek((feature: Feature) => {
                     selectedFeatureInspectionModels.push(feature.inspectionModel() as InspectionModelData[]);
-                    selectedFeatureGeoJsonTexts.push(feature.geojson() as string);
                 });
             } catch (error) {
                 console.error("Failed to read inspection model for selected feature.", {
@@ -175,7 +180,6 @@ export class FeaturePanelComponent implements OnDestroy {
                 });
             }
         });
-        const nextGeoJson = `{"type": "FeatureCollection", "features": [${selectedFeatureGeoJsonTexts.join(", ")}]}`;
         let nextTreeData: TreeTableNode[] = [];
         try {
             nextTreeData = this.getFeatureTreeDataFromModel(selectedFeatureInspectionModels);
@@ -189,7 +193,6 @@ export class FeaturePanelComponent implements OnDestroy {
 
         this.restoreTreeExpansionState(nextTreeData, previousExpansionState);
         this.firstHighlightedItemIndex = this.highlightSelectedInspectionTarget(nextTreeData);
-        this.geoJson = nextGeoJson;
         this.treeData = nextTreeData;
         this.inspectionTree?.refreshLayout();
     }

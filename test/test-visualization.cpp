@@ -863,6 +863,32 @@ TEST_CASE("FeatureInspection copies canonical array search paths", "[erdblick.in
     }));
 }
 
+TEST_CASE("FeatureInspection bounds point previews across clusters without truncating exports", "[erdblick.inspection]")
+{
+    auto tile = std::make_shared<mapget::TileFeatureLayer>(
+        mapget::TileId::fromWgs84(42., 11., 13), "PointPreviewNode", "PointPreviewMap",
+        lineTestLayerInfo(), std::make_shared<mapget::StringPool>("PointPreviewNode"));
+    auto feature = tile->newFeature("Way", {{"wayId", 1}});
+    feature->addLine({{42., 11., 0.}, {42.0001, 11., 0.}});
+    for (int cluster = 0; cluster < 3; ++cluster) {
+        auto geometry = tile->newGeometry(mapget::GeomType::Points, 200, true);
+        for (int i = 0; i < 200; ++i)
+            geometry->append({42.0 + i * 1e-6, 11.0, double(cluster)});
+        feature->addGeometry(geometry);
+    }
+    auto const exported = feature->geom()->toJson();
+    auto inspection = InspectionConverter().convert(feature);
+    // The existing line keeps its full preview; only point coordinates share the 256 budget.
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[0].coordinates[1]"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[1].coordinates[199]"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[2].coordinates[55]"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[2].coordinates[56]"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[3].coordinates[0]"));
+    REQUIRE((*inspection).dump().find("Showing 0 of 200 coordinates") != std::string::npos);
+    REQUIRE(feature->geom()->toJson() == exported);
+    REQUIRE(exported.at("geometries").at(3).at("coordinates").size() == 200);
+}
+
 TEST_CASE("FeatureInspection copies geometry search paths", "[erdblick.inspection]")
 {
     auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));

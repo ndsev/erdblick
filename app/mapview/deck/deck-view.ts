@@ -57,6 +57,7 @@ import {
 import {
     IRenderSceneHandle,
     IRenderView,
+    RenderViewCameraState,
     RenderNavigationTarget,
     RenderedFeaturePickResult
 } from "../render-view.model";
@@ -150,6 +151,7 @@ import {
     FIRST_PERSON_FAR_METERS,
     FIRST_PERSON_FOCAL_DISTANCE,
     FIRST_PERSON_FOV_DEGREES,
+    FIRST_PERSON_EYE_HEIGHT_METERS,
     FIRST_PERSON_NEAR_METERS,
     type FixedFirstPersonCameraState,
     updateFixedFirstPersonLook
@@ -392,6 +394,7 @@ export abstract class DeckMapView implements IRenderView {
     private gpuSceneRetirementFramesRemaining = 0;
     private liveCameraSyncRaf: number | null = null;
     private cameraStatePushPending = false;
+    private retiringForViewRemoval = false;
     private readonly deckCanvasPointerEnter = () => {
         this.deckCanvasPointerInside = true;
     };
@@ -653,6 +656,9 @@ export abstract class DeckMapView implements IRenderView {
         // parse/upload assets and an immutable handle containing `null` would
         // otherwise strand those tiles as pick proxies only.
         await deckDeviceReady;
+        if (this.retiringForViewRemoval) {
+            return;
+        }
         if (this.sceneMode !== SceneMode.SCENE2D) {
             this.contactShadingService = new DeckContactShadingService(
                 this.deckDevice!,
@@ -1551,6 +1557,40 @@ export abstract class DeckMapView implements IRenderView {
         return this.stateService.cameraViewDataState.getValue(this._viewIndex);
     }
 
+    /** Captures live camera motion and prevents a retired index from publishing late updates. */
+    prepareForViewRemoval(): RenderViewCameraState {
+        this.retiringForViewRemoval = true;
+        this.cameraStatePushPending = false;
+        this.cancelLiveCameraSyncScheduling();
+        this.cancelViewportUpdateScheduling();
+        const firstPerson = this.firstPersonSession?.viewState;
+        const state: RenderViewCameraState = {camera: this.cameraViewData(this.viewState)};
+        if (firstPerson) {
+            state.firstPerson = {
+                position: [firstPerson.longitude, firstPerson.latitude,
+                    firstPerson.position[2] - FIRST_PERSON_EYE_HEIGHT_METERS],
+                bearing: firstPerson.bearing,
+                pitch: firstPerson.pitch
+            };
+        }
+        return state;
+    }
+
+    /** Restores the survivor's map pose and optional transient first-person inspection. */
+    restoreCameraState(state: RenderViewCameraState): void {
+        this.setViewFromState(state.camera);
+        if (state.firstPerson) {
+            this.enterFirstPersonView({position: state.firstPerson.position, featureIds: []});
+            if (this.firstPersonSession) {
+                this.updateFirstPersonViewState({
+                    ...this.firstPersonSession.viewState,
+                    bearing: state.firstPerson.bearing,
+                    pitch: state.firstPerson.pitch
+                });
+            }
+        }
+    }
+
     /** Builds the native tile-selection rectangle from deck's horizon-clipped ground footprint. */
     computeViewport(): Viewport | undefined {
         if (this.firstPersonSession) {
@@ -1695,6 +1735,9 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Pushes the currently visible viewport rectangle back into `MapViewStateService`. */
     protected updateViewport(): void {
+        if (this.retiringForViewRemoval) {
+            return;
+        }
         const viewport = this.computeViewport();
         if (!viewport) {
             return;
@@ -2622,6 +2665,9 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Persists the current controlled deck view state back into `AppStateService`. */
     private pushViewStateToAppState(): void {
+        if (this.retiringForViewRemoval) {
+            return;
+        }
         const groundCentered = this.groundCenteredViewState(this.viewState);
         if (!this.isCameraInteracting && groundCentered !== this.viewState) {
             this.updateViewState(groundCentered, true, true);
@@ -2642,6 +2688,9 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Keeps renderer-local camera motion hot and persists only settled state. */
     private scheduleViewStatePush(): void {
+        if (this.retiringForViewRemoval) {
+            return;
+        }
         if (!this.isCameraInteracting) {
             this.flushPendingViewStatePush(true);
             return;

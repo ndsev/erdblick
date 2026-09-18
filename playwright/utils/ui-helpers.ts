@@ -11,7 +11,8 @@ function menuItemNamePattern(label: string): RegExp {
     return new RegExp(`${escapeRegExp(label)}$`);
 }
 
-async function openMainMenu(page: Page, rootLabel: string): Promise<Locator> {
+/** Opens a main-bar submenu, including layouts that require a click after hover. */
+export async function openMainMenu(page: Page, rootLabel: string): Promise<Locator> {
     const rootItem = page.locator('.main-bar').first().getByRole('menuitem', {
         name: menuItemNamePattern(rootLabel)
     }).first();

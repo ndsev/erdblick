@@ -71,3 +71,26 @@ describe("inspection map-hover ownership", () => {
         expect(component.activeMapHoverOwner).toBe("row:X");
     });
 });
+
+describe("lazy geometry export", () => {
+    it("opens the export menu without serializing geometry, then resolves the current payload on copy", () => {
+        const component = Object.create(InspectionTreeComponent.prototype) as any;
+        const serialize = vi.fn(() => '{"type":"FeatureCollection","features":[]}');
+        component.geoJson = () => serialize;
+        component.geoJsonMenu = {toggle: vi.fn()};
+        component.copyToClipboard = vi.fn();
+        component.showGeoJsonMenu({stopPropagation: vi.fn()} as unknown as MouseEvent);
+        expect(serialize).not.toHaveBeenCalled();
+        component.copyGeoJson();
+        expect(serialize).toHaveBeenCalledTimes(1);
+        expect(component.copyToClipboard).toHaveBeenCalledWith(serialize.mock.results[0].value);
+    });
+
+    it("continues to export eager payloads from other inspection panels", () => {
+        const component = Object.create(InspectionTreeComponent.prototype) as any;
+        component.geoJson = () => '{"type":"FeatureCollection","features":[]}';
+        component.copyToClipboard = vi.fn();
+        component.copyGeoJson();
+        expect(component.copyToClipboard).toHaveBeenCalledWith(component.geoJson());
+    });
+});

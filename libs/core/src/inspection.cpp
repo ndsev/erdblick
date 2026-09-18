@@ -1131,6 +1131,7 @@ BubblePropagation buildPropagatedValueBubbles(InspectionNode& node, std::string_
 
 JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
 {
+    remainingPointPreview_ = 256;
     stringPool_ = featurePtr->model().strings();
     featureId_ = featurePtr->id()->toString();
     tile_ = &featurePtr->model();
@@ -1478,10 +1479,25 @@ void InspectionConverter::convertGeometry(
         return;
     }
 
+    auto const previewCount = g->geomType() == GeomType::Points
+        ? std::min(g->numPoints(), remainingPointPreview_)
+        : g->numPoints();
+    if (g->geomType() == GeomType::Points) {
+        remainingPointPreview_ -= previewCount;
+        if (previewCount < g->numPoints()) {
+            auto count = push("pointCount", RawPath{""}, ValueType::Number);
+            count->value_ = JsValue(double(g->numPoints()));
+            count->geoJsonPath_.clear();
+            count->info_ = fmt::format("Showing {} of {} coordinates. Export includes all points.",
+                                      previewCount, g->numPoints());
+        }
+    }
     uint32_t index = 0;
     g->forEachPoint(
-        [this, &g, &index](auto&& pt)
+        [this, &g, &index, previewCount](auto&& pt)
         {
+            if (index >= previewCount)
+                return false;
             const auto coordinatePath = geometryCoordinatePath(g, index);
             auto ptScope = push(
                 JsValue(index),

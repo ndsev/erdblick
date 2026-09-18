@@ -216,6 +216,8 @@ public:
     JsValue convertString(const char* s);
 
     std::string featureId_;
+    /** Shared across all point geometries in one selected feature. */
+    size_t remainingPointPreview_ = 256;
     uint32_t nextRelationIndex_ = 0;
     /** Tracks one relation-name group and the next local index copied as `select(group, n)`. */
     struct RelationTypeState {

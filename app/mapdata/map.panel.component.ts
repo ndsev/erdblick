@@ -173,9 +173,10 @@ const MAP_FILTER_DELAY_MS = 300;
                                     </p-button>
                                     @if (viewIndices.length > 1) {
                                         <p-button onEnterClick (click)="removeView($event, index)" class="close-view-button"
+                                                  [attr.data-testid]="'close-view-button-' + index"
                                                   icon="pi pi-times" label="" pTooltip="Remove the view from comparison"
                                                   [styleClass]="'map-controls-button p-button-secondary'"
-                                                  tooltipPosition="bottom" tabindex="0" [disabled]="index < 1">
+                                                  tooltipPosition="bottom" tabindex="0">
                                         </p-button>
                                     }
                                     <p-popover #tileGridPopover [baseZIndex]="30000">
@@ -711,6 +712,10 @@ export class MapPanelComponent {
         );
 
         this.subscriptions.push(
+            this.viewState.beforeViewRemoval.subscribe(({retainedIndices}) => {
+                this.lastEnabledBackgroundLayerIds = retainedIndices.map(index =>
+                    this.lastEnabledBackgroundLayerIds[index]);
+            }),
             this.stateService.numViewsState.subscribe(numViews => {
                 const previousViewIndices = new Set(this.viewIndices);
                 this.viewIndices = Array.from({length: numViews}, (_, i) => i);
@@ -1475,12 +1480,7 @@ export class MapPanelComponent {
     /** Removes one view, keeping at least a single map view alive. */
     removeView(event: MouseEvent, index: number) {
         event.stopPropagation();
-        // Right now we just decrement, but for more than 2 views we should consider the actual indices
-        // We cannot have fewer views than at least 1
-        if (this.stateService.numViews > 1) {
-            this.viewIndices.pop();
-            this.stateService.numViews -= 1;
-        }
+        this.viewState.removeView(index);
     }
 
     /** Toggles option synchronization for the selected view. */
