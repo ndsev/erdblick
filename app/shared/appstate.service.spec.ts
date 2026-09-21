@@ -422,7 +422,32 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
         expect(service.deckAntialiasingEnabled).toBe(true);
+        expect(service.semanticCompositingEnabled).toBe(true);
         expect(service.contactShadingEnabled).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('persists semantic compositing locally without adding it to shared URLs', async () => {
+        localStorage.setItem('semanticCompositingEnabled', '0');
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.semanticCompositingEnabled).toBe(false);
+        expect(service.semanticCompositingEnabledState.serialize(true)).toBeUndefined();
+
+        service.semanticCompositingEnabled = true;
+        await flushMicrotasks();
+        expect(localStorage.getItem('semanticCompositingEnabled')).toBe('1');
+
+        service.semanticCompositingEnabled = false;
+        await flushMicrotasks();
+        expect(localStorage.getItem('semanticCompositingEnabled')).toBe('0');
+        expect(service.semanticCompositingEnabledState.serialize(true)).toBeUndefined();
 
         service.ngOnDestroy();
         routerStub.events.complete();

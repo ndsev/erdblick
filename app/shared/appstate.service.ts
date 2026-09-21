@@ -729,6 +729,12 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    readonly semanticCompositingEnabledState = this.createState<boolean>({
+        name: 'semanticCompositingEnabled',
+        defaultValue: true,
+        schema: Boolish
+    });
+
     readonly contactShadingEnabledState = this.createState<boolean>({
         name: 'contactShadingEnabled',
         defaultValue: true,
@@ -2370,6 +2376,8 @@ export class AppStateService implements OnDestroy {
     };
     get deckAntialiasingEnabled() {return this.deckAntialiasingEnabledState.getValue();}
     set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
+    get semanticCompositingEnabled() {return this.semanticCompositingEnabledState.getValue();}
+    set semanticCompositingEnabled(val: boolean) {this.semanticCompositingEnabledState.next(!!val);}
     get contactShadingEnabled() {return this.contactShadingEnabledState.getValue();}
     set contactShadingEnabled(val: boolean) {this.contactShadingEnabledState.next(!!val);}
     get lod3TileThreshold() {return this.lod3TileThresholdState.getValue();}

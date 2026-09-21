@@ -573,6 +573,9 @@ export abstract class DeckMapView implements IRenderView {
         this.lastCanvasCssSize = this.normalizedCanvasCssSize(container.clientWidth, container.clientHeight);
         const gl = this.createWebGl2Context(canvas, container);
         this.contactShadingEnabled = this.stateService.contactShadingEnabled;
+        // Snapshot once: setup awaits the device, while preference changes may
+        // already be starting the next renderer generation.
+        const semanticCompositingEnabled = this.stateService.semanticCompositingEnabled;
 
         this.setViewFromState(this.stateService.cameraViewDataState.getValue(this._viewIndex));
 
@@ -591,7 +594,7 @@ export abstract class DeckMapView implements IRenderView {
             viewState: this.viewState,
             layers: [],
             effects: [
-                this.semanticZIndexService,
+                ...(semanticCompositingEnabled ? [this.semanticZIndexService] : []),
                 this.interactionOutlineService,
                 this.textOverlayService
             ],
@@ -688,11 +691,13 @@ export abstract class DeckMapView implements IRenderView {
             error => this.invalidateGpuScene(error)
         );
         this.gpuVectorDisabledPickIndices.clear();
-        this.semanticZIndexService.bindScene(
-            this.gpuScene,
-            this.sceneMode === SceneMode.SCENE2D,
-            this.gpuVectorDisabledPickIndices
-        );
+        if (semanticCompositingEnabled) {
+            this.semanticZIndexService.bindScene(
+                this.gpuScene,
+                this.sceneMode === SceneMode.SCENE2D,
+                this.gpuVectorDisabledPickIndices
+            );
+        }
         this.layerController.setDeckPresentationDiagnosticsProvider(() => ({
             layers: this.layerRegistry.size,
             scene: this.gpuScene?.snapshot() ?? {

@@ -202,6 +202,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
     private deckAntialiasingEnabled = true;
+    private semanticCompositingEnabled = true;
     private contextMenuVisible = false;
     private pendingContextMenuOpenEvent: {clientX: number; clientY: number; pageX: number; pageY: number} | null = null;
     private pendingContextMenuOpenTimeout?: ReturnType<typeof setTimeout>;
@@ -364,7 +365,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         window.addEventListener(MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT, this.layoutResizePrepareListener);
     }
 
-    /** Creates or recreates the renderer once app state is ready and the 2D/3D mode is known. */
+    /** Recreates the renderer when projection or construction-time rendering preferences change. */
     ngAfterViewInit() {
         const viewerLayout = this.viewerElement.nativeElement.closest<HTMLElement>(".viewer-layout");
         if (viewerLayout) {
@@ -382,12 +383,16 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.modeSubscription = combineLatest([
             this.stateService.ready.pipe(filter(ready => ready)),
             this.stateService.mode2dState.pipe(this.viewIndex()),
-            this.stateService.deckAntialiasingEnabledState
-        ]).subscribe(([_, mode2d, antialiasingEnabled]) => {
+            this.stateService.deckAntialiasingEnabledState,
+            this.stateService.semanticCompositingEnabledState
+        ]).subscribe(([_, mode2d, antialiasingEnabled, semanticCompositingEnabled]) => {
             const needsRebuild =
-                this.is2DMode !== mode2d || this.deckAntialiasingEnabled !== antialiasingEnabled || !this.mapView;
+                this.is2DMode !== mode2d ||
+                this.deckAntialiasingEnabled !== antialiasingEnabled ||
+                this.semanticCompositingEnabled !== semanticCompositingEnabled || !this.mapView;
             this.is2DMode = mode2d;
             this.deckAntialiasingEnabled = antialiasingEnabled;
+            this.semanticCompositingEnabled = semanticCompositingEnabled;
             if (needsRebuild) {
                 this.initializeViewer(mode2d);
             }

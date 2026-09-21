@@ -14,6 +14,22 @@ When the map stays blank or appears to render nothing at all, work through these
    `emptySources` means the backend loaded an empty `sources` list, `allSourcesDisabled` means every configured source has `enabled: false`, `datasourceInitializationFailed` means enabled sources failed during construction, `missingMapOrLayer` means the requested map/layer id is not advertised, and `noConfig` means the backend has no config path.
 5. Reload, since it could be that you were silently logged out.
 
+## Screen-Space Rendering Artifacts
+
+To check whether artifacts depend on semantic layer compositing, open
+**Edit -> Preferences -> Rendering** and turn **Semantic layer compositing**
+off. Changing this default-on setting recreates the map renderer without the
+semantic support, winner, and visible/picking composite passes or their render
+targets. Turn it back on to compare the same camera position.
+
+This is a diagnostic bypass, not an alternative renderer: semantic decorations,
+such as cinematic lane markings, and their picking disappear while it is off.
+Ordinary geometry and support surfaces remain visible. Grid rendering, MSAA,
+contact shading, and hover/selection/glow effects keep their own settings.
+The setting persists in this browser but is not included in shared URLs, so
+include its value when reporting an issue. A change in the artifact narrows the
+investigation; it does not by itself identify a particular shader or driver bug.
+
 ## Performance Issues
 
 If the UI feels sluggish or frame rates drop when you move the camera, a few simple changes often restore responsiveness:
