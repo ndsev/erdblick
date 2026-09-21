@@ -8,7 +8,7 @@ import {
     type PreRenderOptions,
     _LayersPass as LayersPass
 } from "@deck.gl/core";
-import type {Framebuffer, Texture} from "@luma.gl/core";
+import {Texture, type Framebuffer, type RenderPipelineParameters} from "@luma.gl/core";
 import {ClipSpace} from "@luma.gl/engine";
 
 import {DeckLayerRegistry} from "./deck-layer-registry";
@@ -26,6 +26,14 @@ const PICKING_LAYER_ID = "builtin/semantic-z-index-picking";
 const SUPPORT_LAYER_ID = `${PASS_LAYER_PREFIX}support`;
 const OVERLAY_LAYER_ID = `${PASS_LAYER_PREFIX}overlay`;
 const MAX_DISABLED_PICK_INDICES = 64;
+// Deck replaces model parameters with layer parameters before each WebGL draw.
+// Resolve one unblended winner, retaining straight alpha for the final composite.
+const SEMANTIC_PASS_PARAMETERS: RenderPipelineParameters = {
+    depthCompare: "less-equal",
+    depthWriteEnabled: true,
+    cullMode: "none",
+    blend: false
+};
 /**
  * Normalized fixed-depth bias shared by the visible and picking composites.
  *
@@ -114,18 +122,7 @@ class SemanticCompositeLayer extends Layer<SemanticCompositeLayerProps> {
         const model = new ClipSpace(this.context.device, {
             id: String(this.props.id),
             fs: COMPOSITE_FRAGMENT_SHADER,
-            parameters: {
-                depthCompare: "less-equal",
-                depthWriteEnabled: false,
-                cullMode: "none",
-                blend: true,
-                blendColorOperation: "add",
-                blendColorSrcFactor: "src-alpha",
-                blendColorDstFactor: "one-minus-src-alpha",
-                blendAlphaOperation: "add",
-                blendAlphaSrcFactor: "one",
-                blendAlphaDstFactor: "one-minus-src-alpha"
-            }
+            parameters: this.props.parameters
         });
         this.setState({model} satisfies SemanticCompositeLayerState);
     }
@@ -180,11 +177,7 @@ class SemanticPickingLayer extends Layer<SemanticPickingLayerProps> {
             id: String(this.props.id),
             fs: PICKING_FRAGMENT_SHADER,
             modules: [picking as never],
-            parameters: {
-                depthCompare: "less-equal",
-                depthWriteEnabled: true,
-                cullMode: "none"
-            }
+            parameters: this.props.parameters
         });
         this.setState({model} satisfies SemanticCompositeLayerState);
     }
@@ -311,6 +304,7 @@ export class DeckSemanticZIndexService implements Effect {
             scene,
             flattenZ,
             renderMode: ErdblickVectorRenderMode.SemanticSupport,
+            parameters: SEMANTIC_PASS_PARAMETERS,
             getPolygonOffset: NO_POLYGON_OFFSET,
             pickable: false
         });
@@ -320,6 +314,7 @@ export class DeckSemanticZIndexService implements Effect {
             scene,
             flattenZ,
             renderMode: ErdblickVectorRenderMode.SemanticOverlay,
+            parameters: SEMANTIC_PASS_PARAMETERS,
             sharedDisabledPickIndices,
             getPolygonOffset: NO_POLYGON_OFFSET,
             pickable: false
@@ -331,7 +326,15 @@ export class DeckSemanticZIndexService implements Effect {
             service: this,
             parameters: {
                 depthCompare: "less-equal",
-                depthWriteEnabled: false
+                depthWriteEnabled: false,
+                cullMode: "none",
+                blend: true,
+                blendColorOperation: "add",
+                blendColorSrcFactor: "src-alpha",
+                blendColorDstFactor: "one-minus-src-alpha",
+                blendAlphaOperation: "add",
+                blendAlphaSrcFactor: "one",
+                blendAlphaDstFactor: "one-minus-src-alpha"
             },
             getPolygonOffset: NO_POLYGON_OFFSET,
             pickable: false
@@ -341,10 +344,7 @@ export class DeckSemanticZIndexService implements Effect {
             service: this,
             sourceLayer: this.overlayLayer,
             sharedDisabledPickIndices,
-            parameters: {
-                depthCompare: "less-equal",
-                depthWriteEnabled: true
-            },
+            parameters: SEMANTIC_PASS_PARAMETERS,
             getPolygonOffset: NO_POLYGON_OFFSET,
             pickable: true,
             drillPickEligible: true,
@@ -440,51 +440,51 @@ export class DeckSemanticZIndexService implements Effect {
     /** Release all scene shells, framebuffers, and the reusable hidden pass. */
     cleanup(): void {
         this.unbindScene();
-        destroyFramebuffer(this.supportFramebuffer);
-        destroyFramebuffer(this.overlayFramebuffer);
-        this.supportFramebuffer = null;
-        this.overlayFramebuffer = null;
+        this.destroyFramebuffers();
         this.pass?.cleanup();
         this.pass = null;
         this.context = null;
     }
 
-    /** Lazily allocate and resize support and overlay winner targets. */
+    /** Replace resized targets as complete ownership units; reuse unchanged sizes. */
     private ensureFramebuffers(size: [number, number]): void {
         if (!this.context) {
             return;
         }
-        if (!this.supportFramebuffer) {
-            this.supportFramebuffer = createFramebuffer(
-                this.context,
-                "support");
+        if (this.supportFramebuffer?.width === size[0] &&
+            this.supportFramebuffer.height === size[1] &&
+            this.overlayFramebuffer?.width === size[0] &&
+            this.overlayFramebuffer.height === size[1]) {
+            return;
         }
-        if (!this.overlayFramebuffer) {
-            this.overlayFramebuffer = createFramebuffer(
-                this.context,
-                "overlay");
-        }
-        for (const framebuffer of [
-            this.supportFramebuffer,
-            this.overlayFramebuffer
-        ]) {
-            if (framebuffer.width !== size[0] || framebuffer.height !== size[1]) {
-                framebuffer.resize({width: size[0], height: size[1]});
-            }
-        }
+        // luma's deprecated resize() attaches replacement views, not their
+        // backing color textures. Recreate to keep texture ownership explicit.
+        this.destroyFramebuffers();
+        this.supportFramebuffer = createFramebuffer(this.context, "support", size);
+        this.overlayFramebuffer = createFramebuffer(this.context, "overlay", size);
+    }
+
+    /** Release both targets and all textures they own, including automatic depth. */
+    private destroyFramebuffers(): void {
+        this.supportFramebuffer?.destroy();
+        this.overlayFramebuffer?.destroy();
+        this.supportFramebuffer = null;
+        this.overlayFramebuffer = null;
     }
 }
 
 /** Create one nearest-filtered color target with an attached hardware depth buffer. */
 function createFramebuffer(
     context: EffectContext,
-    id: string
+    id: string,
+    [width, height]: [number, number]
 ): Framebuffer {
     const colorAttachment = context.device.createTexture({
         id: `semantic-z-index-${id}`,
         format: "rgba8unorm",
-        width: 1,
-        height: 1,
+        usage: Texture.RENDER_ATTACHMENT | Texture.SAMPLE,
+        width,
+        height,
         sampler: {
             minFilter: "nearest",
             magFilter: "nearest",
@@ -492,22 +492,20 @@ function createFramebuffer(
             addressModeV: "clamp-to-edge"
         }
     });
-    return context.device.createFramebuffer({
-        id: `semantic-z-index-${id}`,
-        width: 1,
-        height: 1,
-        colorAttachments: [colorAttachment],
-        depthStencilAttachment: "depth24plus"
-    });
-}
-
-/** Destroy every explicitly owned color attachment before its framebuffer wrapper. */
-function destroyFramebuffer(framebuffer: Framebuffer | null): void {
-    if (!framebuffer) {
-        return;
+    try {
+        const framebuffer = context.device.createFramebuffer({
+            id: `semantic-z-index-${id}`,
+            width,
+            height,
+            colorAttachments: [colorAttachment],
+            depthStencilAttachment: "depth24plus"
+        });
+        // Explicit attachments are borrowed by default. Own the texture, not
+        // its view; destroying a TextureView does not release GPU storage.
+        framebuffer.attachResource(colorAttachment);
+        return framebuffer;
+    } catch (error) {
+        colorAttachment.destroy();
+        throw error;
     }
-    for (const attachment of framebuffer.colorAttachments) {
-        attachment?.destroy();
-    }
-    framebuffer.destroy();
 }

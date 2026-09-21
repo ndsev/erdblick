@@ -72,11 +72,6 @@ const MASK_NO_DEPTH_PARAMETERS: RenderPipelineParameters = {
   depthCompare: "always",
   depthWriteEnabled: false,
 };
-const SEMANTIC_DEPTH_PARAMETERS: RenderPipelineParameters = {
-  depthCompare: "less-equal",
-  depthWriteEnabled: true,
-  blend: false,
-};
 // WebGL presents a 24-bit depth buffer. Four quantized depth values separate
 // primitive kinds inside the vector pass without changing physical deck order.
 const PRIMITIVE_DEPTH_BIAS_STEP = 8 / 0x00ff_ffff;
@@ -934,7 +929,7 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
       parameters:
         mode === ErdblickVectorRenderMode.Visible
           ? materialParameters(source.flags)
-          : SEMANTIC_DEPTH_PARAMETERS,
+          : this.props.parameters,
       colorAttachmentFormats: ["rgba8unorm"],
     });
   }
