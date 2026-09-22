@@ -827,11 +827,9 @@ export async function captureDocsScreenshotWithLabels(
         }, {entries: labelBoxes, strict, fontSize});
 
         const browserName = page.context().browser()?.browserType().name();
-        if (browserName === 'chromium') {
-            await page.screenshot({
-                path: screenshotPath
-            });
-        }
+        // Exercise the capture in every browser, but only publish one browser's
+        // image to the shared documentation path.
+        await page.screenshot({path: browserName === 'chromium' ? screenshotPath : undefined});
     } finally {
         await page.evaluate(() => {
             document.getElementById('__erdblick-doc-labels__')?.remove();
