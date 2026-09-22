@@ -31,6 +31,8 @@ export interface SearchResultTilePayload {
     sourceTileId: number;
     requestOrder: number;
     resultCount: number;
+    /** Result-only channel in layerBlob, after any rendering channels. */
+    resultChannelOrdinal: number;
     resultFields: string[];
     tilesConsidered?: number;
     tilesCompleted?: number;

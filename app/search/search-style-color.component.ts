@@ -675,7 +675,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.updateColorWarning();
     }
 
-    /** Uses observed histogram buckets to rebuild category stops for enum or string-like values. */
+    /** Rebuilds category stops from observed numeric, boolean, or string values. */
     private updateCategoryStopsFromData(summary: SearchValueSummary): void {
         const values = summary.histogram
             .map(bucket => bucket.value)

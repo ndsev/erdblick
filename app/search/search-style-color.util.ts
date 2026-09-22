@@ -508,7 +508,7 @@ export function autoInitializeSearchStyleColorDraft(
         }
         return {
             draft: cloneSearchStyleColorDraft({...draft, categoryStops: []}),
-            message: "Automatic categories require a schema enum field.",
+            message: "No enum categories in the schema. Use Update from data or add values manually.",
             success: false
         };
     }

@@ -165,6 +165,7 @@ interface SearchResultTileContribution {
     sourceTileId: number;
     requestOrder: number;
     resultCount: number;
+    resultChannelOrdinal: number;
     resultFields: string[];
     results: FeatureSearchResultEntry[];
     diagnostics: Uint8Array | null;
@@ -1728,6 +1729,11 @@ export class FeatureSearchService {
         presentation.styledLayer.dispose();
         presentation.compiled.style.featureLayerStyle.delete?.();
         const session = this.getInternalSession(presentation.sessionId);
+        if (session) {
+            // Replacement styles get a new filter ID. Its predecessor must not
+            // keep contributing expected chunks after its tiles are discarded.
+            this.clearFilterSearchProgress(session, presentation.styledLayer.filterRef.filterId);
+        }
         for (const sourceTileKey of [
             ...(session?.searchResultTilesBySourceKey.keys() ?? [])
         ]) {
@@ -2352,7 +2358,9 @@ export class FeatureSearchService {
 
         try {
             const rawSummaries = subsetLayer.valueSummaries(
-                0,
+                // Rendering channels may have no fields (an unfinished category
+                // scale), or only a subset. Sample the same channel as the list.
+                contribution.resultChannelOrdinal,
                 FeatureSearchService.VALUE_SUMMARY_HISTOGRAM_LIMIT,
                 FeatureSearchService.VALUE_SUMMARY_DISTINCT_LIMIT
             );
@@ -2807,11 +2815,7 @@ export class FeatureSearchService {
             return;
         }
         if (event.type === "generation") {
-            for (const key of [...session.progressByRequestKey.keys()]) {
-                if (key.startsWith(`${presentation.styledLayer.filterRef.filterId}\n`)) {
-                    session.progressByRequestKey.delete(key);
-                }
-            }
+            this.clearFilterSearchProgress(session, presentation.styledLayer.filterRef.filterId);
             session.backendComplete = false;
             session.complete = false;
             this.applySearchCoverageSnapshot(session.id);
@@ -2913,6 +2917,7 @@ export class FeatureSearchService {
             sourceTileId: spatialTileId,
             requestOrder,
             resultCount,
+            resultChannelOrdinal: presentation.compiled.resultChannelOrdinal,
             resultFields: presentation.compiled.resultFields,
             layerBlob: subsetBlob,
             diagnostics,
@@ -3019,6 +3024,7 @@ export class FeatureSearchService {
                 presentation.coverageOrder.get(task.state.partitionKey)
                 ?? Number.MAX_SAFE_INTEGER,
             resultCount: task.resultCount,
+            resultChannelOrdinal: presentation.compiled.resultChannelOrdinal,
             resultFields: task.resultFields,
             layerBlob: subsetBlob,
             diagnostics: null,
@@ -3039,6 +3045,16 @@ export class FeatureSearchService {
         }
         return presentation.spatialTileByPartition.get(state.partitionKey) ??
             null;
+    }
+
+    /** Retires all generations of one filter without removing other layers' progress. */
+    private clearFilterSearchProgress(session: FeatureSearchSession, filterId: string): void {
+        for (const key of session.progressByRequestKey.keys()) {
+            if (key.startsWith(`${filterId}\n`)) {
+                session.progressByRequestKey.delete(key);
+            }
+        }
+        this.updateSearchResultIngressProgress(session);
     }
 
     /** Aggregates interactive filter progress across a search's source layers. */
@@ -3187,6 +3203,7 @@ export class FeatureSearchService {
             sourceTileId: payload.sourceTileId,
             requestOrder: this.nonNegativeNumber(payload.requestOrder, Number.MAX_SAFE_INTEGER),
             resultCount: payload.resultCount,
+            resultChannelOrdinal: payload.resultChannelOrdinal,
             resultFields,
             results,
             diagnostics: payload.diagnostics,
@@ -3400,6 +3417,7 @@ export class FeatureSearchService {
     ): void {
         contribution.refresh = batch.refresh;
         contribution.resultFields = batch.resultFields;
+        contribution.resultChannelOrdinal = batch.resultChannelOrdinal;
         contribution.layerBlob = batch.layerBlob;
         contribution.valueSummary = null;
         this.appendArray(contribution.results, batch.results);
