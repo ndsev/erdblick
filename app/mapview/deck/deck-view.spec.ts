@@ -18,5 +18,8 @@ describe("DeckMapView", () => {
 
         expect(calls).toEqual(["destroy", "lose"]);
         expect(view.deckDevice).toBeNull();
+
+        view.releaseDeckDevice();
+        expect(calls).toEqual(["destroy", "lose"]);
     });
 });

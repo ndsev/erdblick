@@ -821,14 +821,13 @@ export abstract class DeckMapView implements IRenderView {
         this.contactShadingService?.destroy();
         this.contactShadingService = null;
         // Persistent scene buffers and lookup textures belong to the same
-        // device as Deck's models. Retire them while that device is alive;
-        // after finalize(), WebGL context-loss teardown can no longer do so.
+        // device as Deck's models. Retire them before releasing that device.
         this.gpuScene?.destroy();
         this.gpuScene = null;
         this.layerController.clearDeckPresentationDiagnostics();
         if (this.deckDevice) {
             // Atlas textures belong to the still-live luma device and must be
-            // destroyed before Deck finalizes that device/context.
+            // destroyed before releasing that device/context.
             gpuIconAtlasService.releaseDevice(this.deckDevice);
         }
         if (this.deck) {
@@ -862,7 +861,7 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.gpuVectorLayers = [];
         this.gpuTextLayerHost = null;
-        this.deckDevice = null;
+        this.releaseDeckDevice();
         this.navigationTargetOverlay?.destroy();
         this.navigationTargetOverlay = null;
         this.lastCanvasCssSize = undefined;
@@ -875,6 +874,16 @@ export abstract class DeckMapView implements IRenderView {
         if (container) {
             container.innerHTML = "";
         }
+    }
+
+    /** Releases this view's context after Deck and the scene have disposed their resources. */
+    private releaseDeckDevice(): void {
+        const device = this.deckDevice;
+        this.deckDevice = null;
+        device?.destroy();
+        // Deck.finalize() leaves the externally supplied context alive. Explicit
+        // loss returns its browser context slot when views are removed/recreated.
+        device?.loseDevice();
     }
 
     /** Returns whether the deck renderer is currently initialized. */
