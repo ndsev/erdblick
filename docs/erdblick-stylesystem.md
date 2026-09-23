@@ -2,7 +2,7 @@
 
 Erdblick stylesheets are YAML presentation programs. Schema version 2 is
 planned into mapget `/filter` channels and rendered from immutable
-`TileSubsetLayer` values.
+`PartitionSubsetLayer` values.
 
 Styles authored for MapViewer 2026.3.1 use a breaking older contract. See the
 [Style 2.0 Migration Guide](erdblick-style-2.0-migration-guide.md) before
@@ -48,6 +48,67 @@ first row to edit the owning sheet directly:
 ![Editing the lane style from its option group](screenshots/style-layer-action.png)
 
 The **brush** opens the sheet that owns this group of lane options.
+
+## Pre-defined Styles
+
+MapViewer ships styles for NDS.Live, NDS.Classic, and generic geometry.
+Their options and named **layer presets** appear in **Maps & Layers**.
+Choose a preset for a useful starting point, then expand it to adjust its
+options. After an option edit, the selector shows the most specific matching
+preset, or **Custom options** if there is no unambiguous match.
+
+### NDS.Live lanes
+
+Use **Cinematic** to view lane surfaces and markings, or **Lane Topology**
+to inspect how lane groups connect. Expanding the selected preset exposes
+the individual options:
+
+![Cinematic SF lanes and their expanded preset options](screenshots/style-lane-presets.png)
+
+![NDS.Live Lane Cinematic and Lane Topology presets in split view](screenshots/31a-live-lanes-cinematic-topology.png)
+
+### NDS.Live Display
+
+The Display style renders vector geometry and textured meshes. The examples
+show the local NDS.Island-3D filestore with textured meshes and 3D boxes.
+Textures come from the dataset, rather than a stylesheet color rule.
+
+![Local NDS.Island-3D textured meshes and 3D Boxes in split view](screenshots/33-live-display-2d-3d.png)
+
+![Textured NDS.Island-3D meshes in Berlin](screenshots/island-display3d.png)
+
+### NDS.Classic
+
+The BMD **All** preset displays the supported background-map feature
+families together:
+
+![NDS.Classic BMD layer with the All preset selected](screenshots/34-classic-bmd-all-features.png)
+
+Use **Lane Group Topology** for lane connections and **Travel Direction**
+for routing-link directions:
+
+![NDS.Classic Lane Group Topology and Routing Travel Direction presets in split view](screenshots/35a-classic-lane-routing-topology.png)
+
+### Grid and generic geometry
+
+Grid buildings offer typed and uniform presets; intersections have a
+separate visibility option. The generic geometry sheet provides separate
+presets for lines, points, surfaces, and all geometry together.
+
+### NDS.Live point clouds
+
+The MapViewer **NDS.Live/Point Clouds** style displays point-cloud objects.
+Enable **Point clouds**, then choose a layer preset:
+
+| Preset | Appearance |
+| --- | --- |
+| Clean (default) | Opaque teal points, 2 pixels in diameter. |
+| Objects | The same size with a repeating eight-colour palette based on the object ID. All clusters in an object share its colour. |
+| Overlay | Smaller points, 1.5 pixels in diameter at 35% opacity, for viewing alongside other layers. |
+
+**Colour by object** and **Subtle overlay** can also be combined in the
+layer's style options. All presets retain depth occlusion and object picking.
+Overlay changes appearance, not the point count or memory requirements.
 
 ## YAML Styles and Search Result Styles
 
@@ -126,6 +187,37 @@ attribute filters, and the stylesheet LOD fields described below.
 
 Options become typed SIMFIL bindings. They can participate in filters and
 presentation expressions without rewriting the stylesheet.
+
+## Options and layer presets
+
+Options declared in the sheet become controls in **Maps & Layers**. Values
+are stored per map, layer, and style, so changing an option on one layer does
+not require a copy of the whole stylesheet.
+
+A layer preset names a partial combination of the sheet's Boolean options.
+It is available on layers matched by the sheet's `layer` affinity:
+
+```yaml
+presets:
+  - id: lane-topology
+    name: Lane Topology
+    values:
+      - {optionId: showCenterLines, value: true}
+      - {optionId: showDigitizationDir, value: true}
+```
+
+Preset IDs and names must be unique within the sheet. Each `optionId` must
+identify an editable Boolean option in that sheet. A preset changes only the
+listed options; it does not enable a different sheet or change another
+sheet's options. Invalid presets produce validation warnings without
+disabling valid sibling presets or rendering rules.
+
+Edit layer preset definitions in the Advanced YAML editor. The **Map Presets**
+tab manages higher-level compositions that refer to these named layer
+presets. A map preset applies to the component layers present on the current
+map, with at least one matching component required. If a present layer lacks
+the referenced preset, that composition cannot be applied to the map.
+Selecting a map preset leaves unrelated layers and options alone.
 
 ## One top-level rule, one channel
 
@@ -231,32 +323,114 @@ One rule cannot define both branch kinds.
 
 ## Presentation fields
 
-Common primitive fields include:
+Presentation fields control the appearance of geometry selected by a rule.
+The table links to the field descriptions and examples below. Expression
+fields are SIMFIL expressions evaluated for the feature, attribute, or
+relation selected by the rule's scope.
 
-- `color`, `color-expression`, or `color-scale`;
-- `opacity`;
-- `width` and optional `width-scale`;
-- `polygon-height` and optional `polygon-height-expression`;
-- `min-lod-expression` for per-entry GPU visibility within an active rule;
-- `surface-shading` for restrained matte lighting on polygon and mesh triangles;
-- `offset` and `offset-increment`;
-- `z-index` and optional `z-index-expression`;
-- `lateral-offset-unit`: `meter`, `meters`, `m`, `pixel`, `pixels`, or `px`;
-- literal screen-space `glow` material;
-- `flat`, `billboard`, and `depth-test`; paths extrude in the map plane by
-  default, while `billboard: true` explicitly requests a constant
-  screen-facing width;
-- `dashed`, `dash-length`, optional `dash-gap`, `dash-unit`, `dash-pattern`,
-  and `gap-color`; `dash-unit` accepts the same metre/pixel aliases as
-  `lateral-offset-unit`, defaults to pixels, and omitted `dash-gap` preserves
-  the legacy cadence by matching `dash-length`;
-- `arrow` / `arrow-expression`;
-- outline color/width;
-- icon URL/expression;
-- label text/expression plus the Deck-oriented text fields described below.
+| Fields | Purpose |
+| --- | --- |
+| [`color`, `color-expression`, `color-scale`](#color-modes) | Fixed colors, expression-derived colors, or categorical/numeric palettes. |
+| [`opacity`](#opacity) | Geometry transparency. |
+| [`width`, `width-scale`](#width-scales) | Line thickness and point diameter. |
+| [`polygon-height`, `polygon-height-expression`](#polygon-height) | Extruded polygon or mesh height in metres. |
+| [`surface-shading`](#surface-shading) | Matte lighting on surface triangles in 3D. |
+| [`label-*`](#labels) | Label text, font, layout, backgrounds, and collision handling. |
+| [`offset`, `offset-increment`, `lateral-offset`, `vertical-offset`, `lateral-offset-unit`](#offsets) | Physical or screen-space displacement. |
+| [`z-index`, `z-index-expression`](#drawing-order) | Drawing order for coplanar geometry. |
+| [`glow`](#glow) | An exterior shadow or halo. |
+| [`flat`, `billboard`, `depth-test`](#orientation-and-depth) | Flattening, camera-facing presentation, and depth occlusion. |
+| [`dashed`, `dash-length`, `dash-gap`, `dash-unit`](#dashed-lines) | Repeating line strokes and gaps. |
+| [`arrow`, `arrow-expression`](#arrows) | Forward, backward, or double line arrows. |
+| [`icon-url`, `icon-url-expression`](#icons) | Image markers. |
+| [`min-lod-expression`](#per-entry-visibility) | Per-entry visibility as the view zooms out. |
 
-Literal values are resolved without projection. Every expression-backed field
-is collected by the planner and transported in the appropriate field list.
+### Color modes
+
+Exactly one of these may be present:
+
+#### Literal color
+
+```yaml
+color: orange
+```
+
+#### Expression color
+
+```yaml
+color-expression: "selected and '#ff0000' or '#808080'"
+```
+
+Use this for genuinely dynamic color strings, such as the internal selection
+color binding.
+
+#### Typed color scale
+
+```yaml
+color-scale:
+  mode: categorical
+  expression: "properties.category"
+  stops:
+    - ["motorway", "#e41a1c"]
+    - ["primary", "#377eb8"]
+    - ["secondary", "#4daf4a"]
+  fallback: gray
+```
+
+Stops are `[value, color]` pairs, not a YAML map. This preserves boolean,
+numeric, and string key types.
+
+Categorical scales use exact typed equality. Duplicate typed keys are invalid.
+
+```yaml
+color-scale:
+  mode: linear
+  expression: "properties.score"
+  stops:
+    - [0, blue]
+    - [50, yellow]
+    - [100, red]
+  fallback: gray
+```
+
+Linear keys must be finite, numeric, and strictly increasing. Colors are
+interpolated between adjacent stops. `fallback` handles null, unsupported
+types, and values which cannot be mapped.
+
+Use one scale instead of a palette-only `first-of` chain. Structural
+`first-of`/`all-of` trees remain appropriate for geometry, dash composition,
+or other compound presentation changes.
+
+### Opacity
+
+`opacity` sets the geometry alpha from `0` (transparent) to `1` (opaque).
+Use `label-opacity` separately for labels.
+
+### Width scales
+
+`width` sets line thickness or point diameter in pixels.
+`width-scale` maps one projected scalar to that width
+without creating a `first-of` branch for every category. It uses the same
+typed keys and categorical/linear modes as `color-scale`; stop values and the
+fallback are finite non-negative numbers. A literal `width` remains the
+fallback when `width-scale.fallback` is omitted.
+
+```yaml
+width: 1
+width-scale:
+  mode: categorical
+  expression: "properties.roadClass"
+  stops:
+    - [0, 5]
+    - [1, 3]
+    - [2, 2]
+  fallback: 1
+```
+
+When color and width depend on the same expression, use identical expression
+text. The style planner then projects one value for both scales.
+
+### Polygon height
 
 `polygon-height` extrudes polygon and triangle-mesh surface geometry vertically
 in metres. The renderer raises the triangulated roof and materializes walls for
@@ -271,6 +445,8 @@ polygon-height: 3
 polygon-height-expression: attributes.layer.BMD.BUILDING_HEIGHT.buildingHeight
 ```
 
+### Surface shading
+
 `surface-shading: true` derives one flat normal from each existing surface
 triangle and applies a low-contrast ambient/directional light in 3D. It does
 not add geometry, cast shadows, or alter alpha. Flattened 2D rendering and GPU
@@ -281,6 +457,11 @@ diagnostic surfaces and interaction materials remain visually literal:
 geometry: [polygon, mesh]
 surface-shading: true
 ```
+
+### Labels
+
+Use `label-text` for fixed text or `label-text-expression` for text derived
+from each entry. The remaining `label-*` fields control its appearance.
 
 `label-collision: true` lets Deck hide lower-priority labels that overlap
 inside one rendered style layer. `label-collision-priority` is an integer from
@@ -353,62 +534,40 @@ Eye offsets and height references have no TextLayer equivalent and are
 rejected; use `label-pixel-offset` for a screen displacement or `offset` for a
 physical displacement.
 
-`lateral-offset-unit` changes only the first (lateral) component of `offset`
-and `offset-increment`. Meter offsets are baked into projected geometry.
-Pixel offsets remain absolute pixels in native renderer buffers. The Deck
-adapter divides constant offsets by authored width only at the stock
-PathStyleExtension boundary. Generated transitions additionally carry an
-explicit local-map XY pixel vector per vertex. Adjacent vectors are packed as
-one segment `uvec4`: its four words encode the exact
-left/start/end/right vectors as signed 12-bit fixed-point pairs plus a compact
-adaptive-scale threshold.
-`DeckVariableOffsetPathLayer` displaces the projected
-previous/current/next centerline positions before Deck computes extrusion and
-joins. Both segments touching a joint therefore see the same three displaced
-points instead of extrapolating different neighbours. At far zooms, an inside
-offset can consume or reverse the bend's projected forward motion—the cusp of
-an inside parallel curve. The native renderer derives a metres-per-pixel
-safety threshold from the exact sampled centerline and offset-vector motion.
-Sharp and almost-reversing cross-road turns therefore contract sooner than
-gentle turns instead of relying on one trim-radius estimate. Every maneuver of
-the same host/rule, including a U-turn, uses that common threshold, so the
-shader contracts the complete displacement uniformly and preserves the
-relative lane stack instead of locally wrinkling or collapsing lanes. Authored
-stroke, picking mask, glow mask, and terminal arrow share the same displacement
-vector and scale.
+### Offsets
 
-A transition geometry is already ordered from the incoming road through the
-junction to the outgoing road. The renderer derives its visible side from the
-local maneuver: a right turn is right-of-traversal, a left turn is
-left-of-traversal, and a transition returning to the same connected end of the
-same road is a conventional left-side U-turn. An acute or almost-reversing
-transition between different roads remains an ordinary turn. The lateral
-`offset` and `offset-increment` values are distances for transition rules;
-their YAML sign is only the stable tie-breaker for a straight maneuver.
-Connected-end metadata converts the visible path side into each road's
-digitization-relative physical side for stack ownership.
+`offset: [lateral, longitudinal, vertical]` moves geometry relative to its
+local direction. Positive lateral values move ordinary lines to the right
+of their digitization direction. `lateral-offset` and `vertical-offset`
+are shortcuts for the first and third components; an explicit `offset`
+takes precedence.
 
-Incoming and outgoing physical road sides reserve their slots independently.
-The line stays at the incoming distance along that road, rotates its offset
-normal while interpolating the lane radius through the junction fillet, and
-stays at the outgoing distance thereafter. Interpolating the XY components
-directly is incorrect: it shrinks a constant-radius corner and collapses an
-opposing-direction U-turn through zero.
-This is why generated transitions, unlike constant-offset ordinary paths, use
-the packed variable-offset extension. Bend sampling is refined by turn angle,
-so sharp joins do not expose a coarse terminal chord. Straight transitions
-choose the least occupied compatible pair of sides. A pixel-offset U-turn
-keeps a compact, non-overshooting undisplaced bridge; its normal rotates in the
-winding that advances with both road legs and produces the visible hairpin
-before Deck calculates the join. It inherits the host/rule scale without
-contributing the compact bridge's old trim-radius estimate. Arrowheads use the
-same terminal vertex and exact local XY pixel vector as their owning leg
-through `DeckLocalPixelOffsetExtension`.
-The icon shader transforms the local direction directly (without subtracting
-two large projected positions), so arrow anchors retain the terminal lateral
-offset at Web-Mercator float precision.
-Longitudinal and vertical components remain world-space and follow the
-respective leg slot.
+`offset-increment` uses the same three components to separate entries
+sharing a geometry, such as several attributes applying to one road.
+
+`lateral-offset-unit` accepts `meter`, `meters`, or `m` (the default),
+and `pixel`, `pixels`, or `px`. Pixel offsets keep the lateral spacing
+readable on screen as the view zooms. Longitudinal and vertical offsets
+remain in metres.
+
+```yaml
+offset: [6, 0, 0]
+offset-increment: [3, 0, 0]
+lateral-offset-unit: pixels
+```
+
+For feature-transition validities, the renderer places turns on the
+corresponding side of the junction and reserves incoming and outgoing slots
+independently. Offset values specify distances; their sign breaks ties for
+straight transitions. A transition returning to the same connected end of
+the same road forms a left-side U-turn. At distant zoom levels, pixel offsets
+contract together where necessary to keep tight turns from folding over.
+Arrowheads and picking follow the displaced line.
+
+Use vertical offsets for actual height differences. For overlapping geometry
+that should remain at the same height, use drawing order instead.
+
+### Drawing order
 
 `z-index` separates coplanar vector geometry without moving it in world
 space. Higher values are drawn in front of lower values. An optional
@@ -451,9 +610,11 @@ feature property.
 
 Omitting both fields leaves Deck's stock depth behavior untouched. Use the Z
 component of `offset` only for a real geometric displacement; do not use it to
-resolve z-fighting. The initial implementation covers points, paths, arrows,
+resolve z-fighting. Drawing order covers points, paths, arrows,
 polygons, mapget meshes/AABBs, and labels. GLTF nodes retain their physical
-transform and do not consume `z-index` yet.
+transform and do not consume `z-index`.
+
+### Glow
 
 `glow` adds a shadow or halo to emitted vector geometry without changing its
 authored color or width:
@@ -463,13 +624,57 @@ glow: {color: black, radius: 5, opacity: 0.28}
 ```
 
 `radius` is required and measured in screen pixels (`0..12`); `color` defaults
-to black and `opacity` defaults to one. The material is intentionally literal
-in the first version. It applies to paths (including their generated
+to black and `opacity` defaults to one. The material uses literal values. It applies to paths (including their generated
 arrowheads), points, polygons, meshes, and AABBs through the shared GPU mask
-compositor. Labels, arbitrary style icons, and GLTF attachments do not yet
+compositor. Labels, arbitrary style icons, and GLTF attachments do not
 participate. One union identity per material removes internal overlaps,
 triangle seams, and render-block seams. Unlike an interaction halo, authored
 glow is strictly exterior and can never darken the primitive's own fill.
+
+### Orientation and depth
+
+`flat: true` flattens geometry to zero altitude before applying offsets.
+Use it for a planar presentation rather than preserving source elevations.
+
+Paths extrude in the map plane by default. `billboard: true` makes their
+width face the camera; it also controls camera-facing points and labels.
+`depth-test` controls whether nearer geometry occludes a primitive.
+Labels are drawn in a separate overlay, so their depth test orders labels
+within that overlay rather than hiding them behind map geometry.
+
+### Dashed lines
+
+Set `dashed: true` to draw repeating strokes. `dash-length` sets the
+stroke length and `dash-gap` the empty interval; when omitted, the gap
+matches the stroke length. `dash-unit` defaults to pixels and accepts the
+same metre/pixel aliases as `lateral-offset-unit`.
+
+```yaml
+dashed: true
+dash-length: 8
+dash-gap: 4
+dash-unit: pixels
+```
+
+### Arrows
+
+`arrow` accepts `none`, `forward`, `backward`, or `double`, relative
+to the line's digitization direction. `arrow-expression` chooses one of
+these strings per entry, with the literal `arrow` as its fallback.
+
+### Icons
+
+`icon-url` supplies an image URL for an icon marker.
+`icon-url-expression` chooses the URL per entry, falling back to the
+literal URL if it does not return a string.
+
+### Per-entry visibility
+
+`min-lod-expression` sets a minimum display LOD per emitted entry within
+an active rule. Use it to hide less important entries when zooming out
+without creating a separate rule for each threshold. See
+[Level of detail](#level-of-detail) for its relationship to rule activation
+and geometry detail.
 
 ## Interaction effects
 
@@ -548,155 +753,6 @@ extraction, duplicated widened path, or wireframe fallback is involved. GLTF
 nodes initially retain their separate flat-tint/opacity path.
 This constrained material contract intentionally does not synthesize missing
 geometry or emulate arbitrary style rules.
-
-## Color modes
-
-Exactly one of these may be present:
-
-### Literal color
-
-```yaml
-color: orange
-```
-
-### Expression color
-
-```yaml
-color-expression: "selected and '#ff0000' or '#808080'"
-```
-
-Use this for genuinely dynamic color strings, such as the internal selection
-color binding.
-
-### Typed color scale
-
-```yaml
-color-scale:
-  mode: categorical
-  expression: "properties.category"
-  stops:
-    - ["motorway", "#e41a1c"]
-    - ["primary", "#377eb8"]
-    - ["secondary", "#4daf4a"]
-  fallback: gray
-```
-
-Stops are `[value, color]` pairs, not a YAML map. This preserves boolean,
-numeric, and string key types.
-
-Categorical scales use exact typed equality. Duplicate typed keys are invalid.
-
-```yaml
-color-scale:
-  mode: linear
-  expression: "properties.score"
-  stops:
-    - [0, blue]
-    - [50, yellow]
-    - [100, red]
-  fallback: gray
-```
-
-Linear keys must be finite, numeric, and strictly increasing. Colors are
-interpolated between adjacent stops. `fallback` handles null, unsupported
-types, and values which cannot be mapped.
-
-Use one scale instead of a palette-only `first-of` chain. Structural
-`first-of`/`all-of` trees remain appropriate for geometry, dash composition,
-or other compound presentation changes.
-
-## Width scales
-
-`width-scale` maps one projected scalar to a line width or point-radius basis
-without creating a `first-of` branch for every category. It uses the same
-typed keys and categorical/linear modes as `color-scale`; stop values and the
-fallback are finite non-negative numbers. A literal `width` remains the
-fallback when `width-scale.fallback` is omitted.
-
-```yaml
-width: 1
-width-scale:
-  mode: categorical
-  expression: "properties.roadClass"
-  stops:
-    - [0, 5]
-    - [1, 3]
-    - [2, 2]
-  fallback: 1
-```
-
-When color and width depend on the same expression, use identical expression
-text. The style planner then projects one value for both scales.
-
-Per-layer overrides in the Maps & Layers panel map directly to these options. Behind the scenes, erdblick stores the values per `mapId/layerId/styleId` combination, which lets you run different variants across split views or specific layers without cloning the entire style file.
-Options from the same style are grouped and highlighted together on hover. Use the brush button on the first visible option in a group to open the owning style sheet.
-
-### Layer presets
-
-A style sheet can package a partial Boolean option combination for every layer matched by its existing `layer` affinity:
-
-```yaml
-presets:
-  - id: lane-topology
-    name: Lane Topology
-    values:
-      - {optionId: showCenterLines, value: true}
-      - {optionId: showDigitizationDir, value: true}
-```
-
-Preset IDs and names are unique within the style sheet. Every `optionId` must identify an editable Boolean option in that same sheet; `styleId`, a second layer affinity, cross-style values, and enable flags are not accepted. Invalid entries are skipped as style warnings while valid sibling presets and rendering rules remain usable.
-
-`FeatureLayerStyle` parses `options` and `presets` in the same native YAML pass and exposes both through the generated WASM bindings. This keeps source locations, validation reports, imports, edits, and style replacement on one parser lifecycle instead of reparsing preset metadata in TypeScript.
-
-The Maps panel shows eligible embedded presets in each layer's dropdown. Expand a selected preset to edit its Boolean options directly. During hydration and after a complete option/synchronization transaction, the panel selects the unique most-specific preset matching the resulting values; an equal-specificity ambiguity retains the current matching preset, otherwise it becomes **Custom options** without discarding the edited values. Explicitly choosing **Custom options** remains Custom until the next real option edit in the current session, and explicitly choosing a named preset is not replaced during its own apply transaction. Layer preset definitions still have no separate management form: edit them only as part of the complete style YAML. The **Map Presets** tab manages higher-level compositions that refer to these style-owned layer-preset definitions. A map-level selector likewise infers a preset during hydration only when exactly one available composition matches the hydrated layer values.
-
-A map preset applies the subset of its component layers present on the current
-map; at least one component must resolve. A reference to a preset that is
-missing from an existing component layer rejects the composition for that map.
-Equivalent partial compositions are shown only once. Selecting a map preset
-never filters unrelated layers or options from the Maps panel.
-
-The lane example below shows the **Cinematic preset** with its expanded
-Boolean options. Selecting a preset applies its named combination; expanding
-it lets you inspect and change the individual options.
-
-![Cinematic SF lanes and their expanded preset options](screenshots/style-lane-presets.png)
-
-Grid buildings offer typed and uniform presets. Intersections have a separate
-visibility option.
-
-
-The generic geometry sheet offers separate presets for lines, points, surfaces,
-and all geometry together.
-
-
-Datasource-specific style sheets expose named combinations through the same
-layer preset control. The examples below show named selections and their
-rendered states for existing datasource layers.
-
-![NDS.Live Lane Cinematic and Lane Topology presets in split view](screenshots/31a-live-lanes-cinematic-topology.png)
-
-![Local NDS.Island-3D textured meshes and 3D Boxes in split view](screenshots/33-live-display-2d-3d.png)
-
-![Textured NDS.Island-3D meshes in Berlin](screenshots/island-display3d.png)
-
-The Display style renders textured meshes from the local NDS.Island-3D
-filestore. Vector color and height rules apply to their supported geometry
-types; the mesh textures shown here come from the dataset.
-
-![NDS.Classic BMD layer with the All preset selected](screenshots/34-classic-bmd-all-features.png)
-
-The BMD frame uses the repository's minimal anonymized Classic fixture. It
-documents the **All** preset and semantic rule family, not the visual
-density of a production map.
-
-![NDS.Classic Lane Group Topology and Routing Travel Direction presets in split view](screenshots/35a-classic-lane-routing-topology.png)
-
-Changing an option reconciles the selector to the unique preset matching the
-new values. These two frames keep the camera and panel geometry fixed while
-switching from **Surface Colors** to **Uniform Roads**:
-
-
 
 ## Point grouping and `$mergeCount`
 
