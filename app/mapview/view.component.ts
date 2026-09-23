@@ -202,6 +202,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
     private deckAntialiasingEnabled = true;
+    private semanticCompositingEnabled = true;
     private contextMenuVisible = false;
     private pendingContextMenuOpenEvent: {clientX: number; clientY: number; pageX: number; pageY: number} | null = null;
     private pendingContextMenuOpenTimeout?: ReturnType<typeof setTimeout>;
@@ -216,6 +217,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private hoverHudLayoutObserver?: ResizeObserver;
     private viewerSetupGeneration = 0;
     private viewerSetupQueue: Promise<void> = Promise.resolve();
+    private initializingMapView?: IRenderView;
     private layerController?: ViewLayerController;
     private cacheResetSubscription?: Subscription;
 
@@ -288,6 +290,13 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.layerController?.refreshMap(mapId);
             });
         this.subscriptions.push(
+            this.mapViewState.beforeViewRemoval.subscribe(({cameras}) => {
+                if (this.mapView) {
+                    cameras.set(this.viewIndex(), this.mapView.prepareForViewRemoval());
+                }
+                this.initializingMapView?.prepareForViewRemoval();
+                this.disposeView();
+            }),
             this.menuService.menuItems.subscribe(items => {
                 this.menuItems = [...items];
                 if (this.stateService.numViews === 1) {
@@ -298,12 +307,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                             this.stateService.numViews += 1;
                         }
                     });
-                } else if (this.viewIndex() > 0) {
+                } else {
                     this.menuItems.push({
                         label: 'Close View',
                         icon: 'pi pi-times',
                         command: () => {
-                            this.stateService.numViews -= 1;
+                            this.mapViewState.removeView(this.viewIndex());
                         }
                     });
                 }
@@ -356,7 +365,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         window.addEventListener(MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT, this.layoutResizePrepareListener);
     }
 
-    /** Creates or recreates the renderer once app state is ready and the 2D/3D mode is known. */
+    /** Recreates the renderer when projection or construction-time rendering preferences change. */
     ngAfterViewInit() {
         const viewerLayout = this.viewerElement.nativeElement.closest<HTMLElement>(".viewer-layout");
         if (viewerLayout) {
@@ -374,12 +383,16 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.modeSubscription = combineLatest([
             this.stateService.ready.pipe(filter(ready => ready)),
             this.stateService.mode2dState.pipe(this.viewIndex()),
-            this.stateService.deckAntialiasingEnabledState
-        ]).subscribe(([_, mode2d, antialiasingEnabled]) => {
+            this.stateService.deckAntialiasingEnabledState,
+            this.stateService.semanticCompositingEnabledState
+        ]).subscribe(([_, mode2d, antialiasingEnabled, semanticCompositingEnabled]) => {
             const needsRebuild =
-                this.is2DMode !== mode2d || this.deckAntialiasingEnabled !== antialiasingEnabled || !this.mapView;
+                this.is2DMode !== mode2d ||
+                this.deckAntialiasingEnabled !== antialiasingEnabled ||
+                this.semanticCompositingEnabled !== semanticCompositingEnabled || !this.mapView;
             this.is2DMode = mode2d;
             this.deckAntialiasingEnabled = antialiasingEnabled;
+            this.semanticCompositingEnabled = semanticCompositingEnabled;
             if (needsRebuild) {
                 this.initializeViewer(mode2d);
             }
@@ -443,6 +456,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             await this.ngZone.runOutsideAngular(() => this.mapView!.destroy());
             this.mapView = undefined;
         }
+        if (setupGeneration !== this.viewerSetupGeneration) {
+            return undefined;
+        }
         const mapView: IRenderView = is2D
             ? new DeckMapView2D(
                 this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
@@ -457,11 +473,21 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.layerController!
             );
         mapView.setDesktopDrillPickingEnabled(!this.isNarrow);
+        this.initializingMapView = mapView;
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
-        await this.ngZone.runOutsideAngular(() => mapView.setup());
+        try {
+            await this.ngZone.runOutsideAngular(() => mapView.setup());
+        } finally {
+            this.initializingMapView = undefined;
+        }
         if (setupGeneration !== this.viewerSetupGeneration) {
+            mapView.prepareForViewRemoval();
             await this.ngZone.runOutsideAngular(() => mapView.destroy());
             return undefined;
+        }
+        const retainedCamera = this.mapViewState.takeRetainedCamera(this.viewIndex());
+        if (retainedCamera) {
+            mapView.restoreCameraState(retainedCamera);
         }
         this.rendererInvalidatedSubscription = mapView.rendererInvalidated.subscribe(() => {
             if (setupGeneration === this.viewerSetupGeneration) {
@@ -478,6 +504,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * Component cleanup when destroyed
      */
     ngOnDestroy() {
+        this.disposeView();
+    }
+
+    /** Stops view subscriptions and renderer ownership before destruction or reindexing. */
+    private disposeView(): void {
         this.viewerSetupGeneration++;
         this.pendingContextMenuOpenEvent = null;
         this.clearPendingContextMenuOpenTimeout();
@@ -501,7 +532,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.subscriptions.splice(0).forEach(subscription =>
             subscription.unsubscribe());
         if (this.mapView) {
-            this.ngZone.runOutsideAngular(() => this.mapView!.destroy()).then();
+            const mapView = this.mapView;
+            this.mapView = undefined;
+            this.layerController?.detachScene();
+            void this.ngZone.runOutsideAngular(() => mapView.destroy());
         }
         this.layerController?.dispose();
         this.layerController = undefined;
@@ -949,7 +983,13 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         );
         let bestTileId: number | null = null;
         for (const featureId of featureIds) {
-            const [, , tileId] = coreLib.parseMapTileKey(featureId.mapTileKey) as [string, string, number];
+            const parsed = this.tileStream.parseMapTileKeySafe(
+                featureId.mapTileKey
+            );
+            if (!parsed) {
+                continue;
+            }
+            const [, , tileId] = parsed;
             if (!availableTileIds.has(tileId)) {
                 continue;
             }

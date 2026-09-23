@@ -285,7 +285,7 @@ export class SearchStyleRuleDraftCodec {
                 stops: serializableCategoryStops(
                     color,
                     this.fieldOption(color.field)?.valueKind ?? color.categoryValueKind),
-                fallbackColor
+                ...(color.fallbackEnabled === false ? {} : {fallbackColor})
             };
         }
         const option = this.fieldOption(color.field);
@@ -294,7 +294,7 @@ export class SearchStyleRuleDraftCodec {
                 mode: "categories",
                 field: color.field,
                 stops: serializableCategoryStops(color, option.valueKind),
-                fallbackColor
+                ...(color.fallbackEnabled === false ? {} : {fallbackColor})
             };
         }
         return {
@@ -302,7 +302,7 @@ export class SearchStyleRuleDraftCodec {
             field: color.field,
             ...(color.customField ? {customField: true} : {}),
             stops: serializableGradientStops(color) ?? [],
-            fallbackColor
+            ...(color.fallbackEnabled === false ? {} : {fallbackColor})
         };
     }
 
@@ -325,6 +325,7 @@ export class SearchStyleRuleDraftCodec {
                 customField: !!color.customField,
                 categoryValueKind: categoryValueKind(color.stops),
                 solidColor: fallbackColor,
+                fallbackEnabled: color.fallbackColor !== undefined,
                 fallbackColor,
                 categoryStops: color.stops.map(stop => categoryStopToDraft(stop, this.nextColorStopId++))
             };
@@ -335,6 +336,7 @@ export class SearchStyleRuleDraftCodec {
             field,
             customField: !!color.customField,
             solidColor: fallbackColor,
+            fallbackEnabled: color.fallbackColor !== undefined,
             fallbackColor,
             gradientStops: gradientStopsToDraft(color.stops, () => this.nextColorStopId++)
         };

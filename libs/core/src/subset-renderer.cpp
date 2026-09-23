@@ -414,9 +414,11 @@ TileSubsetLayerRenderer::ProjectedGeometryCache::find(
     auto const active = std::span(entries).first(activeCount);
     auto const found = std::ranges::find(
         active,
-        std::pair{address, simplified},
+        // ModelNodeAddress has an implicit bool conversion, but no equality
+        // operator. Compare its packed value so distinct geometries stay distinct.
+        std::pair{address.value_, simplified},
         [](ProjectedGeometryCacheEntry const& entry) {
-            return std::pair{entry.address, entry.simplified};
+            return std::pair{entry.address.value_, entry.simplified};
         });
     return found == active.end() ? nullptr : &*found;
 }
@@ -617,7 +619,12 @@ void TileSubsetLayerRenderer::addTileSubsetContribution(
     // Classic effectiveRenderOrder values repeat their source-list fraction in
     // every tile. Keep neighboring tiles on distinct stable depth phases so
     // their overlapping edge geometry cannot fight as packets arrive.
-    subsetDepthPhase_ = subset_->tileId().mortonNumber() & 0xFU;
+    subsetDepthPhase_ = subset_->partitionId().kind() ==
+        mapget::PartitionKind::Tile
+        ? subset_->tileId().mortonNumber() & 0xFU
+        : mapget::Hash{}
+            .mix(subset_->partitionKey().toString())
+            .value() & 0xFU;
     gpuContributionContext_ = {
         .key = static_cast<uint64_t>(contributionKeyLow) |
             (static_cast<uint64_t>(contributionKeyHigh) << 32U),
@@ -627,7 +634,9 @@ void TileSubsetLayerRenderer::addTileSubsetContribution(
     };
     if (!hasCoordinateOriginWgs_) {
         coordinateOriginWgs_ = subset_->geometryAnchor();
-        coordinateOriginWgs_.z = 0.0;
+        if (subset_->partitionId().kind() == mapget::PartitionKind::Tile) {
+            coordinateOriginWgs_.z = 0.0;
+        }
         hasCoordinateOriginWgs_ = true;
         coordinateOriginWorldX_ = mercatorWorldX(coordinateOriginWgs_.x);
         coordinateOriginWorldY_ = mercatorWorldY(coordinateOriginWgs_.y);

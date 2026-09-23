@@ -10,7 +10,7 @@ import {
     VIEW_SYNC_MOVEMENT,
     VIEW_SYNC_POSITION
 } from "../shared/appstate.service";
-import {RenderRectangle} from "./render-view.model";
+import {RenderRectangle, RenderViewCameraState} from "./render-view.model";
 import {ViewVisualizationState} from "./view.visualization.model";
 import type {
     FeatureLayerStyle,
@@ -62,13 +62,28 @@ export class MapViewStateService {
     readonly moveToRectangleTopic = new Subject<{ targetView: number, rectangle: RenderRectangle }>();
     readonly showLocationLabelTopic = new Subject<{ targetView: number, x: number, y: number, label: string }>();
     readonly liveCameraViewStateTopic = new Subject<LiveCameraViewStateUpdate>();
+    /** Presentation-only camera poses; consumers update both rendering and tile coverage. */
+    readonly presentationCameraViewStateTopic = new Subject<{
+        targetView: number;
+        cameraViewData: CameraViewState;
+    }>();
     readonly viewVisualizationState: ViewVisualizationState[] = [];
+    /** Retiring components synchronously capture cameras and dispose before reindexing. */
+    readonly beforeViewRemoval = new Subject<{
+        retainedIndices: readonly number[];
+        cameras: Map<number, RenderViewCameraState>;
+    }>();
+    private removingView = false;
+    private readonly retainedCameras = new Map<number, RenderViewCameraState>();
 
     constructor(
         private readonly stateService: AppStateService,
         private readonly mapInfo: MapInfoService
     ) {
         this.stateService.numViewsState.subscribe(numViews => {
+            if (this.removingView) {
+                return;
+            }
             const diff = numViews - this.viewVisualizationState.length;
 
             if (diff > 0) {
@@ -89,6 +104,44 @@ export class MapViewStateService {
     /** Returns the mutable visualization state for one view, if it exists. */
     viewStateFor(viewIndex: number): ViewVisualizationState | undefined {
         return this.viewVisualizationState[viewIndex];
+    }
+
+    /** Removes either comparison view without applying synchronization to its survivor. */
+    removeView(viewIndex: number): void {
+        const count = this.stateService.numViews;
+        if (this.removingView || count <= 1 || !Number.isInteger(viewIndex) || viewIndex < 0 || viewIndex >= count) {
+            return;
+        }
+        const retainedIndices = Array.from({length: count}, (_, index) => index)
+            .filter(index => index !== viewIndex);
+        this.removingView = true;
+        try {
+            // Include an unconsumed handoff if another close happens during setup.
+            const cameras = new Map(this.retainedCameras);
+            this.beforeViewRemoval.next({retainedIndices, cameras});
+            this.retainedCameras.clear();
+            retainedIndices.forEach((index, target) => {
+                const camera = cameras.get(index);
+                if (camera) {
+                    this.retainedCameras.set(target, camera);
+                }
+            });
+            const visualizationStates = retainedIndices.map(index => this.viewVisualizationState[index]);
+            this.viewVisualizationState.splice(0, count, ...visualizationStates);
+            this.stateService.retainViews(retainedIndices,
+                new Map([...cameras].map(([index, state]) => [index, state.camera])));
+        } finally {
+            this.removingView = false;
+        }
+        // All count subscribers, including the map tree, now see compacted values.
+        this.requestViewRecalculation(ViewRecalculationReason.NumViews);
+    }
+
+    /** Consumes a camera handoff only after the replacement renderer is ready. */
+    takeRetainedCamera(viewIndex: number): RenderViewCameraState | undefined {
+        const camera = this.retainedCameras.get(viewIndex);
+        this.retainedCameras.delete(viewIndex);
+        return camera;
     }
 
     /**
@@ -162,6 +215,9 @@ export class MapViewStateService {
 
     /** Recomputes visible tiles before notifying stream/render consumers. */
     requestViewRecalculation(reason: ViewRecalculationReason | string) {
+        if (this.removingView) {
+            return;
+        }
         this.recalculateVisibleTiles();
         this.viewStateChanged.next(reason);
     }

@@ -1,8 +1,5 @@
 # Search Guide
 
-![erdblick UI](screenshots/search-pallette.png)
-![erdblick UI](screenshots/search-in-progress.png)
-
 Erdblick has two search surfaces:
 
 - The palette, opened with `Ctrl+K` or the magnifier icon, starts jump targets, utility actions, and feature searches.
@@ -22,6 +19,15 @@ Erdblick's search palette unifies jump targets, utility actions, and the Simfil-
 
 The palette closes automatically when you click the map or another control, but search history and partially typed queries are preserved until you clear them.
 <!-- --8<-- [end:overview] -->
+
+![Schema completion over NDS.Island-6 lanes](screenshots/search-palette.png)
+
+Choose an action from the palette after completing the expression.
+
+![Actions for a feature query](screenshots/search-action-palette.png)
+
+**Schema suggestions (1)** distinguish fields, enum values, and constants.
+This example starts a speed-limit query with `SPEED_`.
 
 ## Built-in Jump and Utility Targets
 
@@ -57,7 +63,9 @@ Location results are sorted by population when the provider supplies it, then by
 Use **Edit -> Settings -> Location Matches** to control how many location matches the palette asks providers to return. The default is 10; the supported range is 1 to 50.
 <!-- --8<-- [end:location-search] -->
 
-![Place-name location search](screenshots/search-location-matches.png)
+![Offline Munich place-name matches above the city map](screenshots/search-location.png)
+
+**Offline place matches (1)** come from MapViewer's built-in location lookup.
 
 ### Feature Jump Targets
 
@@ -118,6 +126,12 @@ The **Results** tab is built for large streamed result sets.
 - **Export as JSON** writes the search configuration and/or result data for offline analysis. Exports preserve enough map/layer/result metadata to reopen the investigation context and are useful before closing a bookmarked search. Treat the exact JSON fields as an integration format, not as a hand-edited user format.
 <!-- --8<-- [end:results] -->
 
+![Matching NDS.Island-6 lane attributes grouped by map](screenshots/search-results.png)
+
+The query `**.speedLimitKmh >= 80` finds lane speed-limit attributes.
+**Search scope** restricts the dataset and evaluation scope;
+**Matching lanes** lists concrete results ready for inspection.
+
 ## Result Visualization
 
 <!-- --8<-- [start:visualization] -->
@@ -125,13 +139,20 @@ The **Visualization** tab controls how one search session is drawn on the map. I
 
 ### Result Density Map
 
-The density map is the safe overview for broad searches. It aggregates matches into visible source-tile buckets and draws colored markers.
+The density map is the safe overview for broad searches. It aggregates matches into visible tile buckets and draws colored markers.
 
 - Toggle density markers on or off.
 - Pick the density/pin color for the search session.
 - Show or hide density labels.
 - Enable a heat-gradient mode for denser buckets.
 - Adjust marker size with the multiplier slider.
+
+![Animal-warning search results shown as a configurable density map][search-density]
+
+The query `**.warningSign == "ANIMALS"` finds animal-warning attributes across
+the road network. **Density Labels** show compact counts for tile aggregates
+(such as `5+` or `20+`). **Gradient** gives higher-count visible markers warmer
+colors, and **Marker Size** scales the markers.
 
 ### High-fi Visualization
 
@@ -152,15 +173,27 @@ Search style rules are evaluated only for the result layer of the current search
 - **Geom** chooses one or more rendered geometry groups. **Any geometry** and **Label** are exclusive modes; line, surface, polygon, mesh, and point groups can be combined. Geometry rules expose the relevant width, radius, size, and opacity controls for the selection.
 - Automatic styles use a 20 px point rule and a 5 px combined line/surface rule so both geometry families remain legible without duplicating every concrete surface type.
 - **Labels** can use a selected field or a custom label expression. Common labels are speed-limit values, feature types, validation rule IDs, and issue IDs.
-- **Color** supports solid colors, numeric gradients, and categories for enum/string-like values. Category and gradient modes include a fallback color for missing or unmatched values. **Update from data** uses the Diagnostics/Values summaries from the current result set when available.
+- **Color** supports solid colors, numeric gradients, and categories for numeric, boolean, or string values. Schema enums can initialize categories immediately; other fields use **Update from data** or manually entered values. In category and gradient modes, **Fallback color** controls how missing or unmatched values are drawn. Uncheck it to omit those values from rendering; the setting survives saving and reopening the stylesheet. Incomplete scales still use a temporary solid colour until valid stops are supplied. **Update from data** uses the Diagnostics/Values summaries from the current result set, collected from the result-only channel independently of rendering rules, including when a category scale has no stops yet.
 
 Auto-created rules prefer fields mentioned by the query. Manual edits stop those rules from being replaced by later query changes.
+
+![Search visualization rule and its rendered result][search-visualization]
+
+### Re-using Search Styles
 
 Use **Save** beside the high-fidelity controls to create a canonical stylesheet. The small save dialog accepts the exact stylesheet name, optional layer affinity, and a checked-by-default **Enable this style upon save** checkbox. Slashes in the name create the same groups used by the normal Styles tree. Empty affinity means any feature layer; selected layer IDs are stored as an escaped exact-match `layer` expression and apply to every map that uses that ID. **Save** creates the style and closes the dialog; **Save and Open** creates it and then opens the ordinary Style Editor. **Cancel** creates nothing. Saving is create-only: an empty rule list or a name/URL collision is rejected without overwriting anything. The generated source has `category: search`, `version: 2`, a root `default` matching the checkbox, one per-layer **Show &lt;stylesheet name&gt;** Boolean option that defaults on, and one flat top-level YAML rule per GUI rule. Every generated rule is gated by that option. The imported style's initial global visible state matches the save checkbox; once active, its per-layer option is available in Maps & Layers.
 
 Only high-fidelity style semantics are saved. The query, search scope, selected maps/layers, feature types, result views, density controls, and source-specific rule applicability remain outside the stylesheet. The saved YAML is registered immediately as a normal browser-imported style and appears under **Edit -> Styles Configurator -> Styles** with a **Search** tag.
 
+![Save Search Style dialog][10-save-search-style]
+
+The saved sheet also provides a per-layer visibility option in **Maps & Layers**:
+
+![Saved search stylesheet and its Maps & Layers option][11a-saved-search-style-editor]
+
 The adjacent **Saved styles** menu lists loaded stylesheets whose category is `search`. Selecting one projects every compatible rule into the current GUI as a detached copy. Root `default`, `layer`, and the generated per-layer visibility option govern ordinary stylesheet rendering; they do not alter the active search scope when rules are copied here. The converter removes its generated option gate from the detached rule copy. Editing that copy does not change the stylesheet, and later stylesheet edits do not change the search. A partially compatible stylesheet remains selectable and reports every rule omitted from the copy. A stylesheet with no compatible rules is shown in red and disabled.
+
+![Saved Lane Speed Search sheet applied as a detached visualization rule][11b-saved-search-style-reuse]
 
 Edit a saved stylesheet from the ordinary Styles tree. The Style Editor opens on **Quick**, which reuses the rule controls, expands every rule initially, and also provides **Advanced** for authoritative YAML editing. Quick exposes the stylesheet name and exact layer-affinity IDs at the top; no selected layer means Any. An arbitrary existing affinity regex is shown as Custom and remains untouched until you explicitly replace or clear it. Quick changes update Advanced immediately. Rules or properties outside the current controls are preserved; a help icon beside the affected rule explains preserved or Advanced-only content. The switch in the dialog header enables or disables the currently loaded stylesheet immediately without changing its YAML `default`. Apply the editor changes to update the imported stylesheet, or use the ordinary **Export** action to download it.
 
@@ -226,3 +259,10 @@ If search behaves unexpectedly, check these common failure modes first:
 
 With these tools in place, the search palette and feature-search panels cover navigation, feature discovery, visualization, and query diagnostics without leaving the browser.
 <!-- --8<-- [end:troubleshooting] -->
+
+<!-- Image paths are defined outside snippets so including pages can supply their own. -->
+[search-density]: screenshots/search-density.png
+[search-visualization]: screenshots/search-visualization.png
+[10-save-search-style]: screenshots/10-save-search-style.png
+[11a-saved-search-style-editor]: screenshots/11a-saved-search-style-editor.png
+[11b-saved-search-style-reuse]: screenshots/11b-saved-search-style-reuse.png

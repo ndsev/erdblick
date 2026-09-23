@@ -130,6 +130,44 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('replaces and hydrates URL state through the explicit runtime boundary', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        // @ts-expect-error this is a call to mock router
+        routerStub.navigate.mockClear();
+        const appliedMarkerValues: boolean[] = [];
+        service.stateApplied.subscribe(() => {
+            appliedMarkerValues.push(service.markerState.getValue());
+        });
+
+        await service.replaceUrlState({v2: '1', m: '1'});
+
+        expect(routerStub.navigate).toHaveBeenCalledWith([], {
+            queryParams: {v2: '1', m: '1'},
+            queryParamsHandling: 'replace',
+            replaceUrl: true,
+        });
+        expect(service.markerState.getValue()).toBe(true);
+        expect(appliedMarkerValues).toEqual([true]);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects explicit URL replacement before persistence is ready', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        await expect(service.replaceUrlState({v2: '1'})).rejects.toThrow('before AppStateService is ready');
+        expect(routerStub.navigate).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('keeps selected features with packed tile ids during datasource pruning', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
@@ -384,7 +422,32 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
 
         expect(service.deckAntialiasingEnabled).toBe(true);
+        expect(service.semanticCompositingEnabled).toBe(true);
         expect(service.contactShadingEnabled).toBe(true);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('persists semantic compositing locally without adding it to shared URLs', async () => {
+        localStorage.setItem('semanticCompositingEnabled', '0');
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        expect(service.semanticCompositingEnabled).toBe(false);
+        expect(service.semanticCompositingEnabledState.serialize(true)).toBeUndefined();
+
+        service.semanticCompositingEnabled = true;
+        await flushMicrotasks();
+        expect(localStorage.getItem('semanticCompositingEnabled')).toBe('1');
+
+        service.semanticCompositingEnabled = false;
+        await flushMicrotasks();
+        expect(localStorage.getItem('semanticCompositingEnabled')).toBe('0');
+        expect(service.semanticCompositingEnabledState.serialize(true)).toBeUndefined();
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -777,6 +840,8 @@ describe('AppStateService', () => {
             showAlertDialogDefault: vi.fn()
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const stateApplied = vi.fn();
+        service.stateApplied.subscribe(stateApplied);
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -797,6 +862,7 @@ describe('AppStateService', () => {
         await flushMicrotasks();
 
         expect(service.markerState.getValue()).toBe(false);
+        expect(stateApplied).toHaveBeenCalledTimes(1);
 
         vi.advanceTimersByTime(100);
         await flushMicrotasks();
@@ -1011,6 +1077,83 @@ describe('AppStateService', () => {
         expect(stylesMap.get('m1/layerA/overlay/opacity')).toEqual([0.5, 0.5]);
         expect(stylesMap.get('m1/layerA/overlay/debug')).toEqual([true, true]);
 
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it.each([0, 1])('retains the other view when view %i is removed', (removed) => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.numViews = 2;
+        service.layerNamesState.next(['m1/layerA']);
+        for (const index of [0, 1]) {
+            service.cameraViewDataState.next(index, {
+                destination: {lon: 11 + index, lat: 48 + index, alt: 1000 + index},
+                orientation: {heading: index, pitch: -0.5, roll: 0},
+                position: [index, index + 1, index + 2]
+            });
+            service.mode2dState.next(index, index === 0);
+            service.setLayerSyncOption(index, index === 1);
+            service.setBackgroundState(index, index === 0 ? 'osm' : null, 20 + index);
+            service.layerVisibilityState.next(index, [index === 1]);
+            service.layerZoomLevelState.next(index, [12 + index]);
+            service.layerAutoZoomLevelState.next(index, [index === 0]);
+            service.viewTileBordersState.next(index, index === 1);
+            service.viewTileGridModeState.next(index, index === 0 ? 'nds' : 'xyz');
+            service.viewTileGridLevelState.next(index, 8 + index);
+            service.viewTileGridAutoLevelState.next(index, index === 0);
+            service.viewTileGridColorState.next(index, index === 0 ? '123abc' : 'abcdef');
+            service.viewTileGridOpacityState.next(index, 30 + index);
+            service.setMapPresetSelection(index, 'm1', `map-preset-${index}`);
+            service.setLayerPresetSelection(index, 'm1', 'layerA', {styleId: 'overlay', presetId: `preset-${index}`});
+        }
+        service.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.2, 0.8]);
+        const searches = [[0], [1], [0, 1]].map(selectedViewIndices =>
+            service.addFeatureSearch({query: 'Way', selectedViewIndices}));
+        service.setSelection([feature('Way.1')]);
+        const selection = service.selectionState.getValue();
+        const survivor = 1 - removed;
+        const slots = [service.cameraViewDataState, service.mode2dState, service.layerSyncOptionsState,
+            service.backgroundState, service.layerVisibilityState, service.layerZoomLevelState,
+            service.layerAutoZoomLevelState, service.viewTileBordersState, service.viewTileGridModeState,
+            service.viewTileGridLevelState, service.viewTileGridAutoLevelState, service.viewTileGridColorState,
+            service.viewTileGridOpacityState, service.layerPresetSelectionState, service.mapPresetSelectionState];
+        const expected = slots.map(slot => slot.getValue(survivor));
+        service.focusedView = removed;
+        service.viewSync = [VIEW_SYNC_POSITION];
+
+        service.retainViews([survivor], new Map());
+
+        expect(service.numViews).toBe(1);
+        expect(service.focusedView).toBe(0);
+        slots.forEach((slot, index) => {
+            expect(slot.appState.getValue()).toEqual([expected[index]]);
+        });
+        expect(service.styles.get('m1/layerA/overlay/opacity')).toEqual([survivor ? 0.8 : 0.2]);
+        expect(service.selectionState.getValue()).toBe(selection);
+        expect(service.featureSearches).toEqual(searches.map(search => ({
+            ...search, selectedViewIndices: search.selectedViewIndices.includes(survivor) ? [0] : []
+        })));
+        expect(service.viewSync).toEqual([VIEW_SYNC_POSITION]);
+
+        service.numViews = 2;
+        expect(service.cameraViewDataState.getValue(1)).toEqual(expected[0]);
+        expect(service.layerVisibilityState.getValue(1)).toEqual(expected[4]);
+        expect(service.styles.get('m1/layerA/overlay/opacity')).toEqual(survivor ? [0.8, 0.8] : [0.2, 0.2]);
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('retains sparse defaults and a live camera without propagating synchronization', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        service.numViewsState.next(3);
+        const camera = {...service.cameraViewDataState.getValue(2), position: [1, 2, 3] as [number, number, number]};
+        const defaultBackground = service.backgroundState.getValue(2);
+        service.retainViews([0, 2], new Map([[2, camera]]));
+        expect(service.backgroundState.appState.getValue()).toEqual([defaultBackground, defaultBackground]);
+        expect(service.cameraViewDataState.getValue(1)).toEqual(camera);
+        expect(service.cameraViewDataState.getValue(0).position).not.toEqual(camera.position);
         service.ngOnDestroy();
         routerStub.events.complete();
     });
@@ -2363,6 +2506,97 @@ describe('AppStateService', () => {
         expect(errors).toEqual([]);
         expect(service.markerState.getValue()).toBe(true);
         expect(service.isDialogOpen('preferences-dialog')).toBe(false);
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('resets omitted query-scene state and replaces camera and style options', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+        service.mapsOpenState.next(true);
+        service.stylesState.next(new Map([['old/Lane/style/topology', [true]]]));
+        await service.replaceUrlState({v2: '1', n: '1', lon: '11.66', lat: '48.25', alt: '128000', map: 'Very-Large-Map', l: 'Road:0', v: '1'}, true);
+        expect(service.mapsOpenState.getValue()).toBe(false);
+        expect(service.stylesState.getValue().has('old/Lane/style/topology')).toBe(false);
+        expect(service.layerNamesState.getValue()).toEqual(['Very-Large-Map/Road']);
+        expect(service.cameraViewDataState.getValue(0).destination.lon).toBeCloseTo(11.66);
+        expect(service.cameraViewDataState.getValue(0).destination.lat).toBeCloseTo(48.25);
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('rejects presentation snapshot replacement before persistence is ready', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+
+        expect(() => service.replaceSnapshotState({marker: true}))
+            .toThrow('before AppStateService is ready');
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('validates presentation snapshot replacement before mutating any state', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+        const stateApplied = vi.fn();
+        service.stateApplied.subscribe(stateApplied);
+
+        service.markerState.next(false);
+        const errors = service.replaceSnapshotState({
+            marker: true,
+            unknownPresentationState: 1
+        });
+
+        expect(errors).not.toEqual([]);
+        expect(service.markerState.getValue()).toBe(false);
+        expect(stateApplied).not.toHaveBeenCalled();
+
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
+    it('replaces presentation state, resets omissions, and clears stale style options without persistence', async () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        routerStub.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+
+        service.markerState.next(true);
+        service.mapsOpenState.next(true);
+        service.layerNamesState.next(['m1/layerA']);
+        service.stylesState.next(new Map([
+            ['m1/layerA/overlay/stale', [true]]
+        ]));
+        await flushMicrotasks();
+        localStorage.clear();
+        // @ts-expect-error this is a call to mock router
+        routerStub.navigate.mockClear();
+        const appliedSnapshots: Array<Record<string, unknown>> = [];
+        service.stateApplied.subscribe(() => appliedSnapshots.push(service.exportSnapshot()));
+
+        const errors = service.replaceSnapshotState({
+            numberOfViews: 1,
+            marker: false,
+            layerNames: ['m2/layerB'],
+            'overlay~0~opacity': '0.75'
+        });
+        await flushMicrotasks();
+
+        expect(errors).toEqual([]);
+        expect(service.markerState.getValue()).toBe(false);
+        expect(service.mapsOpenState.getValue()).toBe(false);
+        expect(service.layerNamesState.getValue()).toEqual(['m2/layerB']);
+        expect(service.stylesState.getValue().has('m1/layerA/overlay/stale')).toBe(false);
+        expect(service.stylesState.getValue().get('m2/layerB/overlay/opacity')).toEqual(['0.75']);
+        expect(appliedSnapshots).toHaveLength(1);
+        expect(routerStub.navigate).not.toHaveBeenCalled();
+        expect(localStorage.length).toBe(0);
 
         service.ngOnDestroy();
         routerStub.events.complete();

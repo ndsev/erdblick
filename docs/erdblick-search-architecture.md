@@ -60,6 +60,11 @@ Schema analysis normalizes the search query before runtime style compilation.
 Outgoing render and result channels therefore use `rewrite: false`; every
 filter and projected field is still schema-compiled by mapget.
 
+Recursive paths such as `**.numLanes.normalLanes` participate in Auto scope
+inference through SIMFIL's schema-path analysis. If the schema also exposes a
+matching basic feature property, Auto remains feature-scoped rather than
+discarding those matches.
+
 Attribute evaluation exposes:
 
 - `$feature`;
@@ -77,6 +82,14 @@ top-level rules. The concrete search scope is applied only to this transient
 runtime source; it is not written into a reusable stylesheet. Labels,
 category/gradient expressions, and geometry choices use the same native style
 properties as bundled styles.
+
+The result-only channel requests selected style fields even while their color
+scales have no stops. Each received contribution retains that channel's ordinal:
+both list ingestion and Diagnostics/Values summaries use it, never a hard-coded
+rendering channel. This lets **Update from data** initialize numeric categories
+without requiring either a schema enum or a working color scale first.
+Retiring a presentation also retires its filter-progress entries, so a style
+replacement cannot leave the session waiting for chunks from an obsolete filter.
 
 The ordinary planner produces one render channel per top-level rule. Erdblick
 preserves those channel IDs and native predicates, intersects their feature

@@ -463,7 +463,17 @@ NativeJsValue parseMapTileKey(std::string const& key) {
     return *JsValue::List({
         JsValue(tileKey.mapId_),
         JsValue(tileKey.layerId_),
-        JsValue(tileKey.tileId_.value())
+        JsValue(tileKey.partitionId_.value())
+    });
+}
+
+/** Get mapId, layerId, and lossless tagged partition identity of a MapPartitionKey. */
+NativeJsValue parseMapPartitionKey(std::string const& key) {
+    auto partitionKey = mapget::MapPartitionKey(key);
+    return *JsValue::List({
+        JsValue(partitionKey.mapId_),
+        JsValue(partitionKey.layerId_),
+        JsValue::fromPartition(partitionKey.partitionId_)
     });
 }
 
@@ -742,6 +752,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::class_<TileFeatureLayer>("TileFeatureLayer")
         .function("id", &TileFeatureLayer::id)
         .function("tileId", &TileFeatureLayer::tileId)
+        .function("partition", &TileFeatureLayer::partition)
         .function("numFeatures", &TileFeatureLayer::numFeatures)
         .function("numVertices", &TileFeatureLayer::numVertices)
         .function("center", &TileFeatureLayer::center)
@@ -759,6 +770,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("mapId", &TileSubsetLayer::mapId)
         .function("layerId", &TileSubsetLayer::layerId)
         .function("tileId", &TileSubsetLayer::tileId)
+        .function("partition", &TileSubsetLayer::partition)
         .function("filterId", &TileSubsetLayer::filterId)
         .function("generation", &TileSubsetLayer::generation)
         .function("numChannels", &TileSubsetLayer::numChannels)
@@ -843,6 +855,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .field("stringPoolId", &TileLayerParser::TileLayerMetadata::stringPoolId)
         .field("mapName", &TileLayerParser::TileLayerMetadata::mapName)
         .field("layerName", &TileLayerParser::TileLayerMetadata::layerName)
+        .field("partition", &TileLayerParser::TileLayerMetadata::partition)
         .field("tileId", &TileLayerParser::TileLayerMetadata::tileId)
         .field("legalInfo", &TileLayerParser::TileLayerMetadata::legalInfo)
         .field("error", &TileLayerParser::TileLayerMetadata::error)
@@ -924,6 +937,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::function("getSourceDataLayerKey", &getSourceDataLayerKey);
     em::function("createMapTileKey", &createMapTileKey);
     em::function("parseMapTileKey", &parseMapTileKey);
+    em::function("parseMapPartitionKey", &parseMapPartitionKey);
 
     ////////// Get tile id with vertical/horizontal offset
     em::function("getTileNeighbor", &getTileNeighbor);

@@ -91,6 +91,37 @@ You do not need to set these parameters manually for normal usage, but they make
 
 Legacy `osm` links from older releases are still accepted during startup and are migrated to the new `bg` state automatically.
 
+## Presentation Embedding
+
+A paired presentation can load erdblick once and apply later URL states without reloading the iframe document. Start the framed viewer with `embed=presentation`; after application initialization, erdblick announces a versioned `postMessage` capability to its parent. The parent can then submit complete query strings using the same URL format documented above.
+
+Erdblick replaces rather than merges each submitted query, hydrates its existing typed application state, refreshes the derived map/layer/style tree, and acknowledges completion. The acknowledgement means local state reconciliation is complete; tile downloads and progressive rendering may still continue. Messages are accepted only from the direct parent, the first valid HTTP(S) parent origin is pinned for the document lifetime, and requests cannot change the iframe origin or path.
+
+This is a narrow embedding transport, not a general automation API. Browser-local stylesheet source text, transient menus, hover state, and in-progress gestures remain outside the URL contract. Deploy the presentation and erdblick as a compatible pair; unsupported viewers are not detected through a timeout or silently reloaded.
+
+The optional protocol-v2 `reset` flag defaults to true. Omitted presentation state
+then resets to detached defaults; `reset: false` hydrates the query while preserving
+unaddressed state and open panels. A full reset dismisses runtime searches without
+deleting their saved definitions. Those definitions reopen when edited or after a
+viewer reload, rather than on an unrelated catalog refresh. Imported local styles are
+retained for editing but disabled unless the submitted state explicitly enables
+them. Their YAML sources are not deleted or rewritten by a scene transition.
+
+The same version-2 bridge accepts `erdblick:presentation:start-camera-flight`
+and `erdblick:presentation:stop-camera-flight`. A flight carries `durationMs`
+(1,000–300,000), `pingPong`, `canvasOnly`, and either 2–64 camera `waypoints`
+or an `orbit`. An orbit uses `center: [longitude, latitude, altitude]`, plus
+`radius` and `height` in metres (1–100,000); it requires `pingPong: false`.
+Longitude/latitude are degrees, altitude is the target's world elevation,
+and height is above that target. Latitude is limited to ±80 degrees.
+The orbit repeats at constant speed with continuous endpoint tangents.
+Applying another scene or stopping the flight cancels motion and restores UI.
+Flights do not write browser history or persisted camera state.
+
+While the embedded canvas has focus, Shift+R sends
+`erdblick:presentation:review-toggle` to the parent using the same bridge version.
+Text-entry fields retain normal typing behavior.
+
 ## Style Option Encoding in the URL
 
 Style option values can vary by stylesheet, map layer, and view. To keep URLs compact, erdblick encodes all option values for a given style into a single query parameter whose name and value are structured strings:

@@ -5,7 +5,10 @@ Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand
 !!! note "Focus on the layout before advanced features"
     If you are new to the viewer, get comfortable with the shell, map navigation, and Maps & Layers first. Search, inspection, SourceData, and diagnostics all build on those basics.
 
-![erdblick UI](screenshots/layout.png)
+![Munich in 3D with annotated workspace controls](screenshots/workspace-munich.png)
+
+Use **Maps and Layers (1)** to choose what to display, **Search (2)** to find
+places or features, and the **2D/3D controls (3)** to change the projection.
 
 ## Layout at a Glance
 
@@ -20,12 +23,10 @@ Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand
 The workspace can keep the Search area, a modal tool, and several inspections
 visible at the same time:
 
-![Default workspace with Search, Cache Reset, and two inspections](screenshots/29a-workspace-default.png)
 
 Individual workspace surfaces can be resized without leaving the desktop
 viewport:
 
-![The same workspace after widening the left Search area](screenshots/29b-workspace-resized.png)
 
 ## Navigating the Map
 
@@ -42,7 +43,7 @@ In 3D mode, panning is a world-parallel translation: bearing, pitch, zoom, and t
 
 The cyan ring and centre dot show a navigation target while it is available or active. Path anchors may snap to the source centreline, so the ring marks the acquired point rather than fabricating the raw pointer pixel. Point anchors use the feature position rather than a billboard surface, and GLTF content uses its interaction proxy. At high pitch, an empty-sky pixel may have neither a physical point nor a forward ground intersection; that mathematically undefined case uses Deck's configured fallback pivot rather than inventing a hidden focal distance.
 
-![Active navigation target on a Grid road](screenshots/23-active-navigation-target.png)
+![Active navigation target in the Munich city view](screenshots/23-active-navigation-target.png)
 
 First-person view replaces the ordinary navigation widgets with a map-level
 perspective and a dedicated exit action:
@@ -134,9 +135,7 @@ Marker state is shared across views, so split-view comparisons can reference the
 
 Use **Edit -> Preferences -> Show coordinates** to hide or show the complete coordinate readout. The marker enable/reset and focus buttons remain available even when that readout is disabled by a preference, deployment default, or unaccepted legal terms. The preference stays in browser-local state and is not added to shared URLs or exported snapshots. A deployment may require coordinate-display terms; the first enable attempt then opens **Accept Legal Terms**. Accepting remembers consent and enables the readout. Refusing leaves it disabled and asks again on a later enable attempt.
 
-![Coordinates visible after accepting the deployment terms](screenshots/25a-coordinates-accepted.png)
 
-![Marker controls remain available while coordinates are hidden](screenshots/25b-coordinates-hidden-marker-controls.png)
 
 ## Styles in the UI
 
@@ -181,6 +180,7 @@ Open **Edit -> Preferences** to access the main viewer preferences:
 - **Hover Labels** controls which feature fields appear above the coordinate readout; each value can use a short display key, which defaults to the final segment of its field expression, and its joined key/value pill follows the inspection value-bubble color, outline, and striping preferences
 - **Tile pull compression** toggles compressed tile downloads
 - **WebGL antialiasing** controls multisample rendering when the browser/device supports it
+- **Semantic layer compositing** is a default-on diagnostic switch. Disabling it recreates the renderer without semantic ordering passes and hides semantic decorations, such as cinematic lane markings, and their picking. It is saved locally, not in shared URLs; other rendering effects remain enabled.
 - **Contact shading** uses final scene depth to darken nearby lower surfaces and can be disabled on slower GPUs
 - **LOD 3 Tile Threshold** controls the default visible-tile-count boundary between stylesheet LOD 2 and LOD 3; styles can override the full LOD ladder
 - **Dark Mode** switches between on, off, and automatic
@@ -190,11 +190,17 @@ Open **Edit -> Preferences** to access the main viewer preferences:
 Preferences are grouped by purpose so navigation defaults, inspection and
 search behavior, and rendering controls remain easy to scan:
 
-![General and Navigation preferences](screenshots/15a-general-navigation-preferences.png)
+![General and Navigation preferences](screenshots/preferences-general.png)
 
-![Inspect and Search preferences](screenshots/15b-inspect-search-preferences.png)
+**Feature zoom clearance** controls the distance left around a feature when zooming to it.
 
-![Rendering preferences](screenshots/15c-rendering-preferences.png)
+![Inspect and Search preferences](screenshots/preferences-inspection.png)
+
+**Drill pick radius** widens the pixel area used to find nearby pick candidates.
+
+![Rendering preferences](screenshots/preferences-rendering.png)
+
+**Max Tiles to Load** bounds the workload when exploring dense maps.
 
 ### Hover Labels
 
@@ -203,9 +209,9 @@ feature. Select known fields or enter a custom Simfil expression, and give each
 value an optional short display key. The feature data is already available to
 the renderer, so hovering does not trigger an extra data request.
 
-![Configuring hover-label fields and display keys](screenshots/13-hover-label-preferences.png)
+![Configuring hover-label fields and display keys](screenshots/preferences-hover-labels.png)
+
+Enable **Hover Labels** and choose projected fields. This Island example shows a lane identifier and its speed limit.
 
 The resulting HUD identifies the hovered feature and shows the configured
 field labels beside the coordinate readout:
-
-![Hover HUD for CaptureFeature.1 with Name and Kind values](screenshots/14-hover-label-hud.png)

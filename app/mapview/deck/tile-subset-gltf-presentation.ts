@@ -93,7 +93,8 @@ export class TileSubsetGltfPresentation {
     /** Fetches and parses the separately transferred GLB without publishing it. */
     async prepare(
         result: TileSubsetRenderBridge,
-        device: Device | null
+        device: Device | null,
+        coordinateOrigin: [number, number, number]
     ): Promise<PreparedTileSubsetGltf | null> {
         const attachmentName = result.glbAttachmentName?.trim() ?? "";
         if (!attachmentName || !result.gltfNodes.nodeIndices.length || !device) {
@@ -105,15 +106,10 @@ export class TileSubsetGltfPresentation {
         );
         const lifecycleVersion = this.lifecycleVersion;
         this.pendingAttachmentRefs.add(attachmentRef);
-        const tilePosition = coreLib.getTilePosition(this.state.tileId);
         const source: DeckTileGltfAttachmentSource = {
             cacheKey: `${this.state.mapTileKey}:${attachmentName}:${this.state.valueVersion}`,
             attachmentName,
-            tilePosition: [
-                Number(tilePosition.x),
-                Number(tilePosition.y),
-                Number(tilePosition.z)
-            ],
+            tilePosition: [...coordinateOrigin],
             readBytes: async () => (await attachmentRef.ready)?.bytes ?? null
         };
         const assetRef = this.assetStore.retain(source);

@@ -150,6 +150,7 @@ export interface AppSurfaceHeaderAction {
                 }
                 @if (closeVisible) {
                     <p-button icon="pi pi-times"
+                              data-testid="surface-close-button"
                               severity="secondary"
                               [disabled]="closeDisabled"
                               [pTooltip]="closeTooltip"

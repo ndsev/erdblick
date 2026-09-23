@@ -40,7 +40,7 @@ interface InspectionExpiryOwner extends RetainedTileExpiryOwner {
     key: string;
     panelId: number;
     mapTileKey: string;
-    tileId: number;
+    tileId: string;
     epoch: number;
     featureIds: TileFeatureId[];
 }
@@ -382,7 +382,7 @@ export class InspectionSelectionService {
         const grouped = new Map<string, {
             panelId: number;
             mapTileKey: string;
-            tileId: number;
+            tileId: string;
             expiresAtMs: number | null;
             featureIds: TileFeatureId[];
         }>();
@@ -393,10 +393,7 @@ export class InspectionSelectionService {
             const expiresAtMs = Number.isFinite(rawExpiry)
                 ? rawExpiry
                 : null;
-            const rawTileId = Number(tile.tileId);
-            const tileId = Number.isFinite(rawTileId)
-                ? Math.trunc(rawTileId)
-                : 0;
+            const tileId = tile.partitionKey;
             let group = grouped.get(key);
             if (!group) {
                 group = {
@@ -454,7 +451,10 @@ export class InspectionSelectionService {
     /** Refreshes one still-retained tile and atomically replaces matching wrappers. */
     private async renewInspectionOwner(
         owner: InspectionExpiryOwner,
-        tokens: ReadonlyArray<{tileId: number; valueVersion: number}>
+        tokens: ReadonlyArray<{
+            tileId: string | number;
+            valueVersion: number;
+        }>
     ): Promise<void> {
         if (this.inspectionExpiryOwners.get(owner.key) !== owner ||
             !tokens.some(token =>
@@ -564,12 +564,13 @@ export class InspectionSelectionService {
 
         const targetViews: number[] = [];
         for (let i = 0; i < this.stateService.numViews; ++i) {
-            if (this.viewState.showsFeatureSearchTileInView(
-                i,
-                featureTile.mapName,
-                featureTile.layerName,
-                featureTile.tileId
-            )) {
+            if (featureTile.tileId !== null &&
+                this.viewState.showsFeatureSearchTileInView(
+                    i,
+                    featureTile.mapName,
+                    featureTile.layerName,
+                    featureTile.tileId
+                )) {
                 targetViews.push(i);
             }
         }

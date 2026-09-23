@@ -269,6 +269,12 @@ function deepCopy<V>(value: V): V {
     if (value instanceof Date) {
         return new Date(value.getTime()) as unknown as V;
     }
+    if (value instanceof Map) {
+        return new Map([...value].map(([key, entry]) => [deepCopy(key), deepCopy(entry)])) as V;
+    }
+    if (value instanceof Set) {
+        return new Set([...value].map(entry => deepCopy(entry))) as V;
+    }
     if (Array.isArray(value)) {
         return value.map(item => deepCopy(item)) as unknown as V;
     }
@@ -308,9 +314,9 @@ export class AppState<T> extends BehaviorSubject<T> {
 
     /** Registers the state slot in the shared pool and seeds it with the default value. */
     constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>) {
-        super(options.defaultValue);
+        super(deepCopy(options.defaultValue));
         this.name = options.name;
-        this.defaultValue = options.defaultValue;
+        this.defaultValue = deepCopy(options.defaultValue);
 
         this.schema = options.schema;
         this.preprocess = options.toStorage ?? (value => compactBooleans(value));
@@ -330,7 +336,8 @@ export class AppState<T> extends BehaviorSubject<T> {
 
     /** Restores the state to its configured default value. */
     resetToDefault(): void {
-        this.next(this.defaultValue);
+        // Callers can mutate live arrays/records; never let those edits become reset defaults.
+        this.next(deepCopy(this.defaultValue));
     }
 
     /** Returns a detached value suitable for snapshot export. */

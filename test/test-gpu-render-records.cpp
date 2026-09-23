@@ -562,7 +562,9 @@ TEST_CASE("GpuRenderPacketBuilder bounds and orders oversized packet fragments")
         .altitude = 400.0,
     });
     builder.beginContribution(100U, 2U, 3U, 17U);
-    constexpr uint32_t kPointCount = 900'000U;
+    // This size previously retained a complete source-sized allocation per
+    // fragment, exceeding the browser's 2 GiB WASM heap during packet splitting.
+    constexpr uint32_t kPointCount = 2'170'625U;
     auto pointStyle = style(std::numeric_limits<uint32_t>::max());
     for (uint32_t index = 0U; index < kPointCount; ++index) {
         builder.appendPoint({
@@ -575,7 +577,7 @@ TEST_CASE("GpuRenderPacketBuilder bounds and orders oversized packet fragments")
 
     CHECK_THROWS_AS(builder.build(), std::length_error);
     auto const fragments = builder.buildFragments();
-    REQUIRE(fragments.size() > 8U);
+    REQUIRE(fragments.size() > 20U);
 
     uint32_t encodedPointCount = 0U;
     for (uint32_t fragmentIndex = 0U;

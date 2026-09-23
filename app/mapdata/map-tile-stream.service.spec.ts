@@ -2,6 +2,20 @@ import "@angular/compiler";
 import {BehaviorSubject, Subject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 import {MapTileStreamService} from "./map-tile-stream.service";
+import {MapgetLayer} from "./mapget-layer.model";
+import {objectPartition, tilePartition} from "./partition.model";
+
+function serviceHarness(): MapTileStreamService {
+    return new MapTileStreamService(
+        {tilePullCompressionEnabledState: new Subject<boolean>()} as any,
+        {dataSourceInfoChanged: new Subject<void>()} as any,
+        {} as any,
+        {
+            run: (callback: () => unknown) => callback(),
+            runOutsideAngular: (callback: () => unknown) => callback()
+        } as any
+    );
+}
 
 describe("MapTileStreamService source catalog refresh", () => {
     it("reloads again when a backend reconnect races an in-flight catalog fetch", async () => {
@@ -129,11 +143,16 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
             schedule: vi.fn()
         };
 
-        service.updateFilterTileExpiry(ref as any, 7, 3, 1_999);
+        service.updateFilterPartitionExpiry(
+            ref as any,
+            tilePartition(7),
+            3,
+            1_999
+        );
 
         expect(internal.tileExpiryScheduler.schedule).toHaveBeenCalledWith(
             ref,
-            7,
+            "tile:7",
             3,
             1_999
         );
@@ -149,7 +168,7 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
             layerId: "Layer",
             filterId: "first",
             generation: 1,
-            tileIds: [7]
+            partitions: [tilePartition(7)]
         };
         const firstRef = {
             filterId: "first",
@@ -167,7 +186,7 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
                 layerId: "Layer",
                 filterId: "empty",
                 generation: 1,
-                tileIds: []
+                partitions: []
             })),
             notifyRequestSynchronized: vi.fn()
         };
@@ -193,5 +212,142 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
         expect(internal.forceNextUpdate).toBe(false);
         expect(firstRef.notifyRequestSynchronized).toHaveBeenCalledOnce();
         expect(emptyRef.notifyRequestSynchronized).toHaveBeenCalledOnce();
+    });
+});
+
+describe("MapTileStreamService object discovery", () => {
+    it("bounds cached discovery tiles without evicting current or pending work", () => {
+        const service = serviceHarness() as any;
+        const cache = new Map<number, unknown>();
+        cache.set(0, {pending: Promise.resolve({objects: [], expiresAtMs: null})});
+        for (let tileId = 1; tileId <= 4_100; ++tileId) {
+            cache.set(tileId, {
+                value: {objects: [], expiresAtMs: null}
+            });
+        }
+
+        service.trimObjectDiscoveryCache(cache, new Set([1]));
+
+        expect(cache.size).toBe(4_096);
+        expect(cache.has(0)).toBe(true);
+        expect(cache.has(1)).toBe(true);
+    });
+
+    it("preserves uint64 identities and deduplicates by discovery priority", async () => {
+        const service = serviceHarness();
+        const layer = new MapgetLayer(
+            "smart-source",
+            "pool",
+            "SmartMap",
+            "Road",
+            {
+                partitionKind: "object",
+                tileAssociationLevel: 13
+            } as never
+        );
+        const firstId = "9007199254740993";
+        const lastId = "18446744073709551615";
+        const response = {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: vi.fn(async () => ({responses: [{
+                mapId: "SmartMap",
+                layerId: "Road",
+                sourceId: "smart-source",
+                tileId: 102,
+                status: "success",
+                timestamp: 1_000,
+                ttlMs: 800,
+                objects: [{
+                    id: firstId,
+                    bounds: [11, 48, 12, 49]
+                }]
+            }, {
+                mapId: "SmartMap",
+                layerId: "Road",
+                sourceId: "smart-source",
+                tileId: 101,
+                status: "success",
+                timestamp: 1_000,
+                ttlMs: 500,
+                objects: [
+                    {id: firstId, bounds: [10, 47, 11, 48]},
+                    {id: lastId}
+                ]
+            }]}) )
+        };
+        const fetchMock = vi.fn(async (
+            _input: RequestInfo | URL,
+            _init?: RequestInit
+        ) => response);
+        const now = vi.spyOn(Date, "now").mockReturnValue(1_100);
+        vi.stubGlobal("fetch", fetchMock);
+        try {
+            const first = await service.discoverObjectPartitions(
+                layer,
+                [101, 102, 101]
+            );
+
+            expect(first).toEqual({
+                associations: [{
+                    partition: objectPartition(firstId),
+                    bounds: [10, 47, 11, 48],
+                    discoveryTileId: 101
+                }, {
+                    partition: objectPartition(lastId),
+                    discoveryTileId: 101
+                }],
+                expiresAtMs: 1_500
+            });
+            expect(fetchMock).toHaveBeenCalledOnce();
+            expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)))
+                .toEqual({requests: [{
+                    mapId: "SmartMap",
+                    layerId: "Road",
+                    sourceId: "smart-source",
+                    tileIds: [101, 102]
+                }]});
+
+            const reprioritized = await service.discoverObjectPartitions(
+                layer,
+                [102, 101]
+            );
+            expect(reprioritized.associations[0]).toEqual({
+                partition: objectPartition(firstId),
+                bounds: [11, 48, 12, 49],
+                discoveryTileId: 102
+            });
+            expect(fetchMock).toHaveBeenCalledOnce();
+        } finally {
+            now.mockRestore();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it("rejects malformed discovery bounds instead of poisoning coverage", async () => {
+        const service = serviceHarness();
+        const layer = new MapgetLayer("", "pool", "Map", "Road", {
+            partitionKind: "object",
+            tileAssociationLevel: 13
+        } as never);
+        vi.stubGlobal("fetch", vi.fn(async () => ({
+            ok: true,
+            json: async () => ({responses: [{
+                mapId: "Map",
+                layerId: "Road",
+                tileId: 7,
+                status: "success",
+                timestamp: 1_000,
+                ttlMs: 0,
+                objects: [{id: "1", bounds: [0, -91, 1, 0]}]
+            }]})
+        })));
+        try {
+            await expect(service.discoverObjectPartitions(layer, [7]))
+                .rejects.toThrow(/invalid bounds/);
+        } finally {
+            vi.unstubAllGlobals();
+        }
     });
 });

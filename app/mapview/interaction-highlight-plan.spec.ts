@@ -9,6 +9,7 @@ import {
     planRemoteInteractionHighlight,
     type InteractionHighlightTarget
 } from "./interaction-highlight-plan";
+import {tilePartition} from "../mapdata/partition.model";
 
 const target = (
     featureId: string,
@@ -16,7 +17,7 @@ const target = (
 ): InteractionHighlightTarget => ({
     featureId,
     mapTileKey: `Map/Layer/${tileId}`,
-    tileId
+    partition: tilePartition(tileId)
 });
 
 const channel = (
@@ -109,9 +110,9 @@ describe("remote interaction highlight planning", () => {
         expect(result?.plan.channels[0].entryFilter).toBe(
             '($source.id == "Intersection.1" and $relationIndex == 3)'
         );
-        expect(result?.tileIds).toEqual([91]);
+        expect(result?.partitions).toEqual([tilePartition(91)]);
         expect(result?.roots).toEqual([{
-            tileId: 91,
+            partition: tilePartition(91),
             featureId: "Intersection.1"
         }]);
     });
@@ -159,9 +160,9 @@ describe("remote interaction highlight planning", () => {
         expect(result?.plan.channels[0].entryFilter).toBe(
             '($source.id == "Intersection.2" and $relationIndex == 4)'
         );
-        expect(result?.tileIds).toEqual([94]);
+        expect(result?.partitions).toEqual([tilePartition(94)]);
         expect(result?.roots).toEqual([{
-            tileId: 94,
+            partition: tilePartition(94),
             featureId: "Intersection.2"
         }]);
     });

@@ -57,6 +57,7 @@ import {
 import {
     IRenderSceneHandle,
     IRenderView,
+    RenderViewCameraState,
     RenderNavigationTarget,
     RenderedFeaturePickResult
 } from "../render-view.model";
@@ -150,6 +151,7 @@ import {
     FIRST_PERSON_FAR_METERS,
     FIRST_PERSON_FOCAL_DISTANCE,
     FIRST_PERSON_FOV_DEGREES,
+    FIRST_PERSON_EYE_HEIGHT_METERS,
     FIRST_PERSON_NEAR_METERS,
     type FixedFirstPersonCameraState,
     updateFixedFirstPersonLook
@@ -301,6 +303,7 @@ export abstract class DeckMapView implements IRenderView {
     protected readonly _viewIndex: number;
     readonly canvasId: string;
     protected deck: DeckGlDeck<DeckView> | null = null;
+    private deckContainer: HTMLDivElement | null = null;
     protected readonly layerRegistry = new DeckLayerRegistry();
     protected readonly interactionOutlineService =
         new DeckInteractionOutlineService(this.layerRegistry);
@@ -391,6 +394,7 @@ export abstract class DeckMapView implements IRenderView {
     private gpuSceneRetirementFramesRemaining = 0;
     private liveCameraSyncRaf: number | null = null;
     private cameraStatePushPending = false;
+    private retiringForViewRemoval = false;
     private readonly deckCanvasPointerEnter = () => {
         this.deckCanvasPointerInside = true;
     };
@@ -553,6 +557,7 @@ export abstract class DeckMapView implements IRenderView {
         if (!container) {
             throw new Error(`Deck container #${this.canvasId} not found.`);
         }
+        this.deckContainer = container;
         container.innerHTML = "";
         const canvas = this.createDeckCanvas(container);
         canvas.addEventListener("pointerenter", this.deckCanvasPointerEnter);
@@ -568,6 +573,9 @@ export abstract class DeckMapView implements IRenderView {
         this.lastCanvasCssSize = this.normalizedCanvasCssSize(container.clientWidth, container.clientHeight);
         const gl = this.createWebGl2Context(canvas, container);
         this.contactShadingEnabled = this.stateService.contactShadingEnabled;
+        // Snapshot once: setup awaits the device, while preference changes may
+        // already be starting the next renderer generation.
+        const semanticCompositingEnabled = this.stateService.semanticCompositingEnabled;
 
         this.setViewFromState(this.stateService.cameraViewDataState.getValue(this._viewIndex));
 
@@ -586,7 +594,7 @@ export abstract class DeckMapView implements IRenderView {
             viewState: this.viewState,
             layers: [],
             effects: [
-                this.semanticZIndexService,
+                ...(semanticCompositingEnabled ? [this.semanticZIndexService] : []),
                 this.interactionOutlineService,
                 this.textOverlayService
             ],
@@ -651,6 +659,9 @@ export abstract class DeckMapView implements IRenderView {
         // parse/upload assets and an immutable handle containing `null` would
         // otherwise strand those tiles as pick proxies only.
         await deckDeviceReady;
+        if (this.retiringForViewRemoval) {
+            return;
+        }
         if (this.sceneMode !== SceneMode.SCENE2D) {
             this.contactShadingService = new DeckContactShadingService(
                 this.deckDevice!,
@@ -680,11 +691,13 @@ export abstract class DeckMapView implements IRenderView {
             error => this.invalidateGpuScene(error)
         );
         this.gpuVectorDisabledPickIndices.clear();
-        this.semanticZIndexService.bindScene(
-            this.gpuScene,
-            this.sceneMode === SceneMode.SCENE2D,
-            this.gpuVectorDisabledPickIndices
-        );
+        if (semanticCompositingEnabled) {
+            this.semanticZIndexService.bindScene(
+                this.gpuScene,
+                this.sceneMode === SceneMode.SCENE2D,
+                this.gpuVectorDisabledPickIndices
+            );
+        }
         this.layerController.setDeckPresentationDiagnosticsProvider(() => ({
             layers: this.layerRegistry.size,
             scene: this.gpuScene?.snapshot() ?? {
@@ -808,14 +821,13 @@ export abstract class DeckMapView implements IRenderView {
         this.contactShadingService?.destroy();
         this.contactShadingService = null;
         // Persistent scene buffers and lookup textures belong to the same
-        // device as Deck's models. Retire them while that device is alive;
-        // after finalize(), WebGL context-loss teardown can no longer do so.
+        // device as Deck's models. Retire them before releasing that device.
         this.gpuScene?.destroy();
         this.gpuScene = null;
         this.layerController.clearDeckPresentationDiagnostics();
         if (this.deckDevice) {
             // Atlas textures belong to the still-live luma device and must be
-            // destroyed before Deck finalizes that device/context.
+            // destroyed before releasing that device/context.
             gpuIconAtlasService.releaseDevice(this.deckDevice);
         }
         if (this.deck) {
@@ -849,16 +861,29 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.gpuVectorLayers = [];
         this.gpuTextLayerHost = null;
-        this.deckDevice = null;
+        this.releaseDeckDevice();
         this.navigationTargetOverlay?.destroy();
         this.navigationTargetOverlay = null;
         this.lastCanvasCssSize = undefined;
         this.clippedLayoutCanvasCssSize = undefined;
         this.rendererInvalidated.complete();
-        const container = document.getElementById(this.canvasId);
+        // A splitter rebuild can already have mounted a replacement container with the same id.
+        // Clear only the element captured by this renderer, never its successor found via document.
+        const container = this.deckContainer;
+        this.deckContainer = null;
         if (container) {
             container.innerHTML = "";
         }
+    }
+
+    /** Releases this view's context after Deck and the scene have disposed their resources. */
+    private releaseDeckDevice(): void {
+        const device = this.deckDevice;
+        this.deckDevice = null;
+        device?.destroy();
+        // Deck.finalize() leaves the externally supplied context alive. Explicit
+        // loss returns its browser context slot when views are removed/recreated.
+        device?.loseDevice();
     }
 
     /** Returns whether the deck renderer is currently initialized. */
@@ -1546,6 +1571,40 @@ export abstract class DeckMapView implements IRenderView {
         return this.stateService.cameraViewDataState.getValue(this._viewIndex);
     }
 
+    /** Captures live camera motion and prevents a retired index from publishing late updates. */
+    prepareForViewRemoval(): RenderViewCameraState {
+        this.retiringForViewRemoval = true;
+        this.cameraStatePushPending = false;
+        this.cancelLiveCameraSyncScheduling();
+        this.cancelViewportUpdateScheduling();
+        const firstPerson = this.firstPersonSession?.viewState;
+        const state: RenderViewCameraState = {camera: this.cameraViewData(this.viewState)};
+        if (firstPerson) {
+            state.firstPerson = {
+                position: [firstPerson.longitude, firstPerson.latitude,
+                    firstPerson.position[2] - FIRST_PERSON_EYE_HEIGHT_METERS],
+                bearing: firstPerson.bearing,
+                pitch: firstPerson.pitch
+            };
+        }
+        return state;
+    }
+
+    /** Restores the survivor's map pose and optional transient first-person inspection. */
+    restoreCameraState(state: RenderViewCameraState): void {
+        this.setViewFromState(state.camera);
+        if (state.firstPerson) {
+            this.enterFirstPersonView({position: state.firstPerson.position, featureIds: []});
+            if (this.firstPersonSession) {
+                this.updateFirstPersonViewState({
+                    ...this.firstPersonSession.viewState,
+                    bearing: state.firstPerson.bearing,
+                    pitch: state.firstPerson.pitch
+                });
+            }
+        }
+    }
+
     /** Builds the native tile-selection rectangle from deck's horizon-clipped ground footprint. */
     computeViewport(): Viewport | undefined {
         if (this.firstPersonSession) {
@@ -1690,6 +1749,9 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Pushes the currently visible viewport rectangle back into `MapViewStateService`. */
     protected updateViewport(): void {
+        if (this.retiringForViewRemoval) {
+            return;
+        }
         const viewport = this.computeViewport();
         if (!viewport) {
             return;
@@ -1763,6 +1825,15 @@ export abstract class DeckMapView implements IRenderView {
                 // Live split-view motion stays in Deck. The settled AppState update
                 // owns tile coverage, persistence, URL state, and Angular UI work.
                 this.applyCameraViewState(update.cameraViewData, false);
+            })
+        );
+
+        this.subscriptions.push(
+            this.mapViewState.presentationCameraViewStateTopic.subscribe(update => {
+                if (update.targetView !== this._viewIndex) {
+                    return;
+                }
+                this.applyCameraViewState(update.cameraViewData, true);
             })
         );
 
@@ -2608,6 +2679,9 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Persists the current controlled deck view state back into `AppStateService`. */
     private pushViewStateToAppState(): void {
+        if (this.retiringForViewRemoval) {
+            return;
+        }
         const groundCentered = this.groundCenteredViewState(this.viewState);
         if (!this.isCameraInteracting && groundCentered !== this.viewState) {
             this.updateViewState(groundCentered, true, true);
@@ -2628,6 +2702,9 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Keeps renderer-local camera motion hot and persists only settled state. */
     private scheduleViewStatePush(): void {
+        if (this.retiringForViewRemoval) {
+            return;
+        }
         if (!this.isCameraInteracting) {
             this.flushPendingViewStatePush(true);
             return;

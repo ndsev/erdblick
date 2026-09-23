@@ -1,6 +1,9 @@
 import {describe, expect, it} from "vitest";
 import type {TileSubsetDelivery} from "./filter-subscription.model";
 import {FilterTileState} from "./filter-tile-state.model";
+import {partitionKey, tilePartition} from "./partition.model";
+
+const PARTITION = tilePartition(42);
 
 function delivery(
     overrides: Partial<TileSubsetDelivery> = {}
@@ -11,7 +14,8 @@ function delivery(
         generation: 2,
         mapId: "Map",
         layerId: "Layer",
-        tileId: 42,
+        partition: PARTITION,
+        partitionKey: partitionKey(PARTITION),
         mapTileKey: "Features:Map:Layer:42",
         stringPoolId: "source",
         conversionTimestampMs: 1_725_000_123_456,
@@ -20,7 +24,7 @@ function delivery(
             sourceTileKey: "Features:Map:Layer:42",
             mapId: "Map",
             layerId: "Layer",
-            tileId: 42,
+            partition: PARTITION,
             sourceFeatureCount: 11
         }],
         issues: [],
@@ -40,7 +44,7 @@ function state() {
     return new FilterTileState(
         "Map",
         "Layer",
-        42,
+        PARTITION,
         "Features:Map:Layer:42",
         2
     );

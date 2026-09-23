@@ -496,6 +496,55 @@ FeatureLayerStyle rendererStyle(std::string_view source)
 } // namespace
 
 TEST_CASE(
+    "TileSubsetLayerRenderer preserves distinct point clusters within one feature",
+    "[erdblick.subset-renderer][pointcloud]")
+{
+    auto strings = std::make_shared<mapget::StringPool>("PointClusterPool");
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        mapget::TileId::fromWgs84(11.0, 48.0, 13), "PointClusterPool",
+        "TestMap", rendererLayerInfo(), strings, "points", 1);
+    subset->setGeometryAnchor({11.0, 48.0, 0.0});
+    auto collection = subset->newGeometryCollection(2, true);
+    auto first = subset->newGeometry(mapget::GeomType::Points, 3, true);
+    auto second = subset->newGeometry(mapget::GeomType::Points, 2, true);
+    for (auto height : {1.0, 2.0, 3.0})
+        first->append({11.0, 48.0, height});
+    for (auto height : {4.0, 5.0})
+        second->append({11.0, 48.0, height});
+    collection->addGeometry(first);
+    collection->addGeometry(second);
+    auto channel = subset->newChannel("style-rule:0", mapget::Scope::Feature,
+        1U << static_cast<uint8_t>(mapget::GeomType::Points), std::nullopt);
+    channel->newFeatureEntry(
+        subset->newFeatureId("Road", {{"roadId", int64_t{1}}}), collection, {});
+    auto style = rendererStyle(R"yaml(
+name: PointClusters
+version: 2
+rules:
+  - type: Road
+    geometry: point
+    color: "#ffffff"
+    width: 2
+    billboard: true
+    flat: false
+)yaml");
+    REQUIRE(style.isValid());
+    TileSubsetLayerRenderer renderer(0, "Features:TestMap:Road:0", style,
+        static_cast<int>(FeatureStyleRule::NoHighlight), FeatureStyleRule::kMaximumLod);
+    renderer.setCoordinateOrigin(11.0, 48.0, 0.0);
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+    REQUIRE(renderer.vertexCount() == 5);
+    auto packet = RendererPacketView(renderer);
+    auto streams = packet.streams(GpuPrimitiveKind::Point);
+    REQUIRE(streams.size() == 1);
+    REQUIRE(streams[0].count == 5);
+    for (uint32_t i = 0; i < 5; ++i)
+        CHECK(packet.read<float>(streams[0].dataOffset + i * streams[0].stride + 8U) ==
+              Catch::Approx(double(i + 1)));
+}
+
+TEST_CASE(
     "TileSubsetLayerRenderer consumes projected color scales and emits tuple picks",
     "[erdblick.subset-renderer]")
 {

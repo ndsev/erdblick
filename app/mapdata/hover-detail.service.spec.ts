@@ -9,6 +9,7 @@ import type {
 import {defaultHoverLabelFieldKey} from "../shared/appstate.service";
 import {HoverDetailService} from "./hover-detail.service";
 import {MapgetLayer} from "./mapget-layer.model";
+import {partitionKey, tilePartition} from "./partition.model";
 
 /** Builds the minimal state and transport surface used by HoverDetailService. */
 function createHarness(
@@ -46,7 +47,11 @@ function createHarness(
             filterRefs.push(ref);
             return ref;
         }),
-        parseMapTileKeySafe: vi.fn(() => ["Map", "Road", 545379780]),
+        parseMapPartitionKeySafe: vi.fn(() => [
+            "Map",
+            "Road",
+            tilePartition(545379780)
+        ]),
         retainTileAttachment: vi.fn()
     };
     const mapInfo = {
@@ -80,8 +85,8 @@ describe("HoverDetailService", () => {
         }]);
         service.reconcileView(0, [{
             mapgetLayer,
-            tileIds: [545379780],
-            priorityTileIds: [545379780]
+            partitions: [tilePartition(545379780)],
+            priorityPartitions: [tilePartition(545379780)]
         }]);
         const target: TileFeatureId = {
             mapTileKey: "Features:Map:Road:42:0",
@@ -105,8 +110,8 @@ describe("HoverDetailService", () => {
             ]);
         service.reconcileView(0, [{
             mapgetLayer,
-            tileIds: [545379780],
-            priorityTileIds: [545379780]
+            partitions: [tilePartition(545379780)],
+            priorityPartitions: [tilePartition(545379780)]
         }]);
 
         expect(tileStream.createFilterSubscription).toHaveBeenCalledOnce();
@@ -127,9 +132,9 @@ describe("HoverDetailService", () => {
         const {service, filterRefs, mapgetLayer} = createHarness([
             {expression: "typeId", customExpression: false}
         ]);
-        const tileIds = [545379780];
-        const priorityTileIds = [545379780];
-        const coverage = [{mapgetLayer, tileIds, priorityTileIds}];
+        const partitions = [tilePartition(545379780)];
+        const priorityPartitions = [tilePartition(545379780)];
+        const coverage = [{mapgetLayer, partitions, priorityPartitions}];
 
         service.reconcileView(0, coverage);
         service.reconcileView(0, coverage);
@@ -146,8 +151,8 @@ describe("HoverDetailService", () => {
             ]);
         service.reconcileView(0, [{
             mapgetLayer,
-            tileIds: [545379780],
-            priorityTileIds: [545379780]
+            partitions: [tilePartition(545379780)],
+            priorityPartitions: [tilePartition(545379780)]
         }]);
 
         expect(tileStream.createFilterSubscription).toHaveBeenCalledOnce();
@@ -169,11 +174,12 @@ describe("HoverDetailService", () => {
                 {expression: "typeId", customExpression: false}
             ]);
         const tileId = 545379780;
+        const partition = tilePartition(tileId);
         const mapTileKey = coreLib.getTileFeatureLayerKey("Map", "Road", tileId);
         service.reconcileView(0, [{
             mapgetLayer,
-            tileIds: [tileId],
-            priorityTileIds: [tileId]
+            partitions: [partition],
+            priorityPartitions: [partition]
         }]);
         mapInfo.tileLayerParser.readTileSubsetLayer.mockReturnValue({
             channelSchema: vi.fn(() => ({
@@ -194,14 +200,15 @@ describe("HoverDetailService", () => {
             generation: 1,
             mapId: "Map",
             layerId: "Road",
-            tileId,
+            partition,
+            partitionKey: partitionKey(partition),
             mapTileKey,
             stringPoolId: "pool",
             dependencies: [{
                 sourceTileKey: mapTileKey,
                 mapId: "Map",
                 layerId: "Road",
-                tileId,
+                partition,
                 sourceFeatureCount: 1
             }],
             issues: [],
@@ -222,7 +229,7 @@ describe("HoverDetailService", () => {
                 {key: "typeId", value: "Road", colorKey: "typeId"}
             ]
         }]);
-        expect(tileStream.parseMapTileKeySafe).toHaveBeenCalledOnce();
+        expect(tileStream.parseMapPartitionKeySafe).toHaveBeenCalledOnce();
         service.ngOnDestroy();
     });
 
@@ -233,8 +240,13 @@ describe("HoverDetailService", () => {
             displayKey: "limit"
         }]);
         const tileId = 545379780;
+        const partition = tilePartition(tileId);
         const mapTileKey = coreLib.getTileFeatureLayerKey("Map", "Road", tileId);
-        service.reconcileView(0, [{mapgetLayer, tileIds: [tileId], priorityTileIds: [tileId]}]);
+        service.reconcileView(0, [{
+            mapgetLayer,
+            partitions: [partition],
+            priorityPartitions: [partition]
+        }]);
         mapInfo.tileLayerParser.readTileSubsetLayer.mockReturnValue({
             channelSchema: vi.fn(() => ({
                 featureFields: ["properties.rules.speedLimit"],
@@ -254,7 +266,8 @@ describe("HoverDetailService", () => {
             generation: 1,
             mapId: "Map",
             layerId: "Road",
-            tileId,
+            partition,
+            partitionKey: partitionKey(partition),
             mapTileKey,
             stringPoolId: "pool",
             dependencies: [],

@@ -1,10 +1,13 @@
 /** Identity retained with one finite-lifetime tile while it is in the shared heap. */
-export interface TileExpiryToken {
-    tileId: number;
+export interface TileExpiryToken<Key extends string | number = number> {
+    tileId: Key;
     valueVersion: number;
 }
 
-interface HeapEntry<Owner extends object> extends TileExpiryToken {
+interface HeapEntry<
+    Owner extends object,
+    Key extends string | number
+> extends TileExpiryToken<Key> {
     owner: Owner;
     expiresAtMs: number;
     heapIndex: number;
@@ -18,16 +21,19 @@ interface HeapEntry<Owner extends object> extends TileExpiryToken {
  * monopolizing the browser task queue. This class deliberately contains no
  * retry delay or backoff policy.
  */
-export class TileExpiryScheduler<Owner extends object> {
-    private readonly heap: Array<HeapEntry<Owner>> = [];
+export class TileExpiryScheduler<
+    Owner extends object,
+    Key extends string | number = number
+> {
+    private readonly heap: Array<HeapEntry<Owner, Key>> = [];
     private readonly entriesByOwner =
-        new Map<Owner, Map<number, HeapEntry<Owner>>>();
+        new Map<Owner, Map<Key, HeapEntry<Owner, Key>>>();
     private timer: ReturnType<typeof setTimeout> | null = null;
 
     constructor(
         private readonly onExpired: (
             owner: Owner,
-            tokens: TileExpiryToken[]
+            tokens: TileExpiryToken<Key>[]
         ) => void,
         private readonly maxExpiriesPerTask = 512
     ) {}
@@ -38,7 +44,7 @@ export class TileExpiryScheduler<Owner extends object> {
 
     schedule(
         owner: Owner,
-        tileId: number,
+        tileId: Key,
         valueVersion: number,
         expiresAtMs: number
     ): void {
@@ -55,9 +61,9 @@ export class TileExpiryScheduler<Owner extends object> {
             ownerEntries = new Map();
             this.entriesByOwner.set(owner, ownerEntries);
         }
-        const entry: HeapEntry<Owner> = {
+        const entry: HeapEntry<Owner, Key> = {
             owner,
-            tileId: Math.trunc(tileId),
+            tileId,
             valueVersion: Math.max(0, Math.trunc(valueVersion)),
             expiresAtMs,
             heapIndex: this.heap.length
@@ -71,9 +77,9 @@ export class TileExpiryScheduler<Owner extends object> {
         }
     }
 
-    cancel(owner: Owner, tileId: number, rearm = true): void {
+    cancel(owner: Owner, tileId: Key, rearm = true): void {
         const ownerEntries = this.entriesByOwner.get(owner);
-        const entry = ownerEntries?.get(Math.trunc(tileId));
+        const entry = ownerEntries?.get(tileId);
         if (!entry) {
             return;
         }
@@ -130,7 +136,7 @@ export class TileExpiryScheduler<Owner extends object> {
     }
 
     private drainExpired(): void {
-        const dueByOwner = new Map<Owner, TileExpiryToken[]>();
+        const dueByOwner = new Map<Owner, TileExpiryToken<Key>[]>();
         const now = Date.now();
         let drained = 0;
         while (this.heap.length > 0 &&
@@ -211,7 +217,8 @@ export class TileExpiryScheduler<Owner extends object> {
         const a = this.heap[left];
         const b = this.heap[right];
         return a.expiresAtMs < b.expiresAtMs ||
-            (a.expiresAtMs === b.expiresAtMs && a.tileId < b.tileId);
+            (a.expiresAtMs === b.expiresAtMs &&
+                String(a.tileId) < String(b.tileId));
     }
 
     private swap(left: number, right: number): void {

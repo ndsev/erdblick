@@ -71,6 +71,11 @@ import {
 } from "./feature-search-style";
 import {formatFeatureInspectionTarget} from "../shared/tile-feature-id";
 import {MAX_STYLE_LOD} from "../shared/lod-policy";
+import {
+    partitionKey,
+    tilePartition,
+    type PartitionId
+} from "../mapdata/partition.model";
 
 export interface FeatureSearchResultEntry {
     label: string;
@@ -160,6 +165,7 @@ interface SearchResultTileContribution {
     sourceTileId: number;
     requestOrder: number;
     resultCount: number;
+    resultChannelOrdinal: number;
     resultFields: string[];
     results: FeatureSearchResultEntry[];
     diagnostics: Uint8Array | null;
@@ -182,7 +188,12 @@ interface SearchStyledPresentation {
     subscription: Subscription;
     definitionSignature: string;
     coverage: FilterSubscriptionCoverage | null;
-    coverageOrder: Map<number, number>;
+    coverageOrder: Map<string, number>;
+    spatialTileByPartition: Map<string, number>;
+    objectDiscoverySignature: string;
+    objectDiscoveryVersion: number;
+    objectCoverage: FilterSubscriptionCoverage | null;
+    objectDiscoveryTimer: ReturnType<typeof setTimeout> | null;
 }
 
 interface SearchSubsetIngestionTask {
@@ -368,6 +379,8 @@ export class FeatureSearchService {
 
     private searchRunCounter = 0;
     private searchSessionCounter = 0;
+    /** Definitions dismissed by a scene reset stay saved, but do not reopen on catalog refresh. */
+    private presentationDismissedSearches = new Map<string, string>();
     private searchPresentationRevision = 0;
 
     readonly sessionsChanged = new BehaviorSubject<FeatureSearchSession[]>([]);
@@ -638,6 +651,15 @@ export class FeatureSearchService {
 
     /** Reconciles persisted feature-search definitions with runtime sessions. */
     private reconcileFeatureSearchState(definitions: FeatureSearchStateEntry[]): void {
+        const currentIds = new Set(definitions.map(definition => definition.id));
+        for (const id of this.presentationDismissedSearches.keys()) {
+            if (!currentIds.has(id)) this.presentationDismissedSearches.delete(id);
+        }
+        definitions = definitions.filter(definition => {
+            if (this.presentationDismissedSearches.get(definition.id) === JSON.stringify(definition)) return false;
+            this.presentationDismissedSearches.delete(definition.id);
+            return true;
+        });
         const definitionById = new Map(definitions.map(definition => [definition.id, definition]));
         let structuralChange = false;
 
@@ -1316,7 +1338,15 @@ export class FeatureSearchService {
         });
     }
 
-    /** Closes one search session and removes its dock and marker state. */
+    /** Dismisses all runtime searches for a new scene, retaining saved definitions for later edits or reload. */
+    dismissForPresentation(): void {
+        for (const definition of this.stateService.featureSearches) {
+            this.presentationDismissedSearches.set(definition.id, JSON.stringify(definition));
+        }
+        for (const session of [...this.searchSessions]) this.closeRuntimeSearch(session.id);
+    }
+
+    /** Closes one search session and removes its persisted definition. */
     closeSearch(sessionId: string): void {
         if (this.stateService.featureSearches.some(entry => entry.id === sessionId)) {
             this.stateService.removeFeatureSearch(sessionId);
@@ -1448,10 +1478,16 @@ export class FeatureSearchService {
     shouldRenderSearchStyledLayer(
         viewIndex: number,
         layer: StyledMapgetLayer,
-        tileId: number
+        partitionOrTileId: PartitionId | number
     ): boolean {
-        const level = Number(coreLib.getTileLevel(tileId));
-        const cacheKey = `${viewIndex}|${layer.ownerId}|${level}`;
+        const partition = typeof partitionOrTileId === "number"
+            ? tilePartition(partitionOrTileId)
+            : partitionOrTileId;
+        const level = partition.kind === "tile"
+            ? Number(coreLib.getTileLevel(partition.id))
+            : layer.mapgetLayer.tileAssociationLevel ?? 0;
+        const cacheKey = `${viewIndex}|${layer.ownerId}|` +
+            `${partition.kind}|${level}`;
         const cached = this.searchRenderDecisionCache.get(cacheKey);
         if (cached !== undefined) {
             return cached;
@@ -1470,11 +1506,12 @@ export class FeatureSearchService {
             return false;
         }
         const strategy = session.definition.renderStrategy;
-        const result = !strategy.showLowFiDots ||
+        const result = partition.kind === "object" ||
+            !strategy.showLowFiDots ||
             this.viewState.prefersHighFidelityForSearchResultTile(
                 viewIndex,
                 session.id,
-                tileId,
+                partition.id,
                 strategy.highFidelityMaxVisibleTiles
             );
         this.searchRenderDecisionCache.set(cacheKey, result);
@@ -1567,7 +1604,7 @@ export class FeatureSearchService {
                 if (shouldUpdateCoverage) {
                     const coverage = this.searchCoverage(
                         definition,
-                        presentation.mapgetLayer
+                        presentation
                     );
                     if (!presentation.coverage ||
                         !filterSubscriptionCoverageEqual(
@@ -1575,18 +1612,25 @@ export class FeatureSearchService {
                             presentation.coverage
                         )) {
                         presentation.coverage = {
-                            tileIds: [...coverage.tileIds],
-                            ...(coverage.priorityTileIds
-                                ? {priorityTileIds:
-                                    [...coverage.priorityTileIds]}
+                            partitions: coverage.partitions.map(
+                                partition => ({...partition})
+                            ),
+                            ...(coverage.priorityPartitions
+                                ? {priorityPartitions:
+                                    coverage.priorityPartitions.map(
+                                        partition => ({...partition})
+                                    )}
                                 : {})
                         };
                         presentation.coverageOrder = new Map(
-                            coverage.tileIds.map((tileId, index) => [tileId, index])
+                            coverage.partitions.map((partition, index) => [
+                                partitionKey(partition),
+                                index
+                            ])
                         );
-                        presentation.styledLayer.setCoverage(
-                            coverage.tileIds,
-                            coverage.priorityTileIds
+                        presentation.styledLayer.setPartitionCoverage(
+                            coverage.partitions,
+                            coverage.priorityPartitions
                         );
                         this.applySearchCoverageSnapshot(definition.id);
                     }
@@ -1656,7 +1700,12 @@ export class FeatureSearchService {
             subscription: new Subscription(),
             definitionSignature,
             coverage: null,
-            coverageOrder: new Map()
+            coverageOrder: new Map(),
+            spatialTileByPartition: new Map(),
+            objectDiscoverySignature: "",
+            objectDiscoveryVersion: 0,
+            objectCoverage: null,
+            objectDiscoveryTimer: null
         };
         this.searchPresentationByLayer.set(styledLayer, presentation);
         presentation.subscription = styledLayer.events.subscribe(event =>
@@ -1666,6 +1715,11 @@ export class FeatureSearchService {
     }
 
     private destroySearchPresentation(presentation: SearchStyledPresentation): void {
+        if (presentation.objectDiscoveryTimer !== null) {
+            clearTimeout(presentation.objectDiscoveryTimer);
+            presentation.objectDiscoveryTimer = null;
+        }
+        presentation.objectDiscoveryVersion += 1;
         this.searchPresentationByLayer.delete(presentation.styledLayer);
         this.searchRenderDecisionCache.clear();
         this.subsetIngestionLoop.cancel(
@@ -1675,6 +1729,11 @@ export class FeatureSearchService {
         presentation.styledLayer.dispose();
         presentation.compiled.style.featureLayerStyle.delete?.();
         const session = this.getInternalSession(presentation.sessionId);
+        if (session) {
+            // Replacement styles get a new filter ID. Its predecessor must not
+            // keep contributing expected chunks after its tiles are discarded.
+            this.clearFilterSearchProgress(session, presentation.styledLayer.filterRef.filterId);
+        }
         for (const sourceTileKey of [
             ...(session?.searchResultTilesBySourceKey.keys() ?? [])
         ]) {
@@ -1712,8 +1771,12 @@ export class FeatureSearchService {
     /** Stable union of selected-view coverage; request order remains significant. */
     private searchCoverage(
         definition: FeatureSearchResolvedDefinition,
-        layer: MapgetLayer
-    ): {tileIds: number[]; priorityTileIds: number[]} {
+        presentation: SearchStyledPresentation
+    ): FilterSubscriptionCoverage {
+        const layer = presentation.mapgetLayer;
+        if (layer.partitionKind === "object") {
+            return this.objectSearchCoverage(definition, presentation);
+        }
         const tileIds: number[] = [];
         const seen = new Set<number>();
         for (const viewIndex of definition.selectedViewIndices) {
@@ -1737,7 +1800,118 @@ export class FeatureSearchService {
                 }
             }
         }
-        return {tileIds, priorityTileIds: []};
+        const partitions = tileIds.map(tilePartition);
+        presentation.spatialTileByPartition = new Map(
+            partitions.map(partition => [
+                partitionKey(partition),
+                partition.id as number
+            ])
+        );
+        return {partitions, priorityPartitions: []};
+    }
+
+    /** Resolve selected-view discovery tiles without treating them as object identities. */
+    private objectSearchCoverage(
+        definition: FeatureSearchResolvedDefinition,
+        presentation: SearchStyledPresentation
+    ): FilterSubscriptionCoverage {
+        const layer = presentation.mapgetLayer;
+        const level = layer.tileAssociationLevel;
+        if (level === null) {
+            return {partitions: []};
+        }
+        const discoveryTileIds: number[] = [];
+        const seen = new Set<number>();
+        for (const viewIndex of definition.selectedViewIndices) {
+            for (const tileId of this.viewState.visibleSearchTileIdsForLevel(
+                viewIndex,
+                level
+            )) {
+                if (!seen.has(tileId)) {
+                    seen.add(tileId);
+                    discoveryTileIds.push(tileId);
+                }
+            }
+        }
+        const signature = discoveryTileIds.join(",");
+        if (presentation.objectDiscoverySignature !== signature) {
+            presentation.objectDiscoverySignature = signature;
+            const version = ++presentation.objectDiscoveryVersion;
+            if (presentation.objectDiscoveryTimer !== null) {
+                clearTimeout(presentation.objectDiscoveryTimer);
+                presentation.objectDiscoveryTimer = null;
+            }
+            void this.tileStream.discoverObjectPartitions(
+                layer,
+                discoveryTileIds
+            ).then(result => {
+                if (presentation.objectDiscoveryVersion !== version ||
+                    presentation.objectDiscoverySignature !== signature ||
+                    !this.searchPresentations.has(presentation.key)) {
+                    return;
+                }
+                const partitions = result.associations.map(
+                    association => association.partition
+                );
+                presentation.objectCoverage = {
+                    partitions,
+                    priorityPartitions: []
+                };
+                presentation.spatialTileByPartition = new Map(
+                    result.associations.map(association => [
+                        partitionKey(association.partition),
+                        association.discoveryTileId
+                    ])
+                );
+                if (result.expiresAtMs !== null) {
+                    const delay = Math.min(
+                        0x7fff_ffff,
+                        Math.max(
+                            0,
+                            Math.ceil(result.expiresAtMs - Date.now()) + 1
+                        )
+                    );
+                    presentation.objectDiscoveryTimer = setTimeout(() => {
+                        presentation.objectDiscoveryTimer = null;
+                        if (presentation.objectDiscoverySignature === signature) {
+                            presentation.objectDiscoverySignature = "";
+                            this.pendingCoverageRefreshIds.add(
+                                presentation.sessionId
+                            );
+                            this.syncSearchRequestsToMapService();
+                        }
+                    }, delay);
+                }
+                this.pendingCoverageRefreshIds.add(presentation.sessionId);
+                this.syncSearchRequestsToMapService();
+            }).catch(error => {
+                if (presentation.objectDiscoveryVersion === version &&
+                    presentation.objectDiscoverySignature === signature &&
+                    this.searchPresentations.has(presentation.key)) {
+                    const session = this.getInternalSession(
+                        presentation.sessionId
+                    );
+                    session?.errors.add(
+                        error instanceof Error ? error.message : String(error)
+                    );
+                    if (session) {
+                        this.progress.next(session);
+                    }
+                    presentation.objectDiscoveryTimer = setTimeout(() => {
+                        presentation.objectDiscoveryTimer = null;
+                        if (presentation.objectDiscoverySignature === signature &&
+                            this.searchPresentations.has(presentation.key)) {
+                            presentation.objectDiscoverySignature = "";
+                            this.pendingCoverageRefreshIds.add(
+                                presentation.sessionId
+                            );
+                            this.syncSearchRequestsToMapService();
+                        }
+                    }, 1_000);
+                }
+            });
+        }
+        return presentation.objectCoverage ?? {partitions: []};
     }
 
     private applySearchCoverageSnapshot(searchId: string): void {
@@ -2184,7 +2358,9 @@ export class FeatureSearchService {
 
         try {
             const rawSummaries = subsetLayer.valueSummaries(
-                0,
+                // Rendering channels may have no fields (an unfinished category
+                // scale), or only a subset. Sample the same channel as the list.
+                contribution.resultChannelOrdinal,
                 FeatureSearchService.VALUE_SUMMARY_HISTOGRAM_LIMIT,
                 FeatureSearchService.VALUE_SUMMARY_DISTINCT_LIMIT
             );
@@ -2639,11 +2815,7 @@ export class FeatureSearchService {
             return;
         }
         if (event.type === "generation") {
-            for (const key of [...session.progressByRequestKey.keys()]) {
-                if (key.startsWith(`${presentation.styledLayer.filterRef.filterId}\n`)) {
-                    session.progressByRequestKey.delete(key);
-                }
-            }
+            this.clearFilterSearchProgress(session, presentation.styledLayer.filterRef.filterId);
             session.backendComplete = false;
             session.complete = false;
             this.applySearchCoverageSnapshot(session.id);
@@ -2722,21 +2894,30 @@ export class FeatureSearchService {
         const projectedFieldIndices = presentation.compiled.resultFields
             .map(field => projectedFields.indexOf(field));
         const resultCount = Math.max(0, Math.floor(Number(schema.entryCount ?? 0)));
+        const spatialTileId = this.searchSpatialTileId(presentation, state);
+        if (spatialTileId === null) {
+            session.errors.add(
+                `Search object '${state.mapTileKey}' has no discovery tile.`
+            );
+            this.progress.next(session);
+            return;
+        }
         const requestOrder =
-            presentation.coverageOrder.get(state.tileId)
+            presentation.coverageOrder.get(state.partitionKey)
             ?? Number.MAX_SAFE_INTEGER;
         const payloadBase: SearchResultTilePayload = {
             searchId: session.id,
             refresh: session.refresh,
             mapId: state.mapId,
             layerId: state.layerId,
-            tileId: state.tileId,
+            tileId: spatialTileId,
             sourceTileKey: state.mapTileKey,
             sourceMapId: state.mapId,
             sourceLayerId: state.layerId,
-            sourceTileId: state.tileId,
+            sourceTileId: spatialTileId,
             requestOrder,
             resultCount,
+            resultChannelOrdinal: presentation.compiled.resultChannelOrdinal,
             resultFields: presentation.compiled.resultFields,
             layerBlob: subsetBlob,
             diagnostics,
@@ -2822,20 +3003,28 @@ export class FeatureSearchService {
         }
         const batchOffset = task.offset;
         task.offset += limit;
+        const spatialTileId = this.searchSpatialTileId(
+            presentation,
+            task.state
+        );
+        if (spatialTileId === null) {
+            return true;
+        }
         this.addServerSearchResultTile({
             searchId: session.id,
             refresh: session.refresh,
             mapId: task.state.mapId,
             layerId: task.state.layerId,
-            tileId: task.state.tileId,
+            tileId: spatialTileId,
             sourceTileKey: task.sourceTileKey,
             sourceMapId: task.state.mapId,
             sourceLayerId: task.state.layerId,
-            sourceTileId: task.state.tileId,
+            sourceTileId: spatialTileId,
             requestOrder:
-                presentation.coverageOrder.get(task.state.tileId)
+                presentation.coverageOrder.get(task.state.partitionKey)
                 ?? Number.MAX_SAFE_INTEGER,
             resultCount: task.resultCount,
+            resultChannelOrdinal: presentation.compiled.resultChannelOrdinal,
             resultFields: task.resultFields,
             layerBlob: subsetBlob,
             diagnostics: null,
@@ -2844,6 +3033,28 @@ export class FeatureSearchService {
             entriesComplete: task.offset >= task.resultCount
         });
         return task.offset >= task.resultCount;
+    }
+
+    /** Spatial hint for density/marker fallback, never the object's identity. */
+    private searchSpatialTileId(
+        presentation: SearchStyledPresentation,
+        state: FilterTileState
+    ): number | null {
+        if (state.partition.kind === "tile") {
+            return state.partition.id;
+        }
+        return presentation.spatialTileByPartition.get(state.partitionKey) ??
+            null;
+    }
+
+    /** Retires all generations of one filter without removing other layers' progress. */
+    private clearFilterSearchProgress(session: FeatureSearchSession, filterId: string): void {
+        for (const key of session.progressByRequestKey.keys()) {
+            if (key.startsWith(`${filterId}\n`)) {
+                session.progressByRequestKey.delete(key);
+            }
+        }
+        this.updateSearchResultIngressProgress(session);
     }
 
     /** Aggregates interactive filter progress across a search's source layers. */
@@ -2992,6 +3203,7 @@ export class FeatureSearchService {
             sourceTileId: payload.sourceTileId,
             requestOrder: this.nonNegativeNumber(payload.requestOrder, Number.MAX_SAFE_INTEGER),
             resultCount: payload.resultCount,
+            resultChannelOrdinal: payload.resultChannelOrdinal,
             resultFields,
             results,
             diagnostics: payload.diagnostics,
@@ -3205,6 +3417,7 @@ export class FeatureSearchService {
     ): void {
         contribution.refresh = batch.refresh;
         contribution.resultFields = batch.resultFields;
+        contribution.resultChannelOrdinal = batch.resultChannelOrdinal;
         contribution.layerBlob = batch.layerBlob;
         contribution.valueSummary = null;
         this.appendArray(contribution.results, batch.results);

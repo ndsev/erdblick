@@ -2,7 +2,7 @@
 
 `erdblick` is a deck.gl-based map UI that connects to [`mapget`](https://github.com/ndsev/mapget) servers, renders NDS.Live and GeoJSON tiles, and exposes live style editing plus advanced inspection tools. MapViewer ships with erdblick pre-integrated, but the UI also runs as a standalone bundle.
 
-![erdblick UI](docs/screenshots/erdblick.png)
+![Munich Classic buildings and Live roads beside cinematic San Francisco lanes](docs/screenshots/product-title.png)
 
 ## Documentation
 

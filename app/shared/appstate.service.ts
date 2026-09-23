@@ -1,6 +1,6 @@
 import {Injectable, OnDestroy} from "@angular/core";
 import {NavigationEnd, NavigationStart, Params, Router} from "@angular/router";
-import {BehaviorSubject, skip, Subscription, take} from "rxjs";
+import {BehaviorSubject, skip, Subject, Subscription, take} from "rxjs";
 import {filter} from "rxjs/operators";
 import {Cartographic, GeoMath} from "../integrations/geo";
 import {AppState, AppStateOptions, Boolish, MapViewState, StyleState} from "./app-state";
@@ -48,6 +48,7 @@ import {
     clampLod3TileThreshold,
     DEFAULT_LOD3_TILE_THRESHOLD
 } from "./lod-policy";
+import {parseMapPartitionKey} from "../mapdata/partition.model";
 
 export {
     AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
@@ -486,6 +487,8 @@ export class AppStateService implements OnDestroy {
     private readonly mapViewStates: Array<MapViewState<unknown>> = [];
     private readonly inspectionTreeExpansionStates = new Map<number, InspectionTreeExpansionState>();
     readonly ready = new BehaviorSubject<boolean>(false);
+    /** Emits synchronously after an externally supplied state replacement has completed. */
+    readonly stateApplied = new Subject<void>();
 
     private readonly stateSubscriptions: Subscription[] = [];
 
@@ -722,6 +725,12 @@ export class AppStateService implements OnDestroy {
 
     readonly deckAntialiasingEnabledState = this.createState<boolean>({
         name: 'deckAntialiasingEnabled',
+        defaultValue: true,
+        schema: Boolish
+    });
+
+    readonly semanticCompositingEnabledState = this.createState<boolean>({
+        name: 'semanticCompositingEnabled',
         defaultValue: true,
         schema: Boolish
     });
@@ -1169,10 +1178,7 @@ export class AppStateService implements OnDestroy {
                 if (!this.isReady) {
                     return;
                 }
-                this.cancelPendingStateSync();
-                this.withHydration(() => {
-                    this.hydrateFromUrl(this.currentBrowserQueryParams());
-                });
+                this.applyHydratedUrlState(this.currentBrowserQueryParams());
             }
         });
 
@@ -1207,6 +1213,47 @@ export class AppStateService implements OnDestroy {
 
         this.isReady = true;
         this.ready.next(true);
+    }
+
+    /** Replaces the current query and hydrates it without navigating the browser document. */
+    async replaceUrlState(params: Params, resetMissing = false): Promise<void> {
+        if (!this.isReady) {
+            throw new Error("URL state cannot be replaced before AppStateService is ready.");
+        }
+
+        this.cancelPendingStateSync();
+        await this.router.navigate([], {
+            queryParams: params,
+            queryParamsHandling: "replace",
+            replaceUrl: true
+        });
+        if (resetMissing) {
+            this.withHydration(() => this.applyNormalizedSnapshot({}, true));
+        }
+        this.applyHydratedUrlState(params);
+    }
+
+    /**
+     * Atomically replaces presentation-controlled state from a native snapshot.
+     * Unlike the user-facing snapshot import, omitted persisted states are reset so
+     * every presentation slide describes a complete and repeatable viewer state.
+     */
+    replaceSnapshotState(snapshot: unknown): string[] {
+        if (!this.isReady) {
+            throw new Error("Snapshot state cannot be replaced before AppStateService is ready.");
+        }
+
+        const normalizedResult = this.normalizeSnapshot(snapshot);
+        if (normalizedResult.errors.length) {
+            return normalizedResult.errors;
+        }
+
+        this.cancelPendingStateSync();
+        this.withHydration(() => {
+            this.applyNormalizedSnapshot(normalizedResult.normalized!, true);
+        });
+        this.stateApplied.next();
+        return [];
     }
 
     /** Flushes all state slots to storage and URL after a batch update. */
@@ -1290,6 +1337,45 @@ export class AppStateService implements OnDestroy {
             nextStyles.set(key, nextValues);
         }
         this.stylesState.next(nextStyles);
+    }
+
+    /** Compacts surviving views after their renderers have stopped publishing state. */
+    retainViews(viewIndices: readonly number[], cameras: ReadonlyMap<number, CameraViewState>): void {
+        // Read every slot before notifying synchronous subscribers. Preset selections
+        // belong here too, even though they are excluded from whole-app snapshots.
+        const states = this.mapViewStates.map(state => ({
+            state,
+            values: viewIndices.map(index => cloneStateValue(
+                state === this.cameraViewDataState
+                    ? cameras.get(index) ?? state.getValue(index)
+                    : state.getValue(index)
+            ))
+        }));
+        const styles = new Map<string, (string | number | boolean)[]>();
+        for (const [key, values] of this.styles) {
+            const retained: (string | number | boolean)[] = [];
+            viewIndices.forEach((index, target) => {
+                if (values[index] !== undefined) {
+                    retained[target] = values[index];
+                }
+            });
+            styles.set(key, retained);
+        }
+        const searches = this.featureSearchState.getValue().map(search => ({
+            ...search,
+            selectedViewIndices: search.selectedViewIndices
+                .map(index => viewIndices.indexOf(index))
+                .filter(index => index >= 0)
+        }));
+        const focusedView = Math.max(0, viewIndices.indexOf(this.focusedView));
+        for (const {state, values} of states) {
+            state.appState.next(values);
+        }
+        this.stylesState.next(styles);
+        this.featureSearchState.next(searches);
+        this.focusedViewState.next(focusedView);
+        // Count subscribers rebuild the tree and components from the compacted state.
+        this.numViewsState.next(viewIndices.length);
     }
 
     /** Subscribes to all persisted state slots so storage and URL remain in sync. */
@@ -1707,6 +1793,13 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Applies one runtime URL state and notifies derived projections after hydration. */
+    private applyHydratedUrlState(params: Params): void {
+        this.cancelPendingStateSync();
+        this.hydrateFromUrl(params);
+        this.stateApplied.next();
+    }
+
     /** Keeps one malformed persisted state entry from aborting startup hydration. */
     private deserializeStateSafely(
         state: {name: string; deserialize(raw: string | Params): void},
@@ -1965,49 +2058,35 @@ export class AppStateService implements OnDestroy {
         if (normalizedResult.errors.length) {
             return normalizedResult.errors;
         }
-        const normalized = normalizedResult.normalized!;
-        const keys = Object.keys(normalized);
-        const errors: string[] = [];
+        this.applyNormalizedSnapshot(normalizedResult.normalized!, false);
+        return [];
+    }
 
-        for (const key of keys) {
-            const state = this.statePool.get(key);
-            if (!state) {
-                if (this.validateStyleOptionSnapshotEntry(key, normalized[key], errors)) {
-                    continue;
-                }
-                errors.push(`Unknown snapshot state '${key}'.`);
-                continue;
-            }
+    /** Applies a validated snapshot in state-registration order. */
+    private applyNormalizedSnapshot(
+        normalized: Record<string, unknown>,
+        replaceMissing: boolean
+    ): void {
+        for (const [key, state] of this.statePool.entries()) {
             if (!state.isSnapshotState()) {
                 continue;
             }
-            try {
-                state.validateSnapshotValue(normalized[key]);
-            } catch (error: any) {
-                errors.push(`Invalid value for '${key}': ${error?.message ?? 'schema validation failed'}`);
+            if (Object.prototype.hasOwnProperty.call(normalized, key)) {
+                state.applySnapshotValue(normalized[key]);
+            } else if (replaceMissing) {
+                state.resetToDefault();
             }
-        }
-        if (errors.length) {
-            return errors;
         }
 
-        for (const key of keys) {
-            const state = this.statePool.get(key);
-            if (!state) {
-                continue;
-            }
-            if (!state.isSnapshotState()) {
-                continue;
-            }
-            state.applySnapshotValue(normalized[key]);
-        }
         const styleOptionEntries = this.extractStyleOptionSnapshotEntries(normalized);
+        if (replaceMissing) {
+            this.stylesState.next(new Map());
+        }
         if (Object.keys(styleOptionEntries).length) {
             this.deserializeStateSafely(this.stylesState, styleOptionEntries);
             this.stylesState.next(new Map(this.stylesState.getValue()));
         }
         this.pendingOpenDialogs.clear();
-        return [];
     }
 
     /** Normalizes legacy snapshot shapes before schema validation is applied. */
@@ -2297,6 +2376,8 @@ export class AppStateService implements OnDestroy {
     };
     get deckAntialiasingEnabled() {return this.deckAntialiasingEnabledState.getValue();}
     set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
+    get semanticCompositingEnabled() {return this.semanticCompositingEnabledState.getValue();}
+    set semanticCompositingEnabled(val: boolean) {this.semanticCompositingEnabledState.next(!!val);}
     get contactShadingEnabled() {return this.contactShadingEnabledState.getValue();}
     set contactShadingEnabled(val: boolean) {this.contactShadingEnabledState.next(!!val);}
     get lod3TileThreshold() {return this.lod3TileThresholdState.getValue();}
@@ -3826,9 +3907,9 @@ export class AppStateService implements OnDestroy {
         let selectionChanged = false;
 
         const parseKey = (tileKey: string): {mapId: string; mapLayerId: string} | undefined => {
-            let parsed: [string, string, number];
+            let parsed: [string, string, unknown];
             try {
-                parsed = coreLib.parseMapTileKey(tileKey) as [string, string, number];
+                parsed = parseMapPartitionKey(coreLib, tileKey);
             } catch {
                 return undefined;
             }

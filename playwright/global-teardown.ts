@@ -616,7 +616,9 @@ function computeCssStats(entries: V8CSSCoverageEntry[]): {
  */
 async function writeV8CoverageSummary(): Promise<void> {
     const repoRoot = process.cwd();
-    const covDir = path.join(repoRoot, 'coverage', 'playwright');
+    const covDir = process.env['EB_PLAYWRIGHT_COVERAGE_DIR']
+        ? path.resolve(process.env['EB_PLAYWRIGHT_COVERAGE_DIR'])
+        : path.join(repoRoot, 'coverage', 'playwright');
 
     const jsEntries = loadNdjson<V8JSCoverageEntry>(
         path.join(covDir, 'v8-js-coverage.ndjson')

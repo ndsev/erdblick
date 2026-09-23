@@ -395,6 +395,21 @@ import type {
                                             (ngModelChange)="setDeckAntialiasingEnabled($event)"></p-selectButton>
                         </div>
                         <div class="button-container">
+                            <label id="semantic-compositing-label">Semantic layer compositing
+                                <i class="pi pi-info-circle"
+                                   pTooltip="Diagnostic switch. Recreates the map renderer. Disabling hides semantic decorations (such as cinematic lane markings) and their picking. Other rendering effects remain enabled."
+                                   tooltipPosition="top"></i>
+                            </label>
+                            <p-selectButton [options]="toggleOptions"
+                                            [(ngModel)]="semanticCompositingEnabledSetting"
+                                            optionLabel="label"
+                                            optionValue="value"
+                                            [allowEmpty]="false"
+                                            ariaLabelledBy="semantic-compositing-label"
+                                            data-testid="semantic-compositing-setting"
+                                            (ngModelChange)="setSemanticCompositingEnabled($event)"></p-selectButton>
+                        </div>
+                        <div class="button-container">
                             <label>Contact shading
                                 <i class="pi pi-info-circle"
                                    pTooltip="Darkens nearby lower surfaces using final scene depth. Disable on slower GPUs."
@@ -509,6 +524,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     locationSearchResultLimitInput: number | string = DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
     tilePullCompressionEnabledSetting: boolean = false;
     deckAntialiasingEnabledSetting: boolean = true;
+    semanticCompositingEnabledSetting: boolean = true;
     contactShadingEnabledSetting: boolean = true;
     lod3TileThresholdInput: number | string = DEFAULT_LOD3_TILE_THRESHOLD;
     renderWorkerCountInput: number | string =
@@ -586,6 +602,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }));
         this.subscriptions.push(this.stateService.deckAntialiasingEnabledState.subscribe(enabled => {
             this.deckAntialiasingEnabledSetting = enabled;
+        }));
+        this.subscriptions.push(this.stateService.semanticCompositingEnabledState.subscribe(enabled => {
+            this.semanticCompositingEnabledSetting = enabled;
         }));
         this.subscriptions.push(this.stateService.contactShadingEnabledState.subscribe(enabled => {
             this.contactShadingEnabledSetting = enabled;
@@ -854,6 +873,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     setDeckAntialiasingEnabled(enabled: boolean) {
         this.deckAntialiasingEnabledSetting = enabled;
         this.stateService.deckAntialiasingEnabled = enabled;
+    }
+
+    /** Recreates map renderers with or without the semantic compositor for diagnosis. */
+    setSemanticCompositingEnabled(enabled: boolean) {
+        this.semanticCompositingEnabledSetting = enabled;
+        this.stateService.semanticCompositingEnabled = enabled;
     }
 
     /** Enables or disables the final-depth screen-space contact shading pass. */

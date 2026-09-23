@@ -1430,7 +1430,19 @@ GpuRenderPacketBuilder::buildFragments() const
                 auto appendRecords = [&](GpuRenderPacketData const& base,
                                          uint32_t recordCount) {
                     auto candidate = base;
-                    auto fragmentStream = stream;
+                    // Copy only the descriptor. Copying the full record vector
+                    // before assigning a slice retains whole-cloud capacity in
+                    // every fragment and exhausts WASM memory for dense clouds.
+                    GpuRecordStream fragmentStream{
+                        .kind = stream.kind,
+                        .flags = stream.flags,
+                        .materialKey = stream.materialKey,
+                        .recordStride = stream.recordStride,
+                        .glowColor = stream.glowColor,
+                        .glowRadius = stream.glowRadius,
+                        .atlasPage = stream.atlasPage,
+                        .renderOrder = stream.renderOrder,
+                    };
                     auto const firstRecord = span.firstRecord + consumed;
                     auto const firstByte = static_cast<size_t>(firstRecord) *
                         stream.recordStride;

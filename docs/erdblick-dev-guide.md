@@ -453,6 +453,9 @@ See [Style System](erdblick-stylesystem.md).
 ## Failure and cancellation rules
 
 - A new filter generation makes older subset/status/render completions stale.
+- Filter status frames use `filterId` and `generation`, independent of viewport
+  request IDs. Route them before request-status filtering; the subscription
+  rejects stale generations.
 - Releasing a styled layer releases its filter ref, subsets, attachment refs,
   and visualizations deterministically.
 - Render workers reject stale signatures; callers must not install them.

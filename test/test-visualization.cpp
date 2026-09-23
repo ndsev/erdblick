@@ -12,10 +12,12 @@
 #include "nlohmann/json.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -60,6 +62,27 @@ std::shared_ptr<mapget::LayerInfo> lineTestLayerInfo()
                 "name": "Way",
                 "uniqueIdCompositions": [[
                     {"partId": "wayId", "datatype": "U32"}
+                ]]
+            }
+        ]
+    })json"));
+}
+
+/** Build an object-backed layer whose container identifier spans the full unsigned domain. */
+std::shared_ptr<mapget::LayerInfo> objectInspectionLayerInfo()
+{
+    return mapget::LayerInfo::fromJson(nlohmann::json::parse(R"json(
+    {
+        "layerId": "Road",
+        "type": "Features",
+        "partitionKind": "object",
+        "tileAssociationLevel": 13,
+        "featureTypes": [
+            {
+                "name": "Road",
+                "uniqueIdCompositions": [[
+                    {"partId": "tileId", "datatype": "U64"},
+                    {"partId": "roadId", "datatype": "U32"}
                 ]]
             }
         ]
@@ -716,6 +739,31 @@ TEST_CASE("FeatureInspection", "[erdblick.inspection]")
     }
 }
 
+TEST_CASE("FeatureInspection preserves unsigned 64-bit identifier rows", "[erdblick.inspection]")
+{
+    constexpr auto objectId = uint64_t{9007199254740993ULL};
+    constexpr auto maximumObjectId = std::numeric_limits<uint64_t>::max();
+    auto layer = std::make_shared<mapget::TileFeatureLayer>(
+        mapget::PartitionId::object(objectId),
+        "InspectionObjectNode",
+        "InspectionObjectMap",
+        objectInspectionLayerInfo(),
+        std::make_shared<simfil::StringPool>());
+
+    for (auto const id : {objectId, maximumObjectId}) {
+        auto feature = layer->newFeature("Road", {
+            {"tileId", std::bit_cast<int64_t>(id)},
+            {"roadId", int64_t{1}},
+        });
+        auto inspection = InspectionConverter().convert(feature);
+        auto const* identifiers = findInspectionNodeByKey(*inspection, "Identifiers");
+        REQUIRE(identifiers);
+        auto const* objectIdNode = findInspectionDirectChildByKey(*identifiers, "tileId");
+        REQUIRE(objectIdNode);
+        REQUIRE(objectIdNode->value("value", std::string{}) == std::to_string(id));
+    }
+}
+
 TEST_CASE("FeatureInspection preserves external feature-reference map ids", "[erdblick.inspection]")
 {
     auto tile = makeExternalReferenceInspectionTile(mapget::TileId::fromWgs84(42., 11., 13));
@@ -813,6 +861,32 @@ TEST_CASE("FeatureInspection copies canonical array search paths", "[erdblick.in
     REQUIRE(std::ranges::none_of(paths, [](std::string const& path) {
         return path.find(".[\"0\"]") != std::string::npos;
     }));
+}
+
+TEST_CASE("FeatureInspection bounds point previews across clusters without truncating exports", "[erdblick.inspection]")
+{
+    auto tile = std::make_shared<mapget::TileFeatureLayer>(
+        mapget::TileId::fromWgs84(42., 11., 13), "PointPreviewNode", "PointPreviewMap",
+        lineTestLayerInfo(), std::make_shared<mapget::StringPool>("PointPreviewNode"));
+    auto feature = tile->newFeature("Way", {{"wayId", 1}});
+    feature->addLine({{42., 11., 0.}, {42.0001, 11., 0.}});
+    for (int cluster = 0; cluster < 3; ++cluster) {
+        auto geometry = tile->newGeometry(mapget::GeomType::Points, 200, true);
+        for (int i = 0; i < 200; ++i)
+            geometry->append({42.0 + i * 1e-6, 11.0, double(cluster)});
+        feature->addGeometry(geometry);
+    }
+    auto const exported = feature->geom()->toJson();
+    auto inspection = InspectionConverter().convert(feature);
+    // The existing line keeps its full preview; only point coordinates share the 256 budget.
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[0].coordinates[1]"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[1].coordinates[199]"));
+    REQUIRE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[2].coordinates[55]"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[2].coordinates[56]"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[3].coordinates[0]"));
+    REQUIRE((*inspection).dump().find("Showing 0 of 200 coordinates") != std::string::npos);
+    REQUIRE(feature->geom()->toJson() == exported);
+    REQUIRE(exported.at("geometries").at(3).at("coordinates").size() == 200);
 }
 
 TEST_CASE("FeatureInspection copies geometry search paths", "[erdblick.inspection]")

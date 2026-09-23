@@ -84,27 +84,33 @@ test.describe('Snapshot – map panel and source data selection dialog', () => {
             },
             {
                 locator: sourceDataDialog.getByTestId('source-data-selection-custom-tile-id'),
-                label: 'Tile ID input'
+                label: 'Tile ID input',
+                placement: 'left'
             },
             {
                 locator: sourceDataDialog.getByTestId('source-data-selection-toggle-custom-tile-id'),
-                label: 'Reset tile input'
+                label: 'Reset tile input',
+                placement: 'right'
             },
             {
                 locator: sourceDataDialog.getByTestId('source-data-selection-map-select'),
-                label: 'Map selector'
+                label: 'Map selector',
+                placement: 'left'
             },
             {
                 locator: sourceDataDialog.getByTestId('source-data-selection-layer-select'),
-                label: 'Source data layer selector'
+                label: 'Source data layer selector',
+                placement: 'right'
             },
             {
                 locator: sourceDataDialog.getByTestId('source-data-selection-confirm-button'),
-                label: 'Confirm inspection'
+                label: 'Confirm inspection',
+                placement: 'left'
             },
             {
                 locator: sourceDataDialog.getByTestId('source-data-selection-close-button'),
-                label: 'Close dialog'
+                label: 'Close dialog',
+                placement: 'bottom'
             }
         ]);
     });

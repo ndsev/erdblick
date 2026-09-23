@@ -1,5 +1,6 @@
 import {describe, expect, it} from "vitest";
 import {FilterTileState} from "../mapdata/filter-tile-state.model";
+import {tilePartition} from "../mapdata/partition.model";
 import {ViewLayerDiagnosticsService} from "./view-layer-diagnostics.service";
 
 describe("ViewLayerDiagnosticsService", () => {
@@ -8,7 +9,7 @@ describe("ViewLayerDiagnosticsService", () => {
         const state = new FilterTileState(
             "TestMap",
             "Road",
-            42,
+            tilePartition(42),
             "Features:TestMap:Road:42",
             1
         );
@@ -33,7 +34,7 @@ describe("ViewLayerDiagnosticsService", () => {
         const state = new FilterTileState(
             "TestMap",
             "Road",
-            42,
+            tilePartition(42),
             "Features:TestMap:Road:42",
             1
         );
@@ -59,7 +60,7 @@ describe("ViewLayerDiagnosticsService", () => {
         const state = new FilterTileState(
             "TestMap",
             "Road",
-            42,
+            tilePartition(42),
             "Features:TestMap:Road:42",
             1
         );
@@ -96,7 +97,7 @@ describe("ViewLayerDiagnosticsService", () => {
         const state = new FilterTileState(
             "TestMap",
             "Road",
-            42,
+            tilePartition(42),
             "Features:TestMap:Road:42",
             1
         );

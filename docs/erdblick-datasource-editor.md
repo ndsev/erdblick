@@ -2,7 +2,10 @@
 
 The DataSource editor is an optional panel that talks to the backend’s `/config` endpoint. When the backend exposes a configuration schema and model for its data sources, erdblick can fetch that schema and push edits back without leaving the browser. Use it for exploratory sessions or when you need to adjust a configuration on a running server.
 
-![erdblick UI](screenshots/datasource-editor.png)
+![Local datasource configuration in a read-only editor](screenshots/datasource-configuration.png)
+
+The **read-only message** explains why this deployment exposes the current
+configuration without an Apply action. Writable deployments provide that action.
 
 ## Prerequisites and Permissions
 

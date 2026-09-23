@@ -1,6 +1,7 @@
 import {AfterViewInit, Component, ElementRef, NgZone, OnDestroy, ViewChild} from '@angular/core';
 import {Subscription} from 'rxjs';
 import {MapInfoService} from './mapdata/map-info.service';
+import {MapViewStateService} from './mapview/map-view-state.service';
 import {
     ABOUT_DIALOG_LAYOUT_ID,
     CACHE_RESET_DIALOG_LAYOUT_ID,
@@ -141,6 +142,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     constructor(public mapService: MapInfoService,
                 public stateService: AppStateService,
+                private mapViewState: MapViewStateService,
                 private diagnostics: DiagnosticsFacadeService,
                 private featureSearchService: FeatureSearchService,
                 private styleService: StyleService,
@@ -595,10 +597,16 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         command: () => { this.stateService.numViews = 2; }
                     },
                     {
+                        name: 'Close Left View',
+                        icon: 'tab_close',
+                        visible: numViews > 1,
+                        command: () => { this.mapViewState.removeView(0); }
+                    },
+                    {
                         name: 'Close Right View',
                         icon: 'tab_close',
                         visible: numViews > 1,
-                        command: () => { this.stateService.numViews = 1; }
+                        command: () => { this.mapViewState.removeView(1); }
                     },
                     {
                         name: 'Sync Views',

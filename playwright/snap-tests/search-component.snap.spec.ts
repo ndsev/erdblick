@@ -59,7 +59,7 @@ test.describe('Snapshot – search component', () => {
 
         const resultsTab = page.getByRole('tab', { name: /^Results / });
         const diagnosticsTab = page.getByRole('tab', { name: /^Diagnostics / });
-        const closeButton = featureSearchDialog.locator('.p-dialog-header button').first();
+        const closeButton = featureSearchDialog.getByTestId('surface-close-button');
 
         await page.mouse.move(0, 0);
         await captureDocsScreenshotWithLabels(page, 'docs/screenshots/search-component-controls.png', [
@@ -81,7 +81,8 @@ test.describe('Snapshot – search component', () => {
             },
             {
                 locator: closeButton,
-                label: 'Close search dialog'
+                label: 'Close search dialog',
+                placement: 'right'
             }
         ]);
     });

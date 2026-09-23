@@ -2,7 +2,11 @@
 
 Erdblick can render two map views side by side. Each pane keeps its own camera state, layer configuration, and per-layer style options, while the built-in sync controls let you share selected parts of that state. This guide explains how to open split view, focus a specific pane, and use the sync options effectively.
 
-![Split view UI](screenshots/split.png)
+![San Francisco lane topology in plan view beside cinematic lane geometry in perspective](screenshots/split-lane-comparison.png)
+
+The same junction is shown in **plan view (1)** and **perspective (2)** with
+different lane styles. The **sync controls (3)** link movement while keeping
+the projections and styles independent.
 
 ## Opening, Closing, and Focusing Views
 
@@ -15,7 +19,7 @@ You can enter split view in three equivalent ways:
 Once split view is open:
 
 1. The **Maps & Layers** dialog shows separate fieldsets for **Maps Left View** and **Maps Right View**.
-2. Close the right pane either from **View -> Close Right View** or from the `[x]` button in the **Maps Right View** header.
+2. Close either pane from **View -> Close Left View / Close Right View**, its `[x]` button in **Maps & Layers**, or **Close View** in that pane's context menu. The remaining pane keeps its camera, projection, layers, style options, and inspections. A first-person session in the remaining pane stays active.
 3. Click inside a pane to focus it. The focused pane gets a blue outline, and keyboard shortcuts (`WASD`, `Q/E`, `Ctrl+K`, jump actions, and so on) apply only there.
 4. Use `Ctrl+ArrowRight` / `Ctrl+ArrowLeft` to move focus without touching the mouse.
 
@@ -36,7 +40,7 @@ Each view maintains its own layer tree:
 
 - **One section per pane** - the **Maps & Layers** dialog renders one expandable section per view. The icon next to each header shows whether the section controls the left or right pane.
 - **Layer sync button** - the circular-arrows button in each section copies visibility, zoom level, and style-option states from that pane to compatible layers, and also syncs that pane's tile-border flag.
-- **Add/remove** - use **Add View** or **View -> Split View** to open the second pane. Close it from the fieldset header or via **View -> Close Right View**. Camera and layer selections are encoded in the URL, so split-view links are shareable.
+- **Add/remove** - use **Add View** or **View -> Split View** to open the second pane. Either pane can be closed; the remaining pane becomes the single view. Camera and layer selections are encoded in the URL, so split-view links are shareable.
 
 ## Search in Split View
 
@@ -47,6 +51,8 @@ Feature-search panels show a **View** selector when split view is active. This s
 - **All** - use this when both panes should visualize the same search result session.
 
 Auto-update follows the selected view set. If a search is bound to the left view only, panning the right view does not refresh that search area. If it is bound to both views, visible-tile changes in either pane can update the search coverage.
+
+Closing a pane removes it from each search's view selection. Searches displayed in the remaining pane stay there; searches displayed only in the closed pane remain available with no map overlay selected.
 
 Selecting a search result focuses and inspects the matched feature like any other feature selection. When the matched result exists in both panes, erdblick uses the currently focused pane as the first navigation target and keeps the result overlay visible in the views selected by the search.
 
@@ -60,7 +66,10 @@ Once split view is active, a few recurring patterns make it easier to compare da
 - **Search comparison** - run the same query against different map/layer selections, bind one search to the left view and another to the right view, then group results by map/layer or use result labels/categories to compare distributions.
 - **2D vs 3D** - enable `lay` and `pos`, disable `proj`. Switch only one pane to 2D, leaving the other in 3D to compare interactions.
 
-![Split view search selector](screenshots/split-search-view-selector.png)
+![Split view search selector](screenshots/split-search-scope.png)
+
+Use the **search view selector** to choose which view supplies the active
+map layers. Here both panes show local NDS.Island-6 data with different projections.
 
 ## Tips and Troubleshooting
 

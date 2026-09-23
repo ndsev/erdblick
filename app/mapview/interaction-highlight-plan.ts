@@ -7,15 +7,21 @@ import {
     parseFeatureInspectionTarget,
     type FeatureInspectionTarget
 } from "../shared/tile-feature-id";
+import {
+    partitionKey,
+    type PartitionId
+} from "../mapdata/partition.model";
 
-/** One visible inspection target with the tile id required by exact-root requests. */
-export type InteractionHighlightTarget = TileFeatureId & {tileId: number};
+/** One visible inspection target with the partition required by exact-root requests. */
+export type InteractionHighlightTarget = TileFeatureId & {
+    partition: PartitionId;
+};
 
 /** Backend portion of one hybrid local/remote interaction presentation. */
 export interface RemoteInteractionHighlightPlan {
     plan: StyleFilterPlan;
-    tileIds: number[];
-    roots: Array<{tileId: number; featureId: string}>;
+    partitions: PartitionId[];
+    roots: Array<{partition: PartitionId; featureId: string}>;
 }
 
 /** Exact targets already represented by regular/search scene geometry. */
@@ -193,25 +199,34 @@ export function planRemoteInteractionHighlight(
 
     const admittedTargets = targets.filter(target =>
         admittedTargetKeys.has(interactionTargetKey(target)));
-    const tileIds = [...new Set(admittedTargets.map(target => target.tileId))];
+    const partitions = [...new Map(admittedTargets.map(target => [
+        partitionKey(target.partition),
+        target.partition
+    ])).values()];
     const needsRoots = plan.channels.some(channel =>
         channel.scope === "relation");
-    const roots = new Map<string, {tileId: number; featureId: string}>();
+    const roots = new Map<string, {
+        partition: PartitionId;
+        featureId: string;
+    }>();
     if (needsRoots) {
         for (const target of admittedTargets) {
             if (target.inspectionTarget.scope !== "relation") {
                 continue;
             }
             const root = {
-                tileId: target.tileId,
+                partition: target.partition,
                 featureId: target.inspectionTarget.baseFeatureId
             };
-            roots.set(`${root.tileId}\n${root.featureId}`, root);
+            roots.set(
+                `${partitionKey(root.partition)}\n${root.featureId}`,
+                root
+            );
         }
     }
     return {
         plan,
-        tileIds,
+        partitions,
         roots: [...roots.values()]
     };
 }

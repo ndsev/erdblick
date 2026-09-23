@@ -98,6 +98,21 @@ import {
                 <ng-content select="[searchStyleColorInlineControl]"></ng-content>
             </div>
 
+            @if (viewDraft.mode !== 'solid') {
+                <div class="search-style-color-fallback">
+                    <label [for]="modeInputId + '-fallback'">Fallback color</label>
+                    <p-toggleswitch [inputId]="modeInputId + '-fallback'"
+                                   [ngModel]="viewDraft.fallbackEnabled !== false"
+                                   (ngModelChange)="setFallbackEnabled($event)"></p-toggleswitch>
+                    @if (viewDraft.fallbackEnabled !== false) {
+                        <p-colorpicker [ngModel]="viewDraft.fallbackColor" appendTo="body"
+                                       [overlayOptions]="colorPickerOverlayOptions"
+                                       aria-label="Fallback color"
+                                       (ngModelChange)="setFallbackColor($event)"></p-colorpicker>
+                    }
+                </div>
+            }
+
             @if (colorWarning) {
                 <div class="search-style-color-warning">{{ colorWarning }}</div>
             }
@@ -411,6 +426,16 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    protected setFallbackEnabled(enabled: boolean): void {
+        this.viewDraft = {...this.viewDraft, fallbackEnabled: enabled};
+        this.emitChange();
+    }
+
+    protected setFallbackColor(color: string): void {
+        this.viewDraft = {...this.viewDraft, fallbackColor: normalizeHexColor(color)};
+        this.emitChange();
+    }
+
     protected addGradientStop(): void {
         this.clearDataWarning();
         this.viewDraft = {
@@ -650,7 +675,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.updateColorWarning();
     }
 
-    /** Uses observed histogram buckets to rebuild category stops for enum or string-like values. */
+    /** Rebuilds category stops from observed numeric, boolean, or string values. */
     private updateCategoryStopsFromData(summary: SearchValueSummary): void {
         const values = summary.histogram
             .map(bucket => bucket.value)

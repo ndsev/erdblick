@@ -61,6 +61,20 @@ JsValue JsValue::fromGlobal(std::string const& globalName)
 #endif
 }
 
+JsValue JsValue::fromPartition(mapget::PartitionId const& partition)
+{
+    if (partition.kind() == mapget::PartitionKind::Object) {
+        return Dict({
+            {"kind", JsValue("object")},
+            {"id", JsValue(partition.toString())},
+        });
+    }
+    return Dict({
+        {"kind", JsValue("tile")},
+        {"id", JsValue(partition.value())},
+    });
+}
+
 JsValue JsValue::Dict(std::initializer_list<std::pair<std::string, JsValue>> initializers)
 {
 #ifdef EMSCRIPTEN
