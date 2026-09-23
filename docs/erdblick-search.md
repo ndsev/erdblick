@@ -139,7 +139,7 @@ The **Visualization** tab controls how one search session is drawn on the map. I
 
 ### Result Density Map
 
-The density map is the safe overview for broad searches. It aggregates matches into visible source-tile buckets and draws colored markers.
+The density map is the safe overview for broad searches. It aggregates matches into visible tile buckets and draws colored markers.
 
 - Toggle density markers on or off.
 - Pick the density/pin color for the search session.
@@ -180,6 +180,15 @@ Edit a saved stylesheet from the ordinary Styles tree. The Style Editor opens on
 
 Use density markers for broad searches or early exploration. Switch to high-fi geometry and labels when the visible tile count is small enough that individual result geometry is more useful than aggregate buckets.
 <!-- --8<-- [end:visualization] -->
+
+### Density Map Example
+
+![Animal-warning search results shown as a configurable density map](screenshots/search-density.png)
+
+The query `**.warningSign == "ANIMALS"` finds animal-warning attributes across
+the road network. **Density Labels** show compact counts for tile aggregates (such as
+`5+` or `20+`). **Gradient** gives higher-count visible markers warmer colors,
+and **Marker Size** scales the markers.
 
 ## Search Diagnostics
 
