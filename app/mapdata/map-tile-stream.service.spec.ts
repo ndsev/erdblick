@@ -4,6 +4,7 @@ import {describe, expect, it, vi} from "vitest";
 import {MapTileStreamService} from "./map-tile-stream.service";
 import {MapgetLayer} from "./mapget-layer.model";
 import {objectPartition, tilePartition} from "./partition.model";
+import {MapTileRequestStatus, type MapTileStreamStatusPayload} from "./tilestream";
 
 function serviceHarness(): MapTileStreamService {
     return new MapTileStreamService(
@@ -16,6 +17,44 @@ function serviceHarness(): MapTileStreamService {
         } as any
     );
 }
+
+describe("MapTileStreamService request failures", () => {
+    it("logs bulk viewport failures without flooding error toasts", () => {
+        const service = serviceHarness();
+        const messages = {showError: vi.fn()};
+        const internal = service as any;
+        internal.messageService = messages;
+        const log = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            for (let requestId = 1; requestId <= 30; ++requestId) {
+                const status: MapTileStreamStatusPayload = {
+                    type: "mapget.tiles.status",
+                    requestId,
+                    allDone: true,
+                    requests: [{
+                        index: 0,
+                        mapId: "Map",
+                        layerId: "Lanes",
+                        status: MapTileRequestStatus.Aborted,
+                        statusText: "SmartLayerService: HTTP 429 Too Many Requests"
+                    }]
+                };
+                internal.acceptRequestStatus(status);
+            }
+
+            expect(messages.showError).not.toHaveBeenCalled();
+            expect(log).toHaveBeenCalledTimes(30);
+            expect(log).toHaveBeenLastCalledWith(
+                "Filter request failed: Map/Lanes: SmartLayerService: HTTP 429 Too Many Requests"
+            );
+            expect(service.getBackendRequestProgress()).toEqual({
+                done: 1, total: 1, allDone: true, requestId: 30
+            });
+        } finally {
+            log.mockRestore();
+        }
+    });
+});
 
 describe("MapTileStreamService source catalog refresh", () => {
     it("reloads again when a backend reconnect races an in-flight catalog fetch", async () => {
