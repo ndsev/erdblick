@@ -1319,7 +1319,9 @@ export class MapTileStreamService {
             )
             : [];
         if (failures.length) {
-            this.showError(
+            // Viewport failures can arrive in bulk. Keep them in diagnostics
+            // (which captures console errors), not in one toast per request.
+            console.error(
                 "Filter request failed: " +
                 failures.map(request =>
                     `${request.mapId}/${request.layerId}: ${request.statusText}`
@@ -1487,10 +1489,6 @@ export class MapTileStreamService {
 
     private showInfo(message: string): void {
         this.ngZone.run(() => this.messageService.showInfo(message));
-    }
-
-    private showError(message: string): void {
-        this.ngZone.run(() => this.messageService.showError(message));
     }
 
     private showBackendConnectionError(message: string): void {
