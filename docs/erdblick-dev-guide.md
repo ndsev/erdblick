@@ -119,6 +119,11 @@ private key is generated under the ignored test cache and removed at teardown.
 This is not a substitute for the deployed proxy, Keycloak login/refresh or real
 client onboarding tests; it never modifies shared SSO configuration.
 
+The `build-playwright` workflow runs the native local and disposable-OAuth
+Chromium suites against its freshly built mapget wheel before the general browser
+suite. Each uses a separate port and coverage directory; the general suite retains
+the Python datasource and browser matrix.
+
 ## Core model and WASM surface
 
 The C++ core wraps mapget models and exposes:
