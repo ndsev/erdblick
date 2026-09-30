@@ -99,6 +99,8 @@ const MAX_OBJECT_DISCOVERY_CACHE_TILES = 4096;
 @Injectable({providedIn: "root"})
 export class MapTileStreamService {
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
+    readonly actionClientId$ = new BehaviorSubject<string | null>(null);
+    readonly actionControlReceived = new Subject<{payload: unknown; receivedAt: number}>();
     readonly filterStatusReceived =
         new Subject<MapTileStreamFilterStatusPayload>();
 
@@ -173,6 +175,8 @@ export class MapTileStreamService {
             "/interactive",
             this.mapInfo.tileLayerParser
         );
+        this.tileStream.onClientId = clientId => this.actionClientId$.next(clientId);
+        this.tileStream.onActionControl = (payload, receivedAt) => this.actionControlReceived.next({payload, receivedAt});
         this.tileStream.setPullCompressionEnabled(
             this.stateService.tilePullCompressionEnabled
         );
@@ -233,6 +237,11 @@ export class MapTileStreamService {
         };
         await this.mapInfo.reloadDataSources();
         this.scheduleUpdate();
+    }
+
+    /** Sends an action reply on its original live connection without opening another transport. */
+    sendActionControl(clientId: string, payload: object): boolean {
+        return this.tileStream?.sendActionControl(clientId, payload) ?? false;
     }
 
     createFilterSubscription(

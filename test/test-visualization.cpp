@@ -1765,6 +1765,63 @@ TEST_CASE("Feature search completion labels enum-backed constants", "[erdblick.s
     REQUIRE_FALSE(hasCompletionType(speedCompletions, "Hint"));
 }
 
+TEST_CASE("Search completion uses native array domains and attribute overlays without sample nodes", "[erdblick.search]")
+{
+    auto layer = warningSignLayerInfoJson();
+    auto& definitions = layer["featureModelSchema"]["$defs"];
+    definitions["Feature"]["properties"]["samples"] = {
+        {"type", "array"}, {"items", {
+            {"type", "object"}, {"properties", {
+                {"speedLimit", {{"type", "number"}}},
+                {"next", {{"$ref", "#/$defs/Feature"}}}
+            }}
+        }}
+    };
+    definitions["WarningSignAttribute"]["properties"]["validity"] = {
+        {"type", "array"}, {"items", {{"type", "object"}, {"properties", {
+            {"direction", {{"type", "string"}, {"enum", {"POSITIVE", "NEGATIVE"}}}}
+        }}}}
+    };
+    auto source = nlohmann::json{{"stringPoolId", "Completion"}, {"mapId", "Completion"},
+        {"layers", {{"Road", layer}}}};
+    TileLayerParser parser;
+    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({source}).dump()));
+    auto complete = [&](std::string const& query, std::string const& scope, std::string const& expected) {
+        auto candidates = parser.completeSearchQuery(query, static_cast<int>(query.size()),
+            nlohmann::json{{"scope", scope}, {"limit", 40}, {"timeoutMs", 1000}});
+        auto found = std::find_if(candidates.begin(), candidates.end(), [&](auto const& item) {
+            return item.at("text") == expected;
+        });
+        INFO(query);
+        INFO(candidates.dump());
+        REQUIRE(found != candidates.end());
+        auto offset = found->at("range")[0].template get<size_t>();
+        auto length = found->at("range")[1].template get<size_t>();
+        auto replaced = query;
+        replaced.replace(offset, length, expected);
+        CHECK(found->at("query") == replaced);
+    };
+    complete("samples[17].spe", "feature", "speedLimit");
+    complete("samples[-1].spe", "feature", "speedLimit");
+    complete("samples[0].next.samples[0].next.samples[0].spe", "feature", "speedLimit");
+    complete("$fea", "attribute", "[\"$feature\"]");
+    complete("$feature.samples[17].spe", "attribute", "speedLimit");
+    complete("$validityC", "attribute", "[\"$validityCount\"]");
+    complete("$hasV", "attribute", "[\"$hasValidity\"]");
+    complete("validity[17].dir", "attribute", "direction");
+    complete("attributeValue.warningSign == SPE", "attribute", "\"SPEED_LIMIT_END\"");
+
+    // Replacing source metadata must invalidate bindings and their private ID namespaces.
+    definitions["Feature"]["properties"]["samples"]["items"]["properties"] = {
+        {"surfaceType", {{"type", "string"}}}
+    };
+    source["layers"]["Road"] = layer;
+    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({source}).dump()));
+    complete("samples[17].sur", "feature", "surfaceType");
+    auto stale = parser.completeSearchQuery("samples[17].spe", 15, nlohmann::json{{"scope", "feature"}});
+    CHECK(std::none_of(stale.begin(), stale.end(), [](auto const& item) { return item.at("text") == "speedLimit"; }));
+}
+
 TEST_CASE("FeatureLayerStyle rejects removed LOD fields", "[erdblick.style]")
 {
     auto style = FeatureLayerStyle(SharedUint8Array(R"yaml(

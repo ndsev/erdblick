@@ -1,0 +1,17 @@
+# Native protocol/UI smoke fixture, independent of the installed Python wheel.
+# Use via EB_MAPGET_CONFIG=test/mapget-native-grid.yaml with the integration runner.
+sources:
+  - type: GridDataSource
+    mapId: TestMap
+    collisionGridSize: 100.0
+    layers:
+      - name: WayLayer
+        featureType: DevSrc-Road
+        geometry:
+          type: line
+          density: 0.01
+      # The native road generator emits references to this built-in feature type.
+      - name: Intersections
+        featureType: DevSrc-Intersection
+        geometry:
+          type: point

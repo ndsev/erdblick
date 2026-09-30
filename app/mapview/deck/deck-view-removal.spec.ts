@@ -15,6 +15,20 @@ function createView() {
 }
 
 describe('Deck view removal camera handoff', () => {
+    it('reads a detached live pose without persistence and exposes gesture ownership', async () => {
+        const {view, state, viewState} = createView();
+        view['viewState'] = {...view['viewState'], longitude: 11, latitude: 48, bearing: 42, pitch: 20, position: [1, 2, 3]};
+        view['isCameraInteracting'] = true;
+        const live = view.getLiveCameraState()!;
+        expect(live.destination).toMatchObject({lon: 11, lat: 48});
+        expect(live.orientation.heading).toBeCloseTo(42 * Math.PI / 180);
+        expect(view.isCameraInteractionActive()).toBe(true);
+        live.position![0] = 99;
+        expect(view.getLiveCameraState()!.position).toEqual([1, 2, 3]);
+        expect(state.setView).not.toHaveBeenCalled();
+        expect(viewState.setViewport).not.toHaveBeenCalled();
+        await view.destroy();
+    });
     it('captures unpersisted camera motion and blocks late persistence and viewport writes', async () => {
         const {view, state, viewState} = createView();
         view['viewState'] = {...view['viewState'], longitude: 11, latitude: 48, bearing: 42, pitch: 20, position: [1, 2, 3]};
@@ -44,6 +58,7 @@ describe('Deck view removal camera handoff', () => {
         };
         view.restoreCameraState(handoff);
         expect(view.isFirstPersonViewActive()).toBe(true);
+        expect(view.getLiveCameraState()).toBeUndefined();
         const captured = view.prepareForViewRemoval();
         expect(captured.firstPerson).toEqual({
             position: [expect.closeTo(11.1), 48.2, 120], bearing: 72, pitch: -12

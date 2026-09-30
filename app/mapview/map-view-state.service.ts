@@ -10,7 +10,7 @@ import {
     VIEW_SYNC_MOVEMENT,
     VIEW_SYNC_POSITION
 } from "../shared/appstate.service";
-import {RenderRectangle, RenderViewCameraState} from "./render-view.model";
+import {IRenderView, RenderRectangle, RenderViewCameraState} from "./render-view.model";
 import {ViewVisualizationState} from "./view.visualization.model";
 import type {
     FeatureLayerStyle,
@@ -75,12 +75,21 @@ export class MapViewStateService {
     }>();
     private removingView = false;
     private readonly retainedCameras = new Map<number, RenderViewCameraState>();
+    private readonly renderViews = new Map<number, IRenderView>();
+    private layoutRevision = 0;
+
+    get viewLayoutRevision(): number { return this.layoutRevision; }
 
     constructor(
         private readonly stateService: AppStateService,
         private readonly mapInfo: MapInfoService
     ) {
+        let previousViewCount = this.stateService.numViews;
         this.stateService.numViewsState.subscribe(numViews => {
+            if (numViews !== previousViewCount) {
+                ++this.layoutRevision;
+                previousViewCount = numViews;
+            }
             if (this.removingView) {
                 return;
             }
@@ -99,6 +108,23 @@ export class MapViewStateService {
         this.stateService.lod3TileThresholdState.subscribe(() =>
             this.requestViewRecalculation(ViewRecalculationReason.LodThreshold));
         this.mapInfo.layerStateChanged.subscribe(reason => this.requestViewRecalculation(reason));
+    }
+
+    /** Registers a renderer reference, not a second camera-state store; teardown is generation-safe. */
+    registerRenderView(view: IRenderView): () => void {
+        this.renderViews.set(view.viewIndex, view);
+        return () => {
+            if (this.renderViews.get(view.viewIndex) === view) {
+                this.renderViews.delete(view.viewIndex);
+            }
+        };
+    }
+
+    /** Looks up a live renderer without touching the view's scene or tile collections. */
+    renderViewFor(viewIndex: number): IRenderView | undefined {
+        if (viewIndex < 0 || viewIndex >= this.stateService.numViews) return undefined;
+        const view = this.renderViews.get(viewIndex);
+        return view?.isAvailable() ? view : undefined;
     }
 
     /** Returns the mutable visualization state for one view, if it exists. */

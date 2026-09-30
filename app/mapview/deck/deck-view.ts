@@ -1571,6 +1571,16 @@ export abstract class DeckMapView implements IRenderView {
         return this.stateService.cameraViewDataState.getValue(this._viewIndex);
     }
 
+    /** Reads renderer-local motion without triggering persistence, tile loads or a redraw. */
+    getLiveCameraState(): CameraViewState | undefined {
+        return this.firstPersonSession ? undefined : this.cameraViewData(this.viewState);
+    }
+
+    /** Exposes gesture ownership without subscribing another consumer to every camera frame. */
+    isCameraInteractionActive(): boolean {
+        return this.isCameraInteracting;
+    }
+
     /** Captures live camera motion and prevents a retired index from publishing late updates. */
     prepareForViewRemoval(): RenderViewCameraState {
         this.retiringForViewRemoval = true;

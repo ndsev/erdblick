@@ -436,6 +436,15 @@ std::shared_ptr<mapget::LayerInfo> rendererLayerInfo()
         })json"));
 }
 
+/** One expression's singleton result sequence in the subset wire contract. */
+template<typename T>
+simfil::ModelNode::Ptr projectedScalar(mapget::TileSubsetLayer& subset, T const& value)
+{
+    auto results = subset.newArray();
+    results->append(subset.newValue(value));
+    return results;
+}
+
 mapget::model_ptr<mapget::GeometryCollection> lineGeometry(
     mapget::TileSubsetLayer& layer,
     std::string_view name)
@@ -577,9 +586,9 @@ TEST_CASE(
         "centerline",
         featureFields);
     std::vector<simfil::ModelNode::Ptr> featureValues{
-        subset->newValue(int64_t{2}),
-        subset->newValue(int64_t{17}),
-        subset->newValue(4.2),
+        projectedScalar(*subset, int64_t{2}),
+        projectedScalar(*subset, int64_t{17}),
+        projectedScalar(*subset, 4.2),
     };
     channel->newFeatureEntry(
         featureId,
@@ -677,6 +686,117 @@ rules:
 }
 
 TEST_CASE(
+    "TileSubsetLayerRenderer distinguishes projection cardinality from array-valued results",
+    "[erdblick.subset-renderer][projection]")
+{
+    auto strings = std::make_shared<mapget::StringPool>("ProjectionCardinality");
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        mapget::TileId::fromWgs84(11.0, 48.0, 13), "ProjectionCardinality",
+        "TestMap", rendererLayerInfo(), strings, "roads", 1);
+    auto results = subset->newArray();
+    double expectedZ = 13;
+    std::string issueProperty;
+    SECTION("zero results use the literal fallback") {}
+    SECTION("one null uses the literal fallback") { results->append(subset->materializeValue(simfil::Value::null())); }
+    SECTION("one undefined uses the literal fallback") { results->append(subset->newUndefined()); }
+    SECTION("one number is the exact style value") {
+        results->append(subset->newValue(int64_t{17}));
+        expectedZ = 17;
+    }
+    SECTION("multiple results are not silently first-picked") {
+        results->append(subset->newValue(int64_t{17}));
+        results->append(subset->newValue(int64_t{19}));
+        issueProperty = "projection";
+    }
+    SECTION("one array is one nonnumeric result, not a result to flatten") {
+        auto array = subset->newArray();
+        array->append(subset->newValue(int64_t{17}));
+        results->append(array);
+        issueProperty = "z-index-expression";
+    }
+    auto channel = subset->newChannel("style-rule:0", mapget::Scope::Feature,
+        1U << static_cast<uint8_t>(mapget::GeomType::Line), "centerline",
+        std::vector<std::string>{"drawOrder"});
+    channel->newFeatureEntry(subset->newFeatureId("Road", {{"roadId", int64_t{7}}}),
+        lineGeometry(*subset, "centerline"), std::vector<simfil::ModelNode::Ptr>{results});
+    auto style = rendererStyle(R"yaml(
+name: Projection cardinality
+version: 2
+rules:
+  - type: Road
+    geometry: line
+    geometry-name: centerline
+    color: white
+    width: 2
+    z-index: 13
+    z-index-expression: drawOrder
+)yaml");
+    REQUIRE(style.isValid());
+    TileSubsetLayerRenderer renderer(0, "Features:TestMap:Road:0", style,
+        static_cast<int>(FeatureStyleRule::NoHighlight), FeatureStyleRule::kMaximumLod);
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+    auto packet = RendererPacketView(renderer);
+    CHECK(packet.zIndices(0) == std::vector<double>{expectedZ});
+    auto issues = packet.issues();
+    if (issueProperty.empty()) {
+        CHECK(issues.empty());
+    }
+    else {
+        REQUIRE(issues.size() == 1);
+        CHECK(issues.front().property == issueProperty);
+        CHECK(issues.front().expression == "drawOrder");
+    }
+}
+
+TEST_CASE(
+    "Subset entry ranges preserve sequences and summaries describe results rather than wrappers",
+    "[erdblick.subset-renderer][projection]")
+{
+    auto strings = std::make_shared<mapget::StringPool>("ProjectionValues");
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        mapget::TileId::fromWgs84(11.0, 48.0, 13), "ProjectionValues",
+        "TestMap", rendererLayerInfo(), strings, "roads", 1);
+    auto empty = subset->newArray();
+    auto null = subset->newArray();
+    null->append(subset->materializeValue(simfil::Value::null()));
+    auto multiple = subset->newArray();
+    multiple->append(subset->newValue(int64_t{1}));
+    multiple->append(subset->newValue(int64_t{2}));
+    auto arrayValue = subset->newArray();
+    arrayValue->append(multiple);
+    auto undefinedValue = subset->newArray();
+    undefinedValue->append(subset->newUndefined());
+    auto object = subset->newObject();
+    (void)object->addField("_undefined", subset->newSmallValue(true)); // Ordinary user data is not our undefined encoding.
+    auto objectValue = subset->newArray();
+    objectValue->append(object);
+    auto channel = subset->newChannel("results", mapget::Scope::Feature,
+        0, std::nullopt, std::vector<std::string>{"empty", "null", "multiple", "array", "undefined", "object"});
+    channel->newFeatureEntry(subset->newFeatureId("Road", {{"roadId", int64_t{7}}}),
+        lineGeometry(*subset, "centerline"),
+        std::vector<simfil::ModelNode::Ptr>{empty, null, multiple, arrayValue, undefinedValue, objectValue});
+    TileSubsetLayer layer(subset);
+    auto entries = layer.entryRange(0, 0, 1, false);
+    REQUIRE(entries.size() == 1);
+    CHECK(entries[0]["values"] == nlohmann::json::array({
+        nlohmann::json::array(), nlohmann::json::array({nullptr}),
+        nlohmann::json::array({1, 2}), nlohmann::json::array({nlohmann::json::array({1, 2})}),
+        nlohmann::json::array({"<undefined>"}), nlohmann::json::array({{{"_undefined", true}}})}));
+    auto summary = layer.valueSummaries(0, 16, 512);
+    auto const& fields = summary["resultFields"];
+    CHECK(fields[0]["summary"]["missing"] == 1);
+    CHECK(fields[1]["summary"]["nulls"] == 1);
+    CHECK(fields[2]["summary"]["count"] == 2);
+    CHECK(fields[2]["summary"]["kinds"]["integer"] == 2);
+    CHECK(fields[2]["summary"]["numeric"]["sum"] == 3);
+    CHECK(fields[3]["summary"]["count"] == 1);
+    CHECK(fields[3]["summary"]["kinds"]["list"] == 1);
+    CHECK(fields[4]["summary"]["missing"] == 1);
+    CHECK(fields[5]["summary"]["kinds"]["object"] == 1);
+}
+
+TEST_CASE(
     "TileSubsetLayerRenderer extrudes mesh surfaces from projected style fields",
     "[erdblick.subset-renderer]")
 {
@@ -702,7 +822,7 @@ TEST_CASE(
         "footprint",
         featureFields);
     std::vector<simfil::ModelNode::Ptr> featureValues{
-        subset->newValue(12.0),
+        projectedScalar(*subset, 12.0),
     };
     channel->newFeatureEntry(
         featureId,
@@ -1216,8 +1336,8 @@ TEST_CASE(
                         std::string_view label,
                         double longitude) {
         std::vector<simfil::ModelNode::Ptr> values{
-            subset->newValue(label),
-            subset->newValue(int64_t{4}),
+            projectedScalar(*subset, label),
+            projectedScalar(*subset, int64_t{4}),
         };
         return channel->newFeatureEntry(
             featureId,
@@ -1814,7 +1934,7 @@ TEST_CASE(
         "Road",
         {{"roadId", int64_t{12}}});
     std::vector<simfil::ModelNode::Ptr> entryValues{
-        subset->newValue("double"),
+        projectedScalar(*subset, "double"),
     };
     channel->newAttributeValidityEntry(
         featureId,
