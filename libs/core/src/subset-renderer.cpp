@@ -903,11 +903,26 @@ BoundEvalFun TileSubsetLayerRenderer::makeEvalFun(
                 state.lastValue = simfil::Value::undef();
                 return state.lastValue;
             }
-            auto node = state.values->at(index);
             state.lastIndex = index;
-            state.lastValue = node
-                ? simfil::Value::field(*node)
-                : simfil::Value::undef();
+            state.lastValue = simfil::Value::undef();
+            auto results = state.values->at(index);
+            if (!results || results->type() != simfil::ValueType::Array) {
+                state.renderer->recordRuntimeIssue(
+                    "projection", expression,
+                    "Projected expression results must be an array.", 0);
+            }
+            else if (results->size() > 1) {
+                state.renderer->recordRuntimeIssue(
+                    "projection", expression,
+                    "Style expression returned multiple values; expected at most one. Use an explicit reduction.", 0);
+            }
+            else if (results->size() == 1) {
+                if (auto node = results->at(0)) {
+                    // An array-valued result is still one value. Never unwrap it
+                    // again or silently choose the first of several results.
+                    state.lastValue = simfil::Value::field(*node);
+                }
+            }
             return state.lastValue;
         };
     result.reportIssueRef_ = [](

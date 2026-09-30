@@ -12,7 +12,10 @@ export interface SearchResultTileEntry {
             height: number;
         } | null;
     };
-    values?: unknown[];
+    /** One ordered result sequence per expression; [] differs from [null] and [[...]]. */
+    values?: unknown[][];
+    /** A failed projection has an empty result sequence plus explicit error metadata. */
+    valueErrors?: Array<{expressionIndex: number; stage: string; message: string}>;
     attributeIndex?: number;
     validityIndex?: number;
     validityCount?: number;

@@ -167,11 +167,15 @@ export async function enableMapLayer(page: Page, mapLabel: string, layerLabel: s
     await expect(dialog).toBeVisible();
     await dialog.click();
 
-    const layerNode = dialog.locator(`[data-id="${mapLabel}/${layerLabel}"]`).first();
-    await expect(layerNode).toBeVisible();
-
+    const mapNode = dialog.getByRole('treeitem').filter({
+        has: page.getByRole('checkbox', {name: mapLabel, exact: true})
+    }).first();
+    const layerCheckboxInput = mapNode.getByRole('checkbox', {name: layerLabel, exact: true});
+    // A fresh viewer has collapsed map nodes; saved-state fixtures may already expand them.
+    if (!(await layerCheckboxInput.isVisible())) {
+        await mapNode.getByRole('button').first().click();
+    }
     // Toggle the corresponding checkbox for the requested layer.
-    const layerCheckboxInput = layerNode.locator('input.p-checkbox-input[type="checkbox"]').first();
     await expect(layerCheckboxInput).toBeVisible();
     await layerCheckboxInput.check();
     await closeLayerDialog(page);

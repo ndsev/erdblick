@@ -17,6 +17,21 @@ void AppModule;
 describe("Search observed category values", () => {
     beforeAll(() => initializeLibrary());
 
+    it.each([
+        {results: [], expected: ""},
+        {results: [null], expected: ""},
+        {results: [undefined], expected: ""},
+        {results: ["WARNING_SIGN"], expected: "WARNING_SIGN"},
+        {results: ["WARNING_SIGN", "SPEED_LIMIT"], expected: ""},
+        {results: [[1, 2]], expected: "[1,2]"},
+        {results: [{name: "WARNING_SIGN"}], expected: '{"name":"WARNING_SIGN"}'}
+    ])("formats a result label from exactly one value: $results", ({results, expected}) => {
+        const service = Object.create(FeatureSearchService.prototype) as FeatureSearchService;
+        expect(service["searchResultFieldValue"]({
+            mapTileKey: "tile", featureId: "Road.1", resultIndex: 0, values: [results]
+        }, ["$name"], "$name")).toBe(expected);
+    });
+
     it("requests numeric values even before a category scale has stops", () => {
         const definition = createFeatureSearchStateEntry({
             query: "attributes.layer.Guidance.NUM_LANES.numLanes.normalLanes",

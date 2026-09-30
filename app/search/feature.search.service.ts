@@ -2994,8 +2994,12 @@ export class FeatureSearchService {
                     values: task.projectedFieldIndices.map(index =>
                         index >= 0 && index < projectedValues.length
                             ? projectedValues[index]
-                            : null
-                    )
+                            : []
+                    ),
+                    valueErrors: entry.valueErrors?.flatMap(error => {
+                        const expressionIndex = task.projectedFieldIndices.indexOf(error.expressionIndex);
+                        return expressionIndex < 0 ? [] : [{...error, expressionIndex}];
+                    })
                 };
             });
         } finally {
@@ -3726,7 +3730,11 @@ export class FeatureSearchService {
         if (fieldIndex < 0 || !entry.values || fieldIndex >= entry.values.length) {
             return "";
         }
-        const value = entry.values[fieldIndex];
+        const results = entry.values[fieldIndex];
+        if (!Array.isArray(results) || results.length !== 1) {
+            return "";
+        }
+        const value = results[0];
         if (value === null || value === undefined) {
             return "";
         }

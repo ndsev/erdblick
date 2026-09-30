@@ -8,6 +8,7 @@ cmake-build-*
 static
 static-visualization-only
 .angular
+app/actions/generated/
 node_modules
 config
 config/*
