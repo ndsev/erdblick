@@ -375,7 +375,7 @@ diagnostics scan for each acknowledgement.
 
 `npm run generate:viewer-actions` exports self-contained Draft-07 schemas from the
 same DOM-free Zod definitions used at runtime. Both webapp variants package
-`viewer-actions.json` beside `index.html`. Its `catalogId` hashes compact JSON
+`web-mcp-actions.json` beside `index.html`. Its `catalogId` hashes compact JSON
 with recursively sorted object keys, retained array order and ECMAScript JSON
 scalar encoding; the digest and timestamps are not hash input. Generated files
 under `app/actions/generated/` are ignored build outputs. Argument, result,
@@ -386,6 +386,13 @@ bounded contract strings and text summaries; byte budgets remain UTF-8 byte limi
 When changing contracts during an already-running watch/serve session, rerun
 `npm run generate:viewer-actions` before reloading and updating the backend catalog;
 the lifecycle hook runs when the watcher starts, not on each source edit.
+
+For local native development, start mapget with `serve --host 127.0.0.1 -p 8099
+--webapp static/browser --mcp local`. It loads `web-mcp-actions.json` from the
+mounted webapp by default; `--mcp-catalog` overrides the artifact path. All MCP
+settings use the normal `mapget.serve` YAML/CLI pipeline, not a separate JSON
+config file. The native-local and disposable-OAuth Playwright fixtures exercise
+these same CLI options and the default catalog lookup.
 
 The browser registers only when `/mcp/info` advertises an exactly matching trusted
 catalog and the existing interactive connection has its UUID. Server controls use

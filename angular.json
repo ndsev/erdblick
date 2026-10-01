@@ -27,7 +27,7 @@
             "tsConfig": "tsconfig.app.json",
             "assets": [
               {
-                "glob": "viewer-actions.json",
+                "glob": "web-mcp-actions.json",
                 "input": "app/actions/generated",
                 "output": "/"
               },
@@ -105,7 +105,7 @@
               "outputHashing": "all",
               "assets": [
                 {
-                  "glob": "viewer-actions.json",
+                  "glob": "web-mcp-actions.json",
                   "input": "app/actions/generated",
                   "output": "/"
                 },
@@ -225,7 +225,7 @@
               "outputHashing": "all",
               "assets": [
                 {
-                  "glob": "viewer-actions.json",
+                  "glob": "web-mcp-actions.json",
                   "input": "app/actions/generated",
                   "output": "/"
                 },
@@ -323,7 +323,7 @@
               "outputHashing": "all",
               "assets": [
                 {
-                  "glob": "viewer-actions.json",
+                  "glob": "web-mcp-actions.json",
                   "input": "app/actions/generated",
                   "output": "/"
                 },

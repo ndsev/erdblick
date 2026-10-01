@@ -9,7 +9,7 @@ test.use({stateSnapshot: null});
 
 /** Browser-adapter fixture only: native MCP authentication/relay require separate backend integration tests. */
 async function browserActions(page: Page, mismatch = false) {
-    const catalog = JSON.parse(readFileSync('static/browser/viewer-actions.json', 'utf8'));
+    const catalog = JSON.parse(readFileSync('static/browser/web-mcp-actions.json', 'utf8'));
     const clientId = randomUUID();
     const messages: ViewerActionClientMessage[] = [];
     const connections: WebSocketRoute[] = [];
