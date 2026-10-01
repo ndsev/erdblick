@@ -37,22 +37,92 @@ cmake --build build-native
 ctest --test-dir build-native
 ```
 
-WebAssembly and application:
+For changes to the native/WASM core or its mapget/simfil dependencies, use the
+incremental rebuild script. It rebuilds the bindings and both frontend variants:
 
 ```bash
-source ci/emsdk/emsdk_env.sh
-export EMSCRIPTEN="$PWD/ci/emsdk/upstream/emscripten"
-emcmake cmake --preset release
-cmake --build --preset release
-npm ci
-npx tsc -p tsconfig.app.json --noEmit
-npm run test:vitest
-npm run build
+./ci/20_linux_rebuild.bash
 ```
 
-For a clean CI-equivalent core and UI build, run
-`./ci/10_linux_build.bash`. The exact top-level build commands used by
-MapViewer are also encoded in its CMake configuration and CI workflows.
+With matching WASM artifacts already present, frontend-only validation uses:
+
+```bash
+npm run lint
+npm run test -- --watch=false --include <path-or-glob>
+npm run build -- -c profiling
+```
+
+The build, start, watch and unit-test hooks generate the trusted viewer-action
+catalog before compiling. `./ci/10_linux_build.bash` is the clean CI build;
+it removes the existing build tree and is not the routine iteration command.
+
+The action/transport browser smoke can use a matching native `mapget` executable
+without an installed Python datasource wheel. From the erdblick root:
+
+```bash
+EB_MAPGET_CONFIG=test/mapget-native-grid.yaml npm run test:integration -- \
+  playwright/tests/tile-request.spec.ts playwright/tests/viewer-actions.spec.ts \
+  --project='' --workers=1
+```
+
+Set `MAPGET_BIN` when the executable is not on `PATH`. The transport cases use
+the real server; the viewer-action cases mock the MCP relay and do not establish
+authentication or native MCP routing. Other inspection fixtures still use the
+default Python example datasource and its matching protocol version.
+
+For the real HTTP-to-browser action path, enable the native local MCP fixture:
+
+```bash
+EB_MAPGET_MCP_LOCAL=1 EB_MAPGET_CONFIG=test/mapget-native-grid.yaml \
+  npm run test:integration -- playwright/tests/viewer-actions-native.spec.ts \
+  playwright/tests/schema-completion.spec.ts playwright/tests/tile-request.spec.ts \
+  --project='' --workers=1
+```
+
+This binds the test server to loopback and generates a test-only trust config
+under `playwright/.cache/`, using the catalog in the built frontend. The test
+uses two actual viewer origins (`localhost` and `127.0.0.1`) and the native MCP
+endpoint, including camera targeting, synchronization and stale-session rejection.
+It does not replace OAuth/Keycloak deployment acceptance. Use an unused
+`EB_APP_PORT` and a fresh `EB_PLAYWRIGHT_COVERAGE_DIR` for independent local runs.
+
+When `MAPGET_BIN` is the integrated MapViewer host, its production style catalog
+replaces the standalone defaults. Use the existing development map and matching
+layer selectors so the tile/render assertions exercise a configured style:
+
+```bash
+MAPGET_BIN=../../cmake-build-release-with-classic/bin/mapviewer \
+  EB_MAPGET_MCP_LOCAL=1 EB_MAPGET_CONFIG=../../config/mapviewer_dev.yaml \
+  EB_TEST_MAP_NAME=GridDataSource EB_TEST_LAYER_NAME=DevSrc-RoadLayer \
+  npm run test:integration -- playwright/tests/viewer-actions-native.spec.ts \
+  playwright/tests/schema-completion.spec.ts playwright/tests/tile-request.spec.ts \
+  --project='' --workers=1
+```
+
+The generic `TestMap/WayLayer` fixture does not match MapViewer's production
+`DevSrc-RoadLayer` style. Successful connection/control is not proof of tile
+rendering when no style enables that layer.
+
+The OAuth integration fixture uses a disposable RSA issuer and a loopback-only
+WebSocket forwarding proxy against that same native backend. The proxy overwrites
+the test identity headers on the real handshake; Chromium's extra HTTP headers
+do not cover WebSocket handshakes. Browser action/control messages are not mocked:
+
+```bash
+EB_MAPGET_MCP_TEST_OAUTH=1 EB_MAPGET_CONFIG=test/mapget-native-grid.yaml \
+  npm run test:integration -- playwright/tests/viewer-actions-auth.spec.ts \
+  --project='' --workers=1
+```
+
+It checks principal isolation, read/control permissions and token rejection. Its
+private key is generated under the ignored test cache and removed at teardown.
+This is not a substitute for the deployed proxy, Keycloak login/refresh or real
+client onboarding tests; it never modifies shared SSO configuration.
+
+The `build-playwright` workflow runs the native local and disposable-OAuth
+Chromium suites against its freshly built mapget wheel before the general browser
+suite. Each uses a separate port and coverage directory; the general suite retains
+the Python datasource and browser matrix.
 
 ## Core model and WASM surface
 
@@ -68,6 +138,25 @@ The C++ core wraps mapget models and exposes:
 
 The retired full-feature visualizers and `TileSearchResultLayer` wrappers do
 not coexist with this path.
+
+Search completion selects native feature or attribute-query schema IDs from
+mapget's `LayerSchema` and calls simfil's schema-domain completion directly.
+The parser caches one environment/private string namespace per registry, cleared
+when datasource metadata changes. It builds no sample `ModelPool` or frontend
+schema graph. Mapget owns attribute overlay roots such as `$feature` and validity
+metadata; simfil owns array, union and recursive-domain traversal. Candidate
+merging/type hints remain in erdblick, under one timeout across selected roots.
+
+Subset projected values have two distinct array levels: the outer array aligns
+with the channel's expressions, and each slot contains that expression's ordered
+results. `[]`, `[null]`, `[1, 2]` and `[[1, 2]]` mean no result, one null, two
+results and one array-valued result respectively. Native undefined survives the
+WASM boundary as JavaScript `undefined`; `valueErrors` distinguishes failed
+expressions from successful empty results. Search summaries count actual results,
+not sequence wrappers. Scalar style properties accept exactly one result, use
+their default for zero results and report a runtime issue/default for multiple
+results. They never silently pick the first. Hover/result labels likewise only
+unwrap singleton sequences.
 
 ## Ownership model
 
@@ -245,6 +334,92 @@ deadline: an older or equal deadline cannot replace the retained value or
 acknowledge pending work. A semantically fresher value may be installed even
 when it is already expired, in which case it remains stale and the output
 stays pending.
+
+## Optional MCP browser actions
+
+`ViewerActionService` binds an explicit action allowlist to existing application
+owners. It is not a second application state store or an arbitrary method-call
+API. Mapget owns MCP authentication, authorization and session routing; erdblick
+does not grant permissions based on browser-supplied identity claims.
+
+The browser actions are `viewer_describe_app_state`, `viewer_get_app_state` and
+`viewer_set_app_state`. Mapget adds/removes the routing `clientId` at the MCP
+boundary; it also owns `viewer_list_sessions`. Browser arguments have no routing
+field. State-channel contracts live in `app/shared/app-state-channel.contract.ts`.
+
+| Channel | Access | Owner/value |
+| --- | --- | --- |
+| `app.views` | Read | View indices, focus, sync, projection and navigation availability |
+| `view.camera` | Read/write | Live render-view pose; ordinary AppState camera setter |
+| `view.layers` | Read | Visible layers, or a selected map/layer including hidden settings |
+| `app.selections` | Read | Panel and feature identities; no inspection trees |
+| `app.searches` | Read | Definitions including hidden/paused searches, plus runtime counts; no result data |
+
+Getters do not fetch tiles, run queries or walk features. A read is bounded to
+32 targets, 100 items per collection and a 256 KiB wire result; omitted content
+is explicit. `complete: false` and unavailable values must not be interpreted as
+empty collections. Source-data panel `loading` is `null` because that request's
+state belongs to the panel, not feature inspection resolution.
+
+Camera values are runtime objects, not flattened URL/storage codecs. Longitude
+and latitude are degrees; orientation is radians; `destination.alt` is the
+positive viewer scale-height in metres, not physical eye altitude. Nonzero roll
+and first-person map-camera writes are unsupported. Writes require the observed
+`viewLayoutRevision`, focus the target and honor position/movement sync. Active
+human camera gestures reject conflicting writes. The response reports the actual
+normalized pose and affected views. `applied` does not mean tiles have loaded or
+a frame has rendered; readiness is currently `unknown` to avoid a scene-wide
+diagnostics scan for each acknowledgement.
+
+### Contract generation and relay
+
+`npm run generate:viewer-actions` exports self-contained Draft-07 schemas from the
+same DOM-free Zod definitions used at runtime. Both webapp variants package
+`web-mcp-actions.json` beside `index.html`. Its `catalogId` hashes compact JSON
+with recursively sorted object keys, retained array order and ECMAScript JSON
+scalar encoding; the digest and timestamps are not hash input. Generated files
+under `app/actions/generated/` are ignored build outputs. Argument, result,
+relay and connection-info parity fixtures live in `test/viewer-actions/`.
+String bounds use Unicode code points, as Draft-07 specifies, not JavaScript's
+UTF-16 length. Use the shared `boundedUnicodeString`/`unicodePrefix` helpers for
+bounded contract strings and text summaries; byte budgets remain UTF-8 byte limits.
+When changing contracts during an already-running watch/serve session, rerun
+`npm run generate:viewer-actions` before reloading and updating the backend catalog;
+the lifecycle hook runs when the watcher starts, not on each source edit.
+
+For local native development, start mapget with `serve --host 127.0.0.1 -p 8099
+--webapp static/browser --mcp local`. It loads `web-mcp-actions.json` from the
+mounted webapp by default; `--mcp-catalog` overrides the artifact path. All MCP
+settings use the normal `mapget.serve` YAML/CLI pipeline, not a separate JSON
+config file. The native-local and disposable-OAuth Playwright fixtures exercise
+these same CLI options and the default catalog lookup.
+
+The browser registers only when `/mcp/info` advertises an exactly matching trusted
+catalog and the existing interactive connection has its UUID. Server controls use
+VTLV `ActionControl` frame type 9; browser controls use text JSON on that same
+socket. Relay envelope version 1 is independent of tile protocol 5.3. Controls
+bypass the pausable tile-data queue without advancing tile request IDs or changing
+dictionary/data order. There is no second WebSocket or mutation replay.
+
+One owner admits at most four calls, including at most one mutation; busy work is
+rejected, not queued. Cancellation, disconnect and expiry invalidate pending work.
+An immediate synchronous camera commit is not rolled back by a later cancel.
+Unexpected failures after effects began report an unknown outcome rather than a
+false rollback guarantee.
+
+### Connection and activity UI
+
+On MCP-enabled deployments, the main-bar MCP control shows availability, a
+renameable tab label, bounded recent action names/outcomes and Stop current action.
+Stop cancels pending agent work, not completed edits or human searches. Catalog
+mismatch disables agent controls only; ordinary viewing remains available.
+
+Copy MCP URL, Copy Codex command and Copy Claude Code command use the server's
+public connection metadata and fixed, POSIX-shell-quoted command syntax. Local
+mode omits OAuth flags; OAuth mode can include a pre-registered public client ID.
+Login remains in the client, not the browser UI. See the official
+[Codex MCP instructions](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
+and [Claude Code MCP instructions](https://code.claude.com/docs/en/mcp).
 
 ## Render pipeline
 

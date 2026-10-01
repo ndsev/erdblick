@@ -99,6 +99,8 @@ const MAX_OBJECT_DISCOVERY_CACHE_TILES = 4096;
 @Injectable({providedIn: "root"})
 export class MapTileStreamService {
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
+    readonly actionClientId$ = new BehaviorSubject<string | null>(null);
+    readonly actionControlReceived = new Subject<{payload: unknown; receivedAt: number}>();
     readonly filterStatusReceived =
         new Subject<MapTileStreamFilterStatusPayload>();
 
@@ -173,6 +175,8 @@ export class MapTileStreamService {
             "/interactive",
             this.mapInfo.tileLayerParser
         );
+        this.tileStream.onClientId = clientId => this.actionClientId$.next(clientId);
+        this.tileStream.onActionControl = (payload, receivedAt) => this.actionControlReceived.next({payload, receivedAt});
         this.tileStream.setPullCompressionEnabled(
             this.stateService.tilePullCompressionEnabled
         );
@@ -233,6 +237,11 @@ export class MapTileStreamService {
         };
         await this.mapInfo.reloadDataSources();
         this.scheduleUpdate();
+    }
+
+    /** Sends an action reply on its original live connection without opening another transport. */
+    sendActionControl(clientId: string, payload: object): boolean {
+        return this.tileStream?.sendActionControl(clientId, payload) ?? false;
     }
 
     createFilterSubscription(
@@ -1319,7 +1328,9 @@ export class MapTileStreamService {
             )
             : [];
         if (failures.length) {
-            this.showError(
+            // Viewport failures can arrive in bulk. Keep them in diagnostics
+            // (which captures console errors), not in one toast per request.
+            console.error(
                 "Filter request failed: " +
                 failures.map(request =>
                     `${request.mapId}/${request.layerId}: ${request.statusText}`
@@ -1487,10 +1498,6 @@ export class MapTileStreamService {
 
     private showInfo(message: string): void {
         this.ngZone.run(() => this.messageService.showInfo(message));
-    }
-
-    private showError(message: string): void {
-        this.ngZone.run(() => this.messageService.showError(message));
     }
 
     private showBackendConnectionError(message: string): void {

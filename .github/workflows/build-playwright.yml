@@ -88,6 +88,32 @@ jobs:
           ./venv/bin/pip install "$GITHUB_WORKSPACE"/build/mapget-wheel/bin/wheel/mapget-*.whl
           ./venv/bin/pip show mapget
 
+      - name: Run native local MCP browser acceptance
+        timeout-minutes: 10
+        env:
+          EB_APP_PORT: '9001'
+          EB_MAPGET_CONFIG: test/mapget-native-grid.yaml
+          EB_MAPGET_MCP_LOCAL: '1'
+          EB_PLAYWRIGHT_COVERAGE_DIR: coverage/playwright-mcp-local
+        run: |
+          source ./venv/bin/activate
+          ./ci/run-integration-with-venv-mapget.sh -- \
+            playwright/tests/viewer-actions-native.spec.ts \
+            playwright/tests/schema-completion.spec.ts playwright/tests/tile-request.spec.ts \
+            --project='' --workers=1
+
+      - name: Run native OAuth MCP browser acceptance
+        timeout-minutes: 10
+        env:
+          EB_APP_PORT: '9002'
+          EB_MAPGET_CONFIG: test/mapget-native-grid.yaml
+          EB_MAPGET_MCP_TEST_OAUTH: '1'
+          EB_PLAYWRIGHT_COVERAGE_DIR: coverage/playwright-mcp-oauth
+        run: |
+          source ./venv/bin/activate
+          ./ci/run-integration-with-venv-mapget.sh -- \
+            playwright/tests/viewer-actions-auth.spec.ts --project='' --workers=1
+
       - name: Run Playwright integration tests (with coverage)
         timeout-minutes: 35
         run: |
@@ -106,7 +132,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-coverage
-          path: coverage/playwright
+          path: coverage/playwright*
 
       - name: Comment PR with Playwright coverage summary
         # Skip forks where the GITHUB_TOKEN cannot write to issues/comments

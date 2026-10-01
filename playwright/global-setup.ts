@@ -3,6 +3,7 @@ import {spawn} from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
+import {generateKeyPairSync} from 'node:crypto';
 
 /**
  * Global Playwright setup.
@@ -115,6 +116,44 @@ async function globalSetup(config: FullConfig): Promise<void> {
         mapgetConfigPath,
         'serve',
     ];
+    const mcpOAuthFixture = process.env['EB_MAPGET_MCP_TEST_OAUTH'] === '1';
+    if (process.env['EB_MAPGET_MCP_LOCAL'] === '1' || mcpOAuthFixture) {
+        const origin = new URL(baseURL);
+        if (origin.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)) {
+            throw new Error('The local MCP test fixture requires a loopback HTTP base URL');
+        }
+        args.push('--host', origin.hostname === '[::1]' ? '::1' : '127.0.0.1',
+            '--mcp', mcpOAuthFixture ? 'oauth' : 'local');
+        if (mcpOAuthFixture) {
+            // Disposable test issuer and proxy claims, never shared SSO credentials or a production config.
+            const {privateKey, publicKey} = generateKeyPairSync('rsa', {modulusLength: 2048});
+            const fixtureDirectory = path.join(projectRoot, 'playwright', '.cache');
+            fs.mkdirSync(fixtureDirectory, {recursive: true});
+            const keyPath = path.join(fixtureDirectory, `mcp-test-key-${port}.pem`);
+            const jwksPath = path.join(fixtureDirectory, `mcp-test-jwks-${port}.json`);
+            fs.writeFileSync(keyPath, privateKey.export({type: 'pkcs8', format: 'pem'}), {mode: 0o600});
+            fs.writeFileSync(jwksPath, JSON.stringify({keys: [{
+                ...publicKey.export({format: 'jwk'}), alg: 'RS256', use: 'sig', kid: 'test-key'
+            }]}));
+            const alternateOrigin = new URL(origin);
+            alternateOrigin.hostname = origin.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
+            const origins = origin.hostname === '[::1]' ? [origin] : [origin, alternateOrigin];
+            args.push(
+                '--mcp-endpoint', 'https://viewer.example/mcp',
+                '--mcp-allowed-hosts', ...origins.map(value => value.host),
+                '--mcp-allowed-origins', ...origins.map(value => value.origin),
+                '--mcp-issuer', 'https://issuer.example/realm',
+                '--mcp-jwks-file', jwksPath, '--mcp-required-scopes', 'viewer',
+                '--mcp-oauth-client-id', 'public-client', '--mcp-clock-skew-seconds', '0',
+                '--mcp-read-claim', '/access/roles', '--mcp-read-value', 'read',
+                '--mcp-control-claim', '/access/roles', '--mcp-control-value', 'control',
+                '--mcp-trusted-proxy-addresses', '127.0.0.1', '::1',
+                '--mcp-browser-issuer-header', 'test-issuer', '--mcp-browser-subject-header', 'test-subject',
+                '--mcp-browser-expiry-header', 'test-expiry', '--mcp-browser-permissions-header', 'test-permissions'
+            );
+        }
+    }
+
     if (process.env["EB_MAPGET_ALLOW_POST_CONFIG"] !== '0') {
         args.push('--allow-post-config');
     }

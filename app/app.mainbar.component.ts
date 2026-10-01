@@ -80,6 +80,7 @@ interface StyleSheetMenuNode {
             </ng-template>
             <ng-template #end>
                 <div style="display: flex; flex-direction: row; gap: 0; align-items: center">
+                    <viewer-action-status></viewer-action-status>
                     <diagnostics-indicator></diagnostics-indicator>
                     @if (copyright.length) {
                         <div class="copyright-info" (click)="openLegalInfo()">

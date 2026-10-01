@@ -14,7 +14,8 @@ import {
 import {
     coreLib,
     uint8ArrayFromWasm,
-    uint8ArrayToWasm
+    uint8ArrayToWasm,
+    uint8ArrayToWasmOrThrow
 } from "../integrations/wasm";
 import {AppStateService, TileGridMode, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
@@ -439,7 +440,7 @@ export class MapInfoService {
         const parser = new coreLib.TileLayerParser() as TileLayerParser;
         try {
             const json = new TextEncoder().encode(JSON.stringify(sources));
-            uint8ArrayToWasm(
+            uint8ArrayToWasmOrThrow(
                 wasmBuffer => parser.setDataSourceInfo(wasmBuffer),
                 json
             );
