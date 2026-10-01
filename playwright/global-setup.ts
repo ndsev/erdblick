@@ -122,44 +122,38 @@ async function globalSetup(config: FullConfig): Promise<void> {
         if (origin.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)) {
             throw new Error('The local MCP test fixture requires a loopback HTTP base URL');
         }
-        const mcpConfigPath = path.join(projectRoot, 'playwright', '.cache', `mcp-test-${port}.json`);
-        fs.mkdirSync(path.dirname(mcpConfigPath), {recursive: true});
-        const alternateOrigin = new URL(origin);
-        alternateOrigin.hostname = origin.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
-        const origins = origin.hostname === '[::1]' ? [origin] : [origin, alternateOrigin];
-        const mcpSettings: Record<string, unknown> = {
-            authentication: mcpOAuthFixture ? 'oauth' : 'local',
-            endpoint: mcpOAuthFixture ? 'https://viewer.example/mcp' : new URL('/mcp', origin).href,
-            catalogPath: path.join(projectRoot, 'static', 'browser', 'viewer-actions.json'),
-            allowedHosts: origins.map(value => value.host),
-            allowedOrigins: origins.map(value => value.origin)
-        };
+        args.push('--host', origin.hostname === '[::1]' ? '::1' : '127.0.0.1',
+            '--mcp', mcpOAuthFixture ? 'oauth' : 'local');
         if (mcpOAuthFixture) {
             // Disposable test issuer and proxy claims, never shared SSO credentials or a production config.
             const {privateKey, publicKey} = generateKeyPairSync('rsa', {modulusLength: 2048});
-            const keyPath = path.join(path.dirname(mcpConfigPath), `mcp-test-key-${port}.pem`);
-            const jwksPath = path.join(path.dirname(mcpConfigPath), `mcp-test-jwks-${port}.json`);
+            const fixtureDirectory = path.join(projectRoot, 'playwright', '.cache');
+            fs.mkdirSync(fixtureDirectory, {recursive: true});
+            const keyPath = path.join(fixtureDirectory, `mcp-test-key-${port}.pem`);
+            const jwksPath = path.join(fixtureDirectory, `mcp-test-jwks-${port}.json`);
             fs.writeFileSync(keyPath, privateKey.export({type: 'pkcs8', format: 'pem'}), {mode: 0o600});
             fs.writeFileSync(jwksPath, JSON.stringify({keys: [{
                 ...publicKey.export({format: 'jwk'}), alg: 'RS256', use: 'sig', kid: 'test-key'
             }]}));
-            mcpSettings['oauth'] = {
-                issuer: 'https://issuer.example/realm', audience: 'https://viewer.example/mcp',
-                jwksFile: jwksPath, requiredScopes: ['viewer'], clientId: 'public-client', clockSkewSeconds: 0,
-                permissions: {
-                    'viewer-read': {claim: '/access/roles', value: 'read'},
-                    'viewer-control': {claim: '/access/roles', value: 'control'}
-                },
-                browser: {
-                    trustedProxyAddresses: ['127.0.0.1', '::1'], issuerHeader: 'test-issuer',
-                    subjectHeader: 'test-subject', expiryHeader: 'test-expiry',
-                    permissionsHeader: 'test-permissions', maxLifetimeSeconds: 3600
-                }
-            };
+            const alternateOrigin = new URL(origin);
+            alternateOrigin.hostname = origin.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
+            const origins = origin.hostname === '[::1]' ? [origin] : [origin, alternateOrigin];
+            args.push(
+                '--mcp-endpoint', 'https://viewer.example/mcp',
+                '--mcp-allowed-hosts', ...origins.map(value => value.host),
+                '--mcp-allowed-origins', ...origins.map(value => value.origin),
+                '--mcp-issuer', 'https://issuer.example/realm',
+                '--mcp-jwks-file', jwksPath, '--mcp-required-scopes', 'viewer',
+                '--mcp-oauth-client-id', 'public-client', '--mcp-clock-skew-seconds', '0',
+                '--mcp-read-claim', '/access/roles', '--mcp-read-value', 'read',
+                '--mcp-control-claim', '/access/roles', '--mcp-control-value', 'control',
+                '--mcp-trusted-proxy-addresses', '127.0.0.1', '::1',
+                '--mcp-browser-issuer-header', 'test-issuer', '--mcp-browser-subject-header', 'test-subject',
+                '--mcp-browser-expiry-header', 'test-expiry', '--mcp-browser-permissions-header', 'test-permissions'
+            );
         }
-        fs.writeFileSync(mcpConfigPath, JSON.stringify(mcpSettings));
-        args.push('--host', origin.hostname === '[::1]' ? '::1' : '127.0.0.1', '--mcp-config', mcpConfigPath);
     }
+
     if (process.env["EB_MAPGET_ALLOW_POST_CONFIG"] !== '0') {
         args.push('--allow-post-config');
     }
