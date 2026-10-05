@@ -383,6 +383,12 @@ relay and connection-info parity fixtures live in `test/viewer-actions/`.
 String bounds use Unicode code points, as Draft-07 specifies, not JavaScript's
 UTF-16 length. Use the shared `boundedUnicodeString`/`unicodePrefix` helpers for
 bounded contract strings and text summaries; byte budgets remain UTF-8 byte limits.
+Fixed-size numeric vectors use homogeneous array schemas with equal `minItems`
+and `maxItems`, not Draft-07 tuple-style `items` arrays. This preserves the
+three-number camera offset while allowing MCP clients to expose its tool to a
+model. Client acceptance must check the model-visible callable inventory:
+successful `tools/list` discovery or direct invocation alone does not prove that
+the client can convert every input schema into a model tool signature.
 When changing contracts during an already-running watch/serve session, rerun
 `npm run generate:viewer-actions` before reloading and updating the backend catalog;
 the lifecycle hook runs when the watcher starts, not on each source edit.

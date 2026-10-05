@@ -47,6 +47,28 @@ describe("viewer action shared contract fixtures", () => {
         }).success).toBe(false);
     });
 
+    it.each([Number.NaN, Infinity, -Infinity])("rejects non-finite camera offset %s", component => {
+        expect(cameraViewStateSchema.safeParse({
+            destination: {lon: 11, lat: 48, alt: 500},
+            orientation: {heading: 0, pitch: -1, roll: 0},
+            position: [0, component, 0]
+        }).success).toBe(false);
+    });
+
+    it("exports camera offsets as fixed-size homogeneous arrays for MCP clients", () => {
+        const catalog = viewerActionCatalog();
+        const cameraSchema = {
+            properties: {position: {type: "array", items: {type: "number"}, minItems: 3, maxItems: 3}},
+            required: ["destination", "orientation"]
+        };
+        const setter = catalog.actions.find(action => action.name === "viewer_set_app_state");
+        expect(setter?.inputSchema).toMatchObject({properties: {value: cameraSchema}});
+        expect(setter?.outputSchema).toMatchObject({properties: {value: cameraSchema}});
+        expect(catalog.channels.find(channel => channel.name === "view.camera")?.valueSchema).toMatchObject(cameraSchema);
+        // Discovery can succeed even when a client cannot expose a tuple schema to its model.
+        expect(canonicalViewerContractJson(catalog)).not.toMatch(/"items":\[/);
+    });
+
     it("does not accept a runtime value for the wrong channel", () => {
         expect(viewerActions.viewer_get_app_state.outputSchema.safeParse({
             observedAt: "2026-09-29T00:00:00Z", viewLayoutRevision: 0,

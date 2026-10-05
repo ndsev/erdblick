@@ -21,7 +21,8 @@ export const cameraViewStateSchema = z.strictObject({
         pitch: z.number().min(-Math.PI / 2).max(-Math.PI / 36).describe("Pitch in radians; -pi/2 is top-down, -pi/36 is the maximum tilt."),
         roll: z.literal(0).describe("Roll is not implemented; only zero is supported.")
     }),
-    position: z.tuple([z.number(), z.number(), z.number()]).optional()
+    // Some MCP clients reject tuple schemas; refine to a tuple only after validating the array length.
+    position: z.array(z.number()).length(3).transform(position => position as [number, number, number]).optional()
         .describe("Local map-centre offset in metres; omitted means [0,0,0].")
 });
 
