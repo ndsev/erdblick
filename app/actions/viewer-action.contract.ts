@@ -2,9 +2,11 @@ import {z} from "zod";
 import {boundedUnicodeString} from "../shared/unicode-string.js";
 import {
     appStateChannels, appStateOmissionSchema, appStateReadinessSchema,
-    appStateTargetSchema, appStateTargetSchemas, appStateValueSchema,
-    cameraViewStateSchema
+    appStateTargetSchema, appStateValueSchema,
+    appStateWritableChannels, appStateWritableTargetSchema, appStateWritableValueSchema
 } from "../shared/app-state-channel.contract.js";
+import {viewerOperations} from "./viewer-operation.contract.js";
+import {viewerUiActions} from "./viewer-ui.contract.js";
 
 export const VIEWER_ACTION_INVOCATION_BYTES = 64 * 1024;
 export const VIEWER_ACTION_RESULT_BYTES = 256 * 1024;
@@ -18,6 +20,24 @@ const completenessShape = {
     omissions: z.array(appStateOmissionSchema).max(VIEWER_ACTION_TARGET_LIMIT)
 };
 
+/** Cross-field constraints are derived from channel definitions for BOTH validators. */
+const assignmentConstraints = appStateWritableChannels.map(([name, channel]) => ({
+    if: {properties: {target: {properties: {channel: {const: name}}}}},
+    then: {properties: {value: viewerJsonSchema(channel.valueSchema)},
+        ...("viewIndex" in channel.selectorSchema.shape || name === "app.focusedView" ? {required: ["viewLayoutRevision"]} : {})}
+}));
+const assignmentInputSchema = z.strictObject({
+    target: appStateWritableTargetSchema, value: appStateWritableValueSchema, viewLayoutRevision: revisionSchema.optional()
+}).superRefine((input, context) => {
+    const channel = appStateChannels[input.target.channel];
+    if (!channel.writable || !channel.valueSchema.safeParse(input.value).success) {
+        context.addIssue({code: "custom", path: ["value"], message: "Value does not match the writable channel"});
+    }
+    if (("viewIndex" in input.target || input.target.channel === "app.focusedView") && input.viewLayoutRevision === undefined) {
+        context.addIssue({code: "custom", path: ["viewLayoutRevision"], message: "View-scoped writes require a layout revision"});
+    }
+}).meta({allOf: assignmentConstraints});
+
 /** Public metadata exported from the same definitions used by runtime handlers. */
 export const appStateChannelDescriptorSchema = z.strictObject({
     name: channelNameSchema,
@@ -26,8 +46,8 @@ export const appStateChannelDescriptorSchema = z.strictObject({
     valueSchema: z.record(z.string(), z.unknown()),
     readable: z.boolean(),
     writable: z.boolean(),
-    persistence: z.enum(["runtime-summary", "url-and-local-storage"]),
-    synchronization: z.enum(["none", "focus-target-and-follow-view-sync"])
+    persistence: z.enum(["runtime-summary", "url-and-local-storage", "local-storage", "mixed"]),
+    synchronization: z.enum(["none", "follow-view-sync", "focus-target-and-follow-view-sync"])
 });
 
 /** Browser actions only: mapget owns viewer_list_sessions and adds clientId routing. */
@@ -57,24 +77,26 @@ export const viewerActions = {
         })
     },
     viewer_set_app_state: {
-        description: "Assign one writable channel through its application owner. Camera assignment is immediate, focuses the target, honors view synchronization and requires the observed viewLayoutRevision. Applied does not mean tiles have loaded or rendered.",
+        description: "Change settings directly: view.layer for layer visibility/level, view.styleOption for style options, view.layerPreset/view.mapPreset for presets, view.camera, view.background, and view.grid. Discover selectors/value schemas with viewer_describe_app_state. Assign one complete value through its application owner; view-scoped writes require the observed viewLayoutRevision and honor synchronization. Use runtime objects, not storage/URL encodings. Applied does not mean tiles have loaded or rendered.",
         permission: "viewer-control", mutation: true,
-        inputSchema: z.strictObject({
-            target: appStateTargetSchemas["view.camera"],
-            value: cameraViewStateSchema,
-            viewLayoutRevision: revisionSchema
-        }),
+        inputSchema: assignmentInputSchema,
         outputSchema: z.strictObject({
             status: z.literal("applied"),
-            target: appStateTargetSchemas["view.camera"],
-            value: cameraViewStateSchema,
+            target: appStateWritableTargetSchema,
+            value: appStateWritableValueSchema,
             changed: z.boolean(),
             focusedView: revisionSchema,
             affectedViews: z.array(revisionSchema).max(100),
             viewLayoutRevision: revisionSchema,
             readiness: appStateReadinessSchema
-        })
-    }
+        }).superRefine((output, context) => {
+            if (!appStateChannels[output.target.channel].valueSchema.safeParse(output.value).success) {
+                context.addIssue({code: "custom", path: ["value"], message: "Value does not match the channel"});
+            }
+        }).meta({allOf: assignmentConstraints})
+    },
+    ...viewerOperations,
+    ...viewerUiActions
 } as const;
 
 export type ViewerActionName = keyof typeof viewerActions;

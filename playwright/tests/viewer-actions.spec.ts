@@ -4,6 +4,7 @@ import type {Page, WebSocketRoute} from '@playwright/test';
 import {expect, test} from '../fixtures/test';
 import type {ViewerActionClientMessage} from '../../app/actions/viewer-action-relay.contract';
 import {viewerActions} from '../../app/actions/viewer-action.contract';
+import {cameraViewStateSchema} from '../../app/shared/app-state-channel.contract';
 
 test.use({stateSnapshot: null});
 
@@ -99,7 +100,7 @@ test('browser action adapter reads live views, moves only its target and updates
         expect('error' in reply ? reply.error : undefined).toBeUndefined();
         const applied = viewerActions.viewer_set_app_state.outputSchema.parse('result' in reply ? reply.result : undefined);
         expect(applied).toMatchObject({status: 'applied', focusedView: 1, affectedViews: [1], changed: true, readiness: {status: 'unknown'}});
-        expect(applied.value.destination.lon).toBeCloseTo(value.destination.lon, 5);
+        expect(cameraViewStateSchema.parse(applied.value).destination.lon).toBeCloseTo(value.destination.lon, 5);
         await expect(details.getByRole('listitem').filter({hasText: 'viewer_set_app_state'})).toContainText('applied');
         const after = await read(first);
         expect(after.values[0]).toEqual(before.values[0]);
@@ -133,5 +134,52 @@ test('catalog mismatch disables agent controls without hiding the map or opening
     await expect(page.getByTestId('viewer-action-details')).toContainText('catalogs do not match');
     await expect(page.locator('#mapViewContainer-0 canvas').first()).toBeVisible();
     expect(adapter.messages).toEqual([]);
+    expect(adapter.connections).toHaveLength(1);
+});
+
+test('browser actions share settings, view lifecycle, style editing and diagnostics with their real owners', async ({page}) => {
+    const adapter = await browserActions(page);
+    /** Exercises typed wire replies, not private service/debug methods. */
+    async function call<Name extends keyof typeof viewerActions>(name: Name, args: object) {
+        const reply = await adapter.invoke(name, args);
+        expect('error' in reply ? reply.error : undefined, name).toBeUndefined();
+        return viewerActions[name].outputSchema.parse('result' in reply ? reply.result : undefined);
+    }
+    const initial = viewerActions.viewer_get_app_state.outputSchema.parse(await call('viewer_get_app_state', {}));
+    const revision = initial.viewLayoutRevision;
+    for (const [target, value] of [
+        [{channel: 'view.background', viewIndex: 1}, {layerId: null, opacity: 50}],
+        [{channel: 'view.grid', viewIndex: 1}, {visible: true, mode: 'xyz', level: 10, autoLevel: false, color: 'aabbcc', opacity: 20}],
+        [{channel: 'app.preferences.hover'}, {enabled: false, fields: [{expression: 'id', customExpression: false, displayKey: 'Identity'}]}],
+        [{channel: 'app.preferences.navigation'}, {zoomStep: 0.2, featureZoomClearance: 12}],
+        [{channel: 'app.marker'}, {enabled: true, position: {lon: 11, lat: 48, alt: 0}}],
+        [{channel: 'view.projection', viewIndex: 1}, '2d']
+    ] as const) {
+        const reply = await call('viewer_set_app_state', {target, value, viewLayoutRevision: revision});
+        expect(reply).toMatchObject({status: 'applied', value});
+    }
+    await call('viewer_manage_view', {operation: 'remove', viewIndex: 1, viewLayoutRevision: revision});
+    await expect(page.locator('#mapViewContainer-1')).toHaveCount(0);
+    const single = viewerActions.viewer_get_app_state.outputSchema.parse(await call('viewer_get_app_state', {}));
+    expect(single.viewLayoutRevision).toBeGreaterThan(revision);
+    await call('viewer_manage_view', {operation: 'create', viewIndex: 0, viewLayoutRevision: single.viewLayoutRevision});
+    await expect(page.locator('#mapViewContainer-1 canvas').first()).toBeVisible();
+
+    const source = 'version: 2\nname: MCP smoke\nrules:\n  - geometry: [line]\n    color: "#123456"\n';
+    expect(await call('viewer_validate_style', {source})).toMatchObject({valid: true});
+    expect(await call('viewer_validate_style', {source: 'rules: [\n'})).toMatchObject({valid: false});
+    const created = viewerActions.viewer_edit_style.outputSchema.parse(await call('viewer_edit_style', {operation: 'create', source, visible: false}));
+    const styleId = created.styleId;
+    expect(await call('viewer_get_style', {styleId})).toMatchObject({source, imported: true, visible: false});
+    await call('viewer_edit_style', {operation: 'update', styleId, source: source.replace('#123456', '#654321')});
+    expect(await call('viewer_get_style', {styleId})).toMatchObject({source: source.replace('#123456', '#654321')});
+    await call('viewer_edit_style', {operation: 'visibility', styleId, visible: true});
+    const catalog = viewerActions.viewer_get_catalog.outputSchema.parse(await call('viewer_get_catalog', {kind: 'styles', styleId}));
+    expect(catalog.items).toMatchObject([{id: styleId, visible: true}]);
+    await call('viewer_edit_style', {operation: 'delete', styleId});
+    expect(await call('viewer_get_catalog', {kind: 'styles', styleId})).toMatchObject({complete: true, items: []});
+    const diagnostics = viewerActions.viewer_get_diagnostics.outputSchema.parse(await call('viewer_get_diagnostics', {viewIndex: 0, sections: ['workers', 'gpu']}));
+    expect(diagnostics.metrics.some(item => item.section === 'workers')).toBe(true);
+    expect(diagnostics.unavailable.length).toBeGreaterThan(0);
     expect(adapter.connections).toHaveLength(1);
 });

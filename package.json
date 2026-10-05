@@ -50,6 +50,7 @@
     "@ndsev/ndslive-math": "^1.0.0",
     "@primeng/themes": "^21.0.4",
     "codemirror": "^6.0.2",
+    "dom-to-image-more": "3.11.0",
     "js-yaml": "^4.3.2",
     "material-symbols": "0.40.2",
     "primeicons": "^7.0.0",

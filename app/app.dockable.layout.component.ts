@@ -1,4 +1,4 @@
-import {ChangeDetectorRef, Component, DoCheck, ElementRef, OnDestroy, Renderer2, ViewChild} from '@angular/core';
+import {AfterViewInit, ChangeDetectorRef, Component, DoCheck, ElementRef, OnDestroy, Renderer2, ViewChild} from '@angular/core';
 import {environment} from "./environments/environment";
 import {AppStateService, INSPECTION_DOCK_TAB_ID, SEARCH_DOCK_TAB_ID} from "./shared/appstate.service";
 import {FeatureSearchService, FeatureSearchSession} from "./search/feature.search.service";
@@ -6,6 +6,7 @@ import {DockedPanelDragController, DockedPanelDragOffset} from "./shared/docked-
 import {Subscription} from "rxjs";
 import {MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT} from "./mapview/render-view.model";
 import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
+import {ViewerUiService} from "./actions/viewer-ui.service";
 
 @Component({
     selector: 'dockable-layout',
@@ -30,7 +31,8 @@ import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
                 }
             </div>
             @if (!environment.visualizationOnly) {
-                <div #dock class="collapsible-dock" [ngClass]="{'collapsed': !this.stateService.isDockOpen, 'open': stateService.isDockOpen}">
+                <div #dock class="collapsible-dock" data-testid="inspection-dock" [style.width.px]="stateService.dockWidthState.getValue()"
+                     [ngClass]="{'collapsed': !this.stateService.isDockOpen, 'open': stateService.isDockOpen}">
                     @if (stateService.isDockOpen) {
                         <div class="resize-handle" (pointerdown)="onResizeStart($event)"></div>
                     }
@@ -113,7 +115,7 @@ import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
  * It owns dock open/close state, user-resizing of the dock, and the temporary
  * pause events used to suppress layout-sensitive work during dock transitions.
  */
-export class DockableLayoutComponent implements DoCheck, OnDestroy {
+export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestroy {
     private static readonly DOCK_RESIZE_PAUSE_START_EVENT = "erdblick-dock-resize-start";
     private static readonly DOCK_RESIZE_PAUSE_END_EVENT = "erdblick-dock-resize-end";
 
@@ -129,13 +131,15 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
     private dockResizePauseActive = false;
     private dockOpenSubscription: Subscription;
     private observedDockOpen: boolean;
+    private unregisterResizeTarget?: () => void;
     protected readonly searchDockDrag: DockedPanelDragController<string>;
 
     constructor(public stateService: AppStateService,
                 public coordinatesPolicy: CoordinatesPolicyService,
                 private renderer: Renderer2,
                 private featureSearchService: FeatureSearchService,
-                private cdr: ChangeDetectorRef) {
+                private cdr: ChangeDetectorRef,
+                private viewerUi: ViewerUiService) {
         this.observedDockOpen = this.stateService.isDockOpen;
         this.dockOpenSubscription = this.stateService.dockOpenState.subscribe(nextDockOpen => {
             if (nextDockOpen === this.observedDockOpen) {
@@ -181,6 +185,25 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
     protected readonly environment = environment;
     protected readonly inspectionDockTabId = INSPECTION_DOCK_TAB_ID;
     protected readonly searchDockTabId = SEARCH_DOCK_TAB_ID;
+
+    /** Registers the live dock; only an open, idle dock accepts an explicit width. */
+    ngAfterViewInit(): void {
+        const dock = this.dockRef?.nativeElement;
+        if (!dock) return;
+        const savedWidth = this.stateService.dockWidthState.getValue();
+        if (savedWidth !== null) this.setDockWidth(savedWidth);
+        this.unregisterResizeTarget = this.viewerUi.registerResizeTarget(dock, {
+            describe: () => ({kind: "dock", dimensions: this.stateService.isDockOpen ? ["widthPx"] : [], busy: this.dragging}),
+            resize: size => {
+                if ("panelSizes" in size || size.widthPx === undefined) return;
+                this.dispatchDockResizePauseStart();
+                this.setDockWidth(size.widthPx);
+                this.stateService.dockWidthState.next(dock.getBoundingClientRect().width);
+                window.dispatchEvent(new Event(MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT));
+                this.scheduleDockResizePauseEnd();
+            }
+        });
+    }
 
     /** Toggles dock visibility; the dock-open subscription performs the resize preparation. */
     protected toggleDock() {
@@ -230,6 +253,7 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
 
     /** Clears listeners and ensures the resize-pause state is reset on teardown. */
     ngOnDestroy(): void {
+        this.unregisterResizeTarget?.();
         this.detachMove?.();
         this.detachUp?.();
         this.detachCancel?.();
@@ -290,13 +314,19 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
         if (!this.dragging || !this.dockRef) return;
         // Compute new width from left edge drag: width = rightEdge - pointerX
         const newWidth = Math.max(0, this.dockRight - ev.clientX);
-        this.dockRef.nativeElement.style.width = `${newWidth}px`;
+        this.setDockWidth(newWidth);
+    }
+
+    /** Keeps a usable strip of map visible for both pointer and explicit dock resizing. */
+    private setDockWidth(width: number): void {
+        if (this.dockRef) this.dockRef.nativeElement.style.width = `${Math.max(0, Math.min(width, window.innerWidth - Math.min(160, window.innerWidth / 2)))}px`;
     }
 
     /** Finishes the dock resize interaction and restores global pointer styles. */
     private onPointerUp() {
         if (!this.dragging) return;
         this.dragging = false;
+        if (this.dockRef) this.stateService.dockWidthState.next(this.dockRef.nativeElement.getBoundingClientRect().width);
         // Cleanup listeners and body styles
         this.detachMove?.();
         this.detachUp?.();

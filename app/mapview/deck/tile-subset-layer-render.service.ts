@@ -266,10 +266,10 @@ export class TileSubsetLayerRenderService {
     }
 
     /** Return the worst per-view rolling p90 frame interval used by diagnostics. */
-    currentFrameTimeMs(): number {
+    currentFrameTimeMs(viewIndex?: number): number {
         return Math.max(
             0,
-            ...[...this.deckFrameIntervalsMsByView.values()]
+            ...(viewIndex === undefined ? [...this.deckFrameIntervalsMsByView.values()] : [this.deckFrameIntervalsMsByView.get(viewIndex) ?? []])
                 .map(samples => {
                     if (!samples.length) {
                         return 0;
@@ -370,6 +370,13 @@ export class TileSubsetLayerRenderService {
             }
         }
         return result;
+    }
+
+    /** Constant-size control-plane metrics; unlike debugSnapshot, never walks queued packets or tiles. */
+    queueSummary() {
+        return {workers: this.activeWorkerCount(), queued: this.queue.length, inFlight: this.inFlight.size,
+            ready: this.ready.length, completed: this.completedTaskCount, failed: this.failedTaskCount,
+            stale: this.staleTaskCount, latestRoundTripMs: this.latestRoundTripMs, latestNativeMs: this.latestNativeRenderMs};
     }
 
     /** Capture queue, worker, packet, and timing state for diagnostics. */

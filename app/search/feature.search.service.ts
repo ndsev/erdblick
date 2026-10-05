@@ -345,7 +345,7 @@ export interface FeatureSearchExportDialogOptions {
 
 export type FeatureSearchRunOptions = Partial<Pick<
     FeatureSearchStateEntry,
-    "scope" | "selectedMapLayers" | "selectedViewIndices" | "selectedMapLayersManual" | "selectedFeatureTypes"
+    "scope" | "selectedMapLayers" | "selectedViewIndices" | "selectedMapLayersManual" | "selectedFeatureTypes" | "autoUpdate" | "selectedTileLevels"
 >>;
 
 @Injectable({providedIn: 'root'})
@@ -870,11 +870,12 @@ export class FeatureSearchService {
         const entry = this.stateService.addFeatureSearch({
             query,
             ...(options.scope ? {scope: options.scope} : {}),
+            ...(options.autoUpdate === undefined ? {} : {autoUpdate: options.autoUpdate}),
             pinColor: this.nextDefaultSearchColor(),
             selectedMapLayers,
             selectedMapLayersManual: options.selectedMapLayersManual ?? false,
             selectedFeatureTypes: options.selectedFeatureTypes ?? [],
-            selectedTileLevels: [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS],
+            selectedTileLevels: [...(options.selectedTileLevels ?? DEFAULT_FEATURE_SEARCH_TILE_LEVELS)],
             selectedViewIndices
         });
         this.placeNewSearchSurface(entry.id);

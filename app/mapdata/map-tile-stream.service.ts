@@ -1048,6 +1048,27 @@ export class MapTileStreamService implements OnDestroy {
         }
     }
 
+    /** Resolves a canonical feature string using the backend schema, preserving ambiguous matches for callers. */
+    async locateFeature(mapId: string, featureId: string, layerId?: string, signal?: AbortSignal): Promise<TileFeatureId[]> {
+        signal?.throwIfAborted();
+        const response = await fetch("/locate", {
+            method: "POST", headers: {"Content-Type": "application/json"}, signal,
+            body: JSON.stringify({requests: [{mapId, ...(layerId ? {layerId} : {}), featureId: stripFeatureInspectionTarget(featureId)}]})
+        });
+        if (!response.ok) throw new Error(`Feature locate failed: HTTP ${response.status}`);
+        const content = await response.text();
+        signal?.throwIfAborted();
+        if (content.length > 256 * 1024) throw new Error("Feature locate response exceeds the bound");
+        const payload: {responses?: Array<Array<{partitionKey?: string; tileId?: string; canonicalFeatureId?: string}>>} = JSON.parse(content);
+        const candidates = payload.responses?.[0] ?? [];
+        if (candidates.length > 100) throw new Error("Feature locate is ambiguous; provide a layer or partition");
+        return candidates.flatMap(candidate => {
+            const mapTileKey = candidate.partitionKey ?? candidate.tileId;
+            return mapTileKey && this.parseMapPartitionKeySafe(mapTileKey)
+                ? [{mapTileKey, featureId: candidate.canonicalFeatureId ?? stripFeatureInspectionTarget(featureId)}] : [];
+        });
+    }
+
     private featureIdentityKey(feature: TileFeatureId): string {
         return `${feature.mapTileKey}\n${stripFeatureInspectionTarget(feature.featureId)}`;
     }
