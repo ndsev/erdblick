@@ -7,6 +7,7 @@ import type {Duplex} from 'node:stream';
 import type {Page} from '@playwright/test';
 import {expect, test} from '../fixtures/test';
 import {mcpClient} from '../utils/mcp-client';
+import {viewerActions} from '../../app/actions/viewer-action.contract';
 
 test.use({stateSnapshot: null});
 test.skip(process.env['EB_MAPGET_MCP_TEST_OAUTH'] !== '1', 'Requires the disposable native OAuth fixture');
@@ -116,7 +117,11 @@ test('native OAuth scopes discovery/control to the authenticated principal', asy
         expect(applied.structuredContent.status).toBe('applied');
         const readonly = mcpClient(request, {Authorization: bearer({access: {roles: ['read']}})});
         const listed = await readonly.rpc('tools/list');
-        expect(listed.message.result.tools.map((tool: {name: string}) => tool.name)).not.toContain('viewer_set_app_state');
+        const names = listed.message.result.tools.map((tool: {name: string}) => tool.name);
+        for (const [name, action] of Object.entries(viewerActions)) {
+            if (action.mutation) expect(names).not.toContain(name);
+            else expect(names).toContain(name);
+        }
         expect((await readonly.call('viewer_set_app_state', write)).isError).toBe(true);
     } finally {
         await otherContext.close();

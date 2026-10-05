@@ -85,7 +85,8 @@
             "scripts": [],
             "webWorkerTsConfig": "tsconfig.worker.json",
             "allowedCommonJsDependencies": [
-              "earcut"
+              "earcut",
+              "dom-to-image-more"
             ]
           },
           "configurations": {

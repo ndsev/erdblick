@@ -999,6 +999,14 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    /** Local layout preferences; deliberately absent from shareable map URLs. */
+    readonly dockWidthState = this.createState<number | null>({
+        name: 'dockWidth', defaultValue: null, schema: z.number().min(0).max(32768).nullable()
+    });
+    readonly viewPanelSizesState = this.createState<number[]>({
+        name: 'viewPanelSizes', defaultValue: [], schema: z.array(z.number().min(0).max(100)).max(2)
+    });
+
     readonly dockActiveTabState = this.createState<string>({
         name: 'dockActiveTabState',
         defaultValue: INSPECTION_DOCK_TAB_ID,

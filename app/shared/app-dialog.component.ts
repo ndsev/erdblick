@@ -14,6 +14,8 @@ import {
 } from '@angular/core';
 import {Dialog, DialogModule} from 'primeng/dialog';
 import {AppDialogLayout, AppStateService} from './appstate.service';
+import {ViewerUiService} from '../actions/viewer-ui.service';
+import {ViewerResizeSize} from '../actions/viewer-ui.contract';
 import {
     AppDialogBounds,
     AppDialogResizeCorner,
@@ -140,9 +142,12 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     private resizeHandles: HTMLElement[] = [];
     private detachResizeHandleListeners: Array<() => void> = [];
     private resizeSession?: AppDialogResizeSession;
+    private unregisterResizeTarget?: () => void;
+    private resizedLayout?: AppDialogLayout;
 
     constructor(private readonly stateService: AppStateService,
-                private readonly renderer: Renderer2) {
+                private readonly renderer: Renderer2,
+                private readonly viewerUi: ViewerUiService) {
         this.refreshEffectiveStyle();
     }
 
@@ -159,6 +164,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
 
     /** Cancels pending layout reveal work when the wrapper is destroyed. */
     ngOnDestroy(): void {
+        this.unregisterResizeTarget?.();
         this.cancelRevealPersistedLayout();
         this.removeResizeHandles();
         this.detachDockDropCueTracking();
@@ -205,11 +211,19 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.applyOrCapturePersistedLayout();
         this.syncResizeHandles();
         this.bindDockDropCue();
+        this.unregisterResizeTarget?.();
+        const container = this.container();
+        if (container) this.unregisterResizeTarget = this.viewerUi.registerResizeTarget(container, {
+            describe: () => ({kind: "dialog", dimensions: this.resizable ? ["widthPx", "heightPx"] : [],
+                busy: !!this.resizeSession || this.dragging, ...(this.layoutId ? {layoutId: this.layoutId} : {})}),
+            resize: size => this.resizeTo(size)
+        });
         this.onShow.emit(event);
     }
 
     /** Stores closed state and forwards the hide event. */
     protected handleOnHide(event: any): void {
+        this.unregisterResizeTarget?.();
         this.cancelRevealPersistedLayout();
         this.removeResizeHandles();
         this.syncPersistedOpenState(false);
@@ -231,6 +245,18 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     protected handleOnResizeEnd(event: any): void {
         this.persistCurrentLayout();
         this.onResizeEnd.emit(event);
+    }
+
+    /** Applies a programmatic size through the same CSS/viewport constraints and completion path as a corner drag. */
+    private resizeTo(size: ViewerResizeSize): void {
+        const container = this.container();
+        if (!container || "panelSizes" in size) return;
+        const rect = container.getBoundingClientRect();
+        const bounds = resizeAppDialogBounds(rect, (size.widthPx ?? rect.width) - rect.width,
+            (size.heightPx ?? rect.height) - rect.height, "se", this.resizeLimits(getComputedStyle(container)));
+        this.onResizeInit.emit(new Event("resize"));
+        this.applyLayout(container, {position: bounds, size: bounds});
+        this.handleOnResizeEnd(new Event("resize"));
     }
 
     /** Installs or removes the custom four-corner resize handles for the current dialog state. */
@@ -451,9 +477,6 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
 
     /** Persists the current dialog bounds and open state. */
     private persistCurrentLayout(): void {
-        if (!this.persistLayout || !this.layoutId) {
-            return;
-        }
         const container = this.container();
         if (!container) {
             return;
@@ -462,8 +485,9 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
             ...this.readLayoutFromContainer(container),
             open: this.persistOpenState ? this.visible : false
         };
+        this.resizedLayout = layout;
         this.refreshEffectiveStyle(false, layout);
-        this.stateService.upsertDialogLayout(this.layoutId, layout);
+        if (this.persistLayout && this.layoutId) this.stateService.upsertDialogLayout(this.layoutId, layout);
     }
 
     /** Reads rounded dialog bounds from a container element. */
@@ -518,7 +542,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         const nextStyle = {...this.style};
         const layout = layoutOverride ?? (this.persistLayout && this.layoutId
             ? this.stateService.getDialogLayout(this.layoutId)
-            : undefined);
+            : this.resizedLayout);
         if (!layout) {
             this.effectiveStyle = nextStyle;
             return;

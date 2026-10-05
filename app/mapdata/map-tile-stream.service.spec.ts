@@ -5,6 +5,8 @@ import {MapTileStreamService} from "./map-tile-stream.service";
 import {MapgetLayer} from "./mapget-layer.model";
 import {objectPartition, tilePartition} from "./partition.model";
 import {MapTileRequestStatus, type MapTileStreamStatusPayload} from "./tilestream";
+import {MapTileStreamClientTiles} from "./tilestream";
+import {coreLib} from "../integrations/wasm";
 
 function serviceHarness(): MapTileStreamService {
     return new MapTileStreamService(
@@ -19,6 +21,43 @@ function serviceHarness(): MapTileStreamService {
 }
 
 describe("MapTileStreamService request failures", () => {
+    it("aborts a one-shot inspection and destroys its transport without starting locate fallback", async () => {
+        const service = serviceHarness();
+        const request = vi.spyOn(MapTileStreamClientTiles.prototype, "request").mockImplementation(() => new Promise(() => {}));
+        const destroy = vi.spyOn(MapTileStreamClientTiles.prototype, "destroy");
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        const controller = new AbortController();
+        try {
+            const loading = service.loadFeatures([{mapTileKey: "Features:Map:Layer:1", featureId: "Road.1"}], controller.signal);
+            expect(request).toHaveBeenCalledOnce();
+            controller.abort(new Error("cancelled by caller"));
+            await expect(loading).rejects.toThrow("cancelled by caller");
+            expect(destroy).toHaveBeenCalledOnce();
+            expect(fetchSpy).not.toHaveBeenCalled();
+        } finally {
+            request.mockRestore(); destroy.mockRestore(); fetchSpy.mockRestore();
+        }
+    });
+
+    it("locates canonical identities without narrowing object partitions or swallowing cancellation", async () => {
+        const service = serviceHarness();
+        const tileKey = coreLib.createMapTileKey("Features", "Map", "Other", String(coreLib.getTileIdFromPosition(10, 48, 13)));
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({responses: [[
+            {partitionKey: "Features:Map:Layer:object/18446744073709551615", canonicalFeatureId: "Road.9"},
+            {partitionKey: tileKey, canonicalFeatureId: "Road.9"}
+        ]]})));
+        try {
+            const controller = new AbortController();
+            const matches = await service.locateFeature("Map", "Road.1:attribute#2", "Layer", controller.signal);
+            expect(matches).toHaveLength(2);
+            expect(matches[0]).toEqual({mapTileKey: "Features:Map:Layer:object/18446744073709551615", featureId: "Road.9"});
+            expect(JSON.parse(fetchSpy.mock.calls[0][1]!.body as string)).toEqual({requests: [{mapId: "Map", layerId: "Layer", featureId: "Road.1"}]});
+            controller.abort(new Error("cancelled"));
+            await expect(service.locateFeature("Map", "Road.1", undefined, controller.signal)).rejects.toThrow("cancelled");
+            expect(fetchSpy).toHaveBeenCalledOnce();
+        } finally { fetchSpy.mockRestore(); }
+    });
+
     it("logs bulk viewport failures without flooding error toasts", () => {
         const service = serviceHarness();
         const messages = {showError: vi.fn()};

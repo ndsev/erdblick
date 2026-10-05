@@ -5,7 +5,7 @@ import {
     type ViewerActionName
 } from "./viewer-action.contract";
 import {viewerActionClientMessageSchema, viewerActionServerMessageSchema, viewerMcpInfoSchema} from "./viewer-action-relay.contract";
-import {cameraViewStateSchema} from "../shared/app-state-channel.contract";
+import {appStateChannels, cameraViewStateSchema} from "../shared/app-state-channel.contract";
 
 describe("viewer action shared contract fixtures", () => {
     for (const fixture of fixtures.actions) {
@@ -62,8 +62,11 @@ describe("viewer action shared contract fixtures", () => {
             required: ["destination", "orientation"]
         };
         const setter = catalog.actions.find(action => action.name === "viewer_set_app_state");
-        expect(setter?.inputSchema).toMatchObject({properties: {value: cameraSchema}});
-        expect(setter?.outputSchema).toMatchObject({properties: {value: cameraSchema}});
+        for (const schema of [setter!.inputSchema, setter!.outputSchema]) {
+            const assignments = schema['allOf'] as Array<{if: {properties: {target: {properties: {channel: {const: string}}}}}; then: unknown}>;
+            expect(assignments.find(item => item.if.properties.target.properties.channel.const === "view.camera")?.then)
+                .toMatchObject({properties: {value: cameraSchema}});
+        }
         expect(catalog.channels.find(channel => channel.name === "view.camera")?.valueSchema).toMatchObject(cameraSchema);
         // Discovery can succeed even when a client cannot expose a tuple schema to its model.
         expect(canonicalViewerContractJson(catalog)).not.toMatch(/"items":\[/);
@@ -82,7 +85,10 @@ describe("viewer action shared contract fixtures", () => {
         expect(new Set(catalog.actions.map(action => action.name)).size).toBe(catalog.actions.length);
         expect(new Set(catalog.channels.map(channel => channel.name)).size).toBe(catalog.channels.length);
         expect(catalog.actions.every(action => action.permission === (action.mutation ? "viewer-control" : "viewer-read"))).toBe(true);
-        expect(catalog.channels.filter(channel => channel.writable).map(channel => channel.name)).toEqual(["view.camera"]);
+        expect(catalog.channels.filter(channel => channel.writable).map(channel => channel.name))
+            .toEqual(Object.entries(appStateChannels).filter(([, channel]) => channel.writable).map(([name]) => name));
+        expect(catalog.actions).toHaveLength(26);
+        expect(catalog.channels).toHaveLength(20);
         expect(catalog.actions.some(action => action.name === "viewer_list_sessions")).toBe(false);
     });
 

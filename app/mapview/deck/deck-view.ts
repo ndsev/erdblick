@@ -905,6 +905,25 @@ export abstract class DeckMapView implements IRenderView {
         this.deck.redraw(reason);
     }
 
+    /** Copies one complete frame, including post-render overlays, without changing normal drawing-buffer policy. */
+    captureCanvas(scale: number): {canvas: HTMLCanvasElement; dataUrl: string} {
+        const deck = this.deck;
+        const canvas = deck?.getCanvas();
+        if (!deck?.isInitialized || !canvas || !canvas.width || !canvas.height
+            || canvas.getContext('webgl2')?.isContextLost() || !(scale > 0 && scale <= 1)) {
+            throw new Error("Map renderer is unavailable for capture");
+        }
+        const copy = document.createElement('canvas');
+        copy.width = Math.max(1, Math.floor(canvas.width * scale));
+        copy.height = Math.max(1, Math.floor(canvas.height * scale));
+        const context = copy.getContext('2d');
+        if (!context) throw new Error("Screenshot canvas is unavailable");
+        // A reason forces Deck's synchronous draw; onAfterRender (contact shading/text) runs before it returns.
+        deck.redraw('Application screenshot');
+        context.drawImage(canvas, 0, 0, copy.width, copy.height);
+        return {canvas, dataUrl: copy.toDataURL('image/png')};
+    }
+
     /**
      * Present streamed scene mutations after a short quiet period with a hard latency bound.
      *

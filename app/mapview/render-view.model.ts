@@ -77,6 +77,8 @@ export interface IRenderView {
     destroy(): Promise<void>;
     isAvailable(): boolean;
     requestRender(): void;
+    /** Forces a frame and freezes its canvas before a non-preserved WebGL drawing buffer is cleared. */
+    captureCanvas(scale: number): {canvas: HTMLCanvasElement; dataUrl: string};
     prepareForLayoutResize(targetCssSize: {width: number; height: number}): void;
     setDesktopDrillPickingEnabled(enabled: boolean): void;
 

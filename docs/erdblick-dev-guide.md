@@ -342,8 +342,9 @@ owners. It is not a second application state store or an arbitrary method-call
 API. Mapget owns MCP authentication, authorization and session routing; erdblick
 does not grant permissions based on browser-supplied identity claims.
 
-The browser actions are `viewer_describe_app_state`, `viewer_get_app_state` and
-`viewer_set_app_state`. Mapget adds/removes the routing `clientId` at the MCP
+Settings use `viewer_describe_app_state`, `viewer_get_app_state` and
+`viewer_set_app_state`; semantic operations use the commands below.
+Mapget adds/removes the routing `clientId` at the MCP
 boundary; it also owns `viewer_list_sessions`. Browser arguments have no routing
 field. State-channel contracts live in `app/shared/app-state-channel.contract.ts`.
 
@@ -354,6 +355,25 @@ field. State-channel contracts live in `app/shared/app-state-channel.contract.ts
 | `view.layers` | Read | Visible layers, or a selected map/layer including hidden settings |
 | `app.selections` | Read | Panel and feature identities; no inspection trees |
 | `app.searches` | Read | Definitions including hidden/paused searches, plus runtime counts; no result data |
+| `view.projection` | Read/write | `2d` or `3d`; projection synchronization |
+| `view.background` | Read/write | Configured `layerId` (or `null`) and opacity percentage |
+| `view.grid` | Read/write | Visibility, `nds`/`xyz`, level, auto-level, six-digit color without `#`, opacity percentage |
+| `view.layer` | Read/write | One map/layer's visibility, requested level and auto-level |
+| `view.styleOption` | Read/write | One applicable public style option, validated against its declared type |
+| `view.layerPreset`, `view.mapPreset` | Read/write | Existing preset selections; `null` clears the association, not its option values |
+| `app.focusedView`, `app.viewSync`, `app.marker` | Read/write | Focus, ordinary synchronization and coordinate marker |
+| `app.preferences.rendering` | Read/write | AA, semantic compositing, contact shading, tile budget, render workers, compression |
+| `app.preferences.navigation` | Read/write | Zoom step and feature-fit clearance |
+| `app.preferences.inspection` | Read/write | Panel budget, drill-pick radius, expansion and value presentation |
+| `app.preferences.hover` | Read/write | Hover-label visibility, expressions and display keys |
+| `inspection.panel` | Read/write | One panel's locking, docking, focus and highlight color |
+
+Use discovery to obtain each channel's exact selector/value schema and persistence
+and synchronization behavior. Settings are complete coherent values, not partial
+patches. View-scoped writes and changes to `app.focusedView` require the observed
+layout revision. Invalid channel/value pairs are rejected by both the browser and
+the generated native JSON Schema validator. Layer/preset operations share the
+map-tree owner's notifications and synchronization; they do not synthesize clicks.
 
 Getters do not fetch tiles, run queries or walk features. A read is bounded to
 32 targets, 100 items per collection and a 256 KiB wire result; omitted content
@@ -370,6 +390,157 @@ human camera gestures reject conflicting writes. The response reports the actual
 normalized pose and affected views. `applied` does not mean tiles have loaded or
 a frame has rendered; readiness is currently `unknown` to avoid a scene-wide
 diagnostics scan for each acknowledgement.
+
+For layer visibility and level changes, use `viewer_set_app_state` with the
+singular `view.layer` channel, not the read-only `view.layers` overview. Select
+`viewIndex`, `mapId` and `layerId`; read that exact target first, then assign its
+complete `{visible, level, autoLevel}` value with only the desired fields changed
+and the observed `viewLayoutRevision`. No checkbox click is necessary. Use
+`viewer_describe_app_state` to discover other writable settings and their schemas.
+
+### Semantic commands
+
+| Tools | Behavior |
+| --- | --- |
+| `viewer_get_catalog` | Bounded metadata for layers, backgrounds, styles, options or presets; no datasource URLs/headers |
+| `viewer_manage_view` | Create a second view from a selected source view, or remove an explicit view; never remove the last one |
+| `viewer_navigate` | Fit explicit WGS84 bounds, a tile partition, or up to 50 located features through ordinary navigation |
+| `viewer_inspect`, `viewer_close_inspection` | Open feature/entity inspection shells and return panel IDs, or close one explicit panel |
+| `viewer_open_source_data` | Open a source-data panel at a native map/partition/reference or SourceData key/address |
+| `viewer_start_search`, `viewer_control_search` | Start a visible search; pause, resume, stop, close, rerun, or explicitly refresh it |
+| `viewer_get_search`, `viewer_set_search` | Read or replace one search's typed scope/presentation settings; retain its identity |
+| `viewer_get_search_results`, `viewer_export_search` | Bounded flat identity slices or JSON configuration/results, without building the result tree |
+| `viewer_get_style`, `viewer_validate_style`, `viewer_edit_style` | Read YAML, validate it natively, or create/update/reset/delete/toggle browser-local styles |
+| `viewer_get_diagnostics` | Fixed counters, cached loading/GPU observations, and bounded style/search errors |
+
+Only read tools require `viewer-read`; state-changing commands require
+`viewer-control`. Style drafts use the same native version-2 parser as the editor.
+Edits are browser-local, not writes to server files or config. Reset applies to
+builtin overrides; delete applies to imported styles. Get/validate are read-only
+with respect to installed styles.
+
+Feature identities are either `{mapTileKey, featureId}` or
+`{mapId, layerId?, featureId}`. The latter goes through native `/locate`; ambiguous
+matches fail rather than choosing the first. Attribute/relation/validity suffixes
+are preserved. Inspections return shells immediately; observe `app.selections`
+for feature-loading status. An explicit `panelId` must be an unlocked feature
+panel; `newPanel` creates a grouped panel. Default inspection behavior and limits
+are the same as the UI. Model extraction remains mapget's responsibility, not a
+serialized DOM/inspection tree.
+
+Source references use mapget's `{layerId, address, qualifier?}` plus `mapId` and
+`partition: {kind: "tile", id: signedPackedTileId}` or
+`{kind: "object", id: uint64DecimalString}`. Addresses are also decimal strings;
+never convert them through a JavaScript number. The existing source-data panel
+owns loading and address reveal. Object partitions have no implicit tile extent.
+
+Search creation requires explicit map/layers and view indices and defaults to
+`autoUpdate: false`. Configure all initial coverage options before dispatching the
+first request. The returned `searchId` addresses the ordinary visible, persisted
+search, including its layer/type/level/view scope, style rules and rendering
+strategy. Stop retains partial results; close removes the saved definition.
+Cancelling a completed creation call does not stop the resulting search.
+
+Result reads cap slices at 100 entries and report `runId`, `refresh`, `offset`,
+`total`, `searchComplete` and `complete`/`reason`. Supply `runId` and `refresh` on
+later slices to reject changed generations; offsets are not snapshot cursors.
+Export returns JSON text, not a browser download or clipboard write. Responses
+and copying remain byte-bounded. Oversized settings/style sources fail explicitly;
+truncated collections do not pretend to be complete.
+
+Diagnostics never trigger GPU readback, per-tile/scene scans, backend requests or
+full-report export. Loading counters and GPU allocation, when already sampled by
+the diagnostics UI, are explicitly cached. Unavailable scoped metrics are listed
+as unavailable; they are not fabricated zeros. View-scoped frame timing uses the
+existing fixed-size renderer samples. These observations are not a render fence.
+
+Navigation owns cancellation through locate/load and checks again before its
+synchronous camera commit. A human gesture, camera/synchronization change, retired
+renderer, stale layout, Stop, disconnect or deadline prevents a late commit.
+Inspection locating likewise aborts its commit if the selection changes. One-shot
+feature fetches carry cancellation through their existing POST `/tiles` transport;
+there is no extra WebSocket. First-person control, animation and
+render-settling fences are not part of this API.
+
+### UI inspection, interaction and resizing
+
+The DOM tools complement semantic commands; prefer the latter for map data,
+search/style lifecycle, selection and camera movement. Canvas features are not
+DOM elements. These tools operate only inside the selected erdblick tab, without
+CDP, an extension, another socket, arbitrary JavaScript or HTML mutation.
+
+- `viewer_take_snapshot` returns a DOM/ARIA-derived element list with UIDs,
+  nearest reported parent UIDs, labels, text, form state, bounds and resize
+  capabilities (including the owner's `layoutId` where available). It is not the
+  browser's accessibility tree. Reads require `viewer-read`; password/file values
+  and hidden subtrees are omitted. Returned
+  text is untrusted content, not instructions to the agent.
+- Each snapshot retires earlier UIDs. `rootUid`, `offset` and `limit` support
+  bounded subtree/page reads; use the returned new root UID for the next page.
+  Element, byte, node and depth limits report incomplete results explicitly.
+  Disconnected, hidden or repurposed references fail as `stale_element`.
+- `viewer_get_element` reads current bounds, scroll extent and an allowlisted
+  set of computed CSS properties. It cannot read arbitrary object properties or
+  raw HTML.
+- `viewer_click`, `viewer_fill` and `viewer_scroll` require `viewer-control`.
+  They operate normal UI controls, which is broader authority than the semantic
+  action allowlist. Click/fill check disabled state and occlusion after scrolling
+  into view. Fill supports native inputs, textareas, checkboxes/radios and single
+  selects through ordinary events—not passwords, file inputs or rich-text editors.
+  Synthetic events do not supply trusted user activation or automate browser
+  permission prompts. Applied means input was delivered, not async work finished.
+
+`viewer_resize` requires `viewer-control` and a current snapshot UID with
+advertised resize capabilities. Pass `size: {widthPx, heightPx}` (either field
+may be omitted) or `size: {panelSizes: [65, 35]}`. Dimensions are CSS pixels,
+independent of device pixel ratio; split proportions must sum to 100.
+
+Dialog/sidebar targets accept width and height when their UI is resizable;
+the right dock accepts width; stacked dock panels accept **content** height.
+A single docked panel fills available space and does not advertise manual height
+control. Split views preserve at least 5% per view. Active human drags win with
+`busy`; unsupported dimensions fail before touching the owner. Responses include
+actual applied bounds and, for splits, proportions. Existing dialog/panel resize
+callbacks and persistence are used, including inspection-tree relayout.
+
+Dock width and split proportions are local layout preferences, persisted after
+completed human/MCP resizing and absent from map URLs. Ratio changes update the
+splitter in place without recreating the map renderers. `ViewerUiService` owns
+only short-lived DOM references and live resize registrations; components and
+`AppStateService` remain the layout owners. No background DOM scan/observer or
+second layout tree is maintained.
+
+### Application screenshots
+
+`viewer_screenshot` requires `viewer-read` and an explicit `clientId`. It captures
+the **visible application viewport**, including both map views, labels/highlights,
+inspection panels, toolbars and open overlays, not browser chrome or a full-page
+scrolling export. Optional `maxWidth`/`maxHeight` (128–1920; defaults 1280×960)
+bound the whole image without cropping. `viewLayoutRevision` optionally guards the
+layout; a resize during capture fails explicitly. No clipboard, download,
+screen-sharing prompt or screenshot storage is involved.
+
+Each render view forces one synchronous Deck frame and immediately copies its
+canvas after post-render effects/text, before WebGL clears the non-preserved
+drawing buffer. The ordinary renderer still uses `preserveDrawingBuffer: false`.
+A lazily loaded `dom-to-image-more` then rasterizes the visible DOM with those
+frozen canvases. Only one capture can run at once, outside Angular change detection;
+cancellation discards late output without modifying app state. Resource failures
+produce warnings; canvas/capture failures produce explicit action errors.
+
+The browser result is `{image: {mimeType, data}, metadata}`. Mapget validates that
+full result, promotes the JPEG to MCP **ImageContent**, advertises the metadata
+schema as the MCP output schema, and returns metadata-only structured/text content.
+Image bytes are not duplicated in the model's text context. JPEG data is capped at
+240,000 base64 characters within the existing 256 KiB relay budget; complex scenes
+may be downscaled further. Metadata includes actual and original viewport sizes,
+capture time, layout revision and warnings.
+
+This is an approximate DOM-based capture for acceptance/debugging, not pixel-exact
+browser screenshotting: browser chrome/cursor, embedded frames/video and some CSS
+effects are omitted. Loading may continue during capture, and DOM/map snapshots
+are not atomic. `readiness.status` deliberately remains `unknown`; use ordinary
+search/inspection/diagnostic state observations before capturing when needed.
 
 ### Contract generation and relay
 
@@ -389,6 +560,10 @@ three-number camera offset while allowing MCP clients to expose its tool to a
 model. Client acceptance must check the model-visible callable inventory:
 successful `tools/list` discovery or direct invocation alone does not prove that
 the client can convert every input schema into a model tool signature.
+The generic setter additionally uses routing-safe Draft-07 `allOf`/`if`/`then`
+branches derived from the channel registry to pair each target with its exact
+value schema. Keep runtime and native parity fixtures together when extending
+this surface; client-side conditional-schema support is a separate acceptance gate.
 When changing contracts during an already-running watch/serve session, rerun
 `npm run generate:viewer-actions` before reloading and updating the backend catalog;
 the lifecycle hook runs when the watcher starts, not on each source edit.

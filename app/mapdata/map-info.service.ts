@@ -8,6 +8,8 @@ import {
     MapInfoItem,
     MapLayerTree,
     layerPresetInferenceKey,
+    layerPresetNode,
+    layerStyleOptions,
     sortDataSourceCatalogEntries,
     StyleOptionNode
 } from "./map.tree.model";
@@ -26,6 +28,7 @@ import type {
 } from "../../build/libs/core/erdblick-core";
 import {MapgetLayer} from "./mapget-layer.model";
 import {MapPresetService} from "../styledata/map-preset.service";
+import type {LayerPresetRef} from "../styledata/layer-preset.model";
 
 /** Lightweight datasource status/progress update carried by interactive catalog-change frames. */
 interface SourceCatalogEntryUpdate {
@@ -664,6 +667,56 @@ export class MapInfoService {
     /** Applies a style-option value change and emits it for render invalidation. */
     applyStyleOptionChange(optionNode: StyleOptionNode, viewIndex: number): void {
         this.applyStyleOptionChanges([optionNode], viewIndex);
+    }
+
+    /** Applies a preset through the same transaction for map-tree controls and agent actions. */
+    applyLayerPreset(viewIndex: number, mapId: string, layerId: string, ref: LayerPresetRef | null): boolean {
+        const layer = this.maps.getFeatureLayer(mapId, layerId);
+        if (!layer || viewIndex < 0 || viewIndex >= this.stateService.numViews) return false;
+        const preset = ref ? layerPresetNode(layer)?.presets.find(candidate =>
+            candidate.styleId === ref.styleId && candidate.id === ref.presetId) : undefined;
+        if (ref && !preset) return false;
+        const options = layerStyleOptions(layer);
+        const changed: StyleOptionNode[] = [];
+        for (const value of preset?.values ?? []) {
+            const option = options.find(candidate => candidate.styleId === preset!.styleId && candidate.id === value.optionId);
+            if (option && option.value[viewIndex] !== value.value) {
+                option.value[viewIndex] = value.value;
+                changed.push(option);
+            }
+        }
+        this.maps.setLayerPresetSelection(viewIndex, mapId, layerId, ref);
+        this.applyPresetChanges(changed, viewIndex, [{mapId, layerId}]);
+        return true;
+    }
+
+    /** Validates an entire map composition before changing any of its component options. */
+    applyMapPreset(viewIndex: number, mapId: string, presetId: string | null): boolean {
+        const map = this.maps.maps.get(mapId);
+        if (!map || viewIndex < 0 || viewIndex >= this.stateService.numViews) return false;
+        if (!presetId) {
+            this.maps.setMapPresetSelection(viewIndex, mapId, null);
+            this.maps.reconcilePresetSelections();
+            return true;
+        }
+        const preset = map.mapPresets.find(candidate => candidate.id === presetId);
+        const components = preset ? this.maps.resolveMapPresetComponents(map, preset) : undefined;
+        if (!preset || !components || (this.isSyncOptionsForViewEnabled(viewIndex) && this.maps.mapPresetHasSyncConflict(map, preset))) return false;
+        const changed: StyleOptionNode[] = [];
+        for (const component of components) {
+            const options = layerStyleOptions(component.layer);
+            for (const value of component.preset.values) {
+                const option = options.find(candidate => candidate.styleId === component.preset.styleId && candidate.id === value.optionId);
+                if (option && option.value[viewIndex] !== value.value) {
+                    option.value[viewIndex] = value.value;
+                    changed.push(option);
+                }
+            }
+            this.maps.setLayerPresetSelection(viewIndex, mapId, component.layer.id, component.preset.ref);
+        }
+        this.maps.setMapPresetSelection(viewIndex, mapId, preset.id);
+        this.applyPresetChanges(changed, viewIndex, components.map(component => ({mapId, layerId: component.layer.id})));
+        return true;
     }
 
     /** Applies one atomic collection of option mutations and performs synchronization once. */
