@@ -221,6 +221,34 @@ describe("ViewerActionService", () => {
         expect(stream.sendActionControl.mock.calls.length).toBe(operation === "disconnect" ? 0 : 1);
     });
 
+    it.each(["catalog_changed", "authorization_expired"])("handles %s without confusing catalog lifetime with action lifetime", async reason => {
+        const {service, state, views, stream, clientId} = await activeFixture();
+        const setter = vi.spyOn(state, "setView");
+        const invoke = (callId: string) => stream.actionControlReceived.next({payload: {
+            type: "mapget.actions.invoke", version: 1, callId, action: "viewer_set_app_state", timeoutMs: 30000,
+            arguments: {target: {channel: "view.camera", viewIndex: 0}, value: camera(), viewLayoutRevision: views.viewLayoutRevision}
+        }, receivedAt: performance.now()});
+        invoke("accepted");
+        stream.actionControlReceived.next({payload: {
+            type: "mapget.actions.error", version: 1, operation: "register",
+            error: {code: "not_available", message: "Registration retired", reason}
+        }, receivedAt: performance.now()});
+        expect(service.availability$.value.ready).toBe(false);
+        invoke("after-retirement");
+        expect(stream.sendActionControl).toHaveBeenLastCalledWith(clientId, expect.objectContaining({
+            callId: "after-retirement", error: expect.objectContaining({code: "not_available"})
+        }));
+        await Promise.resolve();
+        expect(service.hasPendingAction).toBe(false);
+        expect(setter).toHaveBeenCalledTimes(reason === "catalog_changed" ? 1 : 0);
+        if (reason === "catalog_changed") {
+            expect(service.availability$.value.message).toContain("reload the viewer");
+            expect(stream.sendActionControl).toHaveBeenLastCalledWith(clientId, expect.objectContaining({
+                callId: "accepted", result: expect.objectContaining({status: "applied"})
+            }));
+        }
+    });
+
     it("ignores duplicate invokes and late cancellation without rolling back a completed write", async () => {
         const {service, state, views, stream} = await activeFixture();
         const setter = vi.spyOn(state, "setView");

@@ -565,7 +565,8 @@ branches derived from the channel registry to pair each target with its exact
 value schema. Keep runtime and native parity fixtures together when extending
 this surface; client-side conditional-schema support is a separate acceptance gate.
 When changing contracts during an already-running watch/serve session, rerun
-`npm run generate:viewer-actions` before reloading and updating the backend catalog;
+`npm run generate:viewer-actions` and publish the updated generated artifact
+beside the frontend before reloading;
 the lifecycle hook runs when the watcher starts, not on each source edit.
 
 For local native development, start mapget with `serve --host 127.0.0.1 -p 8099
@@ -574,6 +575,14 @@ mounted webapp by default; `--mcp-catalog` overrides the artifact path. All MCP
 settings use the normal `mapget.serve` YAML/CLI pipeline, not a separate JSON
 config file. The native-local and disposable-OAuth Playwright fixtures exercise
 these same CLI options and the default catalog lookup.
+
+Catalog contents reload on native info/tool discovery, tool calls, and browser
+registration when the file's modification time or size changes. Rebuild/publish
+the frontend and reload its tab; no backend restart is needed. The trusted path
+and auth configuration still require a restart to change. An invalid or partial
+artifact leaves the last good catalog active. Older tabs show a reload hint and
+stop accepting new actions, but retain their map connection and finish accepted
+actions using the original contract. A byte-identical rebuild leaves tabs alone.
 
 The browser registers only when `/mcp/info` advertises an exactly matching trusted
 catalog and the existing interactive connection has its UUID. Server controls use

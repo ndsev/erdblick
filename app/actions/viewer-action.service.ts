@@ -196,9 +196,11 @@ export class ViewerActionService implements OnDestroy {
                 && message.catalogId === VIEWER_ACTION_CATALOG_ID && message.clientId === this.clientId;
             this.availability(this.registered ? "MCP controls ready" : "MCP registration does not match this connection");
         } else if (message.type === "mapget.actions.error") {
-            this.stopCurrentAction();
+            // Catalog replacement affects future admission, not already accepted work.
+            const catalogChanged = message.error.reason === "catalog_changed";
+            if (!catalogChanged) this.stopCurrentAction();
             this.registered = false;
-            this.availability(`MCP controls unavailable: ${message.error.code}`);
+            this.availability(catalogChanged ? "MCP action catalog changed; reload the viewer" : `MCP controls unavailable: ${message.error.code}`);
         } else if (message.type === "mapget.actions.cancel") {
             const call = this.pending.get(message.callId);
             if (call) this.finish(call, undefined, {code: "cancelled", message: "Action cancelled", outcome: "not_applied"});
