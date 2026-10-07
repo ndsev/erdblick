@@ -16,7 +16,6 @@ import {
 import {
     coreLib,
     uint8ArrayFromWasm,
-    uint8ArrayToWasm,
     uint8ArrayToWasmOrThrow
 } from "../integrations/wasm";
 import {AppStateService, TileGridMode, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
@@ -54,7 +53,7 @@ export class MapInfoService {
     public readonly legalInformationUpdated = new Subject<boolean>();
     public readonly layerStateChanged = new Subject<string>();
     public readonly styleOptionsChanged = new Subject<StyleOptionChange[]>();
-    /** Emits after ready datasource metadata has been replaced in the shared parser. */
+    /** Emits on replacement/removal, requiring a stream reset; additions leave existing consumers live. */
     public readonly dataSourceInfoChanged = new Subject<void>();
     public readonly maps$: BehaviorSubject<MapLayerTree>;
 
@@ -66,6 +65,8 @@ export class MapInfoService {
     private dataSourceInfoJson: string | null = null;
     /** UTF-8 form of ready datasource metadata shared with render workers. */
     private dataSourceInfoBlobValue: Uint8Array | null = null;
+    /** Installed ready metadata keyed by JSON content, excluding catalog progress/status decoration. */
+    private readySourceMetadata = new Map<string, MapInfoItem>();
     /** Schema-free, map-local parser metadata used only by subset render workers. */
     private readonly renderDataSourceInfoBlobCache = new Map<string, Uint8Array>();
     /** Complete dictionary snapshots reused until the stream appends new fields. */
@@ -280,7 +281,22 @@ export class MapInfoService {
                 observe: "response"
             }));
             const result = Array.isArray(response.body) ? response.body : [];
-            const catalog = this.normalizeSourceCatalogEntries(result);
+            const nextMetadata = new Map<string, MapInfoItem>();
+            const catalog = this.normalizeSourceCatalogEntries(result).map(source => {
+                if (!isDataSourceCatalogEntryReady(source)) {
+                    return source;
+                }
+                const metadata = {...source};
+                for (const field of ["status", "statusMessage", "progress", "configIndex"]) {
+                    delete metadata[field];
+                }
+                const signature = JSON.stringify(metadata);
+                const retained = this.readySourceMetadata.get(signature) ?? metadata;
+                nextMetadata.set(signature, retained);
+                // HTTP decoding creates fresh objects. Preserve unchanged layer
+                // identities so scene reconciliation does not retire their tiles.
+                return {...source, layers: retained.layers};
+            });
             this.sourceCatalogRevisionValue = this.parseSourceCatalogRevision(
                 response.headers.get("X-Mapget-Sources-Revision")
             );
@@ -291,23 +307,32 @@ export class MapInfoService {
                 console.warn("Datasource config status:", message);
             }
 
+            const replaced = [...this.readySourceMetadata.keys()].some(key => !nextMetadata.has(key));
+            const added = [...nextMetadata].filter(([key]) => !this.readySourceMetadata.has(key)).map(([, source]) => source);
+            if (replaced || added.length || this.dataSourceInfoJson === null) {
+                const readyEntries = [...nextMetadata.values()];
+                const parserJson = JSON.stringify(this.schemaFreeDataSourceInfo(replaced ? readyEntries : added));
+                uint8ArrayToWasmOrThrow(wasmBuffer => {
+                    if (replaced) {
+                        this.tileLayerParser.setDataSourceInfo(wasmBuffer);
+                    } else {
+                        this.tileLayerParser.addDataSourceInfo(wasmBuffer);
+                    }
+                }, new TextEncoder().encode(parserJson));
+                this.readySourceMetadata = nextMetadata;
+                this.dataSourceInfoJson = JSON.stringify(readyEntries);
+                this.dataSourceInfoBlobValue = new TextEncoder().encode(this.dataSourceInfoJson);
+                if (replaced) {
+                    this.invalidateFieldDictBlobCache();
+                    this.renderDataSourceInfoBlobCache.clear();
+                    this.clearStyleParsers();
+                }
+            }
+            // Install parser metadata before publishing layers which can request
+            // it. Only actual replacement invalidates dictionaries and transport.
             this.messageService.clearBackendConnectionError();
             this.publishSourceCatalogTree(catalog);
-            const readyEntries = catalog.filter(isDataSourceCatalogEntryReady);
-            const jsonString = JSON.stringify(readyEntries);
-            const dataSourceInfoChanged = jsonString !== this.dataSourceInfoJson;
-            this.dataSourceInfoJson = jsonString;
-            if (dataSourceInfoChanged) {
-                this.invalidateFieldDictBlobCache();
-                this.renderDataSourceInfoBlobCache.clear();
-                this.clearStyleParsers();
-                this.dataSourceInfoBlobValue = new TextEncoder().encode(jsonString);
-                const parserJson = JSON.stringify(
-                    this.schemaFreeDataSourceInfo(readyEntries)
-                );
-                uint8ArrayToWasm(wasmBuffer => {
-                    this.tileLayerParser.setDataSourceInfo(wasmBuffer);
-                }, new TextEncoder().encode(parserJson));
+            if (replaced) {
                 this.dataSourceInfoChanged.next();
             }
             this.layerStateChanged.next("datasources");

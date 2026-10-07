@@ -36,6 +36,12 @@ public:
     void setDataSourceInfo(SharedUint8Array const& dataSourceInfoJson);
 
     /**
+     * Append newly ready maps without resetting existing metadata or string pools.
+     * Rejects already registered map ids; replacements must use setDataSourceInfo.
+     */
+    void addDataSourceInfo(SharedUint8Array const& dataSourceInfoJson);
+
+    /**
      * Get the data source info JSON that was set earlier.
      */
     void getDataSourceInfo(SharedUint8Array& dataSourceInfoJson, std::string const& mapId);

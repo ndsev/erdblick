@@ -1455,6 +1455,49 @@ TEST_CASE("TileLayerParser clears string-pool offsets when datasource info is re
     REQUIRE_FALSE(offsetsAfterReload.contains("ReloadedNode"));
 }
 
+TEST_CASE("TileLayerParser appends ready maps without invalidating live dictionaries or metadata", "[erdblick.parser]")
+{
+    TileLayerParser parser;
+    auto first = nlohmann::json{
+        {"mapId", "First"}, {"stringPoolId", "FirstPool"},
+        {"layers", {{"LineLayer", lineTestLayerInfo()->toJson()}}}
+    };
+    auto second = first;
+    second["mapId"] = "Second";
+    second["stringPoolId"] = "SecondPool";
+    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({first}).dump()));
+    parser.addFieldDict(serializedStringPool("FirstPool", "retained-field"));
+    auto offsets = parser.getFieldDictOffsets();
+    auto targets = parser.filterFeatureJumpTargets("Way.7");
+    REQUIRE(targets.size() == 1);
+    auto originalLayerInfo = targets.front().jumpTarget_.layerInfo_;
+    SharedUint8Array dictionaryBefore;
+    parser.getFieldDict(dictionaryBefore, "FirstPool");
+
+    SECTION("new maps extend the index while retaining existing dictionary bytes and layer pointers")
+    {
+        parser.addDataSourceInfo(SharedUint8Array(nlohmann::json::array({second}).dump()));
+        auto updated = parser.filterFeatureJumpTargets("Way.7");
+        REQUIRE(updated.size() == 1);
+        REQUIRE(updated.front().jumpTarget_.maps_ == std::vector<std::string>{"First", "Second"});
+        REQUIRE(updated.front().jumpTarget_.layerInfo_ == originalLayerInfo);
+        REQUIRE(parser.getFieldDictOffsets() == offsets);
+        SharedUint8Array dictionaryAfter;
+        parser.getFieldDict(dictionaryAfter, "FirstPool");
+        REQUIRE(dictionaryAfter.toString() == dictionaryBefore.toString());
+    }
+
+    SECTION("a rejected replacement does not partially install earlier maps from the same batch")
+    {
+        REQUIRE_THROWS(parser.addDataSourceInfo(SharedUint8Array(nlohmann::json::array({second, first}).dump())));
+        auto unchanged = parser.filterFeatureJumpTargets("Way.7");
+        REQUIRE(unchanged.front().jumpTarget_.maps_ == std::vector<std::string>{"First"});
+        REQUIRE(parser.getFieldDictOffsets() == offsets);
+        // The rejected batch did not install Second, so it can still be added.
+        REQUIRE_NOTHROW(parser.addDataSourceInfo(SharedUint8Array(nlohmann::json::array({second}).dump())));
+    }
+}
+
 TEST_CASE("TileLayerParser exposes the tile lifetime in milliseconds", "[erdblick.parser]")
 {
     using namespace std::chrono;
