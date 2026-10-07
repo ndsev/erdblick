@@ -1954,16 +1954,36 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                     layerTypeIdMetadata);
                 for (auto const& featureType : layerInfo->featureTypes_) {
                     auto const* featureSchemaJson = schemaForRegistryKey(rootSchema, registry, "Feature:" + featureType.name_);
+                    auto const featureSchema = registry->featureSchema(featureType.name_);
                     std::vector<SearchStyleFieldPath> paths;
                     std::set<simfil::SchemaId> activeSchemas;
                     collectSchemaFieldPaths(
                         paths,
                         registry,
-                        registry->featureSchema(featureType.name_),
+                        featureSchema,
                         featureSchemaJson,
                         rootSchema,
                         "",
                         activeSchemas);
+                    // Offer the runtime lookup alias in the picker without duplicating
+                    // canonical schema paths. A declared attributes member keeps precedence.
+                    auto const rootFields = registry->directFields(featureSchema);
+                    if (std::ranges::find(rootFields, "attributes") == rootFields.end() &&
+                        std::ranges::find(rootFields, "properties") != rootFields.end())
+                    {
+                        auto const canonicalCount = paths.size();
+                        for (size_t i = 0; i < canonicalCount; ++i) {
+                            if (paths[i].path == "properties" ||
+                                paths[i].path.starts_with("properties.")) {
+                                auto alias = paths[i];
+                                alias.path.replace(
+                                    0,
+                                    std::string_view("properties").size(),
+                                    "attributes");
+                                paths.push_back(std::move(alias));
+                            }
+                        }
+                    }
                     for (auto const& path : paths) {
                         auto metadata = SearchStyleSchemaMetadata{
                             path.valueKind,
