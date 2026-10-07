@@ -139,6 +139,13 @@ The C++ core wraps mapget models and exposes:
 The retired full-feature visualizers and `TileSearchResultLayer` wrappers do
 not coexist with this path.
 
+During nonblocking datasource startup, `MapInfoService` retains unchanged layer
+identities and appends newly ready maps through `TileLayerParser.addDataSourceInfo`.
+Existing string dictionaries, style planners, rendered tiles and the interactive
+connection remain live. Catalog status/progress changes are not model changes.
+Replacing or removing installed metadata still uses `setDataSourceInfo` and resets
+the stream dictionaries; the additive API rejects already registered map IDs.
+
 Search completion selects native feature or attribute-query schema IDs from
 mapget's `LayerSchema` and calls simfil's schema-domain completion directly.
 The parser caches one environment/private string namespace per registry, cleared

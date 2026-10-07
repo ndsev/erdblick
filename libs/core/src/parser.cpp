@@ -1215,18 +1215,29 @@ void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSo
     cachedStrings_ = std::make_shared<mapget::TileLayerStream::StringPoolCache>();
     reset();
 
-    // Parse data source info
-    auto srcInfoParsed = nlohmann::json::parse(dataSourceInfoJson.toString());
+    addDataSourceInfo(dataSourceInfoJson);
+}
+
+void TileLayerParser::addDataSourceInfo(const erdblick::SharedUint8Array& dataSourceInfoJson)
+{
+    // Validate the entire batch before changing live parser state. Appending a
+    // map is safe on the existing stream; replacing one is not.
+    std::vector<DataSourceInfo> additions;
+    std::set<std::string> addedMapIds;
+    for (auto const& node : nlohmann::json::parse(dataSourceInfoJson.toString())) {
+        auto dsInfo = DataSourceInfo::fromJson(node);
+        if (dsInfo.isAddOn_)
+            continue;
+        if (info_.contains(dsInfo.mapId_) || !addedMapIds.insert(dsInfo.mapId_).second)
+            throw std::runtime_error(
+                fmt::format("Datasource map '{}' is already registered", dsInfo.mapId_));
+        additions.push_back(std::move(dsInfo));
+    }
 
     // Index available feature types by their feature id compositions.
     // These will be the available jump-to-feature targets.
     // For each composition, allow a version with and without optional params.
-    for (auto const& node : srcInfoParsed) {
-        auto dsInfo = DataSourceInfo::fromJson(node);
-        if (dsInfo.isAddOn_) {
-            // Do not expose add-on datasources in the frontend.
-            continue;
-        }
+    for (auto& dsInfo : additions) {
         for (auto const& [_, l] : dsInfo.layers_) {
             for (auto const& tp : l->featureTypes_) {
                 for (auto const& composition : tp.uniqueIdCompositions_) {
