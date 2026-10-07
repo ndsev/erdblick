@@ -87,6 +87,9 @@ Typing `tileId "Map" "SourceLayer"` is not the only way to reach SourceData:
 - When you copy tile information from the SourceData panel, it uses the same quoting rules, so you can paste the string straight into the search input.
 <!-- --8<-- [end:sourcedata] -->
 
+<!-- mcp:
+keywords: [search, sessions, scope, attribute, pause, stop, viewport]
+-->
 ## Feature Search Sessions
 
 <!-- --8<-- [start:feature-search] -->
@@ -163,6 +166,9 @@ High-fi visualization draws styled result geometry when the visible tile count i
 - The default high-fidelity cutoff is 512 visible tiles. Above that limit, density markers remain the practical overview.
 - Geometry for attribute-scope results uses computed validity geometry when available and falls back to feature display geometry otherwise.
 
+<!-- mcp:
+keywords: [search styling, visualization, rules]
+-->
 ### Style Rules
 
 Search style rules are evaluated only for the result layer of the current search.
@@ -200,6 +206,9 @@ Edit a saved stylesheet from the ordinary Styles tree. The Style Editor opens on
 Use density markers for broad searches or early exploration. Switch to high-fi geometry and labels when the visible tile count is small enough that individual result geometry is more useful than aggregate buckets.
 <!-- --8<-- [end:visualization] -->
 
+<!-- mcp:
+keywords: [search diagnostics, trace, error, troubleshooting]
+-->
 ## Search Diagnostics
 
 <!-- --8<-- [start:diagnostics] -->
@@ -212,6 +221,9 @@ The **Diagnostics** tab explains what the current search did and helps tune quer
 Values are loaded lazily and may wait until result chunks have finished ingress. Use them when you want to understand the distribution behind a search before creating labels, categories, or gradients. Useful trace expressions include `trace(typeId)`, `trace(**.speedLimitKmh)`, and named traces such as `trace(valueKph, name="speed limits")` when several measurements should appear as separate value cards.
 <!-- --8<-- [end:diagnostics] -->
 
+<!-- mcp:
+keywords: [search, query, schema, completion, simfil]
+-->
 ## Crafting Feature Queries
 
 <!-- --8<-- [start:crafting] -->

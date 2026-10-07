@@ -110,6 +110,9 @@ Enable **Point clouds**, then choose a layer preset:
 layer's style options. All presets retain depth occlusion and object picking.
 Overlay changes appearance, not the point count or memory requirements.
 
+<!-- mcp:
+keywords: [style, YAML, search visualization]
+-->
 ## YAML Styles and Search Result Styles
 
 YAML style sheets are persistent project-wide rules loaded from the bundle,
@@ -235,6 +238,9 @@ The planner separates:
 Mapget schema-compiles all four lists in their real contexts. Styles do not use
 search-query normalization.
 
+<!-- mcp:
+keywords: [feature scope, attribute scope, relation scope]
+-->
 ## Scopes
 
 `scope` belongs to the top-level rule:
@@ -355,6 +361,9 @@ Exactly one of these may be present:
 color: orange
 ```
 
+<!-- mcp:
+keywords: [style, color, expression, simfil]
+-->
 #### Expression color
 
 ```yaml
@@ -789,6 +798,9 @@ Initial restrictions:
 
 A mismatch rejects the plan rather than returning a wrong merge count.
 
+<!-- mcp:
+keywords: [attribute styling, validity, rules]
+-->
 ## Attribute rules
 
 ```yaml
@@ -836,6 +848,9 @@ pick identity and terminal arrow. Returning to the same connected end of the
 same road uses the compact left-side U-turn hairpin described above;
 opposite-heading cross-road legs retain the ordinary fillet.
 
+<!-- mcp:
+keywords: [relation styling, target, links]
+-->
 ## Relation rules
 
 ```yaml
