@@ -114,7 +114,7 @@ export const viewerOperations = {
         outputSchema: z.strictObject({status: z.literal("applied"), panelId: indexSchema, mapTileKey: identifierSchema})
     },
     viewer_start_search: {
-        description: "Start an ordinary visible search with explicit layers/views and bounded viewport coverage. Auto-update defaults to false. Returns searchId; cancelling this completed call does not stop the search. Use viewer_control_search for lifecycle control.",
+        description: "Start an ordinary visible simfil search with explicit layers/views and bounded viewport coverage. Auto-update defaults to false. Returns searchId; cancelling this completed call does not stop the search. Use viewer_control_search for lifecycle control.",
         permission: "viewer-control", mutation: true,
         inputSchema: z.strictObject({query: boundedUnicodeString(4096, true), scope: z.enum(["auto", "feature", "attribute"]).optional(),
             mapLayers: z.array(mapLayerSchema).min(1).max(100), viewIndices: z.array(indexSchema).min(1).max(2),
