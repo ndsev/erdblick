@@ -77,6 +77,12 @@ describe("viewer action shared contract fixtures", () => {
             observedAt: "2026-09-29T00:00:00Z", viewLayoutRevision: 0,
             values: [{target: {channel: "view.camera", viewIndex: 0}, value: []}], complete: true, omissions: []
         }).success).toBe(false);
+        const input = viewerActions.viewer_set_app_state.inputSchema;
+        const target = {channel: "view.projection", viewIndex: 0};
+        expect(input.safeParse({target, value: "2d", viewLayoutRevision: 0}).success).toBe(true);
+        expect(input.safeParse({target, value: [], viewLayoutRevision: 0}).success).toBe(false);
+        expect(input.safeParse({target, value: "2d"}).success).toBe(false);
+        expect(input.safeParse({target, viewLayoutRevision: 0}).success).toBe(false);
     });
 
     it("publishes only explicit actions/channels with consistent permissions", () => {
@@ -87,7 +93,7 @@ describe("viewer action shared contract fixtures", () => {
         expect(catalog.actions.every(action => action.permission === (action.mutation ? "viewer-control" : "viewer-read"))).toBe(true);
         expect(catalog.channels.filter(channel => channel.writable).map(channel => channel.name))
             .toEqual(Object.entries(appStateChannels).filter(([, channel]) => channel.writable).map(([name]) => name));
-        expect(catalog.actions).toHaveLength(26);
+        expect(catalog.actions).toHaveLength(27);
         expect(catalog.channels).toHaveLength(20);
         expect(catalog.actions.some(action => action.name === "viewer_list_sessions")).toBe(false);
     });

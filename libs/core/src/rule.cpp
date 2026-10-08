@@ -1777,6 +1777,10 @@ std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
 {
     if (!labelTextExpression_.empty()) {
         auto resultVal = evalFun.evaluate(labelTextExpression_);
+        // Missing data and failed projections use the configured fallback, rather
+        // than displaying the evaluator's literal "null" or "undefined" marker.
+        if (resultVal.type == simfil::ValueType::Null || resultVal.type == simfil::ValueType::Undef)
+            return labelText_;
         auto resultText = resultVal.toString();
         if (!resultText.empty()) {
             return resultText;

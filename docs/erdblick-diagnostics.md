@@ -2,6 +2,11 @@
 
 Erdblick exposes loading, rendering, backend, and logging state directly in the UI. Use these tools when you need to understand why tiles are slow, incomplete, empty, or inconsistent.
 
+<!-- mcp:
+title: "Viewer loading and connection diagnostics"
+keywords: ["loading", "connected", "backend", "status", "progress", "ready"]
+hint: "Use viewer_get_diagnostics for bounded cached browser transport/worker/loading/error information. mapget_get_diagnostics separately exposes a backend operational snapshot when global diagnostics permission allows it. Applied state changes are not render-completion fences; combine diagnostics with state and a screenshot when checking visual outcomes."
+-->
 ## Status at a Glance
 
 ![Tile and backend status in the progress popover](screenshots/diagnostics-progress.png)
@@ -25,6 +30,11 @@ Click the indicator to open the progress popover. It shows:
 - backend and rendering progress counters
 - shortcuts to **Open Statistics**, **Open Log**, and **Export**
 
+<!-- mcp:
+title: "Tile loading error overlays"
+keywords: ["red tile", "empty tile", "error overlay", "tile grid"]
+hint: "Use view.grid to show tile borders and viewer_get_diagnostics to inspect cached errors. An empty tile or failed request is not proof that a searched attribute is absent. Search help for \"Nothing renders\" and \"Recovering from a datasource tile error\"."
+-->
 ## Tile Loading Overlays
 
 Enable the tile grid to see tile-status overlays directly on the map:
@@ -42,6 +52,11 @@ The **status popover (1)** reports failed tiles while the red overlay marks
 the affected area. Other road data remains visible. Check the log for the failing
 datasource before reloading.
 
+<!-- mcp:
+title: "Viewer performance diagnostics"
+keywords: ["performance", "memory", "GPU", "worker", "tile budget", "slow"]
+hint: "viewer_get_diagnostics exposes bounded cached counters and explicit unavailable metrics, not full backend reports or GPU readback. app.preferences.rendering controls tileLimit and renderWorkers; retain unrelated settings when changing them."
+-->
 ## Performance Statistics
 
 Open **Tools -> Performance Statistics** from the main bar, or use **Open Statistics** from the diagnostics popover.
@@ -94,6 +109,11 @@ The log collects:
 
 Use the log when the map looks healthy at first glance but the indicator shows an error badge, or when a datasource intermittently disconnects and reconnects.
 
+<!-- mcp:
+title: "Export diagnostics bundle"
+keywords: ["diagnostics export", "bug report", "logs", "snapshot"]
+hint: "Full diagnostics export is a UI operation. viewer_get_diagnostics is a bounded summary, not the downloadable bundle; do not report that it created an export file."
+-->
 ## Exporting Diagnostics
 
 Open **Tools -> Export Diagnostics** to create a diagnostics bundle for bug reports or offline analysis.

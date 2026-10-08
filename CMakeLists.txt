@@ -19,6 +19,14 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 endif()
 
+# Catching must be enabled while compiling every C++ dependency, not just while
+# linking the final WASM module. Otherwise detailed parser/validation catch blocks
+# are erased and recoverable errors escape through the JavaScript boundary.
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+  add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-fexceptions>")
+  add_link_options(-fexceptions)
+endif()
+
 # External dependencies
 message("Building for ${CMAKE_SYSTEM_NAME}.")
 

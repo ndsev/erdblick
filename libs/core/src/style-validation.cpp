@@ -230,7 +230,8 @@ bool validateRegexValue(
             "error",
             "schema",
             std::move(impact),
-            "Invalid regular expression in " + property + ": " + e.what(),
+            "Invalid regular expression in " + property + ": " + e.what() +
+                ". Use regex syntax such as .*SPEED.*, not shell wildcards such as *SPEED*.",
             locationForNode(parent[property]));
         issue.ruleIndex = ruleIndex;
         issue.rulePath = rulePath;

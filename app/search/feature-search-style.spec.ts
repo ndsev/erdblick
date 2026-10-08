@@ -1,10 +1,15 @@
-import {describe, expect, it} from "vitest";
+import {beforeAll, describe, expect, it} from "vitest";
 
 import type {FilterChannelDefinition} from "../mapdata/filter-subscription.model";
 import {
     buildFeatureSearchFilterChannels,
+    compileFeatureSearchStyle,
     FEATURE_SEARCH_RESULT_CHANNEL_PREFIX
 } from "./feature-search-style";
+
+import {coreLib, initializeLibrary, uint8ArrayToWasmOrThrow} from "../integrations/wasm";
+import {createFeatureSearchStateEntry} from "../shared/feature-search-state";
+import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
 
 function channel(overrides: Partial<FilterChannelDefinition>): FilterChannelDefinition {
     return {
@@ -99,5 +104,64 @@ describe("feature search flat style channels", () => {
             featureTypes: [],
             featureFilter: "(nativeFilter) and (false)"
         });
+    });
+});
+
+
+describe("feature search native style compilation", () => {
+    beforeAll(async () => { await initializeLibrary(); });
+
+    it.each([true, false])("accepts valid native channels for two coloured rules (shared=%s)", shared => {
+        const parser = new coreLib.TileLayerParser() as TileLayerParser;
+        const metadata = [{
+            mapId: "Map", sourceId: "Map", stringPoolId: "Map",
+            maxParallelJobs: 1, addOn: false,
+            layers: {Lane: {
+                layerId: "Lane", type: "Features", canRead: true, canWrite: false,
+                coverage: [], featureTypes: [{name: "Lane", uniqueIdCompositions: [[
+                    {partId: "laneId", datatype: "U32"}
+                ]]}], zoomLevels: [13],
+                version: {major: 1, minor: 0, patch: 0}
+            }}
+        }];
+        try {
+            uint8ArrayToWasmOrThrow(buffer => parser.setDataSourceInfo(buffer),
+                new TextEncoder().encode(JSON.stringify(metadata)));
+            const definition = {
+                ...createFeatureSearchStateEntry({
+                    query: "laneId in [76,99]",
+                    searchStyleRules: [
+                        {geometry: ["line"], filter: [{field: "laneId", op: "=", value: 76}],
+                            color: {mode: "solid", color: "#0088ff"}},
+                        {geometry: ["line"], filter: [{field: "laneId", op: "==", value: shared ? 76 : 99}],
+                            color: {mode: "solid", color: "#ff8800"}}
+                    ]
+                }),
+                concreteScope: "feature" as const,
+                backendQuery: "laneId in [76,99]",
+                resultFields: ["laneId"]
+            };
+            const compiled = compileFeatureSearchStyle(definition,
+                {mapId: "Map", layerId: "Lane", key: "Map/Lane"},
+                {planStyleFilter: (style, mapId, layerId, highlightMode, lod) =>
+                    parser.planStyleFilter(style, mapId, layerId, highlightMode, lod)}, ["Lane"]);
+            try {
+                expect(compiled.filterPlan.valid).toBe(true);
+                const renderChannels = shared ? 1 : 2;
+                expect(compiled.filterPlan.channels).toHaveLength(renderChannels + 1);
+                if (shared) expect(compiled.filterPlan.channels[0].channelId).toBe("style-rules:0,1");
+                expect(compiled.filterPlan.channels[renderChannels].channelId)
+                    .toBe(`${FEATURE_SEARCH_RESULT_CHANNEL_PREFIX}${definition.id}:Map/Lane`);
+                expect(compiled.resultChannelOrdinal).toBe(renderChannels);
+                expect(compiled.source).toContain("laneId == 76");
+                expect(compiled.source).toContain(`laneId == ${shared ? 76 : 99}`);
+                expect(compiled.source).toContain("#0088ff");
+                expect(compiled.source).toContain("#ff8800");
+            } finally {
+                compiled.style.featureLayerStyle?.delete();
+            }
+        } finally {
+            parser.delete();
+        }
     });
 });

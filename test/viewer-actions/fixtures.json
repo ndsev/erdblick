@@ -1,109 +1,1833 @@
 {
   "actions": [
-    {"name":"layer visibility uses the writable singular channel","action":"viewer_set_app_state","arguments":{"target":{"channel":"view.layer","viewIndex":0,"mapId":"m","layerId":"l"},"value":{"visible":false,"level":13,"autoLevel":true},"viewLayoutRevision":0},"valid":true},
-    {"name":"layer collection stays read only","action":"viewer_set_app_state","arguments":{"target":{"channel":"view.layers","viewIndex":0,"mapId":"m","layerId":"l"},"value":{"visible":false,"level":13,"autoLevel":true},"viewLayoutRevision":0},"valid":false},
-    {"name":"bounded UI snapshot page","action":"viewer_take_snapshot","arguments":{"limit":300,"offset":0},"valid":true},
-    {"name":"UI snapshot rejects scripts and selectors","action":"viewer_take_snapshot","arguments":{"selector":"body","script":"alert(1)"},"valid":false},
-    {"name":"UI snapshot rejects unbounded count","action":"viewer_take_snapshot","arguments":{"limit":301},"valid":false},
-    {"name":"UI click requires snapshot UID","action":"viewer_click","arguments":{"uid":"#delete-button"},"valid":false},
-    {"name":"UI fill bounded native value","action":"viewer_fill","arguments":{"uid":"1.2","value":"lanes"},"valid":true},
-    {"name":"UI read limits style properties","action":"viewer_get_element","arguments":{"uid":"1.2","styles":["background-image"]},"valid":false},
-    {"name":"UI scroll reveals target","action":"viewer_scroll","arguments":{"uid":"1.2","position":{"intoView":true}},"valid":true},
-    {"name":"UI resize pixels","action":"viewer_resize","arguments":{"uid":"1.2","size":{"widthPx":600,"heightPx":400}},"valid":true},
-    {"name":"UI resize split proportions","action":"viewer_resize","arguments":{"uid":"1.2","size":{"panelSizes":[65,35]}},"valid":true},
-    {"name":"UI resize rejects empty size","action":"viewer_resize","arguments":{"uid":"1.2","size":{}},"valid":false},
-    {"name":"UI resize rejects mixed sizing modes","action":"viewer_resize","arguments":{"uid":"1.2","size":{"widthPx":600,"panelSizes":[65,35]}},"valid":false},
-    {"name":"UI resize rejects negative dimensions","action":"viewer_resize","arguments":{"uid":"1.2","size":{"heightPx":-1}},"valid":false},
-    {"name":"screenshot defaults include UI","action":"viewer_screenshot","arguments":{},"valid":true},
-    {"name":"screenshot bounded dimensions and guard","action":"viewer_screenshot","arguments":{"maxWidth":1920,"maxHeight":128,"viewLayoutRevision":0},"valid":true},
-    {"name":"screenshot rejects unbounded size","action":"viewer_screenshot","arguments":{"maxWidth":1921},"valid":false},
-    {"name":"screenshot rejects arbitrary DOM selectors","action":"viewer_screenshot","arguments":{"selector":"body"},"valid":false},
-    {"name":"projection value with layout guard","action":"viewer_set_app_state","arguments":{"target":{"channel":"view.projection","viewIndex":0},"value":"2d","viewLayoutRevision":0},"valid":true},
-    {"name":"projection rejects another channel value","action":"viewer_set_app_state","arguments":{"target":{"channel":"view.projection","viewIndex":0},"value":{"layerId":null,"opacity":50},"viewLayoutRevision":0},"valid":false},
-    {"name":"projection requires layout guard","action":"viewer_set_app_state","arguments":{"target":{"channel":"view.projection","viewIndex":0},"value":"2d"},"valid":false},
-    {"name":"preferences need no layout guard","action":"viewer_set_app_state","arguments":{"target":{"channel":"app.preferences.navigation"},"value":{"zoomStep":0.2,"featureZoomClearance":10}},"valid":true},
-    {"name":"preferences reject another channel value","action":"viewer_set_app_state","arguments":{"target":{"channel":"app.preferences.navigation"},"value":"2d"},"valid":false},
-    {"name":"qualified layer preset","action":"viewer_set_app_state","arguments":{"target":{"channel":"view.layerPreset","viewIndex":0,"mapId":"m","layerId":"l"},"value":{"styleId":"s","presetId":"p"},"viewLayoutRevision":0},"valid":true},
-    {"name":"source reference preserves signed tile and uint64 address","action":"viewer_open_source_data","arguments":{"source":{"mapId":"m","partition":{"kind":"tile","id":-2147483648},"reference":{"layerId":"l","address":"18446744073709551615"}}},"valid":true},
-    {"name":"source object id cannot be an unsafe JS number","action":"viewer_open_source_data","arguments":{"source":{"mapId":"m","partition":{"kind":"object","id":100},"reference":{"layerId":"l","address":"0"}}},"valid":false},
-    {"name":"feature inspect with entity suffix","action":"viewer_inspect","arguments":{"features":[{"mapId":"m","featureId":"Road.1:attribute#2:validity#0"}]},"valid":true},
-    {"name":"inspection requires nonempty feature selection","action":"viewer_inspect","arguments":{"features":[]},"valid":false},
-    {"name":"bounded result slice","action":"viewer_get_search_results","arguments":{"searchId":"s","offset":0,"limit":100,"runId":"r","refresh":1},"valid":true},
-    {"name":"unbounded result slice rejected","action":"viewer_get_search_results","arguments":{"searchId":"s","limit":101},"valid":false},
-    {"name":"style operations cannot request filesystem writes","action":"viewer_edit_style","arguments":{"operation":"create","source":"name: sample","file":"/tmp/style.yaml"},"valid":false},
-    {"name":"discovery prefix 128 astral code points","action":"viewer_describe_app_state","arguments":{"prefix":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"},"valid":true},
-    {"name":"discovery prefix 129 astral code points","action":"viewer_describe_app_state","arguments":{"prefix":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"},"valid":false},
-    {"name": "bounded default overview", "action": "viewer_get_app_state", "arguments": {}, "valid": true},
-    {"name": "camera and hidden searches", "action": "viewer_get_app_state", "arguments": {"targets": [{"channel": "view.camera", "viewIndex": 1}, {"channel": "app.searches"}]}, "valid": true},
-    {"name": "narrow hidden layer", "action": "viewer_get_app_state", "arguments": {"targets": [{"channel": "view.layers", "viewIndex": 0, "mapId": "Île 6", "layerId": "Lane"}]}, "valid": true},
-    {"name": "routing belongs to mapget", "action": "viewer_get_app_state", "arguments": {"clientId": "b3e68f32-3b51-472d-8cab-14b597f7de91"}, "valid": false},
-    {"name": "no raw state pool", "action": "viewer_get_app_state", "arguments": {"targets": [{"channel": "coordinatesLegalTermsAccepted"}]}, "valid": false},
-    {"name": "no arbitrary target properties", "action": "viewer_get_app_state", "arguments": {"targets": [{"channel": "app.searches", "constructor": "Object"}]}, "valid": false},
-    {"name": "view selector required", "action": "viewer_get_app_state", "arguments": {"targets": [{"channel": "view.camera"}]}, "valid": false},
-    {"name": "explicit zero targets", "action": "viewer_get_app_state", "arguments": {"targets": []}, "valid": true},
-    {"name": "narrow discovery", "action": "viewer_describe_app_state", "arguments": {"channels": ["view.camera", "app.searches"], "prefix": "view."}, "valid": true},
-    {"name": "unknown exact discovery channel", "action": "viewer_describe_app_state", "arguments": {"channels": ["__proto__"]}, "valid": false},
-    {"name": "camera assignment", "action": "viewer_set_app_state", "arguments": {"viewLayoutRevision": 2, "target": {"channel": "view.camera", "viewIndex": 0}, "value": {"destination": {"lon": 11.5374, "lat": 48.1584, "alt": 500}, "orientation": {"heading": 0, "pitch": -1.5707963267948966, "roll": 0}, "position": [0, 0, 0]}}, "valid": true},
-    {"name": "camera offset is optional", "action": "viewer_set_app_state", "arguments": {"viewLayoutRevision": 2, "target": {"channel": "view.camera", "viewIndex": 0}, "value": {"destination": {"lon": 11.5374, "lat": 48.1584, "alt": 500}, "orientation": {"heading": 0, "pitch": -1.5707963267948966, "roll": 0}}}, "valid": true},
-    {"name": "camera offset preserves signed fractional components", "action": "viewer_set_app_state", "arguments": {"viewLayoutRevision": 2, "target": {"channel": "view.camera", "viewIndex": 0}, "value": {"destination": {"lon": 11.5374, "lat": 48.1584, "alt": 500}, "orientation": {"heading": 0, "pitch": -1.5707963267948966, "roll": 0}, "position": [1, -2, 0.5]}}, "valid": true},
-    {"name": "empty camera offset rejected", "action": "viewer_set_app_state", "arguments": {"viewLayoutRevision": 2, "target": {"channel": "view.camera", "viewIndex": 0}, "value": {"destination": {"lon": 11.5374, "lat": 48.1584, "alt": 500}, "orientation": {"heading": 0, "pitch": -1.5707963267948966, "roll": 0}, "position": []}}, "valid": false},
-    {"name": "short camera offset rejected", "action": "viewer_set_app_state", "arguments": {"viewLayoutRevision": 2, "target": {"channel": "view.camera", "viewIndex": 0}, "value": {"destination": {"lon": 11.5374, "lat": 48.1584, "alt": 500}, "orientation": {"heading": 0, "pitch": -1.5707963267948966, "roll": 0}, "position": [0, 0]}}, "valid": false},
-    {"name": "long camera offset rejected", "action": "viewer_set_app_state", "arguments": {"viewLayoutRevision": 2, "target": {"channel": "view.camera", "viewIndex": 0}, "value": {"destination": {"lon": 11.5374, "lat": 48.1584, "alt": 500}, "orientation": {"heading": 0, "pitch": -1.5707963267948966, "roll": 0}, "position": [0, 0, 0, 0]}}, "valid": false},
-    {"name": "camera offset does not coerce numeric strings", "action": "viewer_set_app_state", "arguments": {"viewLayoutRevision": 2, "target": {"channel": "view.camera", "viewIndex": 0}, "value": {"destination": {"lon": 11.5374, "lat": 48.1584, "alt": 500}, "orientation": {"heading": 0, "pitch": -1.5707963267948966, "roll": 0}, "position": [0, "0", 0]}}, "valid": false},
-    {"name": "stale layout guard is mandatory", "action": "viewer_set_app_state", "arguments": {"target": {"channel": "view.camera", "viewIndex": 0}, "value": {"destination": {"lon": 11, "lat": 48, "alt": 500}, "orientation": {"heading": 0, "pitch": -1, "roll": 0}}}, "valid": false},
-    {"name": "no whole app import", "action": "viewer_set_app_state", "arguments": {"target": {"channel": "app.views"}, "value": {}, "viewLayoutRevision": 0}, "valid": false},
-    {"name": "roll is not silently ignored", "action": "viewer_set_app_state", "arguments": {"viewLayoutRevision": 0, "target": {"channel": "view.camera", "viewIndex": 0}, "value": {"destination": {"lon": 11, "lat": 48, "alt": 500}, "orientation": {"heading": 0, "pitch": -1, "roll": 1}}}, "valid": false},
-    {"name": "no numeric coercion", "action": "viewer_set_app_state", "arguments": {"viewLayoutRevision": "0", "target": {"channel": "view.camera", "viewIndex": 0}, "value": {"destination": {"lon": 11, "lat": 48, "alt": 500}, "orientation": {"heading": 0, "pitch": -1, "roll": 0}}}, "valid": false}
+    {
+      "name": "catalog requires explicit kind",
+      "action": "viewer_get_catalog",
+      "arguments": {},
+      "valid": false
+    },
+    {
+      "name": "map catalog supports bounded paging",
+      "action": "viewer_get_catalog",
+      "arguments": {
+        "kind": "maps",
+        "offset": 2,
+        "limit": 10
+      },
+      "valid": true
+    },
+    {
+      "name": "catalog rejects oversized offset",
+      "action": "viewer_get_catalog",
+      "arguments": {
+        "kind": "layers",
+        "offset": 100001
+      },
+      "valid": false
+    },
+    {
+      "name": "layer visibility uses the writable singular channel",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "target": {
+          "channel": "view.layer",
+          "viewIndex": 0,
+          "mapId": "m",
+          "layerId": "l"
+        },
+        "value": {
+          "visible": false,
+          "level": 13,
+          "autoLevel": true
+        },
+        "viewLayoutRevision": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "layer collection stays read only",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "target": {
+          "channel": "view.layers",
+          "viewIndex": 0,
+          "mapId": "m",
+          "layerId": "l"
+        },
+        "value": {
+          "visible": false,
+          "level": 13,
+          "autoLevel": true
+        },
+        "viewLayoutRevision": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "bounded UI snapshot page",
+      "action": "viewer_take_snapshot",
+      "arguments": {
+        "limit": 300,
+        "offset": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "UI snapshot rejects scripts and selectors",
+      "action": "viewer_take_snapshot",
+      "arguments": {
+        "selector": "body",
+        "script": "alert(1)"
+      },
+      "valid": false
+    },
+    {
+      "name": "UI snapshot rejects unbounded count",
+      "action": "viewer_take_snapshot",
+      "arguments": {
+        "limit": 301
+      },
+      "valid": false
+    },
+    {
+      "name": "UI click requires snapshot UID",
+      "action": "viewer_click",
+      "arguments": {
+        "uid": "#delete-button"
+      },
+      "valid": false
+    },
+    {
+      "name": "UI fill bounded native value",
+      "action": "viewer_fill",
+      "arguments": {
+        "uid": "1.2",
+        "value": "lanes"
+      },
+      "valid": true
+    },
+    {
+      "name": "UI read limits style properties",
+      "action": "viewer_get_element",
+      "arguments": {
+        "uid": "1.2",
+        "styles": [
+          "background-image"
+        ]
+      },
+      "valid": false
+    },
+    {
+      "name": "UI scroll reveals target",
+      "action": "viewer_scroll",
+      "arguments": {
+        "uid": "1.2",
+        "position": {
+          "intoView": true
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "UI resize pixels",
+      "action": "viewer_resize",
+      "arguments": {
+        "uid": "1.2",
+        "size": {
+          "widthPx": 600,
+          "heightPx": 400
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "UI resize split proportions",
+      "action": "viewer_resize",
+      "arguments": {
+        "uid": "1.2",
+        "size": {
+          "panelSizes": [
+            65,
+            35
+          ]
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "UI resize rejects empty size",
+      "action": "viewer_resize",
+      "arguments": {
+        "uid": "1.2",
+        "size": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "UI resize rejects mixed sizing modes",
+      "action": "viewer_resize",
+      "arguments": {
+        "uid": "1.2",
+        "size": {
+          "widthPx": 600,
+          "panelSizes": [
+            65,
+            35
+          ]
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "UI resize rejects negative dimensions",
+      "action": "viewer_resize",
+      "arguments": {
+        "uid": "1.2",
+        "size": {
+          "heightPx": -1
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "screenshot defaults include UI",
+      "action": "viewer_screenshot",
+      "arguments": {},
+      "valid": true
+    },
+    {
+      "name": "screenshot bounded dimensions and guard",
+      "action": "viewer_screenshot",
+      "arguments": {
+        "maxWidth": 1920,
+        "maxHeight": 128,
+        "viewLayoutRevision": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "screenshot rejects unbounded size",
+      "action": "viewer_screenshot",
+      "arguments": {
+        "maxWidth": 1921
+      },
+      "valid": false
+    },
+    {
+      "name": "screenshot rejects arbitrary DOM selectors",
+      "action": "viewer_screenshot",
+      "arguments": {
+        "selector": "body"
+      },
+      "valid": false
+    },
+    {
+      "name": "projection value with layout guard",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "target": {
+          "channel": "view.projection",
+          "viewIndex": 0
+        },
+        "value": "2d",
+        "viewLayoutRevision": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "projection rejects another channel value",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "target": {
+          "channel": "view.projection",
+          "viewIndex": 0
+        },
+        "value": {
+          "layerId": null,
+          "opacity": 50
+        },
+        "viewLayoutRevision": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "projection requires layout guard",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "target": {
+          "channel": "view.projection",
+          "viewIndex": 0
+        },
+        "value": "2d"
+      },
+      "valid": false
+    },
+    {
+      "name": "preferences need no layout guard",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "target": {
+          "channel": "app.preferences.navigation"
+        },
+        "value": {
+          "zoomStep": 0.2,
+          "featureZoomClearance": 10
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "preferences reject another channel value",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "target": {
+          "channel": "app.preferences.navigation"
+        },
+        "value": "2d"
+      },
+      "valid": false
+    },
+    {
+      "name": "qualified layer preset",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "target": {
+          "channel": "view.layerPreset",
+          "viewIndex": 0,
+          "mapId": "m",
+          "layerId": "l"
+        },
+        "value": {
+          "styleId": "s",
+          "presetId": "p"
+        },
+        "viewLayoutRevision": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "source reference preserves signed tile and uint64 address",
+      "action": "viewer_open_source_data",
+      "arguments": {
+        "source": {
+          "mapId": "m",
+          "partition": {
+            "kind": "tile",
+            "id": -2147483648
+          },
+          "reference": {
+            "layerId": "l",
+            "address": "18446744073709551615"
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "source object id cannot be an unsafe JS number",
+      "action": "viewer_open_source_data",
+      "arguments": {
+        "source": {
+          "mapId": "m",
+          "partition": {
+            "kind": "object",
+            "id": 100
+          },
+          "reference": {
+            "layerId": "l",
+            "address": "0"
+          }
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "feature inspect with entity suffix",
+      "action": "viewer_inspect",
+      "arguments": {
+        "features": [
+          {
+            "mapId": "m",
+            "featureId": "Road.1:attribute#2:validity#0"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "inspection requires nonempty feature selection",
+      "action": "viewer_inspect",
+      "arguments": {
+        "features": []
+      },
+      "valid": false
+    },
+    {
+      "name": "bounded result slice",
+      "action": "viewer_get_search_results",
+      "arguments": {
+        "searchId": "s",
+        "offset": 0,
+        "limit": 100,
+        "runId": "r",
+        "refresh": 1
+      },
+      "valid": true
+    },
+    {
+      "name": "unbounded result slice rejected",
+      "action": "viewer_get_search_results",
+      "arguments": {
+        "searchId": "s",
+        "limit": 101
+      },
+      "valid": false
+    },
+    {
+      "name": "style operations cannot request filesystem writes",
+      "action": "viewer_edit_style",
+      "arguments": {
+        "operation": "create",
+        "source": "name: sample",
+        "file": "/tmp/style.yaml"
+      },
+      "valid": false
+    },
+    {
+      "name": "discovery prefix 128 astral code points",
+      "action": "viewer_describe_app_state",
+      "arguments": {
+        "prefix": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+      },
+      "valid": true
+    },
+    {
+      "name": "discovery prefix 129 astral code points",
+      "action": "viewer_describe_app_state",
+      "arguments": {
+        "prefix": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+      },
+      "valid": false
+    },
+    {
+      "name": "bounded default overview",
+      "action": "viewer_get_app_state",
+      "arguments": {},
+      "valid": true
+    },
+    {
+      "name": "camera and hidden searches",
+      "action": "viewer_get_app_state",
+      "arguments": {
+        "targets": [
+          {
+            "channel": "view.camera",
+            "viewIndex": 1
+          },
+          {
+            "channel": "app.searches"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "narrow hidden layer",
+      "action": "viewer_get_app_state",
+      "arguments": {
+        "targets": [
+          {
+            "channel": "view.layers",
+            "viewIndex": 0,
+            "mapId": "\u00cele 6",
+            "layerId": "Lane"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "routing belongs to mapget",
+      "action": "viewer_get_app_state",
+      "arguments": {
+        "clientId": "b3e68f32-3b51-472d-8cab-14b597f7de91"
+      },
+      "valid": false
+    },
+    {
+      "name": "no raw state pool",
+      "action": "viewer_get_app_state",
+      "arguments": {
+        "targets": [
+          {
+            "channel": "coordinatesLegalTermsAccepted"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "name": "no arbitrary target properties",
+      "action": "viewer_get_app_state",
+      "arguments": {
+        "targets": [
+          {
+            "channel": "app.searches",
+            "constructor": "Object"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "name": "view selector required",
+      "action": "viewer_get_app_state",
+      "arguments": {
+        "targets": [
+          {
+            "channel": "view.camera"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "name": "explicit zero targets",
+      "action": "viewer_get_app_state",
+      "arguments": {
+        "targets": []
+      },
+      "valid": true
+    },
+    {
+      "name": "narrow discovery",
+      "action": "viewer_describe_app_state",
+      "arguments": {
+        "channels": [
+          "view.camera",
+          "app.searches"
+        ],
+        "prefix": "view."
+      },
+      "valid": true
+    },
+    {
+      "name": "unknown exact discovery channel",
+      "action": "viewer_describe_app_state",
+      "arguments": {
+        "channels": [
+          "__proto__"
+        ]
+      },
+      "valid": false
+    },
+    {
+      "name": "camera assignment",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "viewLayoutRevision": 2,
+        "target": {
+          "channel": "view.camera",
+          "viewIndex": 0
+        },
+        "value": {
+          "destination": {
+            "lon": 11.5374,
+            "lat": 48.1584,
+            "alt": 500
+          },
+          "orientation": {
+            "heading": 0,
+            "pitch": -1.5707963267948966,
+            "roll": 0
+          },
+          "position": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "camera offset is optional",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "viewLayoutRevision": 2,
+        "target": {
+          "channel": "view.camera",
+          "viewIndex": 0
+        },
+        "value": {
+          "destination": {
+            "lon": 11.5374,
+            "lat": 48.1584,
+            "alt": 500
+          },
+          "orientation": {
+            "heading": 0,
+            "pitch": -1.5707963267948966,
+            "roll": 0
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "camera offset preserves signed fractional components",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "viewLayoutRevision": 2,
+        "target": {
+          "channel": "view.camera",
+          "viewIndex": 0
+        },
+        "value": {
+          "destination": {
+            "lon": 11.5374,
+            "lat": 48.1584,
+            "alt": 500
+          },
+          "orientation": {
+            "heading": 0,
+            "pitch": -1.5707963267948966,
+            "roll": 0
+          },
+          "position": [
+            1,
+            -2,
+            0.5
+          ]
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "empty camera offset rejected",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "viewLayoutRevision": 2,
+        "target": {
+          "channel": "view.camera",
+          "viewIndex": 0
+        },
+        "value": {
+          "destination": {
+            "lon": 11.5374,
+            "lat": 48.1584,
+            "alt": 500
+          },
+          "orientation": {
+            "heading": 0,
+            "pitch": -1.5707963267948966,
+            "roll": 0
+          },
+          "position": []
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "short camera offset rejected",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "viewLayoutRevision": 2,
+        "target": {
+          "channel": "view.camera",
+          "viewIndex": 0
+        },
+        "value": {
+          "destination": {
+            "lon": 11.5374,
+            "lat": 48.1584,
+            "alt": 500
+          },
+          "orientation": {
+            "heading": 0,
+            "pitch": -1.5707963267948966,
+            "roll": 0
+          },
+          "position": [
+            0,
+            0
+          ]
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "long camera offset rejected",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "viewLayoutRevision": 2,
+        "target": {
+          "channel": "view.camera",
+          "viewIndex": 0
+        },
+        "value": {
+          "destination": {
+            "lon": 11.5374,
+            "lat": 48.1584,
+            "alt": 500
+          },
+          "orientation": {
+            "heading": 0,
+            "pitch": -1.5707963267948966,
+            "roll": 0
+          },
+          "position": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "camera offset does not coerce numeric strings",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "viewLayoutRevision": 2,
+        "target": {
+          "channel": "view.camera",
+          "viewIndex": 0
+        },
+        "value": {
+          "destination": {
+            "lon": 11.5374,
+            "lat": 48.1584,
+            "alt": 500
+          },
+          "orientation": {
+            "heading": 0,
+            "pitch": -1.5707963267948966,
+            "roll": 0
+          },
+          "position": [
+            0,
+            "0",
+            0
+          ]
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "stale layout guard is mandatory",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "target": {
+          "channel": "view.camera",
+          "viewIndex": 0
+        },
+        "value": {
+          "destination": {
+            "lon": 11,
+            "lat": 48,
+            "alt": 500
+          },
+          "orientation": {
+            "heading": 0,
+            "pitch": -1,
+            "roll": 0
+          }
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "no whole app import",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "target": {
+          "channel": "app.views"
+        },
+        "value": {},
+        "viewLayoutRevision": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "roll is not silently ignored",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "viewLayoutRevision": 0,
+        "target": {
+          "channel": "view.camera",
+          "viewIndex": 0
+        },
+        "value": {
+          "destination": {
+            "lon": 11,
+            "lat": 48,
+            "alt": 500
+          },
+          "orientation": {
+            "heading": 0,
+            "pitch": -1,
+            "roll": 1
+          }
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "no numeric coercion",
+      "action": "viewer_set_app_state",
+      "arguments": {
+        "viewLayoutRevision": "0",
+        "target": {
+          "channel": "view.camera",
+          "viewIndex": 0
+        },
+        "value": {
+          "destination": {
+            "lon": 11,
+            "lat": 48,
+            "alt": 500
+          },
+          "orientation": {
+            "heading": 0,
+            "pitch": -1,
+            "roll": 0
+          }
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "search style operator = accepted",
+      "action": "viewer_set_search",
+      "arguments": {
+        "searchId": "search-1",
+        "viewLayoutRevision": 0,
+        "settings": {
+          "searchStyleRules": [
+            {
+              "geometry": [
+                "line"
+              ],
+              "filter": [
+                {
+                  "field": "_.id",
+                  "op": "=",
+                  "value": "Lane.1"
+                }
+              ],
+              "color": {
+                "mode": "solid",
+                "color": "#0088ff"
+              }
+            }
+          ]
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "search style operator == accepted",
+      "action": "viewer_set_search",
+      "arguments": {
+        "searchId": "search-1",
+        "viewLayoutRevision": 0,
+        "settings": {
+          "searchStyleRules": [
+            {
+              "geometry": [
+                "line"
+              ],
+              "filter": [
+                {
+                  "field": "_.id",
+                  "op": "==",
+                  "value": "Lane.1"
+                }
+              ],
+              "color": {
+                "mode": "solid",
+                "color": "#0088ff"
+              }
+            }
+          ]
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "search style operator equals rejected",
+      "action": "viewer_set_search",
+      "arguments": {
+        "searchId": "search-1",
+        "viewLayoutRevision": 0,
+        "settings": {
+          "searchStyleRules": [
+            {
+              "geometry": [
+                "line"
+              ],
+              "filter": [
+                {
+                  "field": "_.id",
+                  "op": "equals",
+                  "value": "Lane.1"
+                }
+              ],
+              "color": {
+                "mode": "solid",
+                "color": "#0088ff"
+              }
+            }
+          ]
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "share link is read only with no arguments",
+      "action": "viewer_get_share_link",
+      "arguments": {},
+      "valid": true
+    },
+    {
+      "name": "new inspection group with explicit color",
+      "action": "viewer_inspect",
+      "arguments": {
+        "features": [
+          {
+            "mapId": "Map",
+            "layerId": "Lane",
+            "featureId": "Lane.1"
+          }
+        ],
+        "newPanel": true,
+        "color": "#aabbcc"
+      },
+      "valid": true
+    },
+    {
+      "name": "inspection group rejects non-hex color",
+      "action": "viewer_inspect",
+      "arguments": {
+        "features": [
+          {
+            "mapId": "Map",
+            "layerId": "Lane",
+            "featureId": "Lane.1"
+          }
+        ],
+        "newPanel": true,
+        "color": "orange"
+      },
+      "valid": false
+    },
+    {
+      "name": "inspection accepts observed attribute and validity zero",
+      "action": "viewer_inspect",
+      "arguments": {
+        "features": [
+          {
+            "mapId": "m",
+            "layerId": "l",
+            "featureId": "Road.1",
+            "attributeIndex": 0,
+            "validityIndex": 0
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "inspection accepts an observed relation target validity",
+      "action": "viewer_inspect",
+      "arguments": {
+        "features": [
+          {
+            "mapTileKey": "Features:m:l:1",
+            "featureId": "Road.1",
+            "relationIndex": 2,
+            "validityIndex": 0
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "inspection rejects negative assignment indices",
+      "action": "viewer_inspect",
+      "arguments": {
+        "features": [
+          {
+            "mapId": "m",
+            "featureId": "Road.1",
+            "attributeIndex": -1
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "name": "style patch accepts exact edit pairs",
+      "action": "viewer_edit_style",
+      "arguments": {
+        "operation": "patch",
+        "styleId": "s",
+        "edits": [
+          {
+            "find": "width: 2",
+            "replace": "width: 4"
+          }
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "style patch rejects empty find",
+      "action": "viewer_edit_style",
+      "arguments": {
+        "operation": "patch",
+        "styleId": "s",
+        "edits": [
+          {
+            "find": "",
+            "replace": "width: 4"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "name": "style patch rejects an empty edit array",
+      "action": "viewer_edit_style",
+      "arguments": {
+        "operation": "patch",
+        "styleId": "s",
+        "edits": []
+      },
+      "valid": false
+    }
   ],
   "relay": [
-    {"name":"tab label 120 astral code points","direction":"client","valid":true,"message":{"type":"mapget.actions.register","version":1,"catalogId":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","actions":["viewer_get_app_state"],"label":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"}},
-    {"name":"tab label 121 astral code points","direction":"client","valid":false,"message":{"type":"mapget.actions.register","version":1,"catalogId":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","actions":["viewer_get_app_state"],"label":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"}},
-    {"name":"cancel reason 128 astral code points","direction":"server","valid":true,"message":{"type":"mapget.actions.cancel","version":1,"callId":"call-1","reason":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"}},
-    {"name":"cancel reason 129 astral code points","direction":"server","valid":false,"message":{"type":"mapget.actions.cancel","version":1,"callId":"call-1","reason":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"}},
-    {"name": "registration", "direction": "client", "valid": true, "message": {"type": "mapget.actions.register", "version": 1, "catalogId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "actions": ["viewer_get_app_state"], "label": "Erdblick · Zürich"}},
-    {"name": "registration acknowledgement", "direction": "server", "valid": true, "message": {"type": "mapget.actions.registered", "version": 1, "catalogId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "clientId": "b3e68f32-3b51-472d-8cab-14b597f7de91"}},
-    {"name": "numeric legacy client id rejected", "direction": "server", "valid": false, "message": {"type": "mapget.actions.registered", "version": 1, "catalogId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "clientId": 1}},
-    {"name": "invoke", "direction": "server", "valid": true, "message": {"type": "mapget.actions.invoke", "version": 1, "callId": "call-1", "action": "viewer_get_app_state", "arguments": {}, "timeoutMs": 30000}},
-    {"name": "configured timeout above default", "direction": "server", "valid": true, "message": {"type": "mapget.actions.invoke", "version": 1, "callId": "call-1", "action": "viewer_get_app_state", "arguments": {}, "timeoutMs": 60000}},
-    {"name": "duplicate registration names", "direction": "client", "valid": false, "message": {"type": "mapget.actions.register", "version": 1, "catalogId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "actions": ["viewer_get_app_state", "viewer_get_app_state"], "label": "Erdblick"}},
-    {"name": "cancel", "direction": "server", "valid": true, "message": {"type": "mapget.actions.cancel", "version": 1, "callId": "call-1", "reason": "timeout"}},
-    {"name": "registration error is not tile status", "direction": "server", "valid": true, "message": {"type": "mapget.actions.error", "version": 1, "operation": "register", "error": {"code": "not_available", "message": "Catalog mismatch", "reason": "catalog_mismatch"}}},
-    {"name": "result", "direction": "client", "valid": true, "message": {"type": "mapget.actions.result", "version": 1, "callId": "call-1", "result": {"complete": true}}},
-    {"name": "error", "direction": "client", "valid": true, "message": {"type": "mapget.actions.result", "version": 1, "callId": "call-1", "error": {"code": "not_available", "message": "Read the view layout again", "reason": "stale_view_layout", "outcome": "not_applied"}}},
-    {"name": "result error XOR", "direction": "client", "valid": false, "message": {"type": "mapget.actions.result", "version": 1, "callId": "call-1", "result": {}, "error": {"code": "internal_error", "message": "No"}}},
-    {"name": "result payload required", "direction": "client", "valid": false, "message": {"type": "mapget.actions.result", "version": 1, "callId": "call-1"}},
-    {"name": "no tile request id", "direction": "server", "valid": false, "message": {"type": "mapget.actions.cancel", "version": 1, "callId": "call-1", "reason": "timeout", "requestId": 3}},
-    {"name": "unsupported relay version", "direction": "server", "valid": false, "message": {"type": "mapget.actions.cancel", "version": 2, "callId": "call-1", "reason": "timeout"}}
+    {
+      "name": "tab label 120 astral code points",
+      "direction": "client",
+      "valid": true,
+      "message": {
+        "type": "mapget.actions.register",
+        "version": 1,
+        "catalogId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "actions": [
+          "viewer_get_app_state"
+        ],
+        "label": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+      }
+    },
+    {
+      "name": "tab label 121 astral code points",
+      "direction": "client",
+      "valid": false,
+      "message": {
+        "type": "mapget.actions.register",
+        "version": 1,
+        "catalogId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "actions": [
+          "viewer_get_app_state"
+        ],
+        "label": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+      }
+    },
+    {
+      "name": "cancel reason 128 astral code points",
+      "direction": "server",
+      "valid": true,
+      "message": {
+        "type": "mapget.actions.cancel",
+        "version": 1,
+        "callId": "call-1",
+        "reason": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+      }
+    },
+    {
+      "name": "cancel reason 129 astral code points",
+      "direction": "server",
+      "valid": false,
+      "message": {
+        "type": "mapget.actions.cancel",
+        "version": 1,
+        "callId": "call-1",
+        "reason": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+      }
+    },
+    {
+      "name": "registration",
+      "direction": "client",
+      "valid": true,
+      "message": {
+        "type": "mapget.actions.register",
+        "version": 1,
+        "catalogId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "actions": [
+          "viewer_get_app_state"
+        ],
+        "label": "Erdblick \u00b7 Z\u00fcrich"
+      }
+    },
+    {
+      "name": "registration acknowledgement",
+      "direction": "server",
+      "valid": true,
+      "message": {
+        "type": "mapget.actions.registered",
+        "version": 1,
+        "catalogId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "clientId": "b3e68f32-3b51-472d-8cab-14b597f7de91"
+      }
+    },
+    {
+      "name": "numeric legacy client id rejected",
+      "direction": "server",
+      "valid": false,
+      "message": {
+        "type": "mapget.actions.registered",
+        "version": 1,
+        "catalogId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "clientId": 1
+      }
+    },
+    {
+      "name": "invoke",
+      "direction": "server",
+      "valid": true,
+      "message": {
+        "type": "mapget.actions.invoke",
+        "version": 1,
+        "callId": "call-1",
+        "action": "viewer_get_app_state",
+        "arguments": {},
+        "timeoutMs": 30000
+      }
+    },
+    {
+      "name": "configured timeout above default",
+      "direction": "server",
+      "valid": true,
+      "message": {
+        "type": "mapget.actions.invoke",
+        "version": 1,
+        "callId": "call-1",
+        "action": "viewer_get_app_state",
+        "arguments": {},
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "duplicate registration names",
+      "direction": "client",
+      "valid": false,
+      "message": {
+        "type": "mapget.actions.register",
+        "version": 1,
+        "catalogId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "actions": [
+          "viewer_get_app_state",
+          "viewer_get_app_state"
+        ],
+        "label": "Erdblick"
+      }
+    },
+    {
+      "name": "cancel",
+      "direction": "server",
+      "valid": true,
+      "message": {
+        "type": "mapget.actions.cancel",
+        "version": 1,
+        "callId": "call-1",
+        "reason": "timeout"
+      }
+    },
+    {
+      "name": "registration error is not tile status",
+      "direction": "server",
+      "valid": true,
+      "message": {
+        "type": "mapget.actions.error",
+        "version": 1,
+        "operation": "register",
+        "error": {
+          "code": "not_available",
+          "message": "Catalog mismatch",
+          "reason": "catalog_mismatch"
+        }
+      }
+    },
+    {
+      "name": "result",
+      "direction": "client",
+      "valid": true,
+      "message": {
+        "type": "mapget.actions.result",
+        "version": 1,
+        "callId": "call-1",
+        "result": {
+          "complete": true
+        }
+      }
+    },
+    {
+      "name": "error",
+      "direction": "client",
+      "valid": true,
+      "message": {
+        "type": "mapget.actions.result",
+        "version": 1,
+        "callId": "call-1",
+        "error": {
+          "code": "not_available",
+          "message": "Read the view layout again",
+          "reason": "stale_view_layout",
+          "outcome": "not_applied"
+        }
+      }
+    },
+    {
+      "name": "result error XOR",
+      "direction": "client",
+      "valid": false,
+      "message": {
+        "type": "mapget.actions.result",
+        "version": 1,
+        "callId": "call-1",
+        "result": {},
+        "error": {
+          "code": "internal_error",
+          "message": "No"
+        }
+      }
+    },
+    {
+      "name": "result payload required",
+      "direction": "client",
+      "valid": false,
+      "message": {
+        "type": "mapget.actions.result",
+        "version": 1,
+        "callId": "call-1"
+      }
+    },
+    {
+      "name": "no tile request id",
+      "direction": "server",
+      "valid": false,
+      "message": {
+        "type": "mapget.actions.cancel",
+        "version": 1,
+        "callId": "call-1",
+        "reason": "timeout",
+        "requestId": 3
+      }
+    },
+    {
+      "name": "unsupported relay version",
+      "direction": "server",
+      "valid": false,
+      "message": {
+        "type": "mapget.actions.cancel",
+        "version": 2,
+        "callId": "call-1",
+        "reason": "timeout"
+      }
+    }
   ],
   "info": [
-    {"name":"OAuth scope 256 astral code points","valid":true,"value":{"enabled":true,"authentication":"oauth","scopes":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"],"endpoint":"https://maps.example.com/mcp"}},
-    {"name":"OAuth scope 257 astral code points","valid":false,"value":{"enabled":true,"authentication":"oauth","scopes":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"],"endpoint":"https://maps.example.com/mcp"}},
-    {"name": "disabled MCP", "valid": true, "value": {"enabled": false}},
-    {"name": "local MCP without browser catalog", "valid": true, "value": {"enabled": true, "authentication": "local", "scopes": [], "endpoint": "http://localhost:8099/mcp"}},
-    {"name": "OAuth public client", "valid": true, "value": {"enabled": true, "authentication": "oauth", "scopes": ["viewer-read", "viewer-control"], "endpoint": "https://maps.example.com/mcp", "oauthClientId": "public-client", "catalogId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
-    {"name": "no private OAuth client secret", "valid": false, "value": {"enabled": true, "authentication": "oauth", "scopes": [], "endpoint": "https://maps.example.com/mcp", "clientSecret": "not-public"}},
-    {"name": "local mode has no OAuth scopes", "valid": false, "value": {"enabled": true, "authentication": "local", "scopes": ["viewer-read"], "endpoint": "http://localhost:8099/mcp"}},
-    {"name": "disabled mode exposes no endpoint", "valid": false, "value": {"enabled": false, "endpoint": "https://maps.example.com/mcp"}}
+    {
+      "name": "OAuth scope 256 astral code points",
+      "valid": true,
+      "value": {
+        "enabled": true,
+        "authentication": "oauth",
+        "scopes": [
+          "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+        ],
+        "endpoint": "https://maps.example.com/mcp"
+      }
+    },
+    {
+      "name": "OAuth scope 257 astral code points",
+      "valid": false,
+      "value": {
+        "enabled": true,
+        "authentication": "oauth",
+        "scopes": [
+          "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+        ],
+        "endpoint": "https://maps.example.com/mcp"
+      }
+    },
+    {
+      "name": "disabled MCP",
+      "valid": true,
+      "value": {
+        "enabled": false
+      }
+    },
+    {
+      "name": "local MCP without browser catalog",
+      "valid": true,
+      "value": {
+        "enabled": true,
+        "authentication": "local",
+        "scopes": [],
+        "endpoint": "http://localhost:8099/mcp"
+      }
+    },
+    {
+      "name": "OAuth public client",
+      "valid": true,
+      "value": {
+        "enabled": true,
+        "authentication": "oauth",
+        "scopes": [
+          "viewer-read",
+          "viewer-control"
+        ],
+        "endpoint": "https://maps.example.com/mcp",
+        "oauthClientId": "public-client",
+        "catalogId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "no private OAuth client secret",
+      "valid": false,
+      "value": {
+        "enabled": true,
+        "authentication": "oauth",
+        "scopes": [],
+        "endpoint": "https://maps.example.com/mcp",
+        "clientSecret": "not-public"
+      }
+    },
+    {
+      "name": "local mode has no OAuth scopes",
+      "valid": false,
+      "value": {
+        "enabled": true,
+        "authentication": "local",
+        "scopes": [
+          "viewer-read"
+        ],
+        "endpoint": "http://localhost:8099/mcp"
+      }
+    },
+    {
+      "name": "disabled mode exposes no endpoint",
+      "valid": false,
+      "value": {
+        "enabled": false,
+        "endpoint": "https://maps.example.com/mcp"
+      }
+    }
   ],
   "results": [
-    {"name":"UI snapshot empty subtree","action":"viewer_take_snapshot","valid":true,"value":{"observedAt":"2026-10-05T00:00:00Z","rootUid":"1.0","elements":[],"complete":true}},
-    {"name":"UI snapshot rejects arbitrary HTML output","action":"viewer_take_snapshot","valid":false,"value":{"observedAt":"2026-10-05T00:00:00Z","rootUid":"1.0","elements":[],"complete":true,"html":"<body></body>"}},
-    {"name":"UI resize returns owned split proportions","action":"viewer_resize","valid":true,"value":{"status":"applied","element":{"uid":"1.2","tag":"div","role":"","name":"","text":"","disabled":false,"bounds":{"x":0,"y":0,"width":1200,"height":800},"inViewport":true,"resize":{"kind":"split","dimensions":["panelSizes"],"busy":false,"panelSizes":[65,35]}}}},
-    {"name":"UI resize cannot omit actual element state","action":"viewer_resize","valid":false,"value":{"status":"applied"}},
-    {"name":"screenshot browser image and metadata","action":"viewer_screenshot","valid":true,"value":{"image":{"mimeType":"image/jpeg","data":"/9j/2Q=="},"metadata":{"scope":"application-viewport","width":1280,"height":720,"viewportWidth":1920,"viewportHeight":1080,"viewLayoutRevision":0,"capturedAt":"2026-10-05T00:00:00Z","readiness":{"status":"unknown"},"warnings":[]}}},
-    {"name":"screenshot cannot silently omit image","action":"viewer_screenshot","valid":false,"value":{"metadata":{"scope":"application-viewport","width":1280,"height":720,"viewportWidth":1920,"viewportHeight":1080,"viewLayoutRevision":0,"capturedAt":"2026-10-05T00:00:00Z","readiness":{"status":"unknown"},"warnings":[]}}},
-    {"name":"assigned value must match channel","action":"viewer_set_app_state","valid":false,"value":{"status":"applied","target":{"channel":"view.projection","viewIndex":0},"value":{"layerId":null,"opacity":50},"changed":true,"focusedView":0,"affectedViews":[0],"viewLayoutRevision":0,"readiness":{"status":"unknown"}}},
-    {"name":"view sync token 32 astral code points","action":"viewer_get_app_state","valid":true,"value":{"observedAt":"2026-09-30T00:00:00Z","viewLayoutRevision":0,"values":[{"target":{"channel":"app.views"},"value":{"focusedView":0,"sync":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"],"views":[]}}],"complete":true,"omissions":[]}},
-    {"name":"view sync token 33 astral code points","action":"viewer_get_app_state","valid":false,"value":{"observedAt":"2026-09-30T00:00:00Z","viewLayoutRevision":0,"values":[{"target":{"channel":"app.views"},"value":{"focusedView":0,"sync":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"],"views":[]}}],"complete":true,"omissions":[]}},
-    {"name": "empty search collection is complete", "action": "viewer_get_app_state", "valid": true, "value": {"observedAt": "2026-09-29T00:00:00Z", "viewLayoutRevision": 0, "values": [{"target": {"channel": "app.searches"}, "value": []}], "complete": true, "omissions": []}},
-    {"name": "unavailable camera is explicit", "action": "viewer_get_app_state", "valid": true, "value": {"observedAt": "2026-09-29T00:00:00Z", "viewLayoutRevision": 0, "values": [{"target": {"channel": "view.camera", "viewIndex": 0}, "unavailable": "first_person"}], "complete": false, "omissions": []}},
-    {"name": "source-data loading is unknown", "action": "viewer_get_app_state", "valid": true, "value": {"observedAt": "2026-09-29T00:00:00Z", "viewLayoutRevision": 0, "values": [{"target": {"channel": "app.selections"}, "value": [{"panelId": 1, "locked": false, "undocked": true, "loading": null, "features": [], "sourceData": {"mapTileKey": "SourceData:Map:Layer:1", "address": "18446744073709551615"}}]}], "complete": true, "omissions": []}},
-    {"name": "wrong channel value rejected", "action": "viewer_get_app_state", "valid": false, "value": {"observedAt": "2026-09-29T00:00:00Z", "viewLayoutRevision": 0, "values": [{"target": {"channel": "view.camera", "viewIndex": 0}, "value": []}], "complete": true, "omissions": []}},
-    {"name": "applied is not rendered", "action": "viewer_set_app_state", "valid": true, "value": {"status": "applied", "target": {"channel": "view.camera", "viewIndex": 0}, "value": {"destination": {"lon": 11, "lat": 48, "alt": 500}, "orientation": {"heading": 0, "pitch": -1, "roll": 0}}, "changed": true, "focusedView": 0, "affectedViews": [0, 1], "viewLayoutRevision": 2, "readiness": {"status": "unknown"}}},
-    {"name": "short camera offset result rejected", "action": "viewer_set_app_state", "valid": false, "value": {"status": "applied", "target": {"channel": "view.camera", "viewIndex": 0}, "value": {"destination": {"lon": 11, "lat": 48, "alt": 500}, "orientation": {"heading": 0, "pitch": -1, "roll": 0}, "position": [0, 0]}, "changed": true, "focusedView": 0, "affectedViews": [0, 1], "viewLayoutRevision": 2, "readiness": {"status": "unknown"}}},
-    {"name": "unrecognized readiness rejected", "action": "viewer_set_app_state", "valid": false, "value": {"status": "applied", "target": {"channel": "view.camera", "viewIndex": 0}, "value": {"destination": {"lon": 11, "lat": 48, "alt": 500}, "orientation": {"heading": 0, "pitch": -1, "roll": 0}}, "changed": true, "focusedView": 0, "affectedViews": [0], "viewLayoutRevision": 2, "readiness": {"status": "rendered"}}}
+    {
+      "name": "catalog page carries revision and continuation",
+      "action": "viewer_get_catalog",
+      "valid": true,
+      "value": {
+        "observedAt": "2026-10-07T00:00:00Z",
+        "viewLayoutRevision": 2,
+        "kind": "maps",
+        "relatedCatalogs": [],
+        "items": [
+          {
+            "id": "m",
+            "name": "m",
+            "kind": "map",
+            "mapId": "m",
+            "available": true
+          }
+        ],
+        "complete": false,
+        "reason": "item_limit",
+        "nextOffset": 1
+      }
+    },
+    {
+      "name": "catalog cannot omit layout revision",
+      "action": "viewer_get_catalog",
+      "valid": false,
+      "value": {
+        "observedAt": "2026-10-07T00:00:00Z",
+        "kind": "layers",
+        "relatedCatalogs": [],
+        "items": [],
+        "complete": true
+      }
+    },
+    {
+      "name": "UI snapshot empty subtree",
+      "action": "viewer_take_snapshot",
+      "valid": true,
+      "value": {
+        "observedAt": "2026-10-05T00:00:00Z",
+        "rootUid": "1.0",
+        "elements": [],
+        "complete": true
+      }
+    },
+    {
+      "name": "UI snapshot rejects arbitrary HTML output",
+      "action": "viewer_take_snapshot",
+      "valid": false,
+      "value": {
+        "observedAt": "2026-10-05T00:00:00Z",
+        "rootUid": "1.0",
+        "elements": [],
+        "complete": true,
+        "html": "<body></body>"
+      }
+    },
+    {
+      "name": "UI resize returns owned split proportions",
+      "action": "viewer_resize",
+      "valid": true,
+      "value": {
+        "status": "applied",
+        "element": {
+          "uid": "1.2",
+          "tag": "div",
+          "role": "",
+          "name": "",
+          "text": "",
+          "disabled": false,
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1200,
+            "height": 800
+          },
+          "inViewport": true,
+          "resize": {
+            "kind": "split",
+            "dimensions": [
+              "panelSizes"
+            ],
+            "busy": false,
+            "panelSizes": [
+              65,
+              35
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "UI resize cannot omit actual element state",
+      "action": "viewer_resize",
+      "valid": false,
+      "value": {
+        "status": "applied"
+      }
+    },
+    {
+      "name": "screenshot browser image and metadata",
+      "action": "viewer_screenshot",
+      "valid": true,
+      "value": {
+        "image": {
+          "mimeType": "image/jpeg",
+          "data": "/9j/2Q=="
+        },
+        "metadata": {
+          "scope": "application-viewport",
+          "width": 1280,
+          "height": 720,
+          "viewportWidth": 1920,
+          "viewportHeight": 1080,
+          "viewLayoutRevision": 0,
+          "capturedAt": "2026-10-05T00:00:00Z",
+          "readiness": {
+            "status": "unknown"
+          },
+          "warnings": []
+        }
+      }
+    },
+    {
+      "name": "screenshot cannot silently omit image",
+      "action": "viewer_screenshot",
+      "valid": false,
+      "value": {
+        "metadata": {
+          "scope": "application-viewport",
+          "width": 1280,
+          "height": 720,
+          "viewportWidth": 1920,
+          "viewportHeight": 1080,
+          "viewLayoutRevision": 0,
+          "capturedAt": "2026-10-05T00:00:00Z",
+          "readiness": {
+            "status": "unknown"
+          },
+          "warnings": []
+        }
+      }
+    },
+    {
+      "name": "assigned value must match channel",
+      "action": "viewer_set_app_state",
+      "valid": false,
+      "value": {
+        "status": "applied",
+        "target": {
+          "channel": "view.projection",
+          "viewIndex": 0
+        },
+        "value": {
+          "layerId": null,
+          "opacity": 50
+        },
+        "changed": true,
+        "focusedView": 0,
+        "affectedViews": [
+          0
+        ],
+        "viewLayoutRevision": 0,
+        "readiness": {
+          "status": "unknown"
+        }
+      }
+    },
+    {
+      "name": "view sync token 32 astral code points",
+      "action": "viewer_get_app_state",
+      "valid": true,
+      "value": {
+        "observedAt": "2026-09-30T00:00:00Z",
+        "viewLayoutRevision": 0,
+        "values": [
+          {
+            "target": {
+              "channel": "app.views"
+            },
+            "value": {
+              "focusedView": 0,
+              "sync": [
+                "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+              ],
+              "views": []
+            }
+          }
+        ],
+        "complete": true,
+        "omissions": []
+      }
+    },
+    {
+      "name": "view sync token 33 astral code points",
+      "action": "viewer_get_app_state",
+      "valid": false,
+      "value": {
+        "observedAt": "2026-09-30T00:00:00Z",
+        "viewLayoutRevision": 0,
+        "values": [
+          {
+            "target": {
+              "channel": "app.views"
+            },
+            "value": {
+              "focusedView": 0,
+              "sync": [
+                "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+              ],
+              "views": []
+            }
+          }
+        ],
+        "complete": true,
+        "omissions": []
+      }
+    },
+    {
+      "name": "empty search collection is complete",
+      "action": "viewer_get_app_state",
+      "valid": true,
+      "value": {
+        "observedAt": "2026-09-29T00:00:00Z",
+        "viewLayoutRevision": 0,
+        "values": [
+          {
+            "target": {
+              "channel": "app.searches"
+            },
+            "value": []
+          }
+        ],
+        "complete": true,
+        "omissions": []
+      }
+    },
+    {
+      "name": "unavailable camera is explicit",
+      "action": "viewer_get_app_state",
+      "valid": true,
+      "value": {
+        "observedAt": "2026-09-29T00:00:00Z",
+        "viewLayoutRevision": 0,
+        "values": [
+          {
+            "target": {
+              "channel": "view.camera",
+              "viewIndex": 0
+            },
+            "unavailable": "first_person"
+          }
+        ],
+        "complete": false,
+        "omissions": []
+      }
+    },
+    {
+      "name": "source-data loading is unknown",
+      "action": "viewer_get_app_state",
+      "valid": true,
+      "value": {
+        "observedAt": "2026-09-29T00:00:00Z",
+        "viewLayoutRevision": 0,
+        "values": [
+          {
+            "target": {
+              "channel": "app.selections"
+            },
+            "value": [
+              {
+                "panelId": 1,
+                "locked": false,
+                "undocked": true,
+                "loading": null,
+                "features": [],
+                "sourceData": {
+                  "mapTileKey": "SourceData:Map:Layer:1",
+                  "address": "18446744073709551615"
+                }
+              }
+            ]
+          }
+        ],
+        "complete": true,
+        "omissions": []
+      }
+    },
+    {
+      "name": "wrong channel value rejected",
+      "action": "viewer_get_app_state",
+      "valid": false,
+      "value": {
+        "observedAt": "2026-09-29T00:00:00Z",
+        "viewLayoutRevision": 0,
+        "values": [
+          {
+            "target": {
+              "channel": "view.camera",
+              "viewIndex": 0
+            },
+            "value": []
+          }
+        ],
+        "complete": true,
+        "omissions": []
+      }
+    },
+    {
+      "name": "applied is not rendered",
+      "action": "viewer_set_app_state",
+      "valid": true,
+      "value": {
+        "status": "applied",
+        "target": {
+          "channel": "view.camera",
+          "viewIndex": 0
+        },
+        "value": {
+          "destination": {
+            "lon": 11,
+            "lat": 48,
+            "alt": 500
+          },
+          "orientation": {
+            "heading": 0,
+            "pitch": -1,
+            "roll": 0
+          }
+        },
+        "changed": true,
+        "focusedView": 0,
+        "affectedViews": [
+          0,
+          1
+        ],
+        "viewLayoutRevision": 2,
+        "readiness": {
+          "status": "unknown"
+        }
+      }
+    },
+    {
+      "name": "short camera offset result rejected",
+      "action": "viewer_set_app_state",
+      "valid": false,
+      "value": {
+        "status": "applied",
+        "target": {
+          "channel": "view.camera",
+          "viewIndex": 0
+        },
+        "value": {
+          "destination": {
+            "lon": 11,
+            "lat": 48,
+            "alt": 500
+          },
+          "orientation": {
+            "heading": 0,
+            "pitch": -1,
+            "roll": 0
+          },
+          "position": [
+            0,
+            0
+          ]
+        },
+        "changed": true,
+        "focusedView": 0,
+        "affectedViews": [
+          0,
+          1
+        ],
+        "viewLayoutRevision": 2,
+        "readiness": {
+          "status": "unknown"
+        }
+      }
+    },
+    {
+      "name": "unrecognized readiness rejected",
+      "action": "viewer_set_app_state",
+      "valid": false,
+      "value": {
+        "status": "applied",
+        "target": {
+          "channel": "view.camera",
+          "viewIndex": 0
+        },
+        "value": {
+          "destination": {
+            "lon": 11,
+            "lat": 48,
+            "alt": 500
+          },
+          "orientation": {
+            "heading": 0,
+            "pitch": -1,
+            "roll": 0
+          }
+        },
+        "changed": true,
+        "focusedView": 0,
+        "affectedViews": [
+          0
+        ],
+        "viewLayoutRevision": 2,
+        "readiness": {
+          "status": "rendered"
+        }
+      }
+    },
+    {
+      "name": "search overview carries identity color",
+      "action": "viewer_get_app_state",
+      "valid": true,
+      "value": {
+        "observedAt": "2026-10-08T00:00:00Z",
+        "viewLayoutRevision": 0,
+        "values": [
+          {
+            "target": {
+              "channel": "app.searches"
+            },
+            "value": [
+              {
+                "searchId": "blue",
+                "query": "true",
+                "pinColor": "#2477dd",
+                "enabled": true,
+                "paused": false,
+                "autoUpdate": false,
+                "showResultsOnMap": true
+              }
+            ]
+          }
+        ],
+        "complete": true,
+        "omissions": []
+      }
+    },
+    {
+      "name": "search identity color must be canonical hex",
+      "action": "viewer_get_app_state",
+      "valid": false,
+      "value": {
+        "observedAt": "2026-10-08T00:00:00Z",
+        "viewLayoutRevision": 0,
+        "values": [
+          {
+            "target": {
+              "channel": "app.searches"
+            },
+            "value": [
+              {
+                "searchId": "blue",
+                "query": "true",
+                "pinColor": "blue",
+                "enabled": true,
+                "paused": false,
+                "autoUpdate": false,
+                "showResultsOnMap": true
+              }
+            ]
+          }
+        ],
+        "complete": true,
+        "omissions": []
+      }
+    },
+    {
+      "name": "atomic patch reports applied edit count",
+      "action": "viewer_edit_style",
+      "valid": true,
+      "value": {
+        "status": "applied",
+        "styleId": "s",
+        "changed": true,
+        "editCount": 1
+      }
+    }
   ],
   "canonical": [
-    {"value": {"2": "second", "10": "tenth", "a": "Zürich · 東京", "float": -1.5707963267948966, "array": [2, 1]}, "json": "{\"10\":\"tenth\",\"2\":\"second\",\"a\":\"Zürich · 東京\",\"array\":[2,1],\"float\":-1.5707963267948966}"}
+    {
+      "value": {
+        "2": "second",
+        "10": "tenth",
+        "a": "Z\u00fcrich \u00b7 \u6771\u4eac",
+        "float": -1.5707963267948966,
+        "array": [
+          2,
+          1
+        ]
+      },
+      "json": "{\"10\":\"tenth\",\"2\":\"second\",\"a\":\"Z\u00fcrich \u00b7 \u6771\u4eac\",\"array\":[2,1],\"float\":-1.5707963267948966}"
+    }
   ]
 }

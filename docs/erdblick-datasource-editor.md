@@ -7,6 +7,11 @@ The DataSource editor is an optional panel that talks to the backend’s `/confi
 The **read-only message** explains why this deployment exposes the current
 configuration without an Apply action. Writable deployments provide that action.
 
+<!-- mcp:
+title: "Datasource editor permissions"
+keywords: ["datasource", "configuration", "read only", "allow-post-config", "no-get-config"]
+hint: "Native mapget_get_config reads masked datasource configuration and persistence capabilities when config-read permission and deployment opt-in allow it. mapget_set_config additionally requires config-write permission, administrator opt-in and direct-file persistence. Viewer-control permission alone does not grant either capability or make the UI /config endpoint writable."
+-->
 ## Prerequisites and Permissions
 
 Before the editor can accept changes, the backend has to expose a configuration endpoint and make clear whether its contents are writable:
@@ -30,6 +35,11 @@ Once the editor is available, you can adjust data sources directly from within e
 3. Update fields such as data source `type`, `uri`, `mapId`, coverage settings, or HTTP scopes according to your backend’s schema.
 4. Click **Apply** to send the edited configuration back to the backend and refresh the list of maps and layers.
 
+<!-- mcp:
+title: "Datasource configuration persistence"
+keywords: ["configuration", "persist", "server file", "deployment", "reload"]
+hint: "Use mapget_get_config to read the masked datasource model and revision, then mapget_set_config with expectedRevision when configuration writes are authorized and available. Preserve untouched sections and masked secrets; do not automatically retry an uncertain write. viewer_edit_style and viewer_set_app_state affect browser-local presentation, not server datasource configuration."
+-->
 ## File-Based vs. UI Edits
 
 The editor complements, rather than replaces, file-based configuration and fits best into an existing configuration management approach:

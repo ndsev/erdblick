@@ -9,6 +9,11 @@ The **selected road (1)** exposes converted feature attributes. Use the
 **source record (3)** shows the original `SPEED_LIMIT_IMPERIAL` value of
 `50` mph, with the referenced range highlighted in the raw tree.
 
+<!-- mcp:
+title: "Opening SourceData"
+keywords: ["source data", "raw", "metadata", "ServiceDefinition", "tile content index"]
+hint: "Use viewer_open_source_data with a native SourceData mapTileKey or a mapget-native source reference returned by extraction. Preserve unsigned 64-bit addresses as decimal strings. Discover actual source layer IDs; metadata and spatial tile layers are not interchangeable."
+-->
 ## Ways to Open SourceData
 
 You can open SourceData from several entry points:
@@ -41,6 +46,11 @@ SourceData panels are treated differently than feature inspection panels:
 
 This separation keeps feature inspection and raw-payload inspection from competing for the same panel slot.
 
+<!-- mcp:
+title: "SourceData tree and source ranges"
+keywords: ["raw payload", "source range", "address", "SQL", "blob", "metadata", "Classic"]
+hint: "viewer_open_source_data displays the raw payload in the browser; it does not return the entire tree to the caller. Use mapget_extract_source_data with actual provenance for a bounded decoded-data read. Use fresh viewer_take_snapshot UIDs for visible tree/filter controls. app.selections reports the source mapTileKey/address, not decoded payload values."
+-->
 ## Navigating the Raw Payload
 
 Once the panel is open:

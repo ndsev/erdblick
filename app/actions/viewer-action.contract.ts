@@ -3,7 +3,7 @@ import {boundedUnicodeString} from "../shared/unicode-string.js";
 import {
     appStateChannels, appStateOmissionSchema, appStateReadinessSchema,
     appStateTargetSchema, appStateValueSchema,
-    appStateWritableChannels, appStateWritableTargetSchema, appStateWritableValueSchema
+    appStateWritableChannels, appStateWritableTargetSchema
 } from "../shared/app-state-channel.contract.js";
 import {viewerOperations} from "./viewer-operation.contract.js";
 import {viewerUiActions} from "./viewer-ui.contract.js";
@@ -27,7 +27,9 @@ const assignmentConstraints = appStateWritableChannels.map(([name, channel]) => 
         ...("viewIndex" in channel.selectorSchema.shape || name === "app.focusedView" ? {required: ["viewLayoutRevision"]} : {})}
 }));
 const assignmentInputSchema = z.strictObject({
-    target: appStateWritableTargetSchema, value: appStateWritableValueSchema, viewLayoutRevision: revisionSchema.optional()
+    // The conditional constraints below already carry each channel's exact value schema.
+    // Repeating their union here doubles the advertised schema without strengthening validation.
+    target: appStateWritableTargetSchema, value: z.unknown(), viewLayoutRevision: revisionSchema.optional()
 }).superRefine((input, context) => {
     const channel = appStateChannels[input.target.channel];
     if (!channel.writable || !channel.valueSchema.safeParse(input.value).success) {
@@ -67,7 +69,7 @@ export const viewerActions = {
         })
     },
     viewer_get_app_state: {
-        description: "Read selected state channels, or a bounded live overview when targets are omitted. Includes hidden/paused search definitions; excludes feature data and search results.",
+        description: "Read current configured state, or a bounded live overview when targets are omitted. Includes hidden/paused searches; excludes feature data and search results. Current levels and visible layers are not capability metadata: use viewer_get_catalog kind=layers for available layers and supported zoomLevels, kind=options for style controls. Use viewer_describe_app_state for writable channels such as view.grid.",
         permission: "viewer-read", mutation: false,
         inputSchema: z.strictObject({targets: z.array(appStateTargetSchema).max(VIEWER_ACTION_TARGET_LIMIT).optional()}),
         outputSchema: z.strictObject({
@@ -77,13 +79,13 @@ export const viewerActions = {
         })
     },
     viewer_set_app_state: {
-        description: "Change settings directly: view.layer for layer visibility/level, view.styleOption for style options, view.layerPreset/view.mapPreset for presets, view.camera, view.background, and view.grid. Discover selectors/value schemas with viewer_describe_app_state. Assign one complete value through its application owner; view-scoped writes require the observed viewLayoutRevision and honor synchronization. Use runtime objects, not storage/URL encodings. Applied does not mean tiles have loaded or rendered.",
+        description: 'Write ONE setting with {target:{channel:"view.projection",viewIndex:0},value:"2d",viewLayoutRevision:0} plus clientId; use the observed revision. No changes/updates/assignments array. Other channels include view.layer (visibility/level), view.styleOption, view.layerPreset/view.mapPreset, view.camera, view.background and view.grid. Switch maps by enabling the requested feature layers and setting visible:false on the old map layers in that view. Read the value first and preserve unrelated fields; viewer_describe_app_state gives exact selectors/value schemas. Writes use normal owners and honor view synchronization. Applied does not mean tiles have loaded or rendered.',
         permission: "viewer-control", mutation: true,
         inputSchema: assignmentInputSchema,
         outputSchema: z.strictObject({
             status: z.literal("applied"),
             target: appStateWritableTargetSchema,
-            value: appStateWritableValueSchema,
+            value: z.unknown(),
             changed: z.boolean(),
             focusedView: revisionSchema,
             affectedViews: z.array(revisionSchema).max(100),

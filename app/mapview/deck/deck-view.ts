@@ -1052,6 +1052,22 @@ export abstract class DeckMapView implements IRenderView {
         this.requestRender("Prepare layout resize");
     }
 
+    /** Uses the visible map area for an explicit jump after a dock clipped the old projection. */
+    private prepareForNavigation(): void {
+        if (!this.clippedLayoutCanvasCssSize) {
+            return;
+        }
+        const container = document.getElementById(this.canvasId);
+        if (!container || container.clientWidth <= 0 || container.clientHeight <= 0) {
+            return;
+        }
+        // Resizing alone preserves the old scene. A requested jump instead centers its target
+        // inside the available area, rather than under the dock in the old, wider canvas.
+        this.clippedLayoutCanvasCssSize = undefined;
+        this.lastCanvasCssSize = this.normalizedCanvasCssSize(container.clientWidth, container.clientHeight);
+        this.prepareForLayoutResize(this.lastCanvasCssSize);
+    }
+
     /** Returns the absolute canvas style used while a side-dock resize clips the old projection. */
     private canvasStyleAtFixedSize(size: {width: number; height: number}): Partial<CSSStyleDeclaration> {
         return {
@@ -1984,6 +2000,7 @@ export abstract class DeckMapView implements IRenderView {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
+                this.prepareForNavigation();
                 const alt = value.z ?? this.zoomToAltitude(this.viewState.zoom, value.y);
                 this.stateService.setView(
                     this._viewIndex,
@@ -2007,6 +2024,7 @@ export abstract class DeckMapView implements IRenderView {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
+                this.prepareForNavigation();
                 this.exitFirstPersonView();
                 const centerLon = (value.rectangle.west + value.rectangle.east) / 2;
                 const centerLat = (value.rectangle.south + value.rectangle.north) / 2;

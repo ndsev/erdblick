@@ -1,13 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "erdblick/geo/point-conversion.h"
+#include "erdblick/geometry.h"
 #include "erdblick/inspection.h"
 #include "erdblick/parser.h"
 #include "erdblick/rule.h"
 #include "erdblick/testdataprovider.h"
 #include "erdblick/visualization.h"
 #include "mapget/model/point.h"
-#include "mapget/model/sourceinfo.h"
 #include "mapget/model/sourcedatareference.h"
+#include "mapget/model/sourceinfo.h"
 #include "mapget/model/stringpool.h"
 #include "nlohmann/json.hpp"
 
@@ -2645,4 +2647,70 @@ rules:
     REQUIRE(std::ranges::all_of(report["issues"], [](auto const& issue) {
         return issue["severity"] == "warning" && issue["impact"] == "preset-skipped";
     }));
+}
+
+TEST_CASE(
+    "FeatureStyleRule labels preserve explicit values and fall back for missing results",
+    "[erdblick.style]")
+{
+    FeatureStyleRule rule(
+        YAML::Load(R"yaml(
+geometry: line
+label-text: unavailable
+label-text-expression: _.id
+)yaml"),
+        0);
+    FeatureStyleRule noFallback(
+        YAML::Load(R"yaml(
+geometry: line
+label-text-expression: _.id
+)yaml"),
+        0);
+    auto eval = BoundEvalFun{
+        [](std::string const&)
+        {
+            return simfil::Value::undef();
+        }};
+    REQUIRE(rule.labelText(eval) == "unavailable");
+    REQUIRE(noFallback.labelText(eval).empty());
+    eval.eval_ = [](std::string const&)
+    {
+        return simfil::Value::null();
+    };
+    REQUIRE(rule.labelText(eval) == "unavailable");
+    REQUIRE(noFallback.labelText(eval).empty());
+    eval.eval_ = [](std::string const&)
+    {
+        return simfil::Value(int64_t{0});
+    };
+    REQUIRE(rule.labelText(eval) == "0");
+    eval.eval_ = [](std::string const&)
+    {
+        return simfil::Value(false);
+    };
+    REQUIRE(rule.labelText(eval) == "false");
+    eval.eval_ = [](std::string const&)
+    {
+        return simfil::Value(std::string{"undefined"});
+    };
+    REQUIRE(rule.labelText(eval) == "undefined");
+}
+
+TEST_CASE("Feature framing radius compares WGS84 points in metres", "[geometry]")
+{
+    mapget::SelfContainedGeometry geometry{
+        {{11.0, 48.0, 0.0}, {11.02, 48.0, 0.0}, {11.01, 48.0, 100.0}},
+        {},
+        mapget::GeomType::Points};
+    auto const center = geometryCenter(geometry);
+    auto const endpoint = boundingRadiusEndPoint(geometry);
+    CHECK(endpoint.z == 0.0);
+    auto const radius =
+        glm::distance(wgsToCartesian<glm::dvec3>(center), wgsToCartesian<glm::dvec3>(endpoint));
+    CHECK(radius > 700.0);
+    for (auto const& point : geometry.points_) {
+        CHECK(
+            glm::distance(wgsToCartesian<glm::dvec3>(center), wgsToCartesian<glm::dvec3>(point)) <=
+            radius + 1e-6);
+    }
 }

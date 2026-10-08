@@ -748,6 +748,45 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('shares current cameras, layers and selections without copying unknown URL credentials', async () => {
+        window.history.pushState({}, '', '/viewer/?access_token=secret&external=private#token');
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const restoreRouter = createRouterStub();
+        let restored: AppStateService | undefined;
+        try {
+            service.layerNames = ['Map/Lane'];
+            service.setMapLayerConfig('Map', 'Lane', [{visible: true, level: 13, autoLevel: false}]);
+            service.cameraViewDataState.next(0, {destination: {lon: 11, lat: 48, alt: 900},
+                orientation: {heading: 0, pitch: -0.75, roll: 0}, position: [0, 0, 0]});
+            service.selection = [{id: 0, features: [{mapTileKey: 'Features:Map:Lane:545379780', featureId: 'Lane.1'}],
+                locked: true, size: [30, 20], color: '#fff314', undocked: false}];
+            const previous = window.location.href;
+            const link = new URL(service.shareableUrl());
+            expect(window.location.href).toBe(previous);
+            expect(link.pathname).toBe('/viewer/');
+            expect(link.searchParams.has('access_token')).toBe(false);
+            expect(link.searchParams.has('external')).toBe(false);
+            expect(link.hash).toBe('');
+            expect(link.searchParams.get('sel')).toContain('Lane.1');
+            expect(routerStub.navigate).not.toHaveBeenCalled();
+
+            window.history.pushState({}, '', link.href);
+            restored = new AppStateService(restoreRouter as unknown as Router, infoServiceStub());
+            restoreRouter.events.next(new NavigationEnd(1, '/', '/'));
+            await flushMicrotasks();
+            expect(restored.layerNames).toEqual(['Map/Lane']);
+            expect(restored.layerVisibilityState.getValue(0)).toEqual([true]);
+            expect(restored.cameraViewDataState.getValue(0)).toEqual(service.cameraViewDataState.getValue(0));
+            expect(restored.selection[0].features).toEqual(service.selection[0].features);
+        } finally {
+            restored?.ngOnDestroy();
+            service.ngOnDestroy();
+            restoreRouter.events.complete();
+            routerStub.events.complete();
+        }
+    });
+
     it('serializes active and selected-feature layers against one URL layer order', async () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());

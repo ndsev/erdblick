@@ -348,6 +348,8 @@ stays pending.
 owners. It is not a second application state store or an arbitrary method-call
 API. Mapget owns MCP authentication, authorization and session routing; erdblick
 does not grant permissions based on browser-supplied identity claims.
+Optional `/mcp/info` discovery allows up to 30 seconds for source/schema startup.
+Discovery runs asynchronously and does not block ordinary map startup.
 
 Settings use `viewer_describe_app_state`, `viewer_get_app_state` and
 `viewer_set_app_state`; semantic operations use the commands below.
@@ -361,7 +363,7 @@ field. State-channel contracts live in `app/shared/app-state-channel.contract.ts
 | `view.camera` | Read/write | Live render-view pose; ordinary AppState camera setter |
 | `view.layers` | Read | Visible layers, or a selected map/layer including hidden settings |
 | `app.selections` | Read | Panel and feature identities; no inspection trees |
-| `app.searches` | Read | Definitions including hidden/paused searches, plus runtime counts; no result data |
+| `app.searches` | Read | Definitions and pinColor including hidden/paused searches, plus runtime counts; no result data |
 | `view.projection` | Read/write | `2d` or `3d`; projection synchronization |
 | `view.background` | Read/write | Configured `layerId` (or `null`) and opacity percentage |
 | `view.grid` | Read/write | Visibility, `nds`/`xyz`, level, auto-level, six-digit color without `#`, opacity percentage |
@@ -405,33 +407,51 @@ complete `{visible, level, autoLevel}` value with only the desired fields change
 and the observed `viewLayoutRevision`. No checkbox click is necessary. Use
 `viewer_describe_app_state` to discover other writable settings and their schemas.
 
+<!-- mcp:
+title: "Viewer semantic commands and style discovery"
+keywords: ["MCP", "catalog", "styles", "local YAML", "validation", "inspection", "source references"]
+-->
 ### Semantic commands
 
 | Tools | Behavior |
 | --- | --- |
-| `viewer_get_catalog` | Bounded metadata for layers, backgrounds, styles, options or presets; no datasource URLs/headers |
+| `viewer_get_catalog` | Explicit `kind` selects maps, layers, backgrounds, styles, options or presets; bounded metadata without datasource URLs/headers |
 | `viewer_manage_view` | Create a second view from a selected source view, or remove an explicit view; never remove the last one |
 | `viewer_navigate` | Fit explicit WGS84 bounds, a tile partition, or up to 50 located features through ordinary navigation |
 | `viewer_inspect`, `viewer_close_inspection` | Open feature/entity inspection shells and return panel IDs, or close one explicit panel |
 | `viewer_open_source_data` | Open a source-data panel at a native map/partition/reference or SourceData key/address |
 | `viewer_start_search`, `viewer_control_search` | Start a visible search; pause, resume, stop, close, rerun, or explicitly refresh it |
-| `viewer_get_search`, `viewer_set_search` | Read or replace one search's typed scope/presentation settings; retain its identity |
+| `viewer_get_search`, `viewer_set_search` | Read or partially update one search's typed scope/presentation settings; retain its identity |
 | `viewer_get_search_results`, `viewer_export_search` | Bounded flat identity slices or JSON configuration/results, without building the result tree |
 | `viewer_get_style`, `viewer_validate_style`, `viewer_edit_style` | Read YAML, validate it natively, or create/update/reset/delete/toggle browser-local styles |
-| `viewer_get_diagnostics` | Fixed counters, cached loading/GPU observations, and bounded style/search errors |
+| `viewer_get_diagnostics` | Browser counters, cached loading/GPU observations, and bounded style/search errors; use separately privileged `mapget_get_diagnostics`, when exposed, for native backend workers/cache |
+| `viewer_get_share_link` | Read a URL through the normal URL-state codec; report browser-local style/search dependencies that are not embedded |
 
 Only read tools require `viewer-read`; state-changing commands require
 `viewer-control`. Style drafts use the same native version-2 parser as the editor.
 Edits are browser-local, not writes to server files or config. Reset applies to
 builtin overrides; delete applies to imported styles. Get/validate are read-only
-with respect to installed styles.
+with respect to installed styles. Validation reports `runtimeVerified: false`: valid
+syntax does not establish that an expression matches actual features or renders
+geometry. Runtime diagnostics identify the expression/property and rule, with
+available map/layer/feature context. Options belong to the stylesheet declaring
+them; a copied rule cannot implicitly borrow another sheet's options.
+
+Choose the catalog kind explicitly. A layers result is not a list of style controls
+or capabilities. Use `kind: "styles"` and copy the returned item ID exactly; a display
+name or layer ID may differ. Missing stock options do not prevent creating a local
+style. `relatedCatalogs` points to other relevant discovery requests.
 
 Feature identities are either `{mapTileKey, featureId}` or
 `{mapId, layerId?, featureId}`. The latter goes through native `/locate`; ambiguous
 matches fail rather than choosing the first. Attribute/relation/validity suffixes
 are preserved. Inspections return shells immediately; observe `app.selections`
 for feature-loading status. An explicit `panelId` must be an unlocked feature
-panel; `newPanel` creates a grouped panel. Default inspection behavior and limits
+panel; `newPanel:true` creates one grouped panel. Optional `color` is a six-digit
+hex color such as `"#00aaff"` and requires `newPanel:true`; it changes only the new
+panel, even when an older panel contains the same feature. To distinguish groups,
+call separately with different colors. Use `inspection.panel` state to recolor an
+existing panel. Default inspection behavior and limits
 are the same as the UI. Model extraction remains mapget's responsibility, not a
 serialized DOM/inspection tree.
 
@@ -441,12 +461,24 @@ Source references use mapget's `{layerId, address, qualifier?}` plus `mapId` and
 never convert them through a JavaScript number. The existing source-data panel
 owns loading and address reveal. Object partitions have no implicit tile extent.
 
+<!-- mcp:
+title: "Viewer search updates and result completeness"
+keywords: ["MCP", "search", "partial settings", "renderStrategy", "pagination", "searchComplete", "runId", "diagnostics"]
+-->
+### Search commands
+
 Search creation requires explicit map/layers and view indices and defaults to
 `autoUpdate: false`. Configure all initial coverage options before dispatching the
 first request. The returned `searchId` addresses the ordinary visible, persisted
 search, including its layer/type/level/view scope, style rules and rendering
 strategy. Stop retains partial results; close removes the saved definition.
 Cancelling a completed creation call does not stop the resulting search.
+`viewer_set_search` merges supplied settings into the current settings; omitted
+fields are retained. Its nested `renderStrategy` is also merged, while supplied
+arrays replace the whole array. Merely editing presentation does not switch an
+automatic layer selection into manual mode. GUI filter equality accepts `=` and
+`==`, normalizing to `=`; unsupported operators are rejected rather than silently
+producing a false predicate.
 
 Result reads cap slices at 100 entries and report `runId`, `refresh`, `offset`,
 `total`, `searchComplete` and `complete`/`reason`. Supply `runId` and `refresh` on
@@ -459,7 +491,11 @@ Diagnostics never trigger GPU readback, per-tile/scene scans, backend requests o
 full-report export. Loading counters and GPU allocation, when already sampled by
 the diagnostics UI, are explicitly cached. Unavailable scoped metrics are listed
 as unavailable; they are not fabricated zeros. View-scoped frame timing uses the
-existing fixed-size renderer samples. These observations are not a render fence.
+existing fixed-size renderer samples. These observations are not a render fence. Browser worker counts are not backend
+worker counts. Native source loading, cache and service queues require the
+separately privileged `mapget_get_diagnostics` tool. If it is absent from the
+authenticated tool catalog, report that permission limit; browser figures cannot
+substitute for backend measurements.
 
 Navigation owns cancellation through locate/load and checks again before its
 synchronous camera commit. A human gesture, camera/synchronization change, retired
@@ -468,6 +504,15 @@ Inspection locating likewise aborts its commit if the selection changes. One-sho
 feature fetches carry cancellation through their existing POST `/tiles` transport;
 there is no extra WebSocket. First-person control, animation and
 render-settling fences are not part of this API.
+
+### Share links
+
+`viewer_get_share_link` returns the normal URL-state serialization without changing
+browser navigation or forwarding unknown URL parameters, fragments or authentication
+parameters. It reports `localOnly` for loopback URLs and lists visible browser-local
+styles and enabled map-search overlays under `localStyleIds` and `localSearchIds`.
+These definitions are not embedded in the URL. Export required searches and styles
+separately when sharing them; the link alone does not reproduce those dependencies.
 
 ### UI inspection, interaction and resizing
 
