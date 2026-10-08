@@ -190,7 +190,7 @@ describe("HoverDetailService", () => {
                 mapTileKey,
                 featureId: "Road.42",
                 resultIndex: 0,
-                values: ["Road"]
+                values: [["Road"]]
             }]),
             delete: vi.fn()
         });
@@ -233,6 +233,26 @@ describe("HoverDetailService", () => {
         service.ngOnDestroy();
     });
 
+    it.each([
+        {results: [], present: false, expected: undefined},
+        {results: [null], present: true, expected: null},
+        {results: [undefined], present: true, expected: undefined},
+        {results: [80], present: true, expected: 80},
+        {results: [80, 90], present: false, expected: undefined},
+        {results: [[80, 90]], present: true, expected: [80, 90]}
+    ])("preserves exactly one hover result without flattening arrays: $results", ({results, present, expected}) => {
+        const {service, mapInfo} = createHarness([{expression: "speedLimit", customExpression: false}]);
+        mapInfo.tileLayerParser.readTileSubsetLayer.mockReturnValue({
+            channelSchema: () => ({featureFields: ["speedLimit"], entryCount: 1}),
+            entryRange: () => [{featureId: "Road.42", values: [results]}],
+            delete: vi.fn()
+        });
+        const values = service["decodeTile"](new Uint8Array([1]), ["speedLimit"])!.get("Road.42")!;
+        expect(values.has("speedLimit")).toBe(present);
+        expect(values.get("speedLimit")).toEqual(expected);
+        service.ngOnDestroy();
+    });
+
     it("uses a configured display key for projected values", () => {
         const {service, filterRefs, mapInfo, mapgetLayer} = createHarness([{
             expression: "properties.rules.speedLimit",
@@ -256,7 +276,7 @@ describe("HoverDetailService", () => {
                 mapTileKey,
                 featureId: "Road.42",
                 resultIndex: 0,
-                values: [80]
+                values: [[80]]
             }]),
             delete: vi.fn()
         });

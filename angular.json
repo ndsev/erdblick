@@ -27,6 +27,11 @@
             "tsConfig": "tsconfig.app.json",
             "assets": [
               {
+                "glob": "web-mcp-actions.json",
+                "input": "app/actions/generated",
+                "output": "/"
+              },
+              {
                 "glob": "**/*",
                 "input": "config/styles",
                 "output": "/static-config/styles"
@@ -80,7 +85,8 @@
             "scripts": [],
             "webWorkerTsConfig": "tsconfig.worker.json",
             "allowedCommonJsDependencies": [
-              "earcut"
+              "earcut",
+              "dom-to-image-more"
             ]
           },
           "configurations": {
@@ -99,6 +105,11 @@
               ],
               "outputHashing": "all",
               "assets": [
+                {
+                  "glob": "web-mcp-actions.json",
+                  "input": "app/actions/generated",
+                  "output": "/"
+                },
                 {
                   "glob": "**/*",
                   "input": "config/styles",
@@ -215,6 +226,11 @@
               "outputHashing": "all",
               "assets": [
                 {
+                  "glob": "web-mcp-actions.json",
+                  "input": "app/actions/generated",
+                  "output": "/"
+                },
+                {
                   "glob": "**/*",
                   "input": "config/styles",
                   "output": "/static-config/styles"
@@ -307,6 +323,11 @@
               ],
               "outputHashing": "all",
               "assets": [
+                {
+                  "glob": "web-mcp-actions.json",
+                  "input": "app/actions/generated",
+                  "output": "/"
+                },
                 {
                   "glob": "**/*",
                   "input": "config/styles",

@@ -29,6 +29,11 @@ Choose an action from the palette after completing the expression.
 **Schema suggestions (1)** distinguish fields, enum values, and constants.
 This example starts a speed-limit query with `SPEED_`.
 
+<!-- mcp:
+title: "Search palette navigation targets"
+keywords: ["jump", "coordinates", "tile ID", "feature ID", "place name", "location"]
+hint: "For a place name, use mapget_lookup_place to obtain candidate WGS84 coordinates and bounds; choose the intended match, then fit its observed bounds with viewer_navigate. For a point-only result use view.camera with the observed coordinates and an appropriate scale. A wof: place ID is not a map feature ID. Use mapget_get_place_geometry only when the full boundary is needed. The palette remains a UI alternative when supported by the deployment."
+-->
 ## Built-in Jump and Utility Targets
 
 <!-- --8<-- [start:jump-targets] -->
@@ -87,6 +92,10 @@ Typing `tileId "Map" "SourceLayer"` is not the only way to reach SourceData:
 - When you copy tile information from the SourceData panel, it uses the same quoting rules, so you can paste the string straight into the search input.
 <!-- --8<-- [end:sourcedata] -->
 
+<!-- mcp:
+keywords: [search, sessions, scope, attribute, pause, stop, viewport]
+hint: "Start a visible search with viewer_start_search using explicit mapLayers, viewIndices and the current viewLayoutRevision. MCP autoUpdate defaults to false. Keep the returned searchId; use viewer_control_search for pause/resume/stop/close/rerun/refresh. Read progress with viewer_get_search; stopping retains partial results."
+-->
 ## Feature Search Sessions
 
 <!-- --8<-- [start:feature-search] -->
@@ -112,6 +121,11 @@ Important controls:
 - **Pause, resume, and stop** - pause or stop long searches without closing the panel. Pausing preserves current results; stopping terminates the active backend run for that session.
 <!-- --8<-- [end:feature-search] -->
 
+<!-- mcp:
+title: "Search result identities and export"
+keywords: ["results", "select", "inspect", "pagination", "export", "partial"]
+hint: "Read bounded result slices using viewer_get_search_results and use runId/refresh guards when iterating. It returns identities, not complete features. viewer_export_search returns bounded JSON text; it does not trigger browser downloads or export full feature GeoJSON."
+-->
 ## Results
 
 <!-- --8<-- [start:results] -->
@@ -137,6 +151,11 @@ The query `**.speedLimitKmh >= 80` finds lane speed-limit attributes.
 <!-- --8<-- [start:visualization] -->
 The **Visualization** tab controls how one search session is drawn on the map. Its high-fidelity rules can also be saved as ordinary reusable YAML stylesheets.
 
+<!-- mcp:
+title: "Search result density map"
+keywords: ["density", "heatmap", "heat gradient", "bucket", "count", "marker size"]
+hint: "Read viewer_get_search and send changed settings with viewer_set_search; omitted settings and renderStrategy fields are preserved. Density controls live under renderStrategy: showLowFiDots, showBucketLabels, densityHeatGradient and densitySizeMultiplier; pinColor controls the base color. Density aggregates search matches, not an arbitrary continuous attribute surface."
+-->
 ### Result Density Map
 
 The density map is the safe overview for broad searches. It aggregates matches into visible tile buckets and draws colored markers.
@@ -154,6 +173,11 @@ the road network. **Density Labels** show compact counts for tile aggregates
 (such as `5+` or `20+`). **Gradient** gives higher-count visible markers warmer
 colors, and **Marker Size** scales the markers.
 
+<!-- mcp:
+title: "Detailed search result geometry"
+keywords: ["high fidelity", "high-fi", "geometry", "validity", "pins", "visible tiles"]
+hint: "In viewer_set_search settings.renderStrategy, showHighFiGeometry enables detailed geometry; highFidelityMaxVisibleTiles gates it by visible tile count. Preserve density settings for a broad-view fallback. Search help for \"Style Rules\" to configure colors and labels."
+-->
 ### High-fi Visualization
 
 High-fi visualization draws styled result geometry when the visible tile count is low enough for detailed rendering.
@@ -163,6 +187,10 @@ High-fi visualization draws styled result geometry when the visible tile count i
 - The default high-fidelity cutoff is 512 visible tiles. Above that limit, density markers remain the practical overview.
 - Geometry for attribute-scope results uses computed validity geometry when available and falls back to feature display geometry otherwise.
 
+<!-- mcp:
+keywords: [search styling, visualization, rules]
+hint: "Read viewer_get_search, modify its searchStyleRules array while retaining unrelated rules, then send that array with viewer_set_search; other settings are preserved. GUI rule geometry is an array, and its color object differs from YAML color-scale syntax. Search help for \"Style typed color scales\" only when authoring ordinary YAML styles."
+-->
 ### Style Rules
 
 Search style rules are evaluated only for the result layer of the current search.
@@ -179,6 +207,11 @@ Auto-created rules prefer fields mentioned by the query. Manual edits stop those
 
 ![Search visualization rule and its rendered result][search-visualization]
 
+<!-- mcp:
+title: "Save and reuse search styles"
+keywords: ["save style", "reuse", "search category", "detached", "export"]
+hint: "The Save/Saved styles controls are normal UI actions; no semantic save-search-style command is exposed. viewer_edit_style can create browser-local YAML directly when its semantics are known. A saved stylesheet does not retain the query or search scope."
+-->
 ### Re-using Search Styles
 
 Use **Save** beside the high-fidelity controls to create a canonical stylesheet. The small save dialog accepts the exact stylesheet name, optional layer affinity, and a checked-by-default **Enable this style upon save** checkbox. Slashes in the name create the same groups used by the normal Styles tree. Empty affinity means any feature layer; selected layer IDs are stored as an escaped exact-match `layer` expression and apply to every map that uses that ID. **Save** creates the style and closes the dialog; **Save and Open** creates it and then opens the ordinary Style Editor. **Cancel** creates nothing. Saving is create-only: an empty rule list or a name/URL collision is rejected without overwriting anything. The generated source has `category: search`, `version: 2`, a root `default` matching the checkbox, one per-layer **Show &lt;stylesheet name&gt;** Boolean option that defaults on, and one flat top-level YAML rule per GUI rule. Every generated rule is gated by that option. The imported style's initial global visible state matches the save checkbox; once active, its per-layer option is available in Maps & Layers.
@@ -200,7 +233,18 @@ Edit a saved stylesheet from the ordinary Styles tree. The Style Editor opens on
 Use density markers for broad searches or early exploration. Switch to high-fi geometry and labels when the visible tile count is small enough that individual result geometry is more useful than aggregate buckets.
 <!-- --8<-- [end:visualization] -->
 
+<!-- mcp:
+keywords: [search diagnostics, trace, error, troubleshooting]
+hint: "viewer_get_search exposes status/errors, not the Diagnostics/Values histograms or trace summaries. viewer_get_diagnostics is also a bounded runtime summary. Use native mapget query/extraction tools for data analysis or inspect the visible Diagnostics UI; do not report unobserved histogram or trace values."
+-->
 ## Search Diagnostics
+
+`viewer_get_search` includes `schemaAnalysis` with `status`, `concreteScope`,
+`normalizedQuery` and rewrite diagnostics. Pending analysis has no final result count.
+`responseComplete` describes the bounded response, whereas `searchComplete` describes search
+progress. Analysis errors are included in `status.errors`. A correctly applied visible
+asynchronous search can satisfy a visualization request; final counts or absence claims
+require completed, error-free evidence for the requested scope.
 
 <!-- --8<-- [start:diagnostics] -->
 The **Diagnostics** tab explains what the current search did and helps tune queries.
@@ -212,9 +256,20 @@ The **Diagnostics** tab explains what the current search did and helps tune quer
 Values are loaded lazily and may wait until result chunks have finished ingress. Use them when you want to understand the distribution behind a search before creating labels, categories, or gradients. Useful trace expressions include `trace(typeId)`, `trace(**.speedLimitKmh)`, and named traces such as `trace(valueKph, name="speed limits")` when several measurements should appear as separate value cards.
 <!-- --8<-- [end:diagnostics] -->
 
+<!-- mcp:
+keywords: [search, query, schema, completion, simfil]
+hint: "Use mapget_query_schema for the selected map/layer and feature type before composing a query; examples only apply when those paths exist. Narrow incomplete schema results instead of treating omitted fields as absent. After viewer_start_search, inspect its status/errors and bounded result identities. Search help for \"Feature Search Sessions\" for lifecycle and scope."
+-->
 ## Crafting Feature Queries
 
 <!-- --8<-- [start:crafting] -->
+The `speedLimitKmh` and `SPEED_LIMIT_METRIC` examples in this guide use NDS.Live data. They
+are not universal MapViewer fields. NDS.Classic speed-limit assignments instead expose
+`speedLimit` under their actual attribute owner. Discover the current layer schema and
+preserve that field path; check the datasource documentation for units, special values and
+conditions before applying a numeric interpretation. When reading a general example, do not
+substitute its field spelling for a different datasource's observed schema.
+
 When you compose Simfil expressions, start from the data that erdblick actually receives:
 
 - Use inspection to explore one feature. Open the three-dot hover menu on the left of a scalar row and choose **Copy Search Path** to copy the exact Simfil path.

@@ -37,22 +37,92 @@ cmake --build build-native
 ctest --test-dir build-native
 ```
 
-WebAssembly and application:
+For changes to the native/WASM core or its mapget/simfil dependencies, use the
+incremental rebuild script. It rebuilds the bindings and both frontend variants:
 
 ```bash
-source ci/emsdk/emsdk_env.sh
-export EMSCRIPTEN="$PWD/ci/emsdk/upstream/emscripten"
-emcmake cmake --preset release
-cmake --build --preset release
-npm ci
-npx tsc -p tsconfig.app.json --noEmit
-npm run test:vitest
-npm run build
+./ci/20_linux_rebuild.bash
 ```
 
-For a clean CI-equivalent core and UI build, run
-`./ci/10_linux_build.bash`. The exact top-level build commands used by
-MapViewer are also encoded in its CMake configuration and CI workflows.
+With matching WASM artifacts already present, frontend-only validation uses:
+
+```bash
+npm run lint
+npm run test -- --watch=false --include <path-or-glob>
+npm run build -- -c profiling
+```
+
+The build, start, watch and unit-test hooks generate the trusted viewer-action
+catalog before compiling. `./ci/10_linux_build.bash` is the clean CI build;
+it removes the existing build tree and is not the routine iteration command.
+
+The action/transport browser smoke can use a matching native `mapget` executable
+without an installed Python datasource wheel. From the erdblick root:
+
+```bash
+EB_MAPGET_CONFIG=test/mapget-native-grid.yaml npm run test:integration -- \
+  playwright/tests/tile-request.spec.ts playwright/tests/viewer-actions.spec.ts \
+  --project='' --workers=1
+```
+
+Set `MAPGET_BIN` when the executable is not on `PATH`. The transport cases use
+the real server; the viewer-action cases mock the MCP relay and do not establish
+authentication or native MCP routing. Other inspection fixtures still use the
+default Python example datasource and its matching protocol version.
+
+For the real HTTP-to-browser action path, enable the native local MCP fixture:
+
+```bash
+EB_MAPGET_MCP_LOCAL=1 EB_MAPGET_CONFIG=test/mapget-native-grid.yaml \
+  npm run test:integration -- playwright/tests/viewer-actions-native.spec.ts \
+  playwright/tests/schema-completion.spec.ts playwright/tests/tile-request.spec.ts \
+  --project='' --workers=1
+```
+
+This binds the test server to loopback and generates a test-only trust config
+under `playwright/.cache/`, using the catalog in the built frontend. The test
+uses two actual viewer origins (`localhost` and `127.0.0.1`) and the native MCP
+endpoint, including camera targeting, synchronization and stale-session rejection.
+It does not replace OAuth/Keycloak deployment acceptance. Use an unused
+`EB_APP_PORT` and a fresh `EB_PLAYWRIGHT_COVERAGE_DIR` for independent local runs.
+
+When `MAPGET_BIN` is the integrated MapViewer host, its production style catalog
+replaces the standalone defaults. Use the existing development map and matching
+layer selectors so the tile/render assertions exercise a configured style:
+
+```bash
+MAPGET_BIN=../../cmake-build-release-with-classic/bin/mapviewer \
+  EB_MAPGET_MCP_LOCAL=1 EB_MAPGET_CONFIG=../../config/mapviewer_dev.yaml \
+  EB_TEST_MAP_NAME=GridDataSource EB_TEST_LAYER_NAME=DevSrc-RoadLayer \
+  npm run test:integration -- playwright/tests/viewer-actions-native.spec.ts \
+  playwright/tests/schema-completion.spec.ts playwright/tests/tile-request.spec.ts \
+  --project='' --workers=1
+```
+
+The generic `TestMap/WayLayer` fixture does not match MapViewer's production
+`DevSrc-RoadLayer` style. Successful connection/control is not proof of tile
+rendering when no style enables that layer.
+
+The OAuth integration fixture uses a disposable RSA issuer and a loopback-only
+WebSocket forwarding proxy against that same native backend. The proxy overwrites
+the test identity headers on the real handshake; Chromium's extra HTTP headers
+do not cover WebSocket handshakes. Browser action/control messages are not mocked:
+
+```bash
+EB_MAPGET_MCP_TEST_OAUTH=1 EB_MAPGET_CONFIG=test/mapget-native-grid.yaml \
+  npm run test:integration -- playwright/tests/viewer-actions-auth.spec.ts \
+  --project='' --workers=1
+```
+
+It checks principal isolation, read/control permissions and token rejection. Its
+private key is generated under the ignored test cache and removed at teardown.
+This is not a substitute for the deployed proxy, Keycloak login/refresh or real
+client onboarding tests; it never modifies shared SSO configuration.
+
+The `build-playwright` workflow runs the native local and disposable-OAuth
+Chromium suites against its freshly built mapget wheel before the general browser
+suite. Each uses a separate port and coverage directory; the general suite retains
+the Python datasource and browser matrix.
 
 ## Core model and WASM surface
 
@@ -68,6 +138,32 @@ The C++ core wraps mapget models and exposes:
 
 The retired full-feature visualizers and `TileSearchResultLayer` wrappers do
 not coexist with this path.
+
+During nonblocking datasource startup, `MapInfoService` retains unchanged layer
+identities and appends newly ready maps through `TileLayerParser.addDataSourceInfo`.
+Existing string dictionaries, style planners, rendered tiles and the interactive
+connection remain live. Catalog status/progress changes are not model changes.
+Replacing or removing installed metadata still uses `setDataSourceInfo` and resets
+the stream dictionaries; the additive API rejects already registered map IDs.
+
+Search completion selects native feature or attribute-query schema IDs from
+mapget's `LayerSchema` and calls simfil's schema-domain completion directly.
+The parser caches one environment/private string namespace per registry, cleared
+when datasource metadata changes. It builds no sample `ModelPool` or frontend
+schema graph. Mapget owns attribute overlay roots such as `$feature` and validity
+metadata; simfil owns array, union and recursive-domain traversal. Candidate
+merging/type hints remain in erdblick, under one timeout across selected roots.
+
+Subset projected values have two distinct array levels: the outer array aligns
+with the channel's expressions, and each slot contains that expression's ordered
+results. `[]`, `[null]`, `[1, 2]` and `[[1, 2]]` mean no result, one null, two
+results and one array-valued result respectively. Native undefined survives the
+WASM boundary as JavaScript `undefined`; `valueErrors` distinguishes failed
+expressions from successful empty results. Search summaries count actual results,
+not sequence wrappers. Scalar style properties accept exactly one result, use
+their default for zero results and report a runtime issue/default for multiple
+results. They never silently pick the first. Hover/result labels likewise only
+unwrap singleton sequences.
 
 ## Ownership model
 
@@ -245,6 +341,332 @@ deadline: an older or equal deadline cannot replace the retained value or
 acknowledge pending work. A semantically fresher value may be installed even
 when it is already expired, in which case it remains stale and the output
 stays pending.
+
+## Optional MCP browser actions
+
+`ViewerActionService` binds an explicit action allowlist to existing application
+owners. It is not a second application state store or an arbitrary method-call
+API. Mapget owns MCP authentication, authorization and session routing; erdblick
+does not grant permissions based on browser-supplied identity claims.
+Optional `/mcp/info` discovery allows up to 30 seconds for source/schema startup.
+Discovery runs asynchronously and does not block ordinary map startup.
+
+Settings use `viewer_describe_app_state`, `viewer_get_app_state` and
+`viewer_set_app_state`; semantic operations use the commands below.
+Mapget adds/removes the routing `clientId` at the MCP
+boundary; it also owns `viewer_list_sessions`. Browser arguments have no routing
+field. State-channel contracts live in `app/shared/app-state-channel.contract.ts`.
+
+| Channel | Access | Owner/value |
+| --- | --- | --- |
+| `app.views` | Read | View indices, focus, sync, projection and navigation availability |
+| `view.camera` | Read/write | Live render-view pose; ordinary AppState camera setter |
+| `view.layers` | Read | Visible layers, or a selected map/layer including hidden settings |
+| `app.selections` | Read | Panel and feature identities; no inspection trees |
+| `app.searches` | Read | Definitions and pinColor including hidden/paused searches, plus runtime counts; no result data |
+| `view.projection` | Read/write | `2d` or `3d`; projection synchronization |
+| `view.background` | Read/write | Configured `layerId` (or `null`) and opacity percentage |
+| `view.grid` | Read/write | Visibility, `nds`/`xyz`, level, auto-level, six-digit color without `#`, opacity percentage |
+| `view.layer` | Read/write | One map/layer's visibility, requested level and auto-level |
+| `view.styleOption` | Read/write | One applicable public style option, validated against its declared type |
+| `view.layerPreset`, `view.mapPreset` | Read/write | Existing preset selections; `null` clears the association, not its option values |
+| `app.focusedView`, `app.viewSync`, `app.marker` | Read/write | Focus, ordinary synchronization and coordinate marker |
+| `app.preferences.rendering` | Read/write | AA, semantic compositing, contact shading, tile budget, render workers, compression |
+| `app.preferences.navigation` | Read/write | Zoom step and feature-fit clearance |
+| `app.preferences.inspection` | Read/write | Panel budget, drill-pick radius, expansion and value presentation |
+| `app.preferences.hover` | Read/write | Hover-label visibility, expressions and display keys |
+| `inspection.panel` | Read/write | One panel's locking, docking, focus and highlight color |
+
+Use discovery to obtain each channel's exact selector/value schema and persistence
+and synchronization behavior. Settings are complete coherent values, not partial
+patches. View-scoped writes and changes to `app.focusedView` require the observed
+layout revision. Invalid channel/value pairs are rejected by both the browser and
+the generated native JSON Schema validator. Layer/preset operations share the
+map-tree owner's notifications and synchronization; they do not synthesize clicks.
+
+Getters do not fetch tiles, run queries or walk features. A read is bounded to
+32 targets, 100 items per collection and a 256 KiB wire result; omitted content
+is explicit. `complete: false` and unavailable values must not be interpreted as
+empty collections. Source-data panel `loading` is `null` because that request's
+state belongs to the panel, not feature inspection resolution.
+
+Camera values are runtime objects, not flattened URL/storage codecs. Longitude
+and latitude are degrees; orientation is radians; `destination.alt` is the
+positive viewer scale-height in metres, not physical eye altitude. Nonzero roll
+and first-person map-camera writes are unsupported. Writes require the observed
+`viewLayoutRevision`, focus the target and honor position/movement sync. Active
+human camera gestures reject conflicting writes. The response reports the actual
+normalized pose and affected views. `applied` does not mean tiles have loaded or
+a frame has rendered; readiness is currently `unknown` to avoid a scene-wide
+diagnostics scan for each acknowledgement.
+
+For layer visibility and level changes, use `viewer_set_app_state` with the
+singular `view.layer` channel, not the read-only `view.layers` overview. Select
+`viewIndex`, `mapId` and `layerId`; read that exact target first, then assign its
+complete `{visible, level, autoLevel}` value with only the desired fields changed
+and the observed `viewLayoutRevision`. No checkbox click is necessary. Use
+`viewer_describe_app_state` to discover other writable settings and their schemas.
+
+<!-- mcp:
+title: "Viewer semantic commands and style discovery"
+keywords: ["MCP", "catalog", "styles", "local YAML", "validation", "inspection", "source references"]
+-->
+### Semantic commands
+
+| Tools | Behavior |
+| --- | --- |
+| `viewer_get_catalog` | Explicit `kind` selects maps, layers, backgrounds, styles, options or presets; bounded metadata without datasource URLs/headers |
+| `viewer_manage_view` | Create a second view from a selected source view, or remove an explicit view; never remove the last one |
+| `viewer_navigate` | Fit explicit WGS84 bounds, a tile partition, or up to 50 located features through ordinary navigation |
+| `viewer_inspect`, `viewer_close_inspection` | Open feature/entity inspection shells and return panel IDs, or close one explicit panel |
+| `viewer_open_source_data` | Open a source-data panel at a native map/partition/reference or SourceData key/address |
+| `viewer_start_search`, `viewer_control_search` | Start a visible search; pause, resume, stop, close, rerun, or explicitly refresh it |
+| `viewer_get_search`, `viewer_set_search` | Read or partially update one search's typed scope/presentation settings; retain its identity |
+| `viewer_get_search_results`, `viewer_export_search` | Bounded flat identity slices or JSON configuration/results, without building the result tree |
+| `viewer_get_style`, `viewer_validate_style`, `viewer_edit_style` | Read YAML, validate it natively, or create/update/reset/delete/toggle browser-local styles |
+| `viewer_get_diagnostics` | Browser counters, cached loading/GPU observations, and bounded style/search errors; use separately privileged `mapget_get_diagnostics`, when exposed, for native backend workers/cache |
+| `viewer_get_share_link` | Read a URL through the normal URL-state codec; report browser-local style/search dependencies that are not embedded |
+
+Only read tools require `viewer-read`; state-changing commands require
+`viewer-control`. Style drafts use the same native version-2 parser as the editor.
+Edits are browser-local, not writes to server files or config. Reset applies to
+builtin overrides; delete applies to imported styles. Get/validate are read-only
+with respect to installed styles. Validation reports `runtimeVerified: false`: valid
+syntax does not establish that an expression matches actual features or renders
+geometry. Runtime diagnostics identify the expression/property and rule, with
+available map/layer/feature context. Options belong to the stylesheet declaring
+them; a copied rule cannot implicitly borrow another sheet's options.
+
+Choose the catalog kind explicitly. A layers result is not a list of style controls
+or capabilities. Use `kind: "styles"` and copy the returned item ID exactly; a display
+name or layer ID may differ. Missing stock options do not prevent creating a local
+style. `relatedCatalogs` points to other relevant discovery requests.
+
+Feature identities are either `{mapTileKey, featureId}` or
+`{mapId, layerId?, featureId}`. The latter goes through native `/locate`; ambiguous
+matches fail rather than choosing the first. Attribute/relation/validity suffixes
+are preserved. Inspections return shells immediately; observe `app.selections`
+for feature-loading status. An explicit `panelId` must be an unlocked feature
+panel; `newPanel:true` creates one grouped panel. Optional `color` is a six-digit
+hex color such as `"#00aaff"` and requires `newPanel:true`; it changes only the new
+panel, even when an older panel contains the same feature. To distinguish groups,
+call separately with different colors. Use `inspection.panel` state to recolor an
+existing panel. Default inspection behavior and limits
+are the same as the UI. Model extraction remains mapget's responsibility, not a
+serialized DOM/inspection tree.
+
+Source references use mapget's `{layerId, address, qualifier?}` plus `mapId` and
+`partition: {kind: "tile", id: signedPackedTileId}` or
+`{kind: "object", id: uint64DecimalString}`. Addresses are also decimal strings;
+never convert them through a JavaScript number. The existing source-data panel
+owns loading and address reveal. Object partitions have no implicit tile extent.
+
+<!-- mcp:
+title: "Viewer search updates and result completeness"
+keywords: ["MCP", "search", "partial settings", "renderStrategy", "pagination", "searchComplete", "runId", "diagnostics"]
+-->
+### Search commands
+
+Search creation requires explicit map/layers and view indices and defaults to
+`autoUpdate: false`. Configure all initial coverage options before dispatching the
+first request. The returned `searchId` addresses the ordinary visible, persisted
+search, including its layer/type/level/view scope, style rules and rendering
+strategy. Stop retains partial results; close removes the saved definition.
+Cancelling a completed creation call does not stop the resulting search.
+`viewer_set_search` merges supplied settings into the current settings; omitted
+fields are retained. Its nested `renderStrategy` is also merged, while supplied
+arrays replace the whole array. Merely editing presentation does not switch an
+automatic layer selection into manual mode. GUI filter equality accepts `=` and
+`==`, normalizing to `=`; unsupported operators are rejected rather than silently
+producing a false predicate.
+
+Result reads cap slices at 100 entries and report `runId`, `refresh`, `offset`,
+`total`, `searchComplete` and `complete`/`reason`. Supply `runId` and `refresh` on
+later slices to reject changed generations; offsets are not snapshot cursors.
+Export returns JSON text, not a browser download or clipboard write. Responses
+and copying remain byte-bounded. Oversized settings/style sources fail explicitly;
+truncated collections do not pretend to be complete.
+
+Diagnostics never trigger GPU readback, per-tile/scene scans, backend requests or
+full-report export. Loading counters and GPU allocation, when already sampled by
+the diagnostics UI, are explicitly cached. Unavailable scoped metrics are listed
+as unavailable; they are not fabricated zeros. View-scoped frame timing uses the
+existing fixed-size renderer samples. These observations are not a render fence. Browser worker counts are not backend
+worker counts. Native source loading, cache and service queues require the
+separately privileged `mapget_get_diagnostics` tool. If it is absent from the
+authenticated tool catalog, report that permission limit; browser figures cannot
+substitute for backend measurements.
+
+Navigation owns cancellation through locate/load and checks again before its
+synchronous camera commit. A human gesture, camera/synchronization change, retired
+renderer, stale layout, Stop, disconnect or deadline prevents a late commit.
+Inspection locating likewise aborts its commit if the selection changes. One-shot
+feature fetches carry cancellation through their existing POST `/tiles` transport;
+there is no extra WebSocket. First-person control, animation and
+render-settling fences are not part of this API.
+
+### Share links
+
+`viewer_get_share_link` returns the normal URL-state serialization without changing
+browser navigation or forwarding unknown URL parameters, fragments or authentication
+parameters. It reports `localOnly` for loopback URLs and lists visible browser-local
+styles and enabled map-search overlays under `localStyleIds` and `localSearchIds`.
+These definitions are not embedded in the URL. Export required searches and styles
+separately when sharing them; the link alone does not reproduce those dependencies.
+
+### UI inspection, interaction and resizing
+
+The DOM tools complement semantic commands; prefer the latter for map data,
+search/style lifecycle, selection and camera movement. Canvas features are not
+DOM elements. These tools operate only inside the selected erdblick tab, without
+CDP, an extension, another socket, arbitrary JavaScript or HTML mutation.
+
+- `viewer_take_snapshot` returns a DOM/ARIA-derived element list with UIDs,
+  nearest reported parent UIDs, labels, text, form state, bounds and resize
+  capabilities (including the owner's `layoutId` where available). It is not the
+  browser's accessibility tree. Reads require `viewer-read`; password/file values
+  and hidden subtrees are omitted. Returned
+  text is untrusted content, not instructions to the agent.
+- Each snapshot retires earlier UIDs. `rootUid`, `offset` and `limit` support
+  bounded subtree/page reads; use the returned new root UID for the next page.
+  Element, byte, node and depth limits report incomplete results explicitly.
+  Disconnected, hidden or repurposed references fail as `stale_element`.
+- `viewer_get_element` reads current bounds, scroll extent and an allowlisted
+  set of computed CSS properties. It cannot read arbitrary object properties or
+  raw HTML.
+- `viewer_click`, `viewer_fill` and `viewer_scroll` require `viewer-control`.
+  They operate normal UI controls, which is broader authority than the semantic
+  action allowlist. Click/fill check disabled state and occlusion after scrolling
+  into view. Fill supports native inputs, textareas, checkboxes/radios and single
+  selects through ordinary events—not passwords, file inputs or rich-text editors.
+  Synthetic events do not supply trusted user activation or automate browser
+  permission prompts. Applied means input was delivered, not async work finished.
+
+`viewer_resize` requires `viewer-control` and a current snapshot UID with
+advertised resize capabilities. Pass `size: {widthPx, heightPx}` (either field
+may be omitted) or `size: {panelSizes: [65, 35]}`. Dimensions are CSS pixels,
+independent of device pixel ratio; split proportions must sum to 100.
+
+Dialog/sidebar targets accept width and height when their UI is resizable;
+the right dock accepts width; stacked dock panels accept **content** height.
+A single docked panel fills available space and does not advertise manual height
+control. Split views preserve at least 5% per view. Active human drags win with
+`busy`; unsupported dimensions fail before touching the owner. Responses include
+actual applied bounds and, for splits, proportions. Existing dialog/panel resize
+callbacks and persistence are used, including inspection-tree relayout.
+
+Dock width and split proportions are local layout preferences, persisted after
+completed human/MCP resizing and absent from map URLs. Ratio changes update the
+splitter in place without recreating the map renderers. `ViewerUiService` owns
+only short-lived DOM references and live resize registrations; components and
+`AppStateService` remain the layout owners. No background DOM scan/observer or
+second layout tree is maintained.
+
+### Application screenshots
+
+`viewer_screenshot` requires `viewer-read` and an explicit `clientId`. It captures
+the **visible application viewport**, including both map views, labels/highlights,
+inspection panels, toolbars and open overlays, not browser chrome or a full-page
+scrolling export. Optional `maxWidth`/`maxHeight` (128–1920; defaults 1280×960)
+bound the whole image without cropping. `viewLayoutRevision` optionally guards the
+layout; a resize during capture fails explicitly. No clipboard, download,
+screen-sharing prompt or screenshot storage is involved.
+
+Each render view forces one synchronous Deck frame and immediately copies its
+canvas after post-render effects/text, before WebGL clears the non-preserved
+drawing buffer. The ordinary renderer still uses `preserveDrawingBuffer: false`.
+A lazily loaded `dom-to-image-more` then rasterizes the visible DOM with those
+frozen canvases. Only one capture can run at once, outside Angular change detection;
+cancellation discards late output without modifying app state. Resource failures
+produce warnings; canvas/capture failures produce explicit action errors.
+
+The browser result is `{image: {mimeType, data}, metadata}`. Mapget validates that
+full result, promotes the JPEG to MCP **ImageContent**, advertises the metadata
+schema as the MCP output schema, and returns metadata-only structured/text content.
+Image bytes are not duplicated in the model's text context. JPEG data is capped at
+240,000 base64 characters within the existing 256 KiB relay budget; complex scenes
+may be downscaled further. Metadata includes actual and original viewport sizes,
+capture time, layout revision and warnings.
+
+This is an approximate DOM-based capture for acceptance/debugging, not pixel-exact
+browser screenshotting: browser chrome/cursor, embedded frames/video and some CSS
+effects are omitted. Loading may continue during capture, and DOM/map snapshots
+are not atomic. `readiness.status` deliberately remains `unknown`; use ordinary
+search/inspection/diagnostic state observations before capturing when needed.
+
+### Contract generation and relay
+
+`npm run generate:viewer-actions` exports self-contained Draft-07 schemas from the
+same DOM-free Zod definitions used at runtime. Both webapp variants package
+`web-mcp-actions.json` beside `index.html`. Its `catalogId` hashes compact JSON
+with recursively sorted object keys, retained array order and ECMAScript JSON
+scalar encoding; the digest and timestamps are not hash input. Generated files
+under `app/actions/generated/` are ignored build outputs. Argument, result,
+relay and connection-info parity fixtures live in `test/viewer-actions/`.
+String bounds use Unicode code points, as Draft-07 specifies, not JavaScript's
+UTF-16 length. Use the shared `boundedUnicodeString`/`unicodePrefix` helpers for
+bounded contract strings and text summaries; byte budgets remain UTF-8 byte limits.
+Fixed-size numeric vectors use homogeneous array schemas with equal `minItems`
+and `maxItems`, not Draft-07 tuple-style `items` arrays. This preserves the
+three-number camera offset while allowing MCP clients to expose its tool to a
+model. Client acceptance must check the model-visible callable inventory:
+successful `tools/list` discovery or direct invocation alone does not prove that
+the client can convert every input schema into a model tool signature.
+The generic setter additionally uses routing-safe Draft-07 `allOf`/`if`/`then`
+branches derived from the channel registry to pair each target with its exact
+value schema. Keep runtime and native parity fixtures together when extending
+this surface; client-side conditional-schema support is a separate acceptance gate.
+When changing contracts during an already-running watch/serve session, rerun
+`npm run generate:viewer-actions` and publish the updated generated artifact
+beside the frontend before reloading;
+the lifecycle hook runs when the watcher starts, not on each source edit.
+
+For local native development, start mapget with `serve --host 127.0.0.1 -p 8099
+--webapp static/browser --mcp local`. It loads `web-mcp-actions.json` from the
+mounted webapp by default; `--mcp-catalog` overrides the artifact path. All MCP
+settings use the normal `mapget.serve` YAML/CLI pipeline, not a separate JSON
+config file. The native-local and disposable-OAuth Playwright fixtures exercise
+these same CLI options and the default catalog lookup.
+
+Catalog contents reload on native info/tool discovery, tool calls, and browser
+registration when the file's modification time or size changes. Rebuild/publish
+the frontend and reload its tab; no backend restart is needed. The trusted path
+and auth configuration still require a restart to change. An invalid or partial
+artifact leaves the last good catalog active. Older tabs show a reload hint and
+stop accepting new actions, but retain their map connection and finish accepted
+actions using the original contract. A byte-identical rebuild leaves tabs alone.
+
+The browser registers only when `/mcp/info` advertises an exactly matching trusted
+catalog and the existing interactive connection has its UUID. Server controls use
+VTLV `ActionControl` frame type 9; browser controls use text JSON on that same
+socket. Relay envelope version 1 is independent of tile protocol 5.3. Controls
+bypass the pausable tile-data queue without advancing tile request IDs or changing
+dictionary/data order. There is no second WebSocket or mutation replay.
+
+One owner admits at most four calls, including at most one mutation; busy work is
+rejected, not queued. Cancellation, disconnect and expiry invalidate pending work.
+An immediate synchronous camera commit is not rolled back by a later cancel.
+Unexpected failures after effects began report an unknown outcome rather than a
+false rollback guarantee.
+
+### Connection and activity UI
+
+On MCP-enabled deployments, the main-bar MCP control shows availability, a
+renameable tab label, bounded recent action names/outcomes and Stop current action.
+Stop cancels pending agent work, not completed edits or human searches. Catalog
+mismatch disables agent controls only; ordinary viewing remains available.
+
+Copy Codex MCP-Add Command and Copy Claude MCP-Add Command use the server's
+public connection metadata and fixed, POSIX-shell-quoted command syntax. Local
+mode copies only the add command. OAuth mode copies add and login commands joined
+by `&&`, using the configured scopes and optional pre-registered public client ID.
+Codex passes comma-separated scopes to `mcp login --scopes`; Claude Code uses
+`mcp add-json` with space-separated `oauth.scopes`, then `mcp login`. Empty scopes
+and absent client IDs are omitted, leaving client discovery defaults intact.
+Run the copied snippet in a POSIX shell and complete login in the client; the
+browser UI only copies commands and never handles OAuth credentials. See the official
+[Codex MCP instructions](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
+and [Claude Code MCP instructions](https://code.claude.com/docs/en/mcp).
 
 ## Render pipeline
 
@@ -479,3 +901,46 @@ compatibility parser exists. Old staged cache blobs, stage-suffixed keys, LOD
 fields, `TileSearchResultLayer`, and full-feature visualizer APIs must not be
 reintroduced as compatibility paths. The URL decoder may discard an old stage
 suffix solely to restore older links.
+
+<!-- mcp:
+keywords: [WebMCP, browser, document, authentication, tools]
+-->
+## Browser-native WebMCP
+
+Erdblick registers all viewer actions with `document.modelContext.registerTool()`
+after ordinary app initialization. Each action targets the current document, so
+it takes no `clientId`. `viewer_list_sessions` is intentionally absent. The same
+Zod contracts and domain handlers serve WebMCP and remote MCP; both share bounded
+admission, mutation exclusion, result validation, cancellation, and the activity
+list/Stop control. A WebSocket reconnect does not cancel a document-owned call.
+
+On browsers supporting the [WebMCP imperative API](https://developer.chrome.com/docs/ai/webmcp/imperative-api),
+the MCP popover also reports the registered viewer and mapget tool counts.
+Unsupported browsers continue to work normally. Local viewer tools do not require
+remote MCP to be enabled. Browser support currently requires the browser's WebMCP
+feature and a secure context (HTTPS or localhost).
+
+`WebMcpService` owns tool registration and cleanup. It registers mapget tools from
+`POST mcp/browser` using the existing same-origin login, preserving the server's
+input schemas and permission filtering. It refreshes this discovery when the tab
+regains focus. It never copies an OAuth token into JavaScript or redirects to a
+server-supplied URL. Mapget tools need an enabled MCP backend and browser authority;
+when unavailable, the local viewer tools remain usable. Tool registrations are
+removed with abort signals; outstanding owned work is cancelled on app teardown.
+
+The browser bridge accepts JSON and finite SSE MCP responses, limits request and
+response sizes, checks response IDs, and passes cancellation to `fetch`. The server
+rechecks permissions on every call. See [mapget's browser endpoint](../../mapget/docs/mapget-mcp.md#browser-native-webmcp)
+for reverse-proxy and permission configuration.
+
+Run the browser-native regression with an installed WebMCP-capable Chrome:
+
+```sh
+MAPGET_BIN=/path/to/current/mapget EB_MAPGET_CONFIG=test/mapget-web-mcp.yaml \
+  EB_MAPGET_MCP_LOCAL=1 EB_WEBMCP_NATIVE=1 \
+  npm run test:integration -- playwright/tests/web-mcp.spec.ts --project='' --workers=1
+```
+
+This test enables Chrome's WebMCP feature and uses real `getTools`/`executeTool`
+calls. Its erdblick-owned GridDataSource fixture needs no Python datasource or
+external map service. Run it separately from other integration pipelines.

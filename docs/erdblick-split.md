@@ -8,6 +8,11 @@ The same junction is shown in **plan view (1)** and **perspective (2)** with
 different lane styles. The **sync controls (3)** link movement while keeping
 the projections and styles independent.
 
+<!-- mcp:
+title: "Create close and focus split views"
+keywords: ["split", "side by side", "left", "right", "comparison", "focus"]
+hint: "Read app.views and the current viewLayoutRevision. Use viewer_manage_view for layout changes and app.focusedView to change focus. Re-read state after creating/removing a view; indices and layout revision may change."
+-->
 ## Opening, Closing, and Focusing Views
 
 You can enter split view in three equivalent ways:
@@ -23,6 +28,11 @@ Once split view is open:
 3. Click inside a pane to focus it. The focused pane gets a blue outline, and keyboard shortcuts (`WASD`, `Q/E`, `Ctrl+K`, jump actions, and so on) apply only there.
 4. Use `Ctrl+ArrowRight` / `Ctrl+ArrowLeft` to move focus without touching the mouse.
 
+<!-- mcp:
+title: "Split view synchronization"
+keywords: ["sync", "position", "movement", "projection", "layers", "independent"]
+hint: "Read app.viewSync before per-view changes. Its value contains pos, mov, proj and/or lay. To keep styling or datasets independent across panes, disable lay; to compare 2D and 3D independently, disable proj. Preserve other requested synchronization flags."
+-->
 ## View Sync Controls
 
 The secondary pane shows a small toggle group in its top-left corner. These switches control how camera and layer state is shared between views:
@@ -42,6 +52,11 @@ Each view maintains its own layer tree:
 - **Layer sync button** - the circular-arrows button in each section copies visibility, zoom level, and style-option states from that pane to compatible layers, and also syncs that pane's tile-border flag.
 - **Add/remove** - use **Add View** or **View -> Split View** to open the second pane. Either pane can be closed; the remaining pane becomes the single view. Camera and layer selections are encoded in the URL, so split-view links are shareable.
 
+<!-- mcp:
+title: "Search results in split views"
+keywords: ["search", "left", "right", "all views", "viewport", "auto update"]
+hint: "Set explicit viewIndices when starting a search. For an existing search read viewer_get_search, then send selectedViewIndices with viewer_set_search and the observed layout revision; omitted settings are preserved. The selected view set also controls viewport coverage; it is not just a cosmetic overlay target."
+-->
 ## Search in Split View
 
 Feature-search panels show a **View** selector when split view is active. This selector controls where the search result layer is visualized:

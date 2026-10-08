@@ -537,23 +537,34 @@ export class InspectionSelectionService {
         if (!targetViews.length) {
             return;
         }
-        featureWrapper.peek((feature: Feature) => {
-            const center = feature.center() as Wgs84Point;
-            if (!this.isFiniteWgs84Point(center)) {
-                return;
-            }
-            const radiusPoint = feature.boundingRadiusEndPoint() as Wgs84Point;
-            const boundingRadius = this.featureBoundingRadiusMeters(center, radiusPoint);
-            const altitude = this.featureZoomAltitude(center.z, boundingRadius);
+        const target = this.featureSetZoomTarget([featureWrapper]);
+        if (target) targetViews.forEach(vi => this.viewState.moveToWgs84PositionTopic.next({targetView: vi, ...target}));
+    }
 
-            targetViews.forEach(vi =>
-                this.viewState.moveToWgs84PositionTopic.next({
-                    targetView: vi,
-                    x: center.x,
-                    y: center.y,
-                    z: altitude
-                }));
-        });
+    /** Computes the ordinary fit target for a small explicit feature set before any camera/focus mutation. */
+    featureSetZoomTarget(features: readonly FeatureWrapper[]): Wgs84Point | undefined {
+        const spheres = features.flatMap(wrapper => wrapper.peek((feature: Feature) => {
+            const center = feature.center() as Wgs84Point;
+            return this.isFiniteWgs84Point(center)
+                ? [{center, radius: this.featureBoundingRadiusMeters(center, feature.boundingRadiusEndPoint())}] : [];
+        }) ?? []);
+        if (!spheres.length || spheres.length !== features.length) return undefined;
+        if (spheres.length === 1) {
+            const {center, radius} = spheres[0];
+            return {x: center.x, y: center.y, z: this.featureZoomAltitude(center.z, radius)};
+        }
+        const reference = spheres[0].center.x;
+        const center: Wgs84Point = {x: 0, y: 0, z: 0};
+        for (const sphere of spheres) {
+            const delta = ((sphere.center.x - reference + 540) % 360) - 180;
+            center.x += reference + delta;
+            center.y += sphere.center.y;
+            center.z = Math.max(center.z ?? 0, this.finiteHeight(sphere.center.z));
+        }
+        center.x = ((center.x / spheres.length + 540) % 360) - 180;
+        center.y /= spheres.length;
+        const radius = Math.max(...spheres.map(sphere => this.featureBoundingRadiusMeters(center, sphere.center) + sphere.radius));
+        return {x: center.x, y: center.y, z: this.featureZoomAltitude(center.z, radius)};
     }
 
     /** Resolves the view indices affected by a feature zoom request. */

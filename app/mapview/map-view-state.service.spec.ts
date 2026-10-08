@@ -50,6 +50,29 @@ function createService(cameras: CameraViewState[], viewSync: string[]) {
 }
 
 describe("MapViewStateService live camera synchronization", () => {
+    it("does not let an old renderer teardown erase its replacement", () => {
+        const {service} = createService([camera(0, 0, 100, 0, [0, 0, 0])], []);
+        const oldView = {viewIndex: 0, isAvailable: () => true};
+        const nextView = {viewIndex: 0, isAvailable: () => true};
+        const unregisterOld = service.registerRenderView(oldView as never);
+        const unregisterNext = service.registerRenderView(nextView as never);
+        unregisterOld();
+        expect(service.renderViewFor(0)).toBe(nextView);
+        unregisterNext();
+        expect(service.renderViewFor(0)).toBeUndefined();
+    });
+
+    it("changes the layout revision only for changed view counts", () => {
+        const {service, stateService} = createService([camera(0, 0, 100, 0, [0, 0, 0])], []);
+        vi.spyOn(service, "requestViewRecalculation").mockImplementation(() => undefined);
+        expect(service.viewLayoutRevision).toBe(0);
+        stateService.numViewsState.next(1);
+        expect(service.viewLayoutRevision).toBe(0);
+        stateService.numViewsState.next(2);
+        expect(service.viewLayoutRevision).toBe(1);
+        stateService.numViewsState.next(1);
+        expect(service.viewLayoutRevision).toBe(2);
+    });
     it("routes complete position previews to sibling renderers", () => {
         const cameras = [
             camera(11, 48, 1000, 0.1, [1, 2, 3]),

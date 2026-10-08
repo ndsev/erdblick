@@ -345,7 +345,7 @@ export interface FeatureSearchExportDialogOptions {
 
 export type FeatureSearchRunOptions = Partial<Pick<
     FeatureSearchStateEntry,
-    "scope" | "selectedMapLayers" | "selectedViewIndices" | "selectedMapLayersManual" | "selectedFeatureTypes"
+    "scope" | "selectedMapLayers" | "selectedViewIndices" | "selectedMapLayersManual" | "selectedFeatureTypes" | "autoUpdate" | "selectedTileLevels"
 >>;
 
 @Injectable({providedIn: 'root'})
@@ -870,11 +870,12 @@ export class FeatureSearchService {
         const entry = this.stateService.addFeatureSearch({
             query,
             ...(options.scope ? {scope: options.scope} : {}),
+            ...(options.autoUpdate === undefined ? {} : {autoUpdate: options.autoUpdate}),
             pinColor: this.nextDefaultSearchColor(),
             selectedMapLayers,
             selectedMapLayersManual: options.selectedMapLayersManual ?? false,
             selectedFeatureTypes: options.selectedFeatureTypes ?? [],
-            selectedTileLevels: [...DEFAULT_FEATURE_SEARCH_TILE_LEVELS],
+            selectedTileLevels: [...(options.selectedTileLevels ?? DEFAULT_FEATURE_SEARCH_TILE_LEVELS)],
             selectedViewIndices
         });
         this.placeNewSearchSurface(entry.id);
@@ -2994,8 +2995,12 @@ export class FeatureSearchService {
                     values: task.projectedFieldIndices.map(index =>
                         index >= 0 && index < projectedValues.length
                             ? projectedValues[index]
-                            : null
-                    )
+                            : []
+                    ),
+                    valueErrors: entry.valueErrors?.flatMap(error => {
+                        const expressionIndex = task.projectedFieldIndices.indexOf(error.expressionIndex);
+                        return expressionIndex < 0 ? [] : [{...error, expressionIndex}];
+                    })
                 };
             });
         } finally {
@@ -3726,7 +3731,11 @@ export class FeatureSearchService {
         if (fieldIndex < 0 || !entry.values || fieldIndex >= entry.values.length) {
             return "";
         }
-        const value = entry.values[fieldIndex];
+        const results = entry.values[fieldIndex];
+        if (!Array.isArray(results) || results.length !== 1) {
+            return "";
+        }
+        const value = results[0];
         if (value === null || value === undefined) {
             return "";
         }

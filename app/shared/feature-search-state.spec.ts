@@ -7,6 +7,14 @@ import {
 } from "./feature-search-state";
 
 describe("FeatureSearchState", () => {
+    it("normalizes Simfil equality into the GUI operator without dropping the comparison", () => {
+        const entry = createFeatureSearchStateEntry({query: "true", searchStyleRules: [{
+            geometry: ["line"], filter: [{field: "_.id", op: "==", value: "Lane.1"}],
+            color: {mode: "solid", color: "#0088ff"}
+        }]});
+        expect(entry.searchStyleRules[0].filter).toEqual([{field: "_.id", op: "=", value: "Lane.1"}]);
+    });
+
     it("defaults selected map-layer intent to automatic", () => {
         const entry = createFeatureSearchStateEntry({query: "typeId == 'Road'"});
 

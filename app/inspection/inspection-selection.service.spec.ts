@@ -90,6 +90,20 @@ function createHarness(
 }
 
 describe("InspectionSelectionService multi-inspection", () => {
+    it("uses the same native bounds for single/multi-feature fits and unwraps the antimeridian", () => {
+        const {service} = createHarness(3);
+        const wrapper = (x: number, y = 40) => ({peek: (callback: (value: unknown) => unknown) => callback({
+            center: () => ({x, y, z: 10}), boundingRadiusEndPoint: () => ({x, y, z: 10})
+        })}) as unknown as FeatureWrapper;
+        expect(service.featureSetZoomTarget([wrapper(10)])).toEqual({x: 10, y: 40, z: 110});
+        const combined = service.featureSetZoomTarget([wrapper(179.9), wrapper(-179.9)])!;
+        expect(combined.x).toBeCloseTo(-180);
+        expect(combined.y).toBe(40);
+        expect(combined.z).toBeGreaterThan(1000);
+        expect(service.featureSetZoomTarget([])).toBeUndefined();
+        expect(service.featureSetZoomTarget([wrapper(10), wrapper(NaN)])).toBeUndefined();
+    });
+
     it("publishes loading panel shells and starts independent feature loads concurrently", async () => {
         const first = feature("first", "map/tile-1");
         const second = feature("second", "map/tile-2");

@@ -1562,7 +1562,11 @@ void main(void) {
   float strokeDistance = length(vec2(
       vPathPosition.x,
       vPathPosition.y - nearestPathPosition));
-  if (strokeDistance > 1.0) {
+  // The quad already bounds the body. A partially covered MSAA pixel may
+  // interpolate outside it at the pixel center; discarding there destroys
+  // its valid edge samples. Only the round caps need fragment trimming.
+  bool isCap = vPathPosition.y < 0.0 || vPathPosition.y > vPathLength;
+  if (isCap && strokeDistance > 1.0) {
     discard;
   }
 #ifdef ERDBLICK_DUAL_STROKE

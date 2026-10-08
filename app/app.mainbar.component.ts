@@ -48,17 +48,19 @@ interface StyleSheetMenuNode {
     template: `
         @if (mapsPanelOpen) {
             <p-button class="maps-button" data-testid="maps-toggle" (click)="closeMapsPanel()" label=""
+                      ariaLabel="Close maps configuration panel" aria-label="Close maps configuration panel"
                       tooltipPosition="bottom" tooltipStyleClass="maps-panel-button-tooltip"
                       (mouseenter)="alignMapsPanelTooltip($event)"
                       pTooltip="Close maps configuration panel">
-                <span class="material-symbols-outlined">close</span>
+                <span class="material-symbols-outlined" aria-hidden="true">close</span>
             </p-button>
         } @else {
             <p-button class="maps-button" data-testid="maps-toggle" (click)="showMapsPanel()" icon="" label=""
+                      ariaLabel="Open maps configuration panel" aria-label="Open maps configuration panel"
                       tooltipPosition="bottom" tooltipStyleClass="maps-panel-button-tooltip"
                       (mouseenter)="alignMapsPanelTooltip($event)"
                       pTooltip="Open maps configuration panel">
-                <span class="material-symbols-outlined">stacks</span>
+                <span class="material-symbols-outlined" aria-hidden="true">stacks</span>
             </p-button>
         }
         <p-menubar class="main-bar" [model]="menuItems" [breakpoint]="menubarBreakpoint">
@@ -80,6 +82,7 @@ interface StyleSheetMenuNode {
             </ng-template>
             <ng-template #end>
                 <div style="display: flex; flex-direction: row; gap: 0; align-items: center">
+                    <viewer-action-status></viewer-action-status>
                     <diagnostics-indicator></diagnostics-indicator>
                     @if (copyright.length) {
                         <div class="copyright-info" (click)="openLegalInfo()">

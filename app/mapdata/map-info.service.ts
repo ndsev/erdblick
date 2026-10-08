@@ -8,13 +8,15 @@ import {
     MapInfoItem,
     MapLayerTree,
     layerPresetInferenceKey,
+    layerPresetNode,
+    layerStyleOptions,
     sortDataSourceCatalogEntries,
     StyleOptionNode
 } from "./map.tree.model";
 import {
     coreLib,
     uint8ArrayFromWasm,
-    uint8ArrayToWasm
+    uint8ArrayToWasmOrThrow
 } from "../integrations/wasm";
 import {AppStateService, TileGridMode, VIEW_SYNC_LAYERS} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
@@ -25,6 +27,7 @@ import type {
 } from "../../build/libs/core/erdblick-core";
 import {MapgetLayer} from "./mapget-layer.model";
 import {MapPresetService} from "../styledata/map-preset.service";
+import type {LayerPresetRef} from "../styledata/layer-preset.model";
 
 /** Lightweight datasource status/progress update carried by interactive catalog-change frames. */
 interface SourceCatalogEntryUpdate {
@@ -50,7 +53,7 @@ export class MapInfoService {
     public readonly legalInformationUpdated = new Subject<boolean>();
     public readonly layerStateChanged = new Subject<string>();
     public readonly styleOptionsChanged = new Subject<StyleOptionChange[]>();
-    /** Emits after ready datasource metadata has been replaced in the shared parser. */
+    /** Emits on replacement/removal, requiring a stream reset; additions leave existing consumers live. */
     public readonly dataSourceInfoChanged = new Subject<void>();
     public readonly maps$: BehaviorSubject<MapLayerTree>;
 
@@ -62,6 +65,8 @@ export class MapInfoService {
     private dataSourceInfoJson: string | null = null;
     /** UTF-8 form of ready datasource metadata shared with render workers. */
     private dataSourceInfoBlobValue: Uint8Array | null = null;
+    /** Installed ready metadata keyed by JSON content, excluding catalog progress/status decoration. */
+    private readySourceMetadata = new Map<string, MapInfoItem>();
     /** Schema-free, map-local parser metadata used only by subset render workers. */
     private readonly renderDataSourceInfoBlobCache = new Map<string, Uint8Array>();
     /** Complete dictionary snapshots reused until the stream appends new fields. */
@@ -276,7 +281,22 @@ export class MapInfoService {
                 observe: "response"
             }));
             const result = Array.isArray(response.body) ? response.body : [];
-            const catalog = this.normalizeSourceCatalogEntries(result);
+            const nextMetadata = new Map<string, MapInfoItem>();
+            const catalog = this.normalizeSourceCatalogEntries(result).map(source => {
+                if (!isDataSourceCatalogEntryReady(source)) {
+                    return source;
+                }
+                const metadata = {...source};
+                for (const field of ["status", "statusMessage", "progress", "configIndex"]) {
+                    delete metadata[field];
+                }
+                const signature = JSON.stringify(metadata);
+                const retained = this.readySourceMetadata.get(signature) ?? metadata;
+                nextMetadata.set(signature, retained);
+                // HTTP decoding creates fresh objects. Preserve unchanged layer
+                // identities so scene reconciliation does not retire their tiles.
+                return {...source, layers: retained.layers};
+            });
             this.sourceCatalogRevisionValue = this.parseSourceCatalogRevision(
                 response.headers.get("X-Mapget-Sources-Revision")
             );
@@ -287,23 +307,32 @@ export class MapInfoService {
                 console.warn("Datasource config status:", message);
             }
 
+            const replaced = [...this.readySourceMetadata.keys()].some(key => !nextMetadata.has(key));
+            const added = [...nextMetadata].filter(([key]) => !this.readySourceMetadata.has(key)).map(([, source]) => source);
+            if (replaced || added.length || this.dataSourceInfoJson === null) {
+                const readyEntries = [...nextMetadata.values()];
+                const parserJson = JSON.stringify(this.schemaFreeDataSourceInfo(replaced ? readyEntries : added));
+                uint8ArrayToWasmOrThrow(wasmBuffer => {
+                    if (replaced) {
+                        this.tileLayerParser.setDataSourceInfo(wasmBuffer);
+                    } else {
+                        this.tileLayerParser.addDataSourceInfo(wasmBuffer);
+                    }
+                }, new TextEncoder().encode(parserJson));
+                this.readySourceMetadata = nextMetadata;
+                this.dataSourceInfoJson = JSON.stringify(readyEntries);
+                this.dataSourceInfoBlobValue = new TextEncoder().encode(this.dataSourceInfoJson);
+                if (replaced) {
+                    this.invalidateFieldDictBlobCache();
+                    this.renderDataSourceInfoBlobCache.clear();
+                    this.clearStyleParsers();
+                }
+            }
+            // Install parser metadata before publishing layers which can request
+            // it. Only actual replacement invalidates dictionaries and transport.
             this.messageService.clearBackendConnectionError();
             this.publishSourceCatalogTree(catalog);
-            const readyEntries = catalog.filter(isDataSourceCatalogEntryReady);
-            const jsonString = JSON.stringify(readyEntries);
-            const dataSourceInfoChanged = jsonString !== this.dataSourceInfoJson;
-            this.dataSourceInfoJson = jsonString;
-            if (dataSourceInfoChanged) {
-                this.invalidateFieldDictBlobCache();
-                this.renderDataSourceInfoBlobCache.clear();
-                this.clearStyleParsers();
-                this.dataSourceInfoBlobValue = new TextEncoder().encode(jsonString);
-                const parserJson = JSON.stringify(
-                    this.schemaFreeDataSourceInfo(readyEntries)
-                );
-                uint8ArrayToWasm(wasmBuffer => {
-                    this.tileLayerParser.setDataSourceInfo(wasmBuffer);
-                }, new TextEncoder().encode(parserJson));
+            if (replaced) {
                 this.dataSourceInfoChanged.next();
             }
             this.layerStateChanged.next("datasources");
@@ -439,7 +468,7 @@ export class MapInfoService {
         const parser = new coreLib.TileLayerParser() as TileLayerParser;
         try {
             const json = new TextEncoder().encode(JSON.stringify(sources));
-            uint8ArrayToWasm(
+            uint8ArrayToWasmOrThrow(
                 wasmBuffer => parser.setDataSourceInfo(wasmBuffer),
                 json
             );
@@ -663,6 +692,56 @@ export class MapInfoService {
     /** Applies a style-option value change and emits it for render invalidation. */
     applyStyleOptionChange(optionNode: StyleOptionNode, viewIndex: number): void {
         this.applyStyleOptionChanges([optionNode], viewIndex);
+    }
+
+    /** Applies a preset through the same transaction for map-tree controls and agent actions. */
+    applyLayerPreset(viewIndex: number, mapId: string, layerId: string, ref: LayerPresetRef | null): boolean {
+        const layer = this.maps.getFeatureLayer(mapId, layerId);
+        if (!layer || viewIndex < 0 || viewIndex >= this.stateService.numViews) return false;
+        const preset = ref ? layerPresetNode(layer)?.presets.find(candidate =>
+            candidate.styleId === ref.styleId && candidate.id === ref.presetId) : undefined;
+        if (ref && !preset) return false;
+        const options = layerStyleOptions(layer);
+        const changed: StyleOptionNode[] = [];
+        for (const value of preset?.values ?? []) {
+            const option = options.find(candidate => candidate.styleId === preset!.styleId && candidate.id === value.optionId);
+            if (option && option.value[viewIndex] !== value.value) {
+                option.value[viewIndex] = value.value;
+                changed.push(option);
+            }
+        }
+        this.maps.setLayerPresetSelection(viewIndex, mapId, layerId, ref);
+        this.applyPresetChanges(changed, viewIndex, [{mapId, layerId}]);
+        return true;
+    }
+
+    /** Validates an entire map composition before changing any of its component options. */
+    applyMapPreset(viewIndex: number, mapId: string, presetId: string | null): boolean {
+        const map = this.maps.maps.get(mapId);
+        if (!map || viewIndex < 0 || viewIndex >= this.stateService.numViews) return false;
+        if (!presetId) {
+            this.maps.setMapPresetSelection(viewIndex, mapId, null);
+            this.maps.reconcilePresetSelections();
+            return true;
+        }
+        const preset = map.mapPresets.find(candidate => candidate.id === presetId);
+        const components = preset ? this.maps.resolveMapPresetComponents(map, preset) : undefined;
+        if (!preset || !components || (this.isSyncOptionsForViewEnabled(viewIndex) && this.maps.mapPresetHasSyncConflict(map, preset))) return false;
+        const changed: StyleOptionNode[] = [];
+        for (const component of components) {
+            const options = layerStyleOptions(component.layer);
+            for (const value of component.preset.values) {
+                const option = options.find(candidate => candidate.styleId === component.preset.styleId && candidate.id === value.optionId);
+                if (option && option.value[viewIndex] !== value.value) {
+                    option.value[viewIndex] = value.value;
+                    changed.push(option);
+                }
+            }
+            this.maps.setLayerPresetSelection(viewIndex, mapId, component.layer.id, component.preset.ref);
+        }
+        this.maps.setMapPresetSelection(viewIndex, mapId, preset.id);
+        this.applyPresetChanges(changed, viewIndex, components.map(component => ({mapId, layerId: component.layer.id})));
+        return true;
     }
 
     /** Applies one atomic collection of option mutations and performs synchronization once. */

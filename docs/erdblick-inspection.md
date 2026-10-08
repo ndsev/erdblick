@@ -8,6 +8,11 @@ Click a panel title to lock its selection while exploring another feature.
 The unlocked panel shows the transient selection and is reused on the next click.
 Selection colors connect each inspection to its geometry on the map.
 
+<!-- mcp:
+title: "Select and inspect features"
+keywords: ["select", "inspect", "feature ID", "lock", "multiple"]
+hint: "Use viewer_inspect with identities obtained from mapget or search results. Use separate calls with newPanel:true and distinct color values (six-digit hex) to highlight different groups; color applies only to the new panel. Read app.selections for panel IDs and loading state. The state overview contains identities, not feature trees; use native mapget extraction for structured feature content."
+-->
 ## Building a Selection
 
 You can open feature inspection from several entry points:
@@ -24,6 +29,11 @@ lists the individual candidates and offers a **Select all** action:
 
 ![Drill-pick menu for overlapping San Francisco lane and road features](screenshots/20-drill-pick-context-menu.png)
 
+<!-- mcp:
+title: "Inspection panel presentation"
+keywords: ["locked", "unlocked", "undock", "color", "resize", "panel"]
+hint: "Read app.selections to identify panels. Set inspection.panel for lock, undock, focus and color; use viewer_resize only on snapshot elements advertising resize capabilities. Close an explicit panel with viewer_close_inspection."
+-->
 ## Working With Panels
 
 The inspection dock is a small workspace in its own right:
@@ -41,6 +51,11 @@ While selection data is still pending, the dock opens an immediate loading
 shell instead of leaving the workspace without feedback.
 
 
+<!-- mcp:
+title: "Inspection tree attributes and references"
+keywords: ["properties", "attribute", "relation", "geometry", "source reference", "tree"]
+hint: "Use mapget schema/extraction for machine-readable fields and source references; viewer_get_app_state does not expose inspection trees. Visible tree operations are available through a fresh UI snapshot. Search help for \"Opening SourceData\" to follow raw source references."
+-->
 ## Understanding the Tree
 
 ![NDS.Island-6 lane attributes and source references](screenshots/inspection-details.png)
@@ -79,7 +94,24 @@ its resolved parent categories, including `Food` and `Top level`:
 
 ![Resolved multi-level NDS.Classic POI category hierarchy](screenshots/36-classic-poi-hierarchy.png)
 
+<!-- mcp:
+title: "Attribute validity inspection"
+keywords: ["validity", "COMPLETE", "range", "transition", "highlight", "attribute"]
+hint: "viewer_inspect accepts base featureId with observed attributeIndex or relationIndex and optional validityIndex. Copy indices from native extraction or viewer_get_search_results; existing suffixed identities also work. Attribute-scope matches can highlight validity geometry; screenshots alone cannot establish attribute values."
+-->
 ### Validity Display and Hovering
+
+To inspect an observed attribute validity with `viewer_inspect`, pass the base `featureId` and
+its `attributeIndex` plus optional `validityIndex` inside the feature identity. Copy those
+indices from native extraction or search result metadata. `relationIndex` selects a relation
+instead of an attribute; the two selectors are mutually exclusive. `validityIndex` requires
+one of them. For a relation, `validityIndex` addresses its targetValidity, not sourceValidity.
+Omit `validityIndex` to select the whole attribute or relation. Existing entity-ID suffixes
+still work, but do not combine them with numeric selectors. Numeric selectors are returned as
+a suffixed identity; mapId-based lookup resolves the canonical base feature ID. An
+already-suffixed identity supplied with mapTileKey is returned unchanged. The response opens a
+loading inspection panel and does not certify that an arbitrary supplied index exists or that
+validity geometry has finished rendering.
 
 When you hover validity-aware nodes in the tree, erdblick tries to highlight the most specific validity that matches the hovered attribute or subnode. If no single validity is the right match, it falls back to showing all validities attached to that node.
 
@@ -107,6 +139,11 @@ resolved with `/locate`, then fetched from their owning tile. The complete
 feature wrapper is released with the inspection; it is never inserted into a
 viewport tile cache.
 
+<!-- mcp:
+title: "Search from an inspected value"
+keywords: ["copy search path", "key value", "scalar", "same value", "query"]
+hint: "A known scalar path and typed value can be used with viewer_start_search in the inspected map/layer. Discover the actual schema and quote literals according to their type. The row menu is a UI route; do not assume the state overview contains copied paths."
+-->
 ### Searching From Inspection
 
 ![The attribute row menu offers Search for key/value](screenshots/inspection-search-menu.png)
@@ -144,6 +181,11 @@ Typical workflow:
 The generated search inherits the **map and layer (1)** from the inspected
 lane, with the original attribute still visible alongside its results.
 
+<!-- mcp:
+title: "Compare inspected feature values"
+keywords: ["comparison", "side by side", "reference", "candidate", "attributes"]
+hint: "Open/lock the relevant features with viewer_inspect. The comparison dialog itself uses normal UI controls discovered with viewer_take_snapshot; there is no dedicated comparison command. Use native extraction for exact values rather than reading only screenshot labels."
+-->
 ## Comparison Dialog
 
 ![Speed-limit comparison between two NDS.Island-6 lanes](screenshots/inspection-comparison.png)

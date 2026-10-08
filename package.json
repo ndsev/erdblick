@@ -1,11 +1,16 @@
 {
   "name": "erdblick",
-  "version": "2026.4.2",
+  "version": "2026.5.0",
   "scripts": {
     "ng": "ng",
+    "generate:viewer-actions": "tsc -p tsconfig.viewer-actions.json && node .angular/viewer-actions/tools/export-viewer-actions.js",
+    "prestart": "npm run generate:viewer-actions",
     "start": "ng serve",
+    "prebuild": "npm run generate:viewer-actions",
     "build": "ng build",
+    "prewatch": "npm run generate:viewer-actions",
     "watch": "ng build --watch --configuration development",
+    "pretest": "npm run generate:viewer-actions",
     "test": "ng test",
     "test:vitest": "vitest run",
     "lint": "eslint app",
@@ -14,6 +19,7 @@
     "test:integration:headed": "playwright test --headed",
     "test:integration:visual": "playwright test playwright/snap-tests",
     "test:integration:update-snapshots": "playwright test playwright/snap-tests --update-snapshots",
+    "prebuild:integration-coverage": "npm run generate:viewer-actions",
     "build:integration-coverage": "ng build -c playwright-coverage"
   },
   "private": true,
@@ -44,6 +50,7 @@
     "@ndsev/ndslive-math": "^1.0.0",
     "@primeng/themes": "^21.0.4",
     "codemirror": "^6.0.2",
+    "dom-to-image-more": "3.11.0",
     "js-yaml": "^4.3.2",
     "material-symbols": "0.40.2",
     "primeicons": "^7.0.0",

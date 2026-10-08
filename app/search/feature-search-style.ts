@@ -32,8 +32,8 @@ export interface FeatureSearchFilterChannels {
  */
 export function compileFeatureSearchStyle(
     definition: FeatureSearchResolvedDefinition,
-    mapgetLayer: MapgetLayer,
-    mapInfo: MapInfoService,
+    mapgetLayer: Pick<MapgetLayer, "mapId" | "layerId" | "key">,
+    mapInfo: Pick<MapInfoService, "planStyleFilter">,
     featureTypes: readonly string[]
 ): CompiledFeatureSearchStyle {
     const hasRenderRules = definition.searchStyleRules.length > 0;
@@ -66,11 +66,12 @@ export function compileFeatureSearchStyle(
         coreLib.HighlightMode.NO_HIGHLIGHT.value,
         MAX_STYLE_LOD
     ) as StyleFilterPlan;
-    if (!nativePlan.valid || nativePlan.channels.length !== runtimeRules.length) {
+    // Compatible rules share a native data channel; the renderer uses its
+    // style-rules indices to apply each rule independently.
+    if (!nativePlan.valid) {
         featureLayerStyle.delete?.();
         throw new Error(
-            `Generated flat search stylesheet produced ${nativePlan.channels.length} channel(s) for `
-            + `${runtimeRules.length} rule(s): ${JSON.stringify(nativePlan.issues)}`
+            `Generated search stylesheet could not be planned: ${JSON.stringify(nativePlan.issues)}`
         );
     }
 

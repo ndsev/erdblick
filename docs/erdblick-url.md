@@ -1,7 +1,12 @@
 # URL Guide
 
-Erdblick encodes the full UI state inside the browser URL. That makes it easy to bookmark views, send links to colleagues, or preconfigure visualization-only deployments.
+Erdblick encodes shareable view state in the browser URL. That makes it easy to bookmark views, send links to colleagues, or preconfigure visualization-only deployments.
 
+<!-- mcp:
+title: "Viewer startup state precedence"
+keywords: ["URL", "local storage", "default", "startup", "reload", "state"]
+hint: "For the running tab, inspect viewer_get_app_state rather than reconstructing state from the URL alone. MCP state assignments use canonical runtime objects, not flattened URL encodings."
+-->
 ## Startup State Precedence
 
 Erdblick combines several possible state sources during startup:
@@ -149,13 +154,21 @@ Here:
 
 All option values are stored as `0`/`1` numbers (booleans) or plain numbers/strings, depending on the option type. Unknown layers or styles are ignored when a URL is replayed, so links remain reasonably robust across configuration changes.
 
+<!-- mcp:
+title: "Sharing viewer links"
+keywords: ["share", "link", "URL", "inspection", "style", "persistence"]
+hint: "A shared URL is not a copy of backend data or browser-local imported/modified stylesheet source. Verify which state this guide says is encoded before promising reproducibility on another browser. Use viewer_get_share_link to read a share URL for the current view and its localStyleIds/localSearchIds dependencies; localOnly identifies a loopback address."
+-->
 ## Sharing Links
 
 To share a particular map configuration with others, first get the view into the desired state and then capture the URL:
 
 1. Configure the map exactly as needed (activate sources, zoom, tweak styles).
 2. Copy the browser URL directly once the view is in the desired state.
-3. Send the link. Recipients load the same camera, layer, and style state.
+3. Share the link with someone who can access the same configured viewer. The
+   URL carries cameras, layers, selections and style-option values. Browser-local
+   stylesheet source and search overlays are not embedded; export any required
+   definitions separately. A loopback address only works on the originating machine.
 
 The browser’s Back and Forward buttons move between previously visited URL states. Erdblick treats these as full state transitions and hydrates the matching cameras, layer visibility, selections, and style options accordingly.
 
