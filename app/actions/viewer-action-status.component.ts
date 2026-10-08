@@ -1,4 +1,5 @@
 import {Component} from "@angular/core";
+import {WebMcpService} from "./web-mcp.service";
 import {ViewerActionService} from "./viewer-action.service";
 import {ClipboardService} from "../shared/clipboard.service";
 
@@ -8,19 +9,25 @@ import {ClipboardService} from "../shared/clipboard.service";
     standalone: false,
     template: `
         @if (actions.availability$ | async; as availability) {
-            @if (availability.enabled) {
+            @if (availability.enabled || webMcp.status$.value.supported) {
                 <p-button label="MCP" size="small" [text]="true"
-                          [severity]="availability.ready ? 'secondary' : 'warn'"
-                          [pTooltip]="availability.message" (onClick)="details.toggle($event)"
+                          [severity]="availability.ready || webMcp.status$.value.viewerTools > 0 ? 'secondary' : 'warn'"
+                          [pTooltip]="availability.enabled ? availability.message : webMcp.status$.value.message" (onClick)="details.toggle($event)"
                           data-testid="viewer-action-status"/>
                 <p-popover #details appendTo="body">
                     <section class="action-details" data-testid="viewer-action-details">
                         <strong>Agent controls</strong>
+                        @if (webMcp.status$ | async; as web) {
+                            @if (web.supported) { <p role="status">{{ web.message }} ({{ web.viewerTools }} viewer, {{ web.mapgetTools }} mapget tools)</p> }
+                        }
+                        @if (availability.enabled) {
                         <p role="status">{{ availability.message }}</p>
                         <label for="viewer-action-label">Tab label</label>
                         <!-- HTML counts UTF-16 units; the service enforces the 120-code-point label limit. -->
                         <input pInputText id="viewer-action-label" #label [value]="actions.label" maxlength="240"
                                (change)="actions.renameSession(label.value); label.value = actions.label"/>
+                        }
+                        @if (availability.enabled) {
                         <div class="action-buttons">
                             <p-button label="Copy Codex MCP-Add Command" size="small" (onClick)="copy('codex')"
                                       data-testid="viewer-action-copy-codex"/>
@@ -28,6 +35,7 @@ import {ClipboardService} from "../shared/clipboard.service";
                                       data-testid="viewer-action-copy-claude"/>
                         </div>
                         <small>Commands use POSIX-shell quoting and include client-side OAuth login when required.</small>
+                        }
                         <p-button label="Stop current action" severity="danger" size="small"
                                   [disabled]="!actions.hasPendingAction" (onClick)="actions.stopCurrentAction()"
                                   data-testid="viewer-action-stop"/>
@@ -54,7 +62,7 @@ import {ClipboardService} from "../shared/clipboard.service";
     `]
 })
 export class ViewerActionStatusComponent {
-    constructor(readonly actions: ViewerActionService, private readonly clipboard: ClipboardService) {}
+    constructor(readonly actions: ViewerActionService, private readonly clipboard: ClipboardService, readonly webMcp: WebMcpService) {}
 
     /** Builds add/login commands from fixed syntax and quoted metadata, never a server command template. */
     connectionText(kind: "codex" | "claude"): string {

@@ -901,3 +901,46 @@ compatibility parser exists. Old staged cache blobs, stage-suffixed keys, LOD
 fields, `TileSearchResultLayer`, and full-feature visualizer APIs must not be
 reintroduced as compatibility paths. The URL decoder may discard an old stage
 suffix solely to restore older links.
+
+<!-- mcp:
+keywords: [WebMCP, browser, document, authentication, tools]
+-->
+## Browser-native WebMCP
+
+Erdblick registers all viewer actions with `document.modelContext.registerTool()`
+after ordinary app initialization. Each action targets the current document, so
+it takes no `clientId`. `viewer_list_sessions` is intentionally absent. The same
+Zod contracts and domain handlers serve WebMCP and remote MCP; both share bounded
+admission, mutation exclusion, result validation, cancellation, and the activity
+list/Stop control. A WebSocket reconnect does not cancel a document-owned call.
+
+On browsers supporting the [WebMCP imperative API](https://developer.chrome.com/docs/ai/webmcp/imperative-api),
+the MCP popover also reports the registered viewer and mapget tool counts.
+Unsupported browsers continue to work normally. Local viewer tools do not require
+remote MCP to be enabled. Browser support currently requires the browser's WebMCP
+feature and a secure context (HTTPS or localhost).
+
+`WebMcpService` owns tool registration and cleanup. It registers mapget tools from
+`POST mcp/browser` using the existing same-origin login, preserving the server's
+input schemas and permission filtering. It refreshes this discovery when the tab
+regains focus. It never copies an OAuth token into JavaScript or redirects to a
+server-supplied URL. Mapget tools need an enabled MCP backend and browser authority;
+when unavailable, the local viewer tools remain usable. Tool registrations are
+removed with abort signals; outstanding owned work is cancelled on app teardown.
+
+The browser bridge accepts JSON and finite SSE MCP responses, limits request and
+response sizes, checks response IDs, and passes cancellation to `fetch`. The server
+rechecks permissions on every call. See [mapget's browser endpoint](../../mapget/docs/mapget-mcp.md#browser-native-webmcp)
+for reverse-proxy and permission configuration.
+
+Run the browser-native regression with an installed WebMCP-capable Chrome:
+
+```sh
+MAPGET_BIN=/path/to/current/mapget EB_MAPGET_CONFIG=test/mapget-web-mcp.yaml \
+  EB_MAPGET_MCP_LOCAL=1 EB_WEBMCP_NATIVE=1 \
+  npm run test:integration -- playwright/tests/web-mcp.spec.ts --project='' --workers=1
+```
+
+This test enables Chrome's WebMCP feature and uses real `getTools`/`executeTool`
+calls. Its erdblick-owned GridDataSource fixture needs no Python datasource or
+external map service. Run it separately from other integration pipelines.

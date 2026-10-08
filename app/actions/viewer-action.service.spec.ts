@@ -122,6 +122,38 @@ describe("ViewerActionService", () => {
         return {...result, clientId};
     }
 
+    it("runs WebMCP locally without backend registration or a clientId", async () => {
+        const {service, stream} = fixture();
+        const result = await service.invokeLocal("viewer_get_app_state", {}, new AbortController().signal);
+        expect(viewerActions.viewer_get_app_state.outputSchema.safeParse(result).success).toBe(true);
+        expect(stream.sendActionControl).not.toHaveBeenCalled();
+        expect(service.activity$.value.at(-1)).toMatchObject({action: "viewer_get_app_state", status: "completed"});
+        await expect(service.invokeLocal("viewer_get_app_state", {clientId: "another-tab"}, new AbortController().signal))
+            .rejects.toMatchObject({detail: {code: "invalid_arguments"}});
+    });
+
+    it("shares mutation admission, user stop and cancellation between WebMCP and the relay", async () => {
+        const {service, stream, clientId} = await activeFixture();
+        const execute = vi.spyOn(service, "execute").mockImplementation(() => new Promise(() => {}));
+        const abort = new AbortController();
+        const local = service.invokeLocal("viewer_navigate", {}, abort.signal);
+        const localFailure = expect(local).rejects.toMatchObject({detail: {code: "cancelled"}});
+        await Promise.resolve();
+        stream.actionControlReceived.next({payload: {
+            type: "mapget.actions.invoke", version: 1, callId: "relay-busy", action: "viewer_navigate", arguments: {}, timeoutMs: 30000
+        }, receivedAt: performance.now()});
+        expect(stream.sendActionControl).toHaveBeenCalledWith(clientId, expect.objectContaining({error: expect.objectContaining({code: "busy"})}));
+        expect(execute).toHaveBeenCalledTimes(1);
+        service.stopCurrentAction();
+        await localFailure;
+        expect(service.hasPendingAction).toBe(false);
+        const second = service.invokeLocal("viewer_navigate", {}, abort.signal);
+        const secondFailure = expect(second).rejects.toMatchObject({detail: {code: "cancelled"}});
+        abort.abort();
+        await secondFailure;
+        expect(service.hasPendingAction).toBe(false);
+    });
+
     it("keeps optional MCP discovery alive during slow map initialization", async () => {
         vi.useFakeTimers();
         const {service, stream} = fixture();

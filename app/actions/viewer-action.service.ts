@@ -15,7 +15,7 @@ import {
     appStateOmissionSchema, appStateValueSchema, type AppStateTarget
 } from "../shared/app-state-channel.contract";
 import {
-    describeAppStateChannels, VIEWER_ACTION_RESULT_BYTES, viewerActions,
+    describeAppStateChannels, VIEWER_ACTION_INVOCATION_BYTES, VIEWER_ACTION_RESULT_BYTES, viewerActions,
     type ViewerActionInput, type ViewerActionName, type ViewerActionOutput
 } from "./viewer-action.contract";
 import {
@@ -46,7 +46,9 @@ export interface ViewerActionActivity {
 
 interface PendingViewerAction {
     callId: string;
-    clientId: string;
+    clientId: string | null;
+    localComplete?: (result?: ViewerActionOutput<ViewerActionName>, error?: ViewerActionError) => void;
+    removeAbortListener?: () => void;
     action: ViewerActionName;
     arguments: unknown;
     mutation: boolean;
@@ -101,7 +103,7 @@ export class ViewerActionService implements OnDestroy {
         this.initialized = true;
         this.subscriptions.add(this.stream.actionClientId$.subscribe(clientId => {
             if (clientId === this.clientId) return;
-            for (const call of this.pending.values()) this.finish(call, undefined, {
+            for (const call of this.pending.values()) if (call.clientId !== null) this.finish(call, undefined, {
                 code: "disconnected", message: "Interactive connection ended", outcome: "not_applied"
             }, false);
             this.completedCalls.clear();
@@ -211,24 +213,41 @@ export class ViewerActionService implements OnDestroy {
         }
     }
 
+    /** Runs a tool in this document with the same admission, output validation and stop control as relayed calls. */
+    invokeLocal(action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<ViewerActionOutput<ViewerActionName>> {
+        signal.throwIfAborted();
+        if (this.encoder.encode(JSON.stringify(input)).length > VIEWER_ACTION_INVOCATION_BYTES) {
+            this.reject("Viewer arguments exceed the request budget", "invalid_arguments");
+        }
+        return new Promise((resolve, reject) => this.invoke({
+            type: "mapget.actions.invoke", version: 1, callId: `webmcp-${crypto.randomUUID()}`,
+            action, arguments: input, timeoutMs: 30000
+        }, performance.now(), (result, error) => {
+            if (error) reject(new ViewerActionFailure(error));
+            else resolve(result!);
+        }, signal));
+    }
+
     /** Admits bounded calls without a mutation queue; every admitted call owns its cancellation/deadline. */
-    private invoke(message: Extract<ViewerActionServerMessage, {type: "mapget.actions.invoke"}>, receivedAt: number): void {
-        if (!this.clientId || this.pending.has(message.callId) || this.completedCalls.has(message.callId)) return;
+    private invoke(message: Extract<ViewerActionServerMessage, {type: "mapget.actions.invoke"}>, receivedAt: number,
+        localComplete?: PendingViewerAction["localComplete"], signal?: AbortSignal): void {
+        if ((!localComplete && !this.clientId) || this.pending.has(message.callId) || this.completedCalls.has(message.callId)) return;
         let error: ViewerActionError | undefined;
         const known = Object.hasOwn(viewerActions, message.action);
         const name = message.action as ViewerActionName;
-        if (!this.registered) error = {code: "not_available", message: "Viewer action registration is unavailable", outcome: "not_applied"};
+        if (!localComplete && !this.registered) error = {code: "not_available", message: "Viewer action registration is unavailable", outcome: "not_applied"};
         else if (!known) error = {code: "unsupported_action", message: "Unsupported viewer action", outcome: "not_applied"};
         else if (this.pending.size >= 4 || (viewerActions[name].mutation && [...this.pending.values()].some(call => call.mutation))) {
             error = {code: "busy", message: "Viewer action capacity is busy", outcome: "not_applied"};
         }
         if (error) {
-            this.stream.sendActionControl(this.clientId, {type: "mapget.actions.result", version: 1, callId: message.callId, error});
+            if (localComplete) localComplete(undefined, error);
+            else this.stream.sendActionControl(this.clientId!, {type: "mapget.actions.result", version: 1, callId: message.callId, error});
             return;
         }
         const deadline = receivedAt + message.timeoutMs;
         const call: PendingViewerAction = {
-            callId: message.callId, clientId: this.clientId, action: name, arguments: message.arguments,
+            callId: message.callId, clientId: localComplete ? null : this.clientId, localComplete, action: name, arguments: message.arguments,
             mutation: viewerActions[name].mutation, deadline, controller: new AbortController(),
             timer: setTimeout(() => this.finish(call, undefined, {
                 code: "timeout", message: "Action deadline expired", outcome: "not_applied"
@@ -236,6 +255,12 @@ export class ViewerActionService implements OnDestroy {
             activity: {action: name, status: "running"}
         };
         this.pending.set(call.callId, call);
+        if (signal) {
+            const cancel = () => this.finish(call, undefined, {code: "cancelled", message: "Action cancelled", outcome: "not_applied"});
+            signal.addEventListener("abort", cancel, {once: true});
+            call.removeAbortListener = () => signal.removeEventListener("abort", cancel);
+            if (signal.aborted) { cancel(); return; }
+        }
         this.zone.run(() => this.activity$.next([...this.activity$.value.slice(-19), call.activity]));
         queueMicrotask(() => {
             if (!this.pending.has(call.callId)) return;
@@ -280,9 +305,11 @@ export class ViewerActionService implements OnDestroy {
         this.pending.delete(call.callId);
         clearTimeout(call.timer);
         call.controller.abort();
+        call.removeAbortListener?.();
         this.completedCalls.add(call.callId);
         if (this.completedCalls.size > 256) this.completedCalls.delete(this.completedCalls.values().next().value!);
-        if (send && this.clientId === call.clientId) this.stream.sendActionControl(call.clientId, {
+        if (call.localComplete) call.localComplete(result, error);
+        else if (send && call.clientId && this.clientId === call.clientId) this.stream.sendActionControl(call.clientId, {
             type: "mapget.actions.result", version: 1, callId: call.callId, ...(error ? {error} : {result})
         });
         call.activity.status = error?.code ?? (call.mutation ? "applied" : "completed");

@@ -1,0 +1,9 @@
+# Self-contained source for browser-native WebMCP contract tests.
+sources:
+  - type: GridDataSource
+    mapId: WebMcpGrid
+    layers:
+      - name: Road
+        featureType: Road
+        geometry:
+          type: line
