@@ -611,10 +611,15 @@ renameable tab label, bounded recent action names/outcomes and Stop current acti
 Stop cancels pending agent work, not completed edits or human searches. Catalog
 mismatch disables agent controls only; ordinary viewing remains available.
 
-Copy MCP URL, Copy Codex command and Copy Claude Code command use the server's
+Copy Codex MCP-Add Command and Copy Claude MCP-Add Command use the server's
 public connection metadata and fixed, POSIX-shell-quoted command syntax. Local
-mode omits OAuth flags; OAuth mode can include a pre-registered public client ID.
-Login remains in the client, not the browser UI. See the official
+mode copies only the add command. OAuth mode copies add and login commands joined
+by `&&`, using the configured scopes and optional pre-registered public client ID.
+Codex passes comma-separated scopes to `mcp login --scopes`; Claude Code uses
+`mcp add-json` with space-separated `oauth.scopes`, then `mcp login`. Empty scopes
+and absent client IDs are omitted, leaving client discovery defaults intact.
+Run the copied snippet in a POSIX shell and complete login in the client; the
+browser UI only copies commands and never handles OAuth credentials. See the official
 [Codex MCP instructions](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
 and [Claude Code MCP instructions](https://code.claude.com/docs/en/mcp).
 
