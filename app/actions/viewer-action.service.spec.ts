@@ -10,9 +10,18 @@ import {ViewerUiService} from "./viewer-ui.service";
 import {viewerActions, type ViewerActionOutput} from "./viewer-action.contract";
 import {VIEWER_ACTION_CATALOG_ID} from "./generated/catalog-id";
 import {type FeatureSearchSession} from "../search/feature.search.service";
+import {StyleOptionNode} from "../mapdata/map.tree.model";
+import type {StyleValidationReport} from "../styledata/style-validation.model";
 import domToImage from "dom-to-image-more";
 
 vi.mock("dom-to-image-more", () => ({default: {toCanvas: vi.fn()}}));
+
+/** Supplies a complete schema-analysis record for otherwise partial search-service doubles. */
+function readySearchAnalysis(query: string): FeatureSearchSession["schemaAnalysis"] {
+    return {signature: "test", status: "ready", concreteScope: "feature", normalizedQuery: query,
+        attributeScopes: [], attributeScopeCandidateCount: 0, rewriteSuppressed: false,
+        rewriteSuppressionReason: "", matchedFieldNames: [], matchedEnumValues: [], matchedFeatureTypes: []};
+}
 
 /** Builds real state/sync owners, with inert renderers and no tile/schema/scene access. */
 function setup() {
@@ -21,7 +30,7 @@ function setup() {
     } as never, {showError: vi.fn()} as never);
     const maps = {
         layerStateChanged: new Subject<string>(), reapplySyncOptionsForAllViews: vi.fn(),
-        maps: {maps: new Map()}
+        maps: {maps: new Map()}, isMapReady: vi.fn(() => true)
     };
     state.numViews = 2;
     state.viewSyncState.next([]);
@@ -52,14 +61,14 @@ function setup() {
         loadFeatures: vi.fn(() => Promise.resolve([])), isTileStreamConnected: vi.fn(() => true), tilePipelinePaused: false,
         getPendingFrameQueueSize: vi.fn(() => 0), getDownstreamBytesPerSecond: vi.fn(() => 100), getTileStreamTransportCompressionStats: vi.fn(() => ({}))
     };
-    const styles = {styles: new Map(), validateStyleSource: vi.fn(() => ({valid: true, loadable: true, issues: []})),
+    const styles = {styles: new Map(), validateStyleSource: vi.fn((): Pick<StyleValidationReport, "valid" | "loadable" | "issues"> => ({valid: true, loadable: true, issues: []})),
         createEditorSourceRef: vi.fn(), importStyleYamlSource: vi.fn(() => "new-style"), setStyleSource: vi.fn(() => "style"),
         resetModifiedBuiltinStyle: vi.fn(() => "style"), deleteStyle: vi.fn(), toggleStyle: vi.fn()};
     const config = {getBackgroundLayers: () => [{id: "osm", name: "OSM", type: "xyz", url: "never exposed"}]};
-    const render = {queueSummary: vi.fn(() => ({queued: 3})), currentFrameTimeMs: vi.fn(() => 0), debugSnapshot: vi.fn()};
+    const render = {queueSummary: vi.fn(() => ({queued: 3, latestNativeMs: 12})), currentFrameTimeMs: vi.fn(() => 0), debugSnapshot: vi.fn()};
     const diagnostics = {snapshot$: new BehaviorSubject({at: Date.now(), tiles: {expected: 3, loaded: 2, errors: 1}, progress: {rendered: {done: 1, total: 2}}}), perfStats$: new BehaviorSubject([])};
     const viewDiagnostics = {cameraInteracting$: new BehaviorSubject(false), snapshot: vi.fn()};
-    const styleReports = {reports$: new BehaviorSubject([])};
+    const styleReports = {reports$: new BehaviorSubject<import("../styledata/style-validation.model").StyleValidationIssue[]>([])};
     const service = new ViewerActionService(state, views, maps as never, searches as never, inspections as never, zone as never, stream as never,
         styles as never, config as never, render as never, diagnostics as never, viewDiagnostics as never, styleReports as never, new ViewerUiService());
     return {state, views, maps, renderers, searches, inspections, zone, service, stream, styles, config, render, diagnostics, viewDiagnostics, styleReports};
@@ -112,6 +121,28 @@ describe("ViewerActionService", () => {
         result.stream.sendActionControl.mockClear();
         return {...result, clientId};
     }
+
+    it("keeps optional MCP discovery alive during slow map initialization", async () => {
+        vi.useFakeTimers();
+        const {service, stream} = fixture();
+        let resolve!: (value: Response) => void;
+        const response = new Promise<Response>(done => { resolve = done; });
+        vi.stubGlobal("fetch", vi.fn().mockReturnValue(response));
+        try {
+            service.initialize();
+            await vi.advanceTimersByTimeAsync(6000);
+            const signal = vi.mocked(fetch).mock.calls[0][1]!.signal!;
+            expect(signal.aborted).toBe(false);
+            resolve(new Response(JSON.stringify({enabled: true, endpoint: "http://localhost:8099/mcp",
+                authentication: "local", scopes: [], catalogId: VIEWER_ACTION_CATALOG_ID})));
+            await vi.advanceTimersByTimeAsync(0);
+            stream.actionClientId$.next("b3e68f32-3b51-472d-8cab-14b597f7de91");
+            expect(stream.sendActionControl).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({type: "mapget.actions.register"}));
+        } finally {
+            service.ngOnDestroy();
+            vi.useRealTimers();
+        }
+    });
 
     it("captures the full viewport with bounded image metadata and frozen map canvases", async () => {
         const {service, renderers, views} = fixture();
@@ -316,11 +347,11 @@ describe("ViewerActionService", () => {
     it("keeps hidden, paused and restored search definitions visible", () => {
         const {service, state, searches} = fixture();
         state.featureSearchState.next([createFeatureSearchStateEntry({
-            id: "hidden", query: "**.warningSign", enabled: false, paused: true, showResultsOnMap: false
+            id: "hidden", query: "**.warningSign", pinColor: "#2477dd", enabled: false, paused: true, showResultsOnMap: false
         })]);
         const result = read(service, [{channel: "app.searches"}]);
         expect(result.values).toEqual([{target: {channel: "app.searches"}, value: [{
-            searchId: "hidden", query: "**.warningSign", enabled: false, paused: true, autoUpdate: true, showResultsOnMap: false
+            searchId: "hidden", query: "**.warningSign", pinColor: "#2477dd", enabled: false, paused: true, autoUpdate: true, showResultsOnMap: false
         }]}]);
         expect(searches.getSession).toHaveBeenCalledWith("hidden");
     });
@@ -476,6 +507,88 @@ describe("ViewerActionService", () => {
         expect(state.getBackgroundState(0)).toEqual(previous);
     });
 
+    it("pages the default layer catalog and includes advertised levels and feature types", () => {
+        const {service, maps} = fixture();
+        const layers = new Map(["Road", "Lane", "POI"].map(id => [id, {
+            id, type: "Features", viewConfig: [{visible: true}],
+            info: {zoomLevels: [11, 13], featureTypes: [{name: id}, {name: "ReferenceOnly"}], schemaFeatureTypes: [id], partitionKind: "tile"}
+        }]));
+        layers.set("Raw", {id: "Raw", type: "SourceData", viewConfig: [{visible: false}],
+            info: {zoomLevels: [], featureTypes: [], schemaFeatureTypes: [], partitionKind: "tile"}});
+        maps.maps.maps.set("map", {id: "map", layers});
+        expect(service.execute("viewer_get_catalog", {kind: "layers", layerType: "SourceData"}))
+            .toMatchObject({complete: true, items: [{id: "Raw"}]});
+        expect(viewerActions.viewer_get_catalog.outputSchema.parse(service.execute("viewer_get_catalog", {kind: "layers", layerType: "all"})).items).toHaveLength(4);
+        const first = viewerActions.viewer_get_catalog.outputSchema.parse(service.execute("viewer_get_catalog", {kind: "layers", limit: 2}));
+        expect(first).toMatchObject({kind: "layers", complete: false, nextOffset: 2, viewLayoutRevision: 0,
+            relatedCatalogs: [
+                {arguments: {kind: "layers", layerType: "SourceData"}},
+                {arguments: {kind: "styles"}}
+            ],
+            items: [{id: "Road", zoomLevels: [11, 13], featureTypes: ["Road", "ReferenceOnly"], schemaFeatureTypes: ["Road"], partitionKind: "tile"}, {id: "Lane"}]});
+        expect(service.execute("viewer_get_catalog", {kind: "layers", offset: first.nextOffset, limit: 2}))
+            .toMatchObject({complete: true, items: [{id: "POI"}]});
+        expect(service.execute("viewer_get_catalog", {kind: "maps"}))
+            .toMatchObject({complete: true, items: [{id: "map", available: true}]});
+    });
+
+    it("returns selection provenance without narrowing object partition identities", () => {
+        const {service, state, stream} = fixture();
+        state.setSelection([{mapTileKey: "Features:map:layer:object/18446744073709551615", featureId: "Road.1"}]);
+        stream.parseMapPartitionKeySafe.mockReturnValue(["map", "layer", {kind: "object", id: "18446744073709551615"}] as never);
+        expect(read(service, [{channel: "app.selections"}])).toMatchObject({complete: true, values: [{value: [{features: [{
+            featureId: "Road.1", mapId: "map", layerId: "layer", partition: {kind: "object", id: "18446744073709551615"}
+        }]}]}]});
+    });
+
+    it("returns an option write target for the requested view without exposing internal options", () => {
+        const {service, maps} = fixture();
+        const option = new StyleOptionNode("map", "Road", {
+            id: "labels", label: "Labels", type: "Bool", defaultValue: false, description: "Show labels", internal: false
+        }, "style", "s", true);
+        option.value = [false, true];
+        const internal = new StyleOptionNode("map", "Road", {...option.info, id: "private", internal: true}, "style", "s", false);
+        maps.maps.maps.set("map", {id: "map", layers: new Map([["Road", {id: "Road", mapId: "map", children: [option, internal]}]])});
+        const result = viewerActions.viewer_get_catalog.outputSchema.parse(service.execute("viewer_get_catalog", {
+            kind: "options", mapId: "map", layerId: "Road", viewIndex: 1
+        }));
+        expect(result.items).toHaveLength(1);
+        expect(result.items[0]).toMatchObject({id: "labels", value: true, writeTarget: {
+            channel: "view.styleOption", viewIndex: 1, mapId: "map", layerId: "Road", styleId: "style", optionId: "labels"
+        }});
+        expect(viewerActions.viewer_set_app_state.inputSchema.safeParse({
+            target: result.items[0].writeTarget, value: false, viewLayoutRevision: result.viewLayoutRevision
+        }).success).toBe(true);
+    });
+
+    it("discovers hidden and optionless styles by native layer affinity", () => {
+        const {service, maps, styles} = fixture();
+        maps.maps.maps.set("map", {id: "map", layers: new Map([["Road", {id: "Road", mapId: "map", children: []}]])});
+        for (const [id, visible, layerId] of [["optionless", true, "Road"], ["hidden", false, "Road"], ["unrelated", true, "Lane"]] as const) {
+            styles.styles.set(id, {id, visible, imported: true, modified: false, category: "base", options: [],
+                featureLayerStyle: {hasLayerAffinity: (candidate: string) => candidate === layerId}});
+        }
+        const result = viewerActions.viewer_get_catalog.outputSchema.parse(service.execute("viewer_get_catalog", {
+            kind: "styles", mapId: "map", layerId: "Road"
+        }));
+        expect(result.complete).toBe(true);
+        expect(result.items.map(({id, visible}) => ({id, visible}))).toEqual([
+            {id: "optionless", visible: true}, {id: "hidden", visible: false}
+        ]);
+        expect(service.execute("viewer_get_catalog", {kind: "styles", mapId: "map", layerId: "Road", styleId: "hidden"}))
+            .toMatchObject({complete: true, items: [{id: "hidden", visible: false}]});
+        for (const kind of ["options", "presets"] as const) {
+            const empty = viewerActions.viewer_get_catalog.outputSchema.parse(service.execute("viewer_get_catalog", {
+                kind, mapId: "map", layerId: "Road"
+            }));
+            expect(empty.items).toEqual([]);
+            const discovery = empty.relatedCatalogs?.find(entry => entry.arguments.kind === "styles");
+            expect(discovery?.arguments).toEqual({kind: "styles", mapId: "map", layerId: "Road"});
+            expect(discovery?.purpose).toContain("visible:true");
+        }
+        expect(styles.toggleStyle).not.toHaveBeenCalled();
+    });
+
     it("guards focus and view creation/removal using the observed layout revision", () => {
         const {service, state, views} = fixture();
         expect(service.execute("viewer_set_app_state", {target: {channel: "app.focusedView"}, value: 1, viewLayoutRevision: views.viewLayoutRevision})).toMatchObject({changed: true});
@@ -514,6 +627,43 @@ describe("ViewerActionService", () => {
         expect(() => service.execute("viewer_close_inspection", {panelId: 0})).toThrow(ViewerActionFailure);
     });
 
+    it.each([
+        [{attributeIndex: 0, validityIndex: 0}, "Road.1:attribute#0:validity#0"],
+        [{attributeIndex: 2}, "Road.1:attribute#2"],
+        [{relationIndex: 1, validityIndex: 0}, "Road.1:relation#1:validity#0"]
+    ])("formats observed inspection selectors %j without leaking them into the resolved identity", async (selectors, featureId) => {
+        const {service, stream} = fixture();
+        const feature = {mapTileKey: "Features:map:layer:1", featureId: "Road.1", ...selectors};
+        const result = viewerActions.viewer_inspect.outputSchema.parse(await service.execute("viewer_inspect", {features: [feature], newPanel: true}));
+        expect(result.features).toEqual([{mapTileKey: feature.mapTileKey, featureId}]);
+        expect(stream.locateFeature).not.toHaveBeenCalled();
+    });
+
+    it("rejects ambiguous or incomplete inspection selectors before changing selections", async () => {
+        const {service, state, stream} = fixture();
+        const feature = {mapTileKey: "Features:map:layer:1", featureId: "Road.1"};
+        for (const selectors of [{validityIndex: 0}, {attributeIndex: 0, relationIndex: 0},
+            {featureId: "Road.1:attribute#2", attributeIndex: 0}]) {
+            await expect(service.execute("viewer_inspect", {features: [{...feature, ...selectors}], newPanel: true})).rejects.toThrow(ViewerActionFailure);
+            expect(state.selection).toHaveLength(0);
+        }
+        expect(stream.locateFeature).not.toHaveBeenCalled();
+        expect(viewerActions.viewer_inspect.inputSchema.safeParse({features: [{...feature, attributeIndex: -1}]}).success).toBe(false);
+        expect(viewerActions.viewer_inspect.inputSchema.safeParse({features: [{...feature, validityIndex: 0.5}]}).success).toBe(false);
+    });
+
+    it("colors a new inspection group without recoloring an existing overlapping panel", async () => {
+        const {service, state} = fixture();
+        const feature = {mapTileKey: "Features:map:layer:1", featureId: "Road.1"};
+        await service.execute("viewer_inspect", {features: [feature], newPanel: true, color: "#cc3300", lock: true});
+        const original = state.selection[0];
+        const result = await service.execute("viewer_inspect", {features: [feature], newPanel: true, color: "#0033cc"});
+        expect(result).toMatchObject({panelIds: [1], complete: true});
+        expect(state.selection.find(panel => panel.id === original.id)?.color).toBe("#cc3300");
+        expect(state.selection.find(panel => panel.id === 1)?.color).toBe("#0033cc");
+        await expect(service.execute("viewer_inspect", {features: [feature], color: "#ffffff"})).rejects.toThrow(ViewerActionFailure);
+    });
+
     it("rejects ambiguous locations and preserves attribute suffixes after canonical locate", async () => {
         const {service, stream} = fixture();
         const feature = {mapTileKey: "Features:map:layer:1", featureId: "Road.9"};
@@ -521,6 +671,8 @@ describe("ViewerActionService", () => {
         await expect(service.execute("viewer_inspect", {features: [{mapId: "map", featureId: "Road.1"}]})).rejects.toThrow(ViewerActionFailure);
         stream.locateFeature.mockResolvedValue([feature]);
         expect(await service.execute("viewer_inspect", {features: [{mapId: "map", featureId: "Road.1:attribute#2:validity#0"}]}))
+            .toMatchObject({features: [{...feature, featureId: "Road.9:attribute#2:validity#0"}]});
+        expect(await service.execute("viewer_inspect", {features: [{mapId: "map", featureId: "Road.1", attributeIndex: 2, validityIndex: 0}]}))
             .toMatchObject({features: [{...feature, featureId: "Road.9:attribute#2:validity#0"}]});
     });
 
@@ -588,9 +740,42 @@ describe("ViewerActionService", () => {
         const result = {label: "sign", mapId: "m", layerId: "l", featureId: "Road.1", resultIndex: 0, resultKey: "r", mapTileKey: "Features:m:l:1",
             sourceTileKey: "Features:m:l:1", sourceMapId: "m", sourceLayerId: "l", sourceTileId: -2147483648, hoverFeatureId: "Road.1"};
         const session = {id: "s", definition, runId: "run-1", refresh: 2, complete: true, paused: false,
-            searchResults: [result, {...result, resultKey: "r2"}], errors: new Set<string>(), progressDone: 2, progressTotal: 2} as FeatureSearchSession;
+            schemaAnalysis: readySearchAnalysis(definition.query),
+            searchResults: [result, {...result, resultKey: "r2"}], errors: new Set<string>(), progressDone: 2, progressTotal: 2} satisfies Partial<FeatureSearchSession> as FeatureSearchSession;
         searches.getSession.mockReturnValue(session);
-        expect(viewerActions.viewer_get_search.outputSchema.parse(service.execute("viewer_get_search", {searchId: "s"}))).toMatchObject({settings: {scope: "auto"}, status: {resultCount: 2}});
+        expect(viewerActions.viewer_get_search.outputSchema.parse(service.execute("viewer_get_search", {searchId: "s"}))).toMatchObject({responseComplete: true, searchComplete: true, settings: {scope: "auto"}, status: {resultCount: 2}});
+        searches.getSession.mockReturnValue({...session, complete: false} as FeatureSearchSession);
+        expect(viewerActions.viewer_get_search.outputSchema.parse(service.execute("viewer_get_search", {searchId: "s"})))
+            .toMatchObject({responseComplete: true, searchComplete: false, status: {complete: false}});
+        searches.getSession.mockReturnValue({...session,
+            schemaAnalysis: {...session.schemaAnalysis, status: "pending"}});
+        expect(viewerActions.viewer_get_search.outputSchema.parse(service.execute("viewer_get_search", {searchId: "s"})))
+            .toMatchObject({responseComplete: true, searchComplete: false,
+                schemaAnalysis: {status: "pending"}, status: {complete: false}});
+        expect(viewerActions.viewer_get_search_results.outputSchema.parse(service.execute("viewer_get_search_results", {searchId: "s"})))
+            .toMatchObject({complete: false, searchComplete: false, reason: "loading"});
+        expect(viewerActions.viewer_export_search.outputSchema.parse(service.execute("viewer_export_search", {searchId: "s", include: "results"})))
+            .toMatchObject({complete: false, reason: "loading"});
+        state.featureSearchState.next([definition]);
+        expect(read(service, [{channel: "app.searches"}])).toMatchObject({values: [{value: [{runtime: {complete: false}}]}]});
+        searches.getSession.mockReturnValue({...session,
+            schemaAnalysis: {...session.schemaAnalysis, concreteScope: "attribute", normalizedQuery: "$name == 'WARNING_SIGN'",
+                rewriteSuppressed: true, rewriteSuppressionReason: "Too many candidate scopes"}});
+        expect(viewerActions.viewer_get_search.outputSchema.parse(service.execute("viewer_get_search", {searchId: "s"})))
+            .toMatchObject({schemaAnalysis: {concreteScope: "attribute", normalizedQuery: "$name == 'WARNING_SIGN'",
+                rewriteSuppressed: true, rewriteSuppressionReason: "Too many candidate scopes"}});
+        searches.getSession.mockReturnValue({...session,
+            schemaAnalysis: {...session.schemaAnalysis, status: "error", error: "Schema unavailable"}});
+        expect(viewerActions.viewer_get_search.outputSchema.parse(service.execute("viewer_get_search", {searchId: "s"})))
+            .toMatchObject({schemaAnalysis: {status: "error", error: "Schema unavailable"},
+                status: {errors: ["Schema unavailable"]}});
+        expect(read(service, [{channel: "app.searches"}])).toMatchObject({values: [{value: [{runtime: {errorCount: 1}}]}]});
+        searches.getSession.mockReturnValue({...session,
+            schemaAnalysis: {...session.schemaAnalysis, normalizedQuery: "x".repeat(5000)}});
+        expect(viewerActions.viewer_get_search.outputSchema.parse(service.execute("viewer_get_search", {searchId: "s"})))
+            .toMatchObject({responseComplete: false, reason: "text_limit",
+                schemaAnalysis: {normalizedQuery: "x".repeat(4096)}});
+        searches.getSession.mockReturnValue(session);
         const slice = viewerActions.viewer_get_search_results.outputSchema.parse(service.execute("viewer_get_search_results", {searchId: "s", limit: 1}));
         expect(slice).toMatchObject({complete: false, reason: "item_limit", results: [result]});
         expect(() => service.execute("viewer_get_search_results", {searchId: "s", runId: "older"})).toThrow(ViewerActionFailure);
@@ -616,11 +801,47 @@ describe("ViewerActionService", () => {
         expect(state.featureSearches[0].showResultsOnMap).toBe(false);
     });
 
+    it("patches search presentation without replacing omitted settings or automatic layer selection", () => {
+        const {service, searches, state, views} = fixture();
+        const definition = createFeatureSearchStateEntry({id: "patch", query: "true", bookmarked: true});
+        const sibling = createFeatureSearchStateEntry({id: "sibling", query: "false"});
+        const searchResults: FeatureSearchSession["searchResults"] = [];
+        const session = {id: definition.id, definition, runId: "run", refresh: 0, complete: false,
+            schemaAnalysis: readySearchAnalysis(definition.query),
+            paused: false, searchResults, errors: new Set<string>(), progressDone: 0,
+            progressTotal: 1} satisfies Partial<FeatureSearchSession> as FeatureSearchSession;
+        searches.getSession.mockReturnValue(session);
+        state.featureSearchState.next([definition, sibling]);
+        const settings = {autoUpdate: false, renderStrategy: {showHighFiGeometry: true, showLowFiDots: false}};
+        service.execute("viewer_set_search", {searchId: definition.id, settings, viewLayoutRevision: views.viewLayoutRevision});
+        expect(state.featureSearches[0]).toEqual({...definition, autoUpdate: false,
+            renderStrategy: {...definition.renderStrategy, ...settings.renderStrategy}});
+        expect(state.featureSearches[1]).toEqual(sibling);
+        expect(() => service.execute("viewer_set_search", {searchId: definition.id,
+            settings: {renderStrategy: {highFidelityMaxVisibleTiles: 0}}, viewLayoutRevision: views.viewLayoutRevision}))
+            .toThrow(ViewerActionFailure);
+    });
+
+    it("returns the normal share link and identifies local style dependencies", () => {
+        const {service, state, styles} = fixture();
+        styles.styles.set("draft", {id: "draft", source: "name: draft", imported: true, modified: false, visible: true});
+        styles.styles.set("stock", {id: "stock", source: "name: stock", imported: false, modified: false, visible: true});
+        const search = state.addFeatureSearch({query: "typeId == 'Road'", enabled: true, showResultsOnMap: true});
+        state.addFeatureSearch({query: "hidden", enabled: false});
+        const previous = window.location.href;
+        const result = viewerActions.viewer_get_share_link.outputSchema.parse(service.execute("viewer_get_share_link", {}));
+        expect(result.url).toBe(state.shareableUrl());
+        expect(result.localStyleIds).toEqual(["draft"]);
+        expect(result.localSearchIds).toEqual([search.id]);
+        expect(result.complete).toBe(true);
+        expect(window.location.href).toBe(previous);
+    });
+
     it("validates style drafts and delegates browser-local lifecycle operations without server writes", () => {
         const {service, styles} = fixture();
         styles.styles.set("style", {id: "style", source: "name: style", imported: false, modified: true, visible: true});
         expect(service.execute("viewer_get_style", {styleId: "style"})).toMatchObject({source: "name: style", modified: true});
-        expect(service.execute("viewer_validate_style", {source: "name: draft"})).toMatchObject({valid: true, issues: [], complete: true});
+        expect(service.execute("viewer_validate_style", {source: "name: draft"})).toMatchObject({valid: true, runtimeVerified: false, issues: [], complete: true});
         expect(service.execute("viewer_edit_style", {operation: "create", source: "name: new-style", visible: false})).toMatchObject({styleId: "new-style"});
         expect(styles.importStyleYamlSource).toHaveBeenCalledWith("name: new-style", false);
         service.execute("viewer_edit_style", {operation: "update", styleId: "style", source: "name: style"});
@@ -628,7 +849,7 @@ describe("ViewerActionService", () => {
         service.execute("viewer_edit_style", {operation: "reset", styleId: "style"});
         expect(styles.resetModifiedBuiltinStyle).toHaveBeenCalledWith("style");
         service.execute("viewer_edit_style", {operation: "visibility", styleId: "style", visible: false});
-        expect(styles.toggleStyle).toHaveBeenCalledWith("style", false);
+        expect(styles.toggleStyle).toHaveBeenCalledWith("style", false, true);
         expect(() => service.execute("viewer_edit_style", {operation: "delete", styleId: "style"})).toThrow(ViewerActionFailure);
         expect(styles.deleteStyle).not.toHaveBeenCalled();
         styles.styles.get("style").imported = true;
@@ -636,12 +857,88 @@ describe("ViewerActionService", () => {
         expect(styles.deleteStyle).toHaveBeenCalledWith("style", true);
     });
 
+    it("patches exact style fragments atomically while preserving surrounding YAML", () => {
+        const {service, styles} = fixture();
+        const source = "# Keep this comment\nname: style\nrules:\n  - color: red\n    width: 2\n  - color: red\n    width: 4\n";
+        styles.styles.set("style", {id: "style", source, imported: false, modified: false, visible: true});
+        const patch = (edits: Array<{find: string; replace: string}>) => service.execute("viewer_edit_style", {operation: "patch", styleId: "style", edits});
+        expect(patch([{find: "color: red\n    width: 2", replace: "color: blue\n    width: 3"}]))
+            .toMatchObject({status: "applied", styleId: "style", changed: true, editCount: 1});
+        expect(styles.setStyleSource).toHaveBeenCalledWith("style", source.replace("color: red\n    width: 2", "color: blue\n    width: 3"));
+        styles.setStyleSource.mockClear();
+        expect(() => patch([{find: "color: red", replace: "color: green"}])).toThrow(/matches more than once/);
+        expect(() => patch([{find: "width: 2", replace: "width: 3"}, {find: "missing", replace: "value"}])).toThrow(/no exact match/);
+        expect(styles.setStyleSource).not.toHaveBeenCalled();
+        expect(patch([{find: "width: 2", replace: "width: 2"}])).toMatchObject({changed: false});
+        expect(styles.setStyleSource).not.toHaveBeenCalled();
+        expect(() => patch([{find: "", replace: "value"}])).toThrow(ViewerActionFailure);
+        expect(() => service.execute("viewer_edit_style", {operation: "update", styleId: "style", source, edits: [{find: "a", replace: "b"}]}))
+            .toThrow(/other operations do not accept edits/);
+        styles.validateStyleSource.mockReturnValue({valid: false, loadable: false, issues: []});
+        expect(() => patch([{find: "width: 2", replace: "width: broken"}])).toThrow(/no changes were applied/);
+        expect(styles.setStyleSource).not.toHaveBeenCalled();
+    });
+
+    it("returns candidate validation errors for rejected patches without installing a partial edit", () => {
+        const {service, styles} = fixture();
+        const source = "name: style\nrules:\n  - width: 2\n";
+        styles.styles.set("style", {id: "style", source, imported: false, modified: false, visible: true});
+        styles.validateStyleSource.mockReturnValue({valid: false, loadable: false, issues: [
+            {id: "warning", at: 0, impact: "property-fallback", source: {sourceKind: "editor"}, severity: "warning", message: "Earlier warning", phase: "yaml"},
+            {id: "width", at: 0, impact: "stylesheet-failed", source: {sourceKind: "editor"}, severity: "error", message: "Expected numeric width", phase: "schema", rulePath: "rules[0]", property: "width", location: {line: 3, column: 5}}
+        ]});
+        let failure: ViewerActionFailure | undefined;
+        try {
+            service.execute("viewer_edit_style", {operation: "patch", styleId: "style", edits: [{find: "width: 2", replace: "width: broken"}]});
+        } catch (error) { if (error instanceof ViewerActionFailure) failure = error; else throw error; }
+        expect(failure?.detail).toMatchObject({code: "invalid_arguments", reason: "style_validation_failed", outcome: "not_applied"});
+        expect(failure?.message).toContain("Expected numeric width");
+        expect(failure?.message).toContain('"property":"width"');
+        expect(failure?.message).toContain('"line":3');
+        expect(failure?.message).not.toContain("Earlier warning");
+        expect(styles.setStyleSource).not.toHaveBeenCalled();
+        expect(styles.styles.get("style").source).toBe(source);
+    });
+
+    it("bounds style rejection details within the relay error message budget", () => {
+        const {service, styles} = fixture();
+        styles.validateStyleSource.mockReturnValue({valid: false, loadable: false, issues: Array.from({length: 8}, () =>
+            ({id: "long", at: 0, impact: "stylesheet-failed", source: {sourceKind: "editor"}, severity: "error", message: "💥".repeat(5000), phase: "schema", rulePath: "rules[0]"}))});
+        let failure: ViewerActionFailure | undefined;
+        try { service.execute("viewer_edit_style", {operation: "create", source: "name: invalid"}); }
+        catch (error) { if (error instanceof ViewerActionFailure) failure = error; else throw error; }
+        expect(failure?.detail.reason).toBe("style_validation_failed");
+        expect(Array.from(failure!.message).length).toBeLessThanOrEqual(4096);
+        expect(styles.importStyleYamlSource).not.toHaveBeenCalled();
+    });
+
+    it("preserves the failing style expression and property in bounded diagnostics", () => {
+        const {service, styleReports} = fixture();
+        styleReports.reports$.next([{
+            id: "projection-test", at: 0, severity: "warning", phase: "runtime",
+            impact: "property-fallback", source: {styleName: "Lane labels", sourceKind: "editor"},
+            message: "Style expression returned multiple values; expected at most one.",
+            property: "projection", expression: "id", rulePath: "rules[0]",
+            runtimeContext: {mapName: "Map", layerName: "Road", featureId: "Road.1"}
+        }]);
+        const result = viewerActions.viewer_get_diagnostics.outputSchema.parse(
+            service.execute("viewer_get_diagnostics", {sections: ["errors"]}));
+        expect(result.errors).toEqual([expect.objectContaining({
+            source: "Lane labels", property: "projection", expression: "id", rulePath: "rules[0]",
+            severity: "warning", phase: "runtime", mapId: "Map", layerId: "Road", featureId: "Road.1"
+        })]);
+    });
+
     it("samples diagnostic counters/caches without scene traversal or treating missing GPU data as zero", () => {
         const {service, render, viewDiagnostics} = fixture();
         const result = viewerActions.viewer_get_diagnostics.outputSchema.parse(service.execute("viewer_get_diagnostics", {viewIndex: 0}));
         expect(result).toMatchObject({complete: true, errors: []});
+        expect(result.executionContext).toBe("browser");
+        expect(result.interpretation).toContain("Backend queues, CPU and memory were not sampled");
+        expect(result.metrics).toContainEqual(expect.objectContaining({name: "latestWasmMs", value: 12}));
+        expect(result.metrics.some(metric => metric.name === "latestNativeMs")).toBe(false);
         expect(result.metrics).toContainEqual(expect.objectContaining({name: "queued", value: 3}));
-        expect(result.metrics).toContainEqual(expect.objectContaining({name: "frameTimeP90Ms", value: null, scope: "view", viewIndex: 0}));
+        expect(result.metrics).toContainEqual(expect.objectContaining({name: "frameIntervalP90Ms", value: null, scope: "view", viewIndex: 0}));
         expect(result.unavailable.join(" ")).toContain("Scoped GPU allocation is unavailable");
         expect(render.debugSnapshot).not.toHaveBeenCalled();
         expect(viewDiagnostics.snapshot).not.toHaveBeenCalled();

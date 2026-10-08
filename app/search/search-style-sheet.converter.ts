@@ -10,7 +10,7 @@ import {
 } from "../shared/feature-search-state";
 import {searchStyleColorProperties} from "./search-style-color.util";
 
-const SUPPORTED_SEARCH_STYLE_OPERATORS = new Set(["=", "!=", "<", "<=", ">", ">=", "contains"]);
+const SUPPORTED_SEARCH_STYLE_OPERATORS = new Set(["=", "==", "!=", "<", "<=", ">", ">=", "contains"]);
 const ALL_GEOMETRY_TYPES = ["point", "line", "polygon", "mesh", "aabb", "gltf"];
 const SEARCH_STYLE_VISIBILITY_OPTION_ID = "showSearchStyle";
 const SEARCH_STYLE_VISIBILITY_FILTER = `${SEARCH_STYLE_VISIBILITY_OPTION_ID} == true`;
@@ -977,6 +977,7 @@ function filterExpression(filter: FeatureSearchRuleFilter): string {
     const literal = simfilLiteral(filter.value);
     switch (filter.op) {
         case "=":
+        case "==":
             return `${field} == ${literal}`;
         case "!=":
         case "<":

@@ -273,12 +273,15 @@ Point erdblick::boundingRadiusEndPoint(const SelfContainedGeometry& g)
         return center;
     }
 
-    float maxDistanceSquared = 0.0f;
+    // WGS84 x/y are degrees while z is metres. Comparing them directly can select
+    // a nearby height outlier and severely underestimate the feature's map extent.
+    auto const cartesianCenter = wgsToCartesian<glm::dvec3>(center);
+    double maxDistanceSquared = 0.0;
     Point farPoint = center;
     for (auto const& p : g.points_)
     {
-        auto d = p - center;
-        float distanceSquared = d.x * d.x + d.y * d.y + d.z * d.z;
+        auto const d = wgsToCartesian<glm::dvec3>(p) - cartesianCenter;
+        double const distanceSquared = glm::dot(d, d);
         if (distanceSquared > maxDistanceSquared) {
             farPoint = p;
             maxDistanceSquared = distanceSquared;

@@ -112,7 +112,9 @@ export class ViewerActionService implements OnDestroy {
         }));
         this.subscriptions.add(this.stream.actionControlReceived.subscribe(({payload, receivedAt}) => this.receive(payload, receivedAt)));
         void this.zone.runOutsideAngular(async () => {
-            const timer = setTimeout(() => this.infoAbort.abort(), 5000);
+            // Catalog/schema startup may occupy the main thread while this small response
+            // is already in flight. Use the action transport's discovery budget, not 5 seconds.
+            const timer = setTimeout(() => this.infoAbort.abort(), 30000);
             try {
                 const response = await fetch(new URL("mcp/info", document.baseURI), {
                     credentials: "same-origin", signal: this.infoAbort.signal
@@ -319,6 +321,7 @@ export class ViewerActionService implements OnDestroy {
             case "viewer_set_search": return this.zone.run(() => this.setSearch(this.arguments(viewerActions[name].inputSchema, argumentsValue)));
             case "viewer_get_search_results": return this.searchResults(this.arguments(viewerActions[name].inputSchema, argumentsValue));
             case "viewer_export_search": return this.exportSearch(this.arguments(viewerActions[name].inputSchema, argumentsValue));
+            case "viewer_get_share_link": this.arguments(viewerActions[name].inputSchema, argumentsValue); return this.getShareLink();
             case "viewer_get_style": return this.getStyle(this.arguments(viewerActions[name].inputSchema, argumentsValue));
             case "viewer_validate_style": return this.validateStyle(this.arguments(viewerActions[name].inputSchema, argumentsValue));
             case "viewer_edit_style": return this.zone.run(() => this.editStyle(this.arguments(viewerActions[name].inputSchema, argumentsValue)));
@@ -468,19 +471,31 @@ export class ViewerActionService implements OnDestroy {
         const layer = input.layerId ? this.layer(input.mapId!, input.layerId) : undefined;
         type Item = ViewerActionOutput<"viewer_get_catalog">["items"][number];
         const candidates = function* (this: ViewerActionService): Generator<Item> {
-            if (input.kind === "backgrounds") {
+            if (input.kind === "maps") {
+                for (const candidate of map ? [map] : this.maps.maps.maps.values()) yield {
+                    id: candidate.id, name: candidate.id, mapId: candidate.id, kind: "map", available: this.maps.isMapReady(candidate.id)
+                };
+            } else if (input.kind === "backgrounds") {
                 for (const background of this.config.getBackgroundLayers()) yield {id: background.id, name: background.name, kind: background.type};
             } else if (input.kind === "layers") {
                 for (const candidate of map ? [map] : this.maps.maps.maps.values()) {
-                    for (const child of layer ? [layer] : candidate.layers.values()) yield {
-                        id: child.id, name: child.id, mapId: candidate.id, layerId: child.id, kind: child.type,
-                        visible: child.viewConfig[vi]?.visible ?? false, available: this.maps.isMapReady(candidate.id)
-                    };
+                    for (const child of layer ? [layer] : candidate.layers.values()) {
+                        if (input.layerType !== "all" && child.type !== input.layerType) continue;
+                        yield {
+                            id: child.id, name: child.id, mapId: candidate.id, layerId: child.id, kind: child.type,
+                            visible: child.viewConfig[vi]?.visible ?? false, available: this.maps.isMapReady(candidate.id),
+                            zoomLevels: child.info.zoomLevels, featureTypes: child.info.featureTypes.map(type => type.name),
+                            schemaFeatureTypes: child.info.schemaFeatureTypes,
+                            partitionKind: child.info.partitionKind ?? "tile"
+                        };
+                    }
                 }
             } else if (input.kind === "styles") {
-                const applicable = layer ? new Set(layerStyleOptions(layer).map(option => option.styleId)) : null;
                 for (const style of this.styles.styles.values()) {
-                    if ((input.styleId && style.id !== input.styleId) || (applicable && !applicable.has(style.id))) continue;
+                    // Option nodes only represent visible styles with public options. Affinity
+                    // also finds hidden and optionless styles, which remain editable through MCP.
+                    if ((input.styleId && style.id !== input.styleId)
+                        || (layer && !style.featureLayerStyle?.hasLayerAffinity(layer.id))) continue;
                     yield {id: style.id, name: style.id, kind: style.category, visible: style.visible, imported: style.imported, modified: style.modified};
                 }
             } else if (input.kind === "options") {
@@ -488,7 +503,9 @@ export class ViewerActionService implements OnDestroy {
                 for (const option of layerStyleOptions(layer)) {
                     if (option.info.internal || (input.styleId && option.styleId !== input.styleId)) continue;
                     yield {id: option.id, name: option.info.label, kind: option.type, styleId: option.styleId, mapId: layer.mapId, layerId: layer.id,
-                        value: option.value[vi], defaultValue: option.info.defaultValue, description: unicodePrefix(option.info.description, 4096)};
+                        value: option.value[vi], defaultValue: option.info.defaultValue, description: unicodePrefix(option.info.description, 4096),
+                        writeTarget: {channel: "view.styleOption", viewIndex: vi, mapId: layer.mapId, layerId: layer.id,
+                            styleId: option.styleId, optionId: option.id}};
                 }
             } else {
                 if (!map) this.reject("Preset discovery requires mapId", "invalid_arguments");
@@ -500,7 +517,37 @@ export class ViewerActionService implements OnDestroy {
                     available: !this.maps.isSyncOptionsForViewEnabled(vi) || !this.maps.maps.mapPresetHasSyncConflict(map, preset)};
             }
         }.bind(this);
-        return {observedAt: new Date().toISOString(), ...this.collection(candidates(), input.limit)};
+        const offset = input.offset ?? 0;
+        const page = function* () {
+            let skipped = 0;
+            for (const item of candidates()) {
+                if (skipped++ < offset) continue;
+                yield item;
+            }
+        };
+        const result = this.collection(page(), input.limit);
+        const relatedCatalogs: ViewerActionOutput<"viewer_get_catalog">["relatedCatalogs"] = [];
+        if (input.kind === "layers") {
+            const mapScope = input.mapId ? {mapId: input.mapId} : {};
+            if (input.layerType === "Features") relatedCatalogs.push({
+                purpose: "Raw source tables and metadata are separate from renderable feature layers.",
+                arguments: {kind: "layers", layerType: "SourceData", ...mapScope}
+            });
+            relatedCatalogs.push({purpose: "Find editable styles, including hidden and local styles.",
+                arguments: {kind: "styles", ...mapScope, ...(input.layerId ? {layerId: input.layerId} : {})}});
+            if (layer) relatedCatalogs.push({purpose: "Find this layer's style options and their exact write targets.",
+                arguments: {kind: "options", mapId: layer.mapId, layerId: layer.id}});
+        }
+        if ((input.kind === "options" || input.kind === "presets") && layer) relatedCatalogs.push({
+            purpose: "Options and layer presets come from visible styles. If this catalog is empty, inspect matching styles here and enable the intended hidden style with viewer_edit_style operation visibility, visible:true, then retry. For custom labels/colors, read and patch a matching style or use search styling; a missing toggle is not a capability limit.",
+            arguments: {kind: "styles", mapId: layer.mapId, layerId: layer.id}
+        });
+        if (input.kind === "options" && layer) relatedCatalogs.push({
+            purpose: "For a named look, apply its complete preset through view.layerPreset; a same-named option may configure only one part of that look.",
+            arguments: {kind: "presets", mapId: layer.mapId, layerId: layer.id}
+        });
+        return {observedAt: new Date().toISOString(), viewLayoutRevision: this.views.viewLayoutRevision, kind: input.kind, relatedCatalogs, ...result,
+            ...(!result.complete && result.items.length ? {nextOffset: offset + result.items.length} : {})};
     }
 
     /** Creates/removes comparison views using the same retained-camera/layout path as the UI. */
@@ -576,13 +623,27 @@ export class ViewerActionService implements OnDestroy {
         return this.applied();
     }
 
-    /** Reads persisted settings and bounded errors, not result values or schema candidates. */
+    /** Reads persisted settings, resolved query semantics and bounded errors without schema trees. */
     private getSearch(input: ViewerActionInput<"viewer_get_search">): ViewerActionOutput<"viewer_get_search"> {
         const session = this.search(input.searchId);
         const {id: _id, query: _query, paused: _paused, selectedMapLayersManual: _manual, ...settings} = featureSearchDefinitionExport(session.definition);
         let textOmitted = false;
+        const analysis = session.schemaAnalysis;
+        const boundedText = (value: string, limit: number) => {
+            const bounded = unicodePrefix(value, limit);
+            textOmitted ||= bounded !== value;
+            return bounded;
+        };
+        const schemaAnalysis = {status: analysis.status, concreteScope: analysis.concreteScope,
+            normalizedQuery: boundedText(analysis.normalizedQuery, 4096),
+            rewriteSuppressed: analysis.rewriteSuppressed,
+            rewriteSuppressionReason: boundedText(analysis.rewriteSuppressionReason, 1024),
+            ...(analysis.error ? {error: boundedText(analysis.error, 4096)} : {})};
+        const reportedErrors = new Set(session.errors);
+        if (analysis.error) reportedErrors.add(analysis.error);
+        if (analysis.status === "error" && !analysis.error) reportedErrors.add("Search schema analysis failed.");
         const candidates = function* () {
-            for (const error of session.errors) {
+            for (const error of reportedErrors) {
                 const message = unicodePrefix(error, 4096);
                 textOmitted ||= message !== error;
                 yield message;
@@ -593,20 +654,27 @@ export class ViewerActionService implements OnDestroy {
         textOmitted ||= query !== session.definition.query;
         const parsedSettings = searchSettingsSchema.safeParse(settings);
         if (!parsedSettings.success) this.reject("Search settings exceed the public contract; narrow them in the UI first");
-        return {observedAt: new Date().toISOString(), settings: parsedSettings.data,
-            complete: errors.complete && !textOmitted, reason: errors.reason ?? (textOmitted ? "text_limit" : undefined), status: {
+        // No submitted backend requests during pending analysis is not an empty completed search.
+        const searchComplete = session.complete && analysis.status !== "pending";
+        return {observedAt: new Date().toISOString(), settings: parsedSettings.data, schemaAnalysis,
+            responseComplete: errors.complete && !textOmitted, searchComplete,
+            reason: errors.reason ?? (textOmitted ? "text_limit" : undefined), status: {
                 searchId: session.id, query, runId: session.runId, refresh: session.refresh,
-                complete: session.complete, paused: session.paused, resultCount: session.searchResults.length,
+                complete: searchComplete, paused: session.paused, resultCount: session.searchResults.length,
                 progressDone: session.progressDone, progressTotal: session.progressTotal, errors: errors.items
             }};
     }
 
-    /** Publishes one fully validated search settings object without rewriting sibling searches. */
+    /** Merges a validated patch into one search, retaining unrelated fields and sibling searches. */
     private setSearch(input: ViewerActionInput<"viewer_set_search">): ViewerActionOutput<"viewer_set_search"> {
         const session = this.search(input.searchId);
-        this.checkSearchTargets(input.settings.selectedMapLayers, input.settings.selectedViewIndices, input.viewLayoutRevision);
-        const changed = !deepEquals(this.getSearch({searchId: input.searchId}).settings, input.settings);
-        if (changed) this.state.patchFeatureSearch(session.id, {...input.settings, selectedMapLayersManual: true});
+        const current = this.getSearch({searchId: input.searchId}).settings;
+        const settings = searchSettingsSchema.parse({...current, ...input.settings,
+            renderStrategy: {...current.renderStrategy, ...input.settings.renderStrategy}});
+        this.checkSearchTargets(settings.selectedMapLayers, settings.selectedViewIndices, input.viewLayoutRevision);
+        const changed = !deepEquals(current, settings);
+        if (changed) this.state.patchFeatureSearch(session.id, {...settings,
+            ...(input.settings.selectedMapLayers === undefined ? {} : {selectedMapLayersManual: true})});
         return this.applied(changed);
     }
 
@@ -627,9 +695,10 @@ export class ViewerActionService implements OnDestroy {
             }
         };
         const result = this.collection(source(), input.limit);
+        const searchComplete = session.complete && session.schemaAnalysis.status !== "pending";
         return {observedAt: new Date().toISOString(), searchId: session.id, runId: session.runId, refresh: session.refresh,
-            offset, total: session.searchResults.length, searchComplete: session.complete, results: result.items,
-            complete: result.complete && session.complete && !textOmitted, reason: result.reason ?? (textOmitted ? "text_limit" : session.complete ? undefined : "loading")};
+            offset, total: session.searchResults.length, searchComplete, results: result.items,
+            complete: result.complete && searchComplete && !textOmitted, reason: result.reason ?? (textOmitted ? "text_limit" : searchComplete ? undefined : "loading")};
     }
 
     /** Exports only the selected bounded slice, avoiding full result-tree construction and clipboard side effects. */
@@ -647,10 +716,31 @@ export class ViewerActionService implements OnDestroy {
             complete: input.include === "configuration" || results.complete, reason: input.include === "configuration" ? undefined : results.reason};
     }
 
+    /** Exports the normal URL projection without browser navigation or credentials. */
+    private getShareLink(): ViewerActionOutput<"viewer_get_share_link"> {
+        const url = this.state.shareableUrl();
+        if (this.encoder.encode(url).length > 48000) this.reject("The share link exceeds the response budget; reduce URL-backed state first");
+        const hostname = new URL(url).hostname;
+        const styles = this.collection((function* (this: ViewerActionService) {
+            for (const style of this.styles.styles.values()) {
+                if (style.visible && (style.imported || style.modified)) yield unicodePrefix(style.id, 4096);
+            }
+        }).call(this), 100, 64000);
+        const searches = this.collection((function* (this: ViewerActionService) {
+            for (const search of this.state.featureSearches) {
+                if (search.enabled && search.showResultsOnMap) yield unicodePrefix(search.id, 4096);
+            }
+        }).call(this), 100, 64000);
+        return {observedAt: new Date().toISOString(), url,
+            localOnly: hostname === "localhost" || hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(hostname),
+            localStyleIds: styles.items, localSearchIds: searches.items,
+            complete: styles.complete && searches.complete, reason: styles.reason ?? searches.reason};
+    }
+
     /** Returns bounded source text from the style owner, not server filesystem metadata. */
     private getStyle(input: ViewerActionInput<"viewer_get_style">): ViewerActionOutput<"viewer_get_style"> {
         const style = this.styles.styles.get(input.styleId);
-        if (!style) this.reject("The style is unavailable");
+        if (!style) this.reject('The style ID is unavailable. Use viewer_get_catalog with kind:"styles" and copy an item id exactly; layer IDs and display names are not style IDs.');
         if (this.encoder.encode(style.source).length > 180000) this.reject("Style source exceeds the response budget");
         return {styleId: style.id, source: style.source, imported: style.imported, modified: style.modified, visible: style.visible};
     }
@@ -663,18 +753,38 @@ export class ViewerActionService implements OnDestroy {
                 rulePath: issue.rulePath, property: issue.property, line: issue.location?.line, column: issue.location?.column};
         };
         const issues = this.collection(candidates(), 100, 64000);
-        return {valid: report.valid, loadable: report.loadable, issues: issues.items, complete: issues.complete, reason: issues.reason};
+        return {valid: report.valid, loadable: report.loadable, runtimeVerified: false,
+            guidance: "Options belong to this stylesheet only: declare copied option filters here or remove them. Verify data fields with mapget_extract_features. After applying, check viewer_get_diagnostics sections:[errors] and the rendered view; valid syntax does not prove visible labels or geometry.",
+            issues: issues.items, complete: issues.complete, reason: issues.reason};
+    }
+
+    /** Rejects an invalid candidate with repair details before any style installation. */
+    private requireValidStyle(source: string): void {
+        const report = this.validateStyle({source});
+        if (report.valid) return;
+        const errors = report.issues.filter(issue => issue.severity === "error").slice(0, 4);
+        const details = errors.length ? ` Candidate errors: ${unicodePrefix(JSON.stringify(errors), 3500)}` : " Use viewer_validate_style on the candidate for details.";
+        this.reject(`Style validation failed; no changes were applied.${details}`, "invalid_arguments", "style_validation_failed");
     }
 
     /** Edits normal browser-local styles only; no server write capability is implied by viewer-control. */
     private editStyle(input: ViewerActionInput<"viewer_edit_style">): ViewerActionOutput<"viewer_edit_style"> {
         const writesSource = input.operation === "create" || input.operation === "update";
         if (writesSource !== (input.source !== undefined)) this.reject("Create/update require source; other operations do not accept source", "invalid_arguments");
+        if ((input.operation === "patch") !== (input.edits !== undefined)) this.reject("Patch requires edits; other operations do not accept edits", "invalid_arguments");
         if (input.visible !== undefined && input.operation !== "create" && input.operation !== "visibility") this.reject("Only create/visibility accepts visible", "invalid_arguments");
         if (input.operation === "create" && input.styleId !== undefined) this.reject("New style identity comes from its YAML", "invalid_arguments");
         const style = input.styleId ? this.styles.styles.get(input.styleId) : undefined;
-        if (input.operation !== "create" && !style) this.reject("The style is unavailable");
-        if (writesSource && !this.validateStyle({source: input.source!}).valid) this.reject("Style validation failed; use viewer_validate_style for issues", "invalid_arguments");
+        if (input.operation !== "create" && !style) this.reject('The style ID is unavailable. Use viewer_get_catalog with kind:"styles" and copy an item id exactly; layer IDs and display names are not style IDs.');
+        if (input.operation === "patch") {
+            const source = this.patchStyleSource(style!.source, input.edits!);
+            const changed = source !== style!.source;
+            this.requireValidStyle(source);
+            const styleId = changed ? this.styles.setStyleSource(style!.id, source) : style!.id;
+            if (!styleId) this.reject("The style operation failed");
+            return {status: "applied", styleId, changed, editCount: input.edits!.length};
+        }
+        if (writesSource) this.requireValidStyle(input.source!);
         let styleId = style?.id;
         switch (input.operation) {
             case "create": styleId = this.styles.importStyleYamlSource(input.source!, input.visible); break;
@@ -689,11 +799,23 @@ export class ViewerActionService implements OnDestroy {
                 break;
             case "visibility":
                 if (input.visible === undefined) this.reject("Visibility requires a boolean", "invalid_arguments");
-                this.styles.toggleStyle(style!.id, input.visible);
+                this.styles.toggleStyle(style!.id, input.visible, true);
                 break;
         }
         if (!styleId) this.reject("The style operation failed");
         return {status: "applied", styleId};
+    }
+
+    /** Builds a bounded candidate without mutating the style; ambiguous or stale matches fail atomically. */
+    private patchStyleSource(source: string, edits: NonNullable<ViewerActionInput<"viewer_edit_style">["edits"]>): string {
+        for (const [index, edit] of edits.entries()) {
+            const start = source.indexOf(edit.find);
+            if (start < 0) this.reject(`Edit ${index + 1} has no exact match. Read viewer_get_style again and copy the target text. No changes applied.`, "invalid_arguments");
+            if (source.indexOf(edit.find, start + 1) >= 0) this.reject(`Edit ${index + 1} matches more than once. Include surrounding rule text to identify one occurrence. No changes applied.`, "invalid_arguments");
+            source = source.slice(0, start) + edit.replace + source.slice(start + edit.find.length);
+            if (this.encoder.encode(source).length > 180000) this.reject("Patched style exceeds the source budget; no changes applied", "invalid_arguments");
+        }
+        return source;
     }
 
     /** Resolves only explicitly requested identities; never guesses between ambiguous backend matches. */
@@ -701,14 +823,25 @@ export class ViewerActionService implements OnDestroy {
         const result: TileFeatureId[] = [];
         for (const feature of features) {
             signal?.throwIfAborted();
+            let featureId = feature.featureId;
+            if (feature.attributeIndex !== undefined || feature.relationIndex !== undefined || feature.validityIndex !== undefined) {
+                if (feature.attributeIndex !== undefined && feature.relationIndex !== undefined) this.reject("attributeIndex and relationIndex are mutually exclusive", "invalid_arguments");
+                if (feature.attributeIndex === undefined && feature.relationIndex === undefined) this.reject("validityIndex requires attributeIndex or relationIndex", "invalid_arguments");
+                const target = parseFeatureInspectionTarget(featureId);
+                if (target.scope !== "feature") this.reject("Use either a suffixed featureId or numeric inspection selectors, not both", "invalid_arguments");
+                featureId = formatFeatureInspectionTarget(feature.attributeIndex !== undefined
+                    ? {scope: "attribute", baseFeatureId: target.baseFeatureId, attributeIndex: feature.attributeIndex, validityIndex: feature.validityIndex}
+                    : {scope: "relation", baseFeatureId: target.baseFeatureId, relationIndex: feature.relationIndex!, validityIndex: feature.validityIndex});
+            }
             if ("mapTileKey" in feature) {
                 if (!this.stream.parseMapPartitionKeySafe(feature.mapTileKey) || !feature.mapTileKey.startsWith("Features:")) this.reject("Invalid feature partition key", "invalid_arguments");
-                result.push(feature);
+                result.push({mapTileKey: feature.mapTileKey, featureId});
             } else {
-                const matches = await this.stream.locateFeature(feature.mapId, feature.featureId, feature.layerId, signal);
+                const matches = await this.stream.locateFeature(feature.mapId, featureId, feature.layerId, signal);
                 signal?.throwIfAborted();
-                if (matches.length !== 1) this.reject(matches.length ? "Feature identity is ambiguous; supply its partition" : "Feature was not found");
-                const target = parseFeatureInspectionTarget(feature.featureId);
+                if (matches.length !== 1) this.reject(matches.length ? "Feature identity is ambiguous; supply its partition" :
+                    "Feature was not found. For a relation target, discover its owning layer using mapget_list_sources/schemaFeatureTypes; featureTypes may be reference-only. Do not bypass this failure by copying the source feature's mapTileKey into a new inspection.");
+                const target = parseFeatureInspectionTarget(featureId);
                 result.push({...matches[0], featureId: formatFeatureInspectionTarget({...target, baseFeatureId: matches[0].featureId})});
             }
         }
@@ -717,6 +850,7 @@ export class ViewerActionService implements OnDestroy {
 
     /** Publishes inspection shells after locate only; the existing selection owner performs asynchronous feature loading. */
     private async inspect(input: ViewerActionInput<"viewer_inspect">, signal?: AbortSignal): Promise<ViewerActionOutput<"viewer_inspect">> {
+        if (input.color !== undefined && !input.newPanel) this.reject("color requires newPanel:true; use inspection.panel state to recolor an existing panel", "invalid_arguments");
         if (input.panelId !== undefined && input.newPanel) this.reject("panelId and newPanel are mutually exclusive", "invalid_arguments");
         if (input.panelId !== undefined) {
             const panel = this.state.selection.find(panel => panel.id === input.panelId);
@@ -733,12 +867,14 @@ export class ViewerActionService implements OnDestroy {
             if (changed) this.reject("Inspections changed while locating the feature", "cancelled");
         } finally { guard.unsubscribe(); }
         return this.zone.run(() => {
+            let newPanelId: number | undefined;
             if (input.panelId !== undefined || input.newPanel) {
-                this.state.setSelection(features, input.panelId, input.newPanel ?? false);
+                newPanelId = this.state.setSelection(features, input.panelId, input.newPanel ?? false);
             } else this.inspections.inspectFeatureIds(features, input.lock ?? false);
-            const panels = this.state.selection.filter(panel => !panel.sourceData && panel.features.some(candidate =>
+            const panels = this.state.selection.filter(panel => !panel.sourceData && (!input.newPanel || panel.id === newPanelId) && panel.features.some(candidate =>
                 features.some(feature => candidate.mapTileKey === feature.mapTileKey && candidate.featureId === feature.featureId)));
             if (input.lock) panels.forEach(panel => this.state.setInspectionPanelLockedState(panel.id, true));
+            if (input.color !== undefined) panels.forEach(panel => this.state.setInspectionPanelColor(panel.id, input.color!));
             const represented = features.filter(feature => panels.some(panel => panel.features.some(candidate =>
                 candidate.mapTileKey === feature.mapTileKey && candidate.featureId === feature.featureId)));
             return {status: "applied", panelIds: panels.map(panel => panel.id), features: represented,
@@ -817,7 +953,10 @@ export class ViewerActionService implements OnDestroy {
             parseQueue: this.stream.getPendingFrameQueueSize(), downstreamBytesPerSecond: this.stream.getDownstreamBytesPerSecond(),
             ...this.stream.getTileStreamTransportCompressionStats()
         });
-        if (sections.includes("workers")) add("workers", this.render.queueSummary());
+        if (sections.includes("workers")) {
+            const {latestNativeMs, ...browserWorkers} = this.render.queueSummary();
+            add("workers", {...browserWorkers, latestWasmMs: latestNativeMs});
+        }
         if (sections.includes("loading")) {
             if (input.viewIndex !== undefined || input.mapId) unavailable.push("Scoped loading counters are unavailable without a tile scan; tab-wide cached counters are returned.");
             const snapshot = this.diagnostics.snapshot$.value;
@@ -826,7 +965,7 @@ export class ViewerActionService implements OnDestroy {
                 sampleAgeMs: Math.max(0, Date.now() - snapshot.at)}, true);
         }
         if (sections.includes("gpu")) {
-            metrics.push({section: "gpu", name: "frameTimeP90Ms", value: this.render.currentFrameTimeMs(input.viewIndex) || null,
+            metrics.push({section: "gpu", name: "frameIntervalP90Ms", value: this.render.currentFrameTimeMs(input.viewIndex) || null,
                 scope: input.viewIndex === undefined ? "tab" : "view", ...(input.viewIndex === undefined ? {} : {viewIndex: input.viewIndex})});
             if (input.viewIndex !== undefined || input.mapId) unavailable.push("Scoped GPU allocation is unavailable; no scene readback or scan was performed.");
             else {
@@ -844,7 +983,16 @@ export class ViewerActionService implements OnDestroy {
             for (const issue of this.styleReports.reports$.value) {
                 if (input.mapId && issue.runtimeContext?.mapName !== input.mapId) continue;
                 if (input.layerId && issue.runtimeContext?.layerName !== input.layerId) continue;
-                if (issue.severity !== "info") yield {source: issue.source.styleName ?? "style", message: unicodePrefix(issue.message, 4096)};
+                if (issue.severity !== "info") yield {
+                    source: unicodePrefix(issue.source.styleName ?? "style", 4096),
+                    message: unicodePrefix(issue.message, 4096), severity: issue.severity, phase: issue.phase,
+                    property: issue.property === undefined ? undefined : unicodePrefix(issue.property, 4096),
+                    expression: issue.expression === undefined ? undefined : unicodePrefix(issue.expression, 4096),
+                    rulePath: issue.rulePath === undefined ? undefined : unicodePrefix(issue.rulePath, 4096),
+                    mapId: issue.runtimeContext?.mapName === undefined ? undefined : unicodePrefix(issue.runtimeContext.mapName, 4096),
+                    layerId: issue.runtimeContext?.layerName === undefined ? undefined : unicodePrefix(issue.runtimeContext.layerName, 4096),
+                    featureId: issue.runtimeContext?.featureId === undefined ? undefined : unicodePrefix(issue.runtimeContext.featureId, 4096)
+                };
             }
             for (const session of this.searches.getSessions()) {
                 if (input.viewIndex !== undefined && !session.definition.selectedViewIndices.includes(input.viewIndex)) continue;
@@ -854,7 +1002,11 @@ export class ViewerActionService implements OnDestroy {
         }.bind(this);
         const errors = this.collection(sections.includes("errors") ? errorItems() : [], input.limit, 64000);
         if (sections.includes("errors") && input.viewIndex !== undefined) unavailable.push("Style errors have no per-view attribution; map/layer-filtered style issues and view-filtered search errors are returned.");
-        return {observedAt: new Date().toISOString(), metrics, errors: errors.items, unavailable, complete: errors.complete, reason: errors.reason};
+        return {observedAt: new Date().toISOString(), executionContext: "browser",
+            interpretation: "All metrics describe this browser tab. Workers execute browser WASM rendering, not native backend jobs. " +
+                "Frame intervals measure observed rendering cadence, not GPU execution time, and can include idle periods. " +
+                "This snapshot alone cannot identify a panning bottleneck. Backend queues, CPU and memory were not sampled.",
+            metrics, errors: errors.items, unavailable, complete: errors.complete, reason: errors.reason};
     }
 
     /** Rejects malformed/unexposed input without leaking arguments into error messages. */
@@ -958,10 +1110,16 @@ export class ViewerActionService implements OnDestroy {
                 const selections = function* (this: ViewerActionService) {
                     for (const panel of panels) {
                         if (target.panelId !== undefined && panel.id !== target.panelId) continue;
+                        const features = function* (this: ViewerActionService) {
+                            for (const feature of panel.features) {
+                                const identity = this.stream.parseMapPartitionKeySafe(feature.mapTileKey);
+                                yield identity ? {...feature, mapId: identity[0], layerId: identity[1], partition: identity[2]} : feature;
+                            }
+                        }.bind(this);
                         yield {
                             panelId: panel.id, locked: panel.locked, undocked: panel.undocked,
                             loading: panel.sourceData ? null : (runtime.has(panel.id) ? !!runtime.get(panel.id)!.loading : true),
-                            features: this.boundedItems(panel.features, target, omissions, Math.min(budget, 32 * 1024)),
+                            features: this.boundedItems(features(), target, omissions, Math.min(budget, 32 * 1024)),
                             ...(panel.sourceData ? {sourceData: {
                                 mapTileKey: panel.sourceData.mapTileKey,
                                 ...(panel.sourceData.address !== undefined ? {address: panel.sourceData.address.toString()} : {})
@@ -983,12 +1141,13 @@ export class ViewerActionService implements OnDestroy {
                         const query = unicodePrefix(definition.query, APP_STATE_TEXT_LIMIT);
                         if (query !== definition.query) this.omit(omissions, target, "text_limit");
                         yield {
-                            searchId: definition.id, query,
+                            searchId: definition.id, query, pinColor: definition.pinColor,
                             enabled: definition.enabled, paused: runtime?.paused ?? definition.paused,
                             autoUpdate: definition.autoUpdate, showResultsOnMap: definition.showResultsOnMap,
                             ...(runtime ? {runtime: {
-                                complete: runtime.complete, progressDone: runtime.progressDone, progressTotal: runtime.progressTotal,
-                                resultCount: runtime.searchResults.length, errorCount: runtime.errors.size
+                                complete: runtime.complete && runtime.schemaAnalysis.status !== "pending", progressDone: runtime.progressDone, progressTotal: runtime.progressTotal,
+                                resultCount: runtime.searchResults.length, errorCount: runtime.errors.size +
+                                    (runtime.schemaAnalysis.status === "error" && (!runtime.schemaAnalysis.error || !runtime.errors.has(runtime.schemaAnalysis.error)) ? 1 : 0)
                             }} : {})
                         };
                     }

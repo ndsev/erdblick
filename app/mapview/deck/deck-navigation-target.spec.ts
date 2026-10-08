@@ -30,6 +30,7 @@ interface DeckViewTestInternals {
     };
     lastCanvasCssSize?: {width: number; height: number};
     clippedLayoutCanvasCssSize?: {width: number; height: number};
+    prepareForNavigation(): void;
 }
 
 interface MarkerTestInternals extends DeckViewTestInternals {
@@ -278,6 +279,39 @@ describe("Deck navigation target and layout", () => {
                 style: expect.any(Object)
             });
         } finally {
+            requestAnimationFrame.mockRestore();
+        }
+    });
+
+    it("centers explicit navigation in the visible area after the inspection dock clips the canvas", () => {
+        const view = createView();
+        const internals = view as unknown as DeckViewTestInternals;
+        internals.lastCanvasCssSize = {width: 1000, height: 700};
+        const deck = installDeckMock(view, 1000, 700);
+        const container = document.createElement("div");
+        container.id = "canvas";
+        Object.defineProperties(container, {
+            clientWidth: {value: 640},
+            clientHeight: {value: 700}
+        });
+        document.body.appendChild(container);
+        const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame").mockReturnValue(17);
+        try {
+            view.prepareForLayoutResize({width: 640, height: 700});
+            expect(internals.clippedLayoutCanvasCssSize).toEqual({width: 1000, height: 700});
+
+            internals.prepareForNavigation();
+
+            expect(internals.clippedLayoutCanvasCssSize).toBeUndefined();
+            expect(internals.lastCanvasCssSize).toEqual({width: 640, height: 700});
+            expect(deck.setProps).toHaveBeenLastCalledWith({
+                width: 640,
+                height: 700,
+                style: expect.objectContaining({width: "640px", height: "700px"})
+            });
+            expect(deck.setDrawingBufferSize).toHaveBeenLastCalledWith(640, 700);
+        } finally {
+            container.remove();
             requestAnimationFrame.mockRestore();
         }
     });

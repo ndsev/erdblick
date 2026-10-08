@@ -89,7 +89,13 @@ const selectionsSchema = z.array(z.strictObject({
     locked: z.boolean(),
     undocked: z.boolean(),
     loading: z.boolean().nullable().describe("Feature resolution state; null when owned by a source-data panel."),
-    features: z.array(z.strictObject({mapTileKey: identifierSchema, featureId: identifierSchema}))
+    features: z.array(z.strictObject({mapTileKey: identifierSchema, featureId: identifierSchema,
+        mapId: identifierSchema.optional(), layerId: identifierSchema.optional(),
+        partition: z.union([
+            z.strictObject({kind: z.literal("tile"), id: z.number().int().min(-2147483648).max(2147483647)}),
+            z.strictObject({kind: z.literal("object"), id: z.string().regex(/^[0-9]{1,20}$/)})
+        ]).optional()
+    }))
         .max(APP_STATE_COLLECTION_LIMIT),
     sourceData: z.strictObject({
         mapTileKey: identifierSchema,
@@ -101,6 +107,7 @@ const selectionsSchema = z.array(z.strictObject({
 const searchesSchema = z.array(z.strictObject({
     searchId: identifierSchema,
     query: boundedUnicodeString(APP_STATE_TEXT_LIMIT),
+    pinColor: colorSchema.describe("Search identity/pin color; individual geometry rules may override it."),
     enabled: z.boolean(),
     paused: z.boolean(),
     autoUpdate: z.boolean(),
@@ -145,7 +152,7 @@ export const appStateChannels = {
         persistence: "runtime-summary", synchronization: "none"
     },
     "app.searches": {
-        description: "Persisted search definitions and live progress, including hidden and paused searches; never results or style rules.",
+        description: "Persisted search definitions, identity colors and live progress, including hidden and paused searches. Use pinColor to identify requests such as the blue search; individual geometry rules can use different colors. Never results or style rules.",
         selectorSchema: z.strictObject({searchId: identifierSchema.optional()}),
         valueSchema: searchesSchema,
         readable: true, writable: false,
@@ -155,11 +162,11 @@ export const appStateChannels = {
     "view.background": setting("Configured background identity and opacity percentage; no URLs or credentials.", viewSelectorSchema, backgroundSchema, "follow-view-sync"),
     "view.grid": setting("Tile grid appearance; color is six hex digits without #.", viewSelectorSchema, gridSchema, "follow-view-sync"),
     "view.layer": setting("Read/write one layer's visibility, requested level and automatic level policy. Select viewIndex/mapId/layerId. Read this channel first, then assign {visible, level, autoLevel}, preserving fields you do not want to change.", layerSelectorSchema, layerConfigSchema, "follow-view-sync"),
-    "view.styleOption": setting("One applicable style option, validated against its declared type.", layerSelectorSchema.extend({styleId: identifierSchema, optionId: identifierSchema}), styleOptionValueSchema, "follow-view-sync"),
-    "view.layerPreset": setting("Apply a qualified layer preset; null clears its association without resetting options.", layerSelectorSchema, presetSchema, "follow-view-sync"),
+    "view.styleOption": setting("One applicable style option, validated against its declared type. For a named look such as Cinematic or Lane Topology, discover kind:presets and use view.layerPreset to apply all supporting options together; a same-named boolean alone may not enable the needed geometry.", layerSelectorSchema.extend({styleId: identifierSchema, optionId: identifierSchema}), styleOptionValueSchema, "follow-view-sync"),
+    "view.layerPreset": setting("Apply all options of a qualified layer preset. Discover viewer_get_catalog kind:presets with mapId/layerId, then assign {styleId,presetId}; null clears its association without resetting options.", layerSelectorSchema, presetSchema, "follow-view-sync"),
     "view.mapPreset": setting("Apply a map preset; null clears its association without resetting options.", viewSelectorSchema.extend({mapId: identifierSchema}), identifierSchema.nullable(), "follow-view-sync"),
     "app.focusedView": setting("Focused source view; requires the observed layout revision.", tabSelectorSchema, indexSchema),
-    "app.viewSync": setting("Cross-view position, movement, projection and layer synchronization.", tabSelectorSchema, syncSchema),
+    "app.viewSync": setting("Cross-view synchronization: pos keeps camera positions equal; mov synchronizes relative camera movement; choose at most one of pos and mov. proj synchronizes projection; lay synchronizes layers. Omit lay to keep different map layers in each view.", tabSelectorSchema, syncSchema),
     "app.marker": setting("Coordinate marker visibility and WGS84 position.", tabSelectorSchema, markerSchema),
     "app.preferences.rendering": setting("Rendering quality, tile budget, worker count (0=automatic) and transport compression. Only tile budget is included in URLs.", tabSelectorSchema, renderingPreferencesSchema, "none", "mixed"),
     "app.preferences.navigation": setting("Zoom step and feature-fit clearance in metres.", tabSelectorSchema, navigationPreferencesSchema, "none", "local-storage"),

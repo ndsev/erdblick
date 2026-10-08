@@ -226,6 +226,23 @@ test('native MCP starts, styles, exports and inspects a real search through the 
         value: {visible: true, level: 13, autoLevel: false}, viewLayoutRevision});
     expect(await call('viewer_get_catalog', {kind: 'layers', viewIndex: 0, ...layer})).toMatchObject({items: [{visible: true, available: true}]});
     await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThan(0);
+    // Visibility must change rendered geometry, not only the persisted/catalog flag.
+    const styleCatalog = viewerActions.viewer_get_catalog.outputSchema.parse(await call('viewer_get_catalog', {kind: 'styles', limit: 100}));
+    const visibleStyles = styleCatalog.items.filter(style => style.visible === true);
+    expect(visibleStyles.length).toBeGreaterThan(0);
+    for (const style of visibleStyles) await call('viewer_edit_style', {operation: 'visibility', styleId: style.id, visible: false});
+    await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBe(0);
+    for (const style of visibleStyles) await call('viewer_edit_style', {operation: 'visibility', styleId: style.id, visible: true});
+    await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThan(0);
+    const invalidRegex = await call('viewer_validate_style', {source: `name: Regex recovery
+version: 2
+rules:
+  - scope: attribute
+    attribute-type: '*SPEED*'
+    geometry: line
+`});
+    expect(invalidRegex).toMatchObject({valid: false, runtimeVerified: false});
+    expect(invalidRegex.issues).toEqual(expect.arrayContaining([expect.objectContaining({property: 'attribute-type'})]));
     const started = viewerActions.viewer_start_search.outputSchema.parse(await call('viewer_start_search', {
         // GridDataSource does not advertise zoomLevels; there is no automatic search-level choice.
         query: 'true', scope: 'feature', mapLayers: [layer], viewIndices: [0], tileLevels: [13], autoUpdate: false, viewLayoutRevision
@@ -237,9 +254,50 @@ test('native MCP starts, styles, exports and inspects a real search through the 
         return status.status.resultCount;
     }).toBeGreaterThan(0);
     expect(status.settings.autoUpdate).toBe(false);
-    await call('viewer_set_search', {searchId, viewLayoutRevision, settings: {...status.settings, pinColor: '#00ccff',
+    expect(status.schemaAnalysis).toMatchObject({status: 'ready', concreteScope: 'feature', normalizedQuery: 'true'});
+    const browserDiagnostics = viewerActions.viewer_get_diagnostics.outputSchema.parse(await call('viewer_get_diagnostics', {
+        sections: ['workers', 'gpu']
+    }));
+    expect(browserDiagnostics.executionContext).toBe('browser');
+    expect(browserDiagnostics.metrics.some(metric => metric.name === 'latestWasmMs')).toBe(true);
+    expect(browserDiagnostics.metrics.some(metric => metric.name === 'frameIntervalP90Ms')).toBe(true);
+    expect(browserDiagnostics.metrics.some(metric => metric.name === 'latestNativeMs')).toBe(false);
+    // A focused edit must survive native catalog validation and preserve unrelated source.
+    const patchSource = 'name: MCP patch regression\nversion: 2\nrules:\n  - geometry: line\n    color: "#1188ff"\n    width: 2\n';
+    const patchStyle = viewerActions.viewer_edit_style.outputSchema.parse(await call('viewer_edit_style', {
+        operation: 'create', source: patchSource, visible: true
+    }));
+    const rejectedPatch = await mcp.call('viewer_edit_style', {clientId, operation: 'patch', styleId: patchStyle.styleId,
+        edits: [{find: 'width: 2', replace: 'width: 6'}, {find: 'absent fragment', replace: 'replacement'}]});
+    expect(rejectedPatch.isError).toBe(true);
+    expect(await call('viewer_get_style', {styleId: patchStyle.styleId})).toMatchObject({source: patchSource});
+    const invalidPatch = await mcp.call('viewer_edit_style', {clientId, operation: 'patch', styleId: patchStyle.styleId,
+        edits: [{find: 'width: 2', replace: 'width: banana'}]});
+    expect(invalidPatch.isError).toBe(true);
+    expect(invalidPatch.structuredContent).toMatchObject({error: {
+        code: 'invalid_arguments', reason: 'style_validation_failed', outcome: 'not_applied', message: expect.stringContaining('bad conversion')
+    }});
+    expect(invalidPatch.structuredContent.error.message).toContain('"rulePath":"rules[0]"');
+    expect(invalidPatch.structuredContent.error.message).toContain('line 6, column 12');
+    expect(await call('viewer_get_style', {styleId: patchStyle.styleId})).toMatchObject({source: patchSource});
+    expect(await call('viewer_edit_style', {operation: 'patch', styleId: patchStyle.styleId,
+        edits: [{find: 'width: 2', replace: 'width: 6'}]})).toMatchObject({changed: true, editCount: 1});
+    expect(await call('viewer_get_style', {styleId: patchStyle.styleId})).toMatchObject({source: patchSource.replace('width: 2', 'width: 6')});
+    await call('viewer_edit_style', {operation: 'delete', styleId: patchStyle.styleId});
+    await call('viewer_set_search', {searchId, viewLayoutRevision, settings: {pinColor: '#00ccff',
         searchStyleRules: [{geometry: ['line'], filter: [], color: {mode: 'solid', color: '#00ccff'}, width: 5}],
-        renderStrategy: {...status.settings.renderStrategy, showHighFiGeometry: true}}});
+        renderStrategy: {showHighFiGeometry: true}}});
+    await call('viewer_set_search', {searchId, viewLayoutRevision, settings: {renderStrategy: {showHighFiResultDots: false}}});
+    const patched = viewerActions.viewer_get_search.outputSchema.parse(await call('viewer_get_search', {searchId}));
+    expect(patched.settings).toMatchObject({...status.settings, pinColor: '#00ccff',
+        searchStyleRules: [{geometry: ['line'], filter: [], color: {mode: 'solid', color: '#00ccff'}, width: 5}],
+        renderStrategy: {...status.settings.renderStrategy, showHighFiGeometry: true, showHighFiResultDots: false}});
+    const addressBeforeShare = page.url();
+    const shared = viewerActions.viewer_get_share_link.outputSchema.parse(await call('viewer_get_share_link', {}));
+    expect(shared.localOnly).toBe(true);
+    expect(shared.localSearchIds).toContain(searchId);
+    expect(new URL(shared.url).searchParams.size).toBeGreaterThan(0);
+    expect(page.url()).toBe(addressBeforeShare);
     await call('viewer_control_search', {searchId, operation: 'pause'});
     await call('viewer_control_search', {searchId, operation: 'resume'});
     await call('viewer_control_search', {searchId, operation: 'refresh'});
@@ -250,7 +308,7 @@ test('native MCP starts, styles, exports and inspects a real search through the 
     const exported = viewerActions.viewer_export_search.outputSchema.parse(await call('viewer_export_search', {searchId, include: 'both', limit: 1}));
     expect(JSON.parse(exported.content).configuration.pinColor).toBe('#00ccff');
     const inspected = viewerActions.viewer_inspect.outputSchema.parse(await call('viewer_inspect', {
-        features: [{mapId: feature.mapId, layerId: feature.layerId, featureId: feature.featureId}], lock: true
+        features: [{mapId: feature.mapId, layerId: feature.layerId, featureId: feature.featureId}], lock: true, newPanel: true, color: '#aa33cc'
     }));
     expect(inspected.complete).toBe(true);
     const panelId = inspected.panelIds[0];
@@ -258,11 +316,21 @@ test('native MCP starts, styles, exports and inspects a real search through the 
         const result = viewerActions.viewer_get_app_state.outputSchema.parse(await call('viewer_get_app_state', {targets: [{channel: 'app.selections', panelId}]}));
         return result.values;
     }).toMatchObject([{value: [{loading: false}]}]);
+    const relationData = await mcp.call('mapget_extract_features', {...layer, featureIds: [feature.featureId], expressions: ['relations']});
+    expect(relationData.isError).not.toBe(true);
+    expect(relationData.structuredContent.complete).toBe(true);
+    expect(relationData.structuredContent.items[0].values[0][0][0].name).toBe('startIntersection');
+    const relationInspection = viewerActions.viewer_inspect.outputSchema.parse(await call('viewer_inspect', {
+        features: [{mapTileKey: feature.mapTileKey, featureId: feature.featureId, relationIndex: 0}], newPanel: true
+    }));
+    expect(relationInspection.features).toEqual([{mapTileKey: feature.mapTileKey, featureId: `${feature.featureId}:relation#0`}]);
+    await call('viewer_close_inspection', {panelId: relationInspection.panelIds[0]});
     await call('viewer_navigate', {viewIndex: 0, viewLayoutRevision, target: {features: [{mapTileKey: feature.mapTileKey, featureId: feature.featureId}]}});
     // Exercise the same persisted resize callbacks as floating and stacked inspection UI.
     const panelTarget = {channel: 'inspection.panel', panelId};
     const panelState = viewerActions.viewer_get_app_state.outputSchema.parse(await call('viewer_get_app_state', {targets: [panelTarget]}));
     const presentation = appStateChannels['inspection.panel'].valueSchema.parse(panelState.values[0].value);
+    expect(presentation.color).toBe('#aa33cc');
     async function layoutTarget(kind: 'dialog' | 'panel', id: number) {
         let offset = 0;
         for (;;) {

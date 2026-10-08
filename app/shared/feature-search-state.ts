@@ -215,7 +215,8 @@ function normalizeRuleFilters(value: unknown): FeatureSearchRuleFilter[] {
         }
         return [{
             field,
-            op,
+            // Accept the Simfil spelling while keeping the GUI's canonical operator.
+            op: op === "==" ? "=" : op,
             ...("value" in raw ? {value: raw["value"]} : {}),
             ...(normalizeBoolean(raw["customExpression"], false) ? {customExpression: true} : {})
         }];
