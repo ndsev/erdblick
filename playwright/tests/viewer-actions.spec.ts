@@ -94,6 +94,9 @@ test('browser action adapter reads live views, moves only its target and updates
         await page.getByTestId('viewer-action-status').click();
         const details = page.getByTestId('viewer-action-details');
         await expect(details).toContainText('MCP controls ready');
+        await expect(details.getByTestId('viewer-action-copy-codex')).toHaveText('Copy Codex MCP-Add Command');
+        await expect(details.getByTestId('viewer-action-copy-claude')).toHaveText('Copy Claude MCP-Add Command');
+        await expect(details.getByRole('button', {name: 'Copy MCP URL', exact: true})).toHaveCount(0);
 
         const value = {destination: {lon: 11.5374, lat: 48.1584, alt: 700}, orientation: {heading: 0, pitch: -1, roll: 0}, position: [0, 0, 0]};
         const reply = await first.invoke('viewer_set_app_state', {target: targets[1], value, viewLayoutRevision: before.viewLayoutRevision});

@@ -22,11 +22,12 @@ import {ClipboardService} from "../shared/clipboard.service";
                         <input pInputText id="viewer-action-label" #label [value]="actions.label" maxlength="240"
                                (change)="actions.renameSession(label.value); label.value = actions.label"/>
                         <div class="action-buttons">
-                            <p-button label="Copy MCP URL" size="small" (onClick)="copy('url')"/>
-                            <p-button label="Copy Codex command" size="small" (onClick)="copy('codex')"/>
-                            <p-button label="Copy Claude Code command" size="small" (onClick)="copy('claude')"/>
+                            <p-button label="Copy Codex MCP-Add Command" size="small" (onClick)="copy('codex')"
+                                      data-testid="viewer-action-copy-codex"/>
+                            <p-button label="Copy Claude MCP-Add Command" size="small" (onClick)="copy('claude')"
+                                      data-testid="viewer-action-copy-claude"/>
                         </div>
-                        <small>Commands use POSIX-shell quoting. OAuth login happens in your client.</small>
+                        <small>Commands use POSIX-shell quoting and include client-side OAuth login when required.</small>
                         <p-button label="Stop current action" severity="danger" size="small"
                                   [disabled]="!actions.hasPendingAction" (onClick)="actions.stopCurrentAction()"
                                   data-testid="viewer-action-stop"/>
@@ -55,23 +56,38 @@ import {ClipboardService} from "../shared/clipboard.service";
 export class ViewerActionStatusComponent {
     constructor(readonly actions: ViewerActionService, private readonly clipboard: ClipboardService) {}
 
-    /** Builds commands from fixed syntax and quoted trusted metadata, never a server command template. */
-    connectionText(kind: "url" | "codex" | "claude"): string {
+    /** Builds add/login commands from fixed syntax and quoted metadata, never a server command template. */
+    connectionText(kind: "codex" | "claude"): string {
         const info = this.actions.connectionInfo;
         if (!info.enabled) return "";
         let endpoint: URL;
         try { endpoint = new URL(info.endpoint); } catch { return ""; }
         if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) return "";
-        if (kind === "url") return endpoint.href;
         const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-        const publicClient = info.authentication === "oauth" ? info.oauthClientId : undefined;
-        return kind === "codex"
-            ? `codex mcp add mapviewer --url ${quote(endpoint.href)}${publicClient ? ` --oauth-client-id ${quote(publicClient)}` : ""}`
-            : `claude mcp add --transport http${publicClient ? ` --client-id ${quote(publicClient)}` : ""} mapviewer ${quote(endpoint.href)}`;
+        const serverName = "mapviewer";
+        const oauth = info.authentication === "oauth" ? info : undefined;
+        let addCommand = kind === "codex"
+            ? `codex mcp add ${serverName} --url ${quote(endpoint.href)}${oauth?.oauthClientId ? ` --oauth-client-id ${quote(oauth.oauthClientId)}` : ""}`
+            : `claude mcp add --transport http ${serverName} ${quote(endpoint.href)}`;
+        if (!oauth) return addCommand;
+        if (kind === "claude") {
+            // Claude's --scope selects config storage; OAuth scopes belong in its JSON config.
+            const config = {
+                type: "http",
+                url: endpoint.href,
+                oauth: oauth.oauthClientId || oauth.scopes.length ? {
+                    clientId: oauth.oauthClientId,
+                    scopes: oauth.scopes.length ? oauth.scopes.join(" ") : undefined
+                } : undefined
+            };
+            addCommand = `claude mcp add-json ${serverName} ${quote(JSON.stringify(config))}`;
+        }
+        const scopes = kind === "codex" && oauth.scopes.length ? ` --scopes ${quote(oauth.scopes.join(","))}` : "";
+        return `${addCommand} &&\n${kind} mcp login ${serverName}${scopes}`;
     }
 
     /** Uses the existing clipboard/manual-copy fallback, without invoking any client command. */
-    copy(kind: "url" | "codex" | "claude"): void {
+    copy(kind: "codex" | "claude"): void {
         const text = this.connectionText(kind);
         if (text) this.clipboard.copyToClipboard(text);
     }
