@@ -929,7 +929,7 @@ suffix solely to restore older links.
 
 ## Tile warnings and transient datasource recovery
 
-Protocol 5.5 metadata exposes warnings, errors and ordinary timestamp/TTL pairs for every tile type. Warned subset values remain ready and render normally. Warnings are retained with the current value and emitted once per value into diagnostics logs at warning severity, including map/layer/partition context. Replacing or disposing a value replaces or clears its diagnostics. Feature and source-data inspection also surface warnings without discarding content.
+Protocol 5.3 metadata exposes warnings, errors and ordinary timestamp/TTL pairs for every tile type. Warned subset values remain ready and render normally. Warnings are retained with the current value and emitted once per value into diagnostics logs at warning severity, including map/layer/partition context. Replacing or disposing a value replaces or clears its diagnostics. Feature and source-data inspection also surface warnings without discarding content.
 
 Failed tile values expire through the same `TileExpiryScheduler` as successful finite-lifetime values. Mapget caps error tiles with `mapget.serve.error-tile-ttl` (default five seconds). Mapget also caps successful empty source layers with `mapget.serve.empty-tile-ttl` (default five seconds), including missing LiveSource tiles/objects. Empty search/inspection matches inherit their source lifetime; they do not receive a separate empty-result cap. Filter errors retain their per-output diagnostics and earliest dependency expiry; unrelated new coverage is sent immediately. There is no subscription-level suppression, retry deadline map, or tile-specific backoff. Release and coverage pruning cancel expiry ownership. Retained inspection renewals preserve older content on error and schedule the returned value's absolute expiry. Initial inspection failures are surfaced immediately, not hidden in a transport retry loop.
 
@@ -938,3 +938,46 @@ Preferences → Connection edits the flat AppState keys `connectionRetryEnabled`
 `connection-retry-policy.ts` owns browser transport backoff only. Preference changes recompute the connection deadline from its failure time; disabling retries removes the reconnect timer without disabling tile freshness. Compatible connection frames reset reconnect backoff. Server constructor policy and HTTP eligibility belong to `sources[].retry`, independently of this browser.
 
 The diagnostics snapshot separates current recovery from socket connectivity and historical logs. Catalog `retrying` flags and the browser connection owner drive the mainbar circle's green/red animation; stopped failures use static red and healthy idle state uses green. The tooltip/popover identifies causes and retry waits. Reduced motion uses a static retry presentation. The existing spinner requires both a connected backend and active loading or pipeline work; unfinished counters during retry waits do not show it. Pausing progress does not freeze connection status. No health polling or additional retry timer is used for presentation.
+
+<!-- mcp:
+keywords: [WebMCP, browser, document, authentication, tools]
+-->
+## Browser-native WebMCP
+
+Erdblick registers all viewer actions with `document.modelContext.registerTool()`
+after ordinary app initialization. Each action targets the current document, so
+it takes no `clientId`. `viewer_list_sessions` is intentionally absent. The same
+Zod contracts and domain handlers serve WebMCP and remote MCP; both share bounded
+admission, mutation exclusion, result validation, cancellation, and the activity
+list/Stop control. A WebSocket reconnect does not cancel a document-owned call.
+
+On browsers supporting the [WebMCP imperative API](https://developer.chrome.com/docs/ai/webmcp/imperative-api),
+the MCP popover also reports the registered viewer and mapget tool counts.
+Unsupported browsers continue to work normally. Local viewer tools do not require
+remote MCP to be enabled. Browser support currently requires the browser's WebMCP
+feature and a secure context (HTTPS or localhost).
+
+`WebMcpService` owns tool registration and cleanup. It registers mapget tools from
+`POST mcp/browser` using the existing same-origin login, preserving the server's
+input schemas and permission filtering. It refreshes this discovery when the tab
+regains focus. It never copies an OAuth token into JavaScript or redirects to a
+server-supplied URL. Mapget tools need an enabled MCP backend and browser authority;
+when unavailable, the local viewer tools remain usable. Tool registrations are
+removed with abort signals; outstanding owned work is cancelled on app teardown.
+
+The browser bridge accepts JSON and finite SSE MCP responses, limits request and
+response sizes, checks response IDs, and passes cancellation to `fetch`. The server
+rechecks permissions on every call. See [mapget's browser endpoint](../../mapget/docs/mapget-mcp.md#browser-native-webmcp)
+for reverse-proxy and permission configuration.
+
+Run the browser-native regression with an installed WebMCP-capable Chrome:
+
+```sh
+MAPGET_BIN=/path/to/current/mapget EB_MAPGET_CONFIG=test/mapget-web-mcp.yaml \
+  EB_MAPGET_MCP_LOCAL=1 EB_WEBMCP_NATIVE=1 \
+  npm run test:integration -- playwright/tests/web-mcp.spec.ts --project='' --workers=1
+```
+
+This test enables Chrome's WebMCP feature and uses real `getTools`/`executeTool`
+calls. Its erdblick-owned GridDataSource fixture needs no Python datasource or
+external map service. Run it separately from other integration pipelines.

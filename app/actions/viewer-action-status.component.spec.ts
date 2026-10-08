@@ -5,7 +5,7 @@ import type {ViewerMcpInfo} from "./viewer-action-relay.contract";
 
 /** Constructs only the fixed command formatter; never launches a client or changes its config. */
 function component(info: ViewerMcpInfo, clipboard = {copyToClipboard: vi.fn()}) {
-    return new ViewerActionStatusComponent({connectionInfo: info} as never, clipboard as never);
+    return new ViewerActionStatusComponent({connectionInfo: info} as never, clipboard as never, {} as never);
 }
 
 describe("MCP connection copy commands", () => {

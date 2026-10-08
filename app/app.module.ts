@@ -132,6 +132,7 @@ import {MapPresetService} from "./styledata/map-preset.service";
 import {TileSubsetLayerRenderService} from
     "./mapview/deck/tile-subset-layer-render.service";
 import {PresentationStateBridgeService} from "./shared/presentation-state-bridge.service";
+import {WebMcpService} from "./actions/web-mcp.service";
 import {ViewerActionService} from "./actions/viewer-action.service";
 import {ViewerActionStatusComponent} from "./actions/viewer-action-status.component";
 
@@ -182,6 +183,7 @@ export const initializeServices = () => {
     const subsetRenderService = inject(TileSubsetLayerRenderService);
     const presentationBridge = inject(PresentationStateBridgeService);
     const viewerActions = inject(ViewerActionService);
+    const webMcp = inject(WebMcpService);
     inject(FeatureSearchService);
 
     return (async () => {
@@ -207,6 +209,7 @@ export const initializeServices = () => {
         inspectionSelection.initialize();
         presentationBridge.initialize();
         viewerActions.initialize();
+        webMcp.initialize();
     })();
 }
 

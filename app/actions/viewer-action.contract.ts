@@ -79,7 +79,7 @@ export const viewerActions = {
         })
     },
     viewer_set_app_state: {
-        description: 'Write ONE setting with {target:{channel:"view.projection",viewIndex:0},value:"2d",viewLayoutRevision:0} plus clientId; use the observed revision. No changes/updates/assignments array. Other channels include view.layer (visibility/level), view.styleOption, view.layerPreset/view.mapPreset, view.camera, view.background and view.grid. Switch maps by enabling the requested feature layers and setting visible:false on the old map layers in that view. Read the value first and preserve unrelated fields; viewer_describe_app_state gives exact selectors/value schemas. Writes use normal owners and honor view synchronization. Applied does not mean tiles have loaded or rendered.',
+        description: 'Write ONE setting with {target:{channel:"view.projection",viewIndex:0},value:"2d",viewLayoutRevision:0}; use the observed revision. No changes/updates/assignments array. Other channels include view.layer (visibility/level), view.styleOption, view.layerPreset/view.mapPreset, view.camera, view.background and view.grid. Switch maps by enabling the requested feature layers and setting visible:false on the old map layers in that view. Read the value first and preserve unrelated fields; viewer_describe_app_state gives exact selectors/value schemas. Writes use normal owners and honor view synchronization. Applied does not mean tiles have loaded or rendered.',
         permission: "viewer-control", mutation: true,
         inputSchema: assignmentInputSchema,
         outputSchema: z.strictObject({
