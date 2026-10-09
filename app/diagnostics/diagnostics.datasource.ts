@@ -89,6 +89,11 @@ export class DiagnosticsDatasource implements OnDestroy {
                 }
                 wasPaused = paused;
             }),
+            this.viewDiagnostics.tileWarning.subscribe(warning => this.appendLogEntries([{
+                at: Date.now(), level: "warn", message: `Tile warning: ${warning.message}`,
+                data: {tileId: warning.mapTileKey, mapName: warning.mapName,
+                       layerName: warning.layerName, presentation: warning.presentationKind}
+            }])),
             this.viewDiagnostics.tileError.subscribe(error =>
                 this.appendTileError(error)
             ),
@@ -100,12 +105,17 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.refreshLogs();
     }
 
-    /** Publishes progress only when the pipeline is live. */
+    /** Freeze paused progress while keeping current connectivity and recovery visible. */
     private refreshSnapshot(): void {
-        if (!this.deferDiagnosticsRefresh() &&
-            !this.mapService.tilePipelinePaused) {
+        if (this.deferDiagnosticsRefresh()) return;
+        if (!this.mapService.tilePipelinePaused) {
             this.snapshot$.next(this.buildSnapshot());
+            return;
         }
+        const recovery = this.mapService.getConnectionDiagnostics();
+        this.snapshot$.next({...this.snapshot$.getValue(),
+            backend: {connected: this.mapService.isTileStreamConnected()},
+            recovery, loading: recovery.loading});
     }
 
     /** Stop every timer and event subscription owned by this dialog datasource. */
@@ -331,6 +341,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         const backend = this.mapService.getBackendRequestProgress();
         const parseQueueSize = this.mapService.getPendingFrameQueueSize();
         const renderQueueSize = this.renderService.visualizationQueueLength();
+        const recovery = this.mapService.getConnectionDiagnostics();
         if (backend.allDone &&
             loaded === expected &&
             parseQueueSize === 0 &&
@@ -368,7 +379,9 @@ export class DiagnosticsDatasource implements OnDestroy {
             at: Date.now(),
             tiles: tileCounts,
             progress,
-            backend: {connected: this.mapService.isTileStreamConnected()}
+            backend: {connected: this.mapService.isTileStreamConnected()},
+            recovery,
+            loading: recovery.loading || parseQueueSize > 0 || renderQueueSize > 0
         };
     }
 

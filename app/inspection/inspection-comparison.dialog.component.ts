@@ -160,6 +160,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     private detachPointerUpListener?: () => void;
     private selectionTopicSubscription: Subscription;
     private comparisonRevision = 0;
+    private featureLoadController = new AbortController();
     private readonly comparisonExpiryOwners =
         new Map<string, ComparisonExpiryOwner>();
 
@@ -185,6 +186,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     /** Releases transient drag listeners and cached column state. */
     ngOnDestroy() {
         ++this.comparisonRevision;
+        this.featureLoadController.abort();
         this.clearComparisonExpiries();
         this.endDrag();
         this.selectionTopicSubscription.unsubscribe();
@@ -343,6 +345,8 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     /** Materializes comparison entries into temporary panel models that reuse feature inspection rendering. */
     private buildColumns(model: InspectionComparisonModel) {
         const revision = ++this.comparisonRevision;
+        this.featureLoadController.abort();
+        this.featureLoadController = new AbortController();
         this.clearComparisonExpiries();
         const entries = [model.base, ...model.others];
         const columns = entries.map((entry, index) => {
@@ -447,6 +451,10 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         try {
             replacements = await this.tileStream.loadFeatures(owner.featureIds);
         } catch (error) {
+            if (this.comparisonExpiryOwners.get(owner.key) === owner && owner.revision === this.comparisonRevision &&
+                tokens.some(token => token.valueVersion === owner.epoch)) {
+                this.tileStream.scheduleRetainedTileRetry?.(owner, owner.tileId, owner.epoch, error);
+            }
             console.error(`Failed to renew comparison tile '${owner.mapTileKey}'.`, error);
             return;
         }
@@ -522,7 +530,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     }
 
     private async resolveFeatures(entry: InspectionComparisonEntry): Promise<FeatureWrapper[]> {
-        return await this.tileStream.loadFeatures(entry.featureIds);
+        return await this.tileStream.loadFeatures(entry.featureIds, this.featureLoadController.signal);
     }
 
     private buildColumnMenuItems(column: ComparisonColumn): MenuItem[] {

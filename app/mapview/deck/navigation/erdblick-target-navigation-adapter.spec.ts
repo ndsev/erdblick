@@ -1,4 +1,4 @@
-import type {InteractionState, MapInteractionTargetContext} from "@deck.gl/core";
+import type {InteractionState, InteractionTargetContext, WebMercatorViewport} from "@deck.gl/core";
 import {describe, expect, it, vi} from "vitest";
 import type {NavigationAnchor, NavigationVisualTarget} from "./feature-navigation.types";
 import {createDeckMapViewport} from "./web-mercator-feature-navigation";
@@ -17,7 +17,7 @@ const viewport = createDeckMapViewport({
 function context(
     screenPosition: [number, number] | null,
     viewId = VIEW_ID
-): MapInteractionTargetContext {
+): InteractionTargetContext<WebMercatorViewport> {
     return {
         viewId,
         operation: screenPosition ? "rotate" : "zoom",

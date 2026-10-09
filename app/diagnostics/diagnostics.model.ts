@@ -61,6 +61,10 @@ export interface DiagnosticsSnapshot {
     tiles: TileStateCounts;
     progress: TilePipelineProgress;
     backend: BackendState;
+    /** Real in-flight work, excluding pending partitions and recovery waits. */
+    loading?: boolean;
+    /** Current failures and recovery, independent of historical error logs. */
+    recovery?: {retrying: boolean; failed: boolean; message: string};
 }
 
 /** Aggregated performance statistic derived from one raw backend stat path. */

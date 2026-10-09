@@ -13,6 +13,19 @@ diagnostics-indicator {
       color: var(--p-badge-danger-background);
     }
 
+    .pi-circle-fill.retrying {
+      animation: diagnostics-connection-retry 2s step-end infinite;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pi-circle-fill.retrying {
+        animation: none;
+        color: var(--p-badge-danger-background);
+        border-radius: 50%;
+        outline: 2px solid var(--p-badge-success-background);
+      }
+    }
+
     .diagnostics-indicator-button {
       border: none;
       background: transparent;
@@ -86,6 +99,11 @@ diagnostics-indicator {
       }
     }
   }
+}
+
+@keyframes diagnostics-connection-retry {
+  0%, 100% { color: var(--p-badge-success-background); }
+  50% { color: var(--p-badge-danger-background); }
 }
 
 .diagnostics-label {

@@ -1429,6 +1429,8 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
             }
         }
     }
+    auto warnings = JsValue::List();
+    for (auto const& warning : tileLayer.warnings()) warnings.push(JsValue(warning));
     const auto conversionTimestampMs = std::chrono::duration<double, std::milli>(
         tileLayer.timestamp().time_since_epoch()).count();
     const auto ttlMs = tileLayer.ttl()
@@ -1445,6 +1447,10 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
             : 0,
         tileLayer.legalInfo() ? *tileLayer.legalInfo() : "",
         tileLayer.error() ? *tileLayer.error() : "",
+        *warnings,
+        tileLayer.errorRetryAfter() ? static_cast<double>(tileLayer.errorRetryAfter()->count()) :
+            std::numeric_limits<double>::quiet_NaN(),
+        layerInfo.is_object() && layerInfo.contains("serviceError") && layerInfo["serviceError"] == true,
         numFeatures,
         conversionTimestampMs,
         ttlMs,

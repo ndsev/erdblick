@@ -14,7 +14,7 @@ import {
     type InteractionState,
     MapController,
     MapView as DeckMercatorView,
-    type MapInteractionTargetContext,
+    type InteractionTargetContext,
     type PickingInfo,
     type WebMercatorViewport
 } from "@deck.gl/core";
@@ -1274,7 +1274,7 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Resolves one exact eligible physical surface for a controller acquisition. */
     private pickControllerNavigationTarget(
-        context: Readonly<MapInteractionTargetContext>,
+        context: Readonly<InteractionTargetContext<WebMercatorViewport>>,
         screenPosition: [number, number]
     ): NavigationVisualTarget | null {
         const layerIds = this.navigationPickLayerIds();
@@ -2105,7 +2105,7 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Resolves one fresh physical or forward-ground target at controller acquisition time. */
     private resolveControllerNavigationTarget(
-        context: Readonly<MapInteractionTargetContext>
+        context: Readonly<InteractionTargetContext<WebMercatorViewport>>
     ): NavigationVisualTarget | null {
         const screenPosition: [number, number] = context.screenPosition
             ? [...context.screenPosition]
@@ -2788,7 +2788,7 @@ export abstract class DeckMapView implements IRenderView {
             keyboard: {zoomSpeed: keyboardZoomSpeed},
             scrollZoom: {speed: scrollZoomSpeed},
             _targetNavigation: true,
-            getInteractionTarget: (context: Readonly<MapInteractionTargetContext>) =>
+            getInteractionTarget: (context: Readonly<InteractionTargetContext<WebMercatorViewport>>) =>
                 this.targetNavigationAdapter.resolveInteractionTarget(context)
         };
     }

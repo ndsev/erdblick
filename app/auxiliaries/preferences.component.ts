@@ -39,6 +39,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {environment} from "../environments/environment";
 import {CoordinatesPolicyService} from "../coords/coordinates-policy.service";
+import {connectionRetryPolicySchema} from "../shared/connection-retry-policy";
 import {FeatureSearchSchemaService} from "../mapdata/feature-search-schema.service";
 import type {
     FeatureSearchStyleFieldCandidate
@@ -58,6 +59,7 @@ import type {
                     <p-tab value="hover-labels" data-testid="preferences-tab-hover-labels">Hover Labels</p-tab>
                     <p-tab value="rendering" data-testid="preferences-tab-rendering">Rendering</p-tab>
                     <p-tab value="storage" data-testid="preferences-tab-storage">Storage</p-tab>
+                    <p-tab value="connection" data-testid="preferences-tab-connection">Connection</p-tab>
                 </p-tablist>
                 <p-tabpanels>
                     <p-tabpanel value="general">
@@ -479,6 +481,35 @@ import type {
                         </div>
                     </p-tabpanel>
 
+                    <p-tabpanel value="connection">
+                        <p>Configure automatic recovery for this browser. Server datasource retries are configured separately.</p>
+                        <div class="button-container">
+                            <label for="connection-retry-enabled">Automatic retry</label>
+                            <p-toggleswitch inputId="connection-retry-enabled" [(ngModel)]="connectionRetryEnabled" />
+                        </div>
+                        <div class="button-container">
+                            <label for="connection-retry-initial">Initial delay (seconds)</label>
+                            <input id="connection-retry-initial" pInputText type="number" min="0.001" step="0.1"
+                                   [(ngModel)]="connectionInitialSeconds" />
+                        </div>
+                        <div class="button-container">
+                            <label for="connection-retry-multiplier">Backoff multiplier</label>
+                            <input id="connection-retry-multiplier" pInputText type="number" min="1" step="0.1"
+                                   [(ngModel)]="connectionBackoffMultiplier" />
+                        </div>
+                        <div class="button-container">
+                            <label for="connection-retry-maximum">Maximum delay / cooldown (seconds)</label>
+                            <input id="connection-retry-maximum" pInputText type="number" min="0.001" step="0.1"
+                                   [(ngModel)]="connectionMaximumSeconds" />
+                        </div>
+                        <p>Retries continue at the maximum delay during a prolonged outage. A datasource may require a longer minimum wait.</p>
+                        @if (connectionValidationMessage) {
+                            <p role="alert">{{ connectionValidationMessage }}</p>
+                        }
+                        <p-button label="Apply" icon="pi pi-check" (click)="applyConnectionPreferences()"
+                                  data-testid="connection-preferences-apply" />
+                    </p-tabpanel>
+
                     <p-tabpanel value="storage">
                         <div class="button-container">
                             <label>Storage for Viewer properties and search history</label>
@@ -523,6 +554,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     drillPickRadiusInput: number | string = DEFAULT_DRILL_PICK_RADIUS;
     locationSearchResultLimitInput: number | string = DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
     tilePullCompressionEnabledSetting: boolean = false;
+    connectionRetryEnabled = true;
+    connectionInitialSeconds = 5;
+    connectionBackoffMultiplier = 2;
+    connectionMaximumSeconds = 60;
+    connectionValidationMessage = "";
     deckAntialiasingEnabledSetting: boolean = true;
     semanticCompositingEnabledSetting: boolean = true;
     contactShadingEnabledSetting: boolean = true;
@@ -585,6 +621,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
                 public coordinatesPolicy: CoordinatesPolicyService,
                 private searchSchema: FeatureSearchSchemaService,
                 private dialogStack: DialogStackService) {
+        this.subscriptions.push(this.stateService.connectionRetryEnabledState.subscribe(value => this.connectionRetryEnabled = value));
+        this.subscriptions.push(this.stateService.connectionRetryInitialDelayMsState.subscribe(value => this.connectionInitialSeconds = value / 1000));
+        this.subscriptions.push(this.stateService.connectionRetryBackoffMultiplierState.subscribe(value => this.connectionBackoffMultiplier = value));
+        this.subscriptions.push(this.stateService.connectionRetryMaxDelayMsState.subscribe(value => this.connectionMaximumSeconds = value / 1000));
         this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;
         }));
@@ -649,6 +689,18 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     get dialogVisible(): boolean {
         return this.stateService.isDialogOpen(this.dialogLayoutId);
+    }
+
+    /** Applies one complete, validated connection policy without restarting healthy requests. */
+    applyConnectionPreferences(): void {
+        const result = connectionRetryPolicySchema.safeParse({
+            enabled: this.connectionRetryEnabled,
+            initialDelayMs: this.connectionInitialSeconds * 1000,
+            backoffMultiplier: this.connectionBackoffMultiplier,
+            maxDelayMs: this.connectionMaximumSeconds * 1000
+        });
+        this.connectionValidationMessage = result.success ? "" : result.error.issues.map(issue => issue.message).join(" ");
+        if (result.success) this.stateService.setConnectionRetryPolicy(result.data);
     }
 
     set dialogVisible(visible: boolean) {

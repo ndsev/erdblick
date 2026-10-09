@@ -57,6 +57,9 @@ export interface MapTileStreamFilterStatusPayload {
     outputTilesEmitted?: number;
     entriesEmitted?: number;
     error?: string;
+    retryAfterMs?: number;
+    serviceError?: boolean;
+    errorSourceMapId?: string;
 }
 export enum TileLoadState {
     LoadingQueued = 0,
@@ -116,6 +119,7 @@ export interface MapTileStreamSourceCatalogChangeSource {
     status?: string;
     statusMessage?: string;
     progress?: number | null;
+    retrying?: boolean;
 }
 
 /** Control payload emitted by mapget when datasource catalog state or structure changes. */
@@ -323,6 +327,7 @@ export abstract class MapTileStreamClientBase {
 export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
     private socket: WebSocket | null = null;
     private connecting: Promise<void> | null = null;
+    private connectionGeneration = 0;
     private readonly encoder = new TextEncoder();
     private lastRequestPromise: Promise<void> | null = null;
     private awaitingCompletion: boolean = false;
@@ -432,6 +437,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
             configIndex,
             status: typeof status === "string" ? status : undefined,
             statusMessage: typeof statusMessage === "string" ? statusMessage : undefined,
+            retrying: sourceRecord["retrying"] === true,
             progress: typeof progress === "number" && Number.isFinite(progress)
                 ? progress
                 : null
@@ -461,8 +467,14 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         return this.socket?.readyState === WebSocket.OPEN;
     }
 
-    /** Closes the websocket, ignoring close failures from already-dead sockets. */
+    /** Cancels local work synchronously; the websocket close event may arrive after page teardown. */
     close(code?: number, reason?: string) {
+        this.connectionGeneration++;
+        this.connecting = null;
+        this.stopPullLoops();
+        this.clearPendingFrames();
+        this.pullClientId = null;
+        this.lastTilesRequestBody = null;
         if (!this.socket) {
             return;
         }
@@ -484,8 +496,6 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         }
         this.transportFailureActive = true;
         console.error(message, error);
-        this.stopPullLoops();
-        this.clearPendingFrames();
         this.rejectCompletion(
             error instanceof Error ? error : new Error(message)
         );
@@ -505,8 +515,6 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         this.sourcesRevision = null;
         this.openedSocketCount = 0;
         this.awaitingSocketSourcesRevision = false;
-        this.stopPullLoops();
-        this.clearPendingFrames();
         this.frameLoop.dispose();
         this.resetCompletionPromise();
         this.destroyParser();
@@ -522,7 +530,6 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
     /** Invalidates in-flight payloads after datasource dictionaries have been replaced. */
     resetAfterDataSourceInfoChange() {
         this.close(1000, "datasource info changed");
-        this.clearPendingFrames();
         this.awaitingCompletion = false;
         this.lastRequestPromise = null;
         this.lastStatusPayload = null;
@@ -530,7 +537,6 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         this.incomingRequestId = null;
         this.latestRequestedRequestId = this.nextRequestId++;
         this.pullClientId = null;
-        this.stopPullLoops();
         this.resetCompletionPromise();
     }
 
@@ -648,11 +654,15 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
 
     /** Sends one or more pre-serialized request payloads and resets completion tracking. */
     private sendSerializedRequests(payloads: string[]) {
+        const generation = this.connectionGeneration;
         this.awaitingCompletion = true;
         this.lastStatusPayload = null;
         this.resetCompletionPromise();
         this.lastRequestPromise = this.connect()
             .then(() => {
+                if (generation !== this.connectionGeneration) {
+                    throw new DOMException("Connection closed.", "AbortError");
+                }
                 if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
                     throw new Error("WebSocket is not open.");
                 }
@@ -661,7 +671,9 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                 }
             })
             .catch(err => {
-                this.rejectCompletion(err);
+                if (generation === this.connectionGeneration) {
+                    this.rejectCompletion(err);
+                }
                 throw err;
             });
         return this;
@@ -675,6 +687,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         tileLayerRequests: any[],
         force = false
     ): Promise<"sent" | "unchanged" | "failed"> {
+        const generation = this.connectionGeneration;
         const stringPoolOffsets = this.parser!.getFieldDictOffsets();
         const requestBodyBase = {
             requests: tileLayerRequests,
@@ -698,8 +711,12 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                 requestId);
             this.sendSerializedRequests(requestPayloads);
             await this.waitForSend();
-            return "sent";
+            return generation === this.connectionGeneration ? "sent" : "failed";
         } catch (err) {
+            // An explicit close cancels this send, not a newer connection's request state.
+            if (generation !== this.connectionGeneration) {
+                return "failed";
+            }
             this.lastTilesRequestBody = null;
             this.latestRequestedRequestId = previousRequestId;
             console.error("Failed to send interactive tile request.", err);
@@ -962,12 +979,16 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
 
     /** Attempts the configured websocket endpoint first, then legacy `/tiles` for stale proxy setups. */
     private async connectWithEndpointFallback(): Promise<void> {
+        const generation = this.connectionGeneration;
         const candidates = this.streamEndpointCandidates();
         let lastError: Event | CloseEvent | unknown = undefined;
         for (let index = 0; index < candidates.length; ++index) {
             const candidate = candidates[index];
             try {
                 await this.openSocket(candidate);
+                if (generation !== this.connectionGeneration) {
+                    throw new DOMException("Connection closed.", "AbortError");
+                }
                 this.activeStreamPath = candidate;
                 this.usingLegacyWebSocketFallback = index > 0;
                 this.usingLegacyPullFallback = index > 0;
@@ -976,6 +997,10 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                 }
                 return;
             } catch (error) {
+                // Closing during startup must not open a fallback socket in the departing page.
+                if (generation !== this.connectionGeneration) {
+                    throw error;
+                }
                 lastError = error;
                 if (index === 0 && candidates.length > 1) {
                     console.warn(
@@ -1204,7 +1229,6 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                 expected: this.protocolVersion
             });
         }
-        this.stopPullLoops();
         this.rejectCompletion(new Error(
             `Unsupported mapget tile-stream protocol ${version.major}.${version.minor}.${version.patch}; `
             + `expected ${this.protocolVersion.major}.${this.protocolVersion.minor}.x.`));

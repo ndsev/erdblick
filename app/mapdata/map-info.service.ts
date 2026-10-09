@@ -32,6 +32,7 @@ interface SourceCatalogEntryUpdate {
     status?: string;
     statusMessage?: string;
     progress?: number | null;
+    retrying?: boolean;
 }
 
 /** One concrete option/view pair invalidated by an atomic style-option transaction. */
@@ -326,6 +327,7 @@ export class MapInfoService {
         }
         const updatedEntry: MapInfoItem = {
             ...this.sourceCatalogEntries[index],
+            retrying: update.retrying === true,
             progress: this.normalizeProgressValue(update.progress)
         };
         if (typeof update.status === "string") {
@@ -347,6 +349,13 @@ export class MapInfoService {
         this.publishSourceCatalogTree(this.sourceCatalogEntries);
         this.layerStateChanged.next("datasources");
         return true;
+    }
+
+    /** Reports constructor recovery independently of whether mapget's transport is connected. */
+    getSourceRecoveryState(): {retrying: boolean; failed: boolean; message: string} {
+        const failures = this.sourceCatalogEntries.filter(entry => dataSourceCatalogStatus(entry) === "failed");
+        return {retrying: failures.some(entry => entry.retrying === true), failed: failures.length > 0,
+            message: failures.map(entry => `${entry.mapId}: ${entry.statusMessage || "Datasource unavailable."}`).join("\n")};
     }
 
     /** Returns true when a lightweight update announces readiness but the local entry still lacks full metadata. */

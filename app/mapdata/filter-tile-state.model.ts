@@ -49,6 +49,7 @@ export class FilterTileState {
     error: string | null = null;
     dependencies: TileSubsetDependency[] = [];
     issues: TileSubsetIssue[] = [];
+    warnings: readonly string[] = [];
     info: Record<string, unknown> = {};
     receivedAt = 0;
     renderStats: Record<string, number> = {};
@@ -151,6 +152,7 @@ export class FilterTileState {
         this.renderStats = {};
         this.dependencies = dependencies;
         this.issues = delivery.issues as TileSubsetIssue[];
+        this.warnings = delivery.warnings ?? [];
         this.info = delivery.info;
         this.sourceFeatureCount = sourceFeatureCount;
         this.renderedEntryCount = delivery.numEntries;
@@ -165,7 +167,7 @@ export class FilterTileState {
 
     /** Record only failures belonging to the currently pending generation. */
     fail(generation: number, message: string): void {
-        if (generation !== this.pendingGeneration) {
+        if (generation !== this.pendingGeneration || !this.backendPending) {
             return;
         }
         this.status = this.subsetBlob ? "ready" : "error";
@@ -182,6 +184,7 @@ export class FilterTileState {
         this.glbAttachmentName = "";
         this.dependencies = [];
         this.issues = [];
+        this.warnings = [];
         this.info = {};
         this.sourceFeatureCount = null;
         this.renderedEntryCount = 0;

@@ -2371,6 +2371,21 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('validates and persists Connection preferences seeded through deployment state', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        expect(service.seedConfigDefaultState({connectionRetryInitialDelayMs: 7000,
+            connectionRetryMaxDelayMs: 90000}, "connection-config")).toEqual([]);
+        expect(service.connectionRetryPolicy.initialDelayMs).toBe(7000);
+        service.setConnectionRetryPolicy({...service.connectionRetryPolicy, enabled: false, backoffMultiplier: 3});
+        expect(service.exportSnapshot()).toMatchObject({connectionRetryEnabled: 0,
+            connectionRetryInitialDelayMs: 7000, connectionRetryBackoffMultiplier: 3});
+        expect(() => service.setConnectionRetryPolicy({...service.connectionRetryPolicy, maxDelayMs: 0})).toThrow();
+        expect(service.connectionRetryPolicy.maxDelayMs).toBe(90000);
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('exports app state entries with compact style option storage keys', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
