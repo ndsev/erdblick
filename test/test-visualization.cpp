@@ -1464,6 +1464,10 @@ TEST_CASE("TileLayerParser exposes the tile lifetime in milliseconds", "[erdblic
     constexpr int64_t expectedTimestampMs = 1'725'000'123'456;
     tile->setTimestamp(system_clock::time_point(milliseconds(expectedTimestampMs)));
     tile->setTtl(milliseconds(4'500));
+    tile->addWarning("Duplicate feature retained");
+    tile->setError("temporary outage");
+    tile->setErrorRetryAfter(milliseconds(5'000));
+    tile->setInfo("serviceError", true);
 
     std::ostringstream stream;
     REQUIRE(tile->write(stream));
@@ -1471,6 +1475,10 @@ TEST_CASE("TileLayerParser exposes the tile lifetime in milliseconds", "[erdblic
     auto metadata = parser.readTileLayerMetadata(SharedUint8Array(stream.str()));
     REQUIRE(metadata.conversionTimestampMs == static_cast<double>(expectedTimestampMs));
     REQUIRE(metadata.ttlMs == 4'500.0);
+    REQUIRE(metadata.warnings == nlohmann::json::array({"Duplicate feature retained"}));
+    REQUIRE(metadata.error == "temporary outage");
+    REQUIRE(metadata.errorRetryAfterMs == 5'000.0);
+    REQUIRE(metadata.serviceError);
 
     tile->setTtl(milliseconds::zero());
     std::ostringstream zeroStream;
@@ -1480,11 +1488,15 @@ TEST_CASE("TileLayerParser exposes the tile lifetime in milliseconds", "[erdblic
             SharedUint8Array(zeroStream.str())).ttlMs == 0.0);
 
     tile->setTtl(std::nullopt);
+    tile->setError(std::nullopt);
     std::ostringstream absentStream;
     REQUIRE(tile->write(absentStream));
     REQUIRE(std::isnan(
         parser.readTileLayerMetadata(
             SharedUint8Array(absentStream.str())).ttlMs));
+    REQUIRE(std::isnan(
+        parser.readTileLayerMetadata(
+            SharedUint8Array(absentStream.str())).errorRetryAfterMs));
 }
 
 TEST_CASE("TileLayerParser exposes subset identity and lifetime", "[erdblick.parser]")
@@ -1496,6 +1508,7 @@ TEST_CASE("TileLayerParser exposes subset identity and lifetime", "[erdblick.par
     source->setTimestamp(
         system_clock::time_point{milliseconds{1'725'000'123'456}});
     source->setTtl(milliseconds{875});
+    source->addWarning("Subset source warning");
     auto subset = std::make_shared<mapget::TileSubsetLayer>(
         source->tileId(),
         source->stringPoolId(),
@@ -1515,6 +1528,8 @@ TEST_CASE("TileLayerParser exposes subset identity and lifetime", "[erdblick.par
     REQUIRE(metadata.generation == 17);
     REQUIRE(metadata.layer.conversionTimestampMs == 1'725'000'123'456.0);
     REQUIRE(metadata.layer.ttlMs == 875.0);
+    REQUIRE(metadata.layer.warnings == nlohmann::json::array({"Subset source warning"}));
+    REQUIRE(metadata.layer.error.empty());
 }
 
 TEST_CASE("Feature search auto-scope accepts one attribute across different attribute layers", "[erdblick.search]")

@@ -11,6 +11,7 @@ import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {TreeTableNode} from "primeng/api";
 import {TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
+import {TileDeliveryError} from "../mapdata/tile-diagnostics";
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {
@@ -173,6 +174,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         renewal: boolean
     ): Promise<void> {
         let loaded: LoadedSourceDataLayer | null = null;
+        const finishLoading = this.tileStream.beginInspectionLoad();
         try {
             loaded = await this.loadSourceDataLayer(mapTileKey);
             if (revision !== this.loadRevision) {
@@ -201,6 +203,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             if (revision !== this.loadRevision) {
                 return;
             }
+            this.tileStream.scheduleRetainedTileRetry?.(this, mapTileKey, this.valueEpoch, error);
             const message = `${error}`;
             if (renewal && this.treeData.length) {
                 this.staleErrorMessage = message;
@@ -209,6 +212,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
                 this.setError(message);
             }
         } finally {
+            finishLoading();
             loaded?.layer.delete();
             if (revision === this.loadRevision) {
                 this.loading = false;
@@ -247,9 +251,17 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             const metadata = uint8ArrayToWasm((wasmBlob) =>
                 transport.parser.readTileLayerMetadata(wasmBlob),
             payload) as unknown as {
+                error?: string;
+                errorRetryAfterMs?: number;
+                serviceError?: boolean;
+                mapName?: string;
+                warnings?: string[];
                 conversionTimestampMs?: number;
                 ttlMs?: number;
             };
+            if (metadata.error) throw new TileDeliveryError(metadata.error, metadata.errorRetryAfterMs,
+                metadata.serviceError, metadata.mapName);
+            for (const warning of metadata.warnings ?? []) console.warn(`Tile warning (${mapTileKey}): ${warning}`);
             const timestamp = Number(metadata.conversionTimestampMs);
             const ttl = Number(metadata.ttlMs);
             const expiry = Number.isFinite(timestamp) &&

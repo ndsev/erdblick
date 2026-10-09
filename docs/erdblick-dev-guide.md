@@ -219,6 +219,31 @@ The transport supports bounded outgoing queues and adaptive payload batches.
 `/tiles` and `/tiles/next` remain fallback aliases for stale proxy
 deployments; new clients use `/interactive` and `/interactive/payload`.
 
+### Document lifecycle
+
+`MapTileStreamService` owns document-lifecycle suspension of the interactive
+transport. On `beforeunload` and `pagehide`, it cancels scheduled updates,
+pauses frame processing and closes the connection. Client closure aborts
+payload fetches and clears queued frames synchronously, without waiting for
+the websocket close event. Connection-generation checks prevent cancelled
+startup fallbacks or queued sends from affecting a replacement session.
+
+Early `beforeunload` cancellation is necessary because WebKit can reject
+payload fetches before delivering `pagehide`. A next-animation-frame recovery
+resumes streaming if the document renders again; a later `pagehide` cancels that
+recovery or closes a session already reopened. `pageshow` also restores a
+suspended document. Restoration forces the complete current pending snapshot
+into a new session and preserves the user's diagnostic pause and sticky
+protocol-incompatibility state. Angular service destruction removes the
+listeners and disposes the client.
+
+This does not suspend streaming merely because a tab is hidden, filter error
+messages, or suppress genuine failures on an active connection. The browser
+tests cover real reload cancellation and simulated cancelled-navigation and
+persisted page lifecycle events. They do not establish actual back/forward
+cache eligibility; a `beforeunload` listener can affect that eligibility in
+some browsers (see [Mozilla's compatibility caveat](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event#usage_notes)).
+
 ### TTL refresh
 
 Every retained `TileLayer` path reads the serialized conversion timestamp and
@@ -479,3 +504,15 @@ compatibility parser exists. Old staged cache blobs, stage-suffixed keys, LOD
 fields, `TileSearchResultLayer`, and full-feature visualizer APIs must not be
 reintroduced as compatibility paths. The URL decoder may discard an old stage
 suffix solely to restore older links.
+
+## Tile warnings and transient datasource recovery
+
+Protocol 5.4 metadata exposes `warnings` and `errorRetryAfterMs` for every tile type. Warned subset values remain ready and render normally. Warnings are retained with the current value and emitted once per value into diagnostics logs at warning severity, including map/layer/partition context. Replacing or disposing a value replaces or clears its diagnostics. Feature and source-data inspection also surface warnings without discarding content.
+
+A failed filter status may provide positive `retryAfterMs`. `MapTileStreamService` uses a separate instance of the shared indexed deadline scheduler, with one deadline per subscription/generation. While the delay is pending, unrelated snapshot updates cannot resubmit that failed subscription. When due, only the ref's current pending partitions are sent with the same generation; accepted tiles remain retained. Release, supersession, empty coverage, page lifecycle, pause and protocol incompatibility guard scheduled work. Inspection renewals use the same scheduler and preserve older content; cancellable initial inspection requests stop retrying when their selection is removed. Backend error codes/messages alone never trigger retries.
+
+Preferences → Connection edits the flat AppState keys `connectionRetryEnabled`, `connectionRetryInitialDelayMs`, `connectionRetryBackoffMultiplier` and `connectionRetryMaxDelayMs`. Defaults are enabled, 5000 ms, 2 and 60000 ms. They use normal browser persistence and snapshot/config ownership, with no URL parameters. Set deployment defaults in `config.json.state` or `mapviewer.yaml`'s `erdblick.state`; YAML overrides static defaults per key, while user-owned browser preferences remain authoritative. The UI displays seconds and validates the complete policy before Apply. Delays must be positive integer milliseconds within `2147483647`, the maximum must be at least the initial delay, and the multiplier must be finite and at least one. Malformed imported combinations fall back to default timing with a diagnostic.
+
+`connection-retry-policy.ts` is the common browser backoff/validation helper. Connection and request owners retain their attempt index through waits; producer hints are a minimum even above the browser cap. Preference changes recompute existing deadlines from their failure time; disabling retries removes timers but retains eligible demand for re-enabling. Compatible connection frames reset reconnect backoff; completed request recovery resets request backoff. Successful partial tiles do not reset an otherwise failing batch. Server constructor policy and HTTP eligibility belong to `sources[].retry`, independently of this browser.
+
+The diagnostics snapshot separates current recovery from socket connectivity and historical logs. Catalog `retrying` flags and active request owners drive the mainbar circle's green/red animation; stopped failures use static red and healthy idle state uses green. The tooltip/popover identifies causes and retry waits. Reduced motion uses a static retry presentation. The existing spinner requires both a connected backend and active loading or pipeline work; unfinished counters during retry waits do not show it. Pausing progress does not freeze connection status. No health polling or additional retry timer is used for presentation.

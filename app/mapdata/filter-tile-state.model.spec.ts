@@ -129,3 +129,20 @@ describe("FilterTileState", () => {
         expect(tile.valueVersion).toBe(0);
     });
 });
+
+
+it("retains warning-bearing content and excludes accepted outputs from a later request failure", () => {
+    const value = delivery({warnings: ["duplicate Road.7"]});
+    const state = new FilterTileState(value.mapId, value.layerId, value.partition, value.mapTileKey, value.generation);
+    state.install(value);
+    state.fail(value.generation, "another pending partition failed");
+    expect(state.status).toBe("ready");
+    expect(state.error).toBeNull();
+    expect(state.warnings).toEqual(["duplicate Road.7"]);
+    state.markPending(value.generation + 1);
+    state.fail(value.generation + 1, "temporary outage");
+    expect(state.subsetBlob).toBe(value.blob);
+    expect(state.error).toBe("temporary outage");
+    state.dispose();
+    expect(state.warnings).toEqual([]);
+});

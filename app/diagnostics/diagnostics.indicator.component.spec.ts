@@ -32,7 +32,8 @@ function snapshot(
                 renderSeconds: 0
             }
         },
-        backend: {connected: true}
+        backend: {connected: true},
+        loading: loaded + errors < expected
     };
 }
 
@@ -65,6 +66,16 @@ describe("DiagnosticsIndicatorComponent", () => {
         expect(component.showSpinner).toBe(false);
         expect(component.hasError).toBe(true);
         expect(component.snapshot.tiles.loaded).toBe(1);
+        const recovering = snapshot(0, 2);
+        recovering.loading = false;
+        recovering.recovery = {retrying: true, failed: true, message: "SLS outage"};
+        snapshot$.next(recovering);
+        expect(component.showSpinner).toBe(false);
+        expect(component.statusTooltip).toContain("Retrying");
+        recovering.loading = true;
+        recovering.backend.connected = false;
+        snapshot$.next({...recovering});
+        expect(component.showSpinner).toBe(false);
         detectChanges.mockClear();
 
         snapshot$.next(snapshot(2, 2));

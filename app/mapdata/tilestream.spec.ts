@@ -48,6 +48,145 @@ function packedFrames(...frames: Uint8Array[]): ArrayBuffer {
 }
 
 describe('MapTileStreamClient', () => {
+    it('aborts pending payload requests before the websocket close event', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const signals: AbortSignal[] = [];
+        const close = vi.fn();
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+            new Promise<Response>((_resolve, reject) => {
+                const signal = init!.signal!;
+                signals.push(signal);
+                signal.addEventListener('abort', () => reject(
+                    new DOMException('The request was aborted.', 'AbortError')
+                ), {once: true});
+            })
+        ));
+        try {
+            client['socket'] = {readyState: WebSocket.OPEN, close} as unknown as WebSocket;
+            client['handleFrame'](jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context', requestId: 1,
+                clientId: 42
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+            expect(signals).toHaveLength(2);
+
+            client.close(1000, 'page hidden');
+
+            // Native close notifications are asynchronous. Cancellation must not wait for one.
+            expect(signals.every(signal => signal.aborted)).toBe(true);
+            await Promise.resolve();
+            expect(close).toHaveBeenCalledExactlyOnceWith(1000, 'page hidden');
+            expect(error).not.toHaveBeenCalled();
+        } finally {
+            client['socket'] = null;
+            client.destroy();
+            vi.unstubAllGlobals();
+            error.mockRestore();
+        }
+    });
+
+    it('does not report a cancelled payload body as a transport failure', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const controller = new AbortController();
+        let rejectBody!: (error: Error) => void;
+        const body = new Promise<ArrayBuffer>((_resolve, reject) => {rejectBody = reject;});
+        const response = new Response();
+        const readBody = vi.spyOn(response, 'arrayBuffer').mockReturnValue(body);
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+        try {
+            client['pullClientId'] = 42;
+            client['pullControllers'] = [controller];
+            const pending = client['runPullLoop'](controller);
+            await vi.waitFor(() => expect(readBody).toHaveBeenCalledOnce());
+
+            client.close(1000, 'page hidden');
+            rejectBody(new TypeError('Load failed'));
+            await pending;
+
+            expect(controller.signal.aborted).toBe(true);
+            expect(error).not.toHaveBeenCalled();
+        } finally {
+            client.destroy();
+            vi.unstubAllGlobals();
+            error.mockRestore();
+        }
+    });
+
+    it('still reports genuine payload failures and closes the connection', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const controller = new AbortController();
+        const failure = new TypeError('Network unavailable');
+        const close = vi.fn();
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(failure));
+        try {
+            client['socket'] = {readyState: WebSocket.OPEN, close} as unknown as WebSocket;
+            client['pullClientId'] = 42;
+            client['pullControllers'] = [controller];
+
+            await client['runPullLoop'](controller);
+
+            expect(error).toHaveBeenCalledExactlyOnceWith('Interactive payload fetch failed.', failure);
+            expect(close).toHaveBeenCalledExactlyOnceWith(1011, 'interactive transport failure');
+            expect(controller.signal.aborted).toBe(true);
+        } finally {
+            client['socket'] = null;
+            client.destroy();
+            vi.unstubAllGlobals();
+            error.mockRestore();
+        }
+    });
+
+    it('does not retry a fallback endpoint after closing a connection attempt', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        let rejectOpen!: (error: Error) => void;
+        const opening = new Promise<void>((_resolve, reject) => {rejectOpen = reject;});
+        const openSocket = vi.fn().mockReturnValueOnce(opening).mockResolvedValue(undefined);
+        client['openSocket'] = openSocket;
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const request = client.updateRequest([]);
+            expect(openSocket).toHaveBeenCalledExactlyOnceWith('/interactive');
+
+            client.close(1000, 'page hidden');
+            rejectOpen(new DOMException('Connection closed.', 'AbortError'));
+            expect(await request).toBe('failed');
+            expect(openSocket).toHaveBeenCalledOnce();
+            expect(error).not.toHaveBeenCalled();
+            expect(warning).not.toHaveBeenCalled();
+
+            // A restored page can start a fresh attempt; cancellation is not a permanent failure.
+            await client.connect();
+            expect(openSocket).toHaveBeenCalledTimes(2);
+            expect(openSocket).toHaveBeenLastCalledWith('/interactive');
+        } finally {
+            client.destroy();
+            error.mockRestore();
+            warning.mockRestore();
+        }
+    });
+
+    it('does not send queued controls after an explicit close', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const send = vi.fn();
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            client['socket'] = {readyState: WebSocket.OPEN, close: vi.fn(), send} as unknown as WebSocket;
+            const pending = client.updateRequest([]);
+            client.close(1000, 'page hidden');
+
+            expect(await pending).toBe('failed');
+            expect(send).not.toHaveBeenCalled();
+            expect(error).not.toHaveBeenCalled();
+        } finally {
+            client['socket'] = null;
+            client.destroy();
+            error.mockRestore();
+        }
+    });
+
     it('streams POST /tiles across arbitrary HTTP chunk boundaries without opening a websocket', async () => {
         const payload = new Uint8Array(packedFrames(
             jsonFrame(41, {ordinal: 1}),
@@ -614,6 +753,7 @@ describe('MapTileStreamClient', () => {
                     configIndex: 7,
                     status: 'initializing',
                     statusMessage: 'Loading layers',
+                    retrying: false,
                     progress: 0.5
                 }
             });
@@ -651,6 +791,7 @@ describe('MapTileStreamClient', () => {
                     configIndex: 7,
                     status: 'initializing',
                     statusMessage: undefined,
+                    retrying: false,
                     progress: null
                 }
             });

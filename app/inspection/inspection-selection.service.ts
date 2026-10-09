@@ -58,6 +58,7 @@ export class InspectionSelectionService {
     remoteHoverHighlightAllowed = false;
 
     private selectionConversionRevision = 0;
+    private readonly pendingFeatureLoadControllers = new Map<string, AbortController>();
     private readonly pendingFeatureLoads = new Map<string, Promise<FeatureWrapper[]>>();
     private readonly inspectionExpiryOwners =
         new Map<string, InspectionExpiryOwner>();
@@ -78,6 +79,14 @@ export class InspectionSelectionService {
         this.stateService.selectionState.subscribe(selected => {
             this.ngZone.run(() => this.selectionIdsTopic.next(selected));
             const revision = ++this.selectionConversionRevision;
+            const demanded = new Set(selected.map(panel => this.featureLoadKey(panel.features)));
+            for (const [key, controller] of this.pendingFeatureLoadControllers) {
+                if (!demanded.has(key)) {
+                    controller.abort();
+                    this.pendingFeatureLoadControllers.delete(key);
+                    this.pendingFeatureLoads.delete(key);
+                }
+            }
             const pendingSelections: InspectionPanelModel<FeatureWrapper>[] = [];
             const pendingPanelUpdates: Array<{
                 panel: InspectionPanelModel<FeatureWrapper>,
@@ -235,19 +244,25 @@ export class InspectionSelectionService {
         });
     }
 
+    private featureLoadKey(featureIds: TileFeatureId[]): string {
+        return featureIds.map(feature => `${feature.mapTileKey}\u0000${feature.featureId}`).sort().join("\u0001");
+    }
+
     /** Shares one in-flight restricted load across rapid panel-state emissions. */
     private loadFeaturesOnce(featureIds: TileFeatureId[]): Promise<FeatureWrapper[]> {
-        const key = featureIds
-            .map(feature => `${feature.mapTileKey}\u0000${feature.featureId}`)
-            .sort()
-            .join("\u0001");
+        const key = this.featureLoadKey(featureIds);
         const pending = this.pendingFeatureLoads.get(key);
         if (pending) {
             return pending;
         }
-        const request = this.tileStream.loadFeatures(featureIds).finally(() => {
+        this.pendingFeatureLoadControllers.get(key)?.abort();
+        const controller = new AbortController();
+        this.pendingFeatureLoadControllers.set(key, controller);
+        const request = this.tileStream.loadFeatures(featureIds, controller.signal).finally(() => {
             if (this.pendingFeatureLoads.get(key) === request) {
                 this.pendingFeatureLoads.delete(key);
+                // Keep terminal diagnostics owned by this selection until it
+                // is removed or superseded, just like retained tile failures.
             }
         });
         this.pendingFeatureLoads.set(key, request);
@@ -467,6 +482,10 @@ export class InspectionSelectionService {
         try {
             replacements = await this.tileStream.loadFeatures(owner.featureIds);
         } catch (error) {
+            if (this.inspectionExpiryOwners.get(owner.key) === owner &&
+                tokens.some(token => token.valueVersion === owner.epoch)) {
+                this.tileStream.scheduleRetainedTileRetry?.(owner, owner.tileId, owner.epoch, error);
+            }
             console.error(
                 `Failed to renew retained selection tile '${owner.mapTileKey}'.`,
                 error
