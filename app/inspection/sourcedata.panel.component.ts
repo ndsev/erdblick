@@ -203,7 +203,11 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             if (revision !== this.loadRevision) {
                 return;
             }
-            this.tileStream.scheduleRetainedTileRetry?.(this, mapTileKey, this.valueEpoch, error);
+            if (error instanceof TileDeliveryError) {
+                const [, , partition] = parseMapPartitionKey(coreLib, mapTileKey);
+                this.tileStream.updateRetainedTileExpiry(
+                    this, partitionKey(partition), this.valueEpoch, error.expiresAtMs);
+            }
             const message = `${error}`;
             if (renewal && this.treeData.length) {
                 this.staleErrorMessage = message;
@@ -252,15 +256,11 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
                 transport.parser.readTileLayerMetadata(wasmBlob),
             payload) as unknown as {
                 error?: string;
-                errorRetryAfterMs?: number;
-                serviceError?: boolean;
                 mapName?: string;
                 warnings?: string[];
                 conversionTimestampMs?: number;
                 ttlMs?: number;
             };
-            if (metadata.error) throw new TileDeliveryError(metadata.error, metadata.errorRetryAfterMs,
-                metadata.serviceError, metadata.mapName);
             for (const warning of metadata.warnings ?? []) console.warn(`Tile warning (${mapTileKey}): ${warning}`);
             const timestamp = Number(metadata.conversionTimestampMs);
             const ttl = Number(metadata.ttlMs);
@@ -271,6 +271,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             expiresAtMs = expiry !== null && Number.isFinite(expiry)
                 ? expiry
                 : null;
+            if (metadata.error) throw new TileDeliveryError(metadata.error, expiresAtMs);
             const parsedLayer = uint8ArrayToWasm((wasmBlob) => {
                 return transport.parser.readTileSourceDataLayer(wasmBlob);
             }, payload);

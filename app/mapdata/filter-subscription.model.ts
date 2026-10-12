@@ -73,6 +73,7 @@ export interface TileSubsetDelivery {
         partition: PartitionId;
         sourceFeatureCount: number;
     }>;
+    readonly error?: string | null;
     readonly warnings?: readonly string[];
     readonly issues: Array<{
         channelId: string;

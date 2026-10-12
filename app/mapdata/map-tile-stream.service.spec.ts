@@ -314,9 +314,6 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
         ) as MapTileStreamService;
         const internal = service as any;
         const owner = {expireTiles: vi.fn()};
-        internal.retryScheduler = {cancelOwner: vi.fn()};
-        internal.retainedRetries = new Map();
-        internal.deferredRetainedRetries = new Map();
         internal.tileExpiryScheduler = {
             cancel: vi.fn(),
             schedule: vi.fn()
@@ -325,10 +322,7 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
 
         service.updateRetainedTileExpiry(owner, 7, 3, 1_999);
 
-        expect(internal.tileExpiryScheduler.cancel).toHaveBeenCalledWith(
-            owner,
-            7
-        );
+        expect(internal.tileExpiryScheduler.cancel).toHaveBeenCalledWith(owner, 7);
         expect(internal.tileExpiryScheduler.schedule).not.toHaveBeenCalled();
         now.mockRestore();
     });
@@ -339,10 +333,7 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
         ) as MapTileStreamService;
         const internal = service as any;
         const ref = {filterId: "filter", released: false};
-        internal.filterRetryDeadlines = new Map();
         internal.filterSubscriptionsById = new Map([["filter", ref]]);
-        internal.retryScheduler = {cancel: vi.fn()};
-        internal.deferredRetainedRetries = new Map();
         internal.tileExpiryScheduler = {
             cancel: vi.fn(),
             schedule: vi.fn()
@@ -400,7 +391,6 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
         internal.updateInProgress = false;
         internal.updatePending = false;
         internal.forceNextUpdate = true;
-        internal.filterRetryDeadlines = new Map();
         internal.filterSubscriptionsById = new Map([
             [firstRef.filterId, firstRef],
             [emptyRef.filterId, emptyRef]
@@ -559,129 +549,58 @@ describe("MapTileStreamService object discovery", () => {
 });
 
 
-describe("explicit datasource retry hints", () => {
+describe("failed tile expiry", () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());
 
-    it("delays pending-only retries, coalesces failures and retains the generation", async () => {
+    it("does not suppress new viewport coverage while a failed tile waits for expiry", async () => {
         const service = serviceHarness();
         const internal = service as any;
         const updates = vi.fn().mockResolvedValue("sent");
         internal.tileStream = {updateRequest: updates};
         const ref = service.createFilterSubscription({mapId: "Map", layerId: "Layer", channels: []},
-            {partitions: [tilePartition(1), tilePartition(2)]}, {onTile: () => ({status: "accepted", valueVersion: 1})});
-        // One output was already accepted when the other failed.
-        (ref as any).pendingPartitionKeys.delete("tile:1");
-        const status = {type: "mapget.filter.status", filterId: ref.filterId, generation: ref.generation,
-            state: "Failed", error: "503", retryAfterMs: 5000};
-        internal.acceptFilterStatus(status);
-        internal.acceptFilterStatus(status);
-        expect(internal.retryScheduler.size).toBe(1);
+            {partitions: [tilePartition(1), tilePartition(2)]},
+            {onTile: () => ({status: "accepted", valueVersion: 1})});
+        const generation = ref.generation;
+        for (const id of [1, 2]) {
+            ref.accept({blob: new Uint8Array(), filterId: ref.filterId, generation,
+                mapId: "Map", layerId: "Layer", partition: tilePartition(id), partitionKey: `tile:${id}`,
+                mapTileKey: `Features:Map:Layer:${id}`, stringPoolId: "source",
+                conversionTimestampMs: Date.now(), ttlMs: id === 2 ? 5000 : null,
+                error: id === 2 ? "503" : null, dependencies: [], issues: [], info: {}, numEntries: 0,
+                geometryVertexCount: 0, glbAttachmentName: "", receivedAt: 0});
+        }
+        expect(internal.tileExpiryScheduler.size).toBe(1);
+        ref.setCoverage({partitions: [tilePartition(1), tilePartition(2), tilePartition(3)]});
         await vi.advanceTimersByTimeAsync(100);
-        expect(updates.mock.calls.at(-1)![0]).toEqual([]);
-        await vi.advanceTimersByTimeAsync(4950);
-        const requests = updates.mock.calls.at(-1)![0];
-        expect(requests).toHaveLength(1);
-        expect(requests[0].generation).toBe(status.generation);
-        expect(requests[0].partitions).toEqual([{kind: "tile", id: 2}]);
-        internal.acceptFilterStatus(status);
-        expect(internal.filterRetryDeadlines.get(ref).at - Date.now()).toBe(10000);
+        expect(updates.mock.calls.at(-1)![0][0].partitions).toEqual([{kind: "tile", id: 3}]);
+        // Turning off connection retries does not disable value freshness.
         internal.stateService.connectionRetryPolicy = {...DEFAULT_CONNECTION_RETRY_POLICY, enabled: false};
         internal.applyRetryPolicy();
-        expect(internal.retryScheduler.size).toBe(0);
-        expect(internal.filterRetryDeadlines.get(ref).at).toBe(Infinity);
-        internal.stateService.connectionRetryPolicy = {...DEFAULT_CONNECTION_RETRY_POLICY, maxDelayMs: 6000};
-        internal.applyRetryPolicy();
-        expect(internal.filterRetryDeadlines.get(ref).at - Date.now()).toBe(6000);
-        internal.acceptFilterStatus({...status, state: "Success", error: undefined});
-        expect(internal.filterRetryDeadlines.has(ref)).toBe(false);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(updates.mock.calls.at(-1)![0][0].partitions).toEqual([
+            {kind: "tile", id: 2}, {kind: "tile", id: 3}]);
+        expect(ref.generation).toBe(generation);
         ref.release();
     });
 
-    it("cancels released retries and never infers eligibility from a message", async () => {
+    it("cancels expiry when the failed output is no longer retained", async () => {
         const service = serviceHarness();
-        const internal = service as any;
-        const ref = service.createFilterSubscription({mapId: "Map", layerId: "Layer", channels: []},
-            {partitions: [tilePartition(1)]}, {onTile: () => ({status: "accepted", valueVersion: 1})});
-        const failed = {type: "mapget.filter.status", filterId: ref.filterId, generation: ref.generation,
-            state: "Failed", error: "503"};
-        internal.acceptFilterStatus(failed);
-        expect(internal.retryScheduler.size).toBe(0);
-        internal.acceptFilterStatus({...failed, retryAfterMs: 5000});
-        ref.release();
-        expect(internal.retryScheduler.size).toBe(0);
-        await vi.advanceTimersByTimeAsync(6000);
-        expect(internal.filterRetryDeadlines.size).toBe(0);
-    });
-
-    it("defers retained retries while paused and cancels disposed owners", async () => {
-        const service = serviceHarness();
-        const internal = service as any;
         const owner = {expireTiles: vi.fn()};
-        service.tilePipelinePaused$.next(true);
-        service.scheduleRetainedTileRetry(owner, "tile", 3, new TileDeliveryError("outage", 5000));
-        await vi.advanceTimersByTimeAsync(5001);
-        expect(owner.expireTiles).not.toHaveBeenCalled();
-        service.tilePipelinePaused$.next(false);
-        internal.flushRetainedRetries();
-        expect(owner.expireTiles).toHaveBeenCalledWith([{tileId: "tile", valueVersion: 3}]);
-        service.scheduleRetainedTileRetry(owner, "tile", 3, new TileDeliveryError("outage", 5000));
+        service.updateRetainedTileExpiry(owner, "tile", 3, Date.now() + 5000);
         service.cancelRetainedTileExpiries(owner);
-        await vi.advanceTimersByTimeAsync(5001);
-        expect(owner.expireTiles).toHaveBeenCalledOnce();
+        await vi.advanceTimersByTimeAsync(6000);
+        expect(owner.expireTiles).not.toHaveBeenCalled();
     });
 
-    it.each(["refresh", "suspend", "empty coverage", "success", "permanent error"])(
-        "removes obsolete delayed work after %s", (action) => {
-            const service = serviceHarness();
-            const internal = service as any;
-            const ref = service.createFilterSubscription({mapId: "Map", layerId: "Layer", channels: []},
-                {partitions: [tilePartition(1)]}, {onTile: () => ({status: "accepted", valueVersion: 1})});
-            const status = {type: "mapget.filter.status", filterId: ref.filterId, generation: ref.generation,
-                state: "Failed", error: "outage", retryAfterMs: 5000};
-            internal.acceptFilterStatus(status);
-            expect(internal.retryScheduler.size).toBe(1);
-            if (action === "refresh") ref.refresh();
-            else if (action === "suspend") ref.suspend();
-            else if (action === "empty coverage") ref.setCoverage({partitions: []});
-            else internal.acceptFilterStatus({...status, retryAfterMs: undefined,
-                state: action === "success" ? "Success" : "Failed",
-                error: action === "success" ? undefined : "invalid schema"});
-            expect(internal.retryScheduler.size).toBe(0);
-            expect(internal.filterRetryDeadlines.size).toBe(0);
-            ref.release();
-        });
-
-    it("keeps an initial inspection pending until a transient failure recovers", async () => {
+    it("returns initial inspection failures promptly instead of hiding them in a retry loop", async () => {
         const service = serviceHarness();
         const internal = service as any;
-        const load = vi.spyOn(internal, "loadFeaturesOnce")
-            .mockRejectedValueOnce(new TileDeliveryError("outage", 5000)).mockResolvedValue([]);
-        const pending = service.loadFeatures([], new AbortController().signal);
-        await vi.advanceTimersByTimeAsync(4999);
-        expect(load).toHaveBeenCalledOnce();
-        await vi.advanceTimersByTimeAsync(2);
-        await expect(pending).resolves.toEqual([]);
-        expect(load).toHaveBeenCalledTimes(2);
-        expect(internal.retryScheduler.size).toBe(0);
-    });
-});
-
-
-it("cancels an initial inspection while it is waiting to retry", async () => {
-    vi.useFakeTimers();
-    const service = serviceHarness();
-    const internal = service as any;
-    const load = vi.spyOn(internal, "loadFeaturesOnce").mockRejectedValue(new TileDeliveryError("outage", 5000));
-    const controller = new AbortController();
-    try {
-        const pending = service.loadFeatures([], controller.signal);
-        await vi.advanceTimersByTimeAsync(1);
-        expect(internal.retryScheduler.size).toBe(1);
-        controller.abort(new Error("panel closed"));
-        await expect(pending).rejects.toThrow("panel closed");
-        expect(internal.retryScheduler.size).toBe(0);
+        const error = new TileDeliveryError("outage", Date.now() + 5000);
+        const load = vi.spyOn(internal, "loadFeaturesOnce").mockRejectedValue(error);
+        await expect(service.loadFeatures([], new AbortController().signal)).rejects.toBe(error);
         await vi.advanceTimersByTimeAsync(6000);
         expect(load).toHaveBeenCalledOnce();
-    } finally { vi.useRealTimers(); }
+        expect(internal.activeInspectionLoads).toBe(0);
+    });
 });

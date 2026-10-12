@@ -35,7 +35,6 @@ import {
 } from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
-import {TileDeliveryError} from "./tile-diagnostics";
 import {TileExpiryScheduler} from "./tile-expiry-scheduler";
 import {
     ConnectionRetryAttempt, ConnectionRetryPolicy, connectionRetryDeadline,
@@ -60,13 +59,6 @@ export interface RetainedTileExpiryOwner {
 }
 
 type StreamExpiryOwner = RetainedTileExpiryOwner | FilterSubscriptionRef;
-
-/** A failure remains owned until recovery, cancellation or a new generation. */
-interface OwnedRetry extends ConnectionRetryAttempt {
-    generation: number;
-    retryable: boolean;
-    sourceMapId?: string;
-}
 
 export interface BackendRequestProgress {
     done: number;
@@ -141,9 +133,6 @@ export class MapTileStreamService implements OnDestroy {
                 }
             }
         );
-    private readonly deferredRetainedRetries = new Map<RetainedTileExpiryOwner, Array<{tileId: string | number; valueVersion: number}>>();
-    private readonly filterRetryDeadlines = new Map<FilterSubscriptionRef, OwnedRetry>();
-    private readonly retainedRetries = new Map<RetainedTileExpiryOwner, Map<string | number, OwnedRetry>>();
     private connectionRetry?: ConnectionRetryAttempt;
     private connectionTerminalError = "";
     private activeInspectionLoads = 0;
@@ -154,24 +143,9 @@ export class MapTileStreamService implements OnDestroy {
         this.forceNextUpdate = true;
         this.scheduleUpdate();
     }};
-    private readonly retryScheduler = new TileExpiryScheduler<StreamExpiryOwner, string | number>(
+    private readonly connectionRetryScheduler = new TileExpiryScheduler<RetainedTileExpiryOwner, string>(
         (owner, tokens) => {
-            if (owner instanceof FilterSubscriptionRef) {
-                if (!owner.released && !owner.suspended &&
-                    owner.generation === tokens[0].valueVersion &&
-                    this.filterSubscriptionsById.get(owner.filterId) === owner &&
-                    !this.backendProtocolMismatchActive) {
-                    this.updateFilterSubscription(owner, true);
-                }
-            } else if (!this.backendProtocolMismatchActive) {
-                for (const token of tokens) {
-                    const retry = this.retainedRetries.get(owner)?.get(token.tileId);
-                    if (retry) retry.at = 0;
-                }
-                if (this.pageHidden || this.tilePipelinePaused)
-                    this.deferredRetainedRetries.set(owner, tokens);
-                else owner.expireTiles(tokens);
-            }
+            if (!this.backendProtocolMismatchActive) owner.expireTiles(tokens);
         }
     );
     private readonly updateDebounceMs = 25;
@@ -262,9 +236,7 @@ export class MapTileStreamService implements OnDestroy {
             const expected =
                 `${mismatch.expected.major}.${mismatch.expected.minor}.x`;
             this.backendProtocolMismatchActive = true;
-            this.retryScheduler.dispose();
-            this.filterRetryDeadlines.clear();
-            this.retainedRetries.clear();
+            this.connectionRetryScheduler.dispose();
             this.connectionRetry = undefined;
             this.showBackendProtocolError(
                 `The map backend uses unsupported tile-stream protocol ${actual}; ` +
@@ -294,7 +266,7 @@ export class MapTileStreamService implements OnDestroy {
                 );
                 if (event.code === 1002 || event.code === 1003 || event.code === 1008) {
                     this.connectionTerminalError = event.reason || "Backend rejected the connection.";
-                    this.retryScheduler.cancelOwner(this.connectionRetryOwner);
+                    this.connectionRetryScheduler.cancelOwner(this.connectionRetryOwner);
                     this.connectionRetry = undefined;
                 } else {
                     this.scheduleConnectionRetry(event.reason || "Backend connection closed.");
@@ -339,7 +311,6 @@ export class MapTileStreamService implements OnDestroy {
             return;
         }
         this.pageHidden = false;
-        this.flushRetainedRetries();
         this.tileStream?.clearPendingFrames();
         this.tileStream?.setFrameProcessingPaused(this.tilePipelinePaused);
         this.forceNextUpdate = true;
@@ -366,10 +337,7 @@ export class MapTileStreamService implements OnDestroy {
         this.tileStream?.destroy();
         this.tileStream = null;
         this.tileExpiryScheduler.dispose();
-        this.retryScheduler.dispose();
-        this.filterRetryDeadlines.clear();
-        this.deferredRetainedRetries.clear();
-        this.retainedRetries.clear();
+        this.connectionRetryScheduler.dispose();
     }
 
     createFilterSubscription(
@@ -638,12 +606,6 @@ export class MapTileStreamService implements OnDestroy {
         ref: FilterSubscriptionRef,
         force: boolean
     ): void {
-        const retry = this.filterRetryDeadlines.get(ref);
-        if (retry && (retry.generation !== ref.generation || ref.suspended ||
-            !(ref.requestJson()["partitions"] as unknown[]).length)) {
-            this.retryScheduler.cancelOwner(ref);
-            this.filterRetryDeadlines.delete(ref);
-        }
         if (!ref.released &&
             this.filterSubscriptionsById.get(ref.filterId) === ref) {
             if (force) {
@@ -684,12 +646,8 @@ export class MapTileStreamService implements OnDestroy {
         valueVersion: number,
         expiresAtMs: number | null
     ): void {
-        this.retryScheduler.cancelOwner(owner);
-        this.retainedRetries.delete(owner);
-        this.deferredRetainedRetries.delete(owner);
-        // This value came from an explicit request which just completed. If
-        // its encoded lifetime elapsed in transit, retrying it immediately
-        // creates a self-sustaining request loop without making it fresher.
+        // A renewal may retain the old wrapper when its feature disappeared.
+        // Re-arming that elapsed lifetime would create an immediate request loop.
         if (expiresAtMs === null || expiresAtMs <= Date.now()) {
             this.tileExpiryScheduler.cancel(owner, tileId);
             return;
@@ -702,38 +660,10 @@ export class MapTileStreamService implements OnDestroy {
         );
     }
 
-    private flushRetainedRetries(): void {
-        if (this.pageHidden || this.tilePipelinePaused || this.backendProtocolMismatchActive || !this.retryPolicy.enabled) return;
-        const pending = [...this.deferredRetainedRetries];
-        this.deferredRetainedRetries.clear();
-        for (const [owner, tokens] of pending) owner.expireTiles(tokens);
-    }
-
-    /** Retry only explicitly transient errors while the caller retains ownership. */
-    scheduleRetainedTileRetry(owner: RetainedTileExpiryOwner, tileId: string | number,
-                              valueVersion: number, error: unknown): boolean {
-        if (!(error instanceof TileDeliveryError) || this.backendProtocolMismatchActive) return false;
-        const retryable = error.retryAfterMs !== null;
-        if (!retryable && !error.serviceError) return false;
-        let entries = this.retainedRetries.get(owner);
-        if (!entries) this.retainedRetries.set(owner, entries = new Map());
-        const previous = entries.get(tileId);
-        const retry: OwnedRetry = {...recordConnectionFailure(
-            previous?.generation === valueVersion ? previous : undefined,
-            error.message, error.retryAfterMs ?? 0), generation: valueVersion, retryable,
-            sourceMapId: error.mapId};
-        entries.set(tileId, retry);
-        this.scheduleOwnedRetry(owner, tileId, retry);
-        return retryable;
-    }
-
     cancelRetainedTileExpiries(
         owner: RetainedTileExpiryOwner
     ): void {
         this.tileExpiryScheduler.cancelOwner(owner);
-        this.retryScheduler.cancelOwner(owner);
-        this.deferredRetainedRetries.delete(owner);
-        this.retainedRetries.delete(owner);
     }
 
     cancelFilterPartitionExpiries(
@@ -754,8 +684,6 @@ export class MapTileStreamService implements OnDestroy {
             return;
         }
         this.cancelFilterPartitionExpiries(ref);
-        this.retryScheduler.cancelOwner(ref);
-        this.filterRetryDeadlines.delete(ref);
         this.filterSubscriptionsById.delete(ref.filterId);
         this.scheduleUpdate();
     }
@@ -839,43 +767,11 @@ export class MapTileStreamService implements OnDestroy {
         tileFeatureIds: (TileFeatureId | null)[],
         signal?: AbortSignal
     ): Promise<FeatureWrapper[]> {
-        let wake: (() => void) | undefined;
-        const owner: RetainedTileExpiryOwner = {expireTiles: () => wake?.()};
-        const cancel = () => this.cancelRetainedTileExpiries(owner);
-        let retainTerminalFailure = false;
-        signal?.addEventListener("abort", cancel, {once: true});
-        try { while (true) {
-            signal?.throwIfAborted();
-            try {
-                const finishLoading = this.beginInspectionLoad();
-                try { return await this.loadFeaturesOnce(tileFeatureIds, signal); }
-                finally { finishLoading(); }
-            }
-            catch (error) {
-                if (!signal || !(error instanceof TileDeliveryError)) throw error;
-                const scheduled = this.scheduleRetainedTileRetry(owner, "inspection", 0, error);
-                if (!scheduled) {
-                    retainTerminalFailure = error.serviceError && !signal.aborted;
-                    throw error;
-                }
-                await new Promise<void>((resolve, reject) => {
-                    wake = () => {
-                        signal.removeEventListener("abort", abort);
-                        resolve();
-                    };
-                    const abort = () => {
-                        cancel();
-                        reject(signal.reason);
-                    };
-                    signal.addEventListener("abort", abort, {once: true});
-                    if (signal.aborted) abort();
-                });
-            }
-        } } finally {
-            if (!retainTerminalFailure) {
-                signal?.removeEventListener("abort", cancel);
-                cancel();
-            }
+        const finishLoading = this.beginInspectionLoad();
+        try {
+            return await this.loadFeaturesOnce(tileFeatureIds, signal);
+        } finally {
+            finishLoading();
         }
     }
 
@@ -1199,7 +1095,6 @@ export class MapTileStreamService implements OnDestroy {
             return;
         }
         this.tilePipelinePaused$.next(false);
-        this.flushRetainedRetries();
         this.tileStream?.setFrameProcessingPaused(false);
         this.showInfo("Tile pipeline resumed");
         console.info(`Tile pipeline resumed (${source})`);
@@ -1221,34 +1116,18 @@ export class MapTileStreamService implements OnDestroy {
         return this.tileStream?.isOpen() ?? false;
     }
 
-    /** Counts actual inspection transfers separately from promises waiting for a retry. */
+    /** Counts actual inspection transfers for connection diagnostics. */
     beginInspectionLoad(): () => void {
         ++this.activeInspectionLoads;
         return () => --this.activeInspectionLoads;
     }
 
-    /** Schedules through the existing heap; disabled/terminal failures keep state but no timer. */
-    private scheduleOwnedRetry(owner: StreamExpiryOwner, key: string | number, retry: OwnedRetry): void {
-        retry.at = retry.retryable ? connectionRetryDeadline(this.retryPolicy, retry) : Infinity;
-        this.retryScheduler.schedule(owner, key, retry.generation, retry.at);
-    }
-
     /** Recomputes waiting deadlines when preferences change, retaining attempts and live work. */
     private applyRetryPolicy(): void {
         this.retryPolicy = this.stateService.connectionRetryPolicy;
-        for (const [owner, retry] of this.filterRetryDeadlines) {
-            if (retry.at > 0) this.scheduleOwnedRetry(owner, "retry", retry);
-        }
-        for (const [owner, entries] of this.retainedRetries) {
-            for (const [key, retry] of entries) {
-                if (retry.at > 0 || this.deferredRetainedRetries.has(owner)) this.scheduleOwnedRetry(owner, key, retry);
-            }
-            this.deferredRetainedRetries.delete(owner);
-        }
         if (this.connectionRetry && this.connectionRetry.at > 0) {
             this.connectionRetry.at = connectionRetryDeadline(this.retryPolicy, this.connectionRetry);
-            this.retryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);
-            this.deferredRetainedRetries.delete(this.connectionRetryOwner);
+            this.connectionRetryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);
         }
     }
 
@@ -1258,42 +1137,34 @@ export class MapTileStreamService implements OnDestroy {
         this.backendRequestProgress = {done: 0, total: 0, allDone: true};
         this.connectionRetry = recordConnectionFailure(this.connectionRetry, message);
         this.connectionRetry.at = connectionRetryDeadline(this.retryPolicy, this.connectionRetry);
-        this.retryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);
+        this.connectionRetryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);
     }
 
     /** A compatible context/status frame proves recovery; an open TCP/WebSocket alone does not. */
     private clearConnectionFailure(): void {
         this.connectionRetry = undefined;
         this.connectionTerminalError = "";
-        this.retryScheduler.cancelOwner(this.connectionRetryOwner);
+        this.connectionRetryScheduler.cancelOwner(this.connectionRetryOwner);
     }
 
     /** Current owner state drives the circle; historical logs and pending counts do not. */
     getConnectionDiagnostics(): {retrying: boolean; failed: boolean; loading: boolean; message: string} {
         const catalog = this.mapInfo.getSourceRecoveryState();
-        const retries = [
-            ...[...this.filterRetryDeadlines].filter(([owner, retry]) =>
-                !owner.released && !owner.suspended && owner.generation === retry.generation).map(([, retry]) => retry),
-            ...[...this.retainedRetries.values()].flatMap(entries => [...entries.values()])
-        ];
-        const browserRetrying = this.retryPolicy.enabled &&
-            (!!this.connectionRetry || retries.some(retry => retry.retryable));
+        const browserRetrying = this.retryPolicy.enabled && !!this.connectionRetry;
         const activeFilters = [...this.filterSubscriptionsById.values()].some(ref =>
-            !ref.released && !ref.suspended && ref.pendingPartitionCount > 0 &&
-            !(this.filterRetryDeadlines.get(ref)?.at));
+            !ref.released && !ref.suspended && ref.pendingPartitionCount > 0);
         const loading = this.isTileStreamConnected() && !this.connectionRetry &&
             (this.activeInspectionLoads > 0 || (!this.backendRequestProgress.allDone && activeFilters));
-        const describe = (retry: ConnectionRetryAttempt, source: string, eligible = true) => {
-            const action = !eligible ? "No automatic retry." : !this.retryPolicy.enabled ? "Automatic retry disabled." :
+        const describe = (retry: ConnectionRetryAttempt, source: string) => {
+            const action = !this.retryPolicy.enabled ? "Automatic retry disabled." :
                 retry.at > 0 ? `Retry in ${Math.max(0, Math.ceil((retry.at - Date.now()) / 1000))} s.` : "Retrying.";
             return `${source}: ${retry.message} ${action}`;
         };
         const messages = [catalog.message, this.connectionTerminalError,
-            this.connectionRetry && describe(this.connectionRetry, "Backend"),
-            ...retries.map(retry => describe(retry, retry.sourceMapId || "Datasource", retry.retryable))].filter(Boolean);
+            this.connectionRetry && describe(this.connectionRetry, "Backend")].filter(Boolean);
         return {
             retrying: catalog.retrying || (!this.pageHidden && !this.tilePipelinePaused && browserRetrying),
-            failed: catalog.failed || retries.length > 0 || !!this.connectionRetry ||
+            failed: catalog.failed || !!this.connectionRetry ||
                 !!this.connectionTerminalError || this.backendProtocolMismatchActive,
             loading,
             message: [...new Set(messages)].join("\n")
@@ -1445,12 +1316,7 @@ export class MapTileStreamService implements OnDestroy {
         try {
             const activeRefs = [...this.filterSubscriptionsById.values()]
                 .filter(ref => !ref.released && !ref.suspended);
-            const requestedRefs = activeRefs
-                .filter(ref => {
-                    const retry = this.filterRetryDeadlines.get(ref);
-                    return !retry || retry.generation !== ref.generation || retry.at <= Date.now();
-                });
-            const requests = requestedRefs.map(ref => ref.requestJson())
+            const requests = activeRefs.map(ref => ref.requestJson())
                 // The envelope is a complete replacement. Omitting an empty
                 // subscription both avoids useless startup work and cancels
                 // previously sent coverage when its last tile disappears.
@@ -1458,10 +1324,6 @@ export class MapTileStreamService implements OnDestroy {
                     Array.isArray(request["partitions"]) &&
                     request["partitions"].length > 0
                 );
-            for (const ref of requestedRefs) {
-                const retry = this.filterRetryDeadlines.get(ref);
-                if (retry) retry.at = 0;
-            }
             const updateResult =
                 await this.tileStream?.updateRequest(requests, force);
             if (updateResult && updateResult !== "failed") {
@@ -1502,6 +1364,7 @@ export class MapTileStreamService implements OnDestroy {
                 partition: unknown;
                 tileId: number;
                 legalInfo?: string;
+                error?: string;
                 warnings?: string[];
                 stringPoolId?: string;
                 conversionTimestampMs?: number;
@@ -1588,6 +1451,7 @@ export class MapTileStreamService implements OnDestroy {
                 dependencies: Array.isArray(metadata.dependencies)
                     ? metadata.dependencies
                     : [],
+                error: metadata.layer.error || null,
                 warnings: metadata.layer.warnings ?? [],
                 issues: Array.isArray(metadata.issues)
                     ? metadata.issues
@@ -1632,26 +1496,6 @@ export class MapTileStreamService implements OnDestroy {
         if (!subscription ||
             subscription.generation !== Number(status.generation)) {
             return;
-        }
-        if (status.error && Number.isFinite(status.retryAfterMs) && status.retryAfterMs! > 0 &&
-            !subscription.released && !subscription.suspended && !this.backendProtocolMismatchActive &&
-            (subscription.requestJson()["partitions"] as unknown[]).length > 0) {
-            const previous = this.filterRetryDeadlines.get(subscription);
-            const retry: OwnedRetry = {...recordConnectionFailure(
-                previous?.generation === subscription.generation ? previous : undefined,
-                status.error, status.retryAfterMs), generation: subscription.generation,
-                retryable: true, sourceMapId: status.errorSourceMapId ?? status.mapId};
-            this.filterRetryDeadlines.set(subscription, retry);
-            this.scheduleOwnedRetry(subscription, "retry", retry);
-        } else if (status.state === "Success" || status.error) {
-            this.retryScheduler.cancelOwner(subscription);
-            this.filterRetryDeadlines.delete(subscription);
-            if (status.error && status.serviceError) {
-                this.filterRetryDeadlines.set(subscription, {
-                    ...recordConnectionFailure(undefined, status.error), generation: subscription.generation,
-                    retryable: false, at: Infinity, sourceMapId: status.errorSourceMapId ?? status.mapId
-                });
-            }
         }
         subscription.acceptStatus(status);
         this.filterStatusReceived.next(status);

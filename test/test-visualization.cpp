@@ -1466,8 +1466,6 @@ TEST_CASE("TileLayerParser exposes the tile lifetime in milliseconds", "[erdblic
     tile->setTtl(milliseconds(4'500));
     tile->addWarning("Duplicate feature retained");
     tile->setError("temporary outage");
-    tile->setErrorRetryAfter(milliseconds(5'000));
-    tile->setInfo("serviceError", true);
 
     std::ostringstream stream;
     REQUIRE(tile->write(stream));
@@ -1477,8 +1475,6 @@ TEST_CASE("TileLayerParser exposes the tile lifetime in milliseconds", "[erdblic
     REQUIRE(metadata.ttlMs == 4'500.0);
     REQUIRE(metadata.warnings == nlohmann::json::array({"Duplicate feature retained"}));
     REQUIRE(metadata.error == "temporary outage");
-    REQUIRE(metadata.errorRetryAfterMs == 5'000.0);
-    REQUIRE(metadata.serviceError);
 
     tile->setTtl(milliseconds::zero());
     std::ostringstream zeroStream;
@@ -1494,9 +1490,6 @@ TEST_CASE("TileLayerParser exposes the tile lifetime in milliseconds", "[erdblic
     REQUIRE(std::isnan(
         parser.readTileLayerMetadata(
             SharedUint8Array(absentStream.str())).ttlMs));
-    REQUIRE(std::isnan(
-        parser.readTileLayerMetadata(
-            SharedUint8Array(absentStream.str())).errorRetryAfterMs));
 }
 
 TEST_CASE("TileLayerParser exposes subset identity and lifetime", "[erdblick.parser]")

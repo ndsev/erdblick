@@ -147,8 +147,8 @@ export class FilterTileState {
         this.pendingGeneration = delivery.generation;
         this.valueVersion += 1;
         this.backendPending = remainsPending;
-        this.status = "ready";
-        this.error = null;
+        this.status = delivery.error ? "error" : "ready";
+        this.error = delivery.error ?? null;
         this.renderStats = {};
         this.dependencies = dependencies;
         this.issues = delivery.issues as TileSubsetIssue[];

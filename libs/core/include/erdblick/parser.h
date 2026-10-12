@@ -66,8 +66,6 @@ public:
         std::string legalInfo;
         std::string error;
         NativeJsValue warnings;
-        double errorRetryAfterMs;
-        bool serviceError;
         int32_t numFeatures;
         double conversionTimestampMs;
         /** Finite milliseconds when supplied by the datasource; NaN means no expiry. */

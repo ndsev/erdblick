@@ -146,3 +146,17 @@ it("retains warning-bearing content and excludes accepted outputs from a later r
     state.dispose();
     expect(state.warnings).toEqual([]);
 });
+
+
+it("installs failed values with an expiry and clears the error on recovery", () => {
+    const tile = state();
+    const failed = delivery({error: "service unavailable", ttlMs: 5000, numEntries: 0});
+    expect(tile.install(failed)).toBe(true);
+    expect(tile.status).toBe("error");
+    expect(tile.error).toBe("service unavailable");
+    expect(tile.backendPending).toBe(false);
+    expect(tile.expiresAtMs).toBe(failed.conversionTimestampMs! + 5000);
+    expect(tile.install(delivery({ttlMs: null}))).toBe(true);
+    expect(tile.error).toBeNull();
+    expect(tile.status).toBe("ready");
+});

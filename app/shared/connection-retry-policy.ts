@@ -4,7 +4,7 @@ export const MAX_RETRY_DELAY_MS = 0x7fffffff;
 export const retryDelaySchema = z.coerce.number().finite().int().min(1).max(MAX_RETRY_DELAY_MS);
 export const retryMultiplierSchema = z.coerce.number().finite().min(1);
 
-/** One browser's retry policy; producer hints remain a lower bound. */
+/** Backoff for reconnecting this browser to mapget, independent of tile TTLs. */
 export interface ConnectionRetryPolicy {
     enabled: boolean;
     initialDelayMs: number;
@@ -25,11 +25,10 @@ export const connectionRetryPolicySchema = z.object({
     message: "Maximum delay must be at least the initial delay."
 });
 
-/** Failure state belongs to the existing request owner, including during its next attempt. */
+/** Connection failure state persists through waits and the next connection attempt. */
 export interface ConnectionRetryAttempt {
     attempt: number;
     failedAt: number;
-    minimumDelayMs: number;
     at: number;
     message: string;
 }
@@ -39,13 +38,13 @@ export function connectionRetryDeadline(policy: ConnectionRetryPolicy, retry: Co
     if (!policy.enabled) return Infinity;
     const backoff = Math.min(policy.maxDelayMs,
         policy.initialDelayMs * Math.pow(policy.backoffMultiplier, retry.attempt));
-    return retry.failedAt + Math.max(retry.minimumDelayMs, Math.ceil(backoff));
+    return retry.failedAt + Math.ceil(backoff);
 }
 
 /** Records one failure per attempt; repeated status frames during the wait do not advance backoff. */
 export function recordConnectionFailure(previous: ConnectionRetryAttempt | undefined,
-                                        message: string, minimumDelayMs = 0): ConnectionRetryAttempt {
+                                        message: string): ConnectionRetryAttempt {
     if (previous && previous.at > 0) return previous;
     return {attempt: previous ? Math.min(previous.attempt + 1, Number.MAX_SAFE_INTEGER) : 0, failedAt: Date.now(),
-        minimumDelayMs, at: 0, message};
+        at: 0, message};
 }

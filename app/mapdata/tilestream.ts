@@ -57,9 +57,6 @@ export interface MapTileStreamFilterStatusPayload {
     outputTilesEmitted?: number;
     entriesEmitted?: number;
     error?: string;
-    retryAfterMs?: number;
-    serviceError?: boolean;
-    errorSourceMapId?: string;
 }
 export enum TileLoadState {
     LoadingQueued = 0,

@@ -50,14 +50,10 @@ export class InspectionFeatureTile {
             legalInfo?: string;
             error?: string;
             warnings?: string[];
-            errorRetryAfterMs?: number;
-            serviceError?: boolean;
             numFeatures: number;
             conversionTimestampMs?: number;
             ttlMs?: number;
         };
-        if (metadata.error) throw new TileDeliveryError(metadata.error, metadata.errorRetryAfterMs,
-            metadata.serviceError, metadata.mapName);
         this.warnings = metadata.warnings ?? [];
         this.mapTileKey = metadata.id;
         this.stringPoolId = metadata.stringPoolId;
@@ -85,6 +81,7 @@ export class InspectionFeatureTile {
         this.expiresAtMs = expiry !== null && Number.isFinite(expiry)
             ? expiry
             : null;
+        if (metadata.error) throw new TileDeliveryError(metadata.error, this.expiresAtMs);
     }
 
     peek<T>(callback: (layer: TileFeatureLayer) => T): T | null {

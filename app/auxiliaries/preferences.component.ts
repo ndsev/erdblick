@@ -482,7 +482,7 @@ import type {
                     </p-tabpanel>
 
                     <p-tabpanel value="connection">
-                        <p>Configure automatic recovery for this browser. Server datasource retries are configured separately.</p>
+                        <p>Configure this browser's reconnection to mapget. Datasource startup retries are configured on the server; tile freshness uses tile TTLs.</p>
                         <div class="button-container">
                             <label for="connection-retry-enabled">Automatic retry</label>
                             <p-toggleswitch inputId="connection-retry-enabled" [(ngModel)]="connectionRetryEnabled" />
@@ -502,7 +502,7 @@ import type {
                             <input id="connection-retry-maximum" pInputText type="number" min="0.001" step="0.1"
                                    [(ngModel)]="connectionMaximumSeconds" />
                         </div>
-                        <p>Retries continue at the maximum delay during a prolonged outage. A datasource may require a longer minimum wait.</p>
+                        <p>Reconnection continues at the maximum delay during a prolonged outage.</p>
                         @if (connectionValidationMessage) {
                             <p role="alert">{{ connectionValidationMessage }}</p>
                         }

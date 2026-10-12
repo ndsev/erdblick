@@ -1,3 +1,4 @@
+import {TileDeliveryError} from "../mapdata/tile-diagnostics";
 import {Injectable, NgZone} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
 import {
@@ -484,7 +485,10 @@ export class InspectionSelectionService {
         } catch (error) {
             if (this.inspectionExpiryOwners.get(owner.key) === owner &&
                 tokens.some(token => token.valueVersion === owner.epoch)) {
-                this.tileStream.scheduleRetainedTileRetry?.(owner, owner.tileId, owner.epoch, error);
+                if (error instanceof TileDeliveryError) {
+                    this.tileStream.updateRetainedTileExpiry(
+                        owner, owner.tileId, owner.epoch, error.expiresAtMs);
+                }
             }
             console.error(
                 `Failed to renew retained selection tile '${owner.mapTileKey}'.`,

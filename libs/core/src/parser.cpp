@@ -1448,9 +1448,6 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         tileLayer.legalInfo() ? *tileLayer.legalInfo() : "",
         tileLayer.error() ? *tileLayer.error() : "",
         *warnings,
-        tileLayer.errorRetryAfter() ? static_cast<double>(tileLayer.errorRetryAfter()->count()) :
-            std::numeric_limits<double>::quiet_NaN(),
-        layerInfo.is_object() && layerInfo.contains("serviceError") && layerInfo["serviceError"] == true,
         numFeatures,
         conversionTimestampMs,
         ttlMs,

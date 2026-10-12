@@ -1,3 +1,4 @@
+import {TileDeliveryError} from "../mapdata/tile-diagnostics";
 import {
     ChangeDetectorRef,
     Component,
@@ -453,7 +454,10 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         } catch (error) {
             if (this.comparisonExpiryOwners.get(owner.key) === owner && owner.revision === this.comparisonRevision &&
                 tokens.some(token => token.valueVersion === owner.epoch)) {
-                this.tileStream.scheduleRetainedTileRetry?.(owner, owner.tileId, owner.epoch, error);
+                if (error instanceof TileDeliveryError) {
+                    this.tileStream.updateRetainedTileExpiry(
+                        owner, owner.tileId, owner.epoch, error.expiresAtMs);
+                }
             }
             console.error(`Failed to renew comparison tile '${owner.mapTileKey}'.`, error);
             return;
