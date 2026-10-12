@@ -1,5 +1,5 @@
 import {Injectable} from "@angular/core";
-import {Subject} from "rxjs";
+import {Subject, filter, firstValueFrom, fromEvent, merge, startWith} from "rxjs";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {coreLib} from "../integrations/wasm";
 import {
@@ -33,6 +33,7 @@ export enum ViewRecalculationReason {
     HoverPopover = "hover-popover",
     LayerLevel = "layer-level",
     NumViews = "num-views",
+    RenderViewReady = "render-view-ready",
     StyleChange = "style-change",
     SyncOptions = "sync-options",
     TileBorder = "tile-border",
@@ -113,6 +114,7 @@ export class MapViewStateService {
     /** Registers a renderer reference, not a second camera-state store; teardown is generation-safe. */
     registerRenderView(view: IRenderView): () => void {
         this.renderViews.set(view.viewIndex, view);
+        this.viewStateChanged.next(ViewRecalculationReason.RenderViewReady);
         return () => {
             if (this.renderViews.get(view.viewIndex) === view) {
                 this.renderViews.delete(view.viewIndex);
@@ -125,6 +127,26 @@ export class MapViewStateService {
         if (viewIndex < 0 || viewIndex >= this.stateService.numViews) return undefined;
         const view = this.renderViews.get(viewIndex);
         return view?.isAvailable() ? view : undefined;
+    }
+
+    /** Waits for live renderers to publish their current camera footprints, including after projection changes. */
+    async waitForCurrentViewports(signal: AbortSignal): Promise<void> {
+        await firstValueFrom(merge(this.viewStateChanged, fromEvent(signal, "abort")).pipe(
+            startWith(null),
+            filter(() => {
+                signal.throwIfAborted();
+                for (let index = 0; index < this.stateService.numViews; index++) {
+                    const viewport = this.renderViewFor(index)?.computeViewport();
+                    const published = this.viewStateFor(index)?.viewport;
+                    if (!viewport || !published || !([
+                        "south", "west", "width", "height", "camPosLon", "camPosLat", "orientation"
+                    ] as const).every(key => viewport[key] === published[key])) {
+                        return false;
+                    }
+                }
+                return true;
+            })
+        ));
     }
 
     /** Returns the mutable visualization state for one view, if it exists. */

@@ -112,6 +112,26 @@ viewer reload, rather than on an unrelated catalog refresh. Imported local style
 retained for editing but disabled unless the submitted state explicitly enables
 them. Their YAML sources are not deleted or rewritten by a scene transition.
 
+Viewers supporting authored search scenes announce `capabilities: {searches: true}`
+in `erdblick:presentation:ready`. The parent must check this capability before
+including an optional `searches` array in `erdblick:presentation:apply-url-state`;
+older viewers may otherwise ignore the field. Each item uses the existing search
+JSON configuration export format, either directly or wrapped in `configuration`.
+It supports the query, scope, selected map/layers and views, rendering strategy,
+and visualization rules. Up to 50 configurations are accepted and validated before
+the scene changes; invalid configurations produce `invalid-searches`.
+
+After applying the URL state, erdblick dismisses previous searches, waits for live
+renderers to publish the new camera's tile coverage, and imports the supplied
+configurations as fresh, enabled, unpaused sessions. The acknowledgement
+means those sessions have started, not that results have finished loading.
+`searches: []` explicitly clears runtime searches even with `reset: false`.
+Omitting `searches` with `reset: false` preserves existing sessions; omitting it
+with the default full reset dismisses them. Bridge-created definitions are removed
+when replaced or dismissed so revisiting scenes does not accumulate saved searches.
+User-authored saved definitions remain intact. Searches are not part of native
+application snapshots or URL query parameters; use this explicit field to author them.
+
 The same version-2 bridge accepts `erdblick:presentation:start-camera-flight`
 and `erdblick:presentation:stop-camera-flight`. A flight carries `durationMs`
 (1,000–300,000), `pingPong`, `canvasOnly`, and either 2–64 camera `waypoints`

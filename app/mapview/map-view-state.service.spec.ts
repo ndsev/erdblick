@@ -9,7 +9,8 @@ import {
 } from "../shared/appstate.service";
 import {
     LiveCameraViewStateUpdate,
-    MapViewStateService
+    MapViewStateService,
+    ViewRecalculationReason
 } from "./map-view-state.service";
 import {ViewVisualizationState} from "./view.visualization.model";
 import type {RenderViewCameraState} from "./render-view.model";
@@ -50,6 +51,46 @@ function createService(cameras: CameraViewState[], viewSync: string[]) {
 }
 
 describe("MapViewStateService live camera synchronization", () => {
+    it("waits for the current camera footprint before reporting search coverage ready", async () => {
+        const {service} = createService([camera(11, 48, 1000, 0, [0, 0, 0])], []);
+        const state = new ViewVisualizationState();
+        service.viewVisualizationState.push(state);
+        const viewport = {...state.viewport, camPosLon: 11, camPosLat: 48, width: 1, height: 1};
+        service.registerRenderView({viewIndex: 0, isAvailable: () => true, computeViewport: () => viewport} as never);
+        let ready = false;
+        const pending = service.waitForCurrentViewports(new AbortController().signal).then(() => { ready = true; });
+        await Promise.resolve();
+        expect(ready).toBe(false);
+        service.viewStateChanged.next(ViewRecalculationReason.Visibility);
+        await Promise.resolve();
+        expect(ready).toBe(false);
+        state.viewport = {...viewport};
+        service.viewStateChanged.next(ViewRecalculationReason.Viewport);
+        await pending;
+        expect(ready).toBe(true);
+    });
+
+    it("waits for a recreated renderer even when its retained viewport is already current", async () => {
+        const {service} = createService([camera(11, 48, 1000, 0, [0, 0, 0])], []);
+        const state = new ViewVisualizationState();
+        service.viewVisualizationState.push(state);
+        let ready = false;
+        const pending = service.waitForCurrentViewports(new AbortController().signal).then(() => { ready = true; });
+        await Promise.resolve();
+        expect(ready).toBe(false);
+        service.registerRenderView({viewIndex: 0, isAvailable: () => true, computeViewport: () => state.viewport} as never);
+        await pending;
+        expect(ready).toBe(true);
+    });
+
+    it("cancels viewport readiness when a presentation leaves before its renderer is ready", async () => {
+        const {service} = createService([camera(11, 48, 1000, 0, [0, 0, 0])], []);
+        const controller = new AbortController();
+        const pending = service.waitForCurrentViewports(controller.signal);
+        controller.abort();
+        await expect(pending).rejects.toThrow();
+    });
+
     it("does not let an old renderer teardown erase its replacement", () => {
         const {service} = createService([camera(0, 0, 100, 0, [0, 0, 0])], []);
         const oldView = {viewIndex: 0, isAvailable: () => true};
