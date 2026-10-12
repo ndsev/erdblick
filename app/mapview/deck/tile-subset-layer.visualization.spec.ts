@@ -11,6 +11,27 @@ import {TileSubsetLayerVisualization} from
     "./tile-subset-layer.visualization";
 
 describe("TileSubsetLayerVisualization", () => {
+    it("invalidates changed line detail without destroying the installed GLTF presentation", () => {
+        const gltfPresentation = {destroy: vi.fn()};
+        const visualization = Object.assign(Object.create(TileSubsetLayerVisualization.prototype), {
+            lineSimplificationToleranceMeters: 1,
+            renderedSignature: "installed",
+            requestedSignature: "in-flight",
+            state: {status: "ready", renderedValueVersion: 1, valueVersion: 1},
+            gltfPresentation
+        });
+
+        visualization.setLineSimplificationTolerance(1);
+        expect(visualization.isCurrentPresentationInstalled()).toBe(true);
+        expect(visualization.requestedSignature).toBe("in-flight");
+
+        visualization.setLineSimplificationTolerance(2);
+        expect(visualization.isCurrentPresentationInstalled()).toBe(false);
+        expect(visualization.requestedSignature).toBe("");
+        expect(visualization.lineSimplificationToleranceMeters).toBe(2);
+        expect(gltfPresentation.destroy).not.toHaveBeenCalled();
+    });
+
     it("makes only ordinary map layers eligible for drill picking", () => {
         expect(deckSubsetInteractionProps(
             "regular",

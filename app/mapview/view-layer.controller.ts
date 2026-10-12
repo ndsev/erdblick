@@ -1649,18 +1649,13 @@ export class ViewLayerController {
                 owned.layer.tileStates.get(state.partitionKey) === state &&
                 this.presentationStillDemanded(owned.layer, state);
             const lod = this.presentationLod(owned.layer, state);
-            const lineSimplificationToleranceMeters =
-                this.lineSimplificationToleranceMeters();
             const terminalIncomplete = state.status === "error";
             visualization.setLod(lod);
-            if (!retained || terminalIncomplete ||
-                !visualization.hasSameState(
-                    state,
-                    lineSimplificationToleranceMeters
-                )) {
+            if (!retained || terminalIncomplete) {
                 this.replaceVisualization(owned, key, true);
                 continue;
             }
+            visualization.setLineSimplificationTolerance(this.lineSimplificationToleranceMeters());
             if (state.status === "ready" && state.subsetBlob &&
                 !visualization.isCurrentPresentationInstalled()) {
                 this.queueVisualizationRender(visualization);
@@ -1706,13 +1701,11 @@ export class ViewLayerController {
         }
         const lod = this.presentationLod(owned.layer, state);
         visualization.setLod(lod);
-        if (!visualization.hasSameState(
-            state,
-            this.lineSimplificationToleranceMeters()
-        )) {
+        if (visualization.state !== state) {
             this.replaceVisualization(owned, existingKey, true);
             return;
         }
+        visualization.setLineSimplificationTolerance(this.lineSimplificationToleranceMeters());
         this.queueVisualizationRender(visualization);
     }
 

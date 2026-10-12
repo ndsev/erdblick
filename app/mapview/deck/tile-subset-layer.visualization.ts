@@ -91,7 +91,7 @@ export class TileSubsetLayerVisualization {
     private sceneHandle: IRenderSceneHandle | null = null;
     private sceneRevision = 0;
     private lod: number;
-    private readonly lineSimplificationToleranceMeters: number;
+    private lineSimplificationToleranceMeters: number;
     private readonly reportedRuntimeIssueIds = new Set<string>();
     private readonly pendingIconUris = new Set<string>();
     private readonly failedIconUris = new Set<string>();
@@ -162,14 +162,16 @@ export class TileSubsetLayerVisualization {
         }
     }
 
-    /** Test whether reconciliation can preserve this exact visualization owner. */
-    hasSameState(
-        state: FilterTileState,
-        lineSimplificationToleranceMeters: number
-    ): boolean {
-        return this.lineSimplificationToleranceMeters ===
-                lineSimplificationToleranceMeters &&
-            state === this.state;
+    /** Rerender changed line detail without tearing down the installed GLTF asset. */
+    setLineSimplificationTolerance(lineSimplificationToleranceMeters: number): void {
+        if (this.lineSimplificationToleranceMeters === lineSimplificationToleranceMeters) {
+            return;
+        }
+        this.lineSimplificationToleranceMeters = lineSimplificationToleranceMeters;
+        // Keep the current geometry visible until its successor is ready, but
+        // reject in-flight output using the previous camera's simplification.
+        this.renderedSignature = "";
+        this.requestedSignature = "";
     }
 
     /** Update GPU-filtered entry and label visibility without rerendering the subset. */
