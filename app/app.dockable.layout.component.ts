@@ -130,6 +130,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
     private dockPauseEndRafSecond?: number;
     private dockResizePauseActive = false;
     private dockOpenSubscription: Subscription;
+    private readonly searchSessionsSubscription: Subscription;
     private observedDockOpen: boolean;
     private unregisterResizeTarget?: () => void;
     protected readonly searchDockDrag: DockedPanelDragController<string>;
@@ -140,6 +141,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
                 private featureSearchService: FeatureSearchService,
                 private cdr: ChangeDetectorRef,
                 private viewerUi: ViewerUiService) {
+        this.searchSessionsSubscription = this.featureSearchService.sessionsChanged.subscribe(() => this.cdr.markForCheck());
         this.observedDockOpen = this.stateService.isDockOpen;
         this.dockOpenSubscription = this.stateService.dockOpenState.subscribe(nextDockOpen => {
             if (nextDockOpen === this.observedDockOpen) {
@@ -258,6 +260,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
         this.detachUp?.();
         this.detachCancel?.();
         this.dockOpenSubscription.unsubscribe();
+        this.searchSessionsSubscription.unsubscribe();
         this.searchDockDrag.destroy();
         this.clearScheduledDockResizePauseEnd();
         this.dispatchDockResizePauseEnd();

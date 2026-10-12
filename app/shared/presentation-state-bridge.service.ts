@@ -5,6 +5,7 @@ import type {CameraViewState} from "./appstate.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {StyleService} from "../styledata/style.service";
 import {FeatureSearchService} from "../search/feature.search.service";
+import {featureSearchDefinitionFromImportPayload} from "../search/feature-search-export.util";
 import {addMetersToLngLat} from "@math.gl/web-mercator";
 
 export const PRESENTATION_BRIDGE_PROTOCOL_VERSION = 2;
@@ -47,11 +48,12 @@ interface PresentationApplyUrlRequest {
     origin: string;
     transitionMs: number;
     reset: boolean;
+    searches?: unknown[];
     fromCamera?: CameraViewState;
 }
 
 type PresentationApplyRequest = PresentationApplyStateRequest | PresentationApplyUrlRequest;
-type PresentationBridgeError = "invalid-message" | "invalid-search" | "invalid-state" | "state-application-failed";
+type PresentationBridgeError = "invalid-message" | "invalid-search" | "invalid-searches" | "invalid-state" | "state-application-failed";
 
 /** Applies native state snapshots requested by an explicitly embedded presentation parent. */
 @Injectable({providedIn: "root"})
@@ -63,6 +65,8 @@ export class PresentationStateBridgeService implements OnDestroy {
     private flightFrame?: number;
     private transitionPose?: CameraViewState;
     private motionGeneration = 0;
+    private searchViewportWait?: AbortController;
+    private readonly importedSearchIds = new Set<string>();
 
     constructor(
         private readonly stateService: AppStateService,
@@ -86,7 +90,8 @@ export class PresentationStateBridgeService implements OnDestroy {
         browserWindow.addEventListener("keydown", this.handleReviewShortcut, {capture: true});
         browserWindow.parent.postMessage({
             type: PRESENTATION_BRIDGE_READY,
-            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION
+            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
+            capabilities: {searches: !!this.searchService}
         }, "*");
         return true;
     }
@@ -96,6 +101,7 @@ export class PresentationStateBridgeService implements OnDestroy {
         this.browserWindow?.removeEventListener("message", this.handleMessage);
         this.browserWindow?.removeEventListener("keydown", this.handleReviewShortcut, {capture: true});
         this.stopCameraFlight();
+        this.searchViewportWait?.abort();
         this.browserWindow = undefined;
         this.parentOrigin = undefined;
         this.queuedRequest = undefined;
@@ -182,7 +188,21 @@ export class PresentationStateBridgeService implements OnDestroy {
                 this.postResult(requestId, event.origin, false, "invalid-message");
                 return;
             }
-            request = {requestId, kind: "url", params, origin: event.origin, transitionMs, reset,
+            const searches = event.data["searches"];
+            if (searches !== undefined) {
+                if (!this.searchService || !Array.isArray(searches) || searches.length > 50) {
+                    this.postResult(requestId, event.origin, false, "invalid-searches");
+                    return;
+                }
+                try {
+                    // Validate the entire scene before dismissing existing searches.
+                    for (const payload of searches) featureSearchDefinitionFromImportPayload(payload);
+                } catch {
+                    this.postResult(requestId, event.origin, false, "invalid-searches");
+                    return;
+                }
+            }
+            request = {requestId, kind: "url", params, origin: event.origin, transitionMs, reset, searches,
                 fromCamera: this.transitionPose ? structuredClone(this.transitionPose) : undefined};
         }
 
@@ -190,6 +210,7 @@ export class PresentationStateBridgeService implements OnDestroy {
         this.stopCameraFlight();
         if (this.applying) {
             this.queuedRequest = request;
+            this.searchViewportWait?.abort();
             return;
         }
         void this.applyRequests(request);
@@ -274,8 +295,30 @@ export class PresentationStateBridgeService implements OnDestroy {
                     console.warn("[PresentationStateBridge] Rejected presentation state.", errors);
                     this.postResult(request.requestId, request.origin, false, "invalid-state");
                 } else {
-                    if (request.kind === "snapshot" || request.reset) this.searchService?.dismissForPresentation();
+                    if (request.kind === "snapshot" || request.reset || request.searches !== undefined) {
+                        // Retire only bridge-created definitions; user-authored saved
+                        // searches remain available after the presentation ends.
+                        for (const id of this.importedSearchIds) this.searchService?.closeSearch(id);
+                        this.importedSearchIds.clear();
+                        this.searchService?.dismissForPresentation();
+                    }
                     this.styleService.reconcilePresentationStyles();
+                    if (request.kind === "url" && this.searchService) {
+                        if (request.searches?.length) {
+                            // State hydration updates the camera before the renderer's
+                            // coalesced footprint. Fixed-area searches must freeze the
+                            // new scene's coverage, never the preceding scene's tiles.
+                            if (this.queuedRequest) throw new Error("Presentation scene was superseded.");
+                            this.searchViewportWait = new AbortController();
+                            await this.mapViewState.waitForCurrentViewports(this.searchViewportWait.signal);
+                            this.searchViewportWait.signal.throwIfAborted();
+                            this.searchViewportWait = undefined;
+                        }
+                        for (const payload of request.searches ?? []) {
+                            const session = this.searchService.importSearchJsonPayload(payload);
+                            this.importedSearchIds.add(session.id);
+                        }
+                    }
                     if (from && !this.queuedRequest && motionGeneration === this.motionGeneration) {
                         this.transitionCamera(from, structuredClone(this.stateService.cameraViewDataState.getValue(0)), duration);
                     }
@@ -283,6 +326,8 @@ export class PresentationStateBridgeService implements OnDestroy {
                 }
             } catch {
                 this.postResult(request.requestId, request.origin, false, "state-application-failed");
+            } finally {
+                this.searchViewportWait = undefined;
             }
             request = this.queuedRequest;
             this.queuedRequest = undefined;

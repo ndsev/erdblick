@@ -1,10 +1,13 @@
 import {expect, test} from "../fixtures/test";
+import {requireMapSource} from "../utils/backend-helpers";
+import {TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_VIEW_POSITIONS} from "../utils/test-params";
 
 interface PresentationMessage {
     type: string;
     version: number;
     requestId?: number;
     ok?: boolean;
+    capabilities?: {searches?: boolean};
 }
 
 /** Reads protocol messages captured by the same-origin test host. */
@@ -14,7 +17,8 @@ async function presentationMessages(page: import("@playwright/test").Page): Prom
     ).presentationMessages ?? []);
 }
 
-test("presentation snapshot state is applied without reloading the framed application", async ({page}) => {
+test("presentation scenes apply state and authored searches without reloading the framed application", async ({page, request}) => {
+    await requireMapSource(request, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0]);
     await page.goto("/");
     await page.waitForSelector("#global-spinner-container", {state: "hidden"});
     const origin = new URL(page.url()).origin;
@@ -41,6 +45,7 @@ test("presentation snapshot state is applied without reloading the framed applic
 
     await expect.poll(async () => (await presentationMessages(page)).some(message =>
         message.type === "erdblick:presentation:ready" && message.version === 2
+        && message.capabilities?.searches === true
     )).toBe(true);
     const child = page.frames().find(frame => frame.parentFrame() === page.mainFrame());
     if (!child) {
@@ -93,6 +98,41 @@ test("presentation snapshot state is applied without reloading the framed applic
         const canvas = document.querySelector<HTMLCanvasElement>(`#mapViewContainer-${viewIndex} canvas`);
         return canvas ? [canvas.width > 0, canvas.height > 0] : null;
     }))).toEqual([[true, true], [true, true]]);
+
+    const searches = [{query: "true", scope: "feature", autoUpdate: false,
+        selectedMapLayers: [{mapId: TEST_MAP_NAMES[0], layerId: TEST_LAYER_NAMES[0]}],
+        selectedMapLayersManual: true, selectedViewIndices: [0], selectedTileLevels: [13],
+        showResultsOnMap: false}];
+    const [lon, lat] = TEST_VIEW_POSITIONS[0];
+    await page.evaluate(({targetOrigin, searches, search}) => {
+        document.querySelector<HTMLIFrameElement>("iframe")?.contentWindow?.postMessage({
+            type: "erdblick:presentation:apply-url-state", version: 2, requestId: 2,
+            search, reset: false, searches
+        }, targetOrigin);
+    }, {targetOrigin: origin, searches, search: `?embed=presentation&v2=1&lon=${lon}&lat=${lat}&alt=1200&tll=4`});
+    await expect.poll(async () => (await presentationMessages(page)).some(message =>
+        message.requestId === 2 && message.ok === true
+    )).toBe(true);
+    await expect(child.getByTestId("feature-search-panel")).toHaveCount(1);
+    await expect.poll(() => child.evaluate(() =>
+        window.ebDebug!.stateService.featureSearches.map(entry => entry.query)
+    )).toEqual(["true"]);
+    await expect(child.getByTestId("feature-search-panel").getByRole("tab", {name: /^Results/}))
+        .toContainText(/Results\s*[1-9][0-9]*/);
+    await expect(child.locator("feature-search")).toContainText(/Complete, \d+\/\d+ tiles/);
+    await expect(child.getByTestId("feature-search-tree").getByRole("treeitem").first()).toBeVisible();
+
+    await page.evaluate(targetOrigin => {
+        document.querySelector<HTMLIFrameElement>("iframe")?.contentWindow?.postMessage({
+            type: "erdblick:presentation:apply-url-state", version: 2, requestId: 3,
+            search: "?embed=presentation&v2=1", reset: false, searches: []
+        }, targetOrigin);
+    }, origin);
+    await expect.poll(async () => (await presentationMessages(page)).some(message =>
+        message.requestId === 3 && message.ok === true
+    )).toBe(true);
+    await expect(child.getByTestId("feature-search-panel")).toHaveCount(0);
+    expect(await child.evaluate(() => window.ebDebug!.stateService.featureSearches)).toEqual([]);
 
     expect(await child.evaluate(() => performance.timeOrigin)).toBe(initialTimeOrigin);
     expect(childDocumentRequests).toBe(1);
