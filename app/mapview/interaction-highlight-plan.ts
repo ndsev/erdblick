@@ -93,6 +93,7 @@ function channelTargets(
     }
     if (channel.scope === "relation") {
         return targets.filter(target =>
+            target.inspectionTarget.scope === "feature" ||
             target.inspectionTarget.scope === "relation");
     }
     return [...targets];
@@ -101,8 +102,8 @@ function channelTargets(
 /**
  * Reports whether authored geometry exists for the exact target scope.
  *
- * Authored interaction channels only own targets of their exact semantic
- * scope; sibling entity scopes never replace one another.
+ * Relation channels on a whole feature are additive visualization and do not
+ * replace the local host-feature interaction effect.
  */
 export function hasAuthoredInteractionHighlight(
     plan: StyleFilterPlan,
@@ -153,42 +154,78 @@ function restrictChannel(
                 }>;
             } => target.inspectionTarget.scope === "relation"
         );
-        const entryRestriction = exactRelationTargets
-            .map(relationEntryRestriction)
-            .join(" or ");
-        channel.entryFilter = restrictExpression(
-            channel.entryFilter,
-            entryRestriction
-        );
+        // Whole-feature traversal and exact rows are planned separately so
+        // a feature selection cannot remove another target's row restriction.
+        if (exactRelationTargets.length) {
+            const entryRestriction = exactRelationTargets
+                .map(relationEntryRestriction)
+                .join(" or ");
+            channel.entryFilter = restrictExpression(
+                channel.entryFilter,
+                entryRestriction
+            );
+        }
     }
     return remoteTargets;
 }
 
 /**
- * Produces the remote half of a hybrid highlight presentation.
+ * Produces the remote portions of a hybrid highlight presentation.
  *
- * The returned plan contains only channels compatible with the requested
- * semantic targets. The input style plan is never mutated.
+ * Whole-feature relation traversal must not share an entry filter or roots
+ * with exact relation rows. Keep these in separate plans, preserving recursive
+ * traversal without broadening another selected feature's exact row.
  */
-export function planRemoteInteractionHighlight(
+export function planRemoteInteractionHighlights(
     rawPlan: StyleFilterPlan,
     features: readonly InteractionHighlightTarget[],
     options: RemoteInteractionHighlightOptions = {}
-): RemoteInteractionHighlightPlan | null {
+): RemoteInteractionHighlightPlan[] {
     const targets: ResolvedInteractionTarget[] = features
-        .filter(feature => !options.localTargetKeys?.has(
-            interactionTargetKey(feature)))
         .map(feature => ({
             ...feature,
             inspectionTarget: parseFeatureInspectionTarget(feature.featureId)
         }));
+    let targetGroups = [targets];
+    if (rawPlan.channels.some(channel => channel.scope === "relation")) {
+        const wholeFeatures = targets.filter(target =>
+            target.inspectionTarget.scope === "feature");
+        const wholeFeatureKeys = new Set(wholeFeatures.map(interactionTargetKey));
+        const exactRows = targets.filter(target =>
+            target.inspectionTarget.scope !== "feature" &&
+            // A whole feature already requests this row's authored relations.
+            !(target.inspectionTarget.scope === "relation" &&
+                wholeFeatureKeys.has(interactionTargetKey({
+                    mapTileKey: target.mapTileKey,
+                    featureId: target.inspectionTarget.baseFeatureId
+                }))));
+        targetGroups = [wholeFeatures, exactRows];
+    }
+    return targetGroups.flatMap(group => {
+        const plan = planRemoteInteractionHighlight(rawPlan, group, options);
+        return plan ? [plan] : [];
+    });
+}
+
+/** Builds one scope-compatible plan without mutating the authored style. */
+function planRemoteInteractionHighlight(
+    rawPlan: StyleFilterPlan,
+    targets: readonly ResolvedInteractionTarget[],
+    options: RemoteInteractionHighlightOptions
+): RemoteInteractionHighlightPlan | null {
     if (!targets.length) {
         return null;
     }
     const plan = structuredClone(rawPlan);
     const admittedTargetKeys = new Set<string>();
     plan.channels = plan.channels.filter(channel => {
-        const admittedTargets = restrictChannel(channel, targets);
+        // A local host highlight cannot supply its authored relation targets.
+        // Keep those channels while avoiding duplicate exact-target geometry.
+        const remoteTargets = targets.filter(target =>
+            (channel.scope === "relation" &&
+                target.inspectionTarget.scope === "feature") ||
+            !options.localTargetKeys?.has(interactionTargetKey(target)));
+        const admittedTargets = restrictChannel(channel, remoteTargets);
         admittedTargets.forEach(target =>
             admittedTargetKeys.add(interactionTargetKey(target)));
         return admittedTargets.length > 0;
@@ -211,7 +248,8 @@ export function planRemoteInteractionHighlight(
     }>();
     if (needsRoots) {
         for (const target of admittedTargets) {
-            if (target.inspectionTarget.scope !== "relation") {
+            if (target.inspectionTarget.scope !== "feature" &&
+                target.inspectionTarget.scope !== "relation") {
                 continue;
             }
             const root = {

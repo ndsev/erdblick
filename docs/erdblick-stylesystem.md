@@ -890,13 +890,24 @@ target geometry collections.
 
 Use a mode list when hover and selection intentionally share identical
 relation geometry. The planner emits the same authored channel independently
-for each interaction pass. Interaction planning admits a relation channel only
-for an exact relation-row target and adds that row's restriction; selecting its
-host feature does not activate sibling relation rules. If that exact target is
-already present in a regular or search presentation, the local interaction
-compositor highlights it instead. Authored relation geometry is requested only
-as a fallback while the target is absent, and this choice is reconciled again
-when style changes materialize or remove regular geometry.
+for each interaction pass. Selecting a whole feature activates its authored
+selection-mode relation rules, including endpoint styles and configured
+recursive traversal. These visuals supplement the host feature's local
+highlight even when the host is already rendered. For example, selecting a
+Lane can display its `DRIVE_PATH` targets through `relation-target-style`.
+
+Selecting an individual relation row restricts its channel to that exact
+relation, even when another whole feature is selected in the same inspection.
+Whole-feature traversal and exact rows use separate requests so recursive
+rules remain unrestricted beyond their roots. If the relation is already
+present in a regular or search presentation, the local interaction compositor
+highlights it instead.
+Otherwise, authored relation geometry is requested as a fallback. This choice
+is reconciled again when style changes materialize or remove regular geometry.
+There is no generic relation fallback in the bundled MapViewer Highlights
+style: without existing relation geometry or an authored interaction rule,
+hovering or selecting a relation row produces no map highlight. Feature and
+attribute-validity fallbacks remain available.
 
 Generic bidirectional display uses permanent south-west ownership. If that
 owner is outside current coverage, the pair is not rendered. Selection

@@ -43,7 +43,7 @@ import {
 import {
     hasAuthoredInteractionHighlight,
     interactionTargetKey,
-    planRemoteInteractionHighlight
+    planRemoteInteractionHighlights
 } from "./interaction-highlight-plan";
 import type {
     ViewLayerDiagnosticsService
@@ -1108,9 +1108,9 @@ export class ViewLayerController {
                             : []
                     );
                     let rawPlan: StyleFilterPlan | null = null;
-                    let remotePlan: ReturnType<
-                        typeof planRemoteInteractionHighlight
-                    > = null;
+                    let remotePlans: ReturnType<
+                        typeof planRemoteInteractionHighlights
+                    > = [];
                     if (remoteAllowed) {
                         rawPlan = this.interactionFilterPlan(
                             style,
@@ -1119,7 +1119,7 @@ export class ViewLayerController {
                             plannedLod
                         );
                         if (rawPlan) {
-                            remotePlan = planRemoteInteractionHighlight(
+                            remotePlans = planRemoteInteractionHighlights(
                                 rawPlan,
                                 features,
                                 {localTargetKeys}
@@ -1143,7 +1143,9 @@ export class ViewLayerController {
                             // An exact target already materialized by a regular
                             // or search presentation uses the local compositor.
                             // Authored geometry is the fallback only while that
-                            // target is absent from the retained scene.
+                            // target is absent from the retained scene. Relation
+                            // rules on a whole feature remain additive and do
+                            // not replace this local host-feature highlight.
                             if (rawPlan &&
                                 hasAuthoredInteractionHighlight(
                                     rawPlan,
@@ -1178,45 +1180,44 @@ export class ViewLayerController {
                             }
                         }
                     }
-                    if (!remotePlan) {
-                        continue;
-                    }
                     // StyledMapgetLayer plans are immutable. Presence changes
                     // must therefore replace the remote owner even when the
                     // interaction targets and style options did not change.
-                    const identitySignature = sipHash64Hex(JSON.stringify({
-                        filterPlan: remotePlan.plan,
-                        partitions: remotePlan.partitions,
-                        roots: remotePlan.roots,
-                        options
-                    }));
-                    const presentationId = [
-                        group.id,
-                        style.id,
-                        this.styleVersion(style),
-                        identitySignature
-                    ].join(":");
-                    const key = [
-                        mapgetLayer.key,
-                        group.kind,
-                        presentationId
-                    ].join("/");
-                    desired.set(key, {
-                        mapgetLayer,
-                        style,
-                        mode: group.mode,
-                        presentationKind: group.kind,
-                        presentationId,
-                        options,
-                        plan: remotePlan.plan,
-                        partitions: remotePlan.partitions,
-                        roots: remotePlan.roots,
-                        styleOrder: styleIndex +
-                            (group.kind === "hover"
-                                ? INTERACTION_STYLE_ORDER_BASE + 1_000
-                                : INTERACTION_STYLE_ORDER_BASE),
-                        plannedLod
-                    });
+                    for (const remotePlan of remotePlans) {
+                        const identitySignature = sipHash64Hex(JSON.stringify({
+                            filterPlan: remotePlan.plan,
+                            partitions: remotePlan.partitions,
+                            roots: remotePlan.roots,
+                            options
+                        }));
+                        const presentationId = [
+                            group.id,
+                            style.id,
+                            this.styleVersion(style),
+                            identitySignature
+                        ].join(":");
+                        const key = [
+                            mapgetLayer.key,
+                            group.kind,
+                            presentationId
+                        ].join("/");
+                        desired.set(key, {
+                            mapgetLayer,
+                            style,
+                            mode: group.mode,
+                            presentationKind: group.kind,
+                            presentationId,
+                            options,
+                            plan: remotePlan.plan,
+                            partitions: remotePlan.partitions,
+                            roots: remotePlan.roots,
+                            styleOrder: styleIndex +
+                                (group.kind === "hover"
+                                    ? INTERACTION_STYLE_ORDER_BASE + 1_000
+                                    : INTERACTION_STYLE_ORDER_BASE),
+                            plannedLod
+                        });
+                    }
                 }
             }
         }
