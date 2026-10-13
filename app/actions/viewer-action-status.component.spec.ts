@@ -13,6 +13,7 @@ describe("MCP connection copy commands", () => {
         const ui = component({enabled: true, endpoint: "http://localhost:8099/mcp", authentication: "local", scopes: []});
         expect(ui.connectionText("codex")).toBe("codex mcp add mapviewer --url 'http://localhost:8099/mcp'");
         expect(ui.connectionText("claude")).toBe("claude mcp add --transport http mapviewer 'http://localhost:8099/mcp'");
+        expect(ui.connectionText("copilot")).toBe("copilot mcp add --transport http mapviewer 'http://localhost:8099/mcp'");
     });
 
     it.each([
@@ -68,9 +69,27 @@ describe("MCP connection copy commands", () => {
             "claude mcp add-json mapviewer '{\"type\":\"http\",\"url\":\"https://example.com/mcp\",\"oauth\":{\"clientId\":\"client'\\''; echo unsafe; '\\''\",\"scopes\":\"scope'\\''quoted\"}}' &&\n" +
             "claude mcp login mapviewer"
         );
+        expect(ui.connectionText("copilot")).toBe(
+            "# Session-only MCP setup; sign in with /mcp auth mapviewer inside Copilot.\n" +
+            "copilot --additional-mcp-config '{\"mcpServers\":{\"mapviewer\":{\"type\":\"http\",\"url\":\"https://example.com/mcp\",\"tools\":[\"*\"],\"oauthClientId\":\"client'\\''; echo unsafe; '\\''\",\"oauthScopes\":[\"scope'\\''quoted\"]}}}'"
+        );
     });
 
-    it.each(["codex", "claude"] as const)("copies the complete %s add/login snippet", kind => {
+    it.each([
+        {scopes: ["viewer", "tiles:read"], oauthClientId: "public-client", expected: {oauthClientId: "public-client", oauthScopes: ["viewer", "tiles:read"]}},
+        {scopes: [], oauthClientId: "public-client", expected: {oauthClientId: "public-client"}},
+        {scopes: ["viewer"], oauthClientId: undefined, expected: {}},
+        {scopes: [], oauthClientId: undefined, expected: {}}
+    ])("configures Copilot OAuth for one session with client $oauthClientId and scopes $scopes", ({scopes, oauthClientId, expected}) => {
+        const ui = component({enabled: true, endpoint: "https://example.com/mcp", authentication: "oauth", scopes, oauthClientId});
+        const config = {mcpServers: {mapviewer: {type: "http", url: "https://example.com/mcp", tools: ["*"], ...expected}}};
+        expect(ui.connectionText("copilot")).toBe(
+            "# Session-only MCP setup; sign in with /mcp auth mapviewer inside Copilot.\n" +
+            `copilot --additional-mcp-config '${JSON.stringify(config)}'`
+        );
+    });
+
+    it.each(["codex", "claude", "copilot"] as const)("copies the complete %s setup snippet", kind => {
         const clipboard = {copyToClipboard: vi.fn()};
         const ui = component({enabled: true, endpoint: "https://example.com/mcp", authentication: "oauth", scopes: ["viewer"]}, clipboard);
         ui.copy(kind);
@@ -82,8 +101,10 @@ describe("MCP connection copy commands", () => {
         const ui = component({enabled: true, endpoint, authentication: "oauth", scopes: ["viewer"]}, clipboard);
         expect(ui.connectionText("codex")).toBe("");
         expect(ui.connectionText("claude")).toBe("");
+        expect(ui.connectionText("copilot")).toBe("");
         ui.copy("codex");
         ui.copy("claude");
+        ui.copy("copilot");
         expect(clipboard.copyToClipboard).not.toHaveBeenCalled();
     });
 
@@ -92,8 +113,10 @@ describe("MCP connection copy commands", () => {
         const ui = component({enabled: false}, clipboard);
         expect(ui.connectionText("codex")).toBe("");
         expect(ui.connectionText("claude")).toBe("");
+        expect(ui.connectionText("copilot")).toBe("");
         ui.copy("codex");
         ui.copy("claude");
+        ui.copy("copilot");
         expect(clipboard.copyToClipboard).not.toHaveBeenCalled();
     });
 });

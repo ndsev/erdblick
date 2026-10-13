@@ -10,8 +10,8 @@ import {ClipboardService} from "../shared/clipboard.service";
     template: `
         @if (actions.availability$ | async; as availability) {
             @if (availability.enabled || webMcp.status$.value.supported) {
-                <p-button label="MCP" size="small" [text]="true"
-                          [severity]="availability.ready || webMcp.status$.value.viewerTools > 0 ? 'secondary' : 'warn'"
+                <p-button label="MCP" size="small"
+                          [severity]="availability.ready || webMcp.status$.value.viewerTools > 0 ? 'success' : 'warn'"
                           [pTooltip]="availability.enabled ? availability.message : webMcp.status$.value.message" (onClick)="details.toggle($event)"
                           data-testid="viewer-action-status"/>
                 <p-popover #details appendTo="body">
@@ -29,12 +29,19 @@ import {ClipboardService} from "../shared/clipboard.service";
                         }
                         @if (availability.enabled) {
                         <div class="action-buttons">
-                            <p-button label="Copy Codex MCP-Add Command" size="small" (onClick)="copy('codex')"
+                            <p-button label="Copy Codex MCP-Add Command" size="small" [fluid]="true" (onClick)="copy('codex')"
                                       data-testid="viewer-action-copy-codex"/>
-                            <p-button label="Copy Claude MCP-Add Command" size="small" (onClick)="copy('claude')"
+                            <p-button label="Copy Claude MCP-Add Command" size="small" [fluid]="true" (onClick)="copy('claude')"
                                       data-testid="viewer-action-copy-claude"/>
+                            <p-button label="Copy Copilot MCP-Add Command" size="small" [fluid]="true" (onClick)="copy('copilot')"
+                                      data-testid="viewer-action-copy-copilot"/>
                         </div>
-                        <small>Commands use POSIX-shell quoting and include client-side OAuth login when required.</small>
+                        <small>Commands use POSIX-shell quoting. OAuth sign-in happens in your client.</small>
+                        @let connection = actions.connectionInfo;
+                        @if (connection.enabled && connection.authentication === 'oauth') {
+                            <small>Copilot's OAuth command starts a session-only configuration.
+                                Sign in with <code>/mcp auth mapviewer</code> inside Copilot.</small>
+                        }
                         }
                         <p-button label="Stop current action" severity="danger" size="small"
                                   [disabled]="!actions.hasPendingAction" (onClick)="actions.stopCurrentAction()"
@@ -53,9 +60,10 @@ import {ClipboardService} from "../shared/clipboard.service";
         }
     `,
     styles: [`
-        .action-details {display:flex;flex-direction:column;gap:.6rem;width:min(29rem,80vw)}
+        .action-details {display:flex;flex-direction:column;gap:.6rem;width:min(52rem,calc(100vw - 3rem))}
         .action-details p {margin:0}
-        .action-buttons {display:flex;flex-wrap:wrap;gap:.4rem}
+        .action-buttons {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4rem}
+        .action-buttons p-button {display:flex;min-width:0}
         ul {list-style:none;padding:0;margin:0;max-height:15rem;overflow:auto}
         li {display:flex;justify-content:space-between;gap:1rem;font-size:.85rem;padding:.25rem 0}
         li span:first-child {overflow-wrap:anywhere}
@@ -64,8 +72,8 @@ import {ClipboardService} from "../shared/clipboard.service";
 export class ViewerActionStatusComponent {
     constructor(readonly actions: ViewerActionService, private readonly clipboard: ClipboardService, readonly webMcp: WebMcpService) {}
 
-    /** Builds add/login commands from fixed syntax and quoted metadata, never a server command template. */
-    connectionText(kind: "codex" | "claude"): string {
+    /** Builds client setup commands from fixed syntax and quoted metadata, never a server command template. */
+    connectionText(kind: "codex" | "claude" | "copilot"): string {
         const info = this.actions.connectionInfo;
         if (!info.enabled) return "";
         let endpoint: URL;
@@ -74,6 +82,20 @@ export class ViewerActionStatusComponent {
         const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
         const serverName = "mapviewer";
         const oauth = info.authentication === "oauth" ? info : undefined;
+        if (kind === "copilot") {
+            if (!oauth) return `copilot mcp add --transport http ${serverName} ${quote(endpoint.href)}`;
+            // Copilot's add subcommand has no OAuth options. Its session config supports
+            // a public client ID; scopes require that ID (otherwise use server discovery).
+            const config = {mcpServers: {[serverName]: {
+                type: "http",
+                url: endpoint.href,
+                tools: ["*"],
+                oauthClientId: oauth.oauthClientId,
+                oauthScopes: oauth.oauthClientId && oauth.scopes.length ? oauth.scopes : undefined
+            }}};
+            return `# Session-only MCP setup; sign in with /mcp auth ${serverName} inside Copilot.\n` +
+                `copilot --additional-mcp-config ${quote(JSON.stringify(config))}`;
+        }
         let addCommand = kind === "codex"
             ? `codex mcp add ${serverName} --url ${quote(endpoint.href)}${oauth?.oauthClientId ? ` --oauth-client-id ${quote(oauth.oauthClientId)}` : ""}`
             : `claude mcp add --transport http ${serverName} ${quote(endpoint.href)}`;
@@ -95,7 +117,7 @@ export class ViewerActionStatusComponent {
     }
 
     /** Uses the existing clipboard/manual-copy fallback, without invoking any client command. */
-    copy(kind: "codex" | "claude"): void {
+    copy(kind: "codex" | "claude" | "copilot"): void {
         const text = this.connectionText(kind);
         if (text) this.clipboard.copyToClipboard(text);
     }

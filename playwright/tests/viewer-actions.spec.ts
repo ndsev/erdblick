@@ -96,6 +96,7 @@ test('browser action adapter reads live views, moves only its target and updates
         await expect(details).toContainText('MCP controls ready');
         await expect(details.getByTestId('viewer-action-copy-codex')).toHaveText('Copy Codex MCP-Add Command');
         await expect(details.getByTestId('viewer-action-copy-claude')).toHaveText('Copy Claude MCP-Add Command');
+        await expect(details.getByTestId('viewer-action-copy-copilot')).toHaveText('Copy Copilot MCP-Add Command');
         await expect(details.getByRole('button', {name: 'Copy MCP URL', exact: true})).toHaveCount(0);
 
         const value = {destination: {lon: 11.5374, lat: 48.1584, alt: 700}, orientation: {heading: 0, pitch: -1, roll: 0}, position: [0, 0, 0]};
@@ -131,10 +132,49 @@ test('browser action adapter reads live views, moves only its target and updates
     }
 });
 
+for (const darkMode of ['off', 'on'] as const) {
+    test.describe(`MCP controls with dark mode ${darkMode}`, () => {
+        test.use({darkMode});
+        test('uses a filled green status button and keeps copy commands in one row', async ({page}, testInfo) => {
+            await browserActions(page);
+            const status = page.getByTestId('viewer-action-status').getByRole('button');
+            await expect(status).toHaveClass(/p-button-success/);
+            await expect(status).not.toHaveClass(/p-button-text/);
+            await expect(status).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+            for (const width of [1600, 480]) {
+                await page.setViewportSize({width, height: 900});
+                await status.click({timeout: 10000});
+                const details = page.getByTestId('viewer-action-details');
+                const buttons = details.getByTestId(/^viewer-action-copy-/).getByRole('button');
+                await expect(buttons).toHaveCount(3);
+                await expect(buttons.last()).toBeVisible();
+                const bounds = await buttons.evaluateAll(elements => elements.map(element => {
+                    const {top, bottom, left, right} = element.getBoundingClientRect();
+                    return {top, bottom, left, right};
+                }));
+                for (const box of bounds) {
+                    expect(Math.abs(box.top - bounds[0].top)).toBeLessThan(1);
+                    expect(Math.abs(box.bottom - bounds[0].bottom)).toBeLessThan(1);
+                    expect(box.right - box.left).toBeGreaterThan(0);
+                    expect(box.left).toBeGreaterThanOrEqual(0);
+                    expect(box.right).toBeLessThanOrEqual(width);
+                }
+                await page.mouse.move(0, 0);
+                const screenshot = testInfo.outputPath(`mcp-controls-${darkMode}-${width}.png`);
+                await page.screenshot({path: screenshot});
+                await testInfo.attach(`mcp-controls-${darkMode}-${width}`, {path: screenshot, contentType: 'image/png'});
+                await status.click({timeout: 10000});
+                await expect(details).toBeHidden();
+            }
+        });
+    });
+}
+
 test('catalog mismatch disables agent controls without hiding the map or opening another socket', async ({page}) => {
     const adapter = await browserActions(page, true);
     await page.getByTestId('viewer-action-status').click();
     await expect(page.getByTestId('viewer-action-details')).toContainText('catalogs do not match');
+    await expect(page.getByTestId('viewer-action-status').getByRole('button')).toHaveClass(/p-button-warn/);
     await expect(page.locator('#mapViewContainer-0 canvas').first()).toBeVisible();
     expect(adapter.messages).toEqual([]);
     expect(adapter.connections).toHaveLength(1);
