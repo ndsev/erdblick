@@ -175,8 +175,10 @@ for (const darkMode of ['off', 'on'] as const) {
                 const statusBox = await status.boundingBox();
                 const diagnosticsBox = await page.locator('diagnostics-indicator').boundingBox();
                 expect(diagnosticsBox!.x - statusBox!.x - statusBox!.width).toBeGreaterThanOrEqual(8);
-                // Match the connection indicator's vertical clearance inside the bar.
-                expect(Math.abs(statusBox!.height - diagnosticsBox!.height)).toBeLessThanOrEqual(2);
+                // Native diagnostics button font metrics differ across engines. Keep
+                // the MCP button centered with at least the indicator's clearance.
+                expect(statusBox!.height).toBeLessThanOrEqual(diagnosticsBox!.height + 2);
+                expect(Math.abs(statusBox!.y + statusBox!.height / 2 - diagnosticsBox!.y - diagnosticsBox!.height / 2)).toBeLessThan(1);
                 await status.click({timeout: 10000});
                 const details = page.getByTestId('viewer-action-details');
                 const overlay = page.getByRole('dialog').filter({has: details});
