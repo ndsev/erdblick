@@ -651,14 +651,16 @@ false rollback guarantee.
 
 ### Connection and activity UI
 
-On MCP-enabled deployments, the main-bar MCP button is green when controls are
-ready and orange when unavailable. Its popover shows availability, a
+The main-bar MCP button is gray when controls are ready but idle, green while a
+viewer action is pending, and red when enabled controls are unavailable. Backend
+registration alone does not indicate agent activity. Its popover shows availability, a
 renameable tab label, bounded recent action names/outcomes and Stop current action.
 Stop cancels pending agent work, not completed edits or human searches. Catalog
 mismatch disables agent controls only; ordinary viewing remains available.
 
-The Codex, Claude and Copilot MCP-Add Command copy buttons appear in one row and
-use the server's public connection metadata and fixed, POSIX-shell-quoted command
+The compact Codex, Claude and Copilot buttons share the label
+**Copy Add-MCP-Command:** and stay together in one row (the label can wrap above
+them on narrow screens). They use the server's public connection metadata and fixed, POSIX-shell-quoted command
 syntax. Local mode copies only the add command. For Codex and Claude, OAuth mode
 copies add and login commands joined by `&&`, using the configured scopes and
 optional pre-registered public client ID.

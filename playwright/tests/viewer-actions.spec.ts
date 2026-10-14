@@ -94,9 +94,10 @@ test('browser action adapter reads live views, moves only its target and updates
         await page.getByTestId('viewer-action-status').click();
         const details = page.getByTestId('viewer-action-details');
         await expect(details).toContainText('MCP controls ready');
-        await expect(details.getByTestId('viewer-action-copy-codex')).toHaveText('Copy Codex MCP-Add Command');
-        await expect(details.getByTestId('viewer-action-copy-claude')).toHaveText('Copy Claude MCP-Add Command');
-        await expect(details.getByTestId('viewer-action-copy-copilot')).toHaveText('Copy Copilot MCP-Add Command');
+        await expect(details.getByRole('group', {name: 'Copy Add-MCP-Command'})).toContainText('Copy Add-MCP-Command:');
+        await expect(details.getByTestId('viewer-action-copy-codex')).toHaveText('Codex');
+        await expect(details.getByTestId('viewer-action-copy-claude')).toHaveText('Claude');
+        await expect(details.getByTestId('viewer-action-copy-copilot')).toHaveText('Copilot');
         await expect(details.getByRole('button', {name: 'Copy MCP URL', exact: true})).toHaveCount(0);
 
         const value = {destination: {lon: 11.5374, lat: 48.1584, alt: 700}, orientation: {heading: 0, pitch: -1, roll: 0}, position: [0, 0, 0]};
@@ -132,19 +133,68 @@ test('browser action adapter reads live views, moves only its target and updates
     }
 });
 
+test('MCP activity turns green during pending work and gray after completion or stop without another click', async ({page}) => {
+    const adapter = await browserActions(page);
+    const status = page.getByTestId('viewer-action-status').getByRole('button');
+    await expect(status).toHaveClass(/p-button-secondary/);
+    for (const finish of ['response', 'stop'] as const) {
+        let release!: () => void;
+        const pending = new Promise<void>(resolve => { release = resolve; });
+        await page.route('**/locate', async route => {
+            await pending;
+            await route.fulfill({json: {responses: [[]]}});
+        });
+        const result = adapter.invoke('viewer_inspect', {features: [{mapId: 'TestMap', featureId: 'Way.1'}]});
+        try {
+            // No click or open popover is needed to publish action activity.
+            await expect(status).toHaveClass(/p-button-success/, {timeout: 10000});
+            if (finish === 'stop') {
+                await status.click();
+                await page.getByTestId('viewer-action-stop').getByRole('button').click();
+            } else release();
+            const reply = await result;
+            expect('error' in reply ? reply.error.code : undefined).toBe(finish === 'stop' ? 'cancelled' : 'not_available');
+            await expect(status).toHaveClass(/p-button-secondary/, {timeout: 10000});
+        } finally {
+            release();
+        }
+    }
+});
+
 for (const darkMode of ['off', 'on'] as const) {
     test.describe(`MCP controls with dark mode ${darkMode}`, () => {
         test.use({darkMode});
-        test('uses a filled green status button and keeps copy commands in one row', async ({page}, testInfo) => {
+        test('spaces the status button, centers its arrow and keeps compact copy commands in one row', async ({page}, testInfo) => {
             await browserActions(page);
             const status = page.getByTestId('viewer-action-status').getByRole('button');
-            await expect(status).toHaveClass(/p-button-success/);
+            await expect(status).toHaveClass(/p-button-secondary/);
             await expect(status).not.toHaveClass(/p-button-text/);
             await expect(status).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-            for (const width of [1600, 480]) {
+            for (const width of [1600, 480, 360]) {
                 await page.setViewportSize({width, height: 900});
+                const statusBox = await status.boundingBox();
+                const diagnosticsBox = await page.locator('diagnostics-indicator').boundingBox();
+                expect(diagnosticsBox!.x - statusBox!.x - statusBox!.width).toBeGreaterThanOrEqual(8);
+                // Match the connection indicator's vertical clearance inside the bar.
+                expect(Math.abs(statusBox!.height - diagnosticsBox!.height)).toBeLessThanOrEqual(2);
                 await status.click({timeout: 10000});
                 const details = page.getByTestId('viewer-action-details');
+                const overlay = page.getByRole('dialog').filter({has: details});
+                await expect(overlay).toBeVisible();
+                await expect(overlay).toHaveCSS('transform', 'none', {timeout: 10000});
+                // PrimeNG draws a zero-width CSS triangle with balanced borders/margin.
+                // Its computed left therefore identifies the visible arrow tip.
+                await expect.poll(() => overlay.evaluate(element => {
+                    const button = document.querySelector('[data-testid="viewer-action-status"] button')!;
+                    const target = button.getBoundingClientRect();
+                    const arrow = getComputedStyle(element, '::before');
+                    const tip = element.getBoundingClientRect().left + parseFloat(arrow.left);
+                    return Math.abs(tip - target.left - target.width / 2);
+                }), {timeout: 10000}).toBeLessThan(2);
+                const overlayBox = await overlay.boundingBox();
+                expect(overlayBox!.width).toBeLessThan(560);
+                expect(overlayBox!.x).toBeGreaterThanOrEqual(0);
+                expect(overlayBox!.x + overlayBox!.width).toBeLessThanOrEqual(width);
                 const buttons = details.getByTestId(/^viewer-action-copy-/).getByRole('button');
                 await expect(buttons).toHaveCount(3);
                 await expect(buttons.last()).toBeVisible();
@@ -158,6 +208,14 @@ for (const darkMode of ['off', 'on'] as const) {
                     expect(box.right - box.left).toBeGreaterThan(0);
                     expect(box.left).toBeGreaterThanOrEqual(0);
                     expect(box.right).toBeLessThanOrEqual(width);
+                }
+                const label = details.getByText('Copy Add-MCP-Command:', {exact: true});
+                await expect(label).toBeVisible();
+                if (width >= 480) {
+                    const labelBox = await label.boundingBox();
+                    expect(labelBox!.x + labelBox!.width).toBeLessThan(bounds[0].left);
+                    expect(labelBox!.y).toBeGreaterThanOrEqual(bounds[0].top);
+                    expect(labelBox!.y + labelBox!.height).toBeLessThanOrEqual(bounds[0].bottom);
                 }
                 await page.mouse.move(0, 0);
                 const screenshot = testInfo.outputPath(`mcp-controls-${darkMode}-${width}.png`);
@@ -174,7 +232,7 @@ test('catalog mismatch disables agent controls without hiding the map or opening
     const adapter = await browserActions(page, true);
     await page.getByTestId('viewer-action-status').click();
     await expect(page.getByTestId('viewer-action-details')).toContainText('catalogs do not match');
-    await expect(page.getByTestId('viewer-action-status').getByRole('button')).toHaveClass(/p-button-warn/);
+    await expect(page.getByTestId('viewer-action-status').getByRole('button')).toHaveClass(/p-button-danger/);
     await expect(page.locator('#mapViewContainer-0 canvas').first()).toBeVisible();
     expect(adapter.messages).toEqual([]);
     expect(adapter.connections).toHaveLength(1);

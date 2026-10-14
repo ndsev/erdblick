@@ -84,11 +84,6 @@ interface StyleSheetMenuNode {
                 <div style="display: flex; flex-direction: row; gap: 0; align-items: center">
                     <viewer-action-status></viewer-action-status>
                     <diagnostics-indicator></diagnostics-indicator>
-                    @if (copyright.length) {
-                        <div class="copyright-info" (click)="openLegalInfo()">
-                            {{ copyright }}
-                        </div>
-                    }
                 </div>
             </ng-template>
         </p-menubar>
@@ -129,7 +124,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     protected readonly forcedMobileMenubarBreakpoint = MAIN_BAR_FORCED_MOBILE_BREAKPOINT;
     protected readonly environment = environment;
     menuItems: MenuItem[] = [];
-    copyright: string = '';
     @ViewChild('searchJsonImportInput') private searchJsonImportInput?: ElementRef<HTMLInputElement>;
     @ViewChild('styleYamlImportInput') private styleYamlImportInput?: ElementRef<HTMLInputElement>;
 
@@ -156,18 +150,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.setupMobileMenuTracking();
         this.initializeViewerLayoutMobileState();
         this.rebuildMenuItems();
-        this.subscriptions.add(this.mapService.legalInformationUpdated.subscribe(_ => {
-            this.copyright = '';
-            let firstSet: Set<string> | undefined = this.mapService.legalInformationPerMap.values().next().value;
-            if (firstSet !== undefined && firstSet.size) {
-                this.copyright = '© '
-                    .concat(firstSet.values().next().value as string)
-                    .slice(0, 22)
-                    .trim()
-                    .concat('…')
-                    .replace(' ', ' ');
-            }
-        }));
         this.subscriptions.add(this.stateService.numViewsState.subscribe(numViews => {
             this.rebuildMenuItems(numViews);
         }));

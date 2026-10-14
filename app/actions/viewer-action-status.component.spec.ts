@@ -1,5 +1,6 @@
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
+import {BehaviorSubject} from "rxjs";
 import {ViewerActionStatusComponent} from "./viewer-action-status.component";
 import type {ViewerMcpInfo} from "./viewer-action-relay.contract";
 
@@ -7,6 +8,25 @@ import type {ViewerMcpInfo} from "./viewer-action-relay.contract";
 function component(info: ViewerMcpInfo, clipboard = {copyToClipboard: vi.fn()}) {
     return new ViewerActionStatusComponent({connectionInfo: info} as never, clipboard as never, {} as never);
 }
+
+describe("MCP activity indicator", () => {
+    it.each([
+        {enabled: true, ready: true, viewerTools: 0, active: false, severity: "secondary"},
+        {enabled: true, ready: true, viewerTools: 0, active: true, severity: "success"},
+        {enabled: true, ready: false, viewerTools: 0, active: false, severity: "danger"},
+        {enabled: true, ready: false, viewerTools: 1, active: true, severity: "danger"},
+        {enabled: false, ready: false, viewerTools: 1, active: false, severity: "secondary"},
+        {enabled: false, ready: false, viewerTools: 1, active: true, severity: "success"},
+        {enabled: false, ready: false, viewerTools: 0, active: false, severity: "danger"}
+    ])("shows $severity for backend enabled=$enabled ready=$ready, WebMCP tools=$viewerTools, pending=$active", ({enabled, ready, viewerTools, active, severity}) => {
+        const ui = new ViewerActionStatusComponent(
+            {availability$: new BehaviorSubject({enabled, ready}), hasPendingAction: active} as never,
+            {copyToClipboard: vi.fn()} as never,
+            {status$: new BehaviorSubject({viewerTools})} as never
+        );
+        expect(ui.buttonSeverity).toBe(severity);
+    });
+});
 
 describe("MCP connection copy commands", () => {
     it("uses no OAuth flags for a local deployment", () => {

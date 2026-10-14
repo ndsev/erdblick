@@ -1,12 +1,13 @@
 import {AfterViewInit, ChangeDetectorRef, Component, DoCheck, ElementRef, OnDestroy, Renderer2, ViewChild} from '@angular/core';
 import {environment} from "./environments/environment";
-import {AppStateService, INSPECTION_DOCK_TAB_ID, SEARCH_DOCK_TAB_ID} from "./shared/appstate.service";
+import {AppStateService, INSPECTION_DOCK_TAB_ID, LEGAL_INFO_DIALOG_LAYOUT_ID, SEARCH_DOCK_TAB_ID} from "./shared/appstate.service";
 import {FeatureSearchService, FeatureSearchSession} from "./search/feature.search.service";
 import {DockedPanelDragController, DockedPanelDragOffset} from "./shared/docked-panel-drag.controller";
-import {Subscription} from "rxjs";
+import {map, Observable, startWith, Subscription} from "rxjs";
 import {MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT} from "./mapview/render-view.model";
 import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
 import {ViewerUiService} from "./actions/viewer-ui.service";
+import {MapInfoService} from "./mapdata/map-info.service";
 
 @Component({
     selector: 'dockable-layout',
@@ -17,6 +18,11 @@ import {ViewerUiService} from "./actions/viewer-ui.service";
                 @if (!environment.visualizationOnly) {
                     <main-bar></main-bar>
                     <coordinates-panel [coordinatesVisible]="coordinatesPolicy.effectiveEnabled"></coordinates-panel>
+                    @if (copyright$ | async; as copyright) {
+                        <button type="button" class="map-attribution" data-testid="map-attribution"
+                                [title]="copyright" aria-label="Copyright and legal information"
+                                (click)="stateService.openDialog(legalInfoDialogId)">{{ copyright }}</button>
+                    }
                     <div class="dock-toggle" data-testid="dock-toggle" (click)="toggleDock()">
                         @if (stateService.isDockOpen) {
                             <span class="material-symbols-outlined" pTooltip="Collapse dock">
@@ -134,13 +140,23 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
     private observedDockOpen: boolean;
     private unregisterResizeTarget?: () => void;
     protected readonly searchDockDrag: DockedPanelDragController<string>;
+    protected readonly copyright$: Observable<string>;
+    protected readonly legalInfoDialogId = LEGAL_INFO_DIALOG_LAYOUT_ID;
 
     constructor(public stateService: AppStateService,
                 public coordinatesPolicy: CoordinatesPolicyService,
                 private renderer: Renderer2,
                 private featureSearchService: FeatureSearchService,
                 private cdr: ChangeDetectorRef,
-                private viewerUi: ViewerUiService) {
+                private viewerUi: ViewerUiService,
+                mapService: MapInfoService) {
+        // Keep the map-wide legal-information shortcut, but let layout—not a
+        // fixed character limit—shorten its first notice. The dialog lists all notices.
+        this.copyright$ = mapService.legalInformationUpdated.pipe(startWith(true), map(() => {
+            const notices = mapService.legalInformationPerMap.values().next().value;
+            const notice = notices?.values().next().value;
+            return notice ? `© ${notice}` : '';
+        }));
         this.searchSessionsSubscription = this.featureSearchService.sessionsChanged.subscribe(() => this.cdr.markForCheck());
         this.observedDockOpen = this.stateService.isDockOpen;
         this.dockOpenSubscription = this.stateService.dockOpenState.subscribe(nextDockOpen => {
