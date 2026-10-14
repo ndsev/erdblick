@@ -27,19 +27,13 @@ using namespace mapget;
 namespace erdblick
 {
 
-struct TileLayerParser::SchemaCompletionRoot
+struct TileLayerParser::SchemaCompletionBinding
 {
     std::shared_ptr<mapget::StringPool> strings;
-    std::shared_ptr<simfil::ModelPool> model;
-    simfil::ModelNode::Ptr root;
+    std::unique_ptr<simfil::Environment> environment;
 };
 
 namespace {
-
-constexpr int kSchemaCompletionDepth = 6;
-const auto kNoCompletionBudget = [] {
-    return false;
-};
 
 std::string completionTypeToString(simfil::CompletionCandidate::Type type)
 {
@@ -138,85 +132,6 @@ void mergeCompletionHint(std::string& target, std::string const& hint)
         target += "; ";
     }
     target += hint;
-}
-
-simfil::ModelNode::Ptr makeSchemaCompletionNode(
-    std::shared_ptr<simfil::ModelPool> const& model,
-    std::shared_ptr<mapget::LayerSchema const> const& registry,
-    simfil::SchemaId schemaId,
-    int depth,
-    std::function<bool()> const& budgetExhausted = kNoCompletionBudget)
-{
-    if (!registry || schemaId == simfil::NoSchemaId || budgetExhausted()) {
-        return model->newValue(std::string_view{});
-    }
-
-    switch (registry->kind(schemaId)) {
-    case simfil::Schema::Kind::Object: {
-        auto object = model->newObject();
-        (void)object->setSchema(schemaId);
-        if (depth > 0) {
-            for (auto const& fieldName : registry->directFields(schemaId)) {
-                if (budgetExhausted()) {
-                    break;
-                }
-                auto childSchema = registry->childSchema(schemaId, fieldName);
-                auto child = makeSchemaCompletionNode(model, registry, childSchema, depth - 1, budgetExhausted);
-                (void)object->addField(fieldName, child);
-            }
-        }
-        return object;
-    }
-    case simfil::Schema::Kind::Array: {
-        auto array = model->newArray();
-        (void)array->setSchema(schemaId);
-        return array;
-    }
-    case simfil::Schema::Kind::Value:
-        return model->newValue(std::string_view{});
-    }
-
-    return model->newValue(std::string_view{});
-}
-
-void addAttributeOverlayFields(
-    simfil::model_ptr<simfil::Object>& attributeRoot,
-    std::shared_ptr<simfil::ModelPool> const& model,
-    std::shared_ptr<mapget::LayerSchema const> const& registry,
-    std::string const& featureType,
-    std::function<bool()> const& budgetExhausted = kNoCompletionBudget)
-{
-    (void)attributeRoot->addField("$name", std::string_view{});
-    (void)attributeRoot->addField("$layer", std::string_view{});
-    (void)attributeRoot->addField("$validityIndex", int64_t{0});
-    (void)attributeRoot->addField("$validityCount", int64_t{1});
-
-    auto featureSchema = registry ? registry->featureSchema(featureType) : simfil::NoSchemaId;
-    if (featureSchema != simfil::NoSchemaId && !budgetExhausted()) {
-        auto featureRoot = makeSchemaCompletionNode(model, registry, featureSchema, kSchemaCompletionDepth, budgetExhausted);
-        (void)attributeRoot->addField("$feature", featureRoot);
-    }
-}
-
-void addCompletionCandidates(
-    std::set<simfil::CompletionCandidate>& merged,
-    std::shared_ptr<mapget::LayerSchema const> const& registry,
-    std::shared_ptr<simfil::StringPool> const& strings,
-    std::string const& query,
-    int point,
-    simfil::ModelNode const& root,
-    simfil::CompletionOptions const& options)
-{
-    auto env = mapget::makeEnvironment(strings);
-    mapget::installCompletionLayerSchema(*env, registry, strings);
-
-    auto result = simfil::complete(*env, query, point, root, options);
-    if (!result) {
-        return;
-    }
-    for (auto candidate : *result) {
-        merged.insert(enrichCompletionCandidate(std::move(candidate), registry, root.schema()));
-    }
 }
 
 NativeJsValue completionCandidatesToJs(
@@ -900,6 +815,13 @@ void mergeNumericRange(SearchStyleSchemaMetadata& target, SearchStyleSchemaMetad
     }
 }
 
+/** Classify a concrete nullable structural domain without relying on its kind's name. */
+bool hasOnlySchemaAffinity(simfil::Schema::Kind kind, simfil::ValueType type)
+{
+    auto const present = simfil::Schema::affinities(kind) & ~simfil::valueTypeAffinity(simfil::ValueType::Null);
+    return present == simfil::valueTypeAffinity(type);
+}
+
 SearchStyleSchemaMetadata schemaMetadata(
     nlohmann::json const& root,
     nlohmann::json const* schema,
@@ -911,10 +833,10 @@ SearchStyleSchemaMetadata schemaMetadata(
     auto const* resolved = resolveSchema(root, schema, depth);
     if (!resolved || !resolved->is_object() || depth <= 0) {
         if (registry && schemaId != simfil::NoSchemaId) {
-            if (registry->kind(schemaId) == simfil::Schema::Kind::Object) {
+            if (hasOnlySchemaAffinity(registry->kind(schemaId), simfil::ValueType::Object)) {
                 metadata.valueKind = "object";
             }
-            else if (registry->kind(schemaId) == simfil::Schema::Kind::Array) {
+            else if (hasOnlySchemaAffinity(registry->kind(schemaId), simfil::ValueType::Array)) {
                 metadata.valueKind = "array";
             }
             else {
@@ -1002,10 +924,10 @@ SearchStyleSchemaMetadata schemaMetadata(
         metadata.valueKind = "object";
     }
     else if (registry && schemaId != simfil::NoSchemaId) {
-        if (registry->kind(schemaId) == simfil::Schema::Kind::Object) {
+        if (hasOnlySchemaAffinity(registry->kind(schemaId), simfil::ValueType::Object)) {
             metadata.valueKind = "object";
         }
-        else if (registry->kind(schemaId) == simfil::Schema::Kind::Array) {
+        else if (hasOnlySchemaAffinity(registry->kind(schemaId), simfil::ValueType::Array)) {
             metadata.valueKind = "array";
         }
     }
@@ -1093,7 +1015,8 @@ void collectSchemaFieldPaths(
             metadata.numericMinimum,
             metadata.numericMaximum
         });
-        if (childSchema != simfil::NoSchemaId && registry->kind(childSchema) == simfil::Schema::Kind::Object) {
+        if (childSchema != simfil::NoSchemaId &&
+            (simfil::Schema::affinities(registry->kind(childSchema)) & simfil::valueTypeAffinity(simfil::ValueType::Object)) != 0) {
             collectSchemaFieldPaths(paths, registry, childSchema, childJson, rootSchema, path, activeSchemas);
         }
     }
@@ -1286,24 +1209,35 @@ void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSo
 {
     info_.clear();
     featureJumpTargets_.clear();
-    schemaCompletionRoots_.clear();
+    schemaCompletionBindings_.clear();
     // Datasource reloads may reuse node ids with a fresh string dictionary.
     // Drop offsets here so subsequent requests cannot suppress required pool updates.
     cachedStrings_ = std::make_shared<mapget::TileLayerStream::StringPoolCache>();
     reset();
 
-    // Parse data source info
-    auto srcInfoParsed = nlohmann::json::parse(dataSourceInfoJson.toString());
+    addDataSourceInfo(dataSourceInfoJson);
+}
+
+void TileLayerParser::addDataSourceInfo(const erdblick::SharedUint8Array& dataSourceInfoJson)
+{
+    // Validate the entire batch before changing live parser state. Appending a
+    // map is safe on the existing stream; replacing one is not.
+    std::vector<DataSourceInfo> additions;
+    std::set<std::string> addedMapIds;
+    for (auto const& node : nlohmann::json::parse(dataSourceInfoJson.toString())) {
+        auto dsInfo = DataSourceInfo::fromJson(node);
+        if (dsInfo.isAddOn_)
+            continue;
+        if (info_.contains(dsInfo.mapId_) || !addedMapIds.insert(dsInfo.mapId_).second)
+            throw std::runtime_error(
+                fmt::format("Datasource map '{}' is already registered", dsInfo.mapId_));
+        additions.push_back(std::move(dsInfo));
+    }
 
     // Index available feature types by their feature id compositions.
     // These will be the available jump-to-feature targets.
     // For each composition, allow a version with and without optional params.
-    for (auto const& node : srcInfoParsed) {
-        auto dsInfo = DataSourceInfo::fromJson(node);
-        if (dsInfo.isAddOn_) {
-            // Do not expose add-on datasources in the frontend.
-            continue;
-        }
+    for (auto& dsInfo : additions) {
         for (auto const& [_, l] : dsInfo.layers_) {
             for (auto const& tp : l->featureTypes_) {
                 for (auto const& composition : tp.uniqueIdCompositions_) {
@@ -1543,7 +1477,7 @@ NativeJsValue TileLayerParser::planStyleFilter(
 
 void TileLayerParser::setFallbackLayerInfo(std::shared_ptr<mapget::LayerInfo> info) {
     fallbackLayerInfo_ = std::move(info);
-    schemaCompletionRoots_.clear();
+    schemaCompletionBindings_.clear();
 }
 
 std::shared_ptr<mapget::LayerInfo>
@@ -1682,34 +1616,35 @@ NativeJsValue TileLayerParser::completeSearchQuery(
             std::chrono::steady_clock::now() - completionStart);
         return elapsed.count() >= opts.timeoutMs;
     };
-    auto cachedCompletionRoot = [&](std::string const& key, auto&& build) -> SchemaCompletionRoot* {
-        auto existing = schemaCompletionRoots_.find(key);
-        if (existing != schemaCompletionRoots_.end()) {
-            return existing->second.get();
+    auto addCandidates = [&](std::shared_ptr<mapget::LayerSchema const> const& registry,
+                             simfil::SchemaId rootSchema) {
+        if (rootSchema == simfil::NoSchemaId || completionBudgetExhausted()) {
+            return;
         }
-
-        auto entry = std::make_shared<SchemaCompletionRoot>();
-        entry->strings = std::make_shared<mapget::StringPool>("SearchCompletion");
-        entry->model = std::make_shared<simfil::ModelPool>(entry->strings);
-        entry->root = build(entry->model, entry->strings);
-        if (completionBudgetExhausted()) {
-            return nullptr;
+        auto& binding = schemaCompletionBindings_[registry.get()];
+        if (!binding) {
+            binding = std::make_shared<SchemaCompletionBinding>();
+            binding->strings = std::make_shared<mapget::StringPool>("SearchCompletion");
+            binding->environment = mapget::makeEnvironment(binding->strings);
+            // The native binding retains the registry and translates its field IDs
+            // into this private pool. No datasource strings or sample model mutate.
+            mapget::installCompletionLayerSchema(*binding->environment, registry, binding->strings);
         }
-        auto [inserted, _] = schemaCompletionRoots_.emplace(key, std::move(entry));
-        return inserted->second.get();
-    };
-    auto completionCacheKey = [](std::shared_ptr<mapget::LayerSchema const> const& registry,
-                                 std::string_view kind,
-                                 simfil::SchemaId schema,
-                                 simfil::SchemaId overlaySchema = simfil::NoSchemaId,
-                                 std::string_view qualifier = {}) {
-        std::ostringstream key;
-        key << reinterpret_cast<uintptr_t>(registry.get())
-            << ':' << kind
-            << ':' << schema
-            << ':' << overlaySchema
-            << ':' << qualifier;
-        return key.str();
+        auto remaining = opts;
+        if (opts.timeoutMs > 0) {
+            auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - completionStart).count();
+            if (elapsed >= opts.timeoutMs) {
+                return;
+            }
+            remaining.timeoutMs = opts.timeoutMs - elapsed;
+        }
+        auto candidates = simfil::complete(*binding->environment, query, point, rootSchema, remaining);
+        if (candidates) {
+            for (auto candidate : *candidates) {
+                mergedCandidates.insert(enrichCompletionCandidate(std::move(candidate), registry, rootSchema));
+            }
+        }
     };
 
     for (auto const& [_, dataSource] : info_) {
@@ -1734,20 +1669,7 @@ NativeJsValue TileLayerParser::completeSearchQuery(
                     if (completionBudgetExhausted()) {
                         return completionCandidatesToJs(query, mergedCandidates, opts.limit);
                     }
-                    auto* cachedRoot = cachedCompletionRoot(
-                        completionCacheKey(registry, "feature", featureSchema),
-                        [&](auto const& model, auto const&) {
-                            return makeSchemaCompletionNode(
-                                model,
-                                registry,
-                                featureSchema,
-                                kSchemaCompletionDepth,
-                                completionBudgetExhausted);
-                        });
-                    if (!cachedRoot) {
-                        return completionCandidatesToJs(query, mergedCandidates, opts.limit);
-                    }
-                    addCompletionCandidates(mergedCandidates, registry, cachedRoot->strings, query, point, *cachedRoot->root, opts);
+                    addCandidates(registry, featureSchema);
                 }
 
                 if (!includeAttributeScope) {
@@ -1778,48 +1700,7 @@ NativeJsValue TileLayerParser::completeSearchQuery(
                             return completionCandidatesToJs(query, mergedCandidates, opts.limit);
                         }
 
-                        auto* cachedRoot = cachedCompletionRoot(
-                            completionCacheKey(
-                                registry,
-                                "attribute",
-                                attributeSchema,
-                                featureSchema,
-                                featureType.name_),
-                            [&](auto const& model, auto const&) -> simfil::ModelNode::Ptr {
-                                auto attributeRoot = model->newObject();
-                                (void)attributeRoot->setSchema(attributeSchema);
-                                for (auto const& fieldName : registry->directFields(attributeSchema)) {
-                                    if (completionBudgetExhausted()) {
-                                        break;
-                                    }
-                                    auto childSchema = registry->childSchema(attributeSchema, fieldName);
-                                    auto child = makeSchemaCompletionNode(
-                                        model,
-                                        registry,
-                                        childSchema,
-                                        kSchemaCompletionDepth - 1,
-                                        completionBudgetExhausted);
-                                    (void)attributeRoot->addField(fieldName, child);
-                                }
-                                addAttributeOverlayFields(
-                                    attributeRoot,
-                                    model,
-                                    registry,
-                                    featureType.name_,
-                                    completionBudgetExhausted);
-                                return attributeRoot;
-                            });
-                        if (!cachedRoot) {
-                            return completionCandidatesToJs(query, mergedCandidates, opts.limit);
-                        }
-                        addCompletionCandidates(
-                            mergedCandidates,
-                            registry,
-                            cachedRoot->strings,
-                            query,
-                            point,
-                            *cachedRoot->root,
-                            opts);
+                        addCandidates(registry, registry->attributeQuerySchema(featureType.name_, attributeSchema));
                     }
                 }
             }
@@ -2073,16 +1954,36 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
                     layerTypeIdMetadata);
                 for (auto const& featureType : layerInfo->featureTypes_) {
                     auto const* featureSchemaJson = schemaForRegistryKey(rootSchema, registry, "Feature:" + featureType.name_);
+                    auto const featureSchema = registry->featureSchema(featureType.name_);
                     std::vector<SearchStyleFieldPath> paths;
                     std::set<simfil::SchemaId> activeSchemas;
                     collectSchemaFieldPaths(
                         paths,
                         registry,
-                        registry->featureSchema(featureType.name_),
+                        featureSchema,
                         featureSchemaJson,
                         rootSchema,
                         "",
                         activeSchemas);
+                    // Offer the runtime lookup alias in the picker without duplicating
+                    // canonical schema paths. A declared attributes member keeps precedence.
+                    auto const rootFields = registry->directFields(featureSchema);
+                    if (std::ranges::find(rootFields, "attributes") == rootFields.end() &&
+                        std::ranges::find(rootFields, "properties") != rootFields.end())
+                    {
+                        auto const canonicalCount = paths.size();
+                        for (size_t i = 0; i < canonicalCount; ++i) {
+                            if (paths[i].path == "properties" ||
+                                paths[i].path.starts_with("properties.")) {
+                                auto alias = paths[i];
+                                alias.path.replace(
+                                    0,
+                                    std::string_view("properties").size(),
+                                    "attributes");
+                                paths.push_back(std::move(alias));
+                            }
+                        }
+                    }
                     for (auto const& path : paths) {
                         auto metadata = SearchStyleSchemaMetadata{
                             path.valueKind,

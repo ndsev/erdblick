@@ -1,11 +1,13 @@
-import {ChangeDetectorRef, Component, DoCheck, ElementRef, OnDestroy, Renderer2, ViewChild} from '@angular/core';
+import {AfterViewInit, ChangeDetectorRef, Component, DoCheck, ElementRef, OnDestroy, Renderer2, ViewChild} from '@angular/core';
 import {environment} from "./environments/environment";
-import {AppStateService, INSPECTION_DOCK_TAB_ID, SEARCH_DOCK_TAB_ID} from "./shared/appstate.service";
+import {AppStateService, INSPECTION_DOCK_TAB_ID, LEGAL_INFO_DIALOG_LAYOUT_ID, SEARCH_DOCK_TAB_ID} from "./shared/appstate.service";
 import {FeatureSearchService, FeatureSearchSession} from "./search/feature.search.service";
 import {DockedPanelDragController, DockedPanelDragOffset} from "./shared/docked-panel-drag.controller";
-import {Subscription} from "rxjs";
+import {map, Observable, startWith, Subscription} from "rxjs";
 import {MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT} from "./mapview/render-view.model";
 import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
+import {ViewerUiService} from "./actions/viewer-ui.service";
+import {MapInfoService} from "./mapdata/map-info.service";
 
 @Component({
     selector: 'dockable-layout',
@@ -16,6 +18,11 @@ import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
                 @if (!environment.visualizationOnly) {
                     <main-bar></main-bar>
                     <coordinates-panel [coordinatesVisible]="coordinatesPolicy.effectiveEnabled"></coordinates-panel>
+                    @if (copyright$ | async; as copyright) {
+                        <button type="button" class="map-attribution" data-testid="map-attribution"
+                                [title]="copyright" aria-label="Copyright and legal information"
+                                (click)="stateService.openDialog(legalInfoDialogId)">{{ copyright }}</button>
+                    }
                     <div class="dock-toggle" data-testid="dock-toggle" (click)="toggleDock()">
                         @if (stateService.isDockOpen) {
                             <span class="material-symbols-outlined" pTooltip="Collapse dock">
@@ -30,7 +37,8 @@ import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
                 }
             </div>
             @if (!environment.visualizationOnly) {
-                <div #dock class="collapsible-dock" [ngClass]="{'collapsed': !this.stateService.isDockOpen, 'open': stateService.isDockOpen}">
+                <div #dock class="collapsible-dock" data-testid="inspection-dock" [style.width.px]="stateService.dockWidthState.getValue()"
+                     [ngClass]="{'collapsed': !this.stateService.isDockOpen, 'open': stateService.isDockOpen}">
                     @if (stateService.isDockOpen) {
                         <div class="resize-handle" (pointerdown)="onResizeStart($event)"></div>
                     }
@@ -113,7 +121,7 @@ import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
  * It owns dock open/close state, user-resizing of the dock, and the temporary
  * pause events used to suppress layout-sensitive work during dock transitions.
  */
-export class DockableLayoutComponent implements DoCheck, OnDestroy {
+export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestroy {
     private static readonly DOCK_RESIZE_PAUSE_START_EVENT = "erdblick-dock-resize-start";
     private static readonly DOCK_RESIZE_PAUSE_END_EVENT = "erdblick-dock-resize-end";
 
@@ -128,14 +136,28 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
     private dockPauseEndRafSecond?: number;
     private dockResizePauseActive = false;
     private dockOpenSubscription: Subscription;
+    private readonly searchSessionsSubscription: Subscription;
     private observedDockOpen: boolean;
+    private unregisterResizeTarget?: () => void;
     protected readonly searchDockDrag: DockedPanelDragController<string>;
+    protected readonly copyright$: Observable<string>;
+    protected readonly legalInfoDialogId = LEGAL_INFO_DIALOG_LAYOUT_ID;
 
     constructor(public stateService: AppStateService,
                 public coordinatesPolicy: CoordinatesPolicyService,
                 private renderer: Renderer2,
                 private featureSearchService: FeatureSearchService,
-                private cdr: ChangeDetectorRef) {
+                private cdr: ChangeDetectorRef,
+                private viewerUi: ViewerUiService,
+                mapService: MapInfoService) {
+        // Keep the map-wide legal-information shortcut, but let layout—not a
+        // fixed character limit—shorten its first notice. The dialog lists all notices.
+        this.copyright$ = mapService.legalInformationUpdated.pipe(startWith(true), map(() => {
+            const notices = mapService.legalInformationPerMap.values().next().value;
+            const notice = notices?.values().next().value;
+            return notice ? `© ${notice}` : '';
+        }));
+        this.searchSessionsSubscription = this.featureSearchService.sessionsChanged.subscribe(() => this.cdr.markForCheck());
         this.observedDockOpen = this.stateService.isDockOpen;
         this.dockOpenSubscription = this.stateService.dockOpenState.subscribe(nextDockOpen => {
             if (nextDockOpen === this.observedDockOpen) {
@@ -181,6 +203,25 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
     protected readonly environment = environment;
     protected readonly inspectionDockTabId = INSPECTION_DOCK_TAB_ID;
     protected readonly searchDockTabId = SEARCH_DOCK_TAB_ID;
+
+    /** Registers the live dock; only an open, idle dock accepts an explicit width. */
+    ngAfterViewInit(): void {
+        const dock = this.dockRef?.nativeElement;
+        if (!dock) return;
+        const savedWidth = this.stateService.dockWidthState.getValue();
+        if (savedWidth !== null) this.setDockWidth(savedWidth);
+        this.unregisterResizeTarget = this.viewerUi.registerResizeTarget(dock, {
+            describe: () => ({kind: "dock", dimensions: this.stateService.isDockOpen ? ["widthPx"] : [], busy: this.dragging}),
+            resize: size => {
+                if ("panelSizes" in size || size.widthPx === undefined) return;
+                this.dispatchDockResizePauseStart();
+                this.setDockWidth(size.widthPx);
+                this.stateService.dockWidthState.next(dock.getBoundingClientRect().width);
+                window.dispatchEvent(new Event(MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT));
+                this.scheduleDockResizePauseEnd();
+            }
+        });
+    }
 
     /** Toggles dock visibility; the dock-open subscription performs the resize preparation. */
     protected toggleDock() {
@@ -230,10 +271,12 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
 
     /** Clears listeners and ensures the resize-pause state is reset on teardown. */
     ngOnDestroy(): void {
+        this.unregisterResizeTarget?.();
         this.detachMove?.();
         this.detachUp?.();
         this.detachCancel?.();
         this.dockOpenSubscription.unsubscribe();
+        this.searchSessionsSubscription.unsubscribe();
         this.searchDockDrag.destroy();
         this.clearScheduledDockResizePauseEnd();
         this.dispatchDockResizePauseEnd();
@@ -290,13 +333,19 @@ export class DockableLayoutComponent implements DoCheck, OnDestroy {
         if (!this.dragging || !this.dockRef) return;
         // Compute new width from left edge drag: width = rightEdge - pointerX
         const newWidth = Math.max(0, this.dockRight - ev.clientX);
-        this.dockRef.nativeElement.style.width = `${newWidth}px`;
+        this.setDockWidth(newWidth);
+    }
+
+    /** Keeps a usable strip of map visible for both pointer and explicit dock resizing. */
+    private setDockWidth(width: number): void {
+        if (this.dockRef) this.dockRef.nativeElement.style.width = `${Math.max(0, Math.min(width, window.innerWidth - Math.min(160, window.innerWidth / 2)))}px`;
     }
 
     /** Finishes the dock resize interaction and restores global pointer styles. */
     private onPointerUp() {
         if (!this.dragging) return;
         this.dragging = false;
+        if (this.dockRef) this.stateService.dockWidthState.next(this.dockRef.nativeElement.getBoundingClientRect().width);
         // Cleanup listeners and body styles
         this.detachMove?.();
         this.detachUp?.();

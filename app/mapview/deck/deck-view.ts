@@ -905,6 +905,25 @@ export abstract class DeckMapView implements IRenderView {
         this.deck.redraw(reason);
     }
 
+    /** Copies one complete frame, including post-render overlays, without changing normal drawing-buffer policy. */
+    captureCanvas(scale: number): {canvas: HTMLCanvasElement; dataUrl: string} {
+        const deck = this.deck;
+        const canvas = deck?.getCanvas();
+        if (!deck?.isInitialized || !canvas || !canvas.width || !canvas.height
+            || canvas.getContext('webgl2')?.isContextLost() || !(scale > 0 && scale <= 1)) {
+            throw new Error("Map renderer is unavailable for capture");
+        }
+        const copy = document.createElement('canvas');
+        copy.width = Math.max(1, Math.floor(canvas.width * scale));
+        copy.height = Math.max(1, Math.floor(canvas.height * scale));
+        const context = copy.getContext('2d');
+        if (!context) throw new Error("Screenshot canvas is unavailable");
+        // A reason forces Deck's synchronous draw; onAfterRender (contact shading/text) runs before it returns.
+        deck.redraw('Application screenshot');
+        context.drawImage(canvas, 0, 0, copy.width, copy.height);
+        return {canvas, dataUrl: copy.toDataURL('image/png')};
+    }
+
     /**
      * Present streamed scene mutations after a short quiet period with a hard latency bound.
      *
@@ -1031,6 +1050,22 @@ export abstract class DeckMapView implements IRenderView {
             this.requestRender("Layout resized");
         });
         this.requestRender("Prepare layout resize");
+    }
+
+    /** Uses the visible map area for an explicit jump after a dock clipped the old projection. */
+    private prepareForNavigation(): void {
+        if (!this.clippedLayoutCanvasCssSize) {
+            return;
+        }
+        const container = document.getElementById(this.canvasId);
+        if (!container || container.clientWidth <= 0 || container.clientHeight <= 0) {
+            return;
+        }
+        // Resizing alone preserves the old scene. A requested jump instead centers its target
+        // inside the available area, rather than under the dock in the old, wider canvas.
+        this.clippedLayoutCanvasCssSize = undefined;
+        this.lastCanvasCssSize = this.normalizedCanvasCssSize(container.clientWidth, container.clientHeight);
+        this.prepareForLayoutResize(this.lastCanvasCssSize);
     }
 
     /** Returns the absolute canvas style used while a side-dock resize clips the old projection. */
@@ -1571,6 +1606,16 @@ export abstract class DeckMapView implements IRenderView {
         return this.stateService.cameraViewDataState.getValue(this._viewIndex);
     }
 
+    /** Reads renderer-local motion without triggering persistence, tile loads or a redraw. */
+    getLiveCameraState(): CameraViewState | undefined {
+        return this.firstPersonSession ? undefined : this.cameraViewData(this.viewState);
+    }
+
+    /** Exposes gesture ownership without subscribing another consumer to every camera frame. */
+    isCameraInteractionActive(): boolean {
+        return this.isCameraInteracting;
+    }
+
     /** Captures live camera motion and prevents a retired index from publishing late updates. */
     prepareForViewRemoval(): RenderViewCameraState {
         this.retiringForViewRemoval = true;
@@ -1955,6 +2000,7 @@ export abstract class DeckMapView implements IRenderView {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
+                this.prepareForNavigation();
                 const alt = value.z ?? this.zoomToAltitude(this.viewState.zoom, value.y);
                 this.stateService.setView(
                     this._viewIndex,
@@ -1978,6 +2024,7 @@ export abstract class DeckMapView implements IRenderView {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
+                this.prepareForNavigation();
                 this.exitFirstPersonView();
                 const centerLon = (value.rectangle.west + value.rectangle.east) / 2;
                 const centerLat = (value.rectangle.south + value.rectangle.north) / 2;

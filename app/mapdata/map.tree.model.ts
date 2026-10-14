@@ -41,6 +41,8 @@ export interface LayerInfoItem extends Record<string, any> {
     canWrite: boolean;
     coverage: Array<number | CoverageRectItem>;
     featureTypes: Array<{ name: string, uniqueIdCompositions: Array<any> }>;
+    /** Schema roots published by mapget; identifier types may also contain cross-layer references. */
+    schemaFeatureTypes?: string[];
     layerId: string;
     type: string;
     version: { major: number, minor: number, patch: number };

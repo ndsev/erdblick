@@ -674,6 +674,11 @@ async function writeV8CoverageSummary(): Promise<void> {
 
 async function globalTeardown(config: FullConfig): Promise<void> {
     console.log('[playwright] Global teardown started');
+    if (process.env['EB_MAPGET_MCP_TEST_OAUTH'] === '1') {
+        const keyPath = path.join(process.cwd(), 'playwright', '.cache',
+            `mcp-test-key-${process.env['EB_APP_PORT'] || '9000'}.pem`);
+        fs.rmSync(keyPath, {force: true});
+    }
     try {
         // Coverage summary generation is best-effort; ignore failures so tests
         // do not fail purely due to coverage post-processing.

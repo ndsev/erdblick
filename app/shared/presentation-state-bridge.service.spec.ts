@@ -3,6 +3,7 @@ import {describe, expect, it, vi} from "vitest";
 import type {StyleService} from "../styledata/style.service";
 import type {AppStateService} from "./appstate.service";
 import type {MapViewStateService} from "../mapview/map-view-state.service";
+import type {FeatureSearchService} from "../search/feature.search.service";
 import {
     PRESENTATION_BRIDGE_APPLY,
     PRESENTATION_BRIDGE_APPLY_URL_STATE,
@@ -29,7 +30,8 @@ function styleServiceFixture(): StyleService {
 
 function mapViewStateFixture(): MapViewStateService {
     return {
-        presentationCameraViewStateTopic: {next: vi.fn()}
+        presentationCameraViewStateTopic: {next: vi.fn()},
+        waitForCurrentViewports: vi.fn().mockResolvedValue(undefined)
     } as unknown as MapViewStateService;
 }
 
@@ -79,6 +81,128 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe("PresentationStateBridgeService", () => {
+    it("starts authored search exports after applying scene state and dismissing previous searches", async () => {
+        const fixture = framedWindow();
+        const calls: string[] = [];
+        const replaceUrlState = vi.fn(async () => { calls.push("state"); });
+        const searchService = {
+            dismissForPresentation: vi.fn(() => calls.push("dismiss")),
+            importSearchJsonPayload: vi.fn(() => { calls.push("import"); return {id: "scene-search"}; }),
+            closeSearch: vi.fn()
+        };
+        const view = mapViewStateFixture();
+        let ready!: () => void;
+        vi.mocked(view.waitForCurrentViewports).mockImplementation(() => new Promise<void>(resolve => {
+            ready = resolve;
+        }));
+        const bridge = new PresentationStateBridgeService(
+            {replaceUrlState} as unknown as AppStateService,
+            view, styleServiceFixture(), searchService as unknown as FeatureSearchService
+        );
+        bridge.initialize(fixture.host);
+        expect(fixture.parentPostMessage).toHaveBeenCalledWith({
+            type: PRESENTATION_BRIDGE_READY, version: 2, capabilities: {searches: true}
+        }, "*");
+        const payload = {configuration: {query: "**.speedLimitKmh >= 80", scope: "attribute",
+            selectedMapLayers: [{mapId: "Map", layerId: "Lane"}], selectedMapLayersManual: true,
+            selectedViewIndices: [0], renderStrategy: {showLowFiDots: false},
+            searchStyleRules: [{geometry: ["line"], color: {mode: "solid", color: "#008800"}}]}};
+        fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2,
+            requestId: 1, search: "?embed=presentation&v2=1", searches: [payload]});
+        await flushMicrotasks();
+        expect(calls).toEqual(["state", "dismiss"]);
+        ready();
+        await flushMicrotasks();
+        expect(calls).toEqual(["state", "dismiss", "import"]);
+        expect(searchService.importSearchJsonPayload).toHaveBeenCalledWith(payload);
+        expect(fixture.parentPostMessage).toHaveBeenLastCalledWith({
+            type: PRESENTATION_BRIDGE_RESULT, version: 2, requestId: 1, ok: true
+        }, "http://deck.test");
+
+        // Camera-only keyframes preserve the live search; an explicit empty list clears it.
+        calls.length = 0;
+        fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2,
+            requestId: 2, search: "?embed=presentation&v2=1&alt=1000", reset: false});
+        await flushMicrotasks();
+        expect(calls).toEqual(["state"]);
+        expect(searchService.closeSearch).not.toHaveBeenCalled();
+
+        fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2,
+            requestId: 3, search: "?embed=presentation&v2=1", reset: false, searches: []});
+        await flushMicrotasks();
+        expect(searchService.closeSearch).toHaveBeenCalledExactlyOnceWith("scene-search");
+        expect(searchService.dismissForPresentation).toHaveBeenCalledTimes(2);
+        expect(searchService.importSearchJsonPayload).toHaveBeenCalledTimes(1);
+        bridge.ngOnDestroy();
+    });
+
+    it("does not start a superseded scene's searches after slow state hydration", async () => {
+        const fixture = framedWindow();
+        let hydrated!: () => void;
+        const replaceUrlState = vi.fn().mockResolvedValue(undefined);
+        replaceUrlState.mockImplementationOnce(() => new Promise<void>(resolve => { hydrated = resolve; }));
+        const view = mapViewStateFixture();
+        const searchService = {dismissForPresentation: vi.fn(), importSearchJsonPayload: vi.fn()};
+        const bridge = new PresentationStateBridgeService(
+            {replaceUrlState} as unknown as AppStateService, view, styleServiceFixture(),
+            searchService as unknown as FeatureSearchService
+        );
+        bridge.initialize(fixture.host);
+        fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2,
+            requestId: 1, search: "?embed=presentation&v2=1", searches: [{query: "true"}]});
+        fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2,
+            requestId: 2, search: "?embed=presentation&v2=1", searches: []});
+        hydrated();
+        await flushMicrotasks();
+        await flushMicrotasks();
+        expect(view.waitForCurrentViewports).not.toHaveBeenCalled();
+        expect(searchService.importSearchJsonPayload).not.toHaveBeenCalled();
+        expect(fixture.parentPostMessage).toHaveBeenLastCalledWith({
+            type: PRESENTATION_BRIDGE_RESULT, version: 2, requestId: 2, ok: true
+        }, "http://deck.test");
+        bridge.ngOnDestroy();
+    });
+
+    it("rejects a malformed search list before changing state or dismissing searches", async () => {
+        const fixture = framedWindow();
+        const state = {replaceUrlState: vi.fn()};
+        const searchService = {dismissForPresentation: vi.fn(), importSearchJsonPayload: vi.fn()};
+        const bridge = new PresentationStateBridgeService(
+            state as unknown as AppStateService, mapViewStateFixture(), styleServiceFixture(),
+            searchService as unknown as FeatureSearchService
+        );
+        bridge.initialize(fixture.host);
+        for (const searches of [null, {}, Array(1), [{query: "valid"}, {tree: []}], Array(51).fill({query: "valid"})]) {
+            fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2,
+                requestId: 1, search: "?embed=presentation&v2=1", searches});
+            await flushMicrotasks();
+            expect(fixture.parentPostMessage).toHaveBeenLastCalledWith({
+                type: PRESENTATION_BRIDGE_RESULT, version: 2, requestId: 1, ok: false, error: "invalid-searches"
+            }, "http://deck.test");
+        }
+        expect(state.replaceUrlState).not.toHaveBeenCalled();
+        expect(searchService.dismissForPresentation).not.toHaveBeenCalled();
+        expect(searchService.importSearchJsonPayload).not.toHaveBeenCalled();
+        bridge.ngOnDestroy();
+    });
+
+    it("does not silently acknowledge searches when no search owner is available", async () => {
+        const fixture = framedWindow();
+        const state = {replaceUrlState: vi.fn()};
+        const bridge = new PresentationStateBridgeService(
+            state as unknown as AppStateService, mapViewStateFixture(), styleServiceFixture()
+        );
+        bridge.initialize(fixture.host);
+        fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2,
+            requestId: 1, search: "?embed=presentation&v2=1", searches: [{query: "**.warningSign"}]});
+        await flushMicrotasks();
+        expect(state.replaceUrlState).not.toHaveBeenCalled();
+        expect(fixture.parentPostMessage).toHaveBeenLastCalledWith({
+            type: PRESENTATION_BRIDGE_RESULT, version: 2, requestId: 1, ok: false, error: "invalid-searches"
+        }, "http://deck.test");
+        bridge.ngOnDestroy();
+    });
+
     it("honors false reset policy and rejects a malformed reset flag", async () => {
         const fixture = framedWindow();
         const replaceUrlState = vi.fn().mockResolvedValue(undefined);
@@ -208,7 +332,8 @@ describe("PresentationStateBridgeService", () => {
         expect(service.initialize(fixture.host)).toBe(true);
         expect(fixture.parentPostMessage).toHaveBeenCalledWith({
             type: PRESENTATION_BRIDGE_READY,
-            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION
+            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
+            capabilities: {searches: false}
         }, "*");
 
         service.ngOnDestroy();

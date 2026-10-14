@@ -999,6 +999,14 @@ export class AppStateService implements OnDestroy {
         schema: Boolish
     });
 
+    /** Local layout preferences; deliberately absent from shareable map URLs. */
+    readonly dockWidthState = this.createState<number | null>({
+        name: 'dockWidth', defaultValue: null, schema: z.number().min(0).max(32768).nullable()
+    });
+    readonly viewPanelSizesState = this.createState<number[]>({
+        name: 'viewPanelSizes', defaultValue: [], schema: z.array(z.number().min(0).max(100)).max(2)
+    });
+
     readonly dockActiveTabState = this.createState<string>({
         name: 'dockActiveTabState',
         defaultValue: INSPECTION_DOCK_TAB_ID,
@@ -1561,9 +1569,18 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Returns current URL-backed state without copying authentication or unknown URL parameters. */
+    shareableUrl(): string {
+        const url = new URL(window.location.pathname, window.location.origin);
+        for (const [key, value] of Object.entries(this.serializeUrlV2(false))) {
+            for (const item of Array.isArray(value) ? value : [value]) url.searchParams.append(key, item);
+        }
+        return url.href;
+    }
+
     /** Builds a complete v2 query-param set so all layer-indexed params share one order. */
-    private serializeUrlV2(): Record<string, string | string[]> {
-        const params = this.preservedUnknownUrlParams();
+    private serializeUrlV2(includeUnknownParams = true): Record<string, string | string[]> {
+        const params = includeUnknownParams ? this.preservedUnknownUrlParams() : {};
         params["v2"] = "1";
 
         const urlLayerNames = this.urlLayerNamesForSerialization();

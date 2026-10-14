@@ -290,7 +290,9 @@ export class DiagnosticsDatasource implements OnDestroy {
         if (connected !== this.lastBackendConnected) {
             entries.push({
                 at: now,
-                level: connected ? "info" : "error",
+                // A sampled socket transition also includes intentional metadata
+                // resets. Actual transport failures are reported by the transport.
+                level: "info",
                 message: connected
                     ? "Backend connected"
                     : "Backend disconnected"

@@ -144,22 +144,31 @@ auto subsetGeometryCenter(
     return result;
 }
 
-/** Convert one projected scalar array into ordinary JavaScript values. */
-auto projectedValues(mapget::model_ptr<mapget::Array> const& values)
+/** Preserve nested result values, including native undefined, across the WASM boundary. */
+auto projectedValue(simfil::ModelNode const& node, simfil::StringPool const& strings)
     -> erdblick::JsValue
 {
-    auto result = erdblick::JsValue::List();
-    if (!values) {
+    using erdblick::JsValue;
+    if (node.type() == simfil::ValueType::Undef) {
+        return JsValue::Undefined();
+    }
+    if (node.type() == simfil::ValueType::Object) {
+        auto result = JsValue::Dict();
+        for (auto const& [field, value] : node.fields()) {
+            if (auto key = strings.resolve(field); key && value) {
+                result.set(std::string(*key), projectedValue(*value, strings));
+            }
+        }
         return result;
     }
-    for (uint32_t index = 0; index < values->size(); ++index) {
-        auto value = values->at(index);
-        result.push(
-            value
-                ? jsonToJsValue(value->toJson())
-                : erdblick::JsValue());
+    if (node.type() == simfil::ValueType::Array) {
+        auto result = JsValue::List();
+        for (auto const& value : node) {
+            result.push(value ? projectedValue(*value, strings) : JsValue::Undefined());
+        }
+        return result;
     }
-    return result;
+    return jsonToJsValue(node.toJson());
 }
 
 /** Accumulate compact diagnostics for one projected value stream. */
@@ -795,6 +804,7 @@ NativeJsValue TileSubsetLayer::entryRange(
                       mapget::model_ptr<mapget::FeatureId> const& featureId,
                       mapget::model_ptr<mapget::GeometryCollection> const& geometry,
                       mapget::model_ptr<mapget::Array> const& values,
+                      std::vector<mapget::ProjectedValueError> const& valueErrors,
                       std::optional<uint32_t> attributeIndex = std::nullopt,
                       std::optional<bool> hasValidity = std::nullopt,
                       uint32_t validityIndex = 0,
@@ -806,8 +816,17 @@ NativeJsValue TileSubsetLayer::entryRange(
             {"mapTileKey", JsValue(model_->id().toString())},
             {"featureId", JsValue(featureId->toString())},
             {"resultIndex", JsValue(static_cast<double>(index))},
-            {"values", projectedValues(values)},
+            {"values", values ? projectedValue(*values, *model_->strings()) : JsValue::List()},
         });
+        auto errors = JsValue::List();
+        for (auto const& error : valueErrors) {
+            errors.push(JsValue::Dict({
+                {"expressionIndex", JsValue(error.expressionIndex_)},
+                {"stage", JsValue(error.stage_)},
+                {"message", JsValue(error.message_)},
+            }));
+        }
+        entry.set("valueErrors", errors);
         if (includePosition) {
             if (auto center = subsetGeometryCenter(geometry)) {
                 auto const cartesian =
@@ -838,7 +857,7 @@ NativeJsValue TileSubsetLayer::entryRange(
                     index++,
                     entry->featureId(),
                     entry->geometry(),
-                    entry->values());
+                    entry->values(), entry->valueErrors());
                 return index < end;
             });
         break;
@@ -853,7 +872,7 @@ NativeJsValue TileSubsetLayer::entryRange(
                     current,
                     entry->featureId(),
                     entry->geometry(),
-                    entry->values(),
+                    entry->values(), entry->valueErrors(),
                     entry->attributeIndex(),
                     entry->hasValidity(),
                     entry->validityIndex(),
@@ -871,7 +890,7 @@ NativeJsValue TileSubsetLayer::entryRange(
                         ? source->featureId()
                         : mapget::model_ptr<mapget::FeatureId>{},
                     entry->sourceGeometry(),
-                    entry->values());
+                    entry->values(), entry->valueErrors());
                 return index < end;
             });
         break;
@@ -882,7 +901,7 @@ NativeJsValue TileSubsetLayer::entryRange(
                     index++,
                     entry->representativeFeatureId(),
                     entry->geometry(),
-                    entry->values());
+                    entry->values(), entry->valueErrors());
                 return index < end;
             });
         break;
@@ -914,12 +933,18 @@ NativeJsValue TileSubsetLayer::valueSummaries(
     auto summaries = std::vector<ValueSummary>(fields.size());
     auto summarize = [&](mapget::model_ptr<mapget::Array> const& values) {
         for (size_t field = 0; field < fields.size(); ++field) {
-            summarizeNode(
-                summaries[field],
-                values && field < values->size()
-                    ? values->at(static_cast<int64_t>(field))
-                    : simfil::ModelNode::Ptr{},
-                distinctLimit);
+            auto results = values && field < values->size()
+                ? values->at(static_cast<int64_t>(field))
+                : simfil::ModelNode::Ptr{};
+            if (!results || results->type() != simfil::ValueType::Array || results->size() == 0) {
+                summarizeNode(summaries[field], {}, distinctLimit);
+                continue;
+            }
+            // Summarize the expression's result stream, not its transport
+            // wrapper. One returned array remains one list-valued result.
+            for (auto const& value : *results) {
+                summarizeNode(summaries[field], value, distinctLimit);
+            }
         }
     };
     switch (channel->scope()) {

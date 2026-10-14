@@ -1,7 +1,33 @@
+import "@angular/compiler";
+import {BehaviorSubject} from "rxjs";
 import {describe, expect, it} from "vitest";
 import type {SubsetDiagnosticsTile} from "../mapview/view-layer-diagnostics.service";
 import {CONVERSION_AGE_UNIT} from "./diagnostics.constants";
 import {buildAggregatedPerfStats} from "./diagnostics.perf-aggregation";
+import {DiagnosticsDatasource} from "./diagnostics.datasource";
+import type {LogEntry} from "./diagnostics.model";
+
+describe("backend connectivity diagnostics", () => {
+    it("does not turn an intentional socket reset into a backend error", () => {
+        let connected = true;
+        const logs$ = new BehaviorSubject<LogEntry[]>([]);
+        const diagnostics: DiagnosticsDatasource = Object.assign(Object.create(DiagnosticsDatasource.prototype), {
+            mapService: {isTileStreamConnected: () => connected},
+            viewDiagnostics: {cameraInteracting: false},
+            lastBackendConnected: true,
+            logs$
+        });
+        connected = false;
+        diagnostics.refreshLogs();
+        diagnostics.refreshLogs();
+        connected = true;
+        diagnostics.refreshLogs();
+        expect(logs$.value).toEqual([
+            expect.objectContaining({level: "info", message: "Backend disconnected"}),
+            expect.objectContaining({level: "info", message: "Backend connected"})
+        ]);
+    });
+});
 
 function tile(
     tileId: number,

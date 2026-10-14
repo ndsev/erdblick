@@ -16,6 +16,7 @@ import {
 } from '@angular/core';
 import {AccordionModule} from 'primeng/accordion';
 import {AppStateService, DEFAULT_DOCKED_EM_HEIGHT} from './appstate.service';
+import {ViewerUiService} from '../actions/viewer-ui.service';
 
 export type AppPanelResizeMode = 'none' | 'vertical' | 'fill' | 'auto';
 
@@ -54,6 +55,7 @@ interface AppPanelResizeSession {
                     </p-accordion-header>
                     <p-accordion-content>
                         <div #contentContainer
+                             data-testid="dock-panel-content"
                              class="app-panel-content"
                              [class.app-panel-content-fixed]="usesFixedBody"
                              [class.app-panel-content-resizable]="contentResizable"
@@ -128,8 +130,9 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
     private panelBodyHeightPx?: number;
     private viewInitialized = false;
     private resizeSession?: AppPanelResizeSession;
+    private unregisterResizeTarget?: () => void;
 
-    constructor(private readonly stateService: AppStateService) {}
+    constructor(private readonly stateService: AppStateService, private readonly viewerUi: ViewerUiService) {}
 
     /** Applies persisted panel state and input changes to the accordion value and dock body size. */
     ngOnChanges(changes: SimpleChanges): void {
@@ -155,10 +158,22 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         this.syncPanelLayout();
         this.onShow.emit();
         this.scheduleBodySizeChange();
+        const content = this.contentRef?.nativeElement;
+        if (content) this.unregisterResizeTarget = this.viewerUi.registerResizeTarget(content, {
+            describe: () => ({kind: "panel", dimensions: this.contentResizable ? ["heightPx"] : [], busy: !!this.resizeSession,
+                ...(this.layoutId ? {layoutId: this.layoutId} : {})}),
+            resize: size => {
+                if ("panelSizes" in size || size.heightPx === undefined) return;
+                this.applyBodyLayout(size.heightPx, size.heightPx > this.defaultBodyHeightPx() + 1);
+                // Keep the synchronous result and Angular's next binding update in agreement.
+                content.style.height = `${this.panelBodyHeightPx}px`;
+            }
+        });
     }
 
     /** Releases pointer capture and page-level styles if the panel is destroyed during resizing. */
     ngOnDestroy(): void {
+        this.unregisterResizeTarget?.();
         this.cancelContentResize();
     }
 

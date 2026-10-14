@@ -28,6 +28,11 @@ Individual workspace surfaces can be resized without leaving the desktop
 viewport:
 
 
+<!-- mcp:
+title: "Map camera navigation and projection"
+keywords: ["navigate", "zoom", "pan", "rotate", "flat", "2D", "3D", "first person"]
+hint: "Use viewer_navigate to fit known features, native mapTileKeys or WGS84 bounds. For direct camera/projection changes discover view.camera and view.projection; camera angles are radians and destination.alt is a scale-height, not physical elevation. Observe viewLayoutRevision and synchronization. Direct camera assignment is unavailable in first-person mode."
+-->
 ## Navigating the Map
 
 You can move around the map using a mix of mouse gestures, keyboard shortcuts, and on-screen controls:
@@ -78,6 +83,11 @@ does not clear caches inside a datasource or refresh other browser sessions.
 
 ![Authorized cache-reset dialog with map ownership](screenshots/26-cache-reset-authorized.png)
 
+<!-- mcp:
+title: "Map layers tile levels and grid"
+keywords: ["map", "layer", "visibility", "AUTO", "tile borders", "grid", "background"]
+hint: "Read view.layers to identify what is visible, then use singular view.layer to assign a complete {visible, level, autoLevel} value. Catalogs may include hidden layers. view.grid controls the independent NDS/XYZ tile grid; view.background selects a discovered background. Search help for \"Style options and presets\" for per-layer presentation."
+-->
 ## Maps, Layers, and Base Content
 
 Use the **Maps & Layers** panel to:
@@ -124,6 +134,11 @@ Tile overlays use these states:
 
 Click the diagnostics indicator to open its progress popover. From there you can jump into the full statistics, log, and export tools. For the detailed workflow, see the [Diagnostics and Status Guide](erdblick-diagnostics.md).
 
+<!-- mcp:
+title: "Coordinate marker"
+keywords: ["coordinates", "marker", "longitude", "latitude", "pin", "WGS84"]
+hint: "Use app.marker for the marker position and visibility. A marker does not move the camera; use viewer_navigate or view.camera when navigation is also requested."
+-->
 ## Coordinate Panel and Marker
 
 - The coordinate panel shows the current cursor position plus derived tile IDs. Click any value to copy it.
@@ -169,6 +184,11 @@ For the feature workflow, continue with the [Feature Inspection Guide](erdblick-
 
 The dedicated [Search and Jump](../../../docs/mv-search.md) guide covers targets, persistent feature-search panels, result visualization, diagnostics, and the query language.
 
+<!-- mcp:
+title: "Viewer preferences and resets"
+keywords: ["preferences", "rendering", "tile budget", "dark mode", "reset", "navigation", "inspection"]
+hint: "Discover app.preferences channels for supported rendering, navigation, inspection and hover settings. Assign complete values while preserving unrelated fields. Some UI preferences, including dark mode, have no semantic state channel; use a fresh viewer_take_snapshot and supported UI controls. Reset actions discard saved state; diagnose the specific problem before using them."
+-->
 ## Preferences and Resets
 
 Open **Edit -> Preferences** to access the main viewer preferences:
@@ -202,6 +222,11 @@ search behavior, and rendering controls remain easy to scan:
 
 **Max Tiles to Load** bounds the workload when exploring dense maps.
 
+<!-- mcp:
+title: "Hover label fields"
+keywords: ["hover", "HUD", "label", "field", "display key", "speed limit"]
+hint: "Configure app.preferences.hover using schema-grounded field expressions and optional displayKey values. This changes the hover HUD, not permanent map labels. Search help for \"Style labels\" for text drawn on map geometry."
+-->
 ### Hover Labels
 
 The **Hover Labels** tab builds the compact HUD shown while pointing at a map

@@ -1,13 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "erdblick/geo/point-conversion.h"
+#include "erdblick/geometry.h"
 #include "erdblick/inspection.h"
 #include "erdblick/parser.h"
 #include "erdblick/rule.h"
 #include "erdblick/testdataprovider.h"
 #include "erdblick/visualization.h"
 #include "mapget/model/point.h"
-#include "mapget/model/sourceinfo.h"
 #include "mapget/model/sourcedatareference.h"
+#include "mapget/model/sourceinfo.h"
 #include "mapget/model/stringpool.h"
 #include "nlohmann/json.hpp"
 
@@ -1455,6 +1457,49 @@ TEST_CASE("TileLayerParser clears string-pool offsets when datasource info is re
     REQUIRE_FALSE(offsetsAfterReload.contains("ReloadedNode"));
 }
 
+TEST_CASE("TileLayerParser appends ready maps without invalidating live dictionaries or metadata", "[erdblick.parser]")
+{
+    TileLayerParser parser;
+    auto first = nlohmann::json{
+        {"mapId", "First"}, {"stringPoolId", "FirstPool"},
+        {"layers", {{"LineLayer", lineTestLayerInfo()->toJson()}}}
+    };
+    auto second = first;
+    second["mapId"] = "Second";
+    second["stringPoolId"] = "SecondPool";
+    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({first}).dump()));
+    parser.addFieldDict(serializedStringPool("FirstPool", "retained-field"));
+    auto offsets = parser.getFieldDictOffsets();
+    auto targets = parser.filterFeatureJumpTargets("Way.7");
+    REQUIRE(targets.size() == 1);
+    auto originalLayerInfo = targets.front().jumpTarget_.layerInfo_;
+    SharedUint8Array dictionaryBefore;
+    parser.getFieldDict(dictionaryBefore, "FirstPool");
+
+    SECTION("new maps extend the index while retaining existing dictionary bytes and layer pointers")
+    {
+        parser.addDataSourceInfo(SharedUint8Array(nlohmann::json::array({second}).dump()));
+        auto updated = parser.filterFeatureJumpTargets("Way.7");
+        REQUIRE(updated.size() == 1);
+        REQUIRE(updated.front().jumpTarget_.maps_ == std::vector<std::string>{"First", "Second"});
+        REQUIRE(updated.front().jumpTarget_.layerInfo_ == originalLayerInfo);
+        REQUIRE(parser.getFieldDictOffsets() == offsets);
+        SharedUint8Array dictionaryAfter;
+        parser.getFieldDict(dictionaryAfter, "FirstPool");
+        REQUIRE(dictionaryAfter.toString() == dictionaryBefore.toString());
+    }
+
+    SECTION("a rejected replacement does not partially install earlier maps from the same batch")
+    {
+        REQUIRE_THROWS(parser.addDataSourceInfo(SharedUint8Array(nlohmann::json::array({second, first}).dump())));
+        auto unchanged = parser.filterFeatureJumpTargets("Way.7");
+        REQUIRE(unchanged.front().jumpTarget_.maps_ == std::vector<std::string>{"First"});
+        REQUIRE(parser.getFieldDictOffsets() == offsets);
+        // The rejected batch did not install Second, so it can still be added.
+        REQUIRE_NOTHROW(parser.addDataSourceInfo(SharedUint8Array(nlohmann::json::array({second}).dump())));
+    }
+}
+
 TEST_CASE("TileLayerParser exposes the tile lifetime in milliseconds", "[erdblick.parser]")
 {
     using namespace std::chrono;
@@ -1763,6 +1808,63 @@ TEST_CASE("Feature search completion labels enum-backed constants", "[erdblick.s
     REQUIRE(hasHint(speedCompletions, "\"SPEED_LIMIT_END\"", "enum WarningSign"));
     REQUIRE_FALSE(hasCompletionType(warningCompletions, "Hint"));
     REQUIRE_FALSE(hasCompletionType(speedCompletions, "Hint"));
+}
+
+TEST_CASE("Search completion uses native array domains and attribute overlays without sample nodes", "[erdblick.search]")
+{
+    auto layer = warningSignLayerInfoJson();
+    auto& definitions = layer["featureModelSchema"]["$defs"];
+    definitions["Feature"]["properties"]["samples"] = {
+        {"type", "array"}, {"items", {
+            {"type", "object"}, {"properties", {
+                {"speedLimit", {{"type", "number"}}},
+                {"next", {{"$ref", "#/$defs/Feature"}}}
+            }}
+        }}
+    };
+    definitions["WarningSignAttribute"]["properties"]["validity"] = {
+        {"type", "array"}, {"items", {{"type", "object"}, {"properties", {
+            {"direction", {{"type", "string"}, {"enum", {"POSITIVE", "NEGATIVE"}}}}
+        }}}}
+    };
+    auto source = nlohmann::json{{"stringPoolId", "Completion"}, {"mapId", "Completion"},
+        {"layers", {{"Road", layer}}}};
+    TileLayerParser parser;
+    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({source}).dump()));
+    auto complete = [&](std::string const& query, std::string const& scope, std::string const& expected) {
+        auto candidates = parser.completeSearchQuery(query, static_cast<int>(query.size()),
+            nlohmann::json{{"scope", scope}, {"limit", 40}, {"timeoutMs", 1000}});
+        auto found = std::find_if(candidates.begin(), candidates.end(), [&](auto const& item) {
+            return item.at("text") == expected;
+        });
+        INFO(query);
+        INFO(candidates.dump());
+        REQUIRE(found != candidates.end());
+        auto offset = found->at("range")[0].template get<size_t>();
+        auto length = found->at("range")[1].template get<size_t>();
+        auto replaced = query;
+        replaced.replace(offset, length, expected);
+        CHECK(found->at("query") == replaced);
+    };
+    complete("samples[17].spe", "feature", "speedLimit");
+    complete("samples[-1].spe", "feature", "speedLimit");
+    complete("samples[0].next.samples[0].next.samples[0].spe", "feature", "speedLimit");
+    complete("$fea", "attribute", "[\"$feature\"]");
+    complete("$feature.samples[17].spe", "attribute", "speedLimit");
+    complete("$validityC", "attribute", "[\"$validityCount\"]");
+    complete("$hasV", "attribute", "[\"$hasValidity\"]");
+    complete("validity[17].dir", "attribute", "direction");
+    complete("attributeValue.warningSign == SPE", "attribute", "\"SPEED_LIMIT_END\"");
+
+    // Replacing source metadata must invalidate bindings and their private ID namespaces.
+    definitions["Feature"]["properties"]["samples"]["items"]["properties"] = {
+        {"surfaceType", {{"type", "string"}}}
+    };
+    source["layers"]["Road"] = layer;
+    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({source}).dump()));
+    complete("samples[17].sur", "feature", "surfaceType");
+    auto stale = parser.completeSearchQuery("samples[17].spe", 15, nlohmann::json{{"scope", "feature"}});
+    CHECK(std::none_of(stale.begin(), stale.end(), [](auto const& item) { return item.at("text") == "speedLimit"; }));
 }
 
 TEST_CASE("FeatureLayerStyle rejects removed LOD fields", "[erdblick.style]")
@@ -2545,4 +2647,70 @@ rules:
     REQUIRE(std::ranges::all_of(report["issues"], [](auto const& issue) {
         return issue["severity"] == "warning" && issue["impact"] == "preset-skipped";
     }));
+}
+
+TEST_CASE(
+    "FeatureStyleRule labels preserve explicit values and fall back for missing results",
+    "[erdblick.style]")
+{
+    FeatureStyleRule rule(
+        YAML::Load(R"yaml(
+geometry: line
+label-text: unavailable
+label-text-expression: _.id
+)yaml"),
+        0);
+    FeatureStyleRule noFallback(
+        YAML::Load(R"yaml(
+geometry: line
+label-text-expression: _.id
+)yaml"),
+        0);
+    auto eval = BoundEvalFun{
+        [](std::string const&)
+        {
+            return simfil::Value::undef();
+        }};
+    REQUIRE(rule.labelText(eval) == "unavailable");
+    REQUIRE(noFallback.labelText(eval).empty());
+    eval.eval_ = [](std::string const&)
+    {
+        return simfil::Value::null();
+    };
+    REQUIRE(rule.labelText(eval) == "unavailable");
+    REQUIRE(noFallback.labelText(eval).empty());
+    eval.eval_ = [](std::string const&)
+    {
+        return simfil::Value(int64_t{0});
+    };
+    REQUIRE(rule.labelText(eval) == "0");
+    eval.eval_ = [](std::string const&)
+    {
+        return simfil::Value(false);
+    };
+    REQUIRE(rule.labelText(eval) == "false");
+    eval.eval_ = [](std::string const&)
+    {
+        return simfil::Value(std::string{"undefined"});
+    };
+    REQUIRE(rule.labelText(eval) == "undefined");
+}
+
+TEST_CASE("Feature framing radius compares WGS84 points in metres", "[geometry]")
+{
+    mapget::SelfContainedGeometry geometry{
+        {{11.0, 48.0, 0.0}, {11.02, 48.0, 0.0}, {11.01, 48.0, 100.0}},
+        {},
+        mapget::GeomType::Points};
+    auto const center = geometryCenter(geometry);
+    auto const endpoint = boundingRadiusEndPoint(geometry);
+    CHECK(endpoint.z == 0.0);
+    auto const radius =
+        glm::distance(wgsToCartesian<glm::dvec3>(center), wgsToCartesian<glm::dvec3>(endpoint));
+    CHECK(radius > 700.0);
+    for (auto const& point : geometry.points_) {
+        CHECK(
+            glm::distance(wgsToCartesian<glm::dvec3>(center), wgsToCartesian<glm::dvec3>(point)) <=
+            radius + 1e-6);
+    }
 }

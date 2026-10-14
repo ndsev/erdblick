@@ -3,6 +3,7 @@ import {coreLib} from '../integrations/wasm';
 import {
     MAP_TILE_STREAM_HEADER_SIZE,
     MAP_TILE_STREAM_TYPE_FIELDS,
+    MAP_TILE_STREAM_TYPE_ACTION_CONTROL,
     MAP_TILE_STREAM_TYPE_END_OF_STREAM,
     MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT,
     MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE,
@@ -48,6 +49,138 @@ function packedFrames(...frames: Uint8Array[]): ArrayBuffer {
 }
 
 describe('MapTileStreamClient', () => {
+    it('dispatches identity and action controls while tile frames are paused, preserving tile FIFO', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const clientId = 'b3e68f32-3b51-472d-8cab-14b597f7de91';
+        const socket = {readyState: WebSocket.OPEN, close: vi.fn(), send: vi.fn()};
+        const controls: unknown[] = [];
+        const data: unknown[] = [];
+        tileStream.socket = socket;
+        tileStream.startPullLoops = vi.fn();
+        tileStream.latestRequestedRequestId = 3;
+        client.onClientId = id => {
+            if (id) expect(client.sendActionControl(id, {type: 'test-register'})).toBe(true);
+        };
+        client.onActionControl = payload => controls.push(payload);
+        client.onFrame = (_bytes, type) => data.push([type, tileStream.incomingRequestId]);
+        client.onStatus = vi.fn();
+        client.setFrameProcessingPaused(true);
+        vi.useFakeTimers();
+        try {
+            const invoke = {type: 'mapget.actions.invoke', version: 1, callId: '1', action: 'viewer_get_app_state', arguments: {}, timeoutMs: 30000};
+            const cancel = {type: 'mapget.actions.cancel', version: 1, callId: '1', reason: 'timeout'};
+            tileStream.enqueueFrame(packedFrames(
+                jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {type: 'mapget.tiles.request-context', requestId: 2, clientId}),
+                jsonFrame(41, {}),
+                jsonFrame(MAP_TILE_STREAM_TYPE_ACTION_CONTROL, invoke),
+                jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {type: 'mapget.tiles.request-context', requestId: 3, clientId}),
+                jsonFrame(MAP_TILE_STREAM_TYPE_ACTION_CONTROL, cancel),
+                jsonFrame(42, {})
+            ));
+            await tileStream.frameMessageChain;
+            expect(controls).toEqual([invoke, cancel]);
+            expect(socket.send).toHaveBeenCalledExactlyOnceWith('{"type":"test-register"}');
+            expect(tileStream.incomingRequestId).toBeNull();
+            expect(tileStream.latestRequestedRequestId).toBe(3);
+            expect(client.getPendingFrameQueueSize()).toBe(4);
+            expect(tileStream.startPullLoops).not.toHaveBeenCalled();
+            expect(client.onStatus).not.toHaveBeenCalled();
+            expect(data).toEqual([]);
+
+            client.setFrameProcessingPaused(false);
+            await vi.runAllTimersAsync();
+            expect(data).toEqual([[41, 2], [42, 3]]);
+            expect(tileStream.incomingRequestId).toBe(3);
+        } finally {
+            client.destroy();
+            vi.useRealTimers();
+        }
+    });
+
+    it('isolates malformed or oversized action content from the tile stream', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const controls: unknown[] = [];
+        client.onActionControl = payload => controls.push(payload);
+        const failure = vi.spyOn(client, 'failInteractiveConnection');
+        const data = vi.fn();
+        client.onFrame = data;
+        try {
+            const malformed = jsonFrame(MAP_TILE_STREAM_TYPE_ACTION_CONTROL, {});
+            malformed[MAP_TILE_STREAM_HEADER_SIZE] = 0xff;
+            await (client as any).handleMessage(packedFrames(
+                malformed,
+                jsonFrame(MAP_TILE_STREAM_TYPE_ACTION_CONTROL, {excess: 'x'.repeat(65536)}),
+                jsonFrame(41, {})
+            ));
+            expect(controls).toEqual([undefined, undefined]);
+            expect(failure).not.toHaveBeenCalled();
+            expect(data).toHaveBeenCalledOnce();
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('does not dispatch controls following a protocol mismatch', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const control = vi.fn();
+        client.onActionControl = control;
+        client.onProtocolMismatch = vi.fn();
+        try {
+            (client as any).enqueueFrame(packedFrames(
+                jsonFrame(41, {}, {...currentProtocolVersion(), major: 99}),
+                jsonFrame(MAP_TILE_STREAM_TYPE_ACTION_CONTROL, {type: 'mapget.actions.cancel'})
+            ));
+            await (client as any).frameMessageChain;
+            expect(client.onProtocolMismatch).toHaveBeenCalledOnce();
+            expect(control).not.toHaveBeenCalled();
+            expect(client.getPendingFrameQueueSize()).toBe(0);
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('ignores a retired asynchronous frame failure instead of closing a replacement connection', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const failure = vi.spyOn(client, 'failInteractiveConnection');
+        let rejectDecode!: (reason: Error) => void;
+        tileStream.decodeMessage = vi.fn().mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectDecode = reject; }));
+        try {
+            tileStream.enqueueFrame(new ArrayBuffer(0));
+            await Promise.resolve();
+            client.close();
+            rejectDecode(new Error('Retired Blob decode failed'));
+            await tileStream.frameMessageChain;
+            expect(failure).not.toHaveBeenCalled();
+            expect(client.getPendingFrameQueueSize()).toBe(0);
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('never opens or replays action sends and retains the UUID in payload URLs', () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const clientId = 'b3e68f32-3b51-472d-8cab-14b597f7de91';
+        const socket = {readyState: WebSocket.OPEN, close: vi.fn(), send: vi.fn()};
+        try {
+            expect(client.sendActionControl(clientId, {})).toBe(false);
+            tileStream.socket = socket;
+            tileStream.pullClientId = clientId;
+            expect(new URL(tileStream.resolvePullUrl(clientId)).searchParams.get('clientId')).toBe(clientId);
+            expect(client.sendActionControl('retired', {})).toBe(false);
+            expect(client.sendActionControl(clientId, {oversize: 'x'.repeat(256 * 1024)})).toBe(false);
+            expect(client.sendActionControl(clientId, {type: 'test'})).toBe(true);
+            expect(socket.send).toHaveBeenCalledExactlyOnceWith('{"type":"test"}');
+            client.close();
+            expect(client.sendActionControl(clientId, {})).toBe(false);
+            expect(socket.send).toHaveBeenCalledOnce();
+        } finally {
+            client.destroy();
+        }
+    });
+
     it('streams POST /tiles across arbitrary HTTP chunk boundaries without opening a websocket', async () => {
         const payload = new Uint8Array(packedFrames(
             jsonFrame(41, {ordinal: 1}),

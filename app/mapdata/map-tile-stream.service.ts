@@ -99,6 +99,8 @@ const MAX_OBJECT_DISCOVERY_CACHE_TILES = 4096;
 @Injectable({providedIn: "root"})
 export class MapTileStreamService {
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
+    readonly actionClientId$ = new BehaviorSubject<string | null>(null);
+    readonly actionControlReceived = new Subject<{payload: unknown; receivedAt: number}>();
     readonly filterStatusReceived =
         new Subject<MapTileStreamFilterStatusPayload>();
 
@@ -173,6 +175,8 @@ export class MapTileStreamService {
             "/interactive",
             this.mapInfo.tileLayerParser
         );
+        this.tileStream.onClientId = clientId => this.actionClientId$.next(clientId);
+        this.tileStream.onActionControl = (payload, receivedAt) => this.actionControlReceived.next({payload, receivedAt});
         this.tileStream.setPullCompressionEnabled(
             this.stateService.tilePullCompressionEnabled
         );
@@ -233,6 +237,11 @@ export class MapTileStreamService {
         };
         await this.mapInfo.reloadDataSources();
         this.scheduleUpdate();
+    }
+
+    /** Sends an action reply on its original live connection without opening another transport. */
+    sendActionControl(clientId: string, payload: object): boolean {
+        return this.tileStream?.sendActionControl(clientId, payload) ?? false;
     }
 
     createFilterSubscription(
@@ -660,15 +669,17 @@ export class MapTileStreamService {
      * The returned wrappers own their response blobs; this service retains none.
      */
     async loadFeatures(
-        tileFeatureIds: (TileFeatureId | null)[]
+        tileFeatureIds: (TileFeatureId | null)[],
+        signal?: AbortSignal
     ): Promise<FeatureWrapper[]> {
+        signal?.throwIfAborted();
         const requested = tileFeatureIds.filter(
             (value): value is TileFeatureId => !!value
         );
         if (!requested.length) {
             return [];
         }
-        const direct = await this.loadFeaturesFromDeclaredTiles(requested);
+        const direct = await this.loadFeaturesFromDeclaredTiles(requested, signal);
         const directByKey = new Map(direct.map(feature => [
             this.featureIdentityKey(feature),
             feature
@@ -683,11 +694,11 @@ export class MapTileStreamService {
             });
         }
 
-        const relocated = await this.locateCanonicalFeatures(missing);
+        const relocated = await this.locateCanonicalFeatures(missing, signal);
         const relocatedRequests = relocated
             .filter((value): value is TileFeatureId => !!value);
         const relocatedFeatures = relocatedRequests.length
-            ? await this.loadFeaturesFromDeclaredTiles(relocatedRequests)
+            ? await this.loadFeaturesFromDeclaredTiles(relocatedRequests, signal)
             : [];
         const relocatedByKey = new Map(relocatedFeatures.map(feature => [
             this.featureIdentityKey(feature),
@@ -712,8 +723,10 @@ export class MapTileStreamService {
     }
 
     private async loadFeaturesFromDeclaredTiles(
-        requested: TileFeatureId[]
+        requested: TileFeatureId[],
+        signal?: AbortSignal
     ): Promise<FeatureWrapper[]> {
+        signal?.throwIfAborted();
         if (this.tilePipelinePaused) {
             this.showInfo(
                 "Tile pipeline is paused; cannot load inspection features."
@@ -794,7 +807,13 @@ export class MapTileStreamService {
             }))
         }));
         let timeout: ReturnType<typeof setTimeout> | undefined;
+        let abort: (() => void) | undefined;
         try {
+            const cancelled = new Promise<never>((_, reject) => {
+                abort = () => reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+                signal?.addEventListener("abort", abort, {once: true});
+                if (signal?.aborted) abort();
+            });
             const timeoutPromise = new Promise<never>((_, reject) => {
                 timeout = setTimeout(
                     () => reject(new Error(
@@ -805,7 +824,8 @@ export class MapTileStreamService {
             });
             await Promise.race([
                 transport.request(requests),
-                timeoutPromise
+                timeoutPromise,
+                cancelled
             ]);
             if (tiles.size < distinctPartitionCount) {
                 console.warn(
@@ -814,6 +834,7 @@ export class MapTileStreamService {
                 );
             }
         } finally {
+            if (abort) signal?.removeEventListener("abort", abort);
             if (timeout) {
                 clearTimeout(timeout);
             }
@@ -833,7 +854,8 @@ export class MapTileStreamService {
      * `/locate` schema-resolves canonical IDs and may return another layer/level.
      */
     private async locateCanonicalFeatures(
-        requested: TileFeatureId[]
+        requested: TileFeatureId[],
+        signal?: AbortSignal
     ): Promise<Array<TileFeatureId | null>> {
         const requests = requested.map(feature => {
             const parsed = this.parseMapPartitionKeySafe(feature.mapTileKey);
@@ -859,6 +881,7 @@ export class MapTileStreamService {
         }
         try {
             const response = await fetch("/locate", {
+                signal,
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({requests: validRequests})
@@ -907,9 +930,31 @@ export class MapTileStreamService {
                 };
             });
         } catch (error) {
+            signal?.throwIfAborted();
             console.warn("Canonical feature locate failed.", error);
             return requested.map(() => null);
         }
+    }
+
+    /** Resolves a canonical feature string using the backend schema, preserving ambiguous matches for callers. */
+    async locateFeature(mapId: string, featureId: string, layerId?: string, signal?: AbortSignal): Promise<TileFeatureId[]> {
+        signal?.throwIfAborted();
+        const response = await fetch("/locate", {
+            method: "POST", headers: {"Content-Type": "application/json"}, signal,
+            body: JSON.stringify({requests: [{mapId, ...(layerId ? {layerId} : {}), featureId: stripFeatureInspectionTarget(featureId)}]})
+        });
+        if (!response.ok) throw new Error(`Feature locate failed: HTTP ${response.status}`);
+        const content = await response.text();
+        signal?.throwIfAborted();
+        if (content.length > 256 * 1024) throw new Error("Feature locate response exceeds the bound");
+        const payload: {responses?: Array<Array<{partitionKey?: string; tileId?: string; canonicalFeatureId?: string}>>} = JSON.parse(content);
+        const candidates = payload.responses?.[0] ?? [];
+        if (candidates.length > 100) throw new Error("Feature locate is ambiguous; provide a layer or partition");
+        return candidates.flatMap(candidate => {
+            const mapTileKey = candidate.partitionKey ?? candidate.tileId;
+            return mapTileKey && this.parseMapPartitionKeySafe(mapTileKey)
+                ? [{mapTileKey, featureId: candidate.canonicalFeatureId ?? stripFeatureInspectionTarget(featureId)}] : [];
+        });
     }
 
     private featureIdentityKey(feature: TileFeatureId): string {
@@ -1319,7 +1364,9 @@ export class MapTileStreamService {
             )
             : [];
         if (failures.length) {
-            this.showError(
+            // Viewport failures can arrive in bulk. Keep them in diagnostics
+            // (which captures console errors), not in one toast per request.
+            console.error(
                 "Filter request failed: " +
                 failures.map(request =>
                     `${request.mapId}/${request.layerId}: ${request.statusText}`
@@ -1487,10 +1534,6 @@ export class MapTileStreamService {
 
     private showInfo(message: string): void {
         this.ngZone.run(() => this.messageService.showInfo(message));
-    }
-
-    private showError(message: string): void {
-        this.ngZone.run(() => this.messageService.showError(message));
     }
 
     private showBackendConnectionError(message: string): void {

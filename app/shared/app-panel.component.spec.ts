@@ -3,6 +3,7 @@ import {ElementRef} from '@angular/core';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {AppPanelComponent} from './app-panel.component';
 import {AppStateService} from './appstate.service';
+import {ViewerUiService} from '../actions/viewer-ui.service';
 
 interface AppPanelTestAccess {
     contentRef?: ElementRef<HTMLElement>;
@@ -55,7 +56,7 @@ describe('AppPanelComponent custom resizing', () => {
             baseFontSize: 16,
             setPanelLayout
         } as unknown as AppStateService;
-        component = new AppPanelComponent(stateService);
+        component = new AppPanelComponent(stateService, new ViewerUiService());
         component.layoutId = 'test-panel';
         component.persistLayout = true;
         component.resizeMode = 'vertical';

@@ -1,5 +1,5 @@
 import {Injectable} from "@angular/core";
-import {Subject} from "rxjs";
+import {Subject, filter, firstValueFrom, fromEvent, merge, startWith} from "rxjs";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {coreLib} from "../integrations/wasm";
 import {
@@ -10,7 +10,7 @@ import {
     VIEW_SYNC_MOVEMENT,
     VIEW_SYNC_POSITION
 } from "../shared/appstate.service";
-import {RenderRectangle, RenderViewCameraState} from "./render-view.model";
+import {IRenderView, RenderRectangle, RenderViewCameraState} from "./render-view.model";
 import {ViewVisualizationState} from "./view.visualization.model";
 import type {
     FeatureLayerStyle,
@@ -33,6 +33,7 @@ export enum ViewRecalculationReason {
     HoverPopover = "hover-popover",
     LayerLevel = "layer-level",
     NumViews = "num-views",
+    RenderViewReady = "render-view-ready",
     StyleChange = "style-change",
     SyncOptions = "sync-options",
     TileBorder = "tile-border",
@@ -75,12 +76,21 @@ export class MapViewStateService {
     }>();
     private removingView = false;
     private readonly retainedCameras = new Map<number, RenderViewCameraState>();
+    private readonly renderViews = new Map<number, IRenderView>();
+    private layoutRevision = 0;
+
+    get viewLayoutRevision(): number { return this.layoutRevision; }
 
     constructor(
         private readonly stateService: AppStateService,
         private readonly mapInfo: MapInfoService
     ) {
+        let previousViewCount = this.stateService.numViews;
         this.stateService.numViewsState.subscribe(numViews => {
+            if (numViews !== previousViewCount) {
+                ++this.layoutRevision;
+                previousViewCount = numViews;
+            }
             if (this.removingView) {
                 return;
             }
@@ -99,6 +109,44 @@ export class MapViewStateService {
         this.stateService.lod3TileThresholdState.subscribe(() =>
             this.requestViewRecalculation(ViewRecalculationReason.LodThreshold));
         this.mapInfo.layerStateChanged.subscribe(reason => this.requestViewRecalculation(reason));
+    }
+
+    /** Registers a renderer reference, not a second camera-state store; teardown is generation-safe. */
+    registerRenderView(view: IRenderView): () => void {
+        this.renderViews.set(view.viewIndex, view);
+        this.viewStateChanged.next(ViewRecalculationReason.RenderViewReady);
+        return () => {
+            if (this.renderViews.get(view.viewIndex) === view) {
+                this.renderViews.delete(view.viewIndex);
+            }
+        };
+    }
+
+    /** Looks up a live renderer without touching the view's scene or tile collections. */
+    renderViewFor(viewIndex: number): IRenderView | undefined {
+        if (viewIndex < 0 || viewIndex >= this.stateService.numViews) return undefined;
+        const view = this.renderViews.get(viewIndex);
+        return view?.isAvailable() ? view : undefined;
+    }
+
+    /** Waits for live renderers to publish their current camera footprints, including after projection changes. */
+    async waitForCurrentViewports(signal: AbortSignal): Promise<void> {
+        await firstValueFrom(merge(this.viewStateChanged, fromEvent(signal, "abort")).pipe(
+            startWith(null),
+            filter(() => {
+                signal.throwIfAborted();
+                for (let index = 0; index < this.stateService.numViews; index++) {
+                    const viewport = this.renderViewFor(index)?.computeViewport();
+                    const published = this.viewStateFor(index)?.viewport;
+                    if (!viewport || !published || !([
+                        "south", "west", "width", "height", "camPosLon", "camPosLat", "orientation"
+                    ] as const).every(key => viewport[key] === published[key])) {
+                        return false;
+                    }
+                }
+                return true;
+            })
+        ));
     }
 
     /** Returns the mutable visualization state for one view, if it exists. */
