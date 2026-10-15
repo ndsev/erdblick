@@ -93,7 +93,11 @@ test('reload cancels live payload requests before leaving the document', async (
         }, {once: true});
     });
 
-    await page.reload();
+    // Playwright's Firefox reload command skips beforeunload; use a browser-initiated reload.
+    await Promise.all([
+        page.waitForEvent('load'),
+        page.evaluate(() => window.location.reload())
+    ]);
     await waitForAppReady(page);
     await waitForPayloadSession(page);
 
