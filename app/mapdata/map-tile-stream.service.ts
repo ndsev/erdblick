@@ -1,5 +1,5 @@
-import {Injectable, NgZone} from "@angular/core";
-import {BehaviorSubject, Subject} from "rxjs";
+import {Injectable, NgZone, OnDestroy} from "@angular/core";
+import {auditTime, BehaviorSubject, combineLatest, Subject, Subscription} from "rxjs";
 import {MapInfoService} from "./map-info.service";
 import {
     MapTileRequestStatus,
@@ -36,6 +36,10 @@ import {
 import {InfoMessageService} from "../shared/info.service";
 import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
 import {TileExpiryScheduler} from "./tile-expiry-scheduler";
+import {
+    ConnectionRetryAttempt, ConnectionRetryPolicy, connectionRetryDeadline,
+    recordConnectionFailure
+} from "../shared/connection-retry-policy";
 import {
     parseMapPartitionKey,
     parsePartition,
@@ -97,12 +101,14 @@ const MAX_OBJECT_DISCOVERY_CACHE_TILES = 4096;
  * `/tiles` requests for inspection and is never inserted into a viewport cache.
  */
 @Injectable({providedIn: "root"})
-export class MapTileStreamService {
+export class MapTileStreamService implements OnDestroy {
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
     readonly filterStatusReceived =
         new Subject<MapTileStreamFilterStatusPayload>();
 
     private tileStream: MapTileStreamClientInteractive | null = null;
+    private pageHidden = false;
+    private pageResumeFrame: number | null = null;
     private readonly filterSubscriptionsById =
         new Map<string, FilterSubscriptionRef>();
     private nextFilterSubscriptionId = 0;
@@ -127,6 +133,21 @@ export class MapTileStreamService {
                 }
             }
         );
+    private connectionRetry?: ConnectionRetryAttempt;
+    private connectionTerminalError = "";
+    private activeInspectionLoads = 0;
+    private retryPolicy: ConnectionRetryPolicy;
+    private readonly stateSubscriptions = new Subscription();
+    private readonly connectionRetryOwner: RetainedTileExpiryOwner = {expireTiles: () => {
+        if (this.connectionRetry) this.connectionRetry.at = 0;
+        this.forceNextUpdate = true;
+        this.scheduleUpdate();
+    }};
+    private readonly connectionRetryScheduler = new TileExpiryScheduler<RetainedTileExpiryOwner, string>(
+        (owner, tokens) => {
+            if (!this.backendProtocolMismatchActive) owner.expireTiles(tokens);
+        }
+    );
     private readonly updateDebounceMs = 25;
     private readonly acknowledgementQuietMs = 100;
     private readonly acknowledgementMaxLatencyMs = 500;
@@ -157,6 +178,13 @@ export class MapTileStreamService {
         private readonly messageService: InfoMessageService,
         private readonly ngZone: NgZone
     ) {
+        this.retryPolicy = this.stateService.connectionRetryPolicy;
+        this.stateSubscriptions.add(combineLatest([
+            this.stateService.connectionRetryEnabledState,
+            this.stateService.connectionRetryInitialDelayMsState,
+            this.stateService.connectionRetryBackoffMultiplierState,
+            this.stateService.connectionRetryMaxDelayMsState
+        ]).pipe(auditTime(0)).subscribe(() => this.applyRetryPolicy()));
         this.stateService.tilePullCompressionEnabledState.subscribe(enabled =>
             this.tileStream?.setPullCompressionEnabled(enabled)
         );
@@ -190,9 +218,10 @@ export class MapTileStreamService {
                 this.handleSourceCatalogChanged(change)
             );
         this.tileStream.onSourcesRevisionChanged = (revision, reconnected) =>
-            this.ngZone.runOutsideAngular(() =>
-                this.handleSourcesRevisionChanged(revision, reconnected)
-            );
+            this.ngZone.runOutsideAngular(() => {
+                this.clearConnectionFailure();
+                this.handleSourcesRevisionChanged(revision, reconnected);
+            });
         this.tileStream.onOpen = () => this.ngZone.run(() => {
             this.backendProtocolMismatchActive = false;
             this.messageService.clearBackendConnectionError();
@@ -207,32 +236,108 @@ export class MapTileStreamService {
             const expected =
                 `${mismatch.expected.major}.${mismatch.expected.minor}.x`;
             this.backendProtocolMismatchActive = true;
+            this.connectionRetryScheduler.dispose();
+            this.connectionRetry = undefined;
             this.showBackendProtocolError(
                 `The map backend uses unsupported tile-stream protocol ${actual}; ` +
                 `this erdblick build requires ${expected}.`
             );
         };
         this.tileStream.onError = event => {
+            if (this.pageHidden) {
+                return;
+            }
             console.error("Tile WebSocket error.", event);
             if (!this.backendProtocolMismatchActive) {
+                this.scheduleConnectionRetry("Could not connect to the map backend.");
                 this.showBackendConnectionError(
                     "Could not connect to the map backend."
                 );
             }
         };
         this.tileStream.onClose = event => {
+            if (this.pageHidden) {
+                return;
+            }
             if (!this.backendProtocolMismatchActive && event.code !== 1000) {
                 const detail = event.reason ? ` (${event.reason})` : "";
                 this.showBackendConnectionError(
                     `The map backend connection was closed${detail}.`
                 );
+                if (event.code === 1002 || event.code === 1003 || event.code === 1008) {
+                    this.connectionTerminalError = event.reason || "Backend rejected the connection.";
+                    this.connectionRetryScheduler.cancelOwner(this.connectionRetryOwner);
+                    this.connectionRetry = undefined;
+                } else {
+                    this.scheduleConnectionRetry(event.reason || "Backend connection closed.");
+                }
             }
             if (!this.backendProtocolMismatchActive) {
                 this.scheduleUpdate();
             }
         };
+        this.ngZone.runOutsideAngular(() => {
+            window.addEventListener("beforeunload", this.onBeforeUnload);
+            window.addEventListener("pagehide", this.onPageHide);
+            window.addEventListener("pageshow", this.onPageShow);
+        });
         await this.mapInfo.reloadDataSources();
         this.scheduleUpdate();
+    }
+
+    /** WebKit may cancel fetches before pagehide; resume only when this document renders again. */
+    private readonly onBeforeUnload = (): void => {
+        this.onPageHide();
+        // A zero-delay timer can reopen the socket while WebKit is still unloading.
+        this.pageResumeFrame = requestAnimationFrame(() => {
+            this.pageResumeFrame = null;
+            this.onPageShow();
+        });
+    };
+
+    /** Stops transport work without destroying state that a back/forward-cache restore still needs. */
+    private readonly onPageHide = (): void => {
+        this.cancelPageResume();
+        this.pageHidden = true;
+        this.clearUpdateTimers();
+        this.tileStream?.setFrameProcessingPaused(true);
+        this.tileStream?.close(1000, "page hidden");
+    };
+
+    /** A back/forward-cache restore needs a new session and the complete current pending snapshot. */
+    private readonly onPageShow = (): void => {
+        this.cancelPageResume();
+        if (!this.pageHidden) {
+            return;
+        }
+        this.pageHidden = false;
+        this.tileStream?.clearPendingFrames();
+        this.tileStream?.setFrameProcessingPaused(this.tilePipelinePaused);
+        this.forceNextUpdate = true;
+        if (!this.backendProtocolMismatchActive) {
+            this.scheduleUpdate();
+        }
+    };
+
+    /** Prevents a deferred cancelled-navigation recovery from reviving a hidden or destroyed page. */
+    private cancelPageResume(): void {
+        if (this.pageResumeFrame !== null) {
+            cancelAnimationFrame(this.pageResumeFrame);
+            this.pageResumeFrame = null;
+        }
+    }
+
+    /** Removes page listeners and releases the owned transport when the Angular root is destroyed. */
+    ngOnDestroy(): void {
+        this.stateSubscriptions.unsubscribe();
+        window.removeEventListener("beforeunload", this.onBeforeUnload);
+        window.removeEventListener("pagehide", this.onPageHide);
+        window.removeEventListener("pageshow", this.onPageShow);
+        this.onPageHide();
+        this.tileStream?.destroy();
+        this.tileStream = null;
+        this.tileExpiryScheduler.dispose();
+        this.connectionRetryScheduler.dispose();
     }
 
     createFilterSubscription(
@@ -541,9 +646,8 @@ export class MapTileStreamService {
         valueVersion: number,
         expiresAtMs: number | null
     ): void {
-        // This value came from an explicit request which just completed. If
-        // its encoded lifetime elapsed in transit, retrying it immediately
-        // creates a self-sustaining request loop without making it fresher.
+        // A renewal may retain the old wrapper when its feature disappeared.
+        // Re-arming that elapsed lifetime would create an immediate request loop.
         if (expiresAtMs === null || expiresAtMs <= Date.now()) {
             this.tileExpiryScheduler.cancel(owner, tileId);
             return;
@@ -660,15 +764,28 @@ export class MapTileStreamService {
      * The returned wrappers own their response blobs; this service retains none.
      */
     async loadFeatures(
-        tileFeatureIds: (TileFeatureId | null)[]
+        tileFeatureIds: (TileFeatureId | null)[],
+        signal?: AbortSignal
     ): Promise<FeatureWrapper[]> {
+        const finishLoading = this.beginInspectionLoad();
+        try {
+            return await this.loadFeaturesOnce(tileFeatureIds, signal);
+        } finally {
+            finishLoading();
+        }
+    }
+
+    private async loadFeaturesOnce(
+        tileFeatureIds: (TileFeatureId | null)[], signal?: AbortSignal
+    ): Promise<FeatureWrapper[]> {
+        signal?.throwIfAborted();
         const requested = tileFeatureIds.filter(
             (value): value is TileFeatureId => !!value
         );
         if (!requested.length) {
             return [];
         }
-        const direct = await this.loadFeaturesFromDeclaredTiles(requested);
+        const direct = await this.loadFeaturesFromDeclaredTiles(requested, signal);
         const directByKey = new Map(direct.map(feature => [
             this.featureIdentityKey(feature),
             feature
@@ -683,11 +800,11 @@ export class MapTileStreamService {
             });
         }
 
-        const relocated = await this.locateCanonicalFeatures(missing);
+        const relocated = await this.locateCanonicalFeatures(missing, signal);
         const relocatedRequests = relocated
             .filter((value): value is TileFeatureId => !!value);
         const relocatedFeatures = relocatedRequests.length
-            ? await this.loadFeaturesFromDeclaredTiles(relocatedRequests)
+            ? await this.loadFeaturesFromDeclaredTiles(relocatedRequests, signal)
             : [];
         const relocatedByKey = new Map(relocatedFeatures.map(feature => [
             this.featureIdentityKey(feature),
@@ -712,8 +829,10 @@ export class MapTileStreamService {
     }
 
     private async loadFeaturesFromDeclaredTiles(
-        requested: TileFeatureId[]
+        requested: TileFeatureId[],
+        signal?: AbortSignal
     ): Promise<FeatureWrapper[]> {
+        signal?.throwIfAborted();
         if (this.tilePipelinePaused) {
             this.showInfo(
                 "Tile pipeline is paused; cannot load inspection features."
@@ -769,17 +888,14 @@ export class MapTileStreamService {
             this.mapInfo.invalidateFieldDictBlobCache();
         const tiles = new Map<string, InspectionFeatureTile>();
         transport.onFeatures = blob => {
-            try {
-                const tile = new InspectionFeatureTile(
-                    this.mapInfo.tileLayerParser,
-                    blob
-                );
-                tiles.set(tile.mapTileKey, tile);
-                if (tile.legalInfo) {
-                    this.mapInfo.setLegalInfo(tile.mapName, tile.legalInfo);
-                }
-            } catch (error) {
-                console.error("Could not decode inspection feature tile.", error);
+            const tile = new InspectionFeatureTile(
+                this.mapInfo.tileLayerParser,
+                blob
+            );
+            tiles.set(tile.mapTileKey, tile);
+            for (const warning of tile.warnings) console.warn(`Tile warning (${tile.mapTileKey}): ${warning}`);
+            if (tile.legalInfo) {
+                this.mapInfo.setLegalInfo(tile.mapName, tile.legalInfo);
             }
         };
         const requests = [...groups.values()].map(group => ({
@@ -794,7 +910,13 @@ export class MapTileStreamService {
             }))
         }));
         let timeout: ReturnType<typeof setTimeout> | undefined;
+        let abort: (() => void) | undefined;
         try {
+            const cancelled = new Promise<never>((_, reject) => {
+                abort = () => reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+                signal?.addEventListener("abort", abort, {once: true});
+                if (signal?.aborted) abort();
+            });
             const timeoutPromise = new Promise<never>((_, reject) => {
                 timeout = setTimeout(
                     () => reject(new Error(
@@ -805,7 +927,8 @@ export class MapTileStreamService {
             });
             await Promise.race([
                 transport.request(requests),
-                timeoutPromise
+                timeoutPromise,
+                cancelled
             ]);
             if (tiles.size < distinctPartitionCount) {
                 console.warn(
@@ -814,6 +937,7 @@ export class MapTileStreamService {
                 );
             }
         } finally {
+            if (abort) signal?.removeEventListener("abort", abort);
             if (timeout) {
                 clearTimeout(timeout);
             }
@@ -833,7 +957,8 @@ export class MapTileStreamService {
      * `/locate` schema-resolves canonical IDs and may return another layer/level.
      */
     private async locateCanonicalFeatures(
-        requested: TileFeatureId[]
+        requested: TileFeatureId[],
+        signal?: AbortSignal
     ): Promise<Array<TileFeatureId | null>> {
         const requests = requested.map(feature => {
             const parsed = this.parseMapPartitionKeySafe(feature.mapTileKey);
@@ -859,6 +984,7 @@ export class MapTileStreamService {
         }
         try {
             const response = await fetch("/locate", {
+                signal,
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({requests: validRequests})
@@ -907,6 +1033,7 @@ export class MapTileStreamService {
                 };
             });
         } catch (error) {
+            signal?.throwIfAborted();
             console.warn("Canonical feature locate failed.", error);
             return requested.map(() => null);
         }
@@ -943,6 +1070,16 @@ export class MapTileStreamService {
             return;
         }
         this.tilePipelinePaused$.next(true);
+        this.clearUpdateTimers();
+        this.updateRequestedWhilePaused ||=
+            this.updatePending || this.acknowledgementPending;
+        this.tileStream?.setFrameProcessingPaused(true);
+        this.showInfo("Tile pipeline paused");
+        console.info(`Tile pipeline paused (${source})`);
+    }
+
+    /** Cancels both scheduled control updates without discarding their pending-work state. */
+    private clearUpdateTimers(): void {
         if (this.updateTimer) {
             clearTimeout(this.updateTimer);
             this.updateTimer = null;
@@ -951,11 +1088,6 @@ export class MapTileStreamService {
             clearTimeout(this.acknowledgementTimer);
             this.acknowledgementTimer = null;
         }
-        this.updateRequestedWhilePaused ||=
-            this.updatePending || this.acknowledgementPending;
-        this.tileStream?.setFrameProcessingPaused(true);
-        this.showInfo("Tile pipeline paused");
-        console.info(`Tile pipeline paused (${source})`);
     }
 
     resumeTilePipeline(source: string = "diagnostics"): void {
@@ -982,6 +1114,61 @@ export class MapTileStreamService {
 
     isTileStreamConnected(): boolean {
         return this.tileStream?.isOpen() ?? false;
+    }
+
+    /** Counts actual inspection transfers for connection diagnostics. */
+    beginInspectionLoad(): () => void {
+        ++this.activeInspectionLoads;
+        return () => --this.activeInspectionLoads;
+    }
+
+    /** Recomputes waiting deadlines when preferences change, retaining attempts and live work. */
+    private applyRetryPolicy(): void {
+        this.retryPolicy = this.stateService.connectionRetryPolicy;
+        if (this.connectionRetry && this.connectionRetry.at > 0) {
+            this.connectionRetry.at = connectionRetryDeadline(this.retryPolicy, this.connectionRetry);
+            this.connectionRetryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);
+        }
+    }
+
+    /** Coalesces error/close callbacks for one failed connection attempt. */
+    private scheduleConnectionRetry(message: string): void {
+        if (this.pageHidden || this.backendProtocolMismatchActive || this.connectionTerminalError) return;
+        this.backendRequestProgress = {done: 0, total: 0, allDone: true};
+        this.connectionRetry = recordConnectionFailure(this.connectionRetry, message);
+        this.connectionRetry.at = connectionRetryDeadline(this.retryPolicy, this.connectionRetry);
+        this.connectionRetryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);
+    }
+
+    /** A compatible context/status frame proves recovery; an open TCP/WebSocket alone does not. */
+    private clearConnectionFailure(): void {
+        this.connectionRetry = undefined;
+        this.connectionTerminalError = "";
+        this.connectionRetryScheduler.cancelOwner(this.connectionRetryOwner);
+    }
+
+    /** Current owner state drives the circle; historical logs and pending counts do not. */
+    getConnectionDiagnostics(): {retrying: boolean; failed: boolean; loading: boolean; message: string} {
+        const catalog = this.mapInfo.getSourceRecoveryState();
+        const browserRetrying = this.retryPolicy.enabled && !!this.connectionRetry;
+        const activeFilters = [...this.filterSubscriptionsById.values()].some(ref =>
+            !ref.released && !ref.suspended && ref.pendingPartitionCount > 0);
+        const loading = this.isTileStreamConnected() && !this.connectionRetry &&
+            (this.activeInspectionLoads > 0 || (!this.backendRequestProgress.allDone && activeFilters));
+        const describe = (retry: ConnectionRetryAttempt, source: string) => {
+            const action = !this.retryPolicy.enabled ? "Automatic retry disabled." :
+                retry.at > 0 ? `Retry in ${Math.max(0, Math.ceil((retry.at - Date.now()) / 1000))} s.` : "Retrying.";
+            return `${source}: ${retry.message} ${action}`;
+        };
+        const messages = [catalog.message, this.connectionTerminalError,
+            this.connectionRetry && describe(this.connectionRetry, "Backend")].filter(Boolean);
+        return {
+            retrying: catalog.retrying || (!this.pageHidden && !this.tilePipelinePaused && browserRetrying),
+            failed: catalog.failed || !!this.connectionRetry ||
+                !!this.connectionTerminalError || this.backendProtocolMismatchActive,
+            loading,
+            message: [...new Set(messages)].join("\n")
+        };
     }
 
     getPendingFrameQueueSize(): number {
@@ -1047,6 +1234,9 @@ export class MapTileStreamService {
     }
 
     private scheduleUpdate(): void {
+        if (this.pageHidden) {
+            return;
+        }
         if (this.acknowledgementTimer) {
             clearTimeout(this.acknowledgementTimer);
             this.acknowledgementTimer = null;
@@ -1075,6 +1265,9 @@ export class MapTileStreamService {
 
     /** Coalesce acceptance-only omission snapshots without delaying forced work. */
     private scheduleAcknowledgementUpdate(): void {
+        if (this.pageHidden) {
+            return;
+        }
         this.acknowledgementPending = true;
         if (this.tilePipelinePaused) {
             this.updateRequestedWhilePaused = true;
@@ -1103,10 +1296,15 @@ export class MapTileStreamService {
     }
 
     private async runUpdate(): Promise<void> {
+        if (this.pageHidden) {
+            return;
+        }
         if (this.tilePipelinePaused) {
             this.updateRequestedWhilePaused = true;
             return;
         }
+        if (this.backendProtocolMismatchActive || this.connectionTerminalError ||
+            (this.connectionRetry && this.connectionRetry.at > Date.now())) return;
         if (this.updateInProgress) {
             this.updatePending = true;
             return;
@@ -1118,8 +1316,7 @@ export class MapTileStreamService {
         try {
             const activeRefs = [...this.filterSubscriptionsById.values()]
                 .filter(ref => !ref.released && !ref.suspended);
-            const requests = activeRefs
-                .map(ref => ref.requestJson())
+            const requests = activeRefs.map(ref => ref.requestJson())
                 // The envelope is a complete replacement. Omitting an empty
                 // subscription both avoids useless startup work and cancels
                 // previously sent coverage when its last tile disappears.
@@ -1147,6 +1344,9 @@ export class MapTileStreamService {
                     ? this.viewportLoadStartedAtMs
                     : null;
             }
+            if (updateResult === "failed" && !this.isTileStreamConnected()) {
+                this.scheduleConnectionRetry("Could not connect to the map backend.");
+            }
         } finally {
             this.updateInProgress = false;
             this.lastUpdateAt = Date.now();
@@ -1164,6 +1364,8 @@ export class MapTileStreamService {
                 partition: unknown;
                 tileId: number;
                 legalInfo?: string;
+                error?: string;
+                warnings?: string[];
                 stringPoolId?: string;
                 conversionTimestampMs?: number;
                 ttlMs?: number;
@@ -1249,6 +1451,8 @@ export class MapTileStreamService {
                 dependencies: Array.isArray(metadata.dependencies)
                     ? metadata.dependencies
                     : [],
+                error: metadata.layer.error || null,
+                warnings: metadata.layer.warnings ?? [],
                 issues: Array.isArray(metadata.issues)
                     ? metadata.issues
                     : [],
@@ -1301,6 +1505,7 @@ export class MapTileStreamService {
         if (!status || status.type !== "mapget.tiles.status") {
             return;
         }
+        this.clearConnectionFailure();
         const total = status.requests.length || this.backendRequestProgress.total;
         const done = status.allDone
             ? total
@@ -1319,7 +1524,9 @@ export class MapTileStreamService {
             )
             : [];
         if (failures.length) {
-            this.showError(
+            // Viewport failures can arrive in bulk. Keep them in diagnostics
+            // (which captures console errors), not in one toast per request.
+            console.error(
                 "Filter request failed: " +
                 failures.map(request =>
                     `${request.mapId}/${request.layerId}: ${request.statusText}`
@@ -1487,10 +1694,6 @@ export class MapTileStreamService {
 
     private showInfo(message: string): void {
         this.ngZone.run(() => this.messageService.showInfo(message));
-    }
-
-    private showError(message: string): void {
-        this.ngZone.run(() => this.messageService.showError(message));
     }
 
     private showBackendConnectionError(message: string): void {

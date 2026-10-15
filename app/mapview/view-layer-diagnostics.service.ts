@@ -16,6 +16,7 @@ export interface SubsetDiagnosticsTile {
     conversionTimestampMs: number | null;
     ready: boolean;
     error: string | null;
+    warnings: readonly string[];
     sourceFeatureCount: number | null;
     renderedEntryCount: number;
     stats: Map<string, number[]>;
@@ -58,6 +59,8 @@ interface DiagnosticsProvider {
  */
 @Injectable({providedIn: "root"})
 export class ViewLayerDiagnosticsService {
+    readonly tileWarning = new Subject<SubsetDiagnosticsError>();
+    private readonly warnedVersions = new WeakMap<FilterTileState, number>();
     readonly tileError = new Subject<SubsetDiagnosticsError>();
     readonly cameraInteracting$ = new BehaviorSubject(false);
     private readonly providers = new Map<number, DiagnosticsProvider>();
@@ -160,6 +163,13 @@ export class ViewLayerDiagnosticsService {
                         continue;
                     }
                     presentationTileSeen.add(presentationTileKey);
+                    if (state.warnings.length && this.warnedVersions.get(state) !== state.valueVersion) {
+                        this.warnedVersions.set(state, state.valueVersion);
+                        for (const message of state.warnings) this.tileWarning.next({
+                            viewIndex, ownerId: layer.ownerId, presentationKind: layer.identity.presentationKind,
+                            mapName: state.mapId, layerName: state.layerId, mapTileKey: state.mapTileKey, message
+                        });
+                    }
                     result.expected += 1;
                     if (this.presentationReady(provider, layer, state)) {
                         result.ready += 1;
@@ -296,6 +306,7 @@ export class ViewLayerDiagnosticsService {
                             : null,
                         ready: this.presentationReady(provider, layer, state),
                         error: state.error,
+                        warnings: state.warnings,
                         sourceFeatureCount: state.sourceFeatureCount,
                         renderedEntryCount: state.renderedEntryCount,
                         stats

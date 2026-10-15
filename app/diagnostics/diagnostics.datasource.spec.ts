@@ -20,6 +20,7 @@ function tile(
         conversionTimestampMs,
         ready,
         error: null,
+        warnings: [],
         sourceFeatureCount: 1,
         renderedEntryCount: 1,
         stats: new Map(stats)

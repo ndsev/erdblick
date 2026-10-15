@@ -16,7 +16,10 @@ describe("TileGridOverlayLayer", () => {
             lineColor: [255, 255, 255, 255],
             lineWidthPixels: 1
         });
-        Object.defineProperty(layer, "context", {value: {defaultShaderModules: []}});
+        // Deck selects shader modules by device type even without creating a GPU model.
+        Object.defineProperty(layer, "context", {
+            value: {device: {type: "webgl"}, defaultShaderModules: []}
+        });
 
         const shaders = layer.getShaders("top");
         const vertexDeclaration = shaders.inject["vs:#decl"] as string;

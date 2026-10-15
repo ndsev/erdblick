@@ -1,13 +1,34 @@
 import "@angular/compiler";
 import {BehaviorSubject, Subject} from "rxjs";
-import {describe, expect, it, vi} from "vitest";
+import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import {MapTileStreamService} from "./map-tile-stream.service";
+import {TileDeliveryError} from "./tile-diagnostics";
 import {MapgetLayer} from "./mapget-layer.model";
 import {objectPartition, tilePartition} from "./partition.model";
+import {
+    MapTileRequestStatus,
+    MapTileStreamClientInteractive,
+    MapTileStreamClientTiles,
+    type MapTileStreamStatusPayload
+} from "./tilestream";
+import {coreLib} from "../integrations/wasm";
+import {DEFAULT_CONNECTION_RETRY_POLICY} from "../shared/connection-retry-policy";
+
+/** Supplies real observable preference values to each transport harness. */
+function retryStateHarness() {
+    const policy = {...DEFAULT_CONNECTION_RETRY_POLICY};
+    return {
+        connectionRetryPolicy: policy,
+        connectionRetryEnabledState: new BehaviorSubject(policy.enabled),
+        connectionRetryInitialDelayMsState: new BehaviorSubject(policy.initialDelayMs),
+        connectionRetryBackoffMultiplierState: new BehaviorSubject(policy.backoffMultiplier),
+        connectionRetryMaxDelayMsState: new BehaviorSubject(policy.maxDelayMs)
+    };
+}
 
 function serviceHarness(): MapTileStreamService {
     return new MapTileStreamService(
-        {tilePullCompressionEnabledState: new Subject<boolean>()} as any,
+        {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any,
         {dataSourceInfoChanged: new Subject<void>()} as any,
         {} as any,
         {
@@ -16,6 +37,184 @@ function serviceHarness(): MapTileStreamService {
         } as any
     );
 }
+
+describe("MapTileStreamService request failures", () => {
+    it("logs bulk viewport failures without flooding error toasts", () => {
+        const service = serviceHarness();
+        const messages = {showError: vi.fn()};
+        const internal = service as any;
+        internal.messageService = messages;
+        const log = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            for (let requestId = 1; requestId <= 30; ++requestId) {
+                const status: MapTileStreamStatusPayload = {
+                    type: "mapget.tiles.status",
+                    requestId,
+                    allDone: true,
+                    requests: [{
+                        index: 0,
+                        mapId: "Map",
+                        layerId: "Lanes",
+                        status: MapTileRequestStatus.Aborted,
+                        statusText: "SmartLayerService: HTTP 429 Too Many Requests"
+                    }]
+                };
+                internal.acceptRequestStatus(status);
+            }
+
+            expect(messages.showError).not.toHaveBeenCalled();
+            expect(log).toHaveBeenCalledTimes(30);
+            expect(log).toHaveBeenLastCalledWith(
+                "Filter request failed: Map/Lanes: SmartLayerService: HTTP 429 Too Many Requests"
+            );
+            expect(service.getBackendRequestProgress()).toEqual({
+                done: 1, total: 1, allDone: true, requestId: 30
+            });
+        } finally {
+            log.mockRestore();
+        }
+    });
+});
+
+describe("MapTileStreamService page lifecycle", () => {
+    let service: MapTileStreamService;
+    let client: MapTileStreamClientInteractive;
+    const connectionError = vi.fn();
+
+    beforeEach(async () => {
+        vi.useFakeTimers();
+        connectionError.mockClear();
+        service = new MapTileStreamService(
+            {
+                ...retryStateHarness(),
+                tilePullCompressionEnabled: false,
+                tilePullCompressionEnabledState: new Subject<boolean>()
+            } as any,
+            {
+                dataSourceInfoChanged: new Subject<void>(),
+                reloadDataSources: vi.fn().mockResolvedValue(true)
+            } as any,
+            {showBackendConnectionError: connectionError} as any,
+            {
+                run: (callback: () => unknown) => callback(),
+                runOutsideAngular: (callback: () => unknown) => callback()
+            } as any
+        );
+        await service.initialize();
+        client = service['tileStream']!;
+        vi.spyOn(client, 'updateRequest').mockResolvedValue('sent');
+        vi.spyOn(client, 'close');
+        vi.spyOn(client, 'setFrameProcessingPaused');
+        await vi.advanceTimersByTimeAsync(100);
+        vi.mocked(client.updateRequest).mockClear();
+    });
+
+    afterEach(() => {
+        service.ngOnDestroy();
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+    });
+
+    it("stops scheduled work and ignores late socket callbacks after pagehide", async () => {
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        service['scheduleUpdate']();
+        service['scheduleAcknowledgementUpdate']();
+
+        window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}));
+
+        expect(client.close).toHaveBeenCalledWith(1000, 'page hidden');
+        expect(client.setFrameProcessingPaused).toHaveBeenLastCalledWith(true);
+        expect(vi.getTimerCount()).toBe(0);
+        client.onClose?.(new CloseEvent('close', {code: 1006}));
+        client.onError?.(new Event('error'));
+        service['scheduleUpdate']();
+        service['scheduleAcknowledgementUpdate']();
+        await service['runUpdate']();
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(client.updateRequest).not.toHaveBeenCalled();
+        expect(connectionError).not.toHaveBeenCalled();
+        expect(error).not.toHaveBeenCalled();
+    });
+
+    it("cancels before WebKit unload rejection and resumes a page that stays active", async () => {
+        window.dispatchEvent(new Event('beforeunload', {cancelable: true}));
+
+        expect(client.close).toHaveBeenCalledWith(1000, 'page hidden');
+        expect(service['pageHidden']).toBe(true);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(client.updateRequest).not.toHaveBeenCalled();
+        expect(service['pageHidden']).toBe(true);
+        vi.advanceTimersToNextFrame();
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(service['pageHidden']).toBe(false);
+        expect(client.updateRequest).toHaveBeenCalledExactlyOnceWith([], true);
+        expect(client.setFrameProcessingPaused).toHaveBeenLastCalledWith(false);
+    });
+
+    it("cancels unload recovery on pagehide and restores a fresh pending snapshot once", async () => {
+        window.dispatchEvent(new Event('beforeunload'));
+        window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}));
+        await vi.advanceTimersByTimeAsync(100);
+        expect(client.updateRequest).not.toHaveBeenCalled();
+
+        window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+        await vi.advanceTimersByTimeAsync(100);
+        expect(client.updateRequest).toHaveBeenCalledExactlyOnceWith([], true);
+
+        window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+        await vi.advanceTimersByTimeAsync(100);
+        expect(client.updateRequest).toHaveBeenCalledOnce();
+    });
+
+    it("preserves the user's diagnostic pause across page restoration", async () => {
+        service.tilePipelinePaused$.next(true);
+        window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}));
+        window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(service.tilePipelinePaused).toBe(true);
+        expect(client.setFrameProcessingPaused).toHaveBeenLastCalledWith(true);
+        expect(client.updateRequest).not.toHaveBeenCalled();
+    });
+
+    it("does not reconnect a protocol-incompatible transport on restoration", async () => {
+        service['backendProtocolMismatchActive'] = true;
+        window.dispatchEvent(new Event('pagehide'));
+        window.dispatchEvent(new Event('pageshow'));
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(client.updateRequest).not.toHaveBeenCalled();
+        expect(service['backendProtocolMismatchActive']).toBe(true);
+    });
+
+    it("removes listeners and unload recovery when the service is destroyed", async () => {
+        window.dispatchEvent(new Event('beforeunload'));
+        service.ngOnDestroy();
+        vi.mocked(client.close).mockClear();
+
+        window.dispatchEvent(new Event('beforeunload'));
+        window.dispatchEvent(new Event('pagehide'));
+        window.dispatchEvent(new Event('pageshow'));
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(service['tileStream']).toBeNull();
+        expect(client.close).not.toHaveBeenCalled();
+        expect(client.updateRequest).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("still reports unexpected disconnects while the page is active", async () => {
+        client.onClose?.(new CloseEvent('close', {code: 1006, reason: 'connection lost'}));
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(connectionError).toHaveBeenCalledWith('The map backend connection was closed (connection lost).');
+        expect(client.updateRequest).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(client.updateRequest).toHaveBeenCalledOnce();
+    });
+});
 
 describe("MapTileStreamService source catalog refresh", () => {
     it("reloads again when a backend reconnect races an in-flight catalog fetch", async () => {
@@ -31,7 +230,7 @@ describe("MapTileStreamService source catalog refresh", () => {
                 .mockResolvedValue(true)
         };
         const service = new MapTileStreamService(
-            {tilePullCompressionEnabledState: new Subject<boolean>()} as any,
+            {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any,
             mapInfo as any,
             {} as any,
             {
@@ -82,7 +281,7 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
         vi.useFakeTimers();
         try {
             const service = new MapTileStreamService(
-                {tilePullCompressionEnabledState: new Subject<boolean>()} as any,
+                {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any,
                 {dataSourceInfoChanged: new Subject<void>()} as any,
                 {} as any,
                 {
@@ -123,10 +322,7 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
 
         service.updateRetainedTileExpiry(owner, 7, 3, 1_999);
 
-        expect(internal.tileExpiryScheduler.cancel).toHaveBeenCalledWith(
-            owner,
-            7
-        );
+        expect(internal.tileExpiryScheduler.cancel).toHaveBeenCalledWith(owner, 7);
         expect(internal.tileExpiryScheduler.schedule).not.toHaveBeenCalled();
         now.mockRestore();
     });
@@ -349,5 +545,62 @@ describe("MapTileStreamService object discovery", () => {
         } finally {
             vi.unstubAllGlobals();
         }
+    });
+});
+
+
+describe("failed tile expiry", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("does not suppress new viewport coverage while a failed tile waits for expiry", async () => {
+        const service = serviceHarness();
+        const internal = service as any;
+        const updates = vi.fn().mockResolvedValue("sent");
+        internal.tileStream = {updateRequest: updates};
+        const ref = service.createFilterSubscription({mapId: "Map", layerId: "Layer", channels: []},
+            {partitions: [tilePartition(1), tilePartition(2)]},
+            {onTile: () => ({status: "accepted", valueVersion: 1})});
+        const generation = ref.generation;
+        for (const id of [1, 2]) {
+            ref.accept({blob: new Uint8Array(), filterId: ref.filterId, generation,
+                mapId: "Map", layerId: "Layer", partition: tilePartition(id), partitionKey: `tile:${id}`,
+                mapTileKey: `Features:Map:Layer:${id}`, stringPoolId: "source",
+                conversionTimestampMs: Date.now(), ttlMs: id === 2 ? 5000 : null,
+                error: id === 2 ? "503" : null, dependencies: [], issues: [], info: {}, numEntries: 0,
+                geometryVertexCount: 0, glbAttachmentName: "", receivedAt: 0});
+        }
+        expect(internal.tileExpiryScheduler.size).toBe(1);
+        ref.setCoverage({partitions: [tilePartition(1), tilePartition(2), tilePartition(3)]});
+        await vi.advanceTimersByTimeAsync(100);
+        expect(updates.mock.calls.at(-1)![0][0].partitions).toEqual([{kind: "tile", id: 3}]);
+        // Turning off connection retries does not disable value freshness.
+        internal.stateService.connectionRetryPolicy = {...DEFAULT_CONNECTION_RETRY_POLICY, enabled: false};
+        internal.applyRetryPolicy();
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(updates.mock.calls.at(-1)![0][0].partitions).toEqual([
+            {kind: "tile", id: 2}, {kind: "tile", id: 3}]);
+        expect(ref.generation).toBe(generation);
+        ref.release();
+    });
+
+    it("cancels expiry when the failed output is no longer retained", async () => {
+        const service = serviceHarness();
+        const owner = {expireTiles: vi.fn()};
+        service.updateRetainedTileExpiry(owner, "tile", 3, Date.now() + 5000);
+        service.cancelRetainedTileExpiries(owner);
+        await vi.advanceTimersByTimeAsync(6000);
+        expect(owner.expireTiles).not.toHaveBeenCalled();
+    });
+
+    it("returns initial inspection failures promptly instead of hiding them in a retry loop", async () => {
+        const service = serviceHarness();
+        const internal = service as any;
+        const error = new TileDeliveryError("outage", Date.now() + 5000);
+        const load = vi.spyOn(internal, "loadFeaturesOnce").mockRejectedValue(error);
+        await expect(service.loadFeatures([], new AbortController().signal)).rejects.toBe(error);
+        await vi.advanceTimersByTimeAsync(6000);
+        expect(load).toHaveBeenCalledOnce();
+        expect(internal.activeInspectionLoads).toBe(0);
     });
 });

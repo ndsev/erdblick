@@ -61,6 +61,7 @@ export interface MapInfoItem extends Record<string, any> {
     addOn: boolean;
     status?: DataSourceCatalogStatus | string;
     statusMessage?: string;
+    retrying?: boolean;
     progress?: number | null;
     configIndex?: number;
     type?: string;

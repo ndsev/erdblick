@@ -1,7 +1,8 @@
 import type {
     InteractionState,
-    MapInteractionTarget,
-    MapInteractionTargetContext
+    InteractionTarget,
+    InteractionTargetContext,
+    WebMercatorViewport
 } from "@deck.gl/core";
 import type {
     NavigationAnchor,
@@ -13,7 +14,7 @@ import {isNavigationAnchorUsable} from "./web-mercator-feature-navigation";
 export interface ErdblickTargetNavigationAdapterOptions {
     viewId: string;
     resolveTarget: (
-        context: Readonly<MapInteractionTargetContext>
+        context: Readonly<InteractionTargetContext<WebMercatorViewport>>
     ) => NavigationVisualTarget | null;
     getRetainedTarget: () => NavigationVisualTarget | null;
     getMinimumTargetDistance: (
@@ -37,8 +38,8 @@ export class ErdblickTargetNavigationAdapter {
 
     /** Synchronous provider installed as MapController's `getInteractionTarget` option. */
     readonly resolveInteractionTarget = (
-        context: Readonly<MapInteractionTargetContext>
-    ): MapInteractionTarget | null => {
+        context: Readonly<InteractionTargetContext<WebMercatorViewport>>
+    ): InteractionTarget | null => {
         // A resolver exception or rejected sample must never leave semantic metadata queued for
         // a later, unrelated controller state update.
         this.pendingTarget = null;
@@ -137,7 +138,7 @@ export class ErdblickTargetNavigationAdapter {
     /** Applies the same on-screen/front-of-near-plane policy as retained command targets. */
     private isUsable(
         coordinate: NavigationAnchor,
-        context: Readonly<MapInteractionTargetContext>
+        context: Readonly<InteractionTargetContext<WebMercatorViewport>>
     ): boolean {
         return isNavigationAnchorUsable(context.viewport, coordinate, true);
     }

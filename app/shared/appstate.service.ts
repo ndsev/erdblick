@@ -26,6 +26,10 @@ import {
     serializeFeatureSearchState
 } from "./feature-search-state";
 import {stripFeatureInspectionTarget} from "./tile-feature-id";
+import {
+    ConnectionRetryPolicy, DEFAULT_CONNECTION_RETRY_POLICY,
+    connectionRetryPolicySchema, retryDelaySchema, retryMultiplierSchema
+} from "./connection-retry-policy";
 import type {LayerPresetRef} from "../styledata/layer-preset.model";
 import {
     compressUrlCsvRuns,
@@ -762,6 +766,49 @@ export class AppStateService implements OnDestroy {
         defaultValue: false,
         schema: Boolish
     });
+
+    private invalidConnectionPolicy = "";
+    readonly connectionRetryEnabledState = this.createState<boolean>({
+        name: 'connectionRetryEnabled', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.enabled, schema: Boolish
+    });
+    readonly connectionRetryInitialDelayMsState = this.createState<number>({
+        name: 'connectionRetryInitialDelayMs', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.initialDelayMs,
+        schema: retryDelaySchema
+    });
+    readonly connectionRetryBackoffMultiplierState = this.createState<number>({
+        name: 'connectionRetryBackoffMultiplier', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.backoffMultiplier,
+        schema: retryMultiplierSchema
+    });
+    readonly connectionRetryMaxDelayMsState = this.createState<number>({
+        name: 'connectionRetryMaxDelayMs', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.maxDelayMs,
+        schema: retryDelaySchema
+    });
+
+    /** Combines validated slots; inconsistent imported bounds fall back without disabling an explicit opt-out. */
+    get connectionRetryPolicy(): ConnectionRetryPolicy {
+        const policy = {
+            enabled: this.connectionRetryEnabledState.getValue(),
+            initialDelayMs: this.connectionRetryInitialDelayMsState.getValue(),
+            backoffMultiplier: this.connectionRetryBackoffMultiplierState.getValue(),
+            maxDelayMs: this.connectionRetryMaxDelayMsState.getValue()
+        };
+        const result = connectionRetryPolicySchema.safeParse(policy);
+        const invalid = result.success ? "" : JSON.stringify(policy);
+        if (invalid && invalid !== this.invalidConnectionPolicy) {
+            console.warn("Ignoring inconsistent connection retry settings; using default timing.");
+        }
+        this.invalidConnectionPolicy = invalid;
+        return result.success ? result.data : {...DEFAULT_CONNECTION_RETRY_POLICY, enabled: policy.enabled};
+    }
+
+    /** Validate the complete preference edit before publishing any persisted values. */
+    setConnectionRetryPolicy(policy: ConnectionRetryPolicy): void {
+        const parsed = connectionRetryPolicySchema.parse(policy);
+        this.connectionRetryEnabledState.next(parsed.enabled);
+        this.connectionRetryInitialDelayMsState.next(parsed.initialDelayMs);
+        this.connectionRetryBackoffMultiplierState.next(parsed.backoffMultiplier);
+        this.connectionRetryMaxDelayMsState.next(parsed.maxDelayMs);
+    }
 
     readonly mapZoomStepState = this.createState<number>({
         name: 'mapZoomStep',

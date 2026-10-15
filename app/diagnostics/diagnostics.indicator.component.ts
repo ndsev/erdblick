@@ -10,7 +10,7 @@ import {
 import {combineLatest, Subscription} from 'rxjs';
 import {Popover} from 'primeng/popover';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
-import {DiagnosticsSnapshot, ProgressCounter} from './diagnostics.model';
+import {DiagnosticsSnapshot} from './diagnostics.model';
 import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
 
 @Component({
@@ -18,13 +18,15 @@ import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
     changeDetection: ChangeDetectionStrategy.OnPush,
     template: `
         <div class="diagnostics-indicator">
-            <button class="diagnostics-indicator-button" type="button" (click)="togglePopover($event)" pTooltip="Open progress statistics" tooltipPosition="left">
+            <button class="diagnostics-indicator-button" type="button" (click)="togglePopover($event)"
+                    [pTooltip]="statusTooltip" [attr.aria-label]="statusTooltip" tooltipPosition="left">
                 @if (showSpinner) {
                     <p-progress-spinner strokeWidth="8" fill="transparent" animationDuration=".5s"
                                         [style]="{ width: '1.75em', height: '1.75em' }"
                                         [class]="paused ? 'diagnostics-spinner-paused' : ''" />
                 } @else {
-                    <i class="pi pi-circle-fill" [class.disconnected]="!snapshot.backend.connected"></i>
+                    <i class="pi pi-circle-fill" [class.disconnected]="!snapshot.backend.connected || snapshot.recovery?.failed"
+                       [class.retrying]="snapshot.recovery?.retrying"></i>
                 }
             </button>
             @if (hasError) {
@@ -46,6 +48,13 @@ import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
                             <span class="diagnostics-label">Backend</span>
                             <span>{{ snapshot.backend.connected ? 'connected' : 'disconnected' }}</span>
                         </div>
+                        @if (snapshot.recovery?.failed || snapshot.recovery?.retrying) {
+                            <div class="diagnostics-popover-row">
+                                <span class="diagnostics-label">Connection recovery</span>
+                                <span>{{ snapshot.recovery?.retrying ? 'Retrying' : 'No automatic retry active' }}</span>
+                            </div>
+                            <div class="diagnostics-popover-row">{{ snapshot.recovery?.message }}</div>
+                        }
                         <diagnostics-progress [progress]="snapshot.progress"></diagnostics-progress>
                         <div class="diagnostics-popover-actions">
                             <div class="open-actions">
@@ -147,16 +156,16 @@ export class DiagnosticsIndicatorComponent implements AfterViewInit, OnDestroy {
         this.diagnostics.openLogDialog(true);
     }
 
-    /** Shows the spinner while backend or rendering progress is still incomplete. */
-    private shouldShowSpinner(snapshot: DiagnosticsSnapshot): boolean {
-        return !this.isCounterComplete(snapshot.progress.backend)
-            || !this.isCounterComplete(snapshot.progress.rendered, snapshot.tiles.errors);
+    /** Describes current recovery without conflating it with the persistent error-log badge. */
+    protected get statusTooltip(): string {
+        const status = this.snapshot.recovery?.retrying ? "Retrying connection…" :
+            this.snapshot.recovery?.failed || !this.snapshot.backend.connected ? "Connection unavailable." :
+            this.showSpinner ? "Loading map data…" : "Connected.";
+        return `${status} ${this.snapshot.recovery?.message || "Open progress statistics."}`;
     }
 
-    /** Treats counters with no total as already complete to avoid spinner lockup. */
-    private isCounterComplete(counter: ProgressCounter, errors = 0): boolean {
-        // Failed tiles are terminal work, while the displayed loaded count
-        // continues to describe only successful tiles.
-        return !counter.total || counter.done + errors >= counter.total;
+    /** Pending counters alone cannot prove loading: they can remain incomplete throughout an outage. */
+    private shouldShowSpinner(snapshot: DiagnosticsSnapshot): boolean {
+        return snapshot.backend.connected && snapshot.loading === true;
     }
 }

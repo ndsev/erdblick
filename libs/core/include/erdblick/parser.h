@@ -65,6 +65,7 @@ public:
         int32_t tileId;
         std::string legalInfo;
         std::string error;
+        NativeJsValue warnings;
         int32_t numFeatures;
         double conversionTimestampMs;
         /** Finite milliseconds when supplied by the datasource; NaN means no expiry. */

@@ -2,6 +2,7 @@ import type {
     TileFeatureLayer,
     TileLayerParser
 } from "../../build/libs/core/erdblick-core";
+import {TileDeliveryError} from "./tile-diagnostics";
 import {uint8ArrayToWasm} from "../integrations/wasm";
 import type {TileFeatureId} from "../shared/appstate.service";
 import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
@@ -27,6 +28,7 @@ export class InspectionFeatureTile {
     readonly tileId: number | null;
     readonly legalInfo: string;
     readonly numFeatures: number;
+    readonly warnings: readonly string[];
     readonly conversionTimestampMs: number | null;
     readonly ttlMs: number | null;
     readonly expiresAtMs: number | null;
@@ -46,10 +48,13 @@ export class InspectionFeatureTile {
             partition: unknown;
             tileId: number;
             legalInfo?: string;
+            error?: string;
+            warnings?: string[];
             numFeatures: number;
             conversionTimestampMs?: number;
             ttlMs?: number;
         };
+        this.warnings = metadata.warnings ?? [];
         this.mapTileKey = metadata.id;
         this.stringPoolId = metadata.stringPoolId;
         this.mapName = metadata.mapName;
@@ -76,6 +81,7 @@ export class InspectionFeatureTile {
         this.expiresAtMs = expiry !== null && Number.isFinite(expiry)
             ? expiry
             : null;
+        if (metadata.error) throw new TileDeliveryError(metadata.error, this.expiresAtMs);
     }
 
     peek<T>(callback: (layer: TileFeatureLayer) => T): T | null {

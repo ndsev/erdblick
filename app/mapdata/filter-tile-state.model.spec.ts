@@ -129,3 +129,34 @@ describe("FilterTileState", () => {
         expect(tile.valueVersion).toBe(0);
     });
 });
+
+
+it("retains warning-bearing content and excludes accepted outputs from a later request failure", () => {
+    const value = delivery({warnings: ["duplicate Road.7"]});
+    const state = new FilterTileState(value.mapId, value.layerId, value.partition, value.mapTileKey, value.generation);
+    state.install(value);
+    state.fail(value.generation, "another pending partition failed");
+    expect(state.status).toBe("ready");
+    expect(state.error).toBeNull();
+    expect(state.warnings).toEqual(["duplicate Road.7"]);
+    state.markPending(value.generation + 1);
+    state.fail(value.generation + 1, "temporary outage");
+    expect(state.subsetBlob).toBe(value.blob);
+    expect(state.error).toBe("temporary outage");
+    state.dispose();
+    expect(state.warnings).toEqual([]);
+});
+
+
+it("installs failed values with an expiry and clears the error on recovery", () => {
+    const tile = state();
+    const failed = delivery({error: "service unavailable", ttlMs: 5000, numEntries: 0});
+    expect(tile.install(failed)).toBe(true);
+    expect(tile.status).toBe("error");
+    expect(tile.error).toBe("service unavailable");
+    expect(tile.backendPending).toBe(false);
+    expect(tile.expiresAtMs).toBe(failed.conversionTimestampMs! + 5000);
+    expect(tile.install(delivery({ttlMs: null}))).toBe(true);
+    expect(tile.error).toBeNull();
+    expect(tile.status).toBe("ready");
+});

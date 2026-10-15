@@ -4,6 +4,8 @@ import {ViewLayerController} from "./view-layer.controller";
 import {TileSubsetLayerVisualization} from
     "./deck/tile-subset-layer.visualization";
 import {coreLib} from "../integrations/wasm";
+import type {FilterSubscriptionDefinition} from
+    "../mapdata/filter-subscription.model";
 import {
     objectPartition,
     partitionKey,
@@ -13,6 +15,88 @@ import {
 const tileKey = (id: number) => partitionKey(tilePartition(id));
 
 describe("ViewLayerController", () => {
+    it("owns mixed feature/row highlight plans independently and reuses them", () => {
+        const controller = Object.create(ViewLayerController.prototype);
+        const partition = tilePartition(coreLib.getTileIdFromPosition(11, 48, 13));
+        const features = [
+            {mapTileKey: "tile", featureId: "Lane.1"},
+            {mapTileKey: "tile", featureId: "Lane.2:relation#3"}
+        ];
+        const mapgetLayer = {key: "Map/Lane", mapId: "Map", layerId: "Lane"};
+        const style = {id: "DrivePaths", source: "style", sourceRef: {}};
+        controller.viewIndex = 0;
+        controller.inspection = {
+            selectionIdsTopic: {getValue: () => [{id: 1, features}]},
+            hoverIdsTopic: {getValue: () => []}
+        };
+        controller.mapInfo = {maps: {getLayerStyleOptions: () => ({})}};
+        controller.viewState = {styleLod: () => 7};
+        controller.resolveInteractionTargetLayer = () => ({
+            mapgetLayer, partition
+        });
+        controller.hasInteractionLayerAffinity = () => true;
+        controller.interactionEffect = () => null;
+        controller.interactionFilterPlan = () => ({
+            valid: true,
+            issues: [],
+            channels: [{
+                channelId: "style-rule:0", scope: "relation", rewrite: false,
+                featureTypes: ["Lane"], featureFields: [], entryFields: [],
+                geometryTypes: 0, geometryName: "*",
+                relation: {recursive: true, mergeTwoway: false}
+            }]
+        });
+        controller.styleVersion = () => 0;
+        controller.tileStream = {
+            createFilterSubscription: vi.fn(
+                (_definition: FilterSubscriptionDefinition) => ({
+                    generation: 0,
+                    setCoverage: vi.fn(),
+                    isPending: () => false
+                })
+            )
+        };
+        controller.styledLayers = new Map();
+        controller.subscribeToStyledLayer = () => ({unsubscribe: vi.fn()});
+        controller.reconcileOwnedVisualizations = vi.fn();
+        controller.destroyOwnedLayer = vi.fn();
+        controller.localInteractionVisualizations = () => new Set();
+        controller.localInteractionVisualizationsWithOverlays = new Set();
+
+        controller.reconcileHighlightLayers([style]);
+
+        const create = controller.tileStream.createFilterSubscription;
+        expect(create).toHaveBeenCalledTimes(2);
+        expect(create.mock.calls.map(([definition]: [FilterSubscriptionDefinition]) =>
+            definition.channels[0])).toMatchObject([
+            {featureFilter: 'id == "Lane.1"'},
+            {featureFilter: 'id == "Lane.2"',
+                entryFilter: '($source.id == "Lane.2" and $relationIndex == 3)'}
+        ]);
+        expect(create.mock.calls[0][0].channels[0].entryFilter).toBeUndefined();
+        for (const [index, featureId] of ["Lane.1", "Lane.2"].entries()) {
+            expect(create.mock.results[index].value.setCoverage)
+                .toHaveBeenCalledWith({
+                    partitions: [partition],
+                    priorityPartitions: [partition],
+                    roots: [{partition, featureId}]
+                });
+        }
+        expect(controller.styledLayers.size).toBe(2);
+
+        controller.reconcileHighlightLayers([style]);
+        expect(create).toHaveBeenCalledTimes(2);
+        expect(controller.destroyOwnedLayer).not.toHaveBeenCalled();
+
+        features.pop();
+        controller.reconcileHighlightLayers([style]);
+        expect(create).toHaveBeenCalledTimes(2);
+        expect(controller.styledLayers.size).toBe(1);
+        expect(controller.destroyOwnedLayer).toHaveBeenCalledOnce();
+        expect(controller.destroyOwnedLayer.mock.calls[0][0]
+            .layer.filterPlan.channels[0].featureFilter).toBe('id == "Lane.2"');
+    });
+
     it("reconciles hover masks without rebuilding regular presentation demand", async () => {
         const controller = Object.create(
             ViewLayerController.prototype

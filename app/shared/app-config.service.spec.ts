@@ -53,6 +53,17 @@ describe("AppConfigService", () => {
         expect(config.serverConfig.cacheReset).toBe(false);
     });
 
+    it("merges Connection defaults from config.json and public YAML state per key", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockImplementation((url: string) => url === "/static-config/config.json"
+            ? of({state: {connectionRetryEnabled: true, connectionRetryInitialDelayMs: 7000}})
+            : of(new HttpResponse({status: 200, body: {erdblick: {state: {
+                connectionRetryEnabled: false, connectionRetryMaxDelayMs: 90000
+            }}}})));
+        expect((await service.load()).state).toMatchObject({connectionRetryEnabled: false,
+            connectionRetryInitialDelayMs: 7000, connectionRetryMaxDelayMs: 90000});
+    });
+
     it("applies public erdblick config when datasource model is unavailable", async () => {
         const {service, httpClient} = createService();
         const serverBody: ServerConfigResponse = {

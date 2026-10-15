@@ -141,3 +141,27 @@ describe("ViewLayerDiagnosticsService", () => {
         expect(service.cameraInteracting$.getValue()).toBe(false);
     });
 });
+
+
+it("keeps warned tiles ready and logs each retained value once", () => {
+    const service = new ViewLayerDiagnosticsService();
+    const state = new FilterTileState("Map", "Road", tilePartition(42), "Features:Map:Road:42", 1);
+    state.status = "ready";
+    state.valueVersion = 1;
+    state.warnings = ["duplicate Road.7"];
+    const layer = {ownerId: "regular", identity: {presentationKind: "regular"},
+        tileStates: new Map([[state.partitionKey, state]]), latestStatus: null} as any;
+    service.register(0, () => [layer], () => false);
+    const messages: string[] = [];
+    service.tileWarning.subscribe(warning => messages.push(warning.message));
+    expect(service.currentSummary().errors).toBe(0);
+    expect(service.currentSummary().ready).toBe(1);
+    service.notifyChanged();
+    service.currentSummary();
+    expect(messages).toEqual(["duplicate Road.7"]);
+    expect(service.currentTiles()[0].warnings).toEqual(state.warnings);
+    state.valueVersion++;
+    state.warnings = [];
+    service.notifyChanged();
+    expect(service.currentTiles()[0].warnings).toEqual([]);
+});
