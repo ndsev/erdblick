@@ -86,7 +86,7 @@ export class HoverDetailService implements OnDestroy {
         }));
     }
 
-    /** Reconciles visible coverage for one view while retaining scalar-only subset values. */
+    /** Reconciles visible coverage for one view while retaining geometry-free projected values. */
     reconcileView(
         viewIndex: number,
         coverage: ReadonlyArray<{
@@ -353,7 +353,7 @@ export class HoverDetailService implements OnDestroy {
         return cached.valuesByFeatureId.get(featureId);
     }
 
-    /** Converts one immutable TileSubsetLayer into feature-id keyed scalar values. */
+    /** Converts singleton expression results into feature-id keyed hover values. */
     private decodeTile(
         blob: Uint8Array,
         expressions: readonly string[]
@@ -386,8 +386,9 @@ export class HoverDetailService implements OnDestroy {
                     const byExpression = new Map<string, unknown>();
                     expressions.forEach((expression, index) => {
                         const fieldIndex = fieldIndices[index];
-                        if (fieldIndex >= 0 && fieldIndex < values.length) {
-                            byExpression.set(expression, values[fieldIndex]);
+                        const results = values[fieldIndex];
+                        if (Array.isArray(results) && results.length === 1) {
+                            byExpression.set(expression, results[0]);
                         }
                     });
                     valuesByFeatureId.set(entry.featureId, byExpression);

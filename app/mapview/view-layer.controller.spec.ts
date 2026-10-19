@@ -97,6 +97,39 @@ describe("ViewLayerController", () => {
             .layer.filterPlan.channels[0].featureFilter).toBe('id == "Lane.2"');
     });
 
+    it("rerenders camera-dependent line detail on the retained tile owner", () => {
+        const controller = Object.create(ViewLayerController.prototype) as any;
+        const state = {partitionKey: tileKey(7), status: "ready", subsetBlob: new Uint8Array([1])};
+        const visualization = {
+            state,
+            setLod: vi.fn(),
+            setLineSimplificationTolerance: vi.fn(),
+            setPointCloudScale: vi.fn(),
+            isCurrentPresentationInstalled: vi.fn(() => false)
+        };
+        const owned = {
+            layer: {tileStates: new Map([[state.partitionKey, state]])},
+            visualizations: new Map([["visual", visualization]]),
+            visualizationKeyByPartition: new Map([[state.partitionKey, "visual"]]),
+            pendingPartitions: new Map()
+        };
+        controller.presentationStillDemanded = vi.fn(() => true);
+        controller.presentationLod = vi.fn(() => 3);
+        controller.lineSimplificationToleranceMeters = vi.fn(() => 2);
+        controller.viewState = {viewStateFor: () => ({metersPerPixel: 1})};
+        controller.shouldVisualize = vi.fn(() => true);
+        controller.replaceVisualization = vi.fn();
+        controller.queueVisualizationRender = vi.fn();
+        controller.schedulePendingTiles = vi.fn();
+
+        controller.reconcileOwnedVisualizations(owned);
+
+        expect(visualization.setLineSimplificationTolerance).toHaveBeenCalledWith(2);
+        expect(controller.queueVisualizationRender).toHaveBeenCalledWith(visualization);
+        expect(controller.replaceVisualization).not.toHaveBeenCalled();
+        expect(owned.visualizations.get("visual")).toBe(visualization);
+    });
+
     it("reconciles hover masks without rebuilding regular presentation demand", async () => {
         const controller = Object.create(
             ViewLayerController.prototype
@@ -202,6 +235,7 @@ describe("ViewLayerController", () => {
         controller.interactionViewportSignature = () => "unchanged";
         controller.occupancyChanged = {next: vi.fn()};
         controller.diagnostics = {notifyChanged: vi.fn()};
+        controller.renderService = {pointCloudPolicy: {enabled: true}};
 
         controller.reconcile();
 
@@ -219,6 +253,7 @@ describe("ViewLayerController", () => {
         controller.sceneHandle = null;
         controller.occupancyChanged = {next: vi.fn()};
         controller.diagnostics = {notifyChanged: vi.fn()};
+        controller.renderService = {pointCloudPolicy: {enabled: true}};
         controller.pendingVisualizationRenders = new Set();
         controller.localInteractionVisualizationsWithOverlays = new Set();
         controller.scheduleInteractionPresenceReconcile = vi.fn();
@@ -449,6 +484,7 @@ describe("ViewLayerController", () => {
         controller.applyLocalInteractionOverlays = vi.fn();
         controller.scheduleInteractionPresenceReconcile = vi.fn();
         controller.diagnostics = {notifyChanged: vi.fn()};
+        controller.renderService = {pointCloudPolicy: {enabled: true}};
         controller.releaseRegularFallbackWhenReady = vi.fn();
 
         controller.startVisualizationRender(visualization);

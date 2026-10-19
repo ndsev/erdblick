@@ -19,6 +19,7 @@ export interface FilterChannelDefinition {
     entryFields: string[];
     geometryTypes: number;
     geometryName?: string;
+    pointCloudMaxPoints?: number;
     featureFilter?: string;
     entryFilter?: string;
     group?: {

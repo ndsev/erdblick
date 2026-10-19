@@ -199,6 +199,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private firstPersonViewActiveSubscription?: Subscription;
     private firstPersonViewRequestSubscription?: Subscription;
     private rendererInvalidatedSubscription?: Subscription;
+    private unregisterRenderView?: () => void;
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
     private deckAntialiasingEnabled = true;
@@ -443,6 +444,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * Recreate the viewer with different projection for 2D/3D modes
      */
     private async createViewerForMode(is2D: boolean, setupGeneration: number): Promise<IRenderView | undefined> {
+        this.unregisterRenderView?.();
+        this.unregisterRenderView = undefined;
         this.rendererInvalidatedSubscription?.unsubscribe();
         this.rendererInvalidatedSubscription = undefined;
         this.hoverSubscription?.unsubscribe();
@@ -495,6 +498,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             }
         });
         this.mapView = mapView;
+        this.unregisterRenderView = this.mapViewState.registerRenderView(mapView);
         this.layerController?.attachScene(mapView.getSceneHandle());
         this.viewerInitError = "";
         return mapView;
@@ -509,6 +513,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     /** Stops view subscriptions and renderer ownership before destruction or reindexing. */
     private disposeView(): void {
+        this.unregisterRenderView?.();
+        this.unregisterRenderView = undefined;
         this.viewerSetupGeneration++;
         this.pendingContextMenuOpenEvent = null;
         this.clearPendingContextMenuOpenTimeout();

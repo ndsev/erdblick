@@ -541,6 +541,12 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             zIndexRole_ = ZIndexRole::Overlay;
         }
     }
+    if (yaml["point-cloud"].IsDefined()) pointCloud_ = yaml["point-cloud"].as<bool>();
+    if (yaml["point-cloud-max-points"].IsDefined()) {
+        auto const quota = yaml["point-cloud-max-points"].as<int64_t>();
+        if (quota < 0 || quota > 1048576) throw std::invalid_argument("point-cloud-max-points must be in 0..1048576");
+        pointCloudMaxPoints_ = static_cast<uint32_t>(quota);
+    }
     if (yaml["billboard"].IsDefined()) {
         // Parse whether the rendered primitive should face the camera.
         billboard_ = yaml["billboard"].as<bool>();
@@ -1777,6 +1783,10 @@ std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
 {
     if (!labelTextExpression_.empty()) {
         auto resultVal = evalFun.evaluate(labelTextExpression_);
+        // Missing data and failed projections use the configured fallback, rather
+        // than displaying the evaluator's literal "null" or "undefined" marker.
+        if (resultVal.type == simfil::ValueType::Null || resultVal.type == simfil::ValueType::Undef)
+            return labelText_;
         auto resultText = resultVal.toString();
         if (!resultText.empty()) {
             return resultText;

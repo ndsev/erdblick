@@ -39,8 +39,11 @@ export interface CoverageRectItem extends Record<string, any> {
 export interface LayerInfoItem extends Record<string, any> {
     canRead: boolean;
     canWrite: boolean;
+    defaultVisible?: boolean;
     coverage: Array<number | CoverageRectItem>;
     featureTypes: Array<{ name: string, uniqueIdCompositions: Array<any> }>;
+    /** Schema roots published by mapget; identifier types may also contain cross-layer references. */
+    schemaFeatureTypes?: string[];
     layerId: string;
     type: string;
     version: { major: number, minor: number, patch: number };
@@ -744,7 +747,7 @@ export class MapLayerTree {
                 featureLayer.viewConfig = this.stateService.mapLayerConfig(
                     featureLayer.mapId,
                     featureLayer.info.layerId,
-                    defaultVisibility,
+                    defaultVisibility && (featureLayer.info.defaultVisible ?? true),
                     defaultLevel);
                 const options = layerStyleOptions(featureLayer);
                 for (const option of options) {

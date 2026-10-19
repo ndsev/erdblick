@@ -1,4 +1,5 @@
-import {Component} from "@angular/core";
+import {ChangeDetectorRef, Component, OnDestroy} from "@angular/core";
+import {Subscription} from "rxjs";
 import {FeatureSearchService} from "./feature.search.service";
 
 @Component({
@@ -11,6 +12,16 @@ import {FeatureSearchService} from "./feature.search.service";
     standalone: false
 })
 /** Renders all feature-search sessions that are currently floating dialogs. */
-export class FeatureSearchDialogsComponent {
-    constructor(public searchService: FeatureSearchService) {}
+export class FeatureSearchDialogsComponent implements OnDestroy {
+    private readonly sessionsSubscription: Subscription;
+
+    constructor(public searchService: FeatureSearchService, cdr: ChangeDetectorRef) {
+        // Async scene imports and MCP actions need an explicit zoneless render notification.
+        this.sessionsSubscription = searchService.sessionsChanged.subscribe(() => cdr.markForCheck());
+    }
+
+    /** Removes the structural UI notification when the floating host is destroyed. */
+    ngOnDestroy(): void {
+        this.sessionsSubscription.unsubscribe();
+    }
 }

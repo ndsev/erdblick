@@ -94,6 +94,8 @@ test.describe('Style feedback workflows', () => {
         const saveStyle = searchDialog.getByTestId('feature-search-save-style');
         await expect(saveStyle).toBeVisible();
 
+        // Automatic rules arrive asynchronously; Save rejects an empty rules editor.
+        await expect(searchDialog.getByTestId(/^feature-search-style-panel-/).first()).toBeAttached();
         await saveStyle.click();
         const saveDialog = page.getByTestId('search-style-save-dialog');
         await expect(saveDialog).toBeVisible();

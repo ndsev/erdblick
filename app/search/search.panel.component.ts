@@ -46,6 +46,7 @@ import {
     LocationSearchService,
     normalizeLocationSearchPayload
 } from "./location.search.service";
+import {LocationNavigationService} from "./location-navigation.service";
 import {
     packedTileIdFromMortonString,
     packedTileIdFromParsedNdsCoordinates,
@@ -129,7 +130,8 @@ interface SearchResizeSession {
                           [draggable]="false" [resizable]="false" [closeOnEscape]="false">
                     <div data-testid="search-menu-panel">
                         <div class="search-menu" *ngFor="let item of activeSearchItems">
-                            <div onEnterClick (click)="targetToHistory(item)" class="search-option-wrapper"
+                            <div onEnterClick (click)="onSearchTargetClick($event, item)" class="search-option-wrapper"
+                               data-testid="search-action" [attr.data-action-id]="item.id"
                                [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
                                 <span class="icon-circle {{ item.color }}">
                                     @if (item.iconType === 'material') {
@@ -147,7 +149,8 @@ interface SearchResizeSession {
                         </div>
 
                         <div class="search-menu" *ngFor="let item of visibleSearchHistory" >
-                            <div onEnterClick (click)="selectHistoryEntry(item)" class="search-option-wrapper" tabindex="0">
+                            <div onEnterClick (click)="selectHistoryEntry(item)" class="search-option-wrapper" tabindex="0"
+                                 data-testid="search-history-action" [attr.data-action-id]="item.actionId">
                                 <div class="icon-circle violet">
                                     <i class="pi pi-history"></i>
                                 </div>
@@ -410,6 +413,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 private menuService: RightClickMenuService,
                 public searchService: FeatureSearchService,
                 private locationSearchService: LocationSearchService,
+                private locationNavigation: LocationNavigationService,
                 private externalViewerService: ExternalViewerService,
                 private changeDetectorRef: ChangeDetectorRef) {
         this.keyboardService.registerShortcut("Ctrl+k", this.searchShortcutHandler);
@@ -568,6 +572,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     /** Releases subscriptions and global shortcuts when the responsive shell replaces the panel. */
     ngOnDestroy() {
         this.destroyed = true;
+        this.locationNavigation.cancel();
         this.cancelSearchResize();
         this.keyboardService.unregisterShortcut("Ctrl+k", this.searchShortcutHandler);
         this.subscriptions.unsubscribe();
@@ -1341,6 +1346,12 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.dialog?.close(new Event("close-on-execute"));
     }
 
+    /** Source/license links are independently actionable inside a location-result row. */
+    protected onSearchTargetClick(event: Event, target: SearchTarget): void {
+        if (event.target instanceof Element && event.target.closest("a")) return;
+        this.targetToHistory(target);
+    }
+
     /** Returns whether a target can run for the supplied input, including empty-input actions. */
     private canRunTarget(target: SearchTarget, input: string): boolean {
         return (!!input.trim() || target.acceptsEmptyInput === true) && target.validate(input);
@@ -1350,10 +1361,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
      * Executes the chosen search target by either jumping locally or delegating to its side-effect callback.
      */
     runTarget(entry: SearchHistoryEntry) {
+        this.locationNavigation.cancel();
         const item = this.resolveTargetForEntry(entry);
         if (!item) {
             if (this.locationSearchService.isLocationTargetId(entry.actionId)) {
-                this.restoreLocationSearchTarget(entry);
+                this.locationNavigation.navigate(entry.actionId, entry.payload);
                 return;
             }
             this.messageService.showError("Search action is no longer available");
@@ -1364,8 +1376,13 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
 
     /** Executes an already resolved target. */
     private executeResolvedTarget(item: SearchTarget, entry: SearchHistoryEntry) {
+        this.locationNavigation.cancel();
         if (!item.validate(entry.input)) {
             this.messageService.showError("Search action is not valid for the stored input");
+            return;
+        }
+        if (this.locationSearchService.isLocationTargetId(item.id)) {
+            this.locationNavigation.navigate(item.id, entry.payload ?? item.payload);
             return;
         }
         if (item.jump !== undefined) {
@@ -1378,22 +1395,6 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             item.execute(entry.input, entry.payload ?? item.payload);
             return;
         }
-    }
-
-    /** Recreates compact location URL/search-state entries from the built-in mapget /location endpoint. */
-    private restoreLocationSearchTarget(entry: SearchHistoryEntry): void {
-        const subscription = this.locationSearchService.restoreMapgetLocationTarget(entry.actionId, entry.input)
-            .subscribe(result => {
-                if (!result.target) {
-                    this.messageService.showError(result.error ?? "Could not restore location search result.");
-                    return;
-                }
-                this.executeResolvedTarget(result.target, {
-                    ...entry,
-                    payload: result.target.payload
-                });
-            });
-        this.subscriptions.add(subscription);
     }
 
     /**

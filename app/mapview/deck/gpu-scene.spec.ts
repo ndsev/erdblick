@@ -1,5 +1,6 @@
 import type { Buffer, Device, Texture } from "@luma.gl/core";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { gpuMemoryBudget } from "./gpu-memory-budget";
 
 import { GpuScene, type GpuSceneRenderReservation } from "./gpu-scene";
 import { gpuSceneShaderModule } from "./erdblick-vector.shaders";
@@ -324,15 +325,22 @@ function pointPacket(
 }
 
 /** Creates one scene with deterministic fake graphics resources. */
+const scenes: GpuScene[] = [];
+afterEach(() => {
+  for (const scene of scenes.splice(0)) scene.destroy();
+});
+
 function createScene() {
   const device = new FakeDevice();
   const redraw = vi.fn();
   const fatal = vi.fn();
+  const scene = new GpuScene(device as unknown as Device, redraw, fatal);
+  scenes.push(scene);
   return {
     device,
     redraw,
     fatal,
-    scene: new GpuScene(device as unknown as Device, redraw, fatal),
+    scene,
   };
 }
 
@@ -1300,7 +1308,7 @@ describe("GpuScene contribution lifecycle", () => {
     expect(fatal).toHaveBeenCalledOnce();
   });
 
-  it("publishes a storage generation when inactive staging grows a shared buffer", () => {
+  it.each([false, true])("publishes a storage generation when inactive staging grows a shared buffer (presented: %s)", (presented) => {
     const { device, redraw, scene } = createScene();
     for (let index = 0; index < 64; ++index) {
       const reservation = scene.prepareRender(
@@ -1323,6 +1331,7 @@ describe("GpuScene contribution lifecycle", () => {
       );
       scene.finishRender(reservation);
     }
+    if (presented) scene.publishPresentation();
     const store = scene.materialStores()[0].store;
     const oldBuffer = store.buffer as unknown as FakeBuffer;
     const oldRevision = scene.revision;
@@ -1347,7 +1356,16 @@ describe("GpuScene contribution lifecycle", () => {
 
     const newBuffer = store.buffer as unknown as FakeBuffer;
     expect(newBuffer).not.toBe(oldBuffer);
-    expect(oldBuffer.destroyed).toBe(true);
+    expect(oldBuffer.destroyed).toBe(!presented);
+    if (presented) {
+      scene.releaseRetiredPresentationResources();
+      expect(oldBuffer.destroyed).toBe(false);
+      expect(gpuMemoryBudget.retirement).not.toBeNull();
+      scene.publishPresentation();
+      scene.releaseRetiredPresentationResources();
+      expect(oldBuffer.destroyed).toBe(true);
+      expect(gpuMemoryBudget.retirement).toBeNull();
+    }
     expect(newBuffer.bytes[0]).toBe(oldBuffer.bytes[0]);
     expect(store.bufferRevision).toBe(2);
     expect(scene.revision).toBe(oldRevision + 1);
@@ -1392,6 +1410,32 @@ describe("GpuScene contribution lifecycle", () => {
     expect(presented.destroyed).toBe(false);
     scene.releaseRetiredPresentationResources();
     expect(presented.destroyed).toBe(true);
+  });
+
+  it("reclaims an empty material buffer after removed contributions leave the presentation", async () => {
+    const {scene, device} = createScene();
+    const reservation = scene.prepareRender("origin", [11, 48, 0], [{
+      identity: "cloud", mapTileKey: "Features:Map:Cloud:1:0", styleOrder: 0, lod: 7,
+    }]);
+    scene.applyPacket(pointPacket(reservation), reservation);
+    scene.finishRender(reservation);
+    scene.publishPresentation();
+    const buffer = device.buffers[0];
+    scene.removeContributions(["cloud"]);
+    const retirement = gpuMemoryBudget.retirement;
+    expect(retirement).not.toBeNull();
+    expect(buffer.destroyed).toBe(false);
+    scene.releaseRetiredPresentationResources();
+    expect(gpuMemoryBudget.retirement).toBe(retirement);
+    expect(buffer.destroyed).toBe(false);
+    scene.publishPresentation();
+    expect(buffer.destroyed).toBe(false);
+    scene.releaseRetiredPresentationResources();
+    await retirement;
+    expect(gpuMemoryBudget.retirement).toBeNull();
+    expect(buffer.destroyed).toBe(true);
+    expect(scene.snapshot().stores).toHaveLength(0);
+    scene.destroy();
   });
 
   it("rejects late worker reservations after context-owned resources die", () => {

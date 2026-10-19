@@ -5,6 +5,10 @@ import {filter} from "rxjs/operators";
 import {Cartographic, GeoMath} from "../integrations/geo";
 import {AppState, AppStateOptions, Boolish, MapViewState, StyleState} from "./app-state";
 import {z} from "zod";
+import {
+    PointCloudPolicy, DEFAULT_POINT_CLOUD_POLICY, pointCloudPolicySchema,
+    pointCloudDetailSchema, pointCloudWorkingMemorySchema, pointCloudGpuMemorySchema
+} from "./point-cloud-policy";
 import {MapTreeNode} from "../mapdata/map.tree.model";
 import {ErdblickStyle} from "../styledata/style.service";
 import {coreLib} from "../integrations/wasm";
@@ -768,6 +772,41 @@ export class AppStateService implements OnDestroy {
     });
 
     private invalidConnectionPolicy = "";
+    readonly pointCloudDownsamplingEnabledState = this.createState<boolean>({
+        name: 'pointCloudDownsamplingEnabled', defaultValue: DEFAULT_POINT_CLOUD_POLICY.enabled, schema: Boolish
+    });
+    readonly pointCloudDetailPixelsState = this.createState<number>({
+        name: 'pointCloudDetailPixels', defaultValue: DEFAULT_POINT_CLOUD_POLICY.detailPixels,
+        schema: pointCloudDetailSchema
+    });
+    readonly pointCloudWorkingMemoryMiBState = this.createState<number>({
+        name: 'pointCloudWorkingMemoryMiB', defaultValue: DEFAULT_POINT_CLOUD_POLICY.workingMemoryMiB,
+        schema: pointCloudWorkingMemorySchema
+    });
+    readonly pointCloudGpuMemoryMiBState = this.createState<number>({
+        name: 'pointCloudGpuMemoryMiB', defaultValue: DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB,
+        schema: pointCloudGpuMemorySchema
+    });
+
+    /** Read the same validated policy for Preferences, rendering and worker admission. */
+    get pointCloudPolicy(): PointCloudPolicy {
+        return {
+            enabled: this.pointCloudDownsamplingEnabledState.getValue(),
+            detailPixels: this.pointCloudDetailPixelsState.getValue(),
+            workingMemoryMiB: this.pointCloudWorkingMemoryMiBState.getValue(),
+            gpuMemoryMiB: this.pointCloudGpuMemoryMiBState.getValue()
+        };
+    }
+
+    /** Validate the whole preference edit before changing any persisted field. */
+    setPointCloudPolicy(policy: PointCloudPolicy): void {
+        const parsed = pointCloudPolicySchema.parse(policy);
+        this.pointCloudDownsamplingEnabledState.next(parsed.enabled);
+        this.pointCloudDetailPixelsState.next(parsed.detailPixels);
+        this.pointCloudWorkingMemoryMiBState.next(parsed.workingMemoryMiB);
+        this.pointCloudGpuMemoryMiBState.next(parsed.gpuMemoryMiB);
+    }
+
     readonly connectionRetryEnabledState = this.createState<boolean>({
         name: 'connectionRetryEnabled', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.enabled, schema: Boolish
     });
@@ -1044,6 +1083,14 @@ export class AppStateService implements OnDestroy {
         name: 'dockOpenState',
         defaultValue: false,
         schema: Boolish
+    });
+
+    /** Local layout preferences; deliberately absent from shareable map URLs. */
+    readonly dockWidthState = this.createState<number | null>({
+        name: 'dockWidth', defaultValue: null, schema: z.number().min(0).max(32768).nullable()
+    });
+    readonly viewPanelSizesState = this.createState<number[]>({
+        name: 'viewPanelSizes', defaultValue: [], schema: z.array(z.number().min(0).max(100)).max(2)
     });
 
     readonly dockActiveTabState = this.createState<string>({
@@ -1608,9 +1655,18 @@ export class AppStateService implements OnDestroy {
         });
     }
 
+    /** Returns current URL-backed state without copying authentication or unknown URL parameters. */
+    shareableUrl(): string {
+        const url = new URL(window.location.pathname, window.location.origin);
+        for (const [key, value] of Object.entries(this.serializeUrlV2(false))) {
+            for (const item of Array.isArray(value) ? value : [value]) url.searchParams.append(key, item);
+        }
+        return url.href;
+    }
+
     /** Builds a complete v2 query-param set so all layer-indexed params share one order. */
-    private serializeUrlV2(): Record<string, string | string[]> {
-        const params = this.preservedUnknownUrlParams();
+    private serializeUrlV2(includeUnknownParams = true): Record<string, string | string[]> {
+        const params = includeUnknownParams ? this.preservedUnknownUrlParams() : {};
         params["v2"] = "1";
 
         const urlLayerNames = this.urlLayerNamesForSerialization();

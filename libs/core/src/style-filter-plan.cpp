@@ -473,7 +473,8 @@ bool canShareFeatureChannel(
         left.featureFilter_ == right.featureFilter_ &&
         left.entryFilter_ == right.entryFilter_ &&
         left.geometryTypes_ == right.geometryTypes_ &&
-        left.geometryName_ == right.geometryName_;
+        left.geometryName_ == right.geometryName_ &&
+        left.pointCloudMaxPoints_ == right.pointCloudMaxPoints_;
 }
 
 void appendUniqueFields(
@@ -548,6 +549,8 @@ JsValue channelToJsValue(
         {"geometryName",
          JsValue(channel.geometryName_.value_or("*"))},
     });
+    if (channel.pointCloudMaxPoints_)
+        result.set("pointCloudMaxPoints", JsValue(*channel.pointCloudMaxPoints_));
     if (channel.featureFilter_) {
         result.set(
             "featureFilter",
@@ -843,6 +846,25 @@ StyleFilterPlan planStyleFilter(
                 eligible(rule, featurePredicate).expression;
             channel.featureFields_ =
                 expressions.feature.take();
+        }
+
+        auto consistentCloudPolicy = [&](auto const& self, FeatureStyleRule const& child) -> bool {
+            if (child.pointCloud() != rule.pointCloud() ||
+                (child.pointCloud() && child.pointCloudMaxPoints() != rule.pointCloudMaxPoints())) return false;
+            return std::ranges::all_of(child.subRules(), [&](auto const& sub) { return self(self, sub); });
+        };
+        if (!consistentCloudPolicy(consistentCloudPolicy, rule)) {
+            addIssue(plan, rule, "point-cloud and point-cloud-max-points must be set on the top-level rule and inherited by every subrule.");
+            continue;
+        }
+        if (rule.pointCloud()) {
+            if (channel.scope_ != mapget::FeatureLayerFilterScope::Feature ||
+                channel.geometryTypes_ != (1U << static_cast<unsigned>(mapget::GeomType::Points)) ||
+                channel.group_ || channel.relation_) {
+                addIssue(plan, rule, "point-cloud requires a feature-scope point-only rule without grouping or relations.");
+                continue;
+            }
+            channel.pointCloudMaxPoints_ = rule.pointCloudMaxPoints();
         }
 
         if (expressions.usesMergeCount &&

@@ -11,6 +11,7 @@
 #include "sfl/small_vector.hpp"
 #include "simfil/model/string-pool.h"
 #include "mapget/model/featurelayer.h"
+#include "mapget/model/incoming-relations.h"
 
 namespace erdblick
 {
@@ -55,6 +56,8 @@ public:
         JsValue direction_;
         std::string geoJsonPath_;
         std::string nodeId_;
+        /** Source owner for incoming relation rows, independent of the selected target. */
+        std::string mapTileKey_;
         std::optional<JsValue> address_;
         bool addressScope_ = false;
         std::string schemaType_;
@@ -99,6 +102,9 @@ public:
      * their tree so summary semantics cannot drift between the two views.
      */
     static void finalizeTree(InspectionNode& root);
+
+    /** Render backend-associated incoming relations using their original source models. */
+    JsValue convertIncoming(mapget::FeatureInspectionView const& view);
 
     /**
      * RAII helper that temporarily pushes a child node onto the converter stack.

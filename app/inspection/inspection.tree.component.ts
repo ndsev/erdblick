@@ -191,6 +191,13 @@ export class FeatureFilterOptions {
                                             <p-treeTableToggler [rowNode]="rowNode"/>
                                         </span>
                                     }
+                                    @if (col.key === "key" && rowData["incomingLoading"]) {
+                                        <i class="pi pi-spinner pi-spin" role="status" aria-label="Loading incoming relations"></i>
+                                    }
+                                    @if (col.key === "key" && rowData["retryIncoming"]) {
+                                        <button type="button" aria-label="Reload incoming relations"
+                                                (click)="$event.stopPropagation(); rowData['retryIncoming']()">Retry</button>
+                                    }
                                     @if (shouldShowValueCopyButton(rowNode, rowData, col.key)) {
                                         <p-button class="inspection-value-copy-button"
                                                   severity="secondary"
@@ -1223,13 +1230,21 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 .scope === "relation"
                 ? "Relation/Validity"
                 : "Attr/Validity";
+            const baseId = stripFeatureInspectionTarget(inspectionTarget);
+            const ownedByPanel = this.stateService.selection.find(panel => panel.id === this.panelId())
+                ?.features.some(feature => feature.mapTileKey === mapTileKey
+                    && stripFeatureInspectionTarget(feature.featureId) === baseId);
             this.inspectionMenuItems.push({
-                label: this.isInspectionTargetHighlighted(mapTileKey, inspectionTarget)
+                label: !ownedByPanel ? "Inspect source relation" : this.isInspectionTargetHighlighted(mapTileKey, inspectionTarget)
                     ? `Unhighlight ${targetLabel}`
                     : `Highlight ${targetLabel}`,
                 icon: 'pi pi-bullseye',
                 command: () => {
-                    this.stateService.toggleInspectionFeatureHighlight(this.panelId(), mapTileKey, inspectionTarget);
+                    if (ownedByPanel) {
+                        this.stateService.toggleInspectionFeatureHighlight(this.panelId(), mapTileKey, inspectionTarget);
+                    } else {
+                        this.stateService.setSelection([{mapTileKey, featureId: inspectionTarget}]);
+                    }
                 }
             });
         }

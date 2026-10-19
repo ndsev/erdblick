@@ -10,6 +10,17 @@ export interface RenderRectangle {
     north: number;
 }
 
+/** Ground coordinates of one polygon: exterior ring followed by its holes. */
+export type LocationPolygon = [number, number][][];
+
+/** Transient area navigation; boundaries are never persisted in camera or search state. */
+export interface LocationArea {
+    rectangle: RenderRectangle;
+    polygons?: LocationPolygon[];
+    label: string;
+    representativePoint?: [number, number];
+}
+
 /** Generic 3D vector payload used by view-agnostic navigation topics. */
 export interface RenderVector3 {
     x: number;
@@ -77,6 +88,8 @@ export interface IRenderView {
     destroy(): Promise<void>;
     isAvailable(): boolean;
     requestRender(): void;
+    /** Forces a frame and freezes its canvas before a non-preserved WebGL drawing buffer is cleared. */
+    captureCanvas(scale: number): {canvas: HTMLCanvasElement; dataUrl: string};
     prepareForLayoutResize(targetCssSize: {width: number; height: number}): void;
     setDesktopDrillPickingEnabled(enabled: boolean): void;
 
@@ -96,6 +109,10 @@ export interface IRenderView {
     ): RenderedFeaturePickResult;
     setViewFromState(cameraData: CameraViewState): void;
     getViewState(): CameraViewState;
+    /** Reads the live renderer pose without persisting it; unavailable in first-person mode. */
+    getLiveCameraState(): CameraViewState | undefined;
+    /** Whether a human camera gesture currently owns this view. */
+    isCameraInteractionActive(): boolean;
     prepareForViewRemoval(): RenderViewCameraState;
     restoreCameraState(state: RenderViewCameraState): void;
     computeViewport(): Viewport | undefined;

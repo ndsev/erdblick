@@ -692,6 +692,11 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .value("UNKNOWN", mapget::TileSourceDataLayer::SourceDataAddressFormat::Unknown)
         .value("BIT_RANGE", mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange);
 
+    em::class_<IncomingInspection>("IncomingInspection")
+        .constructor<std::string const&, std::string const&, std::string const&>()
+        .function("addSnapshot", &IncomingInspection::addSnapshot)
+        .function("inspectionModel", &IncomingInspection::inspectionModel);
+
     ////////// TileSourceDataLayer
     em::class_<TileSourceDataLayer>("TileSourceDataLayer")
         .function("addressFormat", &TileSourceDataLayer::addressFormat)
@@ -807,6 +812,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function(
             "setLineSimplificationTolerance",
             &TileSubsetLayerRenderer::setLineSimplificationTolerance)
+        .function("setPointCloudPolicy", &TileSubsetLayerRenderer::setPointCloudPolicy)
+        .function("pointCloudDeliveredCount", &TileSubsetLayerRenderer::pointCloudDeliveredCount)
+        .function("pointCloudRenderedCount", &TileSubsetLayerRenderer::pointCloudRenderedCount)
         .function(
             "configureGpuPacket",
             &TileSubsetLayerRenderer::configureGpuPacket)
@@ -879,12 +887,14 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::class_<TileLayerParser>("TileLayerParser")
         .constructor<>()
         .function("setDataSourceInfo", &TileLayerParser::setDataSourceInfo)
+        .function("addDataSourceInfo", &TileLayerParser::addDataSourceInfo)
         .function("getDataSourceInfo", &TileLayerParser::getDataSourceInfo)
         .function("getFieldDictOffsets", &TileLayerParser::getFieldDictOffsets)
         .function("getFieldDict", &TileLayerParser::getFieldDict)
         .function("addFieldDict", &TileLayerParser::addFieldDict)
         .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
+        .function("hasIncomingRelations", &TileLayerParser::hasIncomingRelations)
         .function("readTileSourceDataLayer", &TileLayerParser::readTileSourceDataLayer)
         .function("readTileSubsetLayer", &TileLayerParser::readTileSubsetLayer)
         .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)

@@ -2,6 +2,7 @@ import {describe, expect, it} from "vitest";
 import type {TileSubsetDelivery} from "./filter-subscription.model";
 import {FilterTileState} from "./filter-tile-state.model";
 import {partitionKey, tilePartition} from "./partition.model";
+import {pointCloudInputBudget} from "../shared/point-cloud-input-budget";
 
 const PARTITION = tilePartition(42);
 
@@ -51,6 +52,26 @@ function state() {
 }
 
 describe("FilterTileState", () => {
+    it("releases rejected input and accepts a fresh generation after increasing capacity", () => {
+        const tile = state();
+        pointCloudInputBudget.setWorkingLimit(16 * 1048576);
+        try {
+            expect(tile.install(delivery(), false, true)).toBe(true);
+            expect(tile.subsetBlob).toBeNull();
+            expect(tile.pointCloudInputRejected).toBe(true);
+            pointCloudInputBudget.setWorkingLimit(512 * 1048576);
+            tile.markPending(3);
+            expect(tile.install(delivery({generation: 3}), false, true)).toBe(true);
+            expect(tile.pointCloudInputRejected).toBe(false);
+            expect(tile.status).toBe("ready");
+            expect(pointCloudInputBudget.retainedBytes).toBe(3);
+        } finally {
+            tile.dispose();
+            pointCloudInputBudget.setWorkingLimit(512 * 1048576);
+        }
+        expect(pointCloudInputBudget.retainedBytes).toBe(0);
+    });
+
     it("retains immutable subset metadata and uses installation as acceptance", () => {
         const tile = state();
 

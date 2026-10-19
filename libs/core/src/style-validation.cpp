@@ -230,7 +230,8 @@ bool validateRegexValue(
             "error",
             "schema",
             std::move(impact),
-            "Invalid regular expression in " + property + ": " + e.what(),
+            "Invalid regular expression in " + property + ": " + e.what() +
+                ". Use regex syntax such as .*SPEED.*, not shell wildcards such as *SPEED*.",
             locationForNode(parent[property]));
         issue.ruleIndex = ruleIndex;
         issue.rulePath = rulePath;
@@ -1656,6 +1657,9 @@ bool validateStyleRuleYamlImpl(
         ok = false;
     }
 
+    markInvalid(readScalar<bool>(ruleYaml, "point-cloud", rulePath, report, sourceRuleIndex));
+    markInvalid(validateNumericRange(ruleYaml, "point-cloud-max-points", 0., 1048576., rulePath, report, sourceRuleIndex));
+    markInvalid(readScalar<uint32_t>(ruleYaml, "point-cloud-max-points", rulePath, report, sourceRuleIndex));
     if (ruleYaml["geometry-name"].IsDefined()) {
         std::string geometryName;
         if (!readScalar(

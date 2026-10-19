@@ -402,7 +402,9 @@ export class StyledMapgetLayer {
         if (!state) {
             return {status: "superseded"};
         }
-        if (!state.install(delivery, remainsPending)) {
+        const pointCloud = this.filterPlan.channels.some(channel => channel.pointCloudMaxPoints !== undefined);
+        if (!state.install(delivery, remainsPending, pointCloud,
+            () => this.events.next({type: "tile-ready", state}))) {
             return {status: "superseded"};
         }
         const valueVersion = state.valueVersion;

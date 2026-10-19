@@ -103,6 +103,8 @@ const MAX_OBJECT_DISCOVERY_CACHE_TILES = 4096;
 @Injectable({providedIn: "root"})
 export class MapTileStreamService implements OnDestroy {
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
+    readonly actionClientId$ = new BehaviorSubject<string | null>(null);
+    readonly actionControlReceived = new Subject<{payload: unknown; receivedAt: number}>();
     readonly filterStatusReceived =
         new Subject<MapTileStreamFilterStatusPayload>();
 
@@ -201,6 +203,8 @@ export class MapTileStreamService implements OnDestroy {
             "/interactive",
             this.mapInfo.tileLayerParser
         );
+        this.tileStream.onClientId = clientId => this.actionClientId$.next(clientId);
+        this.tileStream.onActionControl = (payload, receivedAt) => this.actionControlReceived.next({payload, receivedAt});
         this.tileStream.setPullCompressionEnabled(
             this.stateService.tilePullCompressionEnabled
         );
@@ -338,6 +342,11 @@ export class MapTileStreamService implements OnDestroy {
         this.tileStream = null;
         this.tileExpiryScheduler.dispose();
         this.connectionRetryScheduler.dispose();
+    }
+
+    /** Sends an action reply on its original live connection without opening another transport. */
+    sendActionControl(clientId: string, payload: object): boolean {
+        return this.tileStream?.sendActionControl(clientId, payload) ?? false;
     }
 
     createFilterSubscription(
@@ -1039,6 +1048,27 @@ export class MapTileStreamService implements OnDestroy {
         }
     }
 
+    /** Resolves a canonical feature string using the backend schema, preserving ambiguous matches for callers. */
+    async locateFeature(mapId: string, featureId: string, layerId?: string, signal?: AbortSignal): Promise<TileFeatureId[]> {
+        signal?.throwIfAborted();
+        const response = await fetch("/locate", {
+            method: "POST", headers: {"Content-Type": "application/json"}, signal,
+            body: JSON.stringify({requests: [{mapId, ...(layerId ? {layerId} : {}), featureId: stripFeatureInspectionTarget(featureId)}]})
+        });
+        if (!response.ok) throw new Error(`Feature locate failed: HTTP ${response.status}`);
+        const content = await response.text();
+        signal?.throwIfAborted();
+        if (content.length > 256 * 1024) throw new Error("Feature locate response exceeds the bound");
+        const payload: {responses?: Array<Array<{partitionKey?: string; tileId?: string; canonicalFeatureId?: string}>>} = JSON.parse(content);
+        const candidates = payload.responses?.[0] ?? [];
+        if (candidates.length > 100) throw new Error("Feature locate is ambiguous; provide a layer or partition");
+        return candidates.flatMap(candidate => {
+            const mapTileKey = candidate.partitionKey ?? candidate.tileId;
+            return mapTileKey && this.parseMapPartitionKeySafe(mapTileKey)
+                ? [{mapTileKey, featureId: candidate.canonicalFeatureId ?? stripFeatureInspectionTarget(featureId)}] : [];
+        });
+    }
+
     private featureIdentityKey(feature: TileFeatureId): string {
         return `${feature.mapTileKey}\n${stripFeatureInspectionTarget(feature.featureId)}`;
     }
@@ -1381,11 +1411,13 @@ export class MapTileStreamService implements OnDestroy {
             metadata = uint8ArrayToWasmOrThrow(
                 data => this.mapInfo.tileLayerParser
                     .readTileSubsetLayerMetadata(data),
-                subsetBlob
+                // Metadata is a protocol prefix. Never copy point geometry into the
+                // permanent main-thread WASM heap just to route a delivery.
+                subsetBlob.subarray(0, 256 * 1024)
             ) as unknown as typeof metadata;
         } catch (error) {
             throw new Error(
-                "Failed to read TileSubsetLayer metadata.",
+                "Failed to read TileSubsetLayer metadata (256 KiB browser metadata limit).",
                 {cause: error}
             );
         }

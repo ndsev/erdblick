@@ -1,6 +1,8 @@
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
 import {FrameBudgetLoop} from "../shared/frame-budget-loop";
+import {VIEWER_ACTION_CONTROL_FRAME_TYPE, viewerClientIdSchema} from "../actions/viewer-action-relay.contract";
+import {VIEWER_ACTION_INVOCATION_BYTES, VIEWER_ACTION_RESULT_BYTES} from "../actions/viewer-action.contract";
 
 export enum MapTileRequestStatus {
     Open = 0,
@@ -18,6 +20,8 @@ export const MAP_TILE_STREAM_TYPE_STATUS = 4;
 export const MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT = 6;
 export const MAP_TILE_STREAM_TYPE_SUBSETS = 7;
 export const MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE = 8;
+export const MAP_TILE_STREAM_TYPE_ACTION_CONTROL = VIEWER_ACTION_CONTROL_FRAME_TYPE;
+export const MAP_TILE_STREAM_TYPE_INCOMING_RELATIONS = 10;
 export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
 export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-context";
 export const MAP_TILE_STREAM_FILTER_STATUS_TYPE = "mapget.filter.status";
@@ -71,7 +75,7 @@ export enum TileLoadState {
 export interface MapTileStreamRequestContextPayload {
     type: string;
     requestId: number;
-    clientId?: number;
+    clientId?: string;
     sourcesRevision?: number;
 }
 
@@ -143,7 +147,7 @@ export interface MapTileStreamDebugState {
     latestRequestedRequestId: number | null;
     incomingRequestId: number | null;
     supportsRequestContextFrames: boolean;
-    pullClientId: number | null;
+    pullClientId: string | null;
     sourcesRevision: number | null;
     pendingFrameQueueSize: number;
     frameProcessingPaused: boolean;
@@ -349,7 +353,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         4,
         "task"
     );
-    private pullClientId: number | null = null;
+    private pullClientId: string | null = null;
     private sourcesRevision: number | null = null;
     private pullControllers: AbortController[] = [];
     private readonly pullParallelism: number = 2;
@@ -384,6 +388,9 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
     onOpen: (() => void) | null = null;
     onError: ((event: Event) => void) | null = null;
     onClose: ((event: CloseEvent) => void) | null = null;
+    /** Connection identity/control callbacks never enter the pausable tile queue. */
+    onClientId: ((clientId: string | null) => void) | null = null;
+    onActionControl: ((payload: unknown, receivedAt: number) => void) | null = null;
 
     /** Creates or adopts the parser and remembers the relative backend path for websocket and pull calls. */
     constructor(private path: string = "/interactive", parser?: TileLayerParser) {
@@ -464,6 +471,19 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         return this.socket?.readyState === WebSocket.OPEN;
     }
 
+    /** Sends control only to the already-open identified connection; never connects, queues or replays. */
+    sendActionControl(clientId: string, payload: object): boolean {
+        if (!this.isOpen() || this.pullClientId !== clientId || this.transportFailureActive) return false;
+        const text = JSON.stringify(payload);
+        if (this.encoder.encode(text).byteLength > VIEWER_ACTION_RESULT_BYTES) return false;
+        try {
+            this.socket!.send(text);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
     /** Cancels local work synchronously; the websocket close event may arrive after page teardown. */
     close(code?: number, reason?: string) {
         this.connectionGeneration++;
@@ -472,6 +492,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         this.clearPendingFrames();
         this.pullClientId = null;
         this.lastTilesRequestBody = null;
+        this.onClientId?.(null);
         if (!this.socket) {
             return;
         }
@@ -1064,6 +1085,8 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                     // force the next update to send the complete snapshot.
                     this.lastTilesRequestBody = null;
                     this.pullClientId = null;
+                    this.onClientId?.(null);
+                    this.clearPendingFrames();
                     this.stopPullLoops();
                     this.onClose?.(event);
                     if (this.awaitingCompletion) {
@@ -1072,7 +1095,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                 }
             };
             socket.onmessage = (event) => {
-                if (this.socket !== socket) {
+                if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) {
                     return;
                 }
                 this.enqueueFrame(event.data);
@@ -1152,6 +1175,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
      */
     private enqueueFrame(data: ArrayBuffer | Blob) {
         const epoch = this.frameQueueEpoch;
+        const receivedAt = performance.now();
         this.pendingFrameMessages += 1;
         this.frameMessageChain = this.frameMessageChain
             .then(async () => {
@@ -1159,11 +1183,27 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                     return;
                 }
                 const frames = await this.decodeMessage(data);
-                if (epoch === this.frameQueueEpoch) {
-                    this.frameLoop.enqueueMany(frames);
+                const tileFrames: QueuedTransportFrame[] = [];
+                for (const frame of frames) {
+                    if (epoch !== this.frameQueueEpoch) return;
+                    if (!this.isCompatibleProtocol(frame.version)) {
+                        this.reportProtocolMismatch(frame.version);
+                        return;
+                    }
+                    if (frame.type === MAP_TILE_STREAM_TYPE_ACTION_CONTROL) {
+                        this.dispatchActionControl(frame.bytes, receivedAt);
+                    } else {
+                        if (frame.type === MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT) {
+                            // Only identity bypasses pause; incomingRequestId must retain tile FIFO order.
+                            this.acceptClientId(JSON.parse(this.decoder.decode(frame.bytes.subarray(MAP_TILE_STREAM_HEADER_SIZE))));
+                        }
+                        tileFrames.push(frame);
+                    }
                 }
+                if (epoch === this.frameQueueEpoch) this.frameLoop.enqueueMany(tileFrames);
             })
             .catch(err => {
+                if (epoch !== this.frameQueueEpoch) return;
                 this.failInteractiveConnection(
                     "Tile stream message could not be decoded.",
                     err
@@ -1179,7 +1219,9 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
 
     /** Test/auxiliary path which immediately dispatches one complete packed message. */
     private async handleMessage(data: ArrayBuffer | Blob): Promise<void> {
+        const epoch = this.frameQueueEpoch;
         for (const frame of await this.decodeMessage(data)) {
+            if (epoch !== this.frameQueueEpoch) return;
             this.dispatchFrame(frame);
         }
     }
@@ -1212,7 +1254,37 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
             this.clearPendingFrames();
             return;
         }
-        this.handleFrame(frame.bytes, frame.type);
+        if (frame.type === MAP_TILE_STREAM_TYPE_ACTION_CONTROL) {
+            this.dispatchActionControl(frame.bytes, performance.now());
+        } else {
+            this.handleFrame(frame.bytes, frame.type);
+        }
+    }
+
+    /** Malformed application controls fail the action boundary, never the unrelated tile request. */
+    private dispatchActionControl(bytes: Uint8Array, receivedAt: number): void {
+        let payload: unknown;
+        if (bytes.byteLength - MAP_TILE_STREAM_HEADER_SIZE <= VIEWER_ACTION_INVOCATION_BYTES) {
+            try {
+                payload = JSON.parse(this.decoder.decode(bytes.subarray(MAP_TILE_STREAM_HEADER_SIZE)));
+            } catch {
+                payload = undefined;
+            }
+        }
+        this.onActionControl?.(payload, receivedAt);
+    }
+
+    /** Accepts the single opaque UUID independently of request-id/dictionary sequencing. */
+    private acceptClientId(payload: MapTileStreamRequestContextPayload): void {
+        if (payload.type !== MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE || payload.clientId === undefined) return;
+        const parsed = viewerClientIdSchema.safeParse(payload.clientId);
+        if (!parsed.success || (this.pullClientId !== null && this.pullClientId !== parsed.data)) {
+            throw new Error("Invalid interactive connection identity");
+        }
+        if (this.pullClientId === null) {
+            this.pullClientId = parsed.data;
+            this.onClientId?.(parsed.data);
+        }
     }
 
     /** Reports one protocol mismatch and stops the active transport because following frame parsing is unsafe. */
@@ -1274,15 +1346,8 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                         this.awaitingSocketSourcesRevision = false;
                         this.updateSourcesRevision(Number(payload.sourcesRevision), true, reconnected);
                     }
-                    if (Number.isFinite(payload.clientId)) {
-                        const nextClientId = Math.max(1, Math.floor(Number(payload.clientId)));
-                        if (this.pullClientId !== nextClientId) {
-                            this.pullClientId = nextClientId;
-                            this.startPullLoops();
-                        } else if (!this.pullControllers.length) {
-                            this.startPullLoops();
-                        }
-                    }
+                    this.acceptClientId(payload);
+                    if (this.pullClientId && !this.pullControllers.length) this.startPullLoops();
                 }
                 return;
             }
@@ -1442,9 +1507,9 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
     }
 
     /** Builds the active payload URL with the current adaptive batch size and compression flags. */
-    private resolvePullUrl(clientId: number): string {
+    private resolvePullUrl(clientId: string): string {
         const pullUrl = new URL(this.resolvePullPath(), document.baseURI);
-        pullUrl.searchParams.set("clientId", String(clientId));
+        pullUrl.searchParams.set("clientId", clientId);
         pullUrl.searchParams.set("waitMs", String(this.pullWaitMs));
         pullUrl.searchParams.set("maxBytes", String(this.currentPullMaxBytes()));
         pullUrl.searchParams.set("compress", this.pullCompressionEnabled ? "1" : "0");
@@ -1616,7 +1681,7 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
     }
 
     /** POST one bounded request envelope and resolve after its EndOfStream frame. */
-    async request(tileLayerRequests: any[]): Promise<void> {
+    async request(tileLayerRequests: any[], filter?: {channels: unknown[]}): Promise<void> {
         if (this.destroyed) {
             throw new Error("Tile HTTP client has already been destroyed.");
         }
@@ -1637,6 +1702,7 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
                     "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
+                    ...filter,
                     responseType: "binary",
                     stringPoolOffsets: this.parser.getFieldDictOffsets(),
                     requests: tileLayerRequests
@@ -1704,6 +1770,9 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
             this.inputBuffer.subarray(0, this.inputLength)
         );
         for (const frame of decoded.frames) {
+            if (this.endOfStreamReceived) {
+                throw new Error("Tile HTTP response contains a frame after EndOfStream.");
+            }
             if (!this.isCompatibleProtocol(frame.version)) {
                 throw this.protocolMismatch(frame.version);
             }

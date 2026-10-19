@@ -48,17 +48,19 @@ interface StyleSheetMenuNode {
     template: `
         @if (mapsPanelOpen) {
             <p-button class="maps-button" data-testid="maps-toggle" (click)="closeMapsPanel()" label=""
+                      ariaLabel="Close maps configuration panel" aria-label="Close maps configuration panel"
                       tooltipPosition="bottom" tooltipStyleClass="maps-panel-button-tooltip"
                       (mouseenter)="alignMapsPanelTooltip($event)"
                       pTooltip="Close maps configuration panel">
-                <span class="material-symbols-outlined">close</span>
+                <span class="material-symbols-outlined" aria-hidden="true">close</span>
             </p-button>
         } @else {
             <p-button class="maps-button" data-testid="maps-toggle" (click)="showMapsPanel()" icon="" label=""
+                      ariaLabel="Open maps configuration panel" aria-label="Open maps configuration panel"
                       tooltipPosition="bottom" tooltipStyleClass="maps-panel-button-tooltip"
                       (mouseenter)="alignMapsPanelTooltip($event)"
                       pTooltip="Open maps configuration panel">
-                <span class="material-symbols-outlined">stacks</span>
+                <span class="material-symbols-outlined" aria-hidden="true">stacks</span>
             </p-button>
         }
         <p-menubar class="main-bar" [model]="menuItems" [breakpoint]="menubarBreakpoint">
@@ -80,12 +82,8 @@ interface StyleSheetMenuNode {
             </ng-template>
             <ng-template #end>
                 <div style="display: flex; flex-direction: row; gap: 0; align-items: center">
+                    <viewer-action-status></viewer-action-status>
                     <diagnostics-indicator></diagnostics-indicator>
-                    @if (copyright.length) {
-                        <div class="copyright-info" (click)="openLegalInfo()">
-                            {{ copyright }}
-                        </div>
-                    }
                 </div>
             </ng-template>
         </p-menubar>
@@ -126,7 +124,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     protected readonly forcedMobileMenubarBreakpoint = MAIN_BAR_FORCED_MOBILE_BREAKPOINT;
     protected readonly environment = environment;
     menuItems: MenuItem[] = [];
-    copyright: string = '';
     @ViewChild('searchJsonImportInput') private searchJsonImportInput?: ElementRef<HTMLInputElement>;
     @ViewChild('styleYamlImportInput') private styleYamlImportInput?: ElementRef<HTMLInputElement>;
 
@@ -153,18 +150,6 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.setupMobileMenuTracking();
         this.initializeViewerLayoutMobileState();
         this.rebuildMenuItems();
-        this.subscriptions.add(this.mapService.legalInformationUpdated.subscribe(_ => {
-            this.copyright = '';
-            let firstSet: Set<string> | undefined = this.mapService.legalInformationPerMap.values().next().value;
-            if (firstSet !== undefined && firstSet.size) {
-                this.copyright = '© '
-                    .concat(firstSet.values().next().value as string)
-                    .slice(0, 22)
-                    .trim()
-                    .concat('…')
-                    .replace(' ', ' ');
-            }
-        }));
         this.subscriptions.add(this.stateService.numViewsState.subscribe(numViews => {
             this.rebuildMenuItems(numViews);
         }));

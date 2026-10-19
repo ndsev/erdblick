@@ -24,6 +24,40 @@
     min-width: 0;
     position: relative;
     height: 100vh;
+
+    .map-attribution {
+      position: absolute;
+      // Read bottom-up from the corner, using the bars' compact edge spacing.
+      bottom: 0.25rem;
+      left: 0.15rem;
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      max-height: 25%;
+      z-index: 110;
+      padding-block: 0.2em;
+      padding-inline: 0.5em;
+      border: none;
+      border-radius: var(--p-border-radius-sm);
+      background: color-mix(in srgb, var(--p-content-background) 85%, transparent);
+      color: var(--p-text-color);
+      font: inherit;
+      font-size: 0.75em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+
+      &:hover, &:focus-visible {
+        background: var(--p-content-background);
+        text-decoration: underline;
+      }
+    }
+
+    // In split views, stay on the left edge above the mirrored navigation stack.
+    &:has(.view-ui-container.mirrored) .map-attribution {
+      bottom: 16.5rem;
+      max-height: min(25%, calc(100% - 20rem));
+    }
   }
 
   display: flex;

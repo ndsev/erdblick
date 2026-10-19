@@ -94,3 +94,26 @@ describe("lazy geometry export", () => {
         expect(component.copyToClipboard).toHaveBeenCalledWith(component.geoJson());
     });
 });
+
+describe("incoming relation actions", () => {
+    it("opens a source relation that is outside the selected target panel", () => {
+        const component = Object.create(InspectionTreeComponent.prototype) as any;
+        component.inspectionMenu = {toggle: vi.fn()};
+        component.panelId = () => 'target';
+        component.stateService = {
+            selection: [{id: 'target', features: [{mapTileKey: 'surface', featureId: 'Surface.1'}]}],
+            setSelection: vi.fn(), toggleInspectionFeatureHighlight: vi.fn()
+        };
+        component.shouldShowScalarRowActions = () => false;
+        component.onRowActionsClick({stopPropagation: vi.fn()}, {}, {
+            key: 'visible', value: '', mapTileKey: 'lane', hoverId: 'Lane.7:relation#1'
+        });
+        const action = component.inspectionMenuItems.find((item: any) => item.label === 'Inspect source relation');
+        expect(action).toBeDefined();
+        action.command();
+        expect(component.stateService.setSelection).toHaveBeenCalledWith([
+            {mapTileKey: 'lane', featureId: 'Lane.7:relation#1'}
+        ]);
+        expect(component.stateService.toggleInspectionFeatureHighlight).not.toHaveBeenCalled();
+    });
+});

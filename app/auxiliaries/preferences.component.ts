@@ -1,5 +1,6 @@
 import {Component, OnDestroy, OnInit, ViewChild} from '@angular/core';
-import {Subscription} from "rxjs";
+import {combineLatest, Subscription} from "rxjs";
+import {DEFAULT_POINT_CLOUD_POLICY, pointCloudPolicySchema, PointCloudPolicy} from "../shared/point-cloud-policy";
 import {InfoMessageService} from "../shared/info.service";
 import {MapViewStateService, ViewRecalculationReason} from "../mapview/map-view-state.service";
 import {StyleService} from "../styledata/style.service";
@@ -345,6 +346,38 @@ import type {
                     </p-tabpanel>
 
                     <p-tabpanel value="rendering">
+                        <section data-testid="point-cloud-preferences">
+                            <h3>Point clouds</h3>
+                            <div class="button-container">
+                                <label for="point-cloud-downsampling">Adaptive detail</label>
+                                <p-toggleswitch inputId="point-cloud-downsampling"
+                                               [(ngModel)]="pointCloudPolicyDraft.enabled" />
+                            </div>
+                            <div class="slider-container">
+                                <label for="point-cloud-detail">Point spacing (pixels)</label>
+                                <input id="point-cloud-detail" type="number" pInputText
+                                       min="0.5" max="32" step="0.5"
+                                       [(ngModel)]="pointCloudPolicyDraft.detailPixels" />
+                                <small>Lower spacing keeps more detail. Full detail still respects memory limits.</small>
+                            </div>
+                            <details>
+                                <summary>Memory limits</summary>
+                                <div class="slider-container">
+                                    <label for="point-cloud-working-memory">Rendering working memory (MiB)</label>
+                                    <input id="point-cloud-working-memory" type="number" pInputText
+                                           min="32" max="4096" [(ngModel)]="pointCloudPolicyDraft.workingMemoryMiB" />
+                                </div>
+                                <div class="slider-container">
+                                    <label for="point-cloud-gpu-memory">GPU allocation allowance (MiB)</label>
+                                    <input id="point-cloud-gpu-memory" type="number" pInputText
+                                           min="16" max="2048" [(ngModel)]="pointCloudPolicyDraft.gpuMemoryMiB" />
+                                </div>
+                                <small>Shared across map views. These settings do not change server limits.</small>
+                            </details>
+                            <p-button label="Apply" data-testid="point-cloud-apply"
+                                      [disabled]="!pointCloudPolicyChanged" (click)="applyPointCloudPolicy()" />
+                        </section>
+                        <p-divider></p-divider>
                         <div class="slider-container">
                             <label [for]="tilesToLoadInput">Max Tiles to Load
                                 <i class="pi pi-info-circle"
@@ -555,6 +588,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     locationSearchResultLimitInput: number | string = DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
     tilePullCompressionEnabledSetting: boolean = false;
     connectionRetryEnabled = true;
+    pointCloudPolicyDraft: PointCloudPolicy = {...DEFAULT_POINT_CLOUD_POLICY};
     connectionInitialSeconds = 5;
     connectionBackoffMultiplier = 2;
     connectionMaximumSeconds = 60;
@@ -622,6 +656,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
                 private searchSchema: FeatureSearchSchemaService,
                 private dialogStack: DialogStackService) {
         this.subscriptions.push(this.stateService.connectionRetryEnabledState.subscribe(value => this.connectionRetryEnabled = value));
+        this.subscriptions.push(combineLatest([this.stateService.pointCloudDownsamplingEnabledState,
+            this.stateService.pointCloudDetailPixelsState, this.stateService.pointCloudWorkingMemoryMiBState,
+            this.stateService.pointCloudGpuMemoryMiBState]).subscribe(() => {
+                this.pointCloudPolicyDraft = {...this.stateService.pointCloudPolicy};
+            }));
         this.subscriptions.push(this.stateService.connectionRetryInitialDelayMsState.subscribe(value => this.connectionInitialSeconds = value / 1000));
         this.subscriptions.push(this.stateService.connectionRetryBackoffMultiplierState.subscribe(value => this.connectionBackoffMultiplier = value));
         this.subscriptions.push(this.stateService.connectionRetryMaxDelayMsState.subscribe(value => this.connectionMaximumSeconds = value / 1000));
@@ -955,6 +994,21 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.lod3TileThresholdInput = normalized;
         this.stateService.lod3TileThreshold = normalized;
         this.lod3TileThresholdChanged = false;
+    }
+
+    /** Keep numeric drafts out of persisted state until the whole policy is applied. */
+    get pointCloudPolicyChanged(): boolean {
+        return JSON.stringify(this.pointCloudPolicyDraft) !== JSON.stringify(this.stateService.pointCloudPolicy);
+    }
+
+    /** Publish one validated point-cloud preference edit through AppState. */
+    applyPointCloudPolicy(): void {
+        const parsed = pointCloudPolicySchema.safeParse(this.pointCloudPolicyDraft);
+        if (!parsed.success) {
+            this.messageService.showError("Point spacing must be 0.5–32 pixels, working memory 32–4096 MiB, and GPU allowance 16–2048 MiB.");
+            return;
+        }
+        this.stateService.setPointCloudPolicy(parsed.data);
     }
 
     /** Applies zero-for-auto or one explicit subset-render worker count. */

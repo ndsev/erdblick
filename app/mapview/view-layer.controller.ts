@@ -163,6 +163,7 @@ export class ViewLayerController {
             () => this.diagnosticStyledLayers(),
             (layer, state) => this.presentationStillDemanded(layer, state)
         );
+        let previousCloudWorkingMiB = this.renderService.pointCloudPolicy.workingMemoryMiB;
         this.subscriptions.push(
             this.mapInfo.maps$.subscribe(() => this.scheduleReconcile()),
             this.mapInfo.dataSourceInfoChanged.subscribe(() =>
@@ -190,6 +191,22 @@ export class ViewLayerController {
             this.inspection.hoverIdsTopic.subscribe(() =>
                 this.scheduleInteractionReconcile()
             ),
+            this.renderService.pointCloudPolicyChanged.subscribe(reclaim => {
+                const workingMiB = this.renderService.pointCloudPolicy.workingMemoryMiB;
+                if (workingMiB > previousCloudWorkingMiB) {
+                    for (const owned of this.styledLayers.values()) {
+                        if ([...owned.layer.tileStates.values()].some(state =>
+                            state.pointCloudInputRejected && !state.backendPending)) owned.layer.refresh();
+                    }
+                }
+                previousCloudWorkingMiB = workingMiB;
+                const owners = [...this.styledLayers.values(),
+                    ...[...this.retiringRegularLayers.values()].map(value => value.owned)];
+                for (const owned of owners)
+                    for (const visualization of owned.visualizations.values())
+                        visualization.setPointCloudScale(this.viewState.viewStateFor(this.viewIndex)?.metersPerPixel ?? null, reclaim);
+                this.scheduleReconcile();
+            }),
             this.renderService.capacityChanged.subscribe(() =>
                 this.schedulePendingTiles()
             )
@@ -458,7 +475,9 @@ export class ViewLayerController {
     private viewportPresentationSignature(): string {
         const viewState = this.viewState.viewStateFor(this.viewIndex);
         const parts = [
-            String(viewState?.coverageVersion ?? -1)
+            String(viewState?.coverageVersion ?? -1),
+            // The sampler applies hysteresis; this cheap scale key only schedules its policy check.
+            String(viewState?.metersPerPixel ?? 0)
         ];
         const orderedStyles = [...this.styleService.styles.values()]
             .filter(style => style.visible);
@@ -583,6 +602,10 @@ export class ViewLayerController {
                     coreLib.HighlightMode.NO_HIGHLIGHT.value,
                     plannedLod
                 ) as StyleFilterPlan;
+                if (!this.renderService.pointCloudPolicy.enabled) {
+                    for (const channel of plan.channels)
+                        if (channel.pointCloudMaxPoints !== undefined) channel.pointCloudMaxPoints = 0;
+                }
                 if (!plan.channels.length) {
                     continue;
                 }
@@ -1650,18 +1673,14 @@ export class ViewLayerController {
                 owned.layer.tileStates.get(state.partitionKey) === state &&
                 this.presentationStillDemanded(owned.layer, state);
             const lod = this.presentationLod(owned.layer, state);
-            const lineSimplificationToleranceMeters =
-                this.lineSimplificationToleranceMeters();
             const terminalIncomplete = state.status === "error";
             visualization.setLod(lod);
-            if (!retained || terminalIncomplete ||
-                !visualization.hasSameState(
-                    state,
-                    lineSimplificationToleranceMeters
-                )) {
+            if (!retained || terminalIncomplete) {
                 this.replaceVisualization(owned, key, true);
                 continue;
             }
+            visualization.setLineSimplificationTolerance(this.lineSimplificationToleranceMeters());
+            visualization.setPointCloudScale(this.viewState.viewStateFor(this.viewIndex)?.metersPerPixel ?? null);
             if (state.status === "ready" && state.subsetBlob &&
                 !visualization.isCurrentPresentationInstalled()) {
                 this.queueVisualizationRender(visualization);
@@ -1707,13 +1726,11 @@ export class ViewLayerController {
         }
         const lod = this.presentationLod(owned.layer, state);
         visualization.setLod(lod);
-        if (!visualization.hasSameState(
-            state,
-            this.lineSimplificationToleranceMeters()
-        )) {
+        if (visualization.state !== state) {
             this.replaceVisualization(owned, existingKey, true);
             return;
         }
+        visualization.setLineSimplificationTolerance(this.lineSimplificationToleranceMeters());
         this.queueVisualizationRender(visualization);
     }
 
@@ -1954,6 +1971,7 @@ export class ViewLayerController {
     private queueVisualizationRender(
         visualization: TileSubsetLayerVisualization
     ): void {
+        visualization.setPointCloudScale(this.viewState.viewStateFor(this.viewIndex)?.metersPerPixel ?? null);
         this.pendingVisualizationRenders.add(visualization);
         this.schedulePendingTiles();
     }
