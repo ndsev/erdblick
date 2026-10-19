@@ -523,6 +523,7 @@ export class InspectionSelectionService {
 
     /** Loads a feature and centers the target view on its reported center point. */
     async focusOnFeature(viewIndex: number|undefined, tileFeatureId: TileFeatureId) {
+        this.viewState.navigationStarted.next();
         const features = await this.tileStream.loadFeatures([tileFeatureId]);
         if (!features.length) {
             this.showErrorMessage(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`)

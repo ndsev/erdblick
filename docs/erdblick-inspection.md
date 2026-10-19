@@ -236,3 +236,19 @@ omitted from the inspection preview.
 - Combine inspection with split view: keep a locked reference in one pane and continue exploring in the other.
 
 Between locked panels, dock/undock support, validity-aware hovering, and SourceData handoff, the inspection UI is intended to support serious debugging work without leaving the browser.
+
+
+### Incoming relations
+
+Features with eligible schema declarations show an **Incoming Relations** section.
+Ordinary inspection appears immediately; a spinner marks only the incoming section while
+its request runs. The section shows source features and their original relations, including
+validity and SourceData links. Source rows use the source layer for hover and search actions.
+Use **Inspect source relation** to open a relation owned by a feature outside the current panel.
+Hidden provider layers can contribute relations without becoming visible in the map.
+
+The lookup covers eligible relations in the same map and partition. An empty result means
+no matches for those declared families. Partial results show diagnostics, and Retry reloads
+the section. Changing the selection or datasource catalog cancels stale work; finite
+provider lifetimes refresh the section. Conventional relations stay in the ordinary
+Relations section. Feature GeoJSON export continues to export the selected feature.

@@ -2,6 +2,7 @@ import {describe, expect, it, vi} from "vitest";
 import {
     TileSubsetLayerRenderService
 } from "./tile-subset-layer-render.service";
+import {gpuMemoryBudget} from "./gpu-memory-budget";
 
 const EMPTY_SCENE = {
     generation: 1,
@@ -103,6 +104,70 @@ function completedTile(
 }
 
 describe("TileSubsetLayerRenderService GPU admission", () => {
+    it("wakes outer tile scheduling even when retirement cannot admit queued work", async () => {
+        const service = new TileSubsetLayerRenderService();
+        const internal = service as any;
+        const pump = vi.spyOn(internal, "pump").mockResolvedValue(undefined);
+        const changed = vi.fn();
+        const subscription = service.capacityChanged.subscribe(changed);
+        const finish = gpuMemoryBudget.beginRetirement();
+        internal.waitForGpuRetirement();
+        expect(pump).not.toHaveBeenCalled();
+        finish();
+        await vi.waitFor(() => expect(changed).toHaveBeenCalledOnce());
+        expect(pump).toHaveBeenCalledOnce();
+        subscription.unsubscribe();
+    });
+
+    it.each([false, true])("admits adaptive work after accounting for GPU retirement (%s)", async (retiring) => {
+        const service = new TileSubsetLayerRenderService();
+        const internal = service as any;
+        const postMessage = vi.fn();
+        const mib = 1048576;
+        gpuMemoryBudget.setLimit(10 * mib);
+        const releaseExisting = gpuMemoryBudget.allocate((retiring ? 10 : 8) * mib);
+        const finishRetirement = retiring ? gpuMemoryBudget.beginRetirement() : null;
+        const task = {
+            taskId: "cloud", visualizationId: "cloud", renderSignature: "cloud",
+            subsetBlob: new Uint8Array(4), inputGeometryVertexCount: 10000,
+            mapId: "Map", catalogRevision: 1, stringPoolId: "pool", styleKey: "style",
+            iconCatalogVersion: 0, gpuExistingBytes: mib / 2,
+            pointCloud: {enabled: true, maxPoints: 10000, spacingMeters: 1, cacheKey: "cloud"}
+        };
+        const pending = {task, admit: vi.fn(), prepare: vi.fn(), resolve: vi.fn(), reject: vi.fn(), queuedAt: 0};
+        internal.workers = [{postMessage}];
+        internal.runningTaskIdByWorker = [null];
+        internal.workerHeapBytes = [0];
+        internal.catalogKeysByWorker = [new Set()];
+        internal.fieldDictSizesByWorker = [new Map()];
+        internal.styleKeysByWorker = [new Set()];
+        internal.iconCatalogVersionByWorker = [-1];
+        internal.idleWorkers = [0];
+        internal.queue = [pending];
+        internal.latestSignatureByVisualization.set("cloud", "cloud");
+        internal.ensureWorkers = vi.fn().mockResolvedValue(undefined);
+        internal.activeWorkerCount = vi.fn().mockReturnValue(1);
+        try {
+            await internal.pump();
+            expect(pending.reject).not.toHaveBeenCalled();
+            if (retiring) {
+                expect(postMessage).not.toHaveBeenCalled();
+                expect(internal.queue).toHaveLength(1);
+                releaseExisting();
+                finishRetirement!();
+                await vi.waitFor(() => expect(postMessage).toHaveBeenCalledOnce());
+            }
+            expect(postMessage).toHaveBeenCalledOnce();
+            expect(postMessage.mock.calls[0][0].pointCloud.maxPoints).toBe(retiring ? 10000 : Math.floor(mib / 640));
+            expect(gpuMemoryBudget.allocatedBytes + gpuMemoryBudget.reservedBytes).toBeLessThanOrEqual(10 * mib);
+        } finally {
+            (pending as any).gpuReservation?.release();
+            releaseExisting();
+            finishRetirement?.();
+            gpuMemoryBudget.setLimit(256 * mib);
+        }
+    });
+
     it("preloads one emitted worker module and reuses its cached source", async () => {
         const workerSources: Array<string | URL> = [];
         const workerModuleUrl = "https://viewer.test/worker-HASH.js";
@@ -693,5 +758,38 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
         expect(internal.iconCatalogVersionByWorker[0]).toBe(-1);
         expect(internal.initializeWorker).toHaveBeenCalledWith(0);
         expect(internal.idleWorkers).toEqual([0]);
+    });
+});
+
+
+describe("point-cloud view allocation", () => {
+    it("shares one quota between views and then their visible contributions", () => {
+        const service = new TileSubsetLayerRenderService();
+        service.registerPointCloud("a", 0, 100);
+        const whole = service.pointCloudPolicyFor("a", 1).maxPoints;
+        service.registerPointCloud("b", 1, 100);
+        service.registerPointCloud("c", 1, 100);
+        const first = service.pointCloudPolicyFor("a", 1);
+        const second = service.pointCloudPolicyFor("b", 1);
+        const third = service.pointCloudPolicyFor("c", 1);
+        expect(first.maxPoints + second.maxPoints + third.maxPoints).toBeLessThanOrEqual(whole);
+        expect(second.maxPoints).toBe(third.maxPoints);
+        expect(first.maxPoints).toBeGreaterThan(second.maxPoints);
+        service.unregisterPointCloud("c");
+        expect(service.pointCloudPolicyFor("b", 1).maxPoints).toBe(first.maxPoints);
+    });
+
+    it("coalesces changed demand and keeps density stable across small scale changes", async () => {
+        const service = new TileSubsetLayerRenderService();
+        const changed = vi.fn();
+        const subscription = service.pointCloudPolicyChanged.subscribe(changed);
+        service.registerPointCloud("a", 0, 100);
+        service.registerPointCloud("b", 0, 200);
+        service.registerPointCloud("a", 0, 100);
+        await Promise.resolve();
+        expect(changed).toHaveBeenCalledTimes(1);
+        const policy = service.pointCloudPolicyFor("a", 1);
+        expect(service.pointCloudPolicyFor("a", 1.1, policy.spacingMeters).spacingMeters).toBe(policy.spacingMeters);
+        subscription.unsubscribe();
     });
 });

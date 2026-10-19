@@ -3,7 +3,9 @@ import type {
     TileLayerParser
 } from "../../build/libs/core/erdblick-core";
 import {TileDeliveryError} from "./tile-diagnostics";
-import {uint8ArrayToWasm} from "../integrations/wasm";
+import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
+import {MapTileStreamClientTiles, MAP_TILE_STREAM_HEADER_SIZE,
+    MAP_TILE_STREAM_TYPE_INCOMING_RELATIONS, MAP_TILE_STREAM_TYPE_STATUS} from "./tilestream";
 import type {TileFeatureId} from "../shared/appstate.service";
 import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
 import {
@@ -11,6 +13,16 @@ import {
     partitionKey,
     type PartitionId
 } from "./partition.model";
+
+/** Completed incoming context; rows and associations were validated by the native feature model. */
+export interface IncomingInspectionResult {
+    model: any[];
+    /** Canonical target snapshot validated in the same bundle as the source relations. */
+    target?: InspectionFeatureTile;
+    complete: boolean;
+    issues: string[];
+    expiresAtMs?: number;
+}
 
 /**
  * One feature-restricted `/tiles` response retained only by inspection models.
@@ -96,6 +108,68 @@ export class InspectionFeatureTile {
             return callback(layer);
         } finally {
             layer.delete();
+        }
+    }
+
+    /** Ask native schema metadata whether this feature has any deferred incoming families. */
+    hasIncomingRelations(featureId: string): boolean {
+        return this.peek(layer => this.parser.hasIncomingRelations(layer,
+            stripFeatureInspectionTarget(featureId))) ?? false;
+    }
+
+    /** Load a request-local snapshot bundle without delaying or modifying ordinary inspection. */
+    async loadIncoming(featureId: string, signal: AbortSignal): Promise<IncomingInspectionResult> {
+        signal.throwIfAborted();
+        const canonicalId = stripFeatureInspectionTarget(featureId);
+        const client = new MapTileStreamClientTiles("/filter", this.parser);
+        const snapshots: InspectionFeatureTile[] = [];
+        const manifests: any[] = [];
+        let successful = false;
+        let failure: string | undefined;
+        let bytes = 0;
+        const abort = () => client.destroy();
+        signal.addEventListener("abort", abort, {once: true});
+        client.onFeatures = blob => {
+            if (successful) throw new Error("Incoming snapshot arrived after terminal status.");
+            bytes += blob.byteLength;
+            if (snapshots.length >= 64 || bytes > 64 * 1024 * 1024)
+                throw new Error("Incoming inspection exceeds its snapshot limit.");
+            snapshots.push(new InspectionFeatureTile(this.parser, blob));
+        };
+        client.onSubsets = () => { throw new Error("Backend does not support incoming inspection."); };
+        client.onFrame = (frame, type) => {
+            if (type !== MAP_TILE_STREAM_TYPE_INCOMING_RELATIONS && type !== MAP_TILE_STREAM_TYPE_STATUS) return;
+            const value = JSON.parse(new TextDecoder().decode(frame.subarray(MAP_TILE_STREAM_HEADER_SIZE)));
+            if (type === MAP_TILE_STREAM_TYPE_INCOMING_RELATIONS) {
+                if (successful) throw new Error("Incoming manifest arrived after terminal status.");
+                if (manifests.length) throw new Error("Duplicate incoming inspection manifest.");
+                manifests.push(value);
+            } else if (value.type === "mapget.filter.status") {
+                if (value.state === "Success") successful = true;
+                if (value.state === "Failed" || value.state === "Aborted")
+                    failure = value.error ?? "Incoming inspection failed.";
+            }
+        };
+        try {
+            await client.request([{
+                mapId: this.mapName, layerId: this.layerName, partitions: [this.partition],
+                roots: [{partition: this.partition, featureId: canonicalId}]
+            }], {channels: [{channelId: "incoming", scope: "relation", relation: {traversal: "incoming"}}]});
+            signal.throwIfAborted();
+            if (failure || !successful || manifests.length !== 1)
+                throw new Error(failure ?? "Incomplete incoming inspection response.");
+            const manifest = manifests[0];
+            const view = new coreLib.IncomingInspection(JSON.stringify(manifest), this.mapTileKey, canonicalId);
+            try {
+                for (const snapshot of snapshots) snapshot.peek(layer => view.addSnapshot(layer));
+                return {model: view.inspectionModel(), target: snapshots.find(tile => tile.mapTileKey === this.mapTileKey), complete: manifest.complete,
+                    issues: manifest.issues, expiresAtMs: manifest.expiresAtMs};
+            } finally {
+                view.delete();
+            }
+        } finally {
+            signal.removeEventListener("abort", abort);
+            client.destroy();
         }
     }
 

@@ -51,6 +51,9 @@ public:
      */
     TileFeatureLayer readTileFeatureLayer(SharedUint8Array const& buffer);
 
+    /** Query explicit deferred relation declarations for a selected feature in the current catalog. */
+    bool hasIncomingRelations(TileFeatureLayer const& layer, std::string const& featureId) const;
+
     /**
      * Parse a TileSourceDataLayer from a buffer.
      */
@@ -217,6 +220,8 @@ public:
     std::vector<FilteredFeatureJumpTarget> filterFeatureJumpTargets(std::string const& queryString) const;
 
     std::map<std::string, mapget::DataSourceInfo> info_;
+    /** Backend-derived capability hints retained when the shared parser omits full schemas. */
+    std::map<std::pair<std::string, std::string>, std::set<std::string>> incomingRelationTargets_;
     std::unique_ptr<mapget::TileLayerStream::Reader> reader_;
     std::shared_ptr<mapget::TileLayerStream::StringPoolCache> cachedStrings_;
     std::function<void(mapget::TileFeatureLayer::Ptr)> tileParsedFun_;

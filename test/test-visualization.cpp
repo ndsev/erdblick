@@ -1570,6 +1570,28 @@ TEST_CASE("TileLayerParser exposes subset identity and lifetime", "[erdblick.par
     REQUIRE(metadata.layer.error.empty());
 }
 
+TEST_CASE("Point-cloud hard limits do not schedule repeated browser conversions", "[erdblick.parser][pointcloud]")
+{
+    TileLayerParser parser;
+    auto source = TestDataProvider(parser).getTestLayer(42., 11., 13);
+    source->setError("Point-cloud allocation unavailable");
+    source->setTtl(std::chrono::milliseconds(1000));
+    for (auto const* classification : {"resource-limit", "resource-busy"}) {
+        source->setInfo("PointCloud/Error", classification);
+        mapget::TileSubsetLayer subset(source->tileId(), source->stringPoolId(),
+            source->mapId(), source->layerInfo(), source->strings(), "cloud", 1);
+        subset.adoptSourceInfo(*source);
+        subset.setError(source->error());
+        std::ostringstream stream;
+        REQUIRE(subset.write(stream));
+        auto metadata = parser.readTileSubsetLayerMetadata(SharedUint8Array(stream.str()));
+        REQUIRE_FALSE(metadata.layer.error.empty());
+        if (std::string_view(classification) == "resource-limit")
+            REQUIRE(std::isnan(metadata.layer.ttlMs));
+        else REQUIRE(metadata.layer.ttlMs == 1000.);
+    }
+}
+
 TEST_CASE("Feature search auto-scope accepts one attribute across different attribute layers", "[erdblick.search]")
 {
     auto datasource = nlohmann::json{
@@ -2099,6 +2121,7 @@ TEST_CASE("Bundled styles pass native style validation", "[erdblick.style]")
                 std::istreambuf_iterator<char>()};
             auto style = FeatureLayerStyle(
                 SharedUint8Array(source));
+            INFO(nlohmann::json(style.validationReport()).dump(2));
             REQUIRE(style.isValid());
         }
     }

@@ -541,6 +541,12 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             zIndexRole_ = ZIndexRole::Overlay;
         }
     }
+    if (yaml["point-cloud"].IsDefined()) pointCloud_ = yaml["point-cloud"].as<bool>();
+    if (yaml["point-cloud-max-points"].IsDefined()) {
+        auto const quota = yaml["point-cloud-max-points"].as<int64_t>();
+        if (quota < 0 || quota > 1048576) throw std::invalid_argument("point-cloud-max-points must be in 0..1048576");
+        pointCloudMaxPoints_ = static_cast<uint32_t>(quota);
+    }
     if (yaml["billboard"].IsDefined()) {
         // Parse whether the rendered primitive should face the camera.
         billboard_ = yaml["billboard"].as<bool>();

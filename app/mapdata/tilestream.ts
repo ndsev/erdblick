@@ -21,6 +21,7 @@ export const MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT = 6;
 export const MAP_TILE_STREAM_TYPE_SUBSETS = 7;
 export const MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE = 8;
 export const MAP_TILE_STREAM_TYPE_ACTION_CONTROL = VIEWER_ACTION_CONTROL_FRAME_TYPE;
+export const MAP_TILE_STREAM_TYPE_INCOMING_RELATIONS = 10;
 export const MAP_TILE_STREAM_TYPE_END_OF_STREAM = 128;
 export const MAP_TILE_STREAM_REQUEST_CONTEXT_TYPE = "mapget.tiles.request-context";
 export const MAP_TILE_STREAM_FILTER_STATUS_TYPE = "mapget.filter.status";
@@ -1680,7 +1681,7 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
     }
 
     /** POST one bounded request envelope and resolve after its EndOfStream frame. */
-    async request(tileLayerRequests: any[]): Promise<void> {
+    async request(tileLayerRequests: any[], filter?: {channels: unknown[]}): Promise<void> {
         if (this.destroyed) {
             throw new Error("Tile HTTP client has already been destroyed.");
         }
@@ -1701,6 +1702,7 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
                     "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
+                    ...filter,
                     responseType: "binary",
                     stringPoolOffsets: this.parser.getFieldDictOffsets(),
                     requests: tileLayerRequests
@@ -1768,6 +1770,9 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
             this.inputBuffer.subarray(0, this.inputLength)
         );
         for (const frame of decoded.frames) {
+            if (this.endOfStreamReceived) {
+                throw new Error("Tile HTTP response contains a frame after EndOfStream.");
+            }
             if (!this.isCompatibleProtocol(frame.version)) {
                 throw this.protocolMismatch(frame.version);
             }

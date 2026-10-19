@@ -63,7 +63,15 @@ Location search is part of the same palette as coordinate jumps and feature sear
 
 Erdblick only sends name-like queries to location providers. Numeric IDs, coordinates, and mixed strings such as postal-code searches stay with the normal jump and feature-search targets. The default minimum query length is two characters.
 
-Location results are sorted by population when the provider supplies it, then by name, provider, and stable result id. Selecting a result moves the active view to its WGS84 coordinate, enables the location marker, and shows a short-lived label with the selected place name. The selected result is stored in search history with enough payload to rerun it later in the same browser profile.
+Location results are sorted by population when the provider supplies it, then by name, provider, and stable result id. Selecting a built-in Plazs result uses its available boundary, then its bounding extent, then its representative coordinate:
+
+- A polygon fits the active map to the complete area, including islands and holes, and briefly highlights its actual shape in aqua before fading.
+- An extent without a usable polygon fits and highlights a rectangle. If a requested boundary cannot be loaded, a short notice explains the fallback.
+- A result without a usable area retains the coordinate jump and location marker. External location providers retain their existing point behavior.
+
+Area navigation shows a temporary place label and preserves any existing marker. It uses the visible map pane and retains the camera orientation when a complete fit is possible. Very broad extents can zoom out beyond one world; polar areas are limited to the portion Web Mercator can display. A later selection or camera interaction cancels a pending lookup.
+
+Boundaries are loaded only after selection. Search history stores lightweight place metadata and resolves the same stable ID when replayed; it does not store polygon coordinates. Provider credits and source/license links appear with the location result. An extent-only record is interpreted as an area even when its original source geometry type is unavailable.
 
 Use **Edit -> Settings -> Location Matches** to control how many location matches the palette asks providers to return. The default is 10; the supported range is 1 to 50.
 <!-- --8<-- [end:location-search] -->

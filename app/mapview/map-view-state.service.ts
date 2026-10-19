@@ -10,7 +10,7 @@ import {
     VIEW_SYNC_MOVEMENT,
     VIEW_SYNC_POSITION
 } from "../shared/appstate.service";
-import {IRenderView, RenderRectangle, RenderViewCameraState} from "./render-view.model";
+import {IRenderView, LocationArea, RenderRectangle, RenderViewCameraState} from "./render-view.model";
 import {ViewVisualizationState} from "./view.visualization.model";
 import type {
     FeatureLayerStyle,
@@ -59,8 +59,13 @@ export class MapViewStateService {
     private static readonly SEARCH_COVERAGE_TILE_LIMIT = 1 << 20;
 
     readonly viewStateChanged = new Subject<ViewRecalculationReason | string>();
+    /** Announces an accepted asynchronous navigation before its data/camera is ready. */
+    readonly navigationStarted = new Subject<void>();
     readonly moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number, z?: number }>();
     readonly moveToRectangleTopic = new Subject<{ targetView: number, rectangle: RenderRectangle }>();
+    readonly moveToLocationAreaTopic = new Subject<{targetView: number; area: LocationArea}>();
+    readonly clearLocationHighlightTopic = new Subject<number>();
+    readonly locationBoundaryUnavailableTopic = new Subject<void>();
     readonly showLocationLabelTopic = new Subject<{ targetView: number, x: number, y: number, label: string }>();
     readonly liveCameraViewStateTopic = new Subject<LiveCameraViewStateUpdate>();
     /** Presentation-only camera poses; consumers update both rendering and tile coverage. */

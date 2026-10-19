@@ -239,7 +239,7 @@ describe("map tree presentation filtering", () => {
 });
 
 describe("style option groups", () => {
-    it("marks the first visible option of each full stylesheet group", () => {
+    it("marks style groups and passes catalog visibility defaults below saved user state", () => {
         const ready = new BehaviorSubject(true);
         const numViewsState = new BehaviorSubject(1);
         const stateService = {
@@ -277,6 +277,7 @@ describe("style option groups", () => {
         const styleService = {styles, styleGroups};
         const map = source("Map");
         map.layers = {
+            Preview: {...featureLayer("Preview"), defaultVisible: false},
             Roads: {
                 layerId: "Roads",
                 type: "Feature",
@@ -297,6 +298,8 @@ describe("style option groups", () => {
             false
         );
         const layer = tree.maps.get("Map")?.layers.get("Roads");
+        expect(stateService.mapLayerConfig).toHaveBeenCalledWith("Map", "Preview", false, 13);
+        expect(tree.maps.get("Map")?.layers.get("Preview")?.viewConfig[0].visible).toBe(true);
         const children = layer ? layerStyleOptions(layer) : [];
 
         expect(layer?.children[0].type).toBe("Preset");

@@ -1,3 +1,4 @@
+import type {PointCloudRenderPolicy} from "../../shared/point-cloud-policy";
 /** Scene-owned identity assigned to one subset before worker rendering starts. */
 export interface TileSubsetGpuContribution {
     keyLow: number;
@@ -52,6 +53,10 @@ export interface TileSubsetLayerRenderTask {
     lod: number;
     /** World-space RDP tolerance selected from the current view's pixel scale. */
     lineSimplificationToleranceMeters: number;
+    pointCloud?: PointCloudRenderPolicy;
+    gpuExistingBytes?: number;
+    /** Reuse the worker's single immutable point-cloud input, verified by cacheKey. */
+    reusePointCloudInput?: boolean;
 }
 
 /** Handshake sent as soon as the worker module is loaded. */
@@ -104,12 +109,20 @@ export interface TileSubsetPickResult {
     memberFeatureIds?: string[];
 }
 
+/** Entry-sized point-cloud interaction identity; no point coordinates are copied. */
+export interface PointCloudPickResult extends TileSubsetPickResult {
+    channelOrdinal: number;
+    entryOrdinal: number;
+    endpointRole: number;
+}
+
 /** Small browser-owned payload that cannot yet be expressed as GPU records. */
 export interface TileSubsetRenderBridge {
     gltfNodes: TileSubsetGltfBuffers;
     gltfPickProxies: TileSubsetGltfPickProxyBuffers;
     coordinateOrigin: Float64Array;
     pickResults: TileSubsetPickResult[];
+    pointCloudPicks?: PointCloudPickResult[];
     glbAttachmentName?: string;
 }
 
@@ -121,6 +134,9 @@ export interface TileSubsetLayerRenderBuffers {
     packets: Uint8Array[];
     bridge: TileSubsetRenderBridge;
     vertexCount: number;
+    pointCloudDeliveredCount?: number;
+    pointCloudRenderedCount?: number;
+    wasmMemoryBytes?: number;
     timings: TileSubsetLayerRenderTimings;
 }
 

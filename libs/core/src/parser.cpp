@@ -1208,6 +1208,7 @@ TileLayerParser::TileLayerParser()
 void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSourceInfoJson)
 {
     info_.clear();
+    incomingRelationTargets_.clear();
     featureJumpTargets_.clear();
     schemaCompletionBindings_.clear();
     // Datasource reloads may reuse node ids with a fresh string dictionary.
@@ -1224,8 +1225,14 @@ void TileLayerParser::addDataSourceInfo(const erdblick::SharedUint8Array& dataSo
     // map is safe on the existing stream; replacing one is not.
     std::vector<DataSourceInfo> additions;
     std::set<std::string> addedMapIds;
+    decltype(incomingRelationTargets_) incomingAdditions;
     for (auto const& node : nlohmann::json::parse(dataSourceInfoJson.toString())) {
         auto dsInfo = DataSourceInfo::fromJson(node);
+        for (auto const& [layerId, layer] : node.at("layers").items()) {
+            auto targets = layer.value("incomingRelationTargetTypes", std::vector<std::string>{});
+            auto& entry = incomingAdditions[{dsInfo.mapId_, layerId}];
+            entry.insert(targets.begin(), targets.end());
+        }
         if (dsInfo.isAddOn_)
             continue;
         if (info_.contains(dsInfo.mapId_) || !addedMapIds.insert(dsInfo.mapId_).second)
@@ -1233,6 +1240,8 @@ void TileLayerParser::addDataSourceInfo(const erdblick::SharedUint8Array& dataSo
                 fmt::format("Datasource map '{}' is already registered", dsInfo.mapId_));
         additions.push_back(std::move(dsInfo));
     }
+    for (auto const& [key, targets] : incomingAdditions)
+        incomingRelationTargets_[key].insert(targets.begin(), targets.end());
 
     // Index available feature types by their feature id compositions.
     // These will be the available jump-to-feature targets.
@@ -1313,6 +1322,28 @@ TileFeatureLayer TileLayerParser::readTileFeatureLayer(const SharedUint8Array& b
     return result;
 }
 
+bool TileLayerParser::hasIncomingRelations(TileFeatureLayer const& layer, std::string const& featureId) const
+{
+    auto target = layer.find(featureId);
+    if (!target) return false;
+    for (auto const& [_, source] : info_) {
+        if (source.mapId_ != layer.model_->mapId()) continue;
+        for (auto const& [__, provider] : source.layers_) {
+            if (!provider->canRead_ || provider->type_ != mapget::LayerType::Features ||
+                provider->partitionKind_ != layer.model_->partitionId().kind()) continue;
+            if (auto capability = incomingRelationTargets_.find({source.mapId_, provider->layerId_});
+                capability != incomingRelationTargets_.end() && capability->second.contains(std::string(target->typeId())))
+                return true;
+            auto schema = provider->layerSchema();
+            if (!schema) continue;
+            for (auto const& declaration : schema->relationDeclarations())
+                if (declaration.incoming_ && std::ranges::find(declaration.targetTypes_, target->typeId())
+                        != declaration.targetTypes_.end()) return true;
+        }
+    }
+    return false;
+}
+
 TileSourceDataLayer TileLayerParser::readTileSourceDataLayer(SharedUint8Array const& buffer)
 {
     auto result = TileSourceDataLayer(std::make_shared<mapget::TileSourceDataLayer>(
@@ -1367,7 +1398,13 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
     for (auto const& warning : tileLayer.warnings()) warnings.push(JsValue(warning));
     const auto conversionTimestampMs = std::chrono::duration<double, std::milli>(
         tileLayer.timestamp().time_since_epoch()).count();
-    const auto ttlMs = tileLayer.ttl()
+    // A source-declared hard resource rejection cannot recover on expiration.
+    // Keep it visible until explicit refresh/source reconfiguration; transient
+    // resource-busy values retain the producer's short retry lifetime.
+    const bool permanentPointCloudLimit = tileLayer.error() &&
+        layerInfo.is_object() && layerInfo.contains("PointCloud/Error") &&
+        layerInfo["PointCloud/Error"] == "resource-limit";
+    const auto ttlMs = tileLayer.ttl() && !permanentPointCloudLimit
         ? static_cast<double>(tileLayer.ttl()->count())
         : std::numeric_limits<double>::quiet_NaN();
     return {

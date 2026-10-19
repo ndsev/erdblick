@@ -11,6 +11,43 @@ import {TileSubsetLayerVisualization} from
     "./tile-subset-layer.visualization";
 
 describe("TileSubsetLayerVisualization", () => {
+    it("resolves cloud picks from entry identities without parsing another subset", () => {
+        const reference = {channelOrdinal: 2, entryOrdinal: 3, endpointRole: 0};
+        const firstPicks = [{...reference, featureId: "PointCloudObject.1"}];
+        const secondPicks = [{...reference, featureId: "PointCloudObject.2"}];
+        const visualization = Object.assign(Object.create(TileSubsetLayerVisualization.prototype), {
+            gpuPickSubset: vi.fn(() => { throw new Error("Unexpected main-thread parse"); })
+        });
+        expect(visualization.resolveGpuPick(reference, firstPicks)).toBe("PointCloudObject.1");
+        expect(visualization.resolveGpuPick(reference, secondPicks)).toBe("PointCloudObject.2");
+        expect(visualization.resolveGpuPick(reference, firstPicks)).toBe("PointCloudObject.1");
+        expect(visualization.findGpuPickReferences("PointCloudObject.1", firstPicks)).toEqual([
+            {...reference, featureId: "PointCloudObject.1"}
+        ]);
+        expect(visualization.findGpuPickReferences("PointCloudObject.1", secondPicks)).toEqual([]);
+        expect(visualization.resolveGpuPick({...reference, entryOrdinal: 4}, firstPicks)).toBeUndefined();
+        expect(visualization.resolveGpuPick(reference, [])).toBeUndefined();
+        expect(visualization.gpuPickSubset).not.toHaveBeenCalled();
+    });
+
+    it("restores either endpoint of a merged relation in a mixed cloud style", () => {
+        const visualization = Object.create(TileSubsetLayerVisualization.prototype);
+        const picks = [0, 1, 2].map(endpointRole => ({
+            channelOrdinal: 1, entryOrdinal: 2, endpointRole,
+            featureId: endpointRole === 2 ? "Road.2" : "Road.1",
+            relationSourceFeatureId: "Road.1", relationIndex: 3,
+            relationId: "source:Road.1#3<->source:Road.2#7"
+        }));
+        expect(visualization.findGpuPickReferences("Road.1:relation#3", picks)).toEqual(picks);
+        expect(visualization.findGpuPickReferences("Road.2:relation#7", picks)).toEqual(picks);
+        expect(visualization.findGpuPickReferences("Road.2:relation#3", picks)).toEqual([]);
+        expect(visualization.findGpuPickReferences("Road.1", picks)).toEqual([]);
+        expect(visualization.findGpuPickReferences("Road.1", [{
+            channelOrdinal: 2, entryOrdinal: 0, endpointRole: 0,
+            featureId: "Road.1", attributeIndex: 1
+        }])).toEqual([]);
+    });
+
     it("invalidates changed line detail without destroying the installed GLTF presentation", () => {
         const gltfPresentation = {destroy: vi.fn()};
         const visualization = Object.assign(Object.create(TileSubsetLayerVisualization.prototype), {
@@ -118,7 +155,7 @@ describe("TileSubsetLayerVisualization", () => {
                 },
                 viewIndex: 2,
                 visualizationId: "render-specific-owner",
-                renderService: {cancel: vi.fn()},
+                renderService: {cancel: vi.fn(), unregisterPointCloud: vi.fn()},
                 gltfPresentation: {destroy: vi.fn()},
                 interactionGltf: null,
                 contributionIdentities: new Set<string>(),

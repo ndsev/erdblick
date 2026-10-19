@@ -626,3 +626,30 @@ TEST_CASE(
             "$mergeCount > 1 and object.$mergeCounter") ==
         "count($features.*) > 1 and object.$mergeCounter");
 }
+
+TEST_CASE("Point-cloud style opt-in reaches the explicit visualization contract", "[erdblick.style-plan][pointcloud]")
+{
+    auto parsed = style(R"yaml(
+name: Cloud
+version: 2
+rules:
+  - geometry: point
+    point-cloud: true
+    point-cloud-max-points: 1234
+    color: "#ffffff"
+)yaml");
+    REQUIRE(parsed.isValid());
+    auto plan = planStyleFilter(parsed, *plannerLayerInfo(), FeatureStyleRule::NoHighlight, 3U);
+    REQUIRE(plan.valid);
+    REQUIRE(plan.channels.size() == 1);
+    REQUIRE(plan.channels[0].pointCloudMaxPoints_ == 1234);
+    auto invalid = style(R"yaml(
+name: InvalidCloud
+version: 2
+rules:
+  - geometry: line
+    point-cloud: true
+    color: "#ffffff"
+)yaml");
+    REQUIRE_FALSE(planStyleFilter(invalid, *plannerLayerInfo(), FeatureStyleRule::NoHighlight, 3U).valid);
+}

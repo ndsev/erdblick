@@ -165,11 +165,10 @@ export async function enableMapLayer(page: Page, mapLabel: string, layerLabel: s
 
     const dialog = page.getByTestId('map-layer-dialog').locator('.p-dialog-content');
     await expect(dialog).toBeVisible();
-    await dialog.click();
 
     const mapNode = dialog.getByRole('treeitem').filter({
         has: page.getByRole('checkbox', {name: mapLabel, exact: true})
-    }).first();
+    }).last(); // The nearest tree item owns the map; ancestors also contain its checkbox.
     const layerCheckboxInput = mapNode.getByRole('checkbox', {name: layerLabel, exact: true});
     // A fresh viewer has collapsed map nodes; saved-state fixtures may already expand them.
     if (!(await layerCheckboxInput.isVisible())) {

@@ -201,6 +201,7 @@ Open **Edit -> Preferences** to access the main viewer preferences:
 - **Tile pull compression** toggles compressed tile downloads
 - **WebGL antialiasing** controls multisample rendering when the browser/device supports it
 - **Semantic layer compositing** is a default-on diagnostic switch. Disabling it recreates the renderer without semantic ordering passes and hides semantic decorations, such as cinematic lane markings, and their picking. It is saved locally, not in shared URLs; other rendering effects remain enabled.
+- **Point clouds** under **Rendering** controls adaptive point spacing and shared CPU/GPU allowances. Press **Apply** to validate and apply the complete policy. These settings are saved locally and included in exported state snapshots; they are not added to shared URLs. Disabling adaptive detail requests full geometry subject to memory limits. A source preview remains approximate.
 - **Contact shading** uses final scene depth to darken nearby lower surfaces and can be disabled on slower GPUs
 - **LOD 3 Tile Threshold** controls the default visible-tile-count boundary between stylesheet LOD 2 and LOD 3; styles can override the full LOD ladder
 - **Dark Mode** switches between on, off, and automatic

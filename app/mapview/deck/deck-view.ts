@@ -19,6 +19,7 @@ import {
     type WebMercatorViewport
 } from "@deck.gl/core";
 import {BitmapLayer, IconLayer, PolygonLayer, TextLayer} from "@deck.gl/layers";
+import {LocationAreaLayer} from "./location-area.layer";
 import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
 import {WMSImageSource} from "@loaders.gl/wms";
 import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
@@ -57,6 +58,8 @@ import {
 import {
     IRenderSceneHandle,
     IRenderView,
+    LocationArea,
+    LocationPolygon,
     RenderViewCameraState,
     RenderNavigationTarget,
     RenderedFeaturePickResult
@@ -130,6 +133,7 @@ import {
     viewStateWithGroundCenter
 } from "./navigation/web-mercator-feature-navigation";
 import {clippedGeographicBounds} from "./deck-viewport-coverage";
+import {fitLocationArea, locationOverlayPolygons, LOCATION_MIN_MAP_ZOOM} from "./deck-location-area-navigation";
 import {ErdblickTargetNavigationAdapter} from "./navigation/erdblick-target-navigation-adapter";
 import type {
     NavigationAnchor,
@@ -254,13 +258,14 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly WEB_MERCATOR_TILE_SIZE = 512;
     private static readonly ASSUMED_VERTICAL_FOV_RADIANS = GeoMath.toRadians(DECK_MAP_FOV_DEGREES);
     private static readonly FALLBACK_VIEWPORT_HEIGHT_PX = 1080;
-    private static readonly MIN_MAP_ZOOM = 0;
+    private static readonly MIN_MAP_ZOOM = LOCATION_MIN_MAP_ZOOM;
     private static readonly MAX_MAP_ZOOM = 22;
     private static readonly BACKGROUND_LAYER_KEY = "background/layer";
     private static readonly TILE_GRID_LAYER_KEY = "builtin/tile-grid";
     private static readonly TILE_STATE_LAYER_KEY = "builtin/tile-state";
     private static readonly TILE_OUTLINE_LAYER_KEY = "builtin/tile-outline";
     private static readonly JUMP_AREA_LAYER_KEY = "builtin/jump-area";
+    private static readonly LOCATION_AREA_LAYER_KEY = "builtin/location-area";
     private static readonly SEARCH_RESULTS_LAYER_PREFIX = "builtin/search-results";
     private static readonly LOCATION_MARKER_LAYER_KEY = "builtin/location-marker";
     private static readonly LOCATION_LABEL_LAYER_KEY = "builtin/location-label";
@@ -361,6 +366,8 @@ export abstract class DeckMapView implements IRenderView {
     private searchResultLayerKeys = new Set<string>();
     private lastLocationMarkerSignature = "";
     private jumpAreaHighlightTick: (() => void) | null = null;
+    private locationAreaHighlightTick: (() => void) | null = null;
+    private locationAreaHighlightStartedAt: number | undefined;
     private locationLabelTick: (() => void) | null = null;
     private isHoveringFeature = false;
     private hoverNavigationPivot: NavigationAnchor | null = null;
@@ -622,6 +629,9 @@ export abstract class DeckMapView implements IRenderView {
             onInteractionStateChange: (interactionState) => this.onInteractionStateChange(interactionState),
             onClick: (info, event) => this.onClick(info, event),
             onAfterRender: () => {
+                if (this.locationAreaHighlightTick && this.locationAreaHighlightStartedAt === undefined) {
+                    this.locationAreaHighlightStartedAt = performance.now();
+                }
                 if (this.contactShadingEnabled && this.contactShadingService) {
                     const viewport = this.deck?.getViewports()[0];
                     if (viewport) {
@@ -801,6 +811,7 @@ export abstract class DeckMapView implements IRenderView {
         this.layerRegistry.remove(DeckMapView.LOCATION_LABEL_LAYER_KEY);
         this.removeTileStateLayers();
         this.stopJumpAreaHighlight();
+        this.stopLocationAreaHighlight();
         this.stopLocationLabel();
         this.backgroundLayerSignature = "";
         this.tileGridEnabled = false;
@@ -1850,6 +1861,19 @@ export abstract class DeckMapView implements IRenderView {
      * Most subscriptions only schedule overlay work so rapid bursts collapse into one frame.
      */
     private setupSubscriptions(): void {
+        this.subscriptions.push(this.mapViewState.clearLocationHighlightTopic.subscribe(index => {
+            if (index === this._viewIndex) {
+                this.stopLocationAreaHighlight();
+                this.stopLocationLabel();
+            }
+        }));
+        this.subscriptions.push(this.stateService.stateApplied.subscribe(() => {
+            this.stopLocationAreaHighlight();
+            this.stopLocationLabel();
+        }));
+        this.subscriptions.push(this.mapViewState.moveToLocationAreaTopic.subscribe(({targetView, area}) => {
+            if (targetView === this._viewIndex) this.moveToLocationArea(area);
+        }));
         this.subscriptions.push(
             this.stateService.cameraViewDataState
                 .pipe(this._viewIndex, distinctUntilChanged())
@@ -2000,6 +2024,8 @@ export abstract class DeckMapView implements IRenderView {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
+                this.stopLocationAreaHighlight();
+                this.stopLocationLabel();
                 this.prepareForNavigation();
                 const alt = value.z ?? this.zoomToAltitude(this.viewState.zoom, value.y);
                 this.stateService.setView(
@@ -2024,6 +2050,8 @@ export abstract class DeckMapView implements IRenderView {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
+                this.stopLocationAreaHighlight();
+                this.stopLocationLabel();
                 this.prepareForNavigation();
                 this.exitFirstPersonView();
                 const centerLon = (value.rectangle.west + value.rectangle.east) / 2;
@@ -3855,6 +3883,83 @@ export abstract class DeckMapView implements IRenderView {
         ]];
     }
 
+    /** Fits a selected place independently of tile navigation, then publishes the settled camera. */
+    private moveToLocationArea(area: LocationArea): void {
+        this.stopLocationAreaHighlight();
+        this.stopLocationLabel();
+        this.prepareForNavigation();
+        this.exitFirstPersonView();
+        const rect = this.getCanvasClientRect();
+        const fitted = fitLocationArea(area.rectangle, this.viewState, rect.width, rect.height, this.useOrthographicProjection);
+        if (!fitted) return;
+        this.clearNavigationPivots();
+        this.updateViewState({...this.viewState, ...fitted, position: [0, 0, 0]}, true, true);
+        this.pushViewStateToAppState();
+        this.startLocationAreaHighlight(area);
+        const viewport = this.createWebMercatorViewport();
+        const representative = area.representativePoint;
+        const pixel = representative && viewport?.project([
+            longitudeInNearestWorld(representative[0], this.viewState.longitude), representative[1], 0]);
+        const anchor = representative && pixel && pixel.every(Number.isFinite)
+            && pixel[0] >= 0 && pixel[0] <= rect.width && pixel[1] >= 0 && pixel[1] <= rect.height
+            ? representative : [this.viewState.longitude, this.viewState.latitude];
+        this.startLocationLabel({x: anchor[0], y: anchor[1], label: area.label});
+    }
+
+    /** Keeps polygon data/accessors stable during fading so Deck only updates opacity. */
+    private startLocationAreaHighlight(area: LocationArea): void {
+        this.stopLocationAreaHighlight();
+        let data: LocationPolygon[];
+        try {
+            data = locationOverlayPolygons(area);
+        } catch {
+            if (area.polygons) {
+                this.mapViewState.locationBoundaryUnavailableTopic.next();
+                this.startLocationAreaHighlight({...area, polygons: undefined});
+            }
+            return;
+        }
+        if (!data.length) return;
+        const layer = new LocationAreaLayer({
+            id: DeckMapView.LOCATION_AREA_LAYER_KEY,
+            data,
+            pickable: false,
+            parameters: DeckMapView.NO_DEPTH_PARAMETERS,
+            onError: () => {
+                // Retire a bad boundary once, outside Deck's layer-update stack.
+                queueMicrotask(() => {
+                    if (this.locationAreaHighlightTick !== tick) return;
+                    this.stopLocationAreaHighlight();
+                    if (area.polygons) {
+                        this.mapViewState.locationBoundaryUnavailableTopic.next();
+                        this.startLocationAreaHighlight({...area, polygons: undefined});
+                    }
+                });
+                return true;
+            }
+        });
+        const tick = () => {
+            const start = this.locationAreaHighlightStartedAt;
+            if (start === undefined) return; // Tessellation and the first frame do not consume the fade.
+            const opacity = Math.max(0, 1 - (performance.now() - start) / 3000);
+            if (!opacity) { this.stopLocationAreaHighlight(); return; }
+            this.layerRegistry.upsert(DeckMapView.LOCATION_AREA_LAYER_KEY, layer.clone({opacity}), 510);
+            this.requestRender();
+        };
+        this.locationAreaHighlightTick = tick;
+        this.layerRegistry.upsert(DeckMapView.LOCATION_AREA_LAYER_KEY, layer, 510);
+        this.onTick(tick);
+        this.requestRender();
+    }
+
+    /** Releases the current transient boundary and its animation callback. */
+    private stopLocationAreaHighlight(): void {
+        if (this.locationAreaHighlightTick) this.offTick(this.locationAreaHighlightTick);
+        this.locationAreaHighlightTick = null;
+        this.locationAreaHighlightStartedAt = undefined;
+        this.layerRegistry.remove(DeckMapView.LOCATION_AREA_LAYER_KEY);
+    }
+
     /** Starts a short-lived animated rectangle highlight for fit-to-rectangle navigation. */
     private startJumpAreaHighlight(rectangle: {west: number; south: number; east: number; north: number}): void {
         this.stopJumpAreaHighlight();
@@ -4139,9 +4244,9 @@ export abstract class DeckMapView implements IRenderView {
         const metersPerPixel = Math.max(1e-6, visibleHeightMeters / viewportHeight);
         const worldMetersAtLatitude = latitudeCos * 2 * Math.PI * DeckMapView.EARTH_RADIUS_METERS;
         return Math.max(
-            0,
+            DeckMapView.MIN_MAP_ZOOM,
             Math.min(
-                22,
+                DeckMapView.MAX_MAP_ZOOM,
                 Math.log2(worldMetersAtLatitude / (DeckMapView.WEB_MERCATOR_TILE_SIZE * metersPerPixel))
             )
         );

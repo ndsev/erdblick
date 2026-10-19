@@ -2425,6 +2425,27 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('shares validated point-cloud preferences across config, snapshots and persisted state', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        expect(service.seedConfigDefaultState({pointCloudDetailPixels: 4,
+            pointCloudGpuMemoryMiB: 128}, 'point-cloud-config')).toEqual([]);
+        expect(service.pointCloudPolicy.detailPixels).toBe(4);
+        service.setPointCloudPolicy({...service.pointCloudPolicy, enabled: false, workingMemoryMiB: 256});
+        const snapshot = service.exportSnapshot();
+        expect(snapshot).toMatchObject({pointCloudDownsamplingEnabled: 0,
+            pointCloudDetailPixels: 4, pointCloudWorkingMemoryMiB: 256, pointCloudGpuMemoryMiB: 128});
+        expect(service.pointCloudDetailPixelsState.isUrlState()).toBe(false);
+        expect(() => service.setPointCloudPolicy({...service.pointCloudPolicy, gpuMemoryMiB: 0})).toThrow();
+        expect(service.pointCloudPolicy.gpuMemoryMiB).toBe(128);
+        expect(service.importSnapshot({pointCloudDetailPixels: 8})).toEqual([]);
+        expect(service.pointCloudPolicy.detailPixels).toBe(8);
+        expect(service.importSnapshot({pointCloudWorkingMemoryMiB: -1}).length).toBeGreaterThan(0);
+        expect(service.pointCloudPolicy.workingMemoryMiB).toBe(256);
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('exports app state entries with compact style option storage keys', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;

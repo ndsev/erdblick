@@ -1411,11 +1411,13 @@ export class MapTileStreamService implements OnDestroy {
             metadata = uint8ArrayToWasmOrThrow(
                 data => this.mapInfo.tileLayerParser
                     .readTileSubsetLayerMetadata(data),
-                subsetBlob
+                // Metadata is a protocol prefix. Never copy point geometry into the
+                // permanent main-thread WASM heap just to route a delivery.
+                subsetBlob.subarray(0, 256 * 1024)
             ) as unknown as typeof metadata;
         } catch (error) {
             throw new Error(
-                "Failed to read TileSubsetLayer metadata.",
+                "Failed to read TileSubsetLayer metadata (256 KiB browser metadata limit).",
                 {cause: error}
             );
         }

@@ -554,6 +554,74 @@ rules:
 }
 
 TEST_CASE(
+    "TileSubsetLayerRenderer samples across clusters and reuses aligned cached coarsening",
+    "[erdblick.subset-renderer][pointcloud]")
+{
+    auto strings = std::make_shared<mapget::StringPool>("PointClusterPool");
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        mapget::TileId::fromWgs84(11.0, 48.0, 13), "PointClusterPool",
+        "TestMap", rendererLayerInfo(), strings, "points", 1);
+    subset->setGeometryAnchor({11.0, 48.0, 0.0});
+    auto collection = subset->newGeometryCollection(2, true);
+    auto first = subset->newGeometry(mapget::GeomType::Points, 3, true);
+    auto second = subset->newGeometry(mapget::GeomType::Points, 2, true);
+    for (auto height : {1.0, 2.0, 3.0})
+        first->append({11.0, 48.0, height});
+    for (auto height : {4.0, 5.0})
+        second->append({11.0, 48.0, height});
+    collection->addGeometry(first);
+    collection->addGeometry(second);
+    auto channel = subset->newChannel("style-rule:0", mapget::Scope::Feature,
+        1U << static_cast<uint8_t>(mapget::GeomType::Points), std::nullopt);
+    channel->newFeatureEntry(
+        subset->newFeatureId("Road", {{"roadId", int64_t{1}}}), collection, {});
+    auto style = rendererStyle(R"yaml(
+name: PointClusters
+version: 2
+rules:
+  - type: Road
+    geometry: point
+    point-cloud: true
+    color: "#ffffff"
+    width: 2
+    billboard: true
+    flat: false
+)yaml");
+    REQUIRE(style.isValid());
+    TileSubsetLayerRenderer renderer(0, "Features:TestMap:Road:0", style,
+        static_cast<int>(FeatureStyleRule::NoHighlight), FeatureStyleRule::kMaximumLod);
+    renderer.setCoordinateOrigin(11.0, 48.0, 0.0);
+    renderer.setPointCloudPolicy(true, 4, 0, "points:1");
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+    REQUIRE(renderer.pointCloudDeliveredCount() == 5);
+    REQUIRE(renderer.pointCloudRenderedCount() <= 4);
+    REQUIRE(renderer.pointCloudRenderedCount() > 0);
+    auto const picks = renderer.renderBridgeResult()["pointCloudPicks"];
+    REQUIRE(picks.size() == 1);
+    REQUIRE(picks[0]["featureId"] == "Road.1");
+    REQUIRE(picks[0]["channelOrdinal"] == 0);
+    REQUIRE(picks[0]["entryOrdinal"] == 0);
+    auto const fineCount = renderer.pointCloudRenderedCount();
+    renderer.resetForNextTile();
+    renderer.setPointCloudPolicy(true, 4, 100, "points:1");
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+    REQUIRE(renderer.pointCloudRenderedCount() == 1);
+    renderer.resetForNextTile();
+    renderer.setPointCloudPolicy(true, 4, 0, "points:1");
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+    REQUIRE(renderer.pointCloudRenderedCount() == fineCount);
+    renderer.resetForNextTile();
+    renderer.setPointCloudPolicy(false, 4, 0, "points:1");
+    installSubset(renderer, TileSubsetLayer(subset));
+    REQUIRE_THROWS_AS(renderer.run(), std::length_error);
+    REQUIRE(first->numPoints() == 3);
+    REQUIRE(second->numPoints() == 2);
+}
+
+TEST_CASE(
     "TileSubsetLayerRenderer consumes projected color scales and emits tuple picks",
     "[erdblick.subset-renderer]")
 {

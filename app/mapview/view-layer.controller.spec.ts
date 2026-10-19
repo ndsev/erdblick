@@ -104,6 +104,7 @@ describe("ViewLayerController", () => {
             state,
             setLod: vi.fn(),
             setLineSimplificationTolerance: vi.fn(),
+            setPointCloudScale: vi.fn(),
             isCurrentPresentationInstalled: vi.fn(() => false)
         };
         const owned = {
@@ -115,6 +116,7 @@ describe("ViewLayerController", () => {
         controller.presentationStillDemanded = vi.fn(() => true);
         controller.presentationLod = vi.fn(() => 3);
         controller.lineSimplificationToleranceMeters = vi.fn(() => 2);
+        controller.viewState = {viewStateFor: () => ({metersPerPixel: 1})};
         controller.shouldVisualize = vi.fn(() => true);
         controller.replaceVisualization = vi.fn();
         controller.queueVisualizationRender = vi.fn();
@@ -233,6 +235,7 @@ describe("ViewLayerController", () => {
         controller.interactionViewportSignature = () => "unchanged";
         controller.occupancyChanged = {next: vi.fn()};
         controller.diagnostics = {notifyChanged: vi.fn()};
+        controller.renderService = {pointCloudPolicy: {enabled: true}};
 
         controller.reconcile();
 
@@ -250,6 +253,7 @@ describe("ViewLayerController", () => {
         controller.sceneHandle = null;
         controller.occupancyChanged = {next: vi.fn()};
         controller.diagnostics = {notifyChanged: vi.fn()};
+        controller.renderService = {pointCloudPolicy: {enabled: true}};
         controller.pendingVisualizationRenders = new Set();
         controller.localInteractionVisualizationsWithOverlays = new Set();
         controller.scheduleInteractionPresenceReconcile = vi.fn();
@@ -480,6 +484,7 @@ describe("ViewLayerController", () => {
         controller.applyLocalInteractionOverlays = vi.fn();
         controller.scheduleInteractionPresenceReconcile = vi.fn();
         controller.diagnostics = {notifyChanged: vi.fn()};
+        controller.renderService = {pointCloudPolicy: {enabled: true}};
         controller.releaseRegularFallbackWhenReady = vi.fn();
 
         controller.startVisualizationRender(visualization);

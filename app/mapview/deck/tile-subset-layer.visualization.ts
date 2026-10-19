@@ -1,3 +1,4 @@
+import type {PointCloudRenderPolicy} from "../../shared/point-cloud-policy";
 import {Matrix4} from "@math.gl/core";
 import type {Device} from "@luma.gl/core";
 import type {FilterTileState} from "../../mapdata/filter-tile-state.model";
@@ -16,7 +17,8 @@ import {StaleSubsetRenderError, TileSubsetLayerRenderService} from
     "./tile-subset-layer-render.service";
 import type {
     TileSubsetLayerRenderBuffers,
-    TileSubsetPickResult
+    TileSubsetPickResult,
+    PointCloudPickResult
 } from "./tile-subset-layer-render.worker.protocol";
 import type {StyleValidationReportService} from "../../styledata/style-validation-report.service";
 import {
@@ -88,6 +90,8 @@ export class TileSubsetLayerVisualization {
     private renderedSignature = "";
     private requestedSignature = "";
     private disposed = false;
+    private pointCloud: PointCloudRenderPolicy | undefined;
+    private pointCloudScale: number | null = null;
     private sceneHandle: IRenderSceneHandle | null = null;
     private sceneRevision = 0;
     private lod: number;
@@ -162,6 +166,26 @@ export class TileSubsetLayerVisualization {
         }
     }
 
+    /** Refresh density before presentation checks; smaller budgets retire old GPU ownership first. */
+    setPointCloudScale(metersPerPixel: number | null, reclaim = false): void {
+        this.pointCloudScale = metersPerPixel;
+        if (!this.owner.filterPlan.channels.some(channel => channel.pointCloudMaxPoints !== undefined)) return;
+        this.renderService.registerPointCloud(this.visualizationId, this.viewIndex, this.state.subsetBlob?.byteLength ?? 0);
+        const next = this.renderService.pointCloudPolicyFor(this.visualizationId, metersPerPixel,
+            this.pointCloud?.spacingMeters);
+        next.cacheKey = JSON.stringify([this.owner.mapInfo.sourceCatalogRevision, this.owner.ownerId,
+            this.state.mapTileKey, this.state.valueVersion]);
+        if (JSON.stringify(next) === JSON.stringify(this.pointCloud) && !reclaim) return;
+        this.pointCloud = next;
+        this.renderService.cancel(this.visualizationId);
+        this.renderedSignature = "";
+        this.requestedSignature = "";
+        if (reclaim) {
+            ++this.sceneRevision;
+            TileSubsetLayerVisualization.retireContributions(this.sceneHandle, this.contributionIdentities);
+        }
+    }
+
     /** Rerender changed line detail without tearing down the installed GLTF asset. */
     setLineSimplificationTolerance(lineSimplificationToleranceMeters: number): void {
         if (this.lineSimplificationToleranceMeters === lineSimplificationToleranceMeters) {
@@ -233,10 +257,12 @@ export class TileSubsetLayerVisualization {
         const renderOrigin: [number, number, number] =
             this.coordinateOrigin ?? [0, 0, 0];
         const nativeOrigin = this.state.partition.kind === "object";
+        this.setPointCloudScale(this.pointCloudScale);
         const signature = [
             `${this.state.mapTileKey}:${this.state.valueVersion}`,
             this.owner.plannedLod,
             this.lineSimplificationToleranceMeters,
+            JSON.stringify(this.pointCloud),
             this.owner.style.id,
             this.owner.renderStyleKey,
             this.owner.styleOrder,
@@ -251,6 +277,10 @@ export class TileSubsetLayerVisualization {
         const valueVersion = this.state.valueVersion;
         const sceneRevision = this.sceneRevision;
         const startedAt = performance.now();
+        // Each installed GPU revision keeps its own identities. Populate them
+        // during preparation, before packet admission can resolve any picks.
+        let pointCloudPicks: readonly PointCloudPickResult[] | undefined =
+            this.pointCloud ? [] : undefined;
         const reservation = scene.prepareRender(
             `${this.viewIndex}:${nativeOrigin
                 ? this.state.mapTileKey
@@ -262,9 +292,9 @@ export class TileSubsetLayerVisualization {
                 styleOrder: this.owner.styleOrder,
                 lod: this.lod,
                 resolvePick: reference =>
-                    this.resolveGpuPick(reference),
+                    this.resolveGpuPick(reference, pointCloudPicks),
                 findPickReferences: targetFeatureId =>
-                    this.findGpuPickReferences(targetFeatureId)
+                    this.findGpuPickReferences(targetFeatureId, pointCloudPicks)
             }]
         );
         const contribution = reservation.contributions[0];
@@ -304,7 +334,9 @@ export class TileSubsetLayerVisualization {
                 highlightModeValue: this.owner.highlightMode.value,
                 lod: this.owner.plannedLod,
                 lineSimplificationToleranceMeters:
-                    this.lineSimplificationToleranceMeters
+                    this.lineSimplificationToleranceMeters,
+                pointCloud: this.pointCloud,
+                gpuExistingBytes: scene.snapshot().stores.reduce((total, store) => total + store.allocatedBytes, 0)
             }, packet => {
                 if (!this.isRenderCurrent(
                     sceneHandle,
@@ -338,6 +370,9 @@ export class TileSubsetLayerVisualization {
                     throw new Error(
                         "Subset renderer returned an invalid geometry anchor."
                     );
+                }
+                if (pointCloudPicks !== undefined) {
+                    pointCloudPicks = buffers.bridge.pointCloudPicks ?? [];
                 }
                 scene.resolveRenderOrigin(reservation, origin);
                 this.coordinateOrigin = origin;
@@ -458,7 +493,12 @@ export class TileSubsetLayerVisualization {
             renderMs: result.timings.renderMs,
             totalMs: result.timings.deserializeMs + result.timings.renderMs,
             clientWallMs,
-            vertexCount: result.vertexCount
+            vertexCount: result.vertexCount,
+            ...(this.pointCloud ? {
+                pointCloudDeliveredCount: result.pointCloudDeliveredCount ?? 0,
+                pointCloudRenderedCount: result.pointCloudRenderedCount ?? 0,
+                workerMemoryBytes: result.wasmMemoryBytes ?? 0
+            } : {})
         };
     }
 
@@ -542,6 +582,7 @@ export class TileSubsetLayerVisualization {
             return null;
         }
         this.disposed = true;
+        this.renderService.unregisterPointCloud(this.visualizationId);
         const preservedIdentity = preserveContribution && sceneHandle
             ? this.contributionIdentity(this.state)
             : null;
@@ -710,8 +751,15 @@ export class TileSubsetLayerVisualization {
 
     /** Resolve one compact GPU tuple only after Deck reports an actual interaction. */
     private resolveGpuPick(
-        reference: GpuScenePickReference
+        reference: GpuScenePickReference,
+        pointCloudPicks?: readonly PointCloudPickResult[]
     ): string | readonly string[] | undefined {
+        if (pointCloudPicks !== undefined) {
+            return this.featureIdsForPickResult(pointCloudPicks.find(pick =>
+                pick.channelOrdinal === reference.channelOrdinal &&
+                pick.entryOrdinal === reference.entryOrdinal &&
+                pick.endpointRole === reference.endpointRole));
+        }
         const subset = this.gpuPickSubset();
         return subset
             ? this.featureIdsForPickResult(subset.resolvePick(
@@ -724,8 +772,30 @@ export class TileSubsetLayerVisualization {
 
     /** Locate packet tuples for one restored semantic target without scanning strings. */
     private findGpuPickReferences(
-        targetFeatureId: string
+        targetFeatureId: string,
+        pointCloudPicks?: readonly PointCloudPickResult[]
     ): readonly GpuScenePickReference[] {
+        if (pointCloudPicks !== undefined) {
+            const target = parseFeatureInspectionTarget(targetFeatureId);
+            return pointCloudPicks.filter(pick => {
+                if (target.scope === "relation" && pick.relationId) {
+                    // A merged two-way identity contains both source descriptor
+                    // ordinals. Mirror the native lookup for either endpoint.
+                    const marker = `:${target.baseFeatureId}#`;
+                    const offset = pick.relationId.indexOf(marker);
+                    const ordinal = offset < 0 ? undefined :
+                        pick.relationId.slice(offset + marker.length).match(/^\d+/)?.[0];
+                    return ordinal !== undefined && Number(ordinal) === target.relationIndex;
+                }
+                if (target.scope === "feature" &&
+                    (pick.attributeIndex !== undefined || pick.relationIndex !== undefined)) {
+                    return false;
+                }
+                const ids = this.featureIdsForPickResult(pick);
+                return (typeof ids === "string" ? [ids] : ids ?? []).some(id =>
+                    id === targetFeatureId);
+            });
+        }
         const subset = this.gpuPickSubset();
         if (!subset) {
             return [];

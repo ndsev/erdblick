@@ -917,11 +917,13 @@ export class ViewerActionService implements OnDestroy {
         const renderers = affected.map(index => this.views.renderViewFor(index));
         if (renderers.some(view => !view || view.isFirstPersonViewActive())) this.reject("Map navigation requires an available map camera");
         if (renderers.some(view => view!.isCameraInteractionActive())) this.reject("A human camera gesture is active", "busy");
+        this.views.navigationStarted.next();
         const controller = new AbortController();
         const abort = () => controller.abort(new ViewerActionFailure({code: "cancelled", message: "Navigation was interrupted", outcome: "not_applied"}));
         signal?.addEventListener("abort", abort, {once: true});
         if (signal?.aborted) abort();
         const guards = new Subscription();
+        guards.add(this.views.navigationStarted.subscribe(abort));
         const poses = affected.map(index => this.views.renderViewFor(index)!.getLiveCameraState());
         const syncBefore = this.state.viewSync;
         guards.add(this.viewDiagnostics.cameraInteracting$.subscribe(active => { if (active && renderers.some(view => view!.isCameraInteractionActive())) abort(); }));

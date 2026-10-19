@@ -381,6 +381,28 @@ auto summaryToJsValue(
 namespace erdblick
 {
 
+IncomingInspection::IncomingInspection(std::string const& manifest, std::string const& targetKey,
+                                       std::string const& featureId)
+    : collection_(mapget::IncomingRelationCollection::fromJson(nlohmann::json::parse(manifest)))
+{
+    if (collection_.target_.toString() != targetKey || collection_.featureId_ != featureId)
+        throw std::invalid_argument("Incoming manifest does not belong to the selected feature");
+}
+
+void IncomingInspection::addSnapshot(TileFeatureLayer const& layer)
+{
+    if (snapshots_.size() >= mapget::IncomingRelationCollection::MaxSnapshots)
+        throw std::invalid_argument("Incoming snapshot limit exceeded");
+    snapshots_.push_back(layer.model_);
+}
+
+NativeJsValue IncomingInspection::inspectionModel() const
+{
+    mapget::FeatureInspectionView view(collection_, snapshots_);
+    return *InspectionConverter().convertIncoming(view);
+}
+
+
 /**
  * Constructor accepting a shared pointer to the original `TileFeatureLayer` class.
  * @param self Shared pointer to `mapget::TileFeatureLayer`.

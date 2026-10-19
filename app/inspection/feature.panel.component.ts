@@ -2,8 +2,10 @@ import {ChangeDetectorRef, Component, effect, input, NgZone, OnDestroy, output, 
 import {TreeTableNode} from "primeng/api";
 import {coreLib} from "../integrations/wasm";
 import {InspectionPanelModel} from "../shared/appstate.service";
-import {FeatureWrapper} from "../mapdata/feature-inspection.model";
+import {FeatureWrapper, IncomingInspectionResult} from "../mapdata/feature-inspection.model";
 import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspection.tree.component";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {Subscription} from "rxjs";
 import {Feature} from '../../build/libs/core/erdblick-core';
 import {
     hasFeatureInspectionValidity,
@@ -37,12 +39,24 @@ interface InspectionModelData {
     hoverId?: string;
     geoJsonPath?: string;
     mapId?: string;
+    mapTileKey?: string;
+    incomingLoading?: boolean;
+    retryIncoming?: () => void;
     nodeId?: string;
     valueCount?: string;
     keyBubbles?: InspectionKeyBubble[];
     valueBubbles?: InspectionValueBubble[];
     sourceDataReferences?: Array<object>;
     children: Array<InspectionModelData>;
+}
+
+/** Lifetime of one deferred section, independent of the ordinary feature load. */
+interface IncomingSectionState {
+    controller: AbortController;
+    loading: boolean;
+    result?: IncomingInspectionResult;
+    error?: string;
+    timer?: ReturnType<typeof setTimeout>;
 }
 
 @Component({
@@ -53,6 +67,9 @@ interface InspectionModelData {
                 <div style="position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--p-content-background) 55%, transparent);">
                     <p-progressSpinner ariaLabel="loading"/>
                 </div>
+            }
+            @for (warning of selectionWarnings; track warning) {
+                <div role="status" data-testid="feature-representation-warning" style="padding: .5rem;">{{ warning }}</div>
             }
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                              [geoJson]="geoJson"
@@ -90,18 +107,34 @@ export class FeaturePanelComponent implements OnDestroy {
     firstHighlightedItemIndex?: number;
     private rebuildQueued = false;
     private destroyed = false;
+    private catalogSubscription?: Subscription;
+    private readonly incoming = new Map<FeatureWrapper, IncomingSectionState>();
+
+    /** Keep source fidelity and incomplete-data notices visible beside inspection/export controls. */
+    get selectionWarnings(): string[] {
+        return [...new Set((this.selectedFeatures ?? []).flatMap(feature => feature.featureTile.warnings))];
+    }
 
     /** Export the full current selection, skipping wrappers whose native tile was released. */
     private exportGeoJson(): string {
         const features = (this.selectedFeatures ?? []).map(wrapper =>
-            wrapper.peek((feature: Feature) => feature.geojson() as string)).filter(value => value !== null);
+            this.inspectionFeature(wrapper).peek((feature: Feature) => feature.geojson() as string)).filter(value => value !== null);
         return `{"type":"FeatureCollection","features":[${features.join(",")}]}`;
     }
 
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
     constructor(private cdr: ChangeDetectorRef,
-                private ngZone: NgZone) {
+                private ngZone: NgZone,
+                mapInfo: MapInfoService) {
+        this.catalogSubscription = mapInfo.dataSourceInfoChanged.subscribe(() => {
+            for (const state of this.incoming.values()) {
+                state.controller.abort();
+                clearTimeout(state.timer);
+            }
+            this.incoming.clear();
+            this.scheduleInspectionTreeRebuild();
+        });
         effect(() => {
             this.panel();
             this.scheduleInspectionTreeRebuild();
@@ -111,6 +144,12 @@ export class FeaturePanelComponent implements OnDestroy {
     /** Prevents queued inspection work from touching a destroyed component. */
     ngOnDestroy() {
         this.destroyed = true;
+        this.catalogSubscription?.unsubscribe();
+        for (const state of this.incoming.values()) {
+            state.controller.abort();
+            clearTimeout(state.timer);
+        }
+        this.incoming.clear();
     }
 
     /** Rebuilds the tree immediately and refreshes the virtual scroller geometry. */
@@ -152,6 +191,13 @@ export class FeaturePanelComponent implements OnDestroy {
         const previousExpansionState = this.captureTreeExpansionState(this.treeData);
         const panel = this.panel();
         this.selectedFeatures = panel.features ?? [];
+        for (const [feature, state] of this.incoming) {
+            if (!this.selectedFeatures.includes(feature)) {
+                state.controller.abort();
+                clearTimeout(state.timer);
+                this.incoming.delete(feature);
+            }
+        }
         this.loading = panel.loading === true;
         if (!this.selectedFeatures.length) {
             this.featureIds = [];
@@ -168,8 +214,11 @@ export class FeaturePanelComponent implements OnDestroy {
         const selectedFeatureInspectionModels: InspectionModelData[][] = [];
         this.selectedFeatures.forEach(featureWrapper => {
             try {
-                featureWrapper.peek((feature: Feature) => {
-                    selectedFeatureInspectionModels.push(feature.inspectionModel() as InspectionModelData[]);
+                this.inspectionFeature(featureWrapper).peek((feature: Feature) => {
+                    const model = feature.inspectionModel() as InspectionModelData[];
+                    const incoming = this.incomingSection(featureWrapper);
+                    if (incoming) model.push(incoming);
+                    selectedFeatureInspectionModels.push(model);
                 });
             } catch (error) {
                 console.error("Failed to read inspection model for selected feature.", {
@@ -195,6 +244,73 @@ export class FeaturePanelComponent implements OnDestroy {
         this.firstHighlightedItemIndex = this.highlightSelectedInspectionTarget(nextTreeData);
         this.treeData = nextTreeData;
         this.inspectionTree?.refreshLayout();
+    }
+
+    /** Use the bundle's canonical target without changing selection identity or restarting discovery. */
+    private inspectionFeature(feature: FeatureWrapper): FeatureWrapper {
+        const target = this.incoming?.get(feature)?.result?.target;
+        return target ? new FeatureWrapper(feature.featureId, target) : feature;
+    }
+
+    /** Begin eligible incoming work only after the ordinary model is available. */
+    private incomingSection(feature: FeatureWrapper): InspectionModelData | undefined {
+        let state = this.incoming.get(feature);
+        if (!state) {
+            let eligibilityError: string | undefined;
+            try {
+                if (!feature.featureTile.hasIncomingRelations(feature.featureId)) return undefined;
+            } catch (error) {
+                eligibilityError = `Incoming discovery unavailable: ${error instanceof Error ? error.message : String(error)}`;
+            }
+            state = {controller: new AbortController(), loading: !eligibilityError, error: eligibilityError};
+            this.incoming.set(feature, state);
+            if (state.loading) void this.loadIncoming(feature, state);
+        }
+        const result = state.result;
+        const section: InspectionModelData = result?.model[0] ?? {
+            key: "Incoming Relations", type: coreLib.ValueType.SECTION.value, value: "", children: []
+        };
+        return {...section, nodeId: "incoming-relations", incomingLoading: state.loading,
+            value: state.loading ? "Loading…" : state.error ?? (result?.complete
+                ? (section.children?.length ? "" : "No matching relations in this partition")
+                : "Partial result"),
+            info: state.error ?? result?.issues.join("\n") ?? section.info,
+            retryIncoming: !state.loading ? () => this.retryIncoming(feature) : undefined};
+    }
+
+    /** Publish only while the selected wrapper and request generation remain current. */
+    private async loadIncoming(feature: FeatureWrapper, state: IncomingSectionState): Promise<void> {
+        try {
+            const result = await feature.featureTile.loadIncoming(feature.featureId, state.controller.signal);
+            if (this.destroyed || this.incoming.get(feature) !== state) return;
+            state.result = result;
+            if (result.expiresAtMs !== undefined) {
+                state.timer = setTimeout(() => this.retryIncoming(feature),
+                    Math.min(2147483647, Math.max(1000, result.expiresAtMs - Date.now())));
+            }
+        } catch (error) {
+            if (state.controller.signal.aborted) return;
+            state.error = error instanceof Error ? error.message : String(error);
+        } finally {
+            if (!state.controller.signal.aborted && this.incoming.get(feature) === state) {
+                state.loading = false;
+                this.scheduleInspectionTreeRebuild();
+            }
+        }
+    }
+
+    /** Retry or renew only the incoming section, preserving the base inspection and its state. */
+    private retryIncoming(feature: FeatureWrapper): void {
+        const previous = this.incoming.get(feature);
+        if (!previous || this.destroyed) return;
+        previous.controller.abort();
+        clearTimeout(previous.timer);
+        const state: IncomingSectionState = {
+            controller: new AbortController(), loading: true, result: previous?.result
+        };
+        this.incoming.set(feature, state);
+        void this.loadIncoming(feature, state);
+        this.scheduleInspectionTreeRebuild();
     }
 
     /** Captures user-expanded and user-collapsed tree rows before rebuilding equivalent inspection nodes. */
@@ -447,7 +563,9 @@ export class FeaturePanelComponent implements OnDestroy {
                     key: data?.key ?? "",
                     value: value ?? "",
                     type: valueType,
-                    mapTileKey: context.mapTileKey,
+                    mapTileKey: data?.mapTileKey ?? context.mapTileKey,
+                    incomingLoading: data?.incomingLoading,
+                    retryIncoming: data?.retryIncoming,
                     nodeId,
                     mapId: context.mapId ?? ""
                 };
@@ -499,7 +617,7 @@ export class FeaturePanelComponent implements OnDestroy {
                 const children = convertToTreeTableNodes(
                     Array.isArray(data?.children) ? data.children : [],
                     {
-                        mapTileKey: context.mapTileKey,
+                        mapTileKey: node.data["mapTileKey"],
                         mapId: typeof node.data["mapId"] === "string" ? node.data["mapId"] : context.mapId,
                         softHoverGroupId: nextSoftHoverGroupId,
                         strongHoverGroupId: nextStrongHoverGroupId,
@@ -540,6 +658,8 @@ export class FeaturePanelComponent implements OnDestroy {
                     key: section?.key ?? "",
                     value: section?.value ?? "",
                     type: section?.type ?? coreLib.ValueType.NULL.value,
+                    incomingLoading: section?.incomingLoading,
+                    retryIncoming: section?.retryIncoming,
                     nodeId: sectionNodeId,
                     mapId
                 };

@@ -5,6 +5,10 @@ import {filter} from "rxjs/operators";
 import {Cartographic, GeoMath} from "../integrations/geo";
 import {AppState, AppStateOptions, Boolish, MapViewState, StyleState} from "./app-state";
 import {z} from "zod";
+import {
+    PointCloudPolicy, DEFAULT_POINT_CLOUD_POLICY, pointCloudPolicySchema,
+    pointCloudDetailSchema, pointCloudWorkingMemorySchema, pointCloudGpuMemorySchema
+} from "./point-cloud-policy";
 import {MapTreeNode} from "../mapdata/map.tree.model";
 import {ErdblickStyle} from "../styledata/style.service";
 import {coreLib} from "../integrations/wasm";
@@ -768,6 +772,41 @@ export class AppStateService implements OnDestroy {
     });
 
     private invalidConnectionPolicy = "";
+    readonly pointCloudDownsamplingEnabledState = this.createState<boolean>({
+        name: 'pointCloudDownsamplingEnabled', defaultValue: DEFAULT_POINT_CLOUD_POLICY.enabled, schema: Boolish
+    });
+    readonly pointCloudDetailPixelsState = this.createState<number>({
+        name: 'pointCloudDetailPixels', defaultValue: DEFAULT_POINT_CLOUD_POLICY.detailPixels,
+        schema: pointCloudDetailSchema
+    });
+    readonly pointCloudWorkingMemoryMiBState = this.createState<number>({
+        name: 'pointCloudWorkingMemoryMiB', defaultValue: DEFAULT_POINT_CLOUD_POLICY.workingMemoryMiB,
+        schema: pointCloudWorkingMemorySchema
+    });
+    readonly pointCloudGpuMemoryMiBState = this.createState<number>({
+        name: 'pointCloudGpuMemoryMiB', defaultValue: DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB,
+        schema: pointCloudGpuMemorySchema
+    });
+
+    /** Read the same validated policy for Preferences, rendering and worker admission. */
+    get pointCloudPolicy(): PointCloudPolicy {
+        return {
+            enabled: this.pointCloudDownsamplingEnabledState.getValue(),
+            detailPixels: this.pointCloudDetailPixelsState.getValue(),
+            workingMemoryMiB: this.pointCloudWorkingMemoryMiBState.getValue(),
+            gpuMemoryMiB: this.pointCloudGpuMemoryMiBState.getValue()
+        };
+    }
+
+    /** Validate the whole preference edit before changing any persisted field. */
+    setPointCloudPolicy(policy: PointCloudPolicy): void {
+        const parsed = pointCloudPolicySchema.parse(policy);
+        this.pointCloudDownsamplingEnabledState.next(parsed.enabled);
+        this.pointCloudDetailPixelsState.next(parsed.detailPixels);
+        this.pointCloudWorkingMemoryMiBState.next(parsed.workingMemoryMiB);
+        this.pointCloudGpuMemoryMiBState.next(parsed.gpuMemoryMiB);
+    }
+
     readonly connectionRetryEnabledState = this.createState<boolean>({
         name: 'connectionRetryEnabled', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.enabled, schema: Boolish
     });

@@ -10,6 +10,17 @@ export interface RenderRectangle {
     north: number;
 }
 
+/** Ground coordinates of one polygon: exterior ring followed by its holes. */
+export type LocationPolygon = [number, number][][];
+
+/** Transient area navigation; boundaries are never persisted in camera or search state. */
+export interface LocationArea {
+    rectangle: RenderRectangle;
+    polygons?: LocationPolygon[];
+    label: string;
+    representativePoint?: [number, number];
+}
+
 /** Generic 3D vector payload used by view-agnostic navigation topics. */
 export interface RenderVector3 {
     x: number;

@@ -773,6 +773,30 @@ Search is an ordinary styled presentation:
 There is no search-specific tile model or renderer. See
 [Search Architecture](erdblick-search-architecture.md).
 
+Place-name navigation is separate from feature-search styling. `LocationNavigationService`
+resolves a Plazs boundary, extent or representative point and owns cancellation of pending
+navigation. `deck-location-area-navigation.ts` clips the complete boundary to Mercator,
+splits dateline crossings and fits the active pane. Coordinates remain transient.
+
+`LocationAreaLayer` combines Deck's indexed polygon fill with `LocationOutlineLayer`,
+a WebGL luma model for the 3px aqua ground outline. `location-outline-buffer.ts`
+preprojects every ring vertex and prepares camera-independent miter joins once.
+Each 40-byte record stores high/low Mercator coordinates and join information;
+adjacent segment instances share records, and a disabled closing record separates
+rings. Holes, islands and repeated coordinates remain in the input. The shader
+retains the ordinary path's flat caps, miter limit and pixel-width behavior under
+tilt. Opacity clones and camera changes reuse the buffer; the view removes the
+layer after its fade, and the layer destroys its model and buffer. Keep sublayer
+error callbacks connected to the view's existing boundary fallback.
+
+`playwright/tests/location-outline-comparison.spec.ts` compares actual rendered
+pixels against Deck's PathLayer, including the zoom-12 projection transition,
+dateline repeats, holes and tiny islands. Its fixture also supports optional GPU
+timer queries for complete real boundaries. Compare total outline GPU time per
+frame as well as individual draws: repeated worlds multiply draw calls. This
+optimization exchanges additional static join data for less shader arithmetic;
+it does not move initial geometry preparation or fill tessellation off the UI thread.
+
 ## Hover, selection, and relations
 
 The controller first resolves hover and selection against typed pick entries

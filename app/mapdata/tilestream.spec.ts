@@ -369,6 +369,22 @@ describe('MapTileStreamClient', () => {
         }
     });
 
+    it('rejects an incoming HTTP bundle that continues after EndOfStream', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(packedFrames(
+            jsonFrame(MAP_TILE_STREAM_TYPE_END_OF_STREAM, {}),
+            jsonFrame(MAP_TILE_STREAM_TYPE_STATUS, {type: 'mapget.filter.status', state: 'Success'})
+        ))));
+        const client = new MapTileStreamClientTiles('/filter');
+        try {
+            await expect(client.request([{mapId: 'Map', layerId: 'Layer', tileIds: [7]}],
+                {channels: [{channelId: 'incoming', scope: 'relation', relation: {traversal: 'incoming'}}]}))
+                .rejects.toThrow('after EndOfStream');
+        } finally {
+            client.destroy();
+            vi.unstubAllGlobals();
+        }
+    });
+
     it('chunks one logical pending snapshot with aligned tile-indexed fields', () => {
         const client = new MapTileStreamClient('/interactive');
         const tileStream = client as any;

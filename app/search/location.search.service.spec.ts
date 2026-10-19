@@ -1,5 +1,5 @@
 import "@angular/compiler";
-import {firstValueFrom, of, throwError} from "rxjs";
+import {firstValueFrom, NEVER, of, throwError} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 
 import {LocationSearchProviderConfig} from "../shared/app-config.service";
@@ -37,6 +37,14 @@ const createService = (providers: LocationSearchProviderConfig[] = [
         httpClient
     };
 };
+
+const polygon = {type: "Polygon", coordinates: [[[10, 47], [14, 47], [14, 49], [10, 49], [10, 47]]]};
+const areaMatch = {id: "wof:1", name: "Place", lonLat: [11.5, 48], aabb: [[10, 47], [4, 2]], geometryAvailable: true};
+
+/** Saved search metadata intentionally contains no polygon. */
+function savedArea(overrides: Record<string, unknown> = {}) {
+    return {...areaMatch, providerId: "mapget-offline", providerName: "Place", ...overrides};
+}
 
 describe("LocationSearchService", () => {
     it("normalizes provider responses and creates executable targets", async () => {
@@ -189,78 +197,119 @@ describe("LocationSearchService", () => {
         expect(await firstValueFrom(failing.service.search("munich", 10))).toEqual([]);
     });
 
-    it("restores compact mapget location targets through the /location endpoint", async () => {
+    it("resolves a saved WOF identity directly, without a name query or intermediate point", async () => {
         const {service, httpClient} = createService();
-        httpClient.get.mockReturnValue(of([
-            {
-                id: "geonames:5690557",
-                name: "Munich, US",
-                lonLat: [-98.83926, 46.80667]
-            },
-            {
-                id: "geonames:2867714",
-                name: "Munich, DE",
-                lonLat: [11.57549, 48.13743],
-                countryCode: "DE"
-            }
-        ]));
-
-        const result = await firstValueFrom(
-            service.restoreMapgetLocationTarget("loc:mapget-offline:geonames:2867714", "munich")
-        );
-        const requestOptions = httpClient.get.mock.calls[0][1];
-
-        expect(httpClient.get).toHaveBeenCalledWith("/location", expect.any(Object));
-        expect(requestOptions.params.get("name")).toBe("munich");
-        expect(requestOptions.params.get("limit")).toBe("50");
-        expect(result.error).toBeUndefined();
-        expect(result.target?.id).toBe("loc:mapget-offline:geonames:2867714");
-        expect(result.target?.jump?.("munich", result.target.payload)).toEqual([48.13743, 11.57549, 0]);
+        httpClient.get.mockReturnValue(of([{...areaMatch, geometry: polygon}]));
+        const result = await firstValueFrom(service.resolveNavigation("loc:mapget-offline:wof:1"));
+        const options = httpClient.get.mock.calls[0][1];
+        expect(options.params.get("id")).toBe("wof:1");
+        expect(options.params.has("name")).toBe(false);
+        expect(options.params.has("geometry")).toBe(false);
+        expect(result.area?.polygons).toEqual([polygon.coordinates]);
+        expect(result.point).toBeUndefined();
     });
 
-    it("reports disabled mapget location restore precisely", async () => {
-        const {service, httpClient} = createService([
-            {id: "mapget-offline", name: "Place", url: "/location", headers: {}, enabled: false}
-        ]);
+    it("retains capability and credit but never puts boundary arrays in history payloads", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockReturnValue(of([{...areaMatch, geometry: polygon,
+            attribution: {name: "WOF", url: "https://example.test", licenseUrl: "javascript:bad"}}]));
+        const [match] = await firstValueFrom(service.search("Place", 10));
+        const target = service.createSearchTarget(match);
+        expect(match.geometryAvailable).toBe(true);
+        expect(target.payload).not.toHaveProperty("geometry");
+        expect(target.label).toContain("WOF");
+        expect(match.attribution).toEqual({name: "WOF", url: "https://example.test"});
+        expect(httpClient.get).toHaveBeenCalledOnce();
+    });
 
-        const result = await firstValueFrom(
-            service.restoreMapgetLocationTarget("loc:mapget-offline:geonames:2867714", "munich")
-        );
-
-        expect(result.target).toBeNull();
-        expect(result.error).toContain("mapget /location search is disabled");
+    it("uses extent-only records without fetching geometry, even when geometryAvailable is false", async () => {
+        const {service, httpClient} = createService();
+        const result = await firstValueFrom(service.resolveNavigation("loc:mapget-offline:wof:1",
+            savedArea({geometryAvailable: false})));
+        expect(result.area?.rectangle).toEqual({west: 10, south: 47, east: 14, north: 49});
+        expect(result.area?.polygons).toBeUndefined();
+        expect(result.notice).toBeUndefined();
         expect(httpClient.get).not.toHaveBeenCalled();
     });
 
-    it("reports mapget location endpoint request failures during restore", async () => {
+    it.each([413, 503, 500])("falls back to saved extent on HTTP %s", async status => {
         const {service, httpClient} = createService();
-        httpClient.get.mockReturnValue(throwError(() => ({
-            status: 503,
-            statusText: "Service Unavailable",
-            url: "/location"
-        })));
-
-        const result = await firstValueFrom(
-            service.restoreMapgetLocationTarget("loc:mapget-offline:geonames:2867714", "munich")
-        );
-
-        expect(result.target).toBeNull();
-        expect(result.error).toContain("mapget /location request failed");
-        expect(result.error).toContain("HTTP 503");
-        expect(result.error).toContain("Service Unavailable");
+        httpClient.get.mockReturnValue(throwError(() => ({status})));
+        const result = await firstValueFrom(service.resolveNavigation("loc:mapget-offline:wof:1", savedArea()));
+        expect(result.area?.rectangle.east).toBe(14);
+        expect(result.notice).toContain("bounding extent");
     });
 
-    it("reports compact non-mapget location targets as unsupported", async () => {
-        const {service, httpClient} = createService([
-            {id: "external", name: "External", url: "https://example.test/location", headers: {}, enabled: true}
-        ]);
+    it.each([[], [{...areaMatch, id: "wof:2", geometry: polygon}], [{...areaMatch, geometry: {type: "Polygon", coordinates: [[]]}}]].map(response => ({response})))(
+        "does not accept missing, mismatched or malformed detail geometry", async ({response}) => {
+            const {service, httpClient} = createService();
+            httpClient.get.mockReturnValue(of(response));
+            const result = await firstValueFrom(service.resolveNavigation("loc:mapget-offline:wof:1", savedArea()));
+            expect(result.area?.polygons).toBeUndefined();
+            expect(result.area?.rectangle.west).toBe(10);
+            expect(result.notice).toBeTruthy();
+        });
 
-        const result = await firstValueFrom(
-            service.restoreMapgetLocationTarget("loc:external:place.1", "munich")
-        );
+    it("still checks the extent when fresh details no longer advertise a boundary", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockReturnValue(of([{...areaMatch, geometryAvailable: false}]));
+        expect((await firstValueFrom(service.resolveNavigation("loc:mapget-offline:wof:1", savedArea()))).area).toBeTruthy();
+    });
 
-        expect(result.target).toBeNull();
-        expect(result.error).toContain("only mapget /location results can be restored");
+    it("uses point behavior only after both area representations are unusable", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockReturnValue(throwError(() => new Error("offline")));
+        const result = await firstValueFrom(service.resolveNavigation("loc:mapget-offline:wof:1",
+            savedArea({aabb: [[10, 47], [0, 2]]})));
+        expect(result.point).toEqual([11.5, 48]);
+        expect(result.area).toBeUndefined();
+    });
+
+    it("navigates valid geometry/extent even without a representative point", async () => {
+        const {service, httpClient} = createService();
+        httpClient.get.mockReturnValue(of([{...areaMatch, lonLat: [999, 999], aabb: null, geometry: polygon}]));
+        const result = await firstValueFrom(service.resolveNavigation("loc:mapget-offline:wof:1"));
+        expect(result.area?.polygons).toEqual([polygon.coordinates]);
+        expect(result.area?.representativePoint).toBeUndefined();
+        expect((await firstValueFrom(service.resolveNavigation("loc:mapget-offline:wof:1",
+            savedArea({lonLat: undefined, geometryAvailable: false})))).area).toBeTruthy();
+    });
+
+    it("keeps external providers and legacy saved points on their synchronous point contract", async () => {
+        const {service, httpClient} = createService();
+        const external = savedArea({providerId: "external", id: "wof:1"});
+        expect((await firstValueFrom(service.resolveNavigation("loc:external:wof:1", external))).point).toEqual([11.5, 48]);
+        const legacy = savedArea({id: "geonames:1"});
+        expect((await firstValueFrom(service.resolveNavigation("loc:mapget-offline:geonames:1", legacy))).point).toEqual([11.5, 48]);
+        expect((await firstValueFrom(service.resolveNavigation("loc:mapget-offline:geonames:1"))).error).toBeTruthy();
+        expect(httpClient.get).not.toHaveBeenCalled();
+    });
+
+    it("honors provider headers and filters conflicting selectors from detail requests", async () => {
+        const {service, httpClient} = createService([{id: "mapget-offline", name: "Place", enabled: true,
+            url: "/location", headers: {"X-Example": "value"}, params: {name: "wrong", geometry: true, limit: 50, language: "en"}}]);
+        httpClient.get.mockReturnValue(of([{...areaMatch, geometry: polygon}]));
+        await firstValueFrom(service.resolveNavigation("loc:mapget-offline:wof:1", savedArea()));
+        const options = httpClient.get.mock.calls[0][1];
+        expect(options.params.keys().sort()).toEqual(["id", "language"]);
+        expect(options.headers.get("X-Example")).toBe("value");
+    });
+
+    it("bounds the detail wait and falls back once", async () => {
+        vi.useFakeTimers();
+        try {
+            const {service, httpClient} = createService();
+            httpClient.get.mockReturnValue(NEVER);
+            const result = firstValueFrom(service.resolveNavigation("loc:mapget-offline:wof:1", savedArea()));
+            await vi.advanceTimersByTimeAsync(8001);
+            expect((await result).area).toBeTruthy();
+        } finally { vi.useRealTimers(); }
+    });
+
+    it("reports unavailable identities and respects disabled providers", async () => {
+        const {service, httpClient} = createService([{id: "mapget-offline", name: "Place", enabled: false, url: "/location", headers: {}}]);
+        expect((await firstValueFrom(service.resolveNavigation("loc:mapget-offline:wof:1"))).error).toContain("disabled");
+        expect((await firstValueFrom(service.resolveNavigation("loc:external:1"))).error).toBeTruthy();
         expect(httpClient.get).not.toHaveBeenCalled();
     });
 

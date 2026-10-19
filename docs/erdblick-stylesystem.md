@@ -118,7 +118,45 @@ Enable **Point clouds**, then choose a layer preset:
 
 **Colour by object** and **Subtle overlay** can also be combined in the
 layer's style options. All presets retain depth occlusion and object picking.
-Overlay changes appearance, not the point count or memory requirements.
+Overlay changes point appearance. The style opts into spatial downsampling for
+both `PointCloudObject` and `PointCloudPreview`; picking still identifies the
+containing object. Preferences → Rendering → Point clouds controls adaptive
+spacing (default 2 CSS pixels), browser working memory (512 MiB), and the shared
+GPU allocation allowance (256 MiB). A smaller spacing requests more detail;
+available memory and the backend's delivered sample limit the result.
+
+Custom styles opt in on a top-level, feature-scope, point-only rule:
+
+```yaml
+rules:
+  - geometry: point
+    point-cloud: true
+    point-cloud-max-points: 262144
+    color: "#70D6C7"
+    width: 2
+```
+
+`point-cloud-max-points` is a backend visualization quota per channel/source
+partition, shared across features. Set it to zero for exact backend delivery
+with frontend sampling. Allowed values are 0–1048576. Subrules inherit the
+policy and must not override it. Ordinary point/POI rules remain unchanged.
+Sampling preserves original representatives and stable order within each
+encoding, including duplicates when the input fits its quota. Draco can use a
+different decoded order from native arrays.
+
+The frontend selects before projection and packet generation. It shares
+quotas across visible views/contributions and reuses bounded representatives
+for aligned coarse redraws. Grid spacing changes with hysteresis. Empty cells,
+diagonal thin structures and outliers can yield fewer representatives than the
+quota. Statistics expose delivered/rendered instance counts. The GPU allowance
+accounts requested primitive-buffer capacity, retained old/new buffers and
+observed luma resources; it is not a measurement of available VRAM.
+
+Reducing memory allowances evicts retained cloud input and retires cloud GPU
+contributions before replacement. Workers are recycled when their retained
+WASM heaps cannot fit further work. Pending work waits for the old GPU buffers
+to be safely freed after Deck rebinds its models. Insufficient memory produces an explicit
+error instead of silently treating reduced data as full detail.
 
 <!-- mcp:
 keywords: [style, YAML, search visualization]
@@ -1097,3 +1135,12 @@ transport identity is only `filterId + generation + output tile`.
 Deck picks store `(channel ordinal, typed-entry ordinal)` against the exact
 subset retained by the visualization. Nested render-rule and primitive details
 stay renderer-local.
+
+Point-cloud picking reuses compact worker-produced feature identities, without
+deserializing another full cloud on the main thread. Browser subset routing
+accepts metadata prefixes up to 256 KiB. Increasing the working-memory setting
+retries clouds whose input was rejected; after hiding other clouds, refresh the
+affected layer to retry it. Complete delivered sources within their point quota
+keep all records, including duplicates.
+Hard backend point-cloud resource-limit errors do not trigger automatic tile
+expiry retries. Temporary resource-busy errors keep their retry delay.
