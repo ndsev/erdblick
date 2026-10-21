@@ -5,7 +5,7 @@ export const viewIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)
     .refine(id => !Object.hasOwn(Object.prototype, id), "This view ID is reserved.")
     .meta({ not: { enum: Object.getOwnPropertyNames(Object.prototype) } });
 
-/** Public controls registered by this service; internal slots remain private to persistence. */
+/** MapViewStateService owns logical focus, synchronization policy and navigation preferences. */
 export const viewSettingsControls = {
     focus: {
         name: "app.focusedView",

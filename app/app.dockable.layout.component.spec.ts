@@ -1,6 +1,7 @@
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
-import {BehaviorSubject, Subject} from "rxjs";
+import {Subject} from "rxjs";
+import {stateOwners, testPersistence} from "../test/state-owners";
 import {DockableLayoutComponent} from "./app.dockable.layout.component";
 
 describe("Map attribution", () => {
@@ -11,14 +12,18 @@ describe("Map attribution", () => {
             legalInformationUpdated: new Subject<boolean>()
         };
         if (alreadyLoaded) mapInfo.legalInformationPerMap.set("Example map", new Set([notice]));
+        const persistence = testPersistence();
+        const owners = stateOwners(persistence);
         const layout = new DockableLayoutComponent(
-            {isDockOpen: false, dockOpenState: new BehaviorSubject(false)} as never,
+            persistence,
             {} as never,
             {} as never,
             {sessionsChanged: new Subject<void>()} as never,
             {markForCheck: vi.fn()} as never,
             {} as never,
-            mapInfo as never, {isDockOpen: false, dockOpenState: new BehaviorSubject(false)} as never as never, {isDockOpen: false, dockOpenState: new BehaviorSubject(false)} as never as never
+            mapInfo as never,
+            owners.layout,
+            owners.inspectionState
         );
         const values: string[] = [];
         const subscription = layout["copyright$"].subscribe(value => values.push(value));

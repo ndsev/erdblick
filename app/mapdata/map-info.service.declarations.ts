@@ -8,7 +8,7 @@ import {
 import { viewIdSchema } from "../mapview/map-view-state.service.declarations.js";
 import { boundedUnicodeString } from "../shared/unicode-string.js";
 
-/** Public controls registered by this service; internal slots remain private to persistence. */
+/** MapInfoService coordinates layer, style-option, preset and background assignments against its catalog. */
 export const mapControls = {
     layers: {
         name: "view.layers",

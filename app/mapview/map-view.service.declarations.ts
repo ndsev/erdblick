@@ -12,7 +12,7 @@ export const mapViewActions = {
     }
 } as const;
 
-/** Public controls registered by this service; internal slots remain private to persistence. */
+/** MapViewService combines durable view settings with live renderer navigation and availability. */
 export const mapViewControls = {
     views: {
         name: "app.views",

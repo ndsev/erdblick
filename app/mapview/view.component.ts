@@ -586,8 +586,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                     if (spinner) {
                         spinner.style.display = 'none';
                     }
-                    this.viewSettings.focusedView = this.viewSettings.focusedView.valueOf();
                     const mapView = this.mapView;
+                    this.outlined = this.viewSettings.numViews > 1 &&
+                        mapView?.viewId === this.viewSettings.focusedViewIdState.value;
                     if (!mapView) {
                         this.cdr.markForCheck();
                     } else {

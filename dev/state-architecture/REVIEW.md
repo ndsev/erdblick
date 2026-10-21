@@ -111,6 +111,38 @@ The official focused gate passes 2 files / 165 tests; the full suite passes
 `legacy-osm-before.log`, `legacy-osm-gate.log`, `full-suite-legacy-osm-final.log`
 and `lint-legacy-osm-final.log`. The public catalog remains unchanged.
 
+The subsequent real inspection browser flow found a synchronous rendering race:
+the dock-open slot notified the parent layout before the selection slot had
+projected its runtime loading panel. `detectChanges()` created the inspection
+container against the old empty runtime selection, causing automatic collapse.
+The parent layout now renders at the existing completed-commit boundary. The
+selection bridge still initializes before Angular mounts the UI, and terminal
+empty/failed loads retain their existing automatic-collapse behavior.
+
+Actual owners, the selection bridge and both layout components reproduce the
+failure before the fix, in either observer-registration order. Six regressions
+cover coherent opening/loading, loaded panel locking, terminal empty and failed
+loads, manual close/reopen, selection removal and late completion. The audit of
+other synchronous change-detection consumers found runtime-only HUD/diagnostic
+views and deferred frame/timer work; existing multi-state render consumers
+already use completed observations.
+
+Keyboard commands now resolve the current focused logical view and renderer at
+each key press. They no longer rely on a no-op focus assignment replaying a
+subscription after renderer creation. Three actual registry/owner tests cover
+late attachment, reorder, removal/restoration, renderer replacement and safe
+component teardown. Initial focus outlines are set directly during renderer
+setup. Two obsolete style clone-next replay attempts were also removed, and the
+new action registry's guards, branches and helper comments received a focused
+readability pass.
+
+The focused gate passes 5 files / 134 tests. The final whole suite passes
+128 files / 1,384 tests, including the additional removed/restored keyboard check.
+Lint exits 0 with 0 errors / 8 warnings. Evidence: `dock-lifecycle-before.log`,
+`dock-keyboard-gate.log`, `full-suite-dock-keyboard-final.log` and
+`lint-dock-keyboard-final.log`. The catalog digest remains `e2df8ee059d0`.
+The parent's rebuilt browser rerun is still required to verify real hit testing.
+
 The parent independently verified earlier checkpoints:
 
 - `d7048247`: 180-test state/URL/identity gate, profiling build and native browser

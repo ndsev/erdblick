@@ -195,7 +195,7 @@ export const searchActions = {
     }
 } as const;
 
-/** Public controls registered by this service; internal slots remain private to persistence. */
+/** FeatureSearchService exposes saved query defaults and logical-view selection for result overlays. */
 export const searchControls = {
     searches: {
         name: "app.searches",

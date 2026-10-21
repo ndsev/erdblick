@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Public controls registered by this service; internal slots remain private to persistence. */
+/** RenderPreferencesService exposes rendering quality, worker count and tile budget. */
 export const renderControls = {
     rendering: {
         name: "app.preferences.rendering",

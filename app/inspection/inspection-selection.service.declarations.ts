@@ -72,7 +72,7 @@ export const inspectionActions = {
     }
 } as const;
 
-/** Public controls registered by this service; internal slots remain private to persistence. */
+/** InspectionSelectionService exposes resolved selections alongside their durable panel identities. */
 export const inspectionControls = {
     selections: {
         name: "app.selections",

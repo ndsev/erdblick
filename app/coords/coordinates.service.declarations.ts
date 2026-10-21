@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Public controls registered by this service; internal slots remain private to persistence. */
+/** CoordinatesService exposes marker position and visibility as one coherent assignment. */
 export const coordinateControls = {
     marker: {
         name: "app.marker",

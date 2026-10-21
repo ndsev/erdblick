@@ -177,7 +177,9 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
         }));
         this.searchSessionsSubscription = this.featureSearchService.sessionsChanged.subscribe(() => this.cdr.markForCheck());
         this.observedDockOpen = this.layout.isDockOpen;
-        this.dockOpenSubscription = this.layout.dockOpenState.subscribe(nextDockOpen => {
+        // Synchronous rendering can create the inspection host. Wait until all
+        // state subscribers have projected the selection into runtime panels.
+        this.dockOpenSubscription = this.stateService.observe(() => this.layout.isDockOpen).subscribe(nextDockOpen => {
             if (nextDockOpen === this.observedDockOpen) {
                 return;
             }

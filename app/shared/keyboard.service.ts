@@ -89,7 +89,6 @@ export class KeyboardService {
 
     /** Registers a shortcut and optionally ignores it while the user edits text inputs. */
     registerShortcut(keys: string, callback: (event: KeyboardEvent) => void, preventOnInput: boolean = false): void {
-        // TODO: If registered for the focused view, only apply shortcuts to the view which gets focused on
         this.shortcuts.set(keys, callback);
         if (preventOnInput) {
             this.preventOnInputShortcuts.add(keys);

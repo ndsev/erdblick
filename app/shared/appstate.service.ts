@@ -868,7 +868,6 @@ export class AppStateService implements OnDestroy {
 
                 if (Object.keys(styleOptionEntries).length) {
                     this.deserializeStateSafely(this.styleStorage, styleOptionEntries);
-                    this.styleStorage.next(new Map(this.styleStorage.getValue()));
                 }
             });
         } finally {
@@ -946,7 +945,6 @@ export class AppStateService implements OnDestroy {
         }
         if (Object.keys(styleOptionEntries).length) {
             this.deserializeStateSafely(this.styleStorage, styleOptionEntries);
-            this.styleStorage.next(new Map(this.styleStorage.getValue()));
         }
         this.snapshotReplaced.next();
     }

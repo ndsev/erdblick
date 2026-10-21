@@ -1,4 +1,4 @@
-import { Component, OnDestroy, QueryList, signal, ViewChild, ViewChildren } from "@angular/core";
+import { Component, OnDestroy, signal, ViewChild } from "@angular/core";
 import { Splitter } from "primeng/splitter";
 import { Subscription } from "rxjs";
 import { ViewerUiService } from "../actions/viewer-ui.service";
@@ -7,7 +7,7 @@ import { AppLayoutService } from "../shared/app-layout.service";
 import { AppStateService } from "../shared/appstate.service";
 import { KeyboardService } from "../shared/keyboard.service";
 import { MapViewStateService } from "./map-view-state.service";
-import { MapViewComponent } from "./view.component";
+import { MapViewService } from "./map-view.service";
 
 @Component({
     selector: 'mapview-container',
@@ -33,13 +33,13 @@ import { MapViewComponent } from "./view.component";
     standalone: false
 })
 /**
- * Container that lays out one or two `MapViewComponent`s and routes keyboard focus between them.
- * The extra `version` signal forces splitter recreation when the number of views changes.
+ * Lays out the live map views and routes keyboard commands to the focused renderer.
+ * The extra `version` signal recreates the splitter when ordered view membership changes.
  */
 export class MapViewContainerComponent implements OnDestroy {
-    @ViewChildren(MapViewComponent) mapViewComponents!: QueryList<MapViewComponent>;
     private unregisterResizeTarget?: () => void;
     private readonly subscriptions = new Subscription();
+    private readonly keyboardShortcuts = new Map<string, () => void>();
     protected resizing = false;
 
     /** Binds each real splitter instance; stale snapshot targets retire when view membership changes. */
@@ -78,22 +78,35 @@ export class MapViewContainerComponent implements OnDestroy {
     });
 
     /** Keeps the container model in sync with app state and registers global focused-view shortcuts. */
-    constructor(private stateService: AppStateService, private keyboardService: KeyboardService, private viewerUi: ViewerUiService,
+    constructor(
+        private stateService: AppStateService,
+        private keyboardService: KeyboardService,
+        private viewerUi: ViewerUiService,
         public readonly viewSettings: MapViewStateService,
-        public readonly layout: AppLayoutService) {
+        public readonly layout: AppLayoutService,
+        private readonly mapViews: MapViewService
+    ) {
         this.subscriptions.add(this.viewModel$.subscribe(vm => {
             this.version.set(vm.identity);
         }));
 
-        // Register a shortcut to cycle the view focus.
-        this.keyboardService.registerShortcut("Ctrl+ArrowRight", this.cycleViewFocus.bind(this, 1), true);
-        this.keyboardService.registerShortcut("Ctrl+ArrowLeft", this.cycleViewFocus.bind(this, -1), true);
-
-        // Ensure that keyboard shortcuts are always registered for the focused view.
-        this.subscriptions.add(this.viewSettings.focusedViewChanges.subscribe(_ => {
-            this.setupKeyboardShortcutsForFocusedView();
-        }));
-
+        this.keyboardShortcuts.set("Ctrl+ArrowRight", () => this.cycleViewFocus(1));
+        this.keyboardShortcuts.set("Ctrl+ArrowLeft", () => this.cycleViewFocus(-1));
+        if (!environment.visualizationOnly) {
+            // A renderer may attach after this component or be replaced without
+            // changing focus. Resolve its current lifetime on each key press.
+            const focusedView = () => this.mapViews.renderViewFor(this.viewSettings.focusedViewIdState.value);
+            this.keyboardShortcuts.set("q", () => focusedView()?.zoomIn());
+            this.keyboardShortcuts.set("e", () => focusedView()?.zoomOut());
+            this.keyboardShortcuts.set("w", () => focusedView()?.moveUp());
+            this.keyboardShortcuts.set("a", () => focusedView()?.moveLeft());
+            this.keyboardShortcuts.set("s", () => focusedView()?.moveDown());
+            this.keyboardShortcuts.set("d", () => focusedView()?.moveRight());
+            this.keyboardShortcuts.set("r", () => focusedView()?.resetOrientation());
+        }
+        for (const [key, callback] of this.keyboardShortcuts) {
+            this.keyboardService.registerShortcut(key, callback, true);
+        }
     }
 
     /** Persists a completed human resize, sharing the same local state as explicit size commands. */
@@ -113,6 +126,9 @@ export class MapViewContainerComponent implements OnDestroy {
     ngOnDestroy(): void {
         this.unregisterResizeTarget?.();
         this.subscriptions.unsubscribe();
+        for (const [key, callback] of this.keyboardShortcuts) {
+            this.keyboardService.unregisterShortcut(key, callback);
+        }
     }
 
     /** Cycles focused-view ownership left or right across the currently visible views. */
@@ -120,37 +136,6 @@ export class MapViewContainerComponent implements OnDestroy {
         console.assert(direction === -1 || direction === 1);
         const nextView = (this.viewSettings.focusedView + direction) % this.viewSettings.numViews;
         this.viewSettings.focusedView = nextView < 0 ? this.viewSettings.numViews - 1 : nextView;
-    }
-
-    /**
-     * Registers movement/zoom shortcuts on the renderer instance of the focused view only.
-     * This is rerun whenever focus changes because the keyboard service stores concrete callbacks.
-     */
-    private setupKeyboardShortcutsForFocusedView() {
-        if (environment.visualizationOnly) {
-            return;
-        }
-
-        if (this.mapViewComponents === undefined) {
-            return;
-        }
-
-        for (const viewComponent of this.mapViewComponents) {
-            if (viewComponent.mapView?.viewIndex !== this.viewSettings.focusedView) {
-                continue;
-            }
-            const mapView = viewComponent.mapView;
-            if (mapView) {
-                this.keyboardService.registerShortcut('q', mapView.zoomIn.bind(mapView), true);
-                this.keyboardService.registerShortcut('e', mapView.zoomOut.bind(mapView), true);
-                this.keyboardService.registerShortcut('w', mapView.moveUp.bind(mapView), true);
-                this.keyboardService.registerShortcut('a', mapView.moveLeft.bind(mapView), true);
-                this.keyboardService.registerShortcut('s', mapView.moveDown.bind(mapView), true);
-                this.keyboardService.registerShortcut('d', mapView.moveRight.bind(mapView), true);
-                this.keyboardService.registerShortcut('r', mapView.resetOrientation.bind(mapView), true);
-            }
-            break;
-        }
     }
 
     protected readonly environment = environment;

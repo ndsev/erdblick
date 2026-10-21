@@ -12,7 +12,7 @@ export const inspectionStateActions = {
     }
 } as const;
 
-/** Public controls registered by this service; internal slots remain private to persistence. */
+/** InspectionStateService owns panel presentation and inspection/hover preferences. */
 export const inspectionStateControls = {
     preferences: {
         name: "app.preferences.inspection",
