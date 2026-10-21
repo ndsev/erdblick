@@ -540,8 +540,8 @@ export class MapLayerTree {
                     take(1)
                 )
                 .subscribe((_) => {
-                this.initializeStyleOptions([...this.styleService.styles.values()]);
-                this.configureTreeParameters();
+                    this.initializeStyleOptions([...this.styleService.styles.values()]);
+                    this.configureTreeParameters();
                     if (this.mapsForMapIds.size) this.pruneState?.(this.mapsForMapIds);
                 })
         );
@@ -554,8 +554,10 @@ export class MapLayerTree {
             this.configureTreeParameters();
         }));
         this.subscriptions.add(
-            this.viewState.numViewsState.subscribe((_) => {
-            this.configureTreeParameters();
+            this.viewState.viewIdsState.subscribe(() => {
+                // Membership values are already committed. Refresh positional UI caches
+                // before completed-publication consumers clone the tree or synchronize options.
+                this.configureTreeParameters();
             })
         );
     }
@@ -740,7 +742,7 @@ export class MapLayerTree {
 
     /**
      * Reapplies persisted per-view state and infers unambiguous presets from hydrated option values.
-     * This is called after map/style changes and when the number of views changes.
+     * This is called after map/style changes and whenever ordered view membership changes.
      */
     configureTreeParameters() {
         let defaultVisibility = true;

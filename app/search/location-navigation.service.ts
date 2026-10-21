@@ -114,7 +114,7 @@ export class LocationNavigationService implements OnDestroy {
             this.viewStateOwner.focusedViewId() === target.id &&
             !renderer.isCameraInteractionActive() &&
             deepEquals(renderer.getLiveCameraState(), pose);
-        pending.add(renderer.rendererInvalidated.subscribe(cancel));
+        pending.add(renderer.rendererInvalidated.subscribe({next: cancel, complete: cancel}));
         pending.add(
             this.viewStateOwner.focusedViewState.pipe(skip(1)).subscribe(() => {
                 if (!stillCurrent()) cancel();

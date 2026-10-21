@@ -917,12 +917,21 @@ export class InspectionSelectionService {
                 if (!deepEquals(value, syncBefore)) abort();
             })
         );
-        for (const view of renderers) guards.add(view!.rendererInvalidated.subscribe(abort));
+        for (const view of renderers) {
+            // Destroy completes this stream without an invalidation event. A logical
+            // view can survive a splitter rebuild while this particular camera retires.
+            guards.add(view!.rendererInvalidated.subscribe({next: abort, complete: abort}));
+        }
         try {
             const target = input.target;
             const features =
                 "features" in target ? await this.resolveFeatures(target.features, controller.signal) : undefined;
             const loaded = features ? await this.tileStream.loadFeatures(features, controller.signal) : undefined;
+            if (affected.some((view, index) =>
+                this.viewState.renderViewFor(this.viewStateOwner.indexOf(view.id)) !== renderers[index]
+            )) {
+                abort();
+            }
             controller.signal.throwIfAborted();
             const viewIndex = this.viewStateOwner.requireCurrentView(intended);
             if (features && loaded?.length !== features.length)

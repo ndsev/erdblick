@@ -85,9 +85,12 @@ set diagnosticsLogFilter(value: DiagnosticsLogFilter) {
 ```
 
 The two location arguments are checked against the store's slice/member types.
-`AppState` supplies validation, serialization and notification access; the value
-itself exists only in SignalStore. Defaults are copied once for initialization,
-not on ordinary reads. Treat `getValue()`, signal results and Observable payloads
+`AppState` supplies storage/import codecs and notification access; the value
+itself exists only in SignalStore. Imports validate against the declared schema.
+Internal typed `.next(...)` writes do not automatically run Zod validation;
+owners validate any additional domain constraints in their setters.
+Defaults are copied once for initialization, not on ordinary reads. Treat
+`getValue()`, signal results and Observable payloads
 as immutable: replace an array, object or Map when editing it. Read-only signals
 do not freeze nested objects; the owner methods preserve that discipline.
 
@@ -122,12 +125,17 @@ Signal readers depend on the specific store member. Per-view readers use
 view order changes. One NgRx `watchState` observation fans out synchronous RxJS
 notifications; there is no whole-store watcher for each slot or subscriber.
 
-The dock has one additional synchronous render boundary: `afterStatePublication`
-runs after those codec consumers have updated the inspection loading models.
-The dock then mounts their content and measures the changed map width. Rendering
-inside a dock-value callback could mount an empty inspection model before its
+`afterStatePublication` is the synchronous UI boundary after codec consumers have
+updated runtime projections. The dock then mounts inspection loading models and
+measures the changed map width. Rendering inside a dock-value callback could
+mount an empty inspection model before its
 bridge receives the same patch. Writes from either notification phase remain
 queued until every observer has seen the current revision.
+
+The map tree refreshes cached per-view controls from the authoritative ID slot.
+The map panel clones those controls, and view synchronization reads them, at this
+completed boundary. This remains ordered when a later catalog replaces the tree
+and its subscriptions, including a reorder that keeps the same number of views.
 
 ## Commit Complete Owner Operations
 
@@ -136,9 +144,11 @@ application use `stateService.transaction(...)` themselves. Ordinary UI calls
 therefore publish coherent state, including synchronized views and preset option
 values. An MCP call may nest that transaction without changing the owner rule.
 
-Transactions are synchronous. Validation and preparation happen before the
-SignalStore patch. An exception discards that transaction's writes; nested failure
-restores the enclosing draft. A write made by a synchronous subscriber is queued
+Transactions are synchronous. Imports and external controls/actions validate at
+their entry boundaries; owner setters enforce their own domain checks. The
+transaction prepares owner invariants before the SignalStore patch, but does not
+schema-check each internal typed write. An exception discards that transaction's
+writes; nested failure restores the enclosing draft. A write made by a synchronous subscriber is queued
 for the next coherent publication, so later subscribers still see the current
 revision. A change reverted within the transaction emits nothing. Async owners
 capture a target, await outside the transaction, revalidate it and then commit.
@@ -162,8 +172,13 @@ It does not create a second authoritative positional value.
 
 UI indices are presentation coordinates. Renderers and async operations capture
 an ID plus generation, check it after waits, and resolve its current index only
-when applying work. Reorder retains camera, layers, search references and renderer
-associations. Removal retires the target, even if a later import restores its ID.
+when applying work. Reorder retains camera, layers, style options and search
+references by logical ID. The current PrimeNG splitter rebuilds its panels and
+physical renderers when ordered membership changes, including same-count reorder;
+it does not preserve GPU instances. Replacement renderers register against the
+same live logical identities without incrementing their membership generation.
+Operations holding an actual renderer reject its retirement or replacement.
+Removal retires the logical lifetime, even if a later import restores its ID.
 
 `vid` stores the ordered IDs in the URL. Explicit IDs determine count when `n` is
 absent; an explicit count must match. Malformed or duplicate IDs reject before
@@ -236,6 +251,9 @@ Generic reads and discovery enforce item/byte budgets and report omissions,
 including the first omitted default target and remaining count. Browser and
 native schemas validate control values for both requests and responses. Mapget's
 version-1 artifact still calls its metadata field `channels`.
+
+This variant exposes `tilePullCompression` within `app.preferences.rendering`.
+That control's value schema is the authoritative grouping for the public API.
 
 Browser diagnostics and integration fixtures can call
 `await window.ebDebug.executeAction(name, input)` through that same validated

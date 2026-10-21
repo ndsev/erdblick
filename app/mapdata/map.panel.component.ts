@@ -978,23 +978,38 @@ export class MapPanelComponent {
         distinctUntilChanged()
     );
     private readonly stylePresetProjectionChanges = new BehaviorSubject(0);
+    private readonly treeStateChanges = this.stateService.afterStatePublication.pipe(
+        startWith(undefined),
+        map(() => ({
+            viewIds: this.viewStateOwner.viewIds(),
+            layerPresets: this.layerState.layerPresetSelectionState.appState.signal(),
+            mapPresets: this.layerState.mapPresetSelectionState.appState.signal()
+        })),
+        distinctUntilChanged((previous, current) =>
+            previous.viewIds === current.viewIds &&
+            previous.layerPresets === current.layerPresets &&
+            previous.mapPresets === current.mapPresets
+        )
+    );
+
+    // A replacement catalog registers its tree subscriptions after this panel.
+    // Clone its per-view arrays only after all codec consumers have refreshed them;
+    // unrelated camera or preference edits keep the existing projection.
     readonly mapTreeView$: Observable<MapPanelTreeView> = combineLatest([
         this.mapService.maps$,
         this.appliedMapFilterTextChanges,
         this.styleService.styleGroups,
-        this.viewStateOwner.numViewsState,
+        this.treeStateChanges,
         this.mapPresetService.presets$,
-        this.layerState.layerPresetSelectionState.appState,
-        this.layerState.mapPresetSelectionState.appState,
         this.stylePresetProjectionChanges,
         this.mapService.layerStateChanged.pipe(
-            filter((reason) => reason === "visibility"),
+            filter((reason) => reason === "visibility" || reason === "external-state"),
             startWith("visibility")
         )
     ]).pipe(
-        map(([mapTree, filterText, _styleGroups, numViews]) => ({
+        map(([mapTree, filterText, _styleGroups, state]) => ({
             size: mapTree.size,
-            nodesByView: Array.from({length: numViews}, (_, viewIndex) =>
+            nodesByView: Array.from({length: state.viewIds.length}, (_, viewIndex) =>
                 filterMapTreeNodes(mapTree.nodes, filterText, viewIndex)
             )
         }))

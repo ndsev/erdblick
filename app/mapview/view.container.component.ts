@@ -1,8 +1,7 @@
-import {Component, computed, inject, OnDestroy, signal, ViewChild} from "@angular/core";
+import {Component, computed, inject, OnDestroy, ViewChild} from "@angular/core";
 import {AppLayoutService} from "../shared/app-layout.service";
 import {MapViewStateService} from "./map-view-state.service";
 import {MapViewService} from "./map-view.service";
-import {Subscription} from "rxjs";
 import {KeyboardService} from "../shared/keyboard.service";
 import {environment} from "../environments/environment";
 import {Splitter} from "primeng/splitter";
@@ -16,10 +15,10 @@ import {ViewerUiService} from "../actions/viewer-ui.service";
                 <!-- TODO: Get rid of this, think about using https://github.com/angular-split/angular-split.
                       Unfortunately, the prime-ng splitter seems to be badly maintained 
                       (see https://github.com/primefaces/primeng/issues/13300) -->
-                @for (v of [version()]; track v) {
-                    <p-splitter [panelSizes]="vm.panelSizes" [minSizes]="[5, 5]" class="mb-8" data-testid="mapview-container"
+                @for (layout of [vm]; track layout.membershipKey) {
+                    <p-splitter [panelSizes]="layout.panelSizes" [minSizes]="[5, 5]" class="mb-8" data-testid="mapview-container"
                                 (onResizeStart)="resizing = true" (onResizeEnd)="onSplitResizeEnd($event.sizes)">
-                        @for (id of vm.viewIds; track id) {
+                        @for (id of layout.viewIds; track id) {
                             <ng-template pTemplate="panel">
                                 <map-view [viewId]="id"></map-view>
                             </ng-template>
@@ -33,13 +32,13 @@ import {ViewerUiService} from "../actions/viewer-ui.service";
 })
 /**
  * Container that lays out map views and routes keyboard commands to the focused live renderer.
- * The extra `version` signal forces splitter recreation when the number of views changes.
+ * PrimeNG captures panel templates at initialization, so ordered membership changes
+ * recreate the splitter and its renderers. View owners retain each logical ID's state.
  */
 export class MapViewContainerComponent implements OnDestroy {
     readonly viewStateOwner = inject(MapViewStateService);
     readonly layoutState = inject(AppLayoutService);
     private unregisterResizeTarget?: () => void;
-    private readonly subscriptions = new Subscription();
     private readonly keyboardShortcuts = new Map<string, () => void>();
     protected resizing = false;
 
@@ -62,22 +61,16 @@ export class MapViewContainerComponent implements OnDestroy {
         });
     }
 
-    version = signal(0);
-
     readonly viewModel = computed(() => {
         const ids = this.viewStateOwner.viewIds();
         const storedSizes = this.layoutState.viewPanelSizesState.signal();
-        return {panelCount: ids.length, viewIds: ids,
+        return {panelCount: ids.length, viewIds: ids, membershipKey: ids.join(","),
             panelSizes: ids.length === 2 && storedSizes.length === 2 && storedSizes[0] + storedSizes[1] > 0
                 ? this.normalizePanelSizes(storedSizes) : ids.map(() => 100 / ids.length)};
     });
 
     /** Keeps the container model in sync with app state and registers global focused-view shortcuts. */
     constructor(private mapViews: MapViewService, private keyboardService: KeyboardService, private viewerUi: ViewerUiService) {
-        this.subscriptions.add(this.viewStateOwner.numViewsState.subscribe(count => {
-            this.version.set(count);
-        }));
-
         // Register a shortcut to cycle the view focus.
         this.keyboardShortcuts.set("Ctrl+ArrowRight", () => this.cycleViewFocus(1));
         this.keyboardShortcuts.set("Ctrl+ArrowLeft", () => this.cycleViewFocus(-1));
@@ -116,7 +109,6 @@ export class MapViewContainerComponent implements OnDestroy {
     /** Releases live element registrations and component-lifetime subscriptions. */
     ngOnDestroy(): void {
         this.unregisterResizeTarget?.();
-        this.subscriptions.unsubscribe();
         for (const [key, callback] of this.keyboardShortcuts) {
             this.keyboardService.unregisterShortcut(key, callback);
         }

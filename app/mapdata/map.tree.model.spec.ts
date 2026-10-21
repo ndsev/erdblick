@@ -241,9 +241,11 @@ describe("style option groups", () => {
     it("marks style groups and passes catalog visibility defaults below saved user state", () => {
         const ready = new BehaviorSubject(true);
         const numViewsState = new BehaviorSubject(1);
+        const viewIdsState = new BehaviorSubject(["left"]);
         const stateService = {
             ready,
             numViewsState,
+            viewIdsState,
             initializeMapLayerConfig: vi.fn(() => [{autoLevel: true, level: 13, visible: true}]),
             initializeStyleOptionValues: vi.fn((_mapId, _layerId, _styleId, _optionId, _type, defaultValue) => [defaultValue]),
             getLayerPresetSelection: vi.fn(() => null),
@@ -317,6 +319,7 @@ describe("style option groups", () => {
         tree.destroy();
         styleGroups.next([]);
         numViewsState.next(2);
+        viewIdsState.next(["left", "right"]);
         expect(stateService.initializeStyleOptionValues).toHaveBeenCalledTimes(styleOptionReadsBeforeDestroy);
     });
 });
@@ -363,6 +366,7 @@ describe("layer presets in the map tree", () => {
         const stateService = {
             ready,
             numViewsState,
+            viewIdsState: new BehaviorSubject(["left", "right"]),
             initializeMapLayerConfig: vi.fn(() => [
                 {autoLevel: true, level: 13, visible: true},
                 {autoLevel: true, level: 13, visible: true}
@@ -586,6 +590,7 @@ describe("map presets in the map tree", () => {
         const stateService = {
             ready: new BehaviorSubject(true),
             numViewsState: new BehaviorSubject(1),
+            viewIdsState: new BehaviorSubject(["left"]),
             initializeMapLayerConfig: vi.fn(() => [{autoLevel: true, level: 13, visible: true}]),
             initializeStyleOptionValues: vi.fn(() => [true]),
             getLayerPresetSelection: vi.fn(() => null),

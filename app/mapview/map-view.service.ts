@@ -1,5 +1,5 @@
 import {Injectable, inject} from "@angular/core";
-import {Subject, filter, firstValueFrom, fromEvent, merge, startWith} from "rxjs";
+import {Subject, distinctUntilChanged, filter, firstValueFrom, fromEvent, map, merge, startWith} from "rxjs";
 import {z} from "zod";
 import type {FeatureLayerStyle, Viewport} from "../../build/libs/core/erdblick-core";
 import {appliedAction, rejectAction} from "../actions/action-utils";
@@ -119,6 +119,16 @@ export class MapViewService {
                     });
                 }
             }
+        });
+
+        // A catalog replacement installs a newer MapLayerTree after this service.
+        // Wait for every slot consumer to refresh its positional caches before
+        // synchronization and coverage read those caches for the new view order.
+        this.persistence.afterStatePublication.pipe(
+            startWith(undefined),
+            map(() => this.viewStateOwner.viewIds()),
+            distinctUntilChanged()
+        ).subscribe(() => {
             if (!this.removingView) {
                 this.mapInfo.reapplySyncOptionsForAllViews();
                 this.requestViewRecalculation(ViewRecalculationReason.NumViews);

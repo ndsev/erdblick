@@ -772,6 +772,31 @@ describe("ViewerActionService", () => {
         expect(stream.loadFeatures).not.toHaveBeenCalled();
     });
 
+    it.each(["completion", "replacement"])("cancels pending feature navigation on renderer %s", async retirement => {
+        const {service, state, views, stream, inspections, renderers} = fixture();
+        let resolve!: (value: Array<{mapTileKey: string; featureId: string}>) => void;
+        stream.locateFeature.mockReturnValue(new Promise(done => { resolve = done; }));
+        const moved = vi.fn();
+        views.moveToWgs84PositionTopic.subscribe(moved);
+        const identity = state.views.captureView(1)!;
+        const pending = service.execute("viewer_navigate", {
+            viewId: identity.id,
+            target: {features: [{mapId: "map", featureId: "Road.1"}]}
+        });
+
+        if (retirement === "completion") {
+            renderers[1].rendererInvalidated.complete();
+        } else {
+            views.registerRenderView({...renderers[1], rendererInvalidated: new Subject<void>()} as never);
+        }
+        expect(state.views.isCurrent(identity)).toBe(true);
+        resolve([{mapTileKey: "Features:map:layer:1", featureId: "Road.1"}]);
+
+        await expect(pending).rejects.toMatchObject({detail: {code: "cancelled"}});
+        expect(moved).not.toHaveBeenCalled();
+        expect(inspections.featureSetZoomTarget).not.toHaveBeenCalled();
+    });
+
     it("opens a source-data address losslessly through the ordinary panel state", () => {
         const {service, state} = fixture();
         expect(service.execute("viewer_open_source_data", {source: {mapTileKey: "SourceData:map:layer:1", address: "18446744073709551615"}}))

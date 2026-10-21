@@ -87,13 +87,14 @@ describe("Location navigation ownership", () => {
         expect(h.marker).toHaveBeenCalledExactlyOnceWith([48, 11, 0]);
     });
 
-    it.each(["focus", "gesture", "renderer", "layout", "camera", "reset", "point", "rectangle", "async navigation", "cancel"])(
+    it.each(["focus", "gesture", "renderer", "renderer teardown", "layout", "camera", "reset", "point", "rectangle", "async navigation", "cancel"])(
         "discards delayed responses after %s, without fallback notices", event => {
             const h = setup();
             h.service.navigate("area");
             if (event === "focus") { h.viewState.focusedView = 1; }
             if (event === "gesture") h.diagnostics.cameraInteracting$.next(true);
             if (event === "renderer") h.renderer.rendererInvalidated.next();
+            if (event === "renderer teardown") h.renderer.rendererInvalidated.complete();
             if (event === "layout") h.viewState.retainViews([1], new Map());
             if (event === "camera") { h.renderer.getLiveCameraState = () => ({destination: {lon: 3, lat: 4, alt: 500}, orientation: {heading: 0, pitch: -90, roll: 0}}); h.viewState.cameraViewDataState.next(0, {...h.viewState.cameraViewDataState.getValue(0), destination: {lon: 3, lat: 4, alt: 500}}); }
             if (event === "reset") h.persistence.stateApplied.next();
