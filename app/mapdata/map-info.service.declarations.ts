@@ -8,7 +8,7 @@ export const mapControls = {
     layers: {
         name: "view.layers",
         
-        description: "Read-only layer overview; mapId/layerId selectors also include hidden layers. To change visibility or level, use viewer_set_control with the singular view.layer channel.",
+        description: "Read-only layer overview; mapId/layerId selectors also include hidden layers. To change visibility or level, use viewer_set_control with the singular view.layer control.",
         selectorSchema: z.strictObject({viewId: viewIdSchema}).extend({mapId: identifierSchema.optional(), layerId: identifierSchema.optional()}),
         valueSchema: z.array(z.strictObject({
     mapId: identifierSchema,
@@ -23,7 +23,7 @@ export const mapControls = {
     },
     layer: {
         name: "view.layer",
-        description: "Read/write one layer's visibility, requested level and automatic level policy. Select viewId/mapId/layerId. Read this channel first, then assign {visible, level, autoLevel}, preserving fields you do not want to change.",
+        description: "Read/write one layer's visibility, requested level and automatic level policy. Select viewId/mapId/layerId. Read this control first, then assign {visible, level, autoLevel}, preserving fields you do not want to change.",
         selectorSchema: z.strictObject({viewId: viewIdSchema}).extend({mapId: identifierSchema, layerId: identifierSchema}),
         valueSchema: z.strictObject({visible: z.boolean(), level: z.number().int().min(0).max(15), autoLevel: z.boolean()}),
         readable: true, writable: true,
@@ -31,7 +31,7 @@ export const mapControls = {
     },
     styleOption: {
         name: "view.styleOption",
-        description: "One applicable style option, validated against its declared type. For a named look such as Cinematic or Lane Topology, discover kind:presets and use view.layerPreset to apply all supporting options together; a same-named boolean alone may not enable the needed geometry.",
+        description: "One applicable style option, validated against its declared type. For a named look such as Cinematic or Lane Topology, call viewer_list_presets and use view.layerPreset to apply all supporting options together; a same-named boolean alone may not enable the needed geometry.",
         selectorSchema: z.strictObject({viewId: viewIdSchema}).extend({mapId: identifierSchema, layerId: identifierSchema}).extend({styleId: identifierSchema, optionId: identifierSchema}),
         valueSchema: z.union([z.boolean(), z.number(), boundedUnicodeString(4096)]),
         readable: true, writable: true,

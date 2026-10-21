@@ -1622,7 +1622,8 @@
                 "sourceData": {
                   "mapTileKey": "SourceData:Map:Layer:1",
                   "address": "18446744073709551615"
-                }
+                },
+                "lifetime": 1
               }
             ]
           }

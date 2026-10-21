@@ -33,13 +33,13 @@ sourceDataSelectionMapIds
 @Injectable({providedIn: "root"})
 export class AppUrlStateService {
     /** Validates identity first, so a malformed share link cannot partially replace state. */
-    hydrate(params: Params, identitiesPrepared = false): void {
+    hydrate(params: Params): void {
         if (!Object.keys(params).length) return;
         if (Array.isArray(params["vid"])) throw new Error("The share link contains more than one view ID list.");
         const encodedIds = firstParamValue(params, "vid");
         const ids = encodedIds === undefined ? undefined : encodedIds.split(",").map(decodeURIComponent);
         const count = firstParamValue(params, "n") ?? ids?.length ?? this.viewSettings.numViews;
-        const nextIds = this.viewSettings.prepareImportedViews(count, ids, !identitiesPrepared);
+        const nextIds = this.viewSettings.prepareImportedViews(count, ids, false);
         this.viewSettings.importViews(nextIds);
         this.layerState.hasAuthoritativeUrlLayerList = firstParamValue(params, "l") !== undefined;
         if (firstParamValue(params, "v2") === "1") this.hydrateFromUrlV2(params);
@@ -51,6 +51,7 @@ export class AppUrlStateService {
 
     /** Prepares one shared identity mapping before importing positional snapshot values. */
     prepareSnapshot(values: Record<string, unknown>, replaceMissing: boolean): Record<string, unknown> {
+        if (!replaceMissing && !Object.hasOwn(values, "viewIds") && !Object.hasOwn(values, "numberOfViews")) return values;
         const ids = values["viewIds"];
         const count = values["numberOfViews"] ?? (Array.isArray(ids) ? ids.length : replaceMissing ? 1 : this.viewSettings.numViews);
         const nextIds = this.viewSettings.prepareImportedViews(count, ids, replaceMissing);
@@ -59,20 +60,34 @@ export class AppUrlStateService {
     }
 
     /** Applies config-versus-user storage choices before any positional value is decoded. */
-    prepareStoredViews(values: Map<string, string>, params: Params): void {
+    prepareStoredViews(values: Map<string, string>, params: Params, configKeys: ReadonlySet<string> = new Set()): void {
         if (Array.isArray(params["vid"])) throw new Error("The share link contains more than one view ID list.");
         const urlIds = firstParamValue(params, "vid");
         const savedIds = values.get("viewIds");
         const savedCount = values.get("numberOfViews");
-        const hasUrl = Object.keys(params).length > 0;
-        const ids = urlIds !== undefined ? urlIds.split(",").map(decodeURIComponent)
-            : hasUrl || savedIds === undefined ? undefined : JSON.parse(savedIds);
+        let ids = urlIds !== undefined ? urlIds.split(",").map(decodeURIComponent)
+            : savedIds === undefined ? undefined : JSON.parse(savedIds);
+        const configuredCount = savedCount === undefined && configKeys.has("numberOfViews");
         const count = firstParamValue(params, "n") ?? (urlIds !== undefined && Array.isArray(ids) ? ids.length
-            : savedCount !== undefined ? JSON.parse(savedCount) : Array.isArray(ids) ? ids.length : this.viewSettings.numViews);
-        this.viewSettings.importViews(this.viewSettings.prepareImportedViews(count, ids, hasUrl));
+            : savedCount !== undefined ? JSON.parse(savedCount) : configuredCount ? this.viewSettings.numViews
+                : Array.isArray(ids) ? ids.length : this.viewSettings.numViews);
+        // Legacy links omit identities. Preserve saved/current identities, resizing only
+        // for the effective count; explicit lists still require an exact count match.
+        if (urlIds === undefined && ids !== undefined) ids = this.viewSettings.resizeStoredViews(ids, count);
+        this.viewSettings.importViews(this.viewSettings.prepareImportedViews(count, ids, false));
         // The shared identity preparation consumed these two compatibility keys.
         values.delete("viewIds");
         values.delete("numberOfViews");
+    }
+
+    /** Prepares replacement identities before navigation can reset or mutate the current page. */
+    prepareUrl(params: Params, resetMissing: boolean): Params {
+        if (Array.isArray(params["vid"])) throw new Error("The share link contains more than one view ID list.");
+        const raw = firstParamValue(params, "vid");
+        const ids = raw === undefined ? undefined : raw.split(",").map(decodeURIComponent);
+        const count = firstParamValue(params, "n") ?? ids?.length ?? (resetMissing ? 1 : this.viewSettings.numViews);
+        const prepared = this.viewSettings.prepareImportedViews(count, ids, resetMissing);
+        return {...params, n: String(prepared.length), vid: prepared.join(",")};
     }
 
     /** Applies the old OSM alias only when no explicit background preference exists. */

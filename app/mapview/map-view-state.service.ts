@@ -60,6 +60,13 @@ export class MapViewStateService {
             !replaceAbsent && this.viewIds[index] ? this.viewIds[index] : crypto.randomUUID());
     }
 
+    /** A changed config-owned count keeps existing saved identities and adds only the new views. */
+    resizeStoredViews(rawIds: unknown, count: unknown): ViewId[] {
+        const ids = viewIdsSchema.parse(rawIds);
+        const effectiveCount = z.coerce.number().int().min(1).max(32).parse(count);
+        return Array.from({length: effectiveCount}, (_, index) => ids[index] ?? crypto.randomUUID());
+    }
+
     /** Installs import identities before decoding per-view values. It does not copy old view contents. */
     importViews(ids: readonly ViewId[], inheritPositions = true): void {
         viewIdsSchema.parse(ids);
@@ -73,13 +80,13 @@ export class MapViewStateService {
     }
 
     private readonly membershipOwners = new Set<{
-        seed(previousCount: number, nextCount: number): void;
+        seed(previousCount: number, nextCount: number, sourceIndex: number): void;
         retain(indices: readonly number[]): void;
         import?(previous: readonly ViewId[], ids: readonly ViewId[]): void;
     }>();
 
     /** Registers another owner's view-indexed values without a circular DI dependency. */
-    registerMembershipOwner(owner: {seed(previousCount: number, nextCount: number): void; retain(indices: readonly number[]): void; import?(previous: readonly ViewId[], ids: readonly ViewId[]): void}): () => void {
+    registerMembershipOwner(owner: {seed(previousCount: number, nextCount: number, sourceIndex: number): void; retain(indices: readonly number[]): void; import?(previous: readonly ViewId[], ids: readonly ViewId[]): void}): () => void {
         this.membershipOwners.add(owner);
         return () => this.membershipOwners.delete(owner);
     }
@@ -301,12 +308,12 @@ export class MapViewStateService {
     }
 
 
-    /** Seeds newly created views with defaults copied from the first view. */
-    private seedAdditionalViews(previousViewCount: number, nextViewCount: number): void {
+    /** Seeds every new view from the explicitly selected source, or the preceding last view. */
+    private seedAdditionalViews(previousViewCount: number, nextViewCount: number, sourceIndex = previousViewCount - 1): void {
         for (let target = previousViewCount; target < nextViewCount; target++) {
-            for (const state of this.mapViewStates) state.next(target, cloneStateValue(state.getValue(target - 1)));
+            for (const state of this.mapViewStates) state.next(target, cloneStateValue(state.getValue(sourceIndex)));
         }
-        for (const owner of this.membershipOwners) owner.seed(previousViewCount, nextViewCount);
+        for (const owner of this.membershipOwners) owner.seed(previousViewCount, nextViewCount, sourceIndex);
     }
 
 
@@ -344,6 +351,19 @@ export class MapViewStateService {
             this.viewIdsState.next([...this.viewIds, ...Array.from({length: count - previous}, () => crypto.randomUUID())]);
             this.seedAdditionalViews(previous, count);
         });
+    }
+
+    /** Adds one logical view and seeds every participating owner in the same commit. */
+    addView(sourceId: ViewId): ViewId {
+        const sourceIndex = this.indexOfView(sourceId);
+        const previous = this.numViews;
+        if (previous >= 32) throw new Error("The viewer supports at most 32 views.");
+        const id = crypto.randomUUID();
+        this.persistence.transaction(() => {
+            this.viewIdsState.next([...this.viewIds, id]);
+            this.seedAdditionalViews(previous, previous + 1, sourceIndex);
+        });
+        return id;
     }
 
     get mapZoomStep() {return this.mapZoomStepState.getValue();}

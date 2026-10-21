@@ -14,7 +14,7 @@ const targetSchemas = controls.map(control => control.selectorSchema.extend({con
 const targetSchema = z.union(targetSchemas);
 const writableTargetSchema = z.union(controls.filter(control => control.writable)
     .map(control => control.selectorSchema.extend({control: z.literal(control.name)})));
-const omissionSchema = z.strictObject({target: targetSchema, reason: z.enum(["item_limit", "byte_limit", "text_limit"])});
+const omissionSchema = z.strictObject({target: targetSchema, reason: z.enum(["item_limit", "byte_limit", "text_limit"]), omittedCount: z.number().int().positive().optional()});
 const descriptorSchema = z.strictObject({
     name: controlNames, description: z.string(), selectorSchema: z.record(z.string(), z.unknown()),
     valueSchema: z.record(z.string(), z.unknown()), readable: z.boolean(), writable: z.boolean(),

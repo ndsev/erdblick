@@ -44,7 +44,7 @@ class AppConfigServiceStub {
     getExtensionModuleId = vi.fn().mockReturnValue(null);
 }
 
-const createService = (config: any = {}) => {
+const createService = (config: any = {}, initialize = true) => {
     const mapService = new MapInfoServiceStub();
     const inspectionSelection = new InspectionSelectionServiceStub();
     const infoService = new InfoMessageServiceStub();
@@ -66,10 +66,20 @@ const createService = (config: any = {}) => {
         configService as any, stateService as any as never, stateService as any as never, Object.assign(stateService as any, {viewIdAt: (index: number) => String(index)}) as never, stateService as any as never
     );
 
+    if (initialize) service.initialize();
     return {service, mapService, inspectionSelection, infoService, menuService, stateService, searchService, configService};
 };
 
 describe('JumpTargetService', () => {
+
+    it('does not construct the native parser before explicit startup', () => {
+        const {service, mapService} = createService({}, false);
+        expect(mapService.tileLayerParser.filterFeatureJumpTargets).not.toHaveBeenCalled();
+        service.initialize();
+        expect(mapService.tileLayerParser.filterFeatureJumpTargets).toHaveBeenCalledTimes(1);
+        service.initialize();
+        expect(mapService.tileLayerParser.filterFeatureJumpTargets).toHaveBeenCalledTimes(1);
+    });
 
     it('loads jump-target plugin and merges its targets into jumpTargets', async () => {
         const pluginTargets = [

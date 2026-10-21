@@ -6,7 +6,7 @@ import {viewIdSchema} from "../mapview/map-view-state.service.declarations.js";
 
 export const inspectionStateActions = {
     closeInspection: {name: "viewer_close_inspection", 
-        description: "Remove one inspection, including locked panels. This also removes its feature selection, highlight and displayed ID. It is not a way to hide settings dialogs. For a screenshot requiring the selected feature or its ID, retain that inspection and close only the obstructing settings UI. Other inspections are preserved.",
+        description: "Remove one inspection, including locked panels. Read panelId and lifetime from app.selections; supplying lifetime rejects stale selections. This also removes its feature selection, highlight and displayed ID. It is not a way to hide settings dialogs. For a screenshot requiring the selected feature or its ID, retain that inspection and close only the obstructing settings UI. Other inspections are preserved.",
         mutation: true,
         inputSchema: z.strictObject({panelId: indexSchema, lifetime: indexSchema.optional()}), outputSchema: z.strictObject({status: z.literal("applied"), changed: z.boolean()})
     }

@@ -527,8 +527,8 @@ export class FeatureSearchService {
         public readonly inspectionState: InspectionStateService,
         public readonly viewSettings: MapViewStateService) {
         viewSettings.registerMembershipOwner({
-            seed: (previous, count) => {
-                const sourceId = viewSettings.viewIdAt(previous - 1);
+            seed: (previous, count, sourceIndex) => {
+                const sourceId = viewSettings.viewIdAt(sourceIndex);
                 const added = viewSettings.viewIds.slice(previous, count);
                 this.featureSearchState.next(this.featureSearchState.value.map(entry => entry.selectedViewIds.includes(sourceId)
                     ? {...entry, selectedViewIds: [...entry.selectedViewIds, ...added]} : entry));

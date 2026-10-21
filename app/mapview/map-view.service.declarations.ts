@@ -26,7 +26,7 @@ export const mapViewControls = {
         viewId: viewIdSchema,
         projection: z.enum(["2d", "3d"]),
         navigationMode: z.enum(["map", "first_person", "unavailable"])
-    })).max(100)
+    })).max(32)
 }),
         readable: true, writable: false,
         persistence: "runtime-summary", synchronization: "none"

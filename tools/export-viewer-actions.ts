@@ -3,7 +3,8 @@ import {mkdirSync, writeFileSync} from "node:fs";
 import {canonicalViewerContractJson, viewerActionCatalog, viewerJsonSchema} from "../app/actions/viewer-action.contract.js";
 import {viewerActionClientMessageSchema, viewerActionServerMessageSchema, viewerMcpInfoSchema} from "../app/actions/viewer-action-relay.contract.js";
 
-// This program imports only pure contract definitions. Never bootstrap Angular/WASM to export tools.
+// Owner-local declarations have no runtime side effects, so this build collector
+// can export the trusted manifest without constructing browser service instances.
 const catalog = viewerActionCatalog();
 const canonical = canonicalViewerContractJson(catalog);
 const catalogId = `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;

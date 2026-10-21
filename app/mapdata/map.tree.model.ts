@@ -740,21 +740,25 @@ export class MapLayerTree {
      * Reapplies persisted per-view state and infers unambiguous presets from hydrated option values.
      * This is called after map/style changes and when the number of views changes.
      */
-    configureTreeParameters() {
+    configureTreeParameters(): void {
+        this.stateService.withSystemStateMutation(() => this.applyTreeParameters());
+    }
+
+    private applyTreeParameters(): void {
         let defaultVisibility = true;
         for (const mapOrGroupItem of this.nodes) {
             for (const featureLayer of mapOrGroupItem.allFeatureLayers()) {
                 const defaultLevel = featureLayer.info.zoomLevels.length
                     ? featureLayer.info.zoomLevels[0]
                     : undefined;
-                featureLayer.viewConfig = this.layerState.mapLayerConfig(
+                featureLayer.viewConfig = this.layerState.materializeLayerDefaults(
                     featureLayer.mapId,
                     featureLayer.info.layerId,
                     defaultVisibility && (featureLayer.info.defaultVisible ?? true),
                     defaultLevel);
                 const options = layerStyleOptions(featureLayer);
                 for (const option of options) {
-                    option.value = this.layerState.styleOptionValues(
+                    option.value = this.layerState.materializeStyleOptionDefaults(
                         featureLayer.mapId,
                         featureLayer.id,
                         option.shortStyleId,

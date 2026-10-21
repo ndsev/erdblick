@@ -302,9 +302,23 @@ export class InspectionStateService {
     setSelection(
         newSelection: TileFeatureId[] | SelectedSourceData,
         id?: number,
-        forceNewPanel: boolean = false,
-        createUndockedFeaturePanel: boolean = false
-    ) {
+        forceNewPanel = false,
+        createUndockedFeaturePanel = false
+    ): number | undefined {
+        let panelId: number | undefined;
+        this.persistence.transaction(() => {
+            panelId = this.updateSelection(newSelection, id, forceNewPanel, createUndockedFeaturePanel);
+        });
+        return panelId;
+    }
+
+    /** Applies panel reuse, focus and dock rules inside the caller's coordinated edit. */
+    private updateSelection(
+        newSelection: TileFeatureId[] | SelectedSourceData,
+        id: number | undefined,
+        forceNewPanel: boolean,
+        createUndockedFeaturePanel: boolean
+    ): number | undefined {
         this.persistence.requestHistoryEntry();
         let allPanels = structuredClone(this.selectionState.getValue());
         const originPanel = id !== undefined ? allPanels.find(panel => panel.id === id) : undefined;
@@ -422,7 +436,8 @@ export class InspectionStateService {
                 this.persistence.replaceHistoryEntry();
                 return;
             }
-            const newId = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
+            const newId = Math.max(this.lastIssuedPanelId + 1, 1 + Math.max(-1, ...allPanels.map(panel => panel.id)));
+            this.lastIssuedPanelId = newId;
             const newPanelUndocked = isSourceDataSelection || createUndockedFeaturePanel;
             allPanels.push({
                 id: newId,
@@ -1016,6 +1031,7 @@ export class InspectionStateService {
     }
 
     private nextPanelLifetime = 0;
+    private lastIssuedPanelId = -1;
     private readonly panelLifetimes = new Map<number, number>();
 
     panelLifetime(panelId: number): number | undefined { return this.panelLifetimes.get(panelId); }

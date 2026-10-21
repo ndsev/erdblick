@@ -716,6 +716,7 @@ export class MapInfoService {
             candidate.styleId === ref.styleId && candidate.id === ref.presetId) : undefined;
         if (ref && !preset) return false;
         const options = layerStyleOptions(layer);
+        this.commitPresetEdit(() => {
         const changed: StyleOptionNode[] = [];
         for (const value of preset?.values ?? []) {
             const option = options.find(candidate => candidate.styleId === preset!.styleId && candidate.id === value.optionId);
@@ -726,6 +727,7 @@ export class MapInfoService {
         }
         this.maps.setLayerPresetSelection(viewIndex, mapId, layerId, ref);
         this.applyPresetChanges(changed, viewIndex, [{mapId, layerId}]);
+        });
         return true;
     }
 
@@ -734,13 +736,16 @@ export class MapInfoService {
         const map = this.maps.maps.get(mapId);
         if (!map || viewIndex < 0 || viewIndex >= this.viewSettings.numViews) return false;
         if (!presetId) {
-            this.maps.setMapPresetSelection(viewIndex, mapId, null);
-            this.maps.reconcilePresetSelections();
+            this.commitPresetEdit(() => {
+                this.maps.setMapPresetSelection(viewIndex, mapId, null);
+                this.maps.reconcilePresetSelections();
+            });
             return true;
         }
         const preset = map.mapPresets.find(candidate => candidate.id === presetId);
         const components = preset ? this.maps.resolveMapPresetComponents(map, preset) : undefined;
         if (!preset || !components || (this.isSyncOptionsForViewEnabled(viewIndex) && this.maps.mapPresetHasSyncConflict(map, preset))) return false;
+        this.commitPresetEdit(() => {
         const changed: StyleOptionNode[] = [];
         for (const component of components) {
             const options = layerStyleOptions(component.layer);
@@ -755,7 +760,17 @@ export class MapInfoService {
         }
         this.maps.setMapPresetSelection(viewIndex, mapId, preset.id);
         this.applyPresetChanges(changed, viewIndex, components.map(component => ({mapId, layerId: component.layer.id})));
+        });
         return true;
+    }
+
+    /** Restores cached tree values if a prepared option write fails before publication. */
+    private commitPresetEdit(edit: () => void): void {
+        try { this.stateService.transaction(edit); }
+        catch (error) {
+            this.maps.configureTreeParameters();
+            throw error;
+        }
     }
 
     /** Applies one atomic collection of option mutations and performs synchronization once. */
@@ -763,7 +778,7 @@ export class MapInfoService {
         const directNodes = optionNodes.filter(optionNode => optionNode.value.length > viewIndex);
         const sourceLayers = new Set(directNodes.map(optionNode =>
             `${optionNode.mapId}\u0000${optionNode.layerId}`));
-        this.applyStyleOptionTransaction(directNodes, viewIndex, sourceLayers, true);
+        this.commitPresetEdit(() => this.applyStyleOptionTransaction(directNodes, viewIndex, sourceLayers, true));
     }
 
     /** Applies preset-owned changes while synchronizing every component source layer once. */
@@ -936,7 +951,7 @@ export class MapInfoService {
         actions.registerAction(mapActions.listPresets, input => this.listPresets(input));
         actions.registerControl(mapControls.layers, {
             read: (target, context) => this.layerSummary(target, context),
-            defaultTargets: () => this.viewSettings.viewIds.slice(0, 14).map(viewId => ({viewId}))
+            defaultTargets: () => this.viewSettings.viewIds.map(viewId => ({viewId}))
         });
         // Layer visibility/level assignment also needs renderer auto-level policy;
         // MapViewService binds that control alongside its ordinary layer operations.

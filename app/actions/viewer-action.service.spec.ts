@@ -57,12 +57,15 @@ function setup() {
     Object.defineProperties(maps, Object.fromEntries(Object.entries(mapRuntime).map(([key, value]) => [key, {value, configurable: true, writable: true}])));
     const config = Object.assign(owners.configService, {getBackgroundLayers: () => [{id: 'osm', name: 'OSM', type: 'xyz' as const, url: 'never exposed'}]});
     const views = new MapViewService(state, maps, owners.renderPreferences, owners.viewSettings, config);
-    const renderers = [0, 1].map(viewIndex => ({
-        viewIndex, viewId: owners.viewSettings.viewIdAt(viewIndex), isAvailable: vi.fn(() => true),
-        getLiveCameraState: vi.fn((): CameraViewState | undefined => structuredClone(owners.viewSettings.cameraViewDataState.getValue(viewIndex))),
+    const renderers = [0, 1].map(viewIndex => {
+        const viewId = owners.viewSettings.viewIdAt(viewIndex);
+        return {
+        viewIndex, viewId, isAvailable: vi.fn(() => true),
+        getLiveCameraState: vi.fn((): CameraViewState | undefined => structuredClone(owners.viewSettings.cameraViewDataState.getValue(viewId))),
         isFirstPersonViewActive: vi.fn(() => false), isCameraInteractionActive: vi.fn(() => false), rendererInvalidated: new Subject<void>(),
         captureCanvas: vi.fn(() => ({canvas: document.createElement('canvas'), dataUrl: 'data:image/png;base64,AAAA'}))
-    }));
+    };
+    });
     renderers.forEach(renderer => views.registerRenderView(renderer as never));
     const searches = Object.assign(owners.searchService, {
         getSession: vi.fn<() => FeatureSearchSession | undefined>(() => undefined), getSessions: vi.fn(() => []),
@@ -636,6 +639,17 @@ describe("ViewerActionService", () => {
         expect(styles.toggleStyle).not.toHaveBeenCalled();
     });
 
+    it("reports the actual dropped targets when the default overview exceeds its bound", () => {
+        const {service, state} = fixture();
+        stateOwners(state).viewSettings.numViews = 32;
+        const result = read(service);
+        expect(result.values).toHaveLength(32);
+        const omission = result.omissions.find(item => item.omittedCount);
+        expect(omission?.omittedCount).toBe(35);
+        expect(result.values.some(item => JSON.stringify(item.target) === JSON.stringify(omission?.target))).toBe(false);
+        expect(result.complete).toBe(false);
+    });
+
     it("guards focus and view creation/removal with stable identities", () => {
         const {service, state} = fixture();
         expect(service.execute("viewer_set_control", {target: {control: "app.focusedView"}, value: "view-1"})).toMatchObject({changed: true});
@@ -644,6 +658,9 @@ describe("ViewerActionService", () => {
         expect(() => service.execute("viewer_manage_view", {operation: "create", viewId: "view-0"})).toThrow(ViewerActionFailure);
         service.execute("viewer_manage_view", {operation: "create", viewId: "view-1"});
         expect(stateOwners(state).viewSettings.numViews).toBe(2);
+        service.execute("viewer_manage_view", {operation: "create", viewId: "view-1"});
+        expect(stateOwners(state).viewSettings.numViews).toBe(3);
+        stateOwners(state).viewSettings.numViews = 32;
         expect(() => service.execute("viewer_manage_view", {operation: "create", viewId: "view-1"})).toThrow(ViewerActionFailure);
     });
 

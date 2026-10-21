@@ -713,6 +713,7 @@ export class InspectionSelectionService {
         if (panelId !== undefined && !panels.some(panel => panel.id === panelId)) rejectAction("The inspection no longer exists");
         const runtime = new Map(this.selectionTopic.value.map(panel => [panel.id, panel]));
         const stream = this.tileStream;
+        const state = this.inspectionState;
         function* summaries() {
             for (const panel of panels) {
                 if (panelId !== undefined && panel.id !== panelId) continue;
@@ -722,7 +723,7 @@ export class InspectionSelectionService {
                         yield identity ? {...feature, mapId: identity[0], layerId: identity[1], partition: identity[2]} : feature;
                     }
                 }
-                yield {panelId: panel.id, locked: panel.locked, undocked: panel.undocked,
+                yield {panelId: panel.id, lifetime: state.panelLifetime(panel.id)!, locked: panel.locked, undocked: panel.undocked,
                     loading: panel.sourceData ? null : runtime.has(panel.id) ? !!runtime.get(panel.id)!.loading : true,
                     features: context.collect(features(), 32 * 1024),
                     ...(panel.sourceData ? {sourceData: {mapTileKey: panel.sourceData.mapTileKey,
@@ -769,7 +770,8 @@ export class InspectionSelectionService {
             signal?.throwIfAborted();
             if (changed) rejectAction("Inspections changed while locating the feature", "cancelled");
         } finally { guard.unsubscribe(); }
-        return this.ngZone.run(() => {
+        let result!: ActionOutput<typeof inspectionActions.inspect>;
+        this.ngZone.run(() => this.stateService.transaction(() => {
             let newPanelId: number | undefined;
             if (input.panelId !== undefined || input.newPanel) {
                 newPanelId = this.inspectionState.setSelection(features, input.panelId, input.newPanel ?? false);
@@ -780,9 +782,10 @@ export class InspectionSelectionService {
             if (input.color !== undefined) panels.forEach(panel => this.inspectionState.setInspectionPanelColor(panel.id, input.color!));
             const represented = features.filter(feature => panels.some(panel => panel.features.some(candidate =>
                 candidate.mapTileKey === feature.mapTileKey && candidate.featureId === feature.featureId)));
-            return {status: "applied", panelIds: panels.map(panel => panel.id), features: represented,
+            result = {status: "applied", panelIds: panels.map(panel => panel.id), features: represented,
                 complete: represented.length === features.length, ...(represented.length < features.length ? {reason: "item_limit" as const} : {})};
-        });
+        }));
+        return result;
     }
 
 }

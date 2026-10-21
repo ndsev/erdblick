@@ -117,13 +117,6 @@ export class JumpTargetService {
         public readonly inspectionState: InspectionStateService,
         public readonly viewSettings: MapViewStateService,
         private readonly views: MapViewService) {
-        this.loadConfiguredJumpTargets();
-
-        // Filter out feature jump targets based on search value.
-        this.targetValueSubject.subscribe(_ => {
-            this.update();
-        })
-
         // Forward marked cartesian position to AppStateService.
         this.markedPosition.subscribe(position => {
             if (position.length >= 2) {
@@ -135,6 +128,16 @@ export class JumpTargetService {
                 ));
             }
         });
+    }
+
+    private initialized = false;
+
+    /** Starts parser-backed suggestions after config and the native library are ready. */
+    initialize(): void {
+        if (this.initialized) return;
+        this.initialized = true;
+        this.loadConfiguredJumpTargets();
+        this.targetValueSubject.subscribe(() => this.update());
     }
 
     /** Loads optional jump-target plugins declared in the shared frontend config. */

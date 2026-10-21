@@ -48,6 +48,7 @@ export const inspectionControls = {
         selectorSchema: z.strictObject({panelId: indexSchema.optional()}),
         valueSchema: z.array(z.strictObject({
     panelId: indexSchema,
+    lifetime: indexSchema.describe("Current panel lifetime; supply it to viewer_close_inspection to reject a reused panel identity."),
     locked: z.boolean(),
     undocked: z.boolean(),
     loading: z.boolean().nullable().describe("Feature resolution state; null when owned by a source-data panel."),

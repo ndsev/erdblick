@@ -741,7 +741,7 @@ export class MapViewService {
         actions.registerControl(mapViewControls.views, {read: () => this.viewSummary(), defaultTargets: () => [{}]});
         actions.registerControl(mapViewControls.camera, {
             read: ({viewId}) => this.readCamera(viewId), write: ({viewId}, value) => this.assignCamera(viewId, value),
-            defaultTargets: () => this.viewSettings.viewIds.slice(0, 14).map(viewId => ({viewId}))
+            defaultTargets: () => this.viewSettings.viewIds.map(viewId => ({viewId}))
         });
         actions.registerControl(mapViewControls.projection, {
             read: ({viewId}) => this.viewSettings.mode2dState.getValue(this.requireViewIndex(viewId)) ? "2d" : "3d",
@@ -789,10 +789,12 @@ export class MapViewService {
             if (this.viewSettings.numViews === 1) rejectAction("Cannot remove the last view", "invalid_arguments");
             this.removeView(index);
         } else {
-            if (this.viewSettings.numViews >= 2) rejectAction("The comparison layout already has two views");
+            if (this.viewSettings.numViews >= 32) rejectAction("The viewer already has 32 views");
             this.stateService.transaction(() => {
                 this.viewSettings.focusedView = index;
-                this.viewSettings.numViews += 1;
+                const liveCamera = this.renderViewFor(input.viewId)?.getLiveCameraState();
+                if (liveCamera) this.viewSettings.cameraViewDataState.next(input.viewId, liveCamera);
+                this.viewSettings.addView(input.viewId);
             });
         }
         return applied();

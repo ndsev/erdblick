@@ -11,7 +11,7 @@ export const viewIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)
 export const viewSettingsControls = {
     focus: {
         name: "app.focusedView",
-        description: "Focused source view; requires the observed layout revision.",
+        description: "Focused source view, addressed by its current logical view ID.",
         selectorSchema: z.strictObject({}),
         valueSchema: viewIdSchema,
         readable: true, writable: true,

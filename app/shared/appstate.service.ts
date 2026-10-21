@@ -19,7 +19,8 @@ export interface AppUrlProjection {
     hydrate(params: Params, identitiesPrepared?: boolean): void;
     initialize(params: Params): void;
     prepareSnapshot(values: Record<string, unknown>, replaceMissing: boolean): Record<string, unknown>;
-    prepareStoredViews(values: Map<string, string>, params: Params): void;
+    prepareUrl(params: Params, resetMissing: boolean): Params;
+    prepareStoredViews(values: Map<string, string>, params: Params, configKeys: ReadonlySet<string>): void;
 }
 
 
@@ -254,6 +255,9 @@ export class AppStateService implements OnDestroy {
             throw new Error("URL state cannot be replaced before AppStateService is ready.");
         }
 
+        // Resolve and validate identities before either changing the browser URL
+        // or resetting state. Invalid explicit IDs must preserve the prior page.
+        const prepared = this.urlProjection!.prepareUrl(params, resetMissing);
         this.cancelPendingStateSync();
         await this.router.navigate([], {
             queryParams: params,
@@ -263,7 +267,7 @@ export class AppStateService implements OnDestroy {
         if (resetMissing) {
             this.withHydration(() => this.applyNormalizedSnapshot({}, true));
         }
-        this.applyHydratedUrlState(params);
+        this.applyHydratedUrlState(prepared);
     }
 
     /**
@@ -630,7 +634,7 @@ export class AppStateService implements OnDestroy {
                 }
                 values.set(state.name, raw);
             }
-            this.urlProjection?.prepareStoredViews(values, params);
+            this.urlProjection?.prepareStoredViews(values, params, this.currentConfigDefaultKeys);
             // MapViewState and any identity-bearing owner values use the same prepared IDs.
             for (const state of this.statePool.values()) {
                 if (state === this.styleStorage) continue;
@@ -825,7 +829,9 @@ export class AppStateService implements OnDestroy {
                     continue;
                 }
                 state.applySnapshotValue(value);
-                appliedStateKeys.add(key);
+                // Identity preparation may supply dependent codec values. Only
+                // explicitly configured keys acquire configuration ownership.
+                if (Object.hasOwn(normalizedResult.normalized!, key)) appliedStateKeys.add(key);
             }
 
             if (Object.keys(styleOptionEntries).length) {

@@ -102,7 +102,7 @@ export class AppActionService {
         const values: z.infer<typeof controlActions.getControls.outputSchema>["values"] = [];
         const omissions: z.infer<typeof controlActions.getControls.outputSchema>["omissions"] = [];
         let budget = VIEWER_ACTION_RESULT_BYTES - 48 * 1024;
-        if (requested.length > targets.length) omissions.push({target: targets[targets.length - 1], reason: "item_limit"});
+        if (requested.length > targets.length) omissions.push({target: requested[targets.length], reason: "item_limit", omittedCount: requested.length - targets.length});
         for (const target of targets) {
             if (budget < 1024) { omissions.push({target, reason: "byte_limit"}); continue; }
             const {binding, selector} = this.resolve(target);

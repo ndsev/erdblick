@@ -215,6 +215,7 @@ export const initializeServices = () => {
     // Every public declaration must be bound by its actual owner before either MCP
     // adapter advertises the build contract. Late registration is rejected.
     const actions = inject(AppActionService);
+    const jumps = inject(JumpTargetService);
     for (const owner of [
         configService, styleService, inspectionSelection, featureSearch, diagnostics, coordService, urlState,
         inject(MapViewService), inject(MapViewStateService), inject(MapInfoService),
@@ -243,6 +244,7 @@ export const initializeServices = () => {
         mapPresetService.initialize();
         updateGlobalSpinner('Initializing map data');
         await tileStream.initialize();
+        jumps.initialize();
         inspectionSelection.initialize();
         featureSearch.initialize();
         diagnostics.initialize();

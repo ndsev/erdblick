@@ -1,6 +1,6 @@
+import "@angular/compiler";
 import {stateOwners} from '../../test/state-owners';
 import {RenderPreferencesService} from "../mapview/render-preferences.service";
-import "@angular/compiler";
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { Subject } from 'rxjs';
 
@@ -896,7 +896,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        const config = stateOwners(service).layerState.mapLayerConfig('Classic-2.5.2-Sample', 'NDS.Classic-BMD');
+        const config = stateOwners(service).layerState.materializeLayerDefaults('Classic-2.5.2-Sample', 'NDS.Classic-BMD');
         expect(config).toEqual([
             {autoLevel: true, visible: false, level: 13},
         ]);
@@ -1155,7 +1155,7 @@ describe('AppStateService', () => {
         stateOwners(service).viewSettings.viewTileGridAutoLevelState.next(0, true);
         stateOwners(service).viewSettings.viewTileGridColorState.next(0, '123abc');
         stateOwners(service).viewSettings.viewTileGridOpacityState.next(0, 64);
-        stateOwners(service).layerState.mapLayerConfig('m1', 'layerA', false, 9);
+        stateOwners(service).layerState.materializeLayerDefaults('m1', 'layerA', false, 9);
         stateOwners(service).layerState.setMapLayerConfig('m1', 'layerA', [{ autoLevel: false, visible: true, level: 7 }]);
 
         stateOwners(service).viewSettings.numViews = 2;
@@ -1764,14 +1764,14 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('initializes layer config with fallback values when first requested', () => {
+    it('materializes discovered layer defaults explicitly', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
-        const config = stateOwners(service).layerState.mapLayerConfig('m1', 'layerA', false, 9);
+        const config = stateOwners(service).layerState.materializeLayerDefaults('m1', 'layerA', false, 9);
 
         expect(config).toEqual([
             { autoLevel: true, visible: false, level: 9 },
@@ -1794,11 +1794,11 @@ describe('AppStateService', () => {
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         // Prime internal state so indices exist before updating.
-        stateOwners(service).layerState.mapLayerConfig('m2', 'layerB');
+        stateOwners(service).layerState.materializeLayerDefaults('m2', 'layerB');
 
         stateOwners(service).layerState.setMapLayerConfig('m2', 'layerB', [{ autoLevel: false, visible: false, level: 7 }]);
 
-        const config = stateOwners(service).layerState.mapLayerConfig('m2', 'layerB');
+        const config = stateOwners(service).layerState.materializeLayerDefaults('m2', 'layerB');
 
         expect(config).toEqual([
             { autoLevel: false, visible: false, level: 7 },
@@ -3014,6 +3014,67 @@ describe('AppStateService', () => {
 
         service.ngOnDestroy();
         routerStub.events.complete();
+    });
+
+    it.each([false, true])('merges changed config view count with stored identities and user ownership: user=%s', async userOwned => {
+        async function launch(count: number) {
+            const router = createRouterStub();
+            const registry = new AppStateService(router as unknown as Router, infoServiceStub());
+            const owners = stateOwners(registry);
+            expect(registry.seedConfigDefaultState({numberOfViews: count}, `config-${count}`)).toEqual([]);
+            router.events.next(new NavigationEnd(1, '/', '/'));
+            await flushMicrotasks();
+            return {registry, owners, router};
+        }
+        const first = await launch(1);
+        if (userOwned) {
+            first.owners.viewSettings.numViews = 3;
+            await flushMicrotasks();
+        }
+        const previous = [...first.owners.viewSettings.viewIds];
+        first.registry.ngOnDestroy();
+        first.router.events.complete();
+        const second = await launch(2);
+        expect(second.owners.viewSettings.numViews).toBe(userOwned ? 3 : 2);
+        expect(second.owners.viewSettings.viewIds.slice(0, previous.length)).toEqual(previous);
+        const meta = JSON.parse(localStorage.getItem('erdblickConfigDefaultStateMeta')!);
+        expect(meta.entries.numberOfViews.owner).toBe(userOwned ? 'user' : 'config');
+        expect(meta.entries.viewIds?.owner).not.toBe('config');
+        second.registry.ngOnDestroy();
+        second.router.events.complete();
+    });
+
+    it('does not claim view ownership when config supplies only an unrelated marker default', async () => {
+        const router = createRouterStub();
+        const registry = new AppStateService(router as unknown as Router, infoServiceStub());
+        const owners = stateOwners(registry);
+        const ids = owners.viewSettings.viewIds;
+        expect(registry.seedConfigDefaultState({marker: true}, 'marker-only')).toEqual([]);
+        expect(owners.viewSettings.viewIds).toBe(ids);
+        const meta = JSON.parse(localStorage.getItem('erdblickConfigDefaultStateMeta')!);
+        for (const key of ['viewIds', 'numberOfViews', 'focus']) expect(meta.entries[key]).toBeUndefined();
+        registry.ngOnDestroy();
+        router.events.complete();
+    });
+
+    it.each(['same,same', 'constructor', '', ['a', 'b']])('rejects invalid replacement identities before reset or navigation: %s', async vid => {
+        const router = createRouterStub();
+        const registry = new AppStateService(router as unknown as Router, infoServiceStub());
+        const owners = stateOwners(registry);
+        router.events.next(new NavigationEnd(1, '/', '/'));
+        await flushMicrotasks();
+        owners.viewSettings.numViews = 2;
+        owners.coordinates.marker = true;
+        await flushMicrotasks();
+        const before = registry.exportSnapshot();
+        const url = window.location.href;
+        vi.mocked(router.navigate).mockClear();
+        await expect(registry.replaceUrlState({v2: '1', n: '2', vid, m: '0'}, true)).rejects.toThrow();
+        expect(registry.exportSnapshot()).toEqual(before);
+        expect(window.location.href).toBe(url);
+        expect(router.navigate).not.toHaveBeenCalled();
+        registry.ngOnDestroy();
+        router.events.complete();
     });
 
     it('applies config default state for a fresh profile before hydration', async () => {

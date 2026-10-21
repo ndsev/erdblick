@@ -70,6 +70,23 @@ describe('logical view identity', () => {
         expect(searches.featureSearches[0].selectedViewIndices).toEqual(selected ? [0, 1] : []);
     });
 
+    it.each([false, true])('copies the chosen source into a third view with search membership=%s', selected => {
+        const {registry, owners: {viewSettings: views, layerState: layers, searchService: searches}} = setup();
+        views.numViews = 2;
+        const [source, other] = views.viewIds;
+        layers.materializeLayerDefaults('Map', 'Lane');
+        layers.layerVisibilityState.next(source, [true]);
+        layers.layerVisibilityState.next(other, [false]);
+        layers.stylesState.next(new Map([['Map/Lane/style/labels', {[source]: true, [other]: false}]]));
+        searches.addFeatureSearch({query: 'true', selectedViewIndices: selected ? [0] : [1]});
+        const added = views.addView(source);
+        expect(views.cameraViewDataState.getValue(added)).toEqual(views.cameraViewDataState.getValue(source));
+        expect(layers.layerVisibilityState.getValue(added)).toEqual([true]);
+        expect(layers.stylesState.value.get('Map/Lane/style/labels')?.[added]).toBe(true);
+        expect(searches.featureSearchState.value[0].selectedViewIds.includes(added)).toBe(selected);
+        registry.ngOnDestroy();
+    });
+
     it('rejects old async targets after removing and restoring the same URL ID', () => {
         const {registry, owners} = setup();
         const views = new MapViewService(registry, {layerStateChanged: new Subject(), reapplySyncOptionsForAllViews() {}, maps: {maps: new Map()}} as never,
@@ -134,7 +151,7 @@ describe('logical view identity', () => {
         expect(targets).toEqual(matches ? [0, 2] : [1]);
     });
 
-    it.each([{external: 'keep'}, {lon: '12,13'}])('preserves omitted storage values under a partial legacy URL: %j', params => {
+    it.each([{}, {external: 'keep'}, {lon: '12,13'}])('preserves omitted storage values under a partial legacy URL: %j', params => {
         localStorage.setItem('numberOfViews', '2');
         localStorage.setItem('viewIds', JSON.stringify(['old-a', 'old-b']));
         localStorage.setItem('cameraView', JSON.stringify([{lon: 1, lat: 40, alt: 111}, {lon: 2, lat: 50, alt: 222}]));
@@ -145,7 +162,7 @@ describe('logical view identity', () => {
         const {registry, owners: {viewSettings: views, layerState: layers}} = setup(params);
         registry.initializePersistence();
         expect(views.viewIds).toHaveLength(2);
-        expect(views.viewIds).not.toEqual(['old-a', 'old-b']);
+        expect(views.viewIds).toEqual(['old-a', 'old-b']);
         expect(views.cameraViewDataState.getValue(0).destination).toMatchObject({lat: 40, alt: 111});
         expect(views.cameraViewDataState.getValue(1).destination).toMatchObject({lat: 50, alt: 222});
         expect(layers.layerVisibilityState.getValue(0)).toEqual([true]);
@@ -153,6 +170,20 @@ describe('logical view identity', () => {
         expect(layers.layerZoomLevelState.getValue(1)).toEqual([12]);
         expect(layers.styles.get('Map/Lane/STY0/active')).toEqual(['1', '0']);
         registry.ngOnDestroy();
+    });
+
+    it('retains identity and omitted values across partial legacy navigation, extending only new views', () => {
+        const {registry, owners: {viewSettings: views, layerState: layers, url}} = setup();
+        views.importViews(['first', 'second']);
+        views.cameraViewDataState.next('second', {...views.cameraViewDataState.getValue('second'), destination: {lon: 11, lat: 22, alt: 33}});
+        layers.layerNamesState.next(['Map/Lane']);
+        layers.layerVisibilityState.next('second', [false]);
+        registry.transaction(() => url.hydrate({n: '3', lon: '1,2,3'}));
+        expect(views.viewIds.slice(0, 2)).toEqual(['first', 'second']);
+        expect(views.cameraViewDataState.getValue('second').destination).toEqual({lon: 2, lat: 22, alt: 33});
+        expect(layers.layerVisibilityState.getValue('second')).toEqual([false]);
+        const replacement = url.prepareUrl({n: '2'}, true);
+        expect(replacement['vid'].split(',')).not.toContain('first');
     });
 
     it.each(['same,same', 'bad!id,other', '__proto__,other', 'constructor,other', 'toString,other', 'one', ['one,two', 'three,four']])('rejects malformed explicit IDs without changing valid state: %j', vid => {

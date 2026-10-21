@@ -15,13 +15,13 @@ import { parseMapPartitionKey } from "./partition.model";
 @Injectable({providedIn: "root"})
 export class MapLayerStateService {
     /** Seeds all persisted layer settings and option values before a new view becomes observable. */
-    private seedViews(previous: number, count: number): void {
+    private seedViews(previous: number, count: number, sourceIndex: number): void {
         for (let target = previous; target < count; target++) {
-            for (const state of this.viewValues) state.next(target, structuredClone(state.getValue(target - 1)));
+            for (const state of this.viewValues) state.next(target, structuredClone(state.getValue(sourceIndex)));
         }
         this.stylesState.replacePositional(new Map([...this.styles].map(([key, values]) => {
             const next = [...values];
-            for (let target = previous; target < count; target++) next[target] = next[target - 1];
+            for (let target = previous; target < count; target++) next[target] = next[sourceIndex];
             return [key, next];
         })));
     }
@@ -42,7 +42,7 @@ export class MapLayerStateService {
         private readonly viewSettings: MapViewStateService,
         private readonly styleService: StyleService,
         private readonly inspectionState: InspectionStateService) {
-        viewSettings.registerMembershipOwner({seed: (previous, count) => this.seedViews(previous, count), retain: indices => this.retainViews(indices),
+        viewSettings.registerMembershipOwner({seed: (previous, count, sourceIndex) => this.seedViews(previous, count, sourceIndex), retain: indices => this.retainViews(indices),
             import: (previous, ids) => {
                 for (const state of this.viewValues) state.rekey(previous, ids);
                 this.stylesState.rekey(previous, ids);
@@ -130,45 +130,31 @@ export class MapLayerStateService {
     }
 
 
-    /** Returns per-view visibility and level configuration for one map/layer pair. */
-    mapLayerConfig(mapId: string, layerId: string, fallbackVisibility: boolean = true, fallbackLevel: number = 13): LayerViewConfig[] {
-        if (isSourceOrMetaData(layerId)) {
-            return [];
-        }
-        const mapLayerId = `${mapId}/${layerId}`;
-        const names = this.layerNames;
-        let layerIndex = names.findIndex(ml => ml === mapLayerId);
-        const missingFromAuthoritativeUrl = layerIndex === -1 && this.hasAuthoritativeUrlLayerList;
-        if (layerIndex === -1) {
-            layerIndex = names.length;
-            this.layerNamesState.next([...names, mapLayerId]);
-        }
-        const result = new Array<LayerViewConfig>();
-        const layerStateValue = <T>(state: MapViewState<Array<T>>, viewIndex: number, defaultValue: T) => {
-            const resultForView = [...state.getValue(viewIndex)];
-            while (resultForView.length <= layerIndex) {
-                resultForView.push(defaultValue);
-            }
-            state.next(viewIndex, resultForView);
-            return resultForView[layerIndex];
-        }
-
-        for (let viewIndex = 0; viewIndex < this.viewSettings.numViewsState.getValue(); viewIndex++) {
-            result.push({
-                autoLevel: layerStateValue(this.layerAutoZoomLevelState, viewIndex, true),
-                visible: layerStateValue(
-                    this.layerVisibilityState,
-                    viewIndex,
-                    missingFromAuthoritativeUrl ? false : fallbackVisibility),
-                level: layerStateValue(this.layerZoomLevelState, viewIndex, fallbackLevel),
-            });
-        }
-        return result;
+    /** Reads one layer's effective values without extending storage or taking ownership. */
+    mapLayerConfig(mapId: string, layerId: string, fallbackVisibility = true, fallbackLevel = 13): LayerViewConfig[] {
+        if (isSourceOrMetaData(layerId)) return [];
+        const index = this.layerNames.indexOf(`${mapId}/${layerId}`);
+        const visible = index < 0 && this.hasAuthoritativeUrlLayerList ? false : fallbackVisibility;
+        return this.viewSettings.viewIds.map((_, viewIndex) => ({
+            autoLevel: this.layerAutoZoomLevelState.getValue(viewIndex)[index] ?? true,
+            visible: this.layerVisibilityState.getValue(viewIndex)[index] ?? visible,
+            level: this.layerZoomLevelState.getValue(viewIndex)[index] ?? fallbackLevel
+        }));
     }
 
+    /** Catalog discovery materializes defaults explicitly as system state, never as a user edit. */
+    materializeLayerDefaults(mapId: string, layerId: string, fallbackVisibility = true, fallbackLevel = 13): LayerViewConfig[] {
+        const values = this.mapLayerConfig(mapId, layerId, fallbackVisibility, fallbackLevel);
+        this.persistence.withSystemStateMutation(() => this.setMapLayerConfig(mapId, layerId, values, fallbackLevel));
+        return values;
+    }
 
     /** Writes per-view visibility and level configuration for one map/layer pair. */
-    setMapLayerConfig(mapId: string, layerId: string, viewConfig: LayerViewConfig[], fallbackLevel: number = 13) {
+    setMapLayerConfig(mapId: string, layerId: string, viewConfig: LayerViewConfig[], fallbackLevel: number = 13): void {
+        this.persistence.transaction(() => this.writeMapLayerConfig(mapId, layerId, viewConfig, fallbackLevel));
+    }
+
+    private writeMapLayerConfig(mapId: string, layerId: string, viewConfig: LayerViewConfig[], fallbackLevel: number): void {
         if (isSourceOrMetaData(layerId) || viewConfig.length < this.viewSettings.numViewsState.getValue()) {
             return;
         }
@@ -197,46 +183,27 @@ export class MapLayerStateService {
     }
 
 
-    /** Returns or seeds the stored values for one style option across all views. */
+    /** Reads stored or catalog-default options without extending storage. */
     styleOptionValues(
-        mapId: string,
-        layerId: string,
-        shortStyleId: string,
-        optionId: string,
-        optionType: string,
-        defaultValue: string|number|boolean
-    ): (string|number|boolean)[] {
-        const mapLayerId = `${mapId}/${layerId}`;
-        const layerIndex = this.layerNames.indexOf(mapLayerId);
-        if (layerIndex === -1) {
-            throw new Error(`[AppStateService] Unknown map layer '${mapLayerId}' when reading style option values`);
-        }
-
+        mapId: string, layerId: string, shortStyleId: string, optionId: string,
+        optionType: string, defaultValue: string | number | boolean
+    ): (string | number | boolean)[] {
         const key = this.stylesState.styleOptionKey(mapId, layerId, shortStyleId, optionId);
-        const views = this.viewSettings.numViewsState.getValue();
-
-        let values = this.styles.get(key);
-        if (!values) {
-            values = Array.from({length: views}, () => defaultValue);
-            this.stylesState.replacePositional(new Map(this.styles).set(key, values));
-            return values.slice();
-        }
-
-        // Ensure array length matches the number of views
-        if (values.length < views) {
-            const pad = Array.from({length: views - values.length}, () => defaultValue);
-            values = values.concat(pad);
-            this.stylesState.replacePositional(new Map(this.styles).set(key, values));
-        } else if (values.length > views) {
-            values = values.slice(0, views);
-            this.stylesState.replacePositional(new Map(this.styles).set(key, values));
-        }
-
-        // Trigger a URL update, as we might have added style option values for some view(s).
-        
-        return values.map(v => this.stylesState.coerceOptionValue(v, optionType));
+        const values = this.styles.get(key);
+        return this.viewSettings.viewIds.map((_, index) =>
+            this.stylesState.coerceOptionValue(values?.[index] ?? defaultValue, optionType));
     }
 
+    /** Resolves one discovered option and stores missing defaults under system ownership. */
+    materializeStyleOptionDefaults(
+        mapId: string, layerId: string, shortStyleId: string, optionId: string,
+        optionType: string, defaultValue: string | number | boolean
+    ): (string | number | boolean)[] {
+        const values = this.styleOptionValues(mapId, layerId, shortStyleId, optionId, optionType, defaultValue);
+        this.persistence.withSystemStateMutation(() =>
+            this.setStyleOptionValues(mapId, layerId, shortStyleId, optionId, values));
+        return values;
+    }
 
     /**
      * Set style option values for a specific map layer style combination.
