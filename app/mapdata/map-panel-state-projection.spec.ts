@@ -38,6 +38,9 @@ function fixture() {
         {} as never, persistence, styles, presets, {} as never,
         owners.layerState, owners.viewSettings, owners.inspectionState
     );
+    // The runtime coordinator exists before the network catalog installs its
+    // replacement tree. Its completed observer must still see refreshed caches.
+    const views = new MapViewService(persistence, maps, owners.renderPreferences, owners.viewSettings, owners.configService);
     const metadata: MapInfoItem = {
         mapId: "Map", sourceId: "Map", stringPoolId: "Map", maxParallelJobs: 0,
         extraJsonAttachment: {}, addOn: false,
@@ -56,7 +59,6 @@ function fixture() {
     maps.maps.destroy();
     maps.maps$.next(tree);
     cleanup.push(() => tree.destroy());
-    const views = new MapViewService(persistence, maps, owners.renderPreferences, owners.viewSettings, owners.configService);
     const panel = new MapPanelComponent(
         maps, views, {} as never, persistence, { registerShortcut: vi.fn() } as never,
         owners.configService, {} as never, owners.searchService, {} as never, {} as never,
@@ -108,7 +110,9 @@ describe("map panel owner projections", () => {
             { visible: true, level: 12, autoLevel: true }
         ]);
         test.owners.layerState.setStyleOptionValues("Map", "Roads", "roads", "details", [true, false]);
+        test.owners.layerState.setLayerSyncOption(1, true);
         test.maps.configureTreeParameters();
+        const applySync = vi.spyOn(test.maps, "applySyncOptionsForView");
 
         test.owners.viewSettings.importViews([right, "left"]);
 
@@ -116,6 +120,7 @@ describe("map panel owner projections", () => {
             { visible: true, level: 12, autoLevel: true, details: false },
             { visible: false, level: 8, autoLevel: false, details: true }
         ]);
+        expect(applySync).toHaveBeenCalledWith(0);
     });
 
     it("refreshes cloned controls after an external-state replacement with unchanged membership", () => {

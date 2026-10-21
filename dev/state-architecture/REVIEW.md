@@ -165,6 +165,11 @@ The focused gate passes 4 files / 28 tests; the whole official suite passes
 unchanged. The canonical guide now explicitly records the current splitter cost:
 ordered membership changes preserve logical values but recreate renderer
 components, so their new generations reject captured obsolete work.
+The follow-up fixture creates the runtime coordinator before the replacement
+catalog tree, matching startup, and enables retained per-view option sync during
+reorder. All three cases pass (`map-panel-startup-order-gate.log`); no additional
+production change was needed because tree slot observers precede completed
+runtime synchronization.
 
 The parent independently verified earlier checkpoints:
 
