@@ -119,8 +119,10 @@ export class MapViewService {
                     });
                 }
             }
-            this.mapInfo.reapplySyncOptionsForAllViews();
-            this.requestViewRecalculation(ViewRecalculationReason.NumViews);
+            if (!this.removingView) {
+                this.mapInfo.reapplySyncOptionsForAllViews();
+                this.requestViewRecalculation(ViewRecalculationReason.NumViews);
+            }
         });
         this.viewStateOwner.lod3TileThresholdState.subscribe(() =>
             this.requestViewRecalculation(ViewRecalculationReason.LodThreshold)

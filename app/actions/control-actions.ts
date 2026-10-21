@@ -89,7 +89,7 @@ export function createControlActions(controls: readonly ControlDeclaration[]) {
             description:
                 "Discover explicit owner controls, their selectors, value schemas and persistence. Use stable view IDs from app.views for view-scoped controls.",
             inputSchema: z.strictObject({
-                controls: z.array(boundedUnicodeString(128, true)).max(32).optional(),
+                controls: z.array(z.enum(controls.map(control => control.name))).max(32).optional(),
                 prefix: boundedUnicodeString(128).optional()
             }),
             outputSchema: z.strictObject({

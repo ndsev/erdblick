@@ -1,3 +1,7 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {CoordinateJumpService} from "./coordinate-jump.service";
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import type {AppConfigService, ExternalViewerConfig} from "../shared/app-config.service";
@@ -43,11 +47,12 @@ function createService() {
     const configService = {
         snapshot: {externalViewers: PROVIDERS}
     };
+    const injector = ownerTestInjector([CoordinateJumpService, {provide: MapViewStateService, useValue: state}]);
     return {
-        service: new ExternalViewerService(
+        service: runInInjectionContext(injector, () => new ExternalViewerService(
             (state) as never,
             configService as unknown as AppConfigService
-        ),
+        )),
         state
     };
 }

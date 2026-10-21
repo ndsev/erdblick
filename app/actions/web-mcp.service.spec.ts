@@ -55,8 +55,8 @@ describe("WebMcpService", () => {
         expect([...tools.keys()].sort()).toEqual([...Object.keys(viewerActions), "mapget_list_sources"].sort());
         expect(tools.has("viewer_list_sessions")).toBe(false);
         const input = {targets: []};
-        await tools.get("viewer_get_app_state")!.execute(input, {signal: new AbortController().signal});
-        expect(actions.invokeLocal).toHaveBeenCalledWith("viewer_get_app_state", input, expect.any(AbortSignal));
+        await tools.get("viewer_get_controls")!.execute(input, {signal: new AbortController().signal});
+        expect(actions.invokeLocal).toHaveBeenCalledWith("viewer_get_controls", input, expect.any(AbortSignal));
         const [url, request] = fetchMock.mock.calls[0];
         expect(url.pathname).toMatch(/\/mcp\/browser$/);
         expect(request.credentials).toBe("same-origin");

@@ -91,7 +91,7 @@ export class MapLayerStateService {
         "layerAutoZoomLevel"
     );
 
-    readonly stylesState = this.stateService.registerStyles();
+    readonly stylesState = this.stateService.registerStyles(this.stateService.bind("layers", "options"));
 
     readonly layerPresetSelectionState = this.stateService.registerView(
         ownerState.layerPresetSelection,
@@ -394,222 +394,29 @@ export class MapLayerStateService {
         });
     }
 
-    /** Removes persisted map/layer/style references that no longer exist in the loaded data. */
-    prune(presentMaps: Map<string, MapTreeNode>, presentStyles: Map<string, ErdblickStyle>) {
-        return this.stateService.withSystemStateMutation(() => {
-            this.stateService.transaction(() => {
-                // 1) Build sets of present maps, layers and styles
-                const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
-                const presentSelectionLayerIds = new Set<string>(); // includes SourceData layers
-                const presentMapIds = new Set<string>();
-                const mapsWithKnownFeatureLayers = new Set<string>();
-                const mapsWithKnownSelectionLayers = new Set<string>();
-                for (const [mapId, mapNode] of presentMaps.entries()) {
-                    presentMapIds.add(mapId);
-                    // Use feature layers (exclude SourceData) via children
-                    for (const layer of mapNode.children) {
-                        presentLayerIds.add(`${mapId}/${layer.id}`);
-                    }
-                    if (mapNode.children.length > 0) {
-                        mapsWithKnownFeatureLayers.add(mapId);
-                    }
-                    // Selection pruning must keep SourceData inspections too.
-                    for (const layerId of mapNode.layers.keys()) {
-                        presentSelectionLayerIds.add(`${mapId}/${layerId}`);
-                    }
-                    if (mapNode.layers.size > 0) {
-                        mapsWithKnownSelectionLayers.add(mapId);
-                    }
+    /** Removes unavailable layer and option references after a complete catalog has arrived. */
+    prune(presentMaps: ReadonlyMap<string, MapTreeNode>, presentStyles: ReadonlyMap<string, ErdblickStyle>): void {
+        this.stateService.withSystemStateMutation(() => this.stateService.transaction(() => {
+            const presentLayers = new Set([...presentMaps].flatMap(([mapId, map]) =>
+                map.children.map(layer => `${mapId}/${layer.id}`)));
+            const oldNames = this.layerNames;
+            const keep = oldNames.flatMap((name, index) => presentLayers.has(name) ? [index] : []);
+            if (keep.length !== oldNames.length) {
+                this.layerNames = keep.map(index => oldNames[index]);
+                for (let view = 0; view < this.viewState.numViews; ++view) {
+                    this.layerVisibilityState.next(view, keep.map(index => this.layerVisibilityState.getValue(view)[index] ?? false));
+                    this.layerZoomLevelState.next(view, keep.map(index => this.layerZoomLevelState.getValue(view)[index] ?? 13));
+                    this.layerAutoZoomLevelState.next(view, keep.map(index => this.layerAutoZoomLevelState.getValue(view)[index] ?? true));
                 }
-
-                const presentStyleIds = new Set<string>([...presentStyles.keys()]); // full style ids
-                const presentShortStyleIds = new Set<string>([...presentStyles.values()].map((s) => s.shortId));
-
-                // 2) Prune layerNames and per-view layer arrays (visibility, zoom levels)
-                const oldLayerNames = this.layerNames;
-                if (oldLayerNames.length) {
-                    const keepIndices: number[] = [];
-                    const nextLayerNames: string[] = [];
-                    for (let i = 0; i < oldLayerNames.length; i++) {
-                        const name = oldLayerNames[i];
-                        if (presentLayerIds.has(name)) {
-                            keepIndices.push(i);
-                            nextLayerNames.push(name);
-                        }
-                    }
-
-                    if (keepIndices.length !== oldLayerNames.length) {
-                        // Update layer names
-                        this.layerNames = nextLayerNames;
-
-                        // Helper to filter layer-indexed arrays by keepIndices with fallback
-                        const filterLayerArray = <T>(arr: T[], fallback: T): T[] =>
-                            keepIndices.map((idx) => (idx < arr.length ? arr[idx] : fallback));
-
-                        const views = this.viewState.numViews;
-                        for (let v = 0; v < views; v++) {
-                            const vis = this.layerVisibilityState.getValue(v);
-                            const levels = this.layerZoomLevelState.getValue(v);
-                            const autoLevels = this.layerAutoZoomLevelState.getValue(v);
-                            this.layerVisibilityState.next(v, filterLayerArray<boolean>(vis ?? [], false));
-                            this.layerZoomLevelState.next(v, filterLayerArray<number>(levels ?? [], 13));
-                            this.layerAutoZoomLevelState.next(v, filterLayerArray<boolean>(autoLevels ?? [], true));
-                        }
-                    }
-                }
-
-                // 3) Prune style option values that reference pruned layers or non-present styles
-                //    and 4) prune style visibility for non-present styles
-                // Prune style visibility
-                const styleVis = {...this.styleService.styleVisibility};
-                let styleVisChanged = false;
-                for (const key of Object.keys(styleVis)) {
-                    if (!presentStyleIds.has(key)) {
-                        delete styleVis[key];
-                        styleVisChanged = true;
-                    }
-                }
-                if (styleVisChanged) {
-                    this.styleService.styleVisibility = styleVis;
-                }
-
-                // Prune style option values
-                const stylesMap = new Map(this.styles); // Map<string, (string|number|boolean)[]>
-                let stylesChanged = false;
-                for (const key of Array.from(stylesMap.keys())) {
-                    // Key format: `${mapId}/${layerId}/${shortStyleId}/${optionId}`
-                    const parts = key.split("/");
-                    if (parts.length < 4) {
-                        stylesMap.delete(key);
-                        stylesChanged = true;
-                        continue;
-                    }
-                    const shortStyleId = parts[parts.length - 2];
-                    const mapLayerId = parts.slice(0, -2).join("/");
-                    if (!presentLayerIds.has(mapLayerId) || !presentShortStyleIds.has(shortStyleId)) {
-                        stylesMap.delete(key);
-                        stylesChanged = true;
-                    }
-                }
-
-                // 5) Prune extra views in MapViewStates and in StyleState values
-                const views = this.viewState.numViews;
-                const pruneViews = <T>(state: MapViewState<T>) => {
-                    const arr = state.appState.getValue();
-                    if (arr.length > views) {
-                        state.appState.next(arr.slice(0, views));
-                    }
-                };
-                pruneViews(this.viewState.mode2dState);
-                pruneViews(this.backgroundState);
-                pruneViews(this.viewTileBordersState);
-                pruneViews(this.viewTileGridModeState);
-                pruneViews(this.viewTileGridLevelState);
-                pruneViews(this.viewTileGridAutoLevelState);
-                pruneViews(this.viewTileGridColorState);
-                pruneViews(this.viewTileGridOpacityState);
-                pruneViews(this.viewState.cameraViewDataState);
-                pruneViews(this.layerVisibilityState);
-                pruneViews(this.layerZoomLevelState);
-                pruneViews(this.layerAutoZoomLevelState);
-
-                // Also prune view-dimension from style option arrays
-                for (const [k, vals] of stylesMap.entries()) {
-                    if (vals.length > views) {
-                        stylesMap.set(k, vals.slice(0, views));
-                        stylesChanged = true;
-                    }
-                }
-                if (stylesChanged) {
-                    this.stylesState.next(stylesMap);
-                }
-
-                // 6) Prune selections that reference maps/layers that are not present anymore
-                const panels = this.inspection.selectionState.getValue();
-                const nextPanels: InspectionPanelModel<TileFeatureId>[] = [];
-                let selectionChanged = false;
-
-                const parseKey = (tileKey: string): {mapId: string; mapLayerId: string} | undefined => {
-                    let parsed: [string, string, unknown];
-                    try {
-                        parsed = parseMapPartitionKey(coreLib, tileKey);
-                    } catch {
-                        return undefined;
-                    }
-                    const [mapId, layerId] = parsed;
-                    return {mapId, mapLayerId: `${mapId}/${layerId}`};
-                };
-
-                const keepFeatureSelection = (tileKey: string): boolean => {
-                    const parsed = parseKey(tileKey);
-                    if (!parsed) {
-                        return false;
-                    }
-                    if (presentLayerIds.has(parsed.mapLayerId)) {
-                        return true;
-                    }
-                    // Nonblocking datasource startup can transiently publish a map before its layers.
-                    return !presentMapIds.has(parsed.mapId) || !mapsWithKnownFeatureLayers.has(parsed.mapId);
-                };
-
-                const keepSourceDataSelection = (tileKey: string): boolean => {
-                    const parsed = parseKey(tileKey);
-                    if (!parsed) {
-                        return false;
-                    }
-                    if (presentSelectionLayerIds.has(parsed.mapLayerId)) {
-                        return true;
-                    }
-                    return !presentMapIds.has(parsed.mapId) || !mapsWithKnownSelectionLayers.has(parsed.mapId);
-                };
-
-                for (const panel of panels) {
-                    const updated: InspectionPanelModel<TileFeatureId> = {
-                        id: panel.id,
-                        features: [],
-                        locked: panel.locked,
-                        size: panel.size,
-                        sourceData: panel.sourceData ? {...panel.sourceData} : undefined,
-                        color: panel.color,
-                        undocked: panel.undocked,
-                        focused: panel.focused
-                    };
-
-                    // Filter features
-                    for (const feat of panel.features) {
-                        if (keepFeatureSelection(feat.mapTileKey)) {
-                            updated.features.push(feat);
-                        }
-                    }
-
-                    // Validate sourceData if present
-                    if (updated.sourceData && !keepSourceDataSelection(updated.sourceData.mapTileKey)) {
-                        delete updated.sourceData;
-                    }
-
-                    if (
-                        updated.features.length !== panel.features.length ||
-                        (panel.sourceData !== undefined && updated.sourceData === undefined)
-                    ) {
-                        selectionChanged = true;
-                    }
-
-                    if (updated.features.length || updated.sourceData) {
-                        nextPanels.push(updated);
-                    } else {
-                        selectionChanged = true;
-                    }
-                }
-
-                if (selectionChanged || nextPanels.length !== panels.length) {
-                    this.inspection.selectionState.next(nextPanels);
-                }
-                this.inspection.reconcileComparison(nextPanels);
-
-                // Sync all states, so the URL is replaced.
-                this.stateService.syncAllStates();
-            });
-        });
+            }
+            const shortIds = new Set([...presentStyles.values()].map(style => style.shortId));
+            const options = new Map([...this.styles].filter(([key]) => {
+                const parts = key.split("/");
+                return parts.length >= 4 && presentLayers.has(parts.slice(0, -2).join("/")) && shortIds.has(parts.at(-2)!);
+            }));
+            this.stylesState.next(options);
+            // View membership already retires every per-view association atomically.
+        }));
     }
 
     /** Migrates legacy `osm` URL/storage payloads into the generic background-layer state once on startup. */
@@ -676,9 +483,7 @@ export class MapLayerStateService {
     }
     constructor(
         private readonly stateService: AppStateService,
-        private readonly viewState: MapViewStateService,
-        private readonly styleService: StyleService,
-        private readonly inspection: InspectionStateService
+        private readonly viewState: MapViewStateService
     ) {
         this.stateService.importingUrl.subscribe((params) => {
             this.hasAuthoritativeUrlLayerList =

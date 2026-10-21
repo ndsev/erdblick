@@ -10,6 +10,7 @@ import {MapLayerStateService} from "../mapdata/map-layer-state.service";
 import {createStateOwners, StateOwners} from "../shared/state-test-owners";
 import {MapViewStateService} from "./map-view-state.service";
 import {ViewLayerDiagnosticsService} from "./view-layer-diagnostics.service";
+import {Cartographic} from "../integrations/geo";
 
 const systems: StateOwners[] = [];
 function fixture(params: Record<string, string> = {}) {
@@ -134,6 +135,67 @@ describe("logical view ownership", () => {
         expect(messages.showError).toHaveBeenCalledOnce();
     });
 
+    it("rejects inconsistent snapshot and config identities before changing any owner", () => {
+        const {state, views} = fixture();
+        state.persistence.initializePersistence();
+        const before = state.persistence.exportSnapshot();
+        const lifetime = views.captureView(0)!;
+        const conflicting = {marker: true, viewIds: ["explicit"], numberOfViews: 2};
+        expect(state.persistence.validateSnapshot(conflicting)).toHaveLength(1);
+        expect(state.persistence.importSnapshot(conflicting)).toHaveLength(1);
+        expect(state.persistence.replaceSnapshotState(conflicting)).toHaveLength(1);
+        expect(state.persistence.seedConfigDefaultState(conflicting, "invalid")).toHaveLength(1);
+        expect(state.persistence.exportSnapshot()).toEqual(before);
+        expect(views.isCurrent(lifetime)).toBe(true);
+    });
+
+    it("derives a missing snapshot count from explicit IDs and applies positional values once", () => {
+        const {state, views} = fixture();
+        state.persistence.initializePersistence();
+        expect(state.persistence.replaceSnapshotState({
+            cameraView: [{lon: 10, lat: 20, alt: 30}, {lon: 40, lat: 50, alt: 60}],
+            viewIds: ["west", "east"]
+        })).toEqual([]);
+        expect(views.viewIds()).toEqual(["west", "east"]);
+        expect(views.numViews).toBe(2);
+        expect(views.cameraViewDataState.getValue(1).destination).toEqual({lon: 40, lat: 50, alt: 60});
+    });
+
+    it("creates fresh lifetimes for each full snapshot replacement without IDs", () => {
+        const {state, views} = fixture();
+        state.persistence.initializePersistence();
+        const original = views.captureView(0)!;
+        expect(state.persistence.replaceSnapshotState({numberOfViews: 2})).toEqual([]);
+        const first = views.viewIds();
+        expect(first).toHaveLength(2);
+        expect(views.isCurrent(original)).toBe(false);
+        expect(state.persistence.replaceSnapshotState({numberOfViews: 2})).toEqual([]);
+        expect(views.viewIds().some(id => first.includes(id))).toBe(false);
+    });
+
+    it("keeps legacy partial snapshot IDs and omitted camera positions", () => {
+        const {state, views} = fixture();
+        views.numViews = 2;
+        const ids = views.viewIds();
+        const camera = {...views.cameraViewDataState.getValue(1), destination: {lon: 4, lat: 5, alt: 6}};
+        views.cameraViewDataState.next(1, camera);
+        expect(state.persistence.importSnapshot({marker: true})).toEqual([]);
+        expect(views.viewIds()).toBe(ids);
+        expect(views.cameraViewDataState.getValue(1)).toBe(camera);
+        expect(state.persistence.importSnapshot({viewIds: ["first", "second"]})).toEqual([]);
+        expect(views.cameraViewDataState.getValue(1)).toEqual(camera);
+    });
+
+    it("seeds config identities before positional values regardless of object key order", () => {
+        const {state, views} = fixture();
+        expect(state.persistence.seedConfigDefaultState({
+            cameraView: [{lon: 10, lat: 20, alt: 30}, {lon: 40, lat: 50, alt: 60}],
+            viewIds: ["west", "east"]
+        }, "config")).toEqual([]);
+        expect(views.viewIds()).toEqual(["west", "east"]);
+        expect(views.cameraViewDataState.getValue(1).destination).toEqual({lon: 40, lat: 50, alt: 60});
+    });
+
     it("shares one fallback ID mapping across stored arrays and partial legacy camera fields", () => {
         localStorage.setItem("numberOfViews", "2");
         localStorage.setItem("cameraView", JSON.stringify([
@@ -154,6 +216,23 @@ describe("logical view ownership", () => {
 
 
 describe("view membership preparations", () => {
+    it("publishes synchronized camera and projection changes atomically through ordinary owner methods", () => {
+        const {views} = fixture();
+        views.numViews = 2;
+        views.viewSync = ["pos", "proj"];
+        const cameras: number[][] = [];
+        const modes: boolean[][] = [];
+        views.cameraViewDataState.appState.subscribe(() => cameras.push([0, 1].map(index =>
+            views.cameraViewDataState.getValue(index).destination.lon)));
+        views.mode2dState.appState.subscribe(() => modes.push([0, 1].map(index => views.mode2dState.getValue(index))));
+        cameras.length = 0;
+        modes.length = 0;
+        views.setView(0, Cartographic.fromDegrees(12, 48, 1000));
+        views.setProjectionMode(0, true);
+        expect(cameras).toEqual([[12, 12]]);
+        expect(modes).toEqual([[true, true]]);
+    });
+
     it("inherits source search selection for added views and prunes removed targets", () => {
         const {state, views} = fixture();
         const search = state.searches;

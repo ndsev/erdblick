@@ -1,3 +1,6 @@
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {HttpClient} from "@angular/common/http";
+import {AppConfigService} from "../shared/app-config.service";
 import "@angular/compiler";
 import {firstValueFrom, NEVER, of, throwError} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
@@ -33,7 +36,8 @@ const createService = (providers: LocationSearchProviderConfig[] = [
         }
     };
     return {
-        service: new LocationSearchService(httpClient as any, configService as any),
+        service: ownerTestInjector([LocationSearchService, {provide: HttpClient, useValue: httpClient},
+            {provide: AppConfigService, useValue: configService}]).get(LocationSearchService),
         httpClient
     };
 };

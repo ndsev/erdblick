@@ -15,7 +15,7 @@ interface CameraSyncTestInternals {
         maxPitch: number;
         position: [number, number, number];
     };
-    stateService: {
+    viewStateOwner: {
         numViews: number;
         viewSync: string[];
         setView: ReturnType<typeof vi.fn>;
@@ -42,9 +42,9 @@ function createView(): CameraSyncTestInternals {
         {} as never,
         {} as never, {captureView: () => ({id: "test-view", generation: 1}), indexOf: () => 0} as never, {} as never, {} as never
     ) as unknown as CameraSyncTestInternals;
-    view.stateService.numViews = 2;
-    view.stateService.viewSync = [VIEW_SYNC_POSITION];
-    view.stateService.setView = vi.fn();
+    view.viewStateOwner.numViews = 2;
+    view.viewStateOwner.viewSync = [VIEW_SYNC_POSITION];
+    view.viewStateOwner.setView = vi.fn();
     view.mapViewState.publishLiveCameraViewState = vi.fn();
     return view;
 }
@@ -66,7 +66,7 @@ describe("DeckMapView split-camera synchronization", () => {
             view.scheduleViewStatePush();
 
             expect(requestAnimationFrame).toHaveBeenCalledOnce();
-            expect(view.stateService.setView).not.toHaveBeenCalled();
+            expect(view.viewStateOwner.setView).not.toHaveBeenCalled();
 
             callbacks[0](0);
 
@@ -74,7 +74,7 @@ describe("DeckMapView split-camera synchronization", () => {
             expect(view.mapViewState.publishLiveCameraViewState.mock.calls[0][0]).toBe(0);
             expect(view.mapViewState.publishLiveCameraViewState.mock.calls[0][1])
                 .toMatchObject({destination: {lon: 12.5}});
-            expect(view.stateService.setView).not.toHaveBeenCalled();
+            expect(view.viewStateOwner.setView).not.toHaveBeenCalled();
         } finally {
             requestAnimationFrame.mockRestore();
         }
@@ -95,7 +95,7 @@ describe("DeckMapView split-camera synchronization", () => {
 
             expect(cancelAnimationFrame).toHaveBeenCalledWith(23);
             expect(view.mapViewState.publishLiveCameraViewState).not.toHaveBeenCalled();
-            expect(view.stateService.setView).toHaveBeenCalledOnce();
+            expect(view.viewStateOwner.setView).toHaveBeenCalledOnce();
         } finally {
             requestAnimationFrame.mockRestore();
             cancelAnimationFrame.mockRestore();

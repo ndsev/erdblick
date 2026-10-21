@@ -27,6 +27,8 @@ export interface ActionContext {
  */
 @Injectable({providedIn: "root"})
 export class AppActionService {
+    private actionsSealed = false;
+    private controlsSealed = false;
     private readonly controls = new Map<
         string,
         {
@@ -45,6 +47,7 @@ export class AppActionService {
             overview?: () => z.input<Selector>[];
         }
     ): void {
+        if (this.controlsSealed) throw new Error(`Late control registration: ${declaration.name}`);
         if (this.controls.has(declaration.name)) throw new Error(`Duplicate control: ${declaration.name}`);
         if (declaration.writable !== !!binding.write)
             throw new Error(`Control write contract mismatch: ${declaration.name}`);
@@ -180,6 +183,7 @@ export class AppActionService {
         ) {
             throw new Error("Control owner registration differs from exported catalog");
         }
+        this.controlsSealed = true;
     }
 
     private readonly actions = new Map<
@@ -195,7 +199,9 @@ export class AppActionService {
         execute: (input: z.output<Input>, context: ActionContext) => z.input<Output> | Promise<z.input<Output>>,
         omnibar?: {suggest: (query: string) => ActionSuggestion<z.input<Input>>[]}
     ): void {
+        if (this.actionsSealed) throw new Error(`Late action registration: ${declaration.name}`);
         if (this.actions.has(declaration.name)) throw new Error(`Duplicate action: ${declaration.name}`);
+        if (omnibar && this.omnibar.has(declaration.name)) throw new Error(`Duplicate omnibar producer: ${declaration.name}`);
         this.actions.set(declaration.name, {
             declaration,
             execute: (input, context) => {
@@ -258,7 +264,7 @@ export class AppActionService {
 
     execute(name: string, input: unknown, context: ActionContext = {}): unknown {
         const action = this.actions.get(name);
-        if (!action) throw new Error(`Action owner was not registered: ${name}`);
+        if (!action) rejectAction(`Unknown action: ${name}`, "invalid_arguments");
         return action.execute(input, context);
     }
 
@@ -278,5 +284,6 @@ export class AppActionService {
         if (missing.length || extra.length || mismatched.length) {
             throw new Error(`Action registration mismatch: missing ${missing}; extra ${extra}; contract ${mismatched}`);
         }
+        this.actionsSealed = true;
     }
 }

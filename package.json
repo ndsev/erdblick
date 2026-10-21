@@ -3,7 +3,7 @@
   "version": "2026.5.0",
   "scripts": {
     "ng": "ng",
-    "generate:viewer-actions": "node tools/export-viewer-actions.cjs",
+    "generate:viewer-actions": "tsc --noEmit -p tsconfig.viewer-actions.json && node tools/export-viewer-actions.cjs",
     "prestart": "npm run generate:viewer-actions",
     "start": "ng serve",
     "prebuild": "npm run generate:viewer-actions",
@@ -78,6 +78,7 @@
     "@typescript-eslint/parser": "^8.57.1",
     "@vitest/coverage-v8": "4.1.11",
     "baseline-browser-mapping": "^2.10.8",
+    "esbuild": "0.28.1",
     "eslint": "^10.0.3",
     "globals": "^17.4.0",
     "istanbul-lib-coverage": "^3.2.2",

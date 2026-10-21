@@ -170,6 +170,14 @@ export class StyleService {
     >([]);
     private readonly builtinStyleBaselines = new Map<string, BuiltinStyleBaseline>();
 
+    /** Removes visibility preferences for styles no longer present in a complete catalog. */
+    pruneVisibility(presentStyles: ReadonlyMap<string, ErdblickStyle>): void {
+        this.stateService.withSystemStateMutation(() => {
+            this.styleVisibility = Object.fromEntries(Object.entries(this.styleVisibility)
+                .filter(([id]) => presentStyles.has(id)));
+        });
+    }
+
     constructor(
         private httpClient: HttpClient,
         private stateService: AppStateService,

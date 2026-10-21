@@ -1,3 +1,8 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {AppStateService} from "../shared/appstate.service";
 import "@angular/compiler";
 import {beforeAll, describe, expect, it, vi} from 'vitest';
 import {Subject} from 'rxjs';
@@ -29,10 +34,9 @@ class RightClickMenuServiceStub {
     customTileAndMapId = new Subject<[string, string]>();
 }
 
-class AppStateServiceStub {
+class MapViewStateStub {
     setMarkerState = vi.fn();
     setMarkerPosition = vi.fn();
-    setSelection = vi.fn();
     focusedView = 0;
 }
 
@@ -49,24 +53,28 @@ const createService = (config: any = {}) => {
     const inspectionSelection = new InspectionSelectionServiceStub();
     const infoService = new InfoMessageServiceStub();
     const menuService = new RightClickMenuServiceStub();
-    const stateService = new AppStateServiceStub();
+    const viewState = new MapViewStateStub();
+    const inspectionState = {setSelection: vi.fn()};
+    const injector = ownerTestInjector([{provide: MapViewStateService, useValue: viewState},
+        {provide: InspectionStateService, useValue: inspectionState}]);
     const searchService = new FeatureSearchServiceStub();
     const configService = new AppConfigServiceStub();
     configService.getExtensionModuleId.mockImplementation((key: string) =>
         key === 'jumpTargets' ? config?.extensionModules?.jumpTargets ?? null : null
     );
 
-    const service = new JumpTargetService(
+    const service = runInInjectionContext(injector, () => new JumpTargetService(
         mapService as any,
         inspectionSelection as any,
         infoService as any,
         menuService as any,
-        stateService as any,
+        injector.get(AppStateService),
         searchService as any,
         configService as any,
-    );
+    ));
+    service.initialize();
 
-    return {service, mapService, inspectionSelection, infoService, menuService, stateService, searchService, configService};
+    return {service, mapService, inspectionSelection, infoService, menuService, viewState, inspectionState, searchService, configService};
 };
 
 describe('JumpTargetService', () => {
@@ -223,7 +231,7 @@ describe('JumpTargetService', () => {
     });
 
     it('executes inspect-tile source-data target and sets selection when map and layer exist', () => {
-        const {service, mapService, stateService, menuService} = createService();
+        const {service, mapService, inspectionState, menuService} = createService();
 
         mapService.maps.maps.set('m1', {});
         mapService.sourceDataLayerIdForLayerName.mockImplementation((name: string) =>
@@ -239,7 +247,7 @@ describe('JumpTargetService', () => {
         }
 
         expect(coreLib.getSourceDataLayerKey('m1', 'LAYER-ID', 65536)).toBe("SourceData:m1:LAYER-ID:65536");
-        expect(stateService.setSelection).toHaveBeenCalledWith({
+        expect(inspectionState.setSelection).toHaveBeenCalledWith({
             mapTileKey: 'SourceData:m1:LAYER-ID:65536',
         } as any);
         expect(menuNextSpy).not.toHaveBeenCalled();
@@ -253,13 +261,13 @@ describe('JumpTargetService', () => {
     });
 
     it('forwards latitude, longitude, and altitude to AppStateService in the expected order', () => {
-        const {service, stateService} = createService();
+        const {service, viewState, inspectionState} = createService();
 
         service.markedPosition.next([48.25, 11.75, 125]);
 
-        expect(stateService.setMarkerState).toHaveBeenCalledWith(true);
-        expect(stateService.setMarkerPosition).toHaveBeenCalledTimes(1);
-        const arg = (stateService.setMarkerPosition as any).mock.calls[0][0];
+        expect(viewState.setMarkerState).toHaveBeenCalledWith(true);
+        expect(viewState.setMarkerPosition).toHaveBeenCalledTimes(1);
+        const arg = (viewState.setMarkerPosition as any).mock.calls[0][0];
         expect(arg.longitude).toBeCloseTo(11.75 * Math.PI / 180);
         expect(arg.latitude).toBeCloseTo(48.25 * Math.PI / 180);
         expect(arg.height).toBe(125);

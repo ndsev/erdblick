@@ -100,7 +100,7 @@ describe("incoming relation actions", () => {
         const component = Object.create(InspectionTreeComponent.prototype) as any;
         component.inspectionMenu = {toggle: vi.fn()};
         component.panelId = () => 'target';
-        component.stateService = {
+        component.inspectionState = {
             selection: [{id: 'target', features: [{mapTileKey: 'surface', featureId: 'Surface.1'}]}],
             setSelection: vi.fn(), toggleInspectionFeatureHighlight: vi.fn()
         };
@@ -111,9 +111,9 @@ describe("incoming relation actions", () => {
         const action = component.inspectionMenuItems.find((item: any) => item.label === 'Inspect source relation');
         expect(action).toBeDefined();
         action.command();
-        expect(component.stateService.setSelection).toHaveBeenCalledWith([
+        expect(component.inspectionState.setSelection).toHaveBeenCalledWith([
             {mapTileKey: 'lane', featureId: 'Lane.7:relation#1'}
         ]);
-        expect(component.stateService.toggleInspectionFeatureHighlight).not.toHaveBeenCalled();
+        expect(component.inspectionState.toggleInspectionFeatureHighlight).not.toHaveBeenCalled();
     });
 });

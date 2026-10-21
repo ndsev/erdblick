@@ -244,8 +244,8 @@ describe("style option groups", () => {
         const stateService = {
             ready,
             numViewsState,
-            mapLayerConfig: vi.fn(() => [{autoLevel: true, level: 13, visible: true}]),
-            styleOptionValues: vi.fn((_mapId, _layerId, _styleId, _optionId, _type, defaultValue) => [defaultValue]),
+            initializeMapLayerConfig: vi.fn(() => [{autoLevel: true, level: 13, visible: true}]),
+            initializeStyleOptionValues: vi.fn((_mapId, _layerId, _styleId, _optionId, _type, defaultValue) => [defaultValue]),
             getLayerPresetSelection: vi.fn(() => null),
             setLayerPresetSelection: vi.fn(),
             getMapPresetSelection: vi.fn(() => null),
@@ -294,10 +294,10 @@ describe("style option groups", () => {
             (stateService) as never,
             styleService as unknown as StyleService,
             emptyPresetService(), stateService as unknown as AppStateService as never, stateService as unknown as AppStateService as never,
-            false
+            undefined
         );
         const layer = tree.maps.get("Map")?.layers.get("Roads");
-        expect(stateService.mapLayerConfig).toHaveBeenCalledWith("Map", "Preview", false, 13);
+        expect(stateService.initializeMapLayerConfig).toHaveBeenCalledWith("Map", "Preview", false, 13);
         expect(tree.maps.get("Map")?.layers.get("Preview")?.viewConfig[0].visible).toBe(true);
         const children = layer ? layerStyleOptions(layer) : [];
 
@@ -313,11 +313,11 @@ describe("style option groups", () => {
         tree.setNodeExpanded(layer!.key, false);
         expect(layer?.expanded).toBe(false);
 
-        const styleOptionReadsBeforeDestroy = stateService.styleOptionValues.mock.calls.length;
+        const styleOptionReadsBeforeDestroy = stateService.initializeStyleOptionValues.mock.calls.length;
         tree.destroy();
         styleGroups.next([]);
         numViewsState.next(2);
-        expect(stateService.styleOptionValues).toHaveBeenCalledTimes(styleOptionReadsBeforeDestroy);
+        expect(stateService.initializeStyleOptionValues).toHaveBeenCalledTimes(styleOptionReadsBeforeDestroy);
     });
 });
 
@@ -363,11 +363,11 @@ describe("layer presets in the map tree", () => {
         const stateService = {
             ready,
             numViewsState,
-            mapLayerConfig: vi.fn(() => [
+            initializeMapLayerConfig: vi.fn(() => [
                 {autoLevel: true, level: 13, visible: true},
                 {autoLevel: true, level: 13, visible: true}
             ]),
-            styleOptionValues: vi.fn((_mapId, _layerId, _styleId, optionId) =>
+            initializeStyleOptionValues: vi.fn((_mapId, _layerId, _styleId, optionId) =>
                 optionId === "owned" ? ownedValues : [false, false]),
             getLayerPresetSelection: vi.fn((viewIndex: number, mapId: string, layerId: string) =>
                 selections[viewIndex][mapId]?.[layerId] ?? null),
@@ -441,7 +441,7 @@ describe("layer presets in the map tree", () => {
             (stateService) as never,
             styleService as unknown as StyleService,
             presetService as unknown as MapPresetService, stateService as unknown as AppStateService as never, stateService as unknown as AppStateService as never,
-            false);
+            undefined);
         return {tree, stateService};
     }
 
@@ -586,8 +586,8 @@ describe("map presets in the map tree", () => {
         const stateService = {
             ready: new BehaviorSubject(true),
             numViewsState: new BehaviorSubject(1),
-            mapLayerConfig: vi.fn(() => [{autoLevel: true, level: 13, visible: true}]),
-            styleOptionValues: vi.fn(() => [true]),
+            initializeMapLayerConfig: vi.fn(() => [{autoLevel: true, level: 13, visible: true}]),
+            initializeStyleOptionValues: vi.fn(() => [true]),
             getLayerPresetSelection: vi.fn(() => null),
             setLayerPresetSelection: vi.fn(),
             getMapPresetSelection: vi.fn(() => null),
@@ -631,7 +631,7 @@ describe("map presets in the map tree", () => {
             (stateService) as never,
             styleService as unknown as StyleService,
             presetService as unknown as MapPresetService, stateService as unknown as AppStateService as never, stateService as unknown as AppStateService as never,
-            false);
+            undefined);
         const mapNode = tree.maps.get("Map")!;
         const renderedMap = filterMapTreeNodes(tree.nodes, "", 0)[0];
 

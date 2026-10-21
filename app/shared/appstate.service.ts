@@ -139,10 +139,9 @@ export class AppStateService implements OnDestroy {
         return state;
     }
 
-    registerStyles(): StyleState {
+    registerStyles(records: StateBinding<Map<string, Record<string, string | number | boolean>>>): StyleState {
         if (this.registrationClosed || this.isReady) throw new Error("Late state registration: styleOptions");
         type Option = string | number | boolean;
-        const records = this.bind("layers", "options");
         records.write(new Map());
         const ids = () => this.values.read((state) => state.viewIds, this.store.viewIds).map(String);
         const project = (
@@ -203,7 +202,8 @@ export class AppStateService implements OnDestroy {
         return new StyleState(this.statePool, binding);
     }
 
-    private bind<S extends OwnerSlice, K extends keyof ViewerValues[S]>(
+    /** Binds an owner's codec to its native SignalStore field, including specialized codecs. */
+    bind<S extends OwnerSlice, K extends keyof ViewerValues[S]>(
         slice: S,
         key: K
     ): StateBinding<ViewerValues[S][K]> {
@@ -231,6 +231,17 @@ export class AppStateService implements OnDestroy {
     }
     private prepareUrl(params: Params, resetMissing = false): Params {
         return this.urlNormalizers.reduce((value, normalize) => normalize(value, resetMissing), params);
+    }
+
+    private readonly snapshotNormalizers: Array<
+        (snapshot: Record<string, unknown>, replaceMissing: boolean) => Record<string, unknown>
+    > = [];
+
+    /** Owners validate relationships between persisted projections before any import writes. */
+    registerSnapshotNormalizer(
+        normalize: (snapshot: Record<string, unknown>, replaceMissing: boolean) => Record<string, unknown>
+    ): void {
+        this.snapshotNormalizers.push(normalize);
     }
 
     readonly importingUrl = new Subject<Params>();
@@ -399,7 +410,7 @@ export class AppStateService implements OnDestroy {
             throw new Error("Snapshot state cannot be replaced before AppStateService is ready.");
         }
 
-        const normalizedResult = this.normalizeSnapshot(snapshot);
+        const normalizedResult = this.normalizeSnapshot(snapshot, false, true);
         if (normalizedResult.errors.length) {
             return normalizedResult.errors;
         }
@@ -829,19 +840,20 @@ export class AppStateService implements OnDestroy {
 
         this.isSeedingConfigDefaults = true;
         try {
-            for (const [key, value] of Object.entries(normalized)) {
-                const state = this.statePool.get(key);
-                if (!state || !state.isConfigDefaultState()) {
-                    continue;
+            this.transaction(() => {
+                for (const [key, state] of this.statePool) {
+                    if (!state.isConfigDefaultState() || !Object.prototype.hasOwnProperty.call(normalized, key)) {
+                        continue;
+                    }
+                    state.applySnapshotValue(normalized[key]);
+                    appliedStateKeys.add(key);
                 }
-                state.applySnapshotValue(value);
-                appliedStateKeys.add(key);
-            }
 
-            if (Object.keys(styleOptionEntries).length) {
-                this.deserializeStateSafely(this.stylesState, styleOptionEntries);
-                this.stylesState.next(new Map(this.stylesState.getValue()));
-            }
+                if (Object.keys(styleOptionEntries).length) {
+                    this.deserializeStateSafely(this.stylesState, styleOptionEntries);
+                    this.stylesState.next(new Map(this.stylesState.getValue()));
+                }
+            });
         } finally {
             this.isSeedingConfigDefaults = false;
         }
@@ -914,7 +926,11 @@ export class AppStateService implements OnDestroy {
     }
 
     /** Normalizes legacy snapshot shapes before schema validation is applied. */
-    private normalizeSnapshot(snapshot: unknown, forConfigDefault: boolean = false): SnapshotNormalizationResult {
+    private normalizeSnapshot(
+        snapshot: unknown,
+        forConfigDefault = false,
+        replaceMissing = false
+    ): SnapshotNormalizationResult {
         const limits = this.getSnapshotImportLimits();
         const errors: string[] = [];
         let serialized: string;
@@ -978,7 +994,16 @@ export class AppStateService implements OnDestroy {
                 errors.push(`Invalid value for '${key}': ${error?.message ?? "schema validation failed"}`);
             }
         }
-        return errors.length ? {errors} : {normalized, errors: []};
+        if (errors.length) return {errors};
+        try {
+            const prepared = this.snapshotNormalizers.reduce(
+                (value, normalize) => normalize(value, replaceMissing),
+                normalized
+            );
+            return {normalized: prepared, errors: []};
+        } catch (error) {
+            return {errors: [`Invalid snapshot: ${error instanceof Error ? error.message : String(error)}`]};
+        }
     }
 
     /** Returns whether a snapshot key is a compact style-option storage key. */

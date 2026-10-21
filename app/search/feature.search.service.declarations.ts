@@ -61,7 +61,7 @@ export const searchSettingsSchema = z.strictObject({
     selectedMapLayers: z.array(mapLayerSchema).max(100),
     selectedFeatureTypes: z.array(identifierSchema).max(100),
     selectedTileLevels: z.array(z.number().int().min(0).max(15)).max(16),
-    selectedViewIds: z.array(viewIdSchema).min(1).max(32),
+    selectedViewIds: z.array(viewIdSchema).max(32),
     searchStyleRules: z.array(searchStyleRuleSchema).max(50),
     renderStrategy: z.strictObject({
         showLowFiDots: z.boolean(),

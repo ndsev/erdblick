@@ -1,5 +1,6 @@
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {MapViewStateService} from "../mapview/map-view-state.service";
 import "@angular/compiler";
-import {TestBed} from "@angular/core/testing";
 import {BehaviorSubject, Observable, Subject, of} from "rxjs";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {MapViewService} from "../mapview/map-view.service";
@@ -24,25 +25,25 @@ function setup() {
         moveToLocationAreaTopic: new Subject(), moveToRectangleTopic: new Subject(), moveToWgs84PositionTopic: new Subject(),
         clearLocationHighlightTopic: new Subject(), showLocationLabelTopic: new Subject(), presentationCameraViewStateTopic: new Subject(),
         locationBoundaryUnavailableTopic: new Subject<void>(), navigationStarted: new Subject<void>()};
-    const state = {focusedView: 0, focusedViewState: new BehaviorSubject(0), numViewsState: new BehaviorSubject(1),
-        viewSyncState: new BehaviorSubject([]), stateApplied: new Subject<void>(),
-        cameraViewDataState: {appState: new Subject<void>(), getValue: () => camera}};
     const diagnostics = {cameraInteracting: false, cameraInteracting$: new BehaviorSubject(false)};
     const jumps = {markedPosition: new Subject()};
     const messages = {showError: vi.fn(), showInfo: vi.fn()};
-    TestBed.configureTestingModule({providers: [LocationNavigationService,
+    const injector = ownerTestInjector([LocationNavigationService, MapViewStateService,
         {provide: LocationSearchService, useValue: locations}, {provide: MapViewService, useValue: views},
-        {provide: AppStateService, useValue: state}, {provide: ViewLayerDiagnosticsService, useValue: diagnostics},
-        {provide: JumpTargetService, useValue: jumps}, {provide: InfoMessageService, useValue: messages}]});
-    const service = TestBed.inject(LocationNavigationService);
+        {provide: ViewLayerDiagnosticsService, useValue: diagnostics},
+        {provide: JumpTargetService, useValue: jumps}, {provide: InfoMessageService, useValue: messages}]);
+    const persistence = injector.get(AppStateService);
+    const viewState = injector.get(MapViewStateService);
+    viewState.viewIdsState.next(["left", "right"]);
+    viewState.cameraViewDataState.next(0, {...camera, position: [0, 0, 0]});
+    const service = injector.get(LocationNavigationService);
     const area = vi.fn(), point = vi.fn(), marker = vi.fn();
     views.moveToLocationAreaTopic.subscribe(area);
     views.moveToWgs84PositionTopic.subscribe(point);
     jumps.markedPosition.subscribe(marker);
-    return {service, response, locations, renderer, views, state, diagnostics, jumps, messages, area, point, marker};
+    return {service, response, locations, renderer, views, viewState, persistence, diagnostics, jumps, messages, area, point, marker};
 }
 
-afterEach(() => TestBed.resetTestingModule());
 
 describe("Location navigation ownership", () => {
     it("commits an area once without creating a point marker", () => {
@@ -68,12 +69,12 @@ describe("Location navigation ownership", () => {
         "discards delayed responses after %s, without fallback notices", event => {
             const h = setup();
             h.service.navigate("area");
-            if (event === "focus") { h.state.focusedView = 1; h.state.focusedViewState.next(1); }
+            if (event === "focus") { h.viewState.focusedView = 1; }
             if (event === "gesture") h.diagnostics.cameraInteracting$.next(true);
             if (event === "renderer") h.renderer.rendererInvalidated.next();
-            if (event === "layout") h.views.viewLayoutRevision++;
-            if (event === "camera") { h.renderer.getLiveCameraState = () => ({destination: {lon: 3, lat: 4, alt: 500}, orientation: {heading: 0, pitch: -90, roll: 0}}); h.state.cameraViewDataState.appState.next(); }
-            if (event === "reset") h.state.stateApplied.next();
+            if (event === "layout") h.viewState.retainViews([1], new Map());
+            if (event === "camera") { h.renderer.getLiveCameraState = () => ({destination: {lon: 3, lat: 4, alt: 500}, orientation: {heading: 0, pitch: -90, roll: 0}}); h.viewState.cameraViewDataState.next(0, {...h.viewState.cameraViewDataState.getValue(0), destination: {lon: 3, lat: 4, alt: 500}}); }
+            if (event === "reset") h.persistence.stateApplied.next();
             if (event === "point") h.views.moveToWgs84PositionTopic.next({});
             if (event === "rectangle") h.views.moveToRectangleTopic.next({});
             if (event === "async navigation") h.views.navigationStarted.next();

@@ -34,7 +34,7 @@ interface DeckViewTestInternals {
 }
 
 interface MarkerTestInternals extends DeckViewTestInternals {
-    stateService: {
+    viewStateOwner: {
         markerState: {getValue: () => boolean};
         markedPositionState: {getValue: () => number[]};
     };
@@ -53,7 +53,7 @@ interface CameraPersistenceTestInternals {
         maxPitch: number;
         position: [number, number, number];
     };
-    stateService: {
+    viewStateOwner: {
         setView: (...args: unknown[]) => void;
     };
     pushViewStateToAppState(): void;
@@ -204,8 +204,8 @@ describe("Deck navigation target and layout", () => {
         const view = createView();
         const internals = view as unknown as MarkerTestInternals;
         installDeckMock(view, 1000, 700);
-        internals.stateService.markerState = {getValue: () => true};
-        internals.stateService.markedPositionState = {getValue: () => [11, 48, 120]};
+        internals.viewStateOwner.markerState = {getValue: () => true};
+        internals.viewStateOwner.markedPositionState = {getValue: () => [11, 48, 120]};
         internals.featureSearchService.markerGraphics = () => "marker.svg";
         const upsert = vi.spyOn(internals.layerRegistry, "upsert");
 
@@ -228,7 +228,7 @@ describe("Deck navigation target and layout", () => {
         const view = createView();
         const internals = view as unknown as CameraPersistenceTestInternals;
         const setView = vi.fn();
-        internals.stateService.setView = setView;
+        internals.viewStateOwner.setView = setView;
         const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame")
             .mockReturnValue(17);
 

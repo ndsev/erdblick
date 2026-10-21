@@ -180,7 +180,7 @@ describe('AppStateService', () => {
             undocked: false,
         }];
 
-        service.layers.prune(new Map([
+        service.inspections.prune(new Map([
             ["Very-Large-Map", new MapTreeNode({
                 mapId: "Very-Large-Map",
                 sourceId: "Very-Large-Map",
@@ -190,7 +190,7 @@ describe('AppStateService', () => {
                 extraJsonAttachment: {},
                 layers: {Road: layerInfo("Road")},
             } as any)]
-        ]), new Map());
+        ]));
 
         expect(service.inspections.selection).toHaveLength(1);
         expect(service.inspections.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:22100770000d");
@@ -212,7 +212,7 @@ describe('AppStateService', () => {
             undocked: false,
         }];
 
-        service.layers.prune(new Map([
+        service.inspections.prune(new Map([
             ["Very-Large-Map", new MapTreeNode({
                 mapId: "Very-Large-Map",
                 sourceId: "Very-Large-Map",
@@ -223,7 +223,7 @@ describe('AppStateService', () => {
                 extraJsonAttachment: {},
                 layers: {},
             } as any)]
-        ]), new Map());
+        ]));
 
         expect(service.inspections.selection).toHaveLength(1);
         expect(service.inspections.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:545554858");
@@ -245,7 +245,7 @@ describe('AppStateService', () => {
             undocked: false,
         }];
 
-        service.layers.prune(new Map([
+        service.inspections.prune(new Map([
             ["Very-Large-Map", new MapTreeNode({
                 mapId: "Very-Large-Map",
                 sourceId: "Very-Large-Map",
@@ -255,7 +255,7 @@ describe('AppStateService', () => {
                 extraJsonAttachment: {},
                 layers: {Road: layerInfo("Road")},
             } as any)]
-        ]), new Map());
+        ]));
 
         expect(service.inspections.selection).toHaveLength(1);
         expect(service.inspections.selection[0].focused).toBe(true);
@@ -280,7 +280,7 @@ describe('AppStateService', () => {
             undocked: false,
         }];
 
-        service.layers.prune(new Map([
+        service.inspections.prune(new Map([
             ["Provider/Sample Munich", new MapTreeNode({
                 mapId: "Provider/Sample Munich",
                 sourceId: "Provider/Sample Munich",
@@ -290,7 +290,7 @@ describe('AppStateService', () => {
                 extraJsonAttachment: {},
                 layers: {Landmark: layerInfo("Landmark")},
             } as any)]
-        ]), new Map());
+        ]));
 
         expect(service.inspections.selection).toHaveLength(1);
         expect(service.inspections.selection[0].focused).toBe(true);

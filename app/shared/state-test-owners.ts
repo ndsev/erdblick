@@ -93,7 +93,7 @@ export function createStateOwners(router: Router, info: InfoMessageService) {
     // has separate owner tests and must not start network work during codec assertions.
     Object.defineProperty(owners.searches, "reconcilePersistedFeatureSearchState", {value: () => {}});
     Object.defineProperty(owners.searches, "resetStaleDockState", {value: () => {}});
-    return {persistence: state, url: injector.get(AppUrlStateService), ...owners, destroy: () => injector.destroy()};
+    return {injector, actions: injector.get(AppActionService), persistence: state, url: injector.get(AppUrlStateService), ...owners, destroy: () => injector.destroy()};
 }
 
 export type StateOwners = ReturnType<typeof createStateOwners>;

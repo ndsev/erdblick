@@ -1,24 +1,13 @@
+import {StyleValidationReportService} from "./style-validation-report.service";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {HttpClient} from "@angular/common/http";
+import {AppStateService} from "../shared/appstate.service";
+import {AppConfigService} from "../shared/app-config.service";
+import {InfoMessageService} from "../shared/info.service";
 import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
 import {of, BehaviorSubject} from 'rxjs';
 
 import {StyleService} from './style.service';
-
-class AppStateServiceStub {
-    ready = new BehaviorSubject<boolean>(true);
-    private visibility = new Map<string, boolean>();
-
-    getStyleVisibility(styleId: string, fallback: boolean = true): boolean {
-        return this.visibility.has(styleId) ? this.visibility.get(styleId)! : fallback;
-    }
-
-    setStyleVisibility(styleId: string, visible: boolean): void {
-        this.visibility.set(styleId, visible);
-    }
-
-    removeStyleVisibility(styleId: string): void {
-        this.visibility.delete(styleId);
-    }
-}
 
 class HttpClientStub {
     get = vi.fn();
@@ -36,26 +25,28 @@ class AppConfigServiceStub {
 
 const createService = (config: any = {styles: []}) => {
     const httpClient = new HttpClientStub();
-    const stateService = new AppStateServiceStub();
     const infoService = new InfoMessageServiceStub();
     const configService = new AppConfigServiceStub();
     configService.snapshot = config;
-    const service = new StyleService(httpClient as any, stateService as any, infoService as any, configService as any);
-    return {service, httpClient, stateService, infoService, configService};
+    const injector = ownerTestInjector([StyleService, StyleValidationReportService, {provide: HttpClient, useValue: httpClient},
+        {provide: InfoMessageService, useValue: infoService}, {provide: AppConfigService, useValue: configService}]);
+    const service = injector.get(StyleService);
+    injector.get(AppStateService).ready.next(true);
+    return {service, httpClient, styleState: service, infoService, configService};
 };
 
 describe('StyleService', () => {
     it('keeps imported styles opt-in across presentation scenes without deleting them', () => {
-        const {service, stateService} = createService();
+        const {service, styleState} = createService();
         const parse = vi.spyOn(service as any, 'parseWasmStyle').mockReturnValue([
             {name: () => 'Demo Road', defaultEnabled: () => true}, []
         ]);
         (service as any).initializeStyle('name: Demo Road', '', undefined, false, true);
-        stateService.removeStyleVisibility('Demo Road');
+        styleState.removeStyleVisibility('Demo Road');
         service.reconcilePresentationStyles();
         expect(service.styles.get('Demo Road')?.visible).toBe(false);
         expect(service.styles.has('Demo Road')).toBe(true);
-        stateService.setStyleVisibility('Demo Road', true);
+        styleState.setStyleVisibility('Demo Road', true);
         service.reconcilePresentationStyles();
         expect(service.styles.get('Demo Road')?.visible).toBe(true);
         parse.mockRestore();
@@ -75,7 +66,7 @@ describe('StyleService', () => {
                 {id: 's1', url: 'base.yaml'},
             ],
         };
-        const {service, httpClient, stateService} = createService(config);
+        const {service, httpClient, styleState} = createService(config);
 
         httpClient.get.mockImplementation((url: string, options: any) => {
             if (url === '/static-config/styles/base.yaml') {
@@ -100,7 +91,7 @@ describe('StyleService', () => {
         const style = service.styles.get('TestStyle')!;
         expect(style.id).toBe('TestStyle');
         expect(style.imported).toBe(false);
-        expect(style.visible).toBe(stateService.getStyleVisibility('TestStyle', true));
+        expect(style.visible).toBe(styleState.getStyleVisibility('TestStyle', true));
         expect(service.builtinStylesCount).toBe(1);
         expect(reapplySpy).toHaveBeenCalledWith(['TestStyle']);
     });
@@ -355,7 +346,7 @@ rules: [{geometry: [point]}]
     });
 
     it('registers category-search YAML directly in the ordinary imported collection', () => {
-        const {service, stateService} = createService();
+        const {service, styleState} = createService();
         const source = 'name: Team/Search\ncategory: search\nversion: 2\nrules:\n  - geometry: [line]';
         vi.spyOn(service, 'validateStyleSource').mockReturnValue({
             source: {styleName: 'Team/Search', sourceKind: 'imported'},
@@ -378,7 +369,7 @@ rules: [{geometry: [point]}]
 
         expect(service.importStyleYamlSource(source, false)).toBe('Team/Search');
         expect(service.styles.get('Team/Search')).toMatchObject({category: 'search', imported: true, visible: false});
-        expect(stateService.getStyleVisibility('Team/Search', true)).toBe(false);
+        expect(styleState.getStyleVisibility('Team/Search', true)).toBe(false);
         expect(JSON.parse(localStorage.getItem('importedStyleData')!)).toEqual({schemaVersion: 2, sources: [source]});
     });
 
@@ -395,7 +386,7 @@ rules: [{geometry: [point]}]
     });
 
     it('rolls back a new imported style when browser persistence fails', () => {
-        const {service, stateService, infoService} = createService();
+        const {service, styleState, infoService} = createService();
         const source = 'name: Team/Search\ncategory: search\nversion: 2\nrules:\n  - geometry: [line]';
         const wasmStyle = {delete: vi.fn(), defaultEnabled: () => false};
         vi.spyOn(service, 'validateStyleSource').mockReturnValue({
@@ -424,7 +415,7 @@ rules: [{geometry: [point]}]
         expect(service.importStyleYamlSource(source, false)).toBeUndefined();
         expect(service.styles.has('Team/Search')).toBe(false);
         expect(service.importedStylesCount).toBe(0);
-        expect(stateService.getStyleVisibility('Team/Search', true)).toBe(true);
+        expect(styleState.getStyleVisibility('Team/Search', true)).toBe(true);
         expect(wasmStyle.delete).toHaveBeenCalledOnce();
         expect(reapply).not.toHaveBeenCalled();
         expect(infoService.showError).toHaveBeenCalledWith(expect.stringContaining('No style was created'));
@@ -673,7 +664,7 @@ rules: [{geometry: [point]}]
     });
 
     it('persists visibility before delayed reapply so toggles do not bounce back', () => {
-        const {service, stateService} = createService();
+        const {service, styleState} = createService();
 
         service.styles.set('StyleOne', {
             id: 'StyleOne',
@@ -691,7 +682,7 @@ rules: [{geometry: [point]}]
 
         service.toggleStyle('StyleOne', false, true);
 
-        expect(stateService.getStyleVisibility('StyleOne', true)).toBe(false);
+        expect(styleState.getStyleVisibility('StyleOne', true)).toBe(false);
         expect(service.styles.get('StyleOne')?.visible).toBe(false);
     });
 
@@ -767,8 +758,8 @@ rules: [{geometry: [point]}]
     });
 
     it('clears the retired visibility identity when an imported style is renamed', () => {
-        const {service, stateService} = createService();
-        stateService.setStyleVisibility('Old', true);
+        const {service, styleState} = createService();
+        styleState.setStyleVisibility('Old', true);
         service.styles.set('Old', {
             id: 'Old',
             url: '',
@@ -793,11 +784,11 @@ rules: [{geometry: [point]}]
         });
         vi.spyOn(service, 'saveImportedStyles').mockImplementation(() => {});
         vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
-        const removeVisibility = vi.spyOn(stateService, 'removeStyleVisibility');
+        const removeVisibility = vi.spyOn(styleState, 'removeStyleVisibility');
 
         expect(service.setStyleSource('Old', 'name: New')).toBe('New');
         expect(removeVisibility).toHaveBeenCalledWith('Old');
-        expect(stateService.getStyleVisibility('Old', false)).toBe(false);
+        expect(styleState.getStyleVisibility('Old', false)).toBe(false);
     });
 
     it('resets one modified builtin style to cached baseline and clears override state', () => {

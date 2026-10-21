@@ -1,3 +1,7 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {AppLayoutService} from "../shared/app-layout.service";
+import {InspectionStateService} from "./inspection-state.service";
 import "@angular/compiler";
 import {ChangeDetectorRef, Renderer2} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
@@ -42,12 +46,14 @@ describe("inspection host render notifications", () => {
             reorderInspectionPanels: vi.fn()
         };
         const cdr = changeDetector();
-        const component = new InspectionContainerComponent(
+        const injector = ownerTestInjector([{provide: AppLayoutService, useValue: stateService},
+            {provide: InspectionStateService, useValue: {reorderInspectionPanels: stateService.reorderInspectionPanels}}]);
+        const component = runInInjectionContext(injector, () => new InspectionContainerComponent(
             (stateService) as never,
             mapService,
             {} as Renderer2,
             cdr
-        );
+        ));
         vi.mocked(cdr.markForCheck).mockClear();
 
         selectionTopic.next([loadingPanel(false)]);
@@ -64,7 +70,9 @@ describe("inspection host render notifications", () => {
         const mapService = {selectionTopic} as unknown as InspectionSelectionService;
         const stateService = {inspectionComparisonState};
         const cdr = changeDetector();
-        const component = new InspectionDialogsComponent(mapService, (stateService) as never, cdr);
+        const injector = ownerTestInjector([{provide: InspectionStateService, useValue: stateService}]);
+        const component = runInInjectionContext(injector, () =>
+            new InspectionDialogsComponent(mapService, stateService as never, cdr));
         vi.mocked(cdr.markForCheck).mockClear();
 
         selectionTopic.next([loadingPanel(true)]);

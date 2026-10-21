@@ -1,3 +1,8 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {AppLayoutService} from "./app-layout.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewService} from "../mapview/map-view.service";
 import '@angular/compiler';
 import {ElementRef} from '@angular/core';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -55,7 +60,10 @@ describe('AppPanelComponent custom resizing', () => {
             baseFontSize: 16,
             setPanelLayout
         };
-        component = new AppPanelComponent((stateService) as never, new ViewerUiService());
+        const injector = ownerTestInjector([ViewerUiService, MapViewStateService,
+            {provide: AppLayoutService, useValue: stateService}, {provide: MapViewService, useValue: {}}]);
+        component = runInInjectionContext(injector, () =>
+            new AppPanelComponent(stateService as never, injector.get(ViewerUiService)));
         component.layoutId = 'test-panel';
         component.persistLayout = true;
         component.resizeMode = 'vertical';

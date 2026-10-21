@@ -1,3 +1,7 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {AppStateService} from "../shared/appstate.service";
 import {describe, it, expect, vi} from 'vitest';
 import {CoordinatesService} from './coordinates.service';
 
@@ -5,28 +9,30 @@ class AppConfigServiceStub {
     getExtensionModuleId = vi.fn().mockReturnValue(null);
 }
 
-class AppStateServiceStub {
+class MapViewStateStub {
     setMarkerPosition = vi.fn();
 }
 
 const createService = () => {
-    const stateService = new AppStateServiceStub();
+    const viewState = new MapViewStateStub();
+    const injector = ownerTestInjector([{provide: MapViewStateService, useValue: viewState}]);
     const configService = new AppConfigServiceStub();
-    const service = new CoordinatesService(stateService as any, configService as any);
-    return {service, stateService, configService};
+    const service = runInInjectionContext(injector, () =>
+        new CoordinatesService(injector.get(AppStateService), configService as any));
+    return {service, viewState, configService};
 };
 
 describe('CoordinatesService', () => {
-    it('forwards mouse click coordinates to AppStateService, skipping the initial null', () => {
-        const {service, stateService} = createService();
+    it('forwards mouse click coordinates to the view owner, skipping the initial null', () => {
+        const {service, viewState} = createService();
 
-        expect(stateService.setMarkerPosition).not.toHaveBeenCalled();
+        expect(viewState.setMarkerPosition).not.toHaveBeenCalled();
 
         const position = {longitude: 1, latitude: 2, height: 3} as any;
         service.mouseClickCoordinates.next(position);
 
-        expect(stateService.setMarkerPosition).toHaveBeenCalledTimes(1);
-        expect(stateService.setMarkerPosition).toHaveBeenCalledWith(position);
+        expect(viewState.setMarkerPosition).toHaveBeenCalledTimes(1);
+        expect(viewState.setMarkerPosition).toHaveBeenCalledWith(position);
     });
 
     it('loads the auxiliary plugin when a jump-target extension module is configured', async () => {

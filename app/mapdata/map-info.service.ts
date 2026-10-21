@@ -1,3 +1,4 @@
+import {InspectionStateService} from "../inspection/inspection-state.service";
 import {HttpClient} from "@angular/common/http";
 import {inject, Injectable} from "@angular/core";
 import {BehaviorSubject, firstValueFrom, Subject} from "rxjs";
@@ -28,7 +29,7 @@ import {
     layerStyleOptions,
     LayerTreeNode,
     MapInfoItem,
-    MapLayerTree,
+    MapLayerTree, MapTreeNode,
     sortDataSourceCatalogEntries,
     StyleOptionNode
 } from "./map.tree.model";
@@ -58,6 +59,7 @@ export class MapInfoService {
 
     static readonly controls = mapInfoControls;
     readonly layerState = inject(MapLayerStateService);
+    private readonly inspectionState = inject(InspectionStateService);
     readonly viewStateOwner = inject(MapViewStateService);
     public readonly legalInformationPerMap = new Map<string, Set<string>>();
     public readonly legalInformationUpdated = new Subject<boolean>();
@@ -449,11 +451,20 @@ export class MapInfoService {
             this.mapPresetService,
             this.layerState,
             this.viewStateOwner,
-            this.canPruneStateForCurrentCatalog()
+            this.canPruneStateForCurrentCatalog() ? maps => this.pruneCatalogReferences(maps) : undefined
         );
         this.maps.destroy();
         this.maps$.next(nextTree);
         this.reapplySyncOptionsForAllViews();
+    }
+
+    /** A complete datasource catalog coordinates each owner's own cleanup in one revision. */
+    private pruneCatalogReferences(maps: ReadonlyMap<string, MapTreeNode>): void {
+        this.stateService.withSystemStateMutation(() => this.stateService.transaction(() => {
+            this.layerState.prune(maps, this.styleService.styles);
+            this.styleService.pruneVisibility(this.styleService.styles);
+            this.inspectionState.prune(maps);
+        }));
     }
 
     /** Materializes the catalog-only layer model without view or presentation state. */

@@ -511,8 +511,8 @@ export interface ResolvedMapPresetComponent {
 
 /**
  * Holds the map/layer/style tree shown in the maps panel.
- * The tree owns UI-only grouping and visibility state, while `AppStateService`
- * remains the source of truth for persisted per-view settings.
+ * The tree owns UI grouping and option controls; the layer and view owners
+ * supply persisted values. Catalog-wide cleanup is supplied by MapInfoService.
  */
 export class MapLayerTree {
     nodes: (GroupTreeNode | MapTreeNode)[] = [];
@@ -528,7 +528,7 @@ export class MapLayerTree {
         private mapPresetService: MapPresetService,
         private layerState: MapLayerStateService,
         private viewState: MapViewStateService,
-        private readonly pruneUnavailableState = true
+        private readonly pruneState?: (maps: ReadonlyMap<string, MapTreeNode>) => void
     ) {
         this.initializeMapGroups(mapInfo);
         this.subscriptions.add(
@@ -540,9 +540,7 @@ export class MapLayerTree {
                 .subscribe((_) => {
                     this.initializeStyleOptions([...this.styleService.styles.values()]);
                     this.configureTreeParameters();
-                    if (this.mapsForMapIds.size && this.pruneUnavailableState) {
-                        this.layerState.prune(this.mapsForMapIds, this.styleService.styles);
-                    }
+                    if (this.mapsForMapIds.size) this.pruneState?.(this.mapsForMapIds);
                 })
         );
         this.subscriptions.add(

@@ -1,3 +1,9 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {InspectionStateService} from "./inspection-state.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
+import {AppStateService} from "../shared/appstate.service";
 import "@angular/compiler";
 import {BehaviorSubject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
@@ -68,14 +74,17 @@ function createHarness(
         })
     };
     const infoMessageService = {showWarning: vi.fn()} as unknown as InfoMessageService;
-    const service = new InspectionSelectionService(
-        (stateService) as never,
+    const injector = ownerTestInjector([MapViewStateService,
+        {provide: InspectionStateService, useValue: stateService},
+        {provide: ViewLayerDiagnosticsService, useValue: {}}]);
+    const service = runInInjectionContext(injector, () => new InspectionSelectionService(
+        injector.get(AppStateService),
         {loadFeatures} as never,
         {} as never,
         {registerShortcut: vi.fn()} as never,
         infoMessageService,
         {run: (callback: () => unknown) => callback()} as never
-    );
+    ));
     return {
         service,
         stateService,

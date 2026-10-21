@@ -1,3 +1,9 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {MapLayerStateService} from "./map-layer-state.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {AppStateService} from "../shared/appstate.service";
 import type {HttpClient} from "@angular/common/http";
 import "@angular/compiler";
 import {BehaviorSubject, Subject} from "rxjs";
@@ -14,12 +20,12 @@ describe("MapInfoService external-state reconciliation", () => {
         let visible = true;
         let level = 13;
         let optionValue = false;
-        const stateService = {
+        const layerState = {
             ready: new BehaviorSubject(true),
             numViewsState: new BehaviorSubject(1),
             stateApplied,
-            mapLayerConfig: vi.fn(() => [{autoLevel: false, level, visible}]),
-            styleOptionValues: vi.fn(() => [optionValue]),
+            initializeMapLayerConfig: vi.fn(() => [{autoLevel: false, level, visible}]),
+            initializeStyleOptionValues: vi.fn(() => [optionValue]),
             getLayerPresetSelection: vi.fn(() => null),
             setLayerPresetSelection: vi.fn(),
             getMapPresetSelection: vi.fn(() => null),
@@ -52,13 +58,19 @@ describe("MapInfoService external-state reconciliation", () => {
             presetsForLayer: () => [],
             matchesPresetValues: () => false
         } as unknown as MapPresetService;
-        const service = new MapInfoService(
+        const injector = ownerTestInjector([MapViewStateService,
+            {provide: MapLayerStateService, useValue: layerState},
+            {provide: InspectionStateService, useValue: {prune() {}}}]);
+        const persistence = injector.get(AppStateService);
+        const views = injector.get(MapViewStateService);
+        persistence.ready.next(true);
+        const service = runInInjectionContext(injector, () => new MapInfoService(
             {} as HttpClient,
-            (stateService) as never,
+            persistence,
             styleService,
             mapPresetService,
             {} as InfoMessageService
-        );
+        ));
         const mapInfo: MapInfoItem = {
             extraJsonAttachment: {},
             layers: {
@@ -82,10 +94,10 @@ describe("MapInfoService external-state reconciliation", () => {
         };
         const tree = new MapLayerTree(
             [mapInfo],
-            (stateService) as never,
+            persistence,
             styleService,
-            mapPresetService, stateService as never, stateService as never,
-            false
+            mapPresetService, layerState as never, views,
+            undefined
         );
         service.maps$.getValue().destroy();
         service.maps$.next(tree);
@@ -99,9 +111,9 @@ describe("MapInfoService external-state reconciliation", () => {
         visible = false;
         level = 9;
         optionValue = true;
-        stateApplied.next();
+        persistence.stateApplied.next();
 
-        expect(stateService.numViewsState.getValue()).toBe(1);
+        expect(views.numViewsState.getValue()).toBe(1);
         expect(layer.viewConfig[0]).toEqual({autoLevel: false, level: 9, visible: false});
         expect(option.value).toEqual([true]);
         expect(reasons).toEqual(["external-state"]);

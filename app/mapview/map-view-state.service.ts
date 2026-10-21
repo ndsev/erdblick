@@ -203,6 +203,28 @@ export class MapViewStateService {
         return {...params, vid: ids.join(","), n: String(count)};
     }
 
+    /**
+     * Snapshot count and ID fields describe one layout. Validate them together before
+     * applying camera/layer arrays, and supply fresh identities for a full legacy replacement.
+     * Partial snapshots and config defaults keep the existing mapping when IDs are absent.
+     */
+    private prepareSnapshot(snapshot: Record<string, unknown>, replaceMissing: boolean): Record<string, unknown> {
+        const hasIds = Object.prototype.hasOwnProperty.call(snapshot, "viewIds");
+        const hasCount = Object.prototype.hasOwnProperty.call(snapshot, "numberOfViews");
+        if (!hasIds && !replaceMissing) return snapshot;
+
+        const ids = hasIds ? this.idSchema.parse(snapshot["viewIds"]) : undefined;
+        const count = hasCount
+            ? this.numViewsState.validateSnapshotValue(snapshot["numberOfViews"])
+            : ids?.length ?? 1;
+        if (ids && ids.length !== count) throw new Error("The view-ID count must match numberOfViews");
+        return {
+            ...snapshot,
+            viewIds: ids ?? Array.from({length: count}, () => this.newViewId()),
+            numberOfViews: count
+        };
+    }
+
     readonly markerState = this.stateService.register(ownerState.marker, "views", "marker");
 
     readonly markedPositionState = this.stateService.register(ownerState.markedPosition, "views", "markedPosition");
@@ -574,48 +596,50 @@ export class MapViewStateService {
         orientation?: {heading: number; pitch: number; roll: number},
         position: readonly [number, number, number] = [0, 0, 0]
     ) {
-        const syncPosition = this.viewSync.includes(VIEW_SYNC_POSITION);
-        const syncMovement = this.viewSync.includes(VIEW_SYNC_MOVEMENT);
+        return this.stateService.transaction(() => {
+            const syncPosition = this.viewSync.includes(VIEW_SYNC_POSITION);
+            const syncMovement = this.viewSync.includes(VIEW_SYNC_MOVEMENT);
 
-        if (syncPosition || syncMovement) {
-            // Unfocused view is trying to update itself when the views are synchronized
-            if (viewIndex !== this.focusedView) {
-                return;
-            }
-
-            if (syncPosition) {
-                for (let i = 0; i < this.numViews; i++) {
-                    this._setView(i, destination, orientation, position);
+            if (syncPosition || syncMovement) {
+                // Unfocused view is trying to update itself when the views are synchronized
+                if (viewIndex !== this.focusedView) {
+                    return;
                 }
-                return;
-            }
 
-            if (syncMovement) {
-                const previous = this.cameraViewDataState.getValue(viewIndex).destination;
-                const destLon = GeoMath.toDegrees(destination.longitude);
-                const destLat = GeoMath.toDegrees(destination.latitude);
-                const deltaLon = destLon - previous.lon;
-                const deltaLat = destLat - previous.lat;
-
-                this._setView(viewIndex, destination, orientation, position);
-
-                for (let i = 0; i < this.numViews; i++) {
-                    if (i === viewIndex) {
-                        continue;
+                if (syncPosition) {
+                    for (let i = 0; i < this.numViews; i++) {
+                        this._setView(i, destination, orientation, position);
                     }
-                    const target = this.cameraViewDataState.getValue(i);
-                    const newDestination = Cartographic.fromDegrees(
-                        target.destination.lon + deltaLon,
-                        target.destination.lat + deltaLat,
-                        target.destination.alt
-                    );
-                    this._setView(i, newDestination, undefined, target.position);
+                    return;
                 }
-                return;
-            }
-        }
 
-        this._setView(viewIndex, destination, orientation, position);
+                if (syncMovement) {
+                    const previous = this.cameraViewDataState.getValue(viewIndex).destination;
+                    const destLon = GeoMath.toDegrees(destination.longitude);
+                    const destLat = GeoMath.toDegrees(destination.latitude);
+                    const deltaLon = destLon - previous.lon;
+                    const deltaLat = destLat - previous.lat;
+
+                    this._setView(viewIndex, destination, orientation, position);
+
+                    for (let i = 0; i < this.numViews; i++) {
+                        if (i === viewIndex) {
+                            continue;
+                        }
+                        const target = this.cameraViewDataState.getValue(i);
+                        const newDestination = Cartographic.fromDegrees(
+                            target.destination.lon + deltaLon,
+                            target.destination.lat + deltaLat,
+                            target.destination.alt
+                        );
+                        this._setView(i, newDestination, undefined, target.position);
+                    }
+                    return;
+                }
+            }
+
+            this._setView(viewIndex, destination, orientation, position);
+        });
     }
 
     /** Switches one view between 2D and 3D projection mode. */
@@ -662,27 +686,29 @@ export class MapViewStateService {
 
     /** Applies the selection emitted by the view-sync toggle UI and mirrors it into state. */
     updateSelectedSyncOptions(selectedCodes: string[]) {
-        const previousSelection = new Set(this.viewSync);
-        let nextSelection = Array.from(new Set(selectedCodes));
-        const hasMovement = nextSelection.includes(VIEW_SYNC_MOVEMENT);
-        const hasPosition = nextSelection.includes(VIEW_SYNC_POSITION);
+        this.stateService.transaction(() => {
+            const previousSelection = new Set(this.viewSync);
+            let nextSelection = Array.from(new Set(selectedCodes));
+            const hasMovement = nextSelection.includes(VIEW_SYNC_MOVEMENT);
+            const hasPosition = nextSelection.includes(VIEW_SYNC_POSITION);
 
-        if (hasMovement && hasPosition) {
-            let valueToRemove = VIEW_SYNC_POSITION;
-            if (!previousSelection.has(VIEW_SYNC_POSITION) && previousSelection.has(VIEW_SYNC_MOVEMENT)) {
-                valueToRemove = VIEW_SYNC_MOVEMENT;
-            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT) && previousSelection.has(VIEW_SYNC_POSITION)) {
-                valueToRemove = VIEW_SYNC_POSITION;
-            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT)) {
-                valueToRemove = VIEW_SYNC_POSITION;
-            } else if (!previousSelection.has(VIEW_SYNC_POSITION)) {
-                valueToRemove = VIEW_SYNC_MOVEMENT;
+            if (hasMovement && hasPosition) {
+                let valueToRemove = VIEW_SYNC_POSITION;
+                if (!previousSelection.has(VIEW_SYNC_POSITION) && previousSelection.has(VIEW_SYNC_MOVEMENT)) {
+                    valueToRemove = VIEW_SYNC_MOVEMENT;
+                } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT) && previousSelection.has(VIEW_SYNC_POSITION)) {
+                    valueToRemove = VIEW_SYNC_POSITION;
+                } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT)) {
+                    valueToRemove = VIEW_SYNC_POSITION;
+                } else if (!previousSelection.has(VIEW_SYNC_POSITION)) {
+                    valueToRemove = VIEW_SYNC_MOVEMENT;
+                }
+                nextSelection = nextSelection.filter((code) => code !== valueToRemove);
             }
-            nextSelection = nextSelection.filter((code) => code !== valueToRemove);
-        }
 
-        this.viewSync = nextSelection;
-        this.syncViews();
+            this.viewSync = nextSelection;
+            this.syncViews();
+        });
     }
     constructor(
         private readonly stateService: AppStateService,
@@ -692,6 +718,9 @@ export class MapViewStateService {
 
         this.focusedViewState.next(0);
         this.stateService.registerUrlNormalizer((params, resetMissing) => this.prepareUrl(params, resetMissing));
+        this.stateService.registerSnapshotNormalizer((snapshot, replaceMissing) =>
+            this.prepareSnapshot(snapshot, replaceMissing)
+        );
     }
 
     /** Resolves a public logical target and captures its current runtime lifetime. */

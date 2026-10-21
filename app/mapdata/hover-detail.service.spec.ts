@@ -1,3 +1,6 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {InspectionStateService} from "../inspection/inspection-state.service";
 import "@angular/compiler";
 import {BehaviorSubject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
@@ -54,11 +57,12 @@ function createHarness(
     const mapInfo = {
         tileLayerParser: {readTileSubsetLayer: vi.fn()}
     };
-    const service = new HoverDetailService(
+    const injector = ownerTestInjector([{provide: InspectionStateService, useValue: state}]);
+    const service = runInInjectionContext(injector, () => new HoverDetailService(
         state as never,
         mapInfo as never,
         tileStream as never
-    );
+    ));
     const mapgetLayer = new MapgetLayer(
         "source",
         "pool",

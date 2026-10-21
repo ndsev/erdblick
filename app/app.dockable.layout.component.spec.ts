@@ -1,3 +1,7 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../test/owner-test-injector";
+import {AppLayoutService} from "./shared/app-layout.service";
+import {InspectionStateService} from "./inspection/inspection-state.service";
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {BehaviorSubject, Subject} from "rxjs";
@@ -11,7 +15,8 @@ describe("Map attribution", () => {
             legalInformationUpdated: new Subject<boolean>()
         };
         if (alreadyLoaded) mapInfo.legalInformationPerMap.set("Example map", new Set([notice]));
-        const layout = new DockableLayoutComponent(
+        const injector = ownerTestInjector([AppLayoutService, InspectionStateService]);
+        const layout = runInInjectionContext(injector, () => new DockableLayoutComponent(
             {isDockOpen: false, dockOpenState: new BehaviorSubject(false)} as never,
             {} as never,
             {} as never,
@@ -19,7 +24,7 @@ describe("Map attribution", () => {
             {markForCheck: vi.fn()} as never,
             {} as never,
             mapInfo as never
-        );
+        ));
         const values: string[] = [];
         const subscription = layout["copyright$"].subscribe(value => values.push(value));
         try {

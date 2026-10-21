@@ -1,3 +1,5 @@
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {AppStateService} from "../shared/appstate.service";
 import "@angular/compiler";
 import {BehaviorSubject, Subject} from "rxjs";
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
@@ -28,7 +30,7 @@ function retryStateHarness() {
 
 function serviceHarness(): MapTileStreamService {
     return new MapTileStreamService(
-        {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any,
+        ownerTestInjector().get(AppStateService),
         {dataSourceInfoChanged: new Subject<void>()} as any,
         {} as any,
         {
@@ -122,11 +124,7 @@ describe("MapTileStreamService page lifecycle", () => {
         vi.useFakeTimers();
         connectionError.mockClear();
         service = new MapTileStreamService(
-            {
-                ...retryStateHarness(),
-                tilePullCompressionEnabled: false,
-                tilePullCompressionEnabledState: new Subject<boolean>()
-            } as any,
+            ownerTestInjector().get(AppStateService),
             {
                 dataSourceInfoChanged: new Subject<void>(),
                 reloadDataSources: vi.fn().mockResolvedValue(true)
@@ -267,7 +265,7 @@ describe("MapTileStreamService source catalog refresh", () => {
                 .mockResolvedValue(true)
         };
         const service = new MapTileStreamService(
-            {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any,
+            ownerTestInjector().get(AppStateService),
             mapInfo as any,
             {} as any,
             {
@@ -318,7 +316,7 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
         vi.useFakeTimers();
         try {
             const service = new MapTileStreamService(
-                {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any,
+                ownerTestInjector().get(AppStateService),
                 {dataSourceInfoChanged: new Subject<void>()} as any,
                 {} as any,
                 {
@@ -612,7 +610,7 @@ describe("failed tile expiry", () => {
         await vi.advanceTimersByTimeAsync(100);
         expect(updates.mock.calls.at(-1)![0][0].partitions).toEqual([{kind: "tile", id: 3}]);
         // Turning off connection retries does not disable value freshness.
-        internal.stateService.connectionRetryPolicy = {...DEFAULT_CONNECTION_RETRY_POLICY, enabled: false};
+        internal.connectionRetryEnabledState.next(false);
         internal.applyRetryPolicy();
         await vi.advanceTimersByTimeAsync(5000);
         expect(updates.mock.calls.at(-1)![0][0].partitions).toEqual([

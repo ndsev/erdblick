@@ -1,3 +1,6 @@
+import {coreLib} from "../integrations/wasm";
+import type {MapTreeNode} from "../mapdata/map.tree.model";
+import {parseMapPartitionKey} from "../mapdata/partition.model";
 import {inject} from "@angular/core";
 import {rejectAction} from "../actions/action-utils";
 import {AppActionService} from "../actions/app-action.service";
@@ -1009,6 +1012,112 @@ export class InspectionStateService {
             others
         };
     }
+    /** Retains inspections while a datasource is still starting and prunes unavailable loaded layers. */
+    prune(presentMaps: ReadonlyMap<string, MapTreeNode>): void {
+        this.stateService.withSystemStateMutation(() => this.stateService.transaction(() => {
+                const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
+                const presentSelectionLayerIds = new Set<string>(); // includes SourceData layers
+                const presentMapIds = new Set<string>();
+                const mapsWithKnownFeatureLayers = new Set<string>();
+                const mapsWithKnownSelectionLayers = new Set<string>();
+                for (const [mapId, mapNode] of presentMaps.entries()) {
+                    presentMapIds.add(mapId);
+                    // Use feature layers (exclude SourceData) via children
+                    for (const layer of mapNode.children) {
+                        presentLayerIds.add(`${mapId}/${layer.id}`);
+                    }
+                    if (mapNode.children.length > 0) {
+                        mapsWithKnownFeatureLayers.add(mapId);
+                    }
+                    // Selection pruning must keep SourceData inspections too.
+                    for (const layerId of mapNode.layers.keys()) {
+                        presentSelectionLayerIds.add(`${mapId}/${layerId}`);
+                    }
+                    if (mapNode.layers.size > 0) {
+                        mapsWithKnownSelectionLayers.add(mapId);
+                    }
+                }
+
+                // 6) Prune selections that reference maps/layers that are not present anymore
+                const panels = this.selectionState.getValue();
+                const nextPanels: InspectionPanelModel<TileFeatureId>[] = [];
+                let selectionChanged = false;
+
+                const parseKey = (tileKey: string): {mapId: string; mapLayerId: string} | undefined => {
+                    let parsed: [string, string, unknown];
+                    try {
+                        parsed = parseMapPartitionKey(coreLib, tileKey);
+                    } catch {
+                        return undefined;
+                    }
+                    const [mapId, layerId] = parsed;
+                    return {mapId, mapLayerId: `${mapId}/${layerId}`};
+                };
+
+                const keepFeatureSelection = (tileKey: string): boolean => {
+                    const parsed = parseKey(tileKey);
+                    if (!parsed) {
+                        return false;
+                    }
+                    if (presentLayerIds.has(parsed.mapLayerId)) {
+                        return true;
+                    }
+                    // Nonblocking datasource startup can transiently publish a map before its layers.
+                    return !presentMapIds.has(parsed.mapId) || !mapsWithKnownFeatureLayers.has(parsed.mapId);
+                };
+
+                const keepSourceDataSelection = (tileKey: string): boolean => {
+                    const parsed = parseKey(tileKey);
+                    if (!parsed) {
+                        return false;
+                    }
+                    if (presentSelectionLayerIds.has(parsed.mapLayerId)) {
+                        return true;
+                    }
+                    return !presentMapIds.has(parsed.mapId) || !mapsWithKnownSelectionLayers.has(parsed.mapId);
+                };
+
+                for (const panel of panels) {
+                    const updated: InspectionPanelModel<TileFeatureId> = {
+                        ...panel,
+                        features: [],
+                        sourceData: panel.sourceData ? {...panel.sourceData} : undefined
+                    };
+
+                    // Filter features
+                    for (const feat of panel.features) {
+                        if (keepFeatureSelection(feat.mapTileKey)) {
+                            updated.features.push(feat);
+                        }
+                    }
+
+                    // Validate sourceData if present
+                    if (updated.sourceData && !keepSourceDataSelection(updated.sourceData.mapTileKey)) {
+                        delete updated.sourceData;
+                    }
+
+                    if (
+                        updated.features.length !== panel.features.length ||
+                        (panel.sourceData !== undefined && updated.sourceData === undefined)
+                    ) {
+                        selectionChanged = true;
+                    }
+
+                    if (updated.features.length || updated.sourceData) {
+                        nextPanels.push(updated);
+                    } else {
+                        selectionChanged = true;
+                    }
+                }
+
+                if (selectionChanged || nextPanels.length !== panels.length) {
+                    this.selectionState.next(nextPanels);
+                }
+                this.reconcileComparison(nextPanels);
+
+        }));
+    }
+
     constructor(
         private readonly stateService: AppStateService,
         private readonly infoMessageService: InfoMessageService,

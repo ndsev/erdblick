@@ -4056,7 +4056,8 @@ export class FeatureSearchService {
         textOmitted ||= query !== session.definition.query;
         const parsedSettings = searchSettingsSchema.safeParse({
             ...settings,
-            selectedViewIds: session.definition.selectedViewIds ?? []
+            selectedViewIds: session.definition.selectedViewIds ?? session.definition.selectedViewIndices
+                .map(index => this.viewStateOwner.idAt(index)).filter(id => id !== undefined)
         });
         if (!parsedSettings.success)
             rejectAction("Search settings exceed the public contract; narrow them in the UI first");
