@@ -289,48 +289,50 @@ export class InspectionSelectionService {
             return { foundFeatureCount: 0, inspectedFeatureCount: 0 };
         }
 
-        if (foundFeatureCount === 1) {
-            const currentPanels = this.inspectionState.selection;
-            const featureAlreadyInspected = this.panelsContainFeature(currentPanels, featureIds[0]);
-            const reusableFeaturePanel = currentPanels.some(panel =>
-                panel.sourceData === undefined && !panel.locked
-            );
-            if (featureAlreadyInspected
-                || reusableFeaturePanel
-                || currentPanels.length < this.inspectionState.inspectionsLimit) {
-                const panelId = this.inspectionState.setSelection(
-                    [featureIds[0]],
-                    undefined,
-                    lockNewPanels
+        this.stateService.transaction(() => {
+            if (foundFeatureCount === 1) {
+                const currentPanels = this.inspectionState.selection;
+                const featureAlreadyInspected = this.panelsContainFeature(currentPanels, featureIds[0]);
+                const reusableFeaturePanel = currentPanels.some(panel =>
+                    panel.sourceData === undefined && !panel.locked
                 );
-                if (lockNewPanels && panelId !== undefined) {
-                    this.inspectionState.setInspectionPanelLockedState(panelId, true);
-                }
-            }
-        } else {
-            // Match the existing merged-feature flow: preserve pinned/source-data panels and
-            // create one new inspection panel for each candidate that still fits.
-            this.inspectionState.unsetUnlockedSelections();
-            let remainingSlots = Math.max(
-                0,
-                this.inspectionState.inspectionsLimit - this.inspectionState.selection.length
-            );
-            for (const featureId of featureIds) {
-                if (this.panelsContainFeature(this.inspectionState.selection, featureId)) {
-                    continue;
-                }
-                if (remainingSlots <= 0) {
-                    break;
-                }
-                const panelId = this.inspectionState.setSelection([featureId], undefined, true);
-                if (panelId !== undefined) {
-                    remainingSlots -= 1;
-                    if (lockNewPanels) {
+                if (featureAlreadyInspected
+                    || reusableFeaturePanel
+                    || currentPanels.length < this.inspectionState.inspectionsLimit) {
+                    const panelId = this.inspectionState.setSelection(
+                        [featureIds[0]],
+                        undefined,
+                        lockNewPanels
+                    );
+                    if (lockNewPanels && panelId !== undefined) {
                         this.inspectionState.setInspectionPanelLockedState(panelId, true);
                     }
                 }
+            } else {
+                // Match the existing merged-feature flow: preserve pinned/source-data panels and
+                // create one new inspection panel for each candidate that still fits.
+                this.inspectionState.unsetUnlockedSelections();
+                let remainingSlots = Math.max(
+                    0,
+                    this.inspectionState.inspectionsLimit - this.inspectionState.selection.length
+                );
+                for (const featureId of featureIds) {
+                    if (this.panelsContainFeature(this.inspectionState.selection, featureId)) {
+                        continue;
+                    }
+                    if (remainingSlots <= 0) {
+                        break;
+                    }
+                    const panelId = this.inspectionState.setSelection([featureId], undefined, true);
+                    if (panelId !== undefined) {
+                        remainingSlots -= 1;
+                        if (lockNewPanels) {
+                            this.inspectionState.setInspectionPanelLockedState(panelId, true);
+                        }
+                    }
+                }
             }
-        }
+        });
 
         const inspectedFeatureCount = featureIds.filter(featureId =>
             this.panelsContainFeature(this.inspectionState.selection, featureId)
@@ -753,13 +755,13 @@ export class InspectionSelectionService {
 
     /** Publishes inspection shells after locate only; the existing selection owner performs asynchronous feature loading. */
     async inspect(input: ActionInput<typeof inspectionActions.inspect>, signal?: AbortSignal): Promise<ActionOutput<typeof inspectionActions.inspect>> {
-        if (input.color !== undefined && !input.newPanel) rejectAction("color requires newPanel:true; use inspection.panel state to recolor an existing panel", "invalid_arguments");
+        if (input.color !== undefined && !input.newPanel) rejectAction("color requires newPanel:true; use the inspection.panel control to recolor an existing panel", "invalid_arguments");
         if (input.panelId !== undefined && input.newPanel) rejectAction("panelId and newPanel are mutually exclusive", "invalid_arguments");
         if (input.panelId !== undefined) {
             const panel = this.inspectionState.selection.find(panel => panel.id === input.panelId);
             if (!panel || panel.locked || panel.sourceData) rejectAction("An explicit target must be an existing unlocked feature panel");
         }
-        // Selection setters can mutate the same array in place; reference equality is not a change guard.
+        // Reject a stale intent if any selection edit completes while identities are being located.
         let changed: boolean;
         const guard = this.inspectionState.selectionState.subscribe(() => { changed = true; });
         changed = false;

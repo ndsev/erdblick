@@ -71,6 +71,15 @@ with 0 errors / 8 max-lines warnings. Exact logs: `full-suite-codecs-final.log` 
 boolean arrays, observe one complete marker edit, and check provider reorder plus
 remove/restore rejection. Parent-owned browser fixture corrections are separate.
 
+The final inspection audit reproduced five separate commits while an ordinary
+Ctrl drill operation replaced an unlocked panel and created two pinned panels.
+One outer transaction now publishes their complete selection and dock state.
+The async grouped inspection already batched selection, lock and color; its new
+observer regression confirms that contract. The full official suite passes
+125 files / 1,366 tests, and lint exits 0 with the same 8 warnings. Evidence:
+`inspection-atomicity-before.log`, `full-suite-inspection-final.log` and
+`lint-inspection-final.log`. Public schemas and the catalog digest are unchanged.
+
 The parent independently verified earlier checkpoints:
 
 - `d7048247`: 180-test state/URL/identity gate, profiling build and native browser

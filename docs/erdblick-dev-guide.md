@@ -641,7 +641,7 @@ model. Client acceptance must check the model-visible callable inventory:
 successful `tools/list` discovery or direct invocation alone does not prove that
 the client can convert every input schema into a model tool signature.
 The generic setter additionally uses routing-safe Draft-07 `allOf`/`if`/`then`
-branches derived from the channel registry to pair each target with its exact
+branches derived from the control declarations to pair each target with its exact
 value schema. Keep runtime and native parity fixtures together when extending
 this surface; client-side conditional-schema support is a separate acceptance gate.
 When changing contracts during an already-running watch/serve session, rerun

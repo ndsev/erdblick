@@ -1,10 +1,7 @@
-import { testPersistence } from '../../test/state-owners';
-import { stateOwners } from '../../test/state-owners';
+import { stateOwners, testPersistence } from '../../test/state-owners';
 import "@angular/compiler";
 import { describe, expect, it, vi } from "vitest";
-import { BehaviorSubject } from "rxjs";
 
-import type { AppStateService } from "../shared/appstate.service";
 import type { InspectionPanelModel, TileFeatureId } from "./inspection-state.model";
 import type { InfoMessageService } from "../shared/info.service";
 import { FeatureWrapper } from "../mapdata/feature-inspection.model";
@@ -26,9 +23,13 @@ function createHarness(
     vi.spyOn(stateService, 'unsetUnlockedSelections');
     vi.spyOn(stateService, 'setInspectionPanelLockedState');
     const infoMessageService = { showWarning: vi.fn() } as unknown as InfoMessageService;
+    const tileStream = {
+        loadFeatures,
+        resolveFeatureIdentities: vi.fn(async (features: TileFeatureId[]) => features)
+    };
     const service = new InspectionSelectionService(
         persistence,
-        { loadFeatures } as never,
+        tileStream as never,
         {} as never,
         { registerShortcut: vi.fn() } as never,
         infoMessageService,
@@ -36,6 +37,8 @@ function createHarness(
     );
     return {
         service,
+        persistence,
+        layout: owners.layout,
         stateService,
         infoMessageService,
         loadFeatures,
@@ -162,8 +165,25 @@ describe("InspectionSelectionService multi-inspection", () => {
         expect(infoMessageService.showWarning).not.toHaveBeenCalled();
     });
 
-    it("locks every panel newly opened by a Ctrl drill inspection", () => {
-        const { service, panels, stateService } = createHarness(3);
+    it("replaces unlocked panels and publishes all Ctrl drill inspections locked in one commit", () => {
+        const previousPanel: InspectionPanelModel<TileFeatureId> = {
+            id: 0,
+            features: [feature("previous", "map/tile")],
+            locked: false,
+            focused: true,
+            size: [30, 20],
+            color: "#fff",
+            undocked: false
+        };
+        const { service, panels, stateService, persistence, layout } = createHarness(3, [previousPanel]);
+        const observed: unknown[] = [];
+        const subscription = persistence.observe(() => ({
+            panels: panels().map(panel => ({
+                feature: panel.features[0].featureId,
+                locked: panel.locked
+            })),
+            dockOpen: layout.isDockOpen
+        })).subscribe(value => observed.push(value));
 
         const result = service.inspectFeatureIds([
             feature("first", "map/tile"),
@@ -173,6 +193,45 @@ describe("InspectionSelectionService multi-inspection", () => {
         expect(result).toEqual({ foundFeatureCount: 2, inspectedFeatureCount: 2 });
         expect(panels().map(panel => panel.locked)).toEqual([true, true]);
         expect(stateService.setInspectionPanelLockedState).toHaveBeenCalledTimes(2);
+        expect(observed).toEqual([
+            { panels: [{ feature: "previous", locked: false }], dockOpen: false },
+            {
+                panels: [{ feature: "first", locked: true }, { feature: "second", locked: true }],
+                dockOpen: true
+            }
+        ]);
+        subscription.unsubscribe();
+    });
+
+    it("publishes an async grouped inspection with its final lock, color and dock state", async () => {
+        const { service, panels, persistence, layout } = createHarness(3);
+        const observed: unknown[] = [];
+        const subscription = persistence.observe(() => ({
+            panels: panels().map(panel => ({
+                features: panel.features.map(selected => selected.featureId),
+                locked: panel.locked,
+                color: panel.color
+            })),
+            dockOpen: layout.isDockOpen
+        })).subscribe(value => observed.push(value));
+
+        const result = await service.inspect({
+            features: [feature("first", "map/tile"), feature("second", "map/tile")],
+            newPanel: true,
+            lock: true,
+            color: "#123456"
+        });
+
+        expect(result.complete).toBe(true);
+        expect(result.panelIds).toHaveLength(1);
+        expect(observed).toEqual([
+            { panels: [], dockOpen: false },
+            {
+                panels: [{ features: ["first", "second"], locked: true, color: "#123456" }],
+                dockOpen: true
+            }
+        ]);
+        subscription.unsubscribe();
     });
 
     it("retains a validity hover without loading its selected host feature", () => {
