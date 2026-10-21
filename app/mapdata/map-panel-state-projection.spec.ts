@@ -7,7 +7,7 @@ import type { MapPresetService } from "../styledata/map-preset.service";
 import type { ErdblickStyle, StyleService } from "../styledata/style.service";
 import { MapInfoService } from "./map-info.service";
 import { MapPanelComponent } from "./map.panel.component";
-import { MapInfoItem, MapLayerTree, MapTreeViewNode } from "./map.tree.model";
+import { layerStyleOptions, MapInfoItem, MapLayerTree, MapTreeViewNode } from "./map.tree.model";
 
 const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).reverse().forEach(destroy => destroy()));
@@ -112,7 +112,19 @@ describe("map panel owner projections", () => {
         test.owners.layerState.setStyleOptionValues("Map", "Roads", "roads", "details", [true, false]);
         test.owners.layerState.setLayerSyncOption(1, true);
         test.maps.configureTreeParameters();
-        const applySync = vi.spyOn(test.maps, "applySyncOptionsForView");
+        const observedDuringSync: unknown[] = [];
+        const applySync = test.maps.applySyncOptionsForView.bind(test.maps);
+        vi.spyOn(test.maps, "applySyncOptionsForView").mockImplementation(index => {
+            // Inspect the cache before executing real synchronization: checking
+            // only the final projection would miss a stale intermediate read.
+            const layer = test.tree.maps.get("Map")!.layers.get("Roads")!;
+            observedDuringSync.push({
+                viewId: test.owners.viewSettings.viewIdAt(index),
+                config: { ...layer.viewConfig[index] },
+                details: layerStyleOptions(layer).find(option => option.id === "details")!.value[index]
+            });
+            applySync(index);
+        });
 
         test.owners.viewSettings.importViews([right, "left"]);
 
@@ -120,7 +132,17 @@ describe("map panel owner projections", () => {
             { visible: true, level: 12, autoLevel: true, details: false },
             { visible: false, level: 8, autoLevel: false, details: true }
         ]);
-        expect(applySync).toHaveBeenCalledWith(0);
+        expect(observedDuringSync).toEqual([{
+            viewId: right,
+            config: { visible: true, level: 12, autoLevel: true },
+            details: false
+        }]);
+        expect(test.owners.layerState.mapLayerConfig("Map", "Roads")).toEqual([
+            { visible: true, level: 12, autoLevel: true },
+            { visible: false, level: 8, autoLevel: false }
+        ]);
+        expect(test.owners.layerState.styleOptionValues("Map", "Roads", "roads", "details", "Bool", false))
+            .toEqual([false, true]);
     });
 
     it("refreshes cloned controls after an external-state replacement with unchanged membership", () => {
