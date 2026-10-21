@@ -10,7 +10,7 @@ function createView() {
     const view = new DeckMapView3D(1, 'camera-test', {} as never, viewState as never,
         {} as never, {setHoveredFeatures: vi.fn()} as never, {} as never,
         {} as never, {} as never, state as never, {} as never,
-        {setCameraInteracting: vi.fn(), clearDeckPresentationDiagnostics: vi.fn()} as never, {} as never);
+        {setCameraInteracting: vi.fn(), clearDeckPresentationDiagnostics: vi.fn()} as never, {} as never, Object.assign(state as never, {viewIdAt: (index: number) => String(index)}) as never, state as never as never,state as never as never);
     return {view, state, viewState};
 }
 

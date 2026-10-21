@@ -1,13 +1,15 @@
-import {Injectable} from "@angular/core";
-import {HttpClient} from "@angular/common/http";
-import {BehaviorSubject, Observable, firstValueFrom} from "rxjs";
-import {z} from "zod";
+import { HttpClient } from "@angular/common/http";
+import { Injectable } from "@angular/core";
 import * as jsyaml from "js-yaml";
+import { BehaviorSubject,firstValueFrom,Observable } from "rxjs";
+import { z } from "zod";
 import {
-    MapPresetDefinition,
-    MapPresetIssue,
-    parseMapPresetDefinitions
+MapPresetDefinition,
+MapPresetIssue,
+parseMapPresetDefinitions
 } from "../styledata/map-preset.model";
+import { Versions } from "./app-state.model";
+import { AppStateService } from "./appstate.service";
 
 /** Background layer id used when neither URL nor stored state selects a layer. */
 export const DEFAULT_BACKGROUND_LAYER_ID = "osm";
@@ -552,12 +554,27 @@ function mergeMeaningfulObjectValues(
 /** Loads and normalizes `config.json` once, then exposes it as a shared application service. */
 @Injectable({providedIn: 'root'})
 export class AppConfigService {
+
+    readonly distributionVersions = this.persistence.registerState<Versions[]>({
+        name: 'distributionVersions',
+        defaultValue: [],
+        schema: z.array(z.record(z.string(), z.string()))
+    });
+
+
+    readonly erdblickVersion = this.persistence.registerState<string>({
+        name: 'erdblickVersion',
+        defaultValue: "",
+        schema: z.string()
+    });
+
     private readonly configSubject = new BehaviorSubject<AppConfig>(DEFAULT_APP_CONFIG);
     private loadPromise: Promise<AppConfig> | null = null;
     private staticRawConfig: RawAppConfig = {};
 
     /** Creates the shared config loader used by styles, plugins, and background-layer UI. */
-    constructor(private readonly httpClient: HttpClient) {
+    constructor(private readonly httpClient: HttpClient,
+        private readonly persistence: AppStateService) {
     }
 
     /** Returns the latest normalized config value, starting with the built-in fallback defaults. */

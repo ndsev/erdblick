@@ -27,7 +27,7 @@ function createRightClickMenuService() {
         {showInfo: vi.fn()} as unknown as InfoMessageService,
         {openPerformanceDialog: vi.fn()} as unknown as DiagnosticsFacadeService,
         externalViewerService as unknown as ExternalViewerService,
-        inspectionSelection as unknown as InspectionSelectionService);
+        inspectionSelection as unknown as InspectionSelectionService, {} as AppStateService as never);
     return {service, externalViewerService, inspectionSelection};
 }
 

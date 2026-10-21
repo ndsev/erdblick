@@ -1,6 +1,7 @@
 import { Component } from "@angular/core";
 import { MapInfoService } from "../mapdata/map-info.service";
-import { AppStateService, LEGAL_INFO_DIALOG_LAYOUT_ID } from "../shared/appstate.service";
+import { AppLayoutService } from "../shared/app-layout.service";
+import { AppStateService,LEGAL_INFO_DIALOG_LAYOUT_ID } from "../shared/appstate.service";
 
 @Component({
     selector: 'legal-dialog',
@@ -35,7 +36,8 @@ export class LegalInfoDialogComponent {
     public aggregatedLegalInfo: { mapName: string, entry: string }[] = [];
 
     constructor(private mapService: MapInfoService,
-                public stateService: AppStateService) {
+                public stateService: AppStateService,
+        public readonly layout: AppLayoutService) {
         this.mapService.legalInformationUpdated.subscribe(_ => {
             this.aggregatedLegalInfo = [];
             this.mapService.legalInformationPerMap.forEach((entries, mapName) => {
@@ -50,11 +52,11 @@ export class LegalInfoDialogComponent {
     }
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.dialogLayoutId);
+        return this.layout.isDialogOpen(this.dialogLayoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+        this.layout.setDialogOpen(this.dialogLayoutId, visible);
     }
 
     /** Closes the legal-information dialog. */

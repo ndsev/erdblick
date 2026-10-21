@@ -40,7 +40,7 @@ function createView(): CameraSyncTestInternals {
         {} as never,
         {} as never,
         {} as never,
-        {} as never, {} as never
+        {} as never, {} as never, Object.assign({} as never, {viewIdAt: (index: number) => String(index)}) as never, {} as never as never,{} as never as never
     ) as unknown as CameraSyncTestInternals;
     view.stateService.numViews = 2;
     view.stateService.viewSync = [VIEW_SYNC_POSITION];

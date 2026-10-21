@@ -9,9 +9,9 @@ import {
 } from "../shared/appstate.service";
 import {
     LiveCameraViewStateUpdate,
-    MapViewStateService,
+    MapViewService,
     ViewRecalculationReason
-} from "./map-view-state.service";
+} from "./map-view.service";
 import {ViewVisualizationState} from "./view.visualization.model";
 import type {RenderViewCameraState} from "./render-view.model";
 
@@ -45,12 +45,12 @@ function createService(cameras: CameraViewState[], viewSync: string[]) {
         reapplySyncOptionsForAllViews: vi.fn()
     };
     return {
-        service: new MapViewStateService(stateService as never, mapInfo as never, stateService as never),
+        service: new MapViewService(stateService as never, mapInfo as never, stateService as never, Object.assign(stateService as never, {viewIdAt: (index: number) => String(index)}) as never),
         stateService
     };
 }
 
-describe("MapViewStateService live camera synchronization", () => {
+describe("MapViewService live camera synchronization", () => {
     it("waits for the current camera footprint before reporting search coverage ready", async () => {
         const {service} = createService([camera(11, 48, 1000, 0, [0, 0, 0])], []);
         const state = new ViewVisualizationState();
@@ -170,7 +170,7 @@ describe("MapViewStateService live camera synchronization", () => {
     });
 });
 
-describe("MapViewStateService indexed removal", () => {
+describe("MapViewService indexed removal", () => {
     it.each([-1, 2, 0.5, Number.NaN])("ignores invalid index %s", index => {
         const {service} = createService([camera(0, 0, 100, 0, [0, 0, 0]), camera(1, 1, 100, 0, [0, 0, 0])], []);
         const retire = vi.fn();
@@ -203,7 +203,7 @@ describe("MapViewStateService indexed removal", () => {
             layerStateChanged: new Subject<string>(),
             reapplySyncOptionsForAllViews: vi.fn()
         };
-        const service = new MapViewStateService(state as never, mapInfo as never, state as never);
+        const service = new MapViewService(state as never, mapInfo as never, state as never, Object.assign(state as never, {viewIdAt: (index: number) => String(index)}) as never);
         state.numViewsState.subscribe(() => order.push('tree'));
         vi.spyOn(service, 'requestViewRecalculation').mockImplementation(() => order.push('coverage'));
         const states = [new ViewVisualizationState(), new ViewVisualizationState(), new ViewVisualizationState()];

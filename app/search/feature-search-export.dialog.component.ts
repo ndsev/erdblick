@@ -1,19 +1,20 @@
-import {Component, OnDestroy, ViewChild} from "@angular/core";
-import {Subscription} from "rxjs";
-import {FeatureSearchExportDialogRequest, FeatureSearchService} from "./feature.search.service";
-import {DialogStackService} from "../shared/dialog-stack.service";
-import {AppStateService, FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
-import {AppDialogComponent} from "../shared/app-dialog.component";
-import {InfoMessageService} from "../shared/info.service";
-import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
+import { Component,OnDestroy,ViewChild } from "@angular/core";
+import { Subscription } from "rxjs";
+import { AppDialogComponent } from "../shared/app-dialog.component";
+import { AppLayoutService } from "../shared/app-layout.service";
+import { AppStateService,FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID } from "../shared/appstate.service";
+import { DialogStackService } from "../shared/dialog-stack.service";
+import type { FeatureSearchMapLayerRef } from "../shared/feature-search-state";
+import { InfoMessageService } from "../shared/info.service";
 import {
-    featureSearchExportFilename,
-    featureSearchExportPayload,
-    featureSearchJsonReplacer,
-    featureSearchMapLayerKey,
-    featureSearchMapLayerLabel,
-    type FeatureSearchExportSelection
+featureSearchExportFilename,
+featureSearchExportPayload,
+featureSearchJsonReplacer,
+featureSearchMapLayerKey,
+featureSearchMapLayerLabel,
+type FeatureSearchExportSelection
 } from "./feature-search-export.util";
+import { FeatureSearchExportDialogRequest,FeatureSearchService } from "./feature.search.service";
 
 interface FeatureSearchExportOptions extends FeatureSearchExportSelection {
     closeAfterExport: boolean;
@@ -90,7 +91,8 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
     constructor(public readonly searchService: FeatureSearchService,
                 public readonly stateService: AppStateService,
                 private readonly dialogStack: DialogStackService,
-                private readonly infoMessageService: InfoMessageService) {
+                private readonly infoMessageService: InfoMessageService,
+        public readonly layout: AppLayoutService) {
         this.subscription = this.searchService.exportDialogRequest.subscribe(request => {
             this.request = request;
             this.exportOptions = request
@@ -105,11 +107,11 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
     }
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.layoutId);
+        return this.layout.isDialogOpen(this.layoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.layoutId, visible);
+        this.layout.setDialogOpen(this.layoutId, visible);
         if (!visible) {
             this.searchService.clearExportDialogRequest();
         }

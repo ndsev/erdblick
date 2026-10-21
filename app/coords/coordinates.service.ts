@@ -1,8 +1,11 @@
-import {Injectable} from "@angular/core";
-import {AppStateService} from "../shared/appstate.service";
-import {BehaviorSubject, skip} from "rxjs";
-import {Cartographic} from "../integrations/geo";
-import {AppConfigService} from "../shared/app-config.service";
+import { Injectable } from "@angular/core";
+import { BehaviorSubject,skip } from "rxjs";
+import { z } from "zod";
+import { Cartographic,GeoMath } from "../integrations/geo";
+import { AppConfigService } from "../shared/app-config.service";
+import { Boolish } from "../shared/app-state";
+import { roundCoordinateStateValue } from "../shared/app-state.model";
+import { AppStateService } from "../shared/appstate.service";
 
 @Injectable({providedIn: 'root'})
 /**
@@ -10,6 +13,69 @@ import {AppConfigService} from "../shared/app-config.service";
  * plugin-provided auxiliary coordinate systems.
  */
 export class CoordinatesService {
+
+    readonly markerState = this.stateService.registerState<boolean>({
+        name: 'marker',
+        defaultValue: false,
+        schema: Boolish,
+        urlParamName: 'm',
+        urlIncludeInVisualizationOnly: false
+    });
+
+
+    readonly markedPositionState = this.stateService.registerState<number[]>({
+        name: 'markedPosition',
+        defaultValue: [],
+        schema: z.array(z.coerce.number()).max(3),
+        toStorage: (value: number[]) => value.map(v => roundCoordinateStateValue(v)),
+        fromStorage: (payload: any): number[] => (payload as number[]).map(v => roundCoordinateStateValue(v)),
+        urlParamName: 'mp',
+        urlIncludeInVisualizationOnly: false
+    });
+
+
+    readonly enabledCoordsTileIdsState = this.stateService.registerState<string[]>({
+        name: 'enabledCoordsTileIds',
+        defaultValue: ["WGS84"],
+        schema: z.array(z.string())
+    });
+
+    get marker() {return this.markerState.getValue();}
+
+    set marker(val: boolean) {this.markerState.next(val);}
+
+    get markedPosition() {return this.markedPositionState.getValue();}
+
+    set markedPosition(val: number[]) {this.markedPositionState.next(val.map(v => roundCoordinateStateValue(v)));}
+
+    get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
+
+    set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);}
+
+
+    /** Enables or disables the explicit location marker overlay. */
+    setMarkerState(enabled: boolean) {
+        this.markerState.next(enabled);
+        if (!enabled) {
+            this.setMarkerPosition(null, false);
+        }
+    }
+
+
+    /** Updates the explicit location marker position, optionally delaying URL sync. */
+    setMarkerPosition(position: Cartographic | null, delayUpdate: boolean = false) {
+        if (position) {
+            const longitude = GeoMath.toDegrees(position.longitude);
+            const latitude = GeoMath.toDegrees(position.latitude);
+            this.markedPosition = [longitude, latitude, position.height];
+        } else {
+            this.markedPosition = [];
+        }
+        if (!delayUpdate) {
+            this.stateService.requestHistoryEntry();
+        }
+    }
+
     mouseMoveCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     mouseClickCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     auxiliaryCoordinatesFun: ((x: number, y: number) => Array<[string, Array<number>]>) | null = null;
@@ -20,7 +86,7 @@ export class CoordinatesService {
         this.mouseClickCoordinates.pipe(
             skip(1)  // Skip the first (null) value from mouseClickCoordinates BehaviorSubject
         ).subscribe(position => {
-            this.stateService.setMarkerPosition(position);
+            this.setMarkerPosition(position);
         });
     }
 

@@ -1,19 +1,20 @@
-import {AsyncPipe} from "@angular/common";
-import {HttpErrorResponse} from "@angular/common/http";
-import {Component} from "@angular/core";
-import {TooltipModule} from "primeng/tooltip";
-import {map, Observable} from "rxjs";
+import { AsyncPipe } from "@angular/common";
+import { HttpErrorResponse } from "@angular/common/http";
+import { Component } from "@angular/core";
+import { TooltipModule } from "primeng/tooltip";
+import { map,Observable } from "rxjs";
+import { AppLayoutService } from "../shared/app-layout.service";
 
-import {CacheResetService} from "../mapdata/cache-reset.service";
-import {MapInfoService} from "../mapdata/map-info.service";
-import {isDataSourceCatalogEntryReady} from "../mapdata/map.tree.model";
-import {AppDialogComponent} from "../shared/app-dialog.component";
-import {AppConfigService} from "../shared/app-config.service";
+import { CacheResetService } from "../mapdata/cache-reset.service";
+import { MapInfoService } from "../mapdata/map-info.service";
+import { isDataSourceCatalogEntryReady } from "../mapdata/map.tree.model";
+import { AppConfigService } from "../shared/app-config.service";
+import { AppDialogComponent } from "../shared/app-dialog.component";
 import {
-    AppStateService,
-    CACHE_RESET_DIALOG_LAYOUT_ID
+AppStateService,
+CACHE_RESET_DIALOG_LAYOUT_ID
 } from "../shared/appstate.service";
-import {InfoMessageService} from "../shared/info.service";
+import { InfoMessageService } from "../shared/info.service";
 
 @Component({
     selector: "cache-reset-dialog",
@@ -133,7 +134,8 @@ export class CacheResetComponent {
         private readonly cacheReset: CacheResetService,
         private readonly config: AppConfigService,
         private readonly messages: InfoMessageService,
-        private readonly state: AppStateService
+        private readonly state: AppStateService,
+        public readonly layout: AppLayoutService
     ) {}
 
     get enabled(): boolean {
@@ -141,11 +143,11 @@ export class CacheResetComponent {
     }
 
     get dialogVisible(): boolean {
-        return this.state.isDialogOpen(this.dialogLayoutId);
+        return this.layout.isDialogOpen(this.dialogLayoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.state.setDialogOpen(this.dialogLayoutId, visible);
+        this.layout.setDialogOpen(this.dialogLayoutId, visible);
     }
 
     isPending(mapId: string): boolean {

@@ -1,38 +1,39 @@
 import {
-    ChangeDetectorRef,
-    Component,
-    effect,
-    input,
-    OnDestroy,
-    output,
-    ViewChild
+ChangeDetectorRef,
+Component,
+effect,
+input,
+OnDestroy,
+output,
+ViewChild
 } from "@angular/core";
-import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
-import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
-import {TreeTableNode} from "primeng/api";
-import {TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
-import {TileDeliveryError} from "../mapdata/tile-diagnostics";
-import {FeatureWrapper} from "../mapdata/feature-inspection.model";
-import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
+import { SourceDataAddressFormat } from "build/libs/core/erdblick-core";
+import { TreeTableNode } from "primeng/api";
+import { TileSourceDataLayer } from "../../build/libs/core/erdblick-core";
+import { coreLib,uint8ArrayToWasm } from "../integrations/wasm";
+import { FeatureWrapper } from "../mapdata/feature-inspection.model";
+import { MapInfoService } from "../mapdata/map-info.service";
 import {
-    MapTileStreamClientTiles,
-} from "../mapdata/tilestream";
-import {MapInfoService} from "../mapdata/map-info.service";
-import {Column, InspectionTreeComponent} from "./inspection.tree.component";
-import {
-    expandSingleChildSourceDataPaths,
-    sourceDataTreePresentation
-} from "./sourcedata-tree.presentation";
-import {
-    MapTileStreamService,
-    RetainedTileExpiryOwner
+MapTileStreamService,
+RetainedTileExpiryOwner
 } from "../mapdata/map-tile-stream.service";
 import {
-    parseMapPartitionKey,
-    partitionJson,
-    partitionKey,
-    partitionKeySuffix
+parseMapPartitionKey,
+partitionJson,
+partitionKey,
+partitionKeySuffix
 } from "../mapdata/partition.model";
+import { TileDeliveryError } from "../mapdata/tile-diagnostics";
+import {
+MapTileStreamClientTiles,
+} from "../mapdata/tilestream";
+import { AppStateService,InspectionPanelModel } from "../shared/appstate.service";
+import { InspectionStateService } from "./inspection-state.service";
+import { Column,InspectionTreeComponent } from "./inspection.tree.component";
+import {
+expandSingleChildSourceDataPaths,
+sourceDataTreePresentation
+} from "./sourcedata-tree.presentation";
 
 interface LoadedSourceDataLayer {
     layer: TileSourceDataLayer;
@@ -65,7 +66,7 @@ interface LoadedSourceDataLayer {
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
                              [showFilter]="showFilter()"
-                             [defaultVisibleColumnKeys]="stateService.sourceDataInspectionDefaultColumns"
+                             [defaultVisibleColumnKeys]="inspectionState.sourceDataInspectionDefaultColumns"
                              [firstHighlightedItemIndex]="firstHighlightedItemIndex">
             </inspection-tree>
         }
@@ -119,7 +120,8 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
     constructor(private mapService: MapInfoService,
                 public stateService: AppStateService,
                 private tileStream: MapTileStreamService,
-                private readonly cdr: ChangeDetectorRef) {
+                private readonly cdr: ChangeDetectorRef,
+        public readonly inspectionState: InspectionStateService) {
         effect(() => {
             const sourceData = this.panel().sourceData;
             const revision = ++this.loadRevision;

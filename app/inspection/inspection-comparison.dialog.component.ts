@@ -1,36 +1,38 @@
-import {TileDeliveryError} from "../mapdata/tile-diagnostics";
 import {
-    ChangeDetectorRef,
-    Component,
-    effect,
-    input,
-    OnDestroy,
-    QueryList,
-    Renderer2,
-    ViewChild,
-    ViewChildren
+ChangeDetectorRef,
+Component,
+effect,
+input,
+OnDestroy,
+QueryList,
+Renderer2,
+ViewChild,
+ViewChildren
 } from '@angular/core';
-import {ContextMenu} from 'primeng/contextmenu';
-import {MenuItem} from 'primeng/api';
-import {Subscription} from 'rxjs';
+import { MenuItem } from 'primeng/api';
+import { ContextMenu } from 'primeng/contextmenu';
+import { Subscription } from 'rxjs';
+import { FeatureWrapper } from '../mapdata/feature-inspection.model';
 import {
-    MapTileStreamService,
-    RetainedTileExpiryOwner
+MapTileStreamService,
+RetainedTileExpiryOwner
 } from '../mapdata/map-tile-stream.service';
-import {InspectionSelectionService} from './inspection-selection.service';
+import { TileDeliveryError } from "../mapdata/tile-diagnostics";
+import { AppDialogComponent } from '../shared/app-dialog.component';
+import { AppLayoutService } from "../shared/app-layout.service";
 import {
-    AppStateService,
-    DEFAULT_EM_HEIGHT,
-    DEFAULT_EM_WIDTH,
-    InspectionComparisonEntry,
-    InspectionComparisonModel,
-    InspectionComparisonOption,
-    InspectionPanelModel
+AppStateService,
+DEFAULT_EM_HEIGHT,
+DEFAULT_EM_WIDTH,
+InspectionComparisonEntry,
+InspectionComparisonModel,
+InspectionComparisonOption,
+InspectionPanelModel
 } from '../shared/appstate.service';
-import {FeatureWrapper} from '../mapdata/feature-inspection.model';
-import {DialogStackService} from '../shared/dialog-stack.service';
-import {FeaturePanelComponent} from './feature.panel.component';
-import {AppDialogComponent} from '../shared/app-dialog.component';
+import { DialogStackService } from '../shared/dialog-stack.service';
+import { FeaturePanelComponent } from './feature.panel.component';
+import { InspectionSelectionService } from './inspection-selection.service';
+import { InspectionStateService } from "./inspection-state.service";
 
 /** View model for one comparison column in the side-by-side inspection dialog. */
 interface ComparisonColumn {
@@ -170,7 +172,9 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
                 private stateService: AppStateService,
                 private dialogStack: DialogStackService,
                 private renderer: Renderer2,
-                private readonly cdr: ChangeDetectorRef) {
+                private readonly cdr: ChangeDetectorRef,
+        public readonly inspectionState: InspectionStateService,
+        public readonly layout: AppLayoutService) {
         effect(() => {
             const model = this.comparison();
             this.selectedCompareIds = [model.base.panelId, ...model.others.map(entry => entry.panelId)];
@@ -202,7 +206,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     /** Closes the comparison dialog in shared app state. */
     onDialogHide() {
-        this.stateService.closeInspectionComparison();
+        this.inspectionState.closeInspectionComparison();
     }
 
     /** Ends the temporary tree freeze used while dragging the dialog around. */
@@ -245,17 +249,17 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
             ? model.base.panelId
             : normalized[0];
         const nextOtherPanelIds = normalized.filter(panelId => panelId !== nextBasePanelId);
-        const nextModel = this.stateService.createComparisonModel(
+        const nextModel = this.inspectionState.createComparisonModel(
             nextBasePanelId,
             nextOtherPanelIds,
             this.inspectionSelection.selectionTopic.getValue()
         );
         if (!nextModel) {
-            this.stateService.closeInspectionComparison();
+            this.inspectionState.closeInspectionComparison();
             return;
         }
         this.selectedCompareIds = [nextModel.base.panelId, ...nextModel.others.map(entry => entry.panelId)];
-        this.stateService.inspectionComparison = nextModel;
+        this.inspectionState.inspectionComparison = nextModel;
     }
 
     /** Drops one column from the comparison, closing the dialog if no entries remain. */
@@ -263,10 +267,10 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         const model = this.comparison();
         const remainingEntries = [model.base, ...model.others].filter(entry => entry.panelId !== panelId);
         if (!remainingEntries.length) {
-            this.stateService.closeInspectionComparison();
+            this.inspectionState.closeInspectionComparison();
             return;
         }
-        this.stateService.inspectionComparison = {
+        this.inspectionState.inspectionComparison = {
             base: remainingEntries[0],
             others: remainingEntries.slice(1)
         };
@@ -275,7 +279,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     /** Persists per-column selection colors back into the underlying inspection panels. */
     onSelectionColorChange(column: ComparisonColumn, color: string): void {
         column.selectionColor = color;
-        this.stateService.setInspectionPanelColor(column.entry.panelId, color);
+        this.inspectionState.setInspectionPanelColor(column.entry.panelId, color);
     }
 
     /** Opens the per-column context menu with actions bound to the clicked column. */
@@ -287,9 +291,9 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     /** Rebuilds the selectable panel list from the current global inspection selection. */
     refreshCompareOptions() {
-        const options = this.stateService.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue());
+        const options = this.inspectionState.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue());
         this.compareOptions = options;
-        const model = this.stateService.inspectionComparison;
+        const model = this.inspectionState.inspectionComparison;
         if (!model) {
             return;
         }
@@ -303,21 +307,21 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         const normalizedPanelIds = modelPanelIds.filter(panelId => availablePanelIds.has(panelId));
 
         if (!normalizedPanelIds.length) {
-            this.stateService.closeInspectionComparison();
+            this.inspectionState.closeInspectionComparison();
             return;
         }
 
         if (!this.panelIdOrderEquals(modelPanelIds, normalizedPanelIds)) {
-            const nextModel = this.stateService.createComparisonModel(
+            const nextModel = this.inspectionState.createComparisonModel(
                 normalizedPanelIds[0],
                 normalizedPanelIds.slice(1),
                 this.inspectionSelection.selectionTopic.getValue()
             );
             if (!nextModel) {
-                this.stateService.closeInspectionComparison();
+                this.inspectionState.closeInspectionComparison();
                 return;
             }
-            this.stateService.inspectionComparison = nextModel;
+            this.inspectionState.inspectionComparison = nextModel;
             this.selectedCompareIds = [nextModel.base.panelId, ...nextModel.others.map(entry => entry.panelId)];
             return;
         }
@@ -332,7 +336,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         if (!container || !container.offsetHeight) {
             return;
         }
-        this.heightEm = container.offsetHeight / this.stateService.baseFontSize;
+        this.heightEm = container.offsetHeight / this.layout.baseFontSize;
     }
 
     private freezeTrees(): void {
@@ -519,7 +523,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         if (!grid || !column || !title) {
             return;
         }
-        const baseFontSize = this.stateService.baseFontSize;
+        const baseFontSize = this.layout.baseFontSize;
         if (!baseFontSize) {
             return;
         }

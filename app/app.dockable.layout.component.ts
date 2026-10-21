@@ -1,19 +1,21 @@
-import {AfterViewInit, ChangeDetectorRef, Component, DoCheck, ElementRef, OnDestroy, Renderer2, ViewChild} from '@angular/core';
-import {environment} from "./environments/environment";
-import {AppStateService, INSPECTION_DOCK_TAB_ID, LEGAL_INFO_DIALOG_LAYOUT_ID, SEARCH_DOCK_TAB_ID} from "./shared/appstate.service";
-import {FeatureSearchService, FeatureSearchSession} from "./search/feature.search.service";
-import {DockedPanelDragController, DockedPanelDragOffset} from "./shared/docked-panel-drag.controller";
-import {map, Observable, startWith, Subscription} from "rxjs";
-import {MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT} from "./mapview/render-view.model";
-import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
-import {ViewerUiService} from "./actions/viewer-ui.service";
-import {MapInfoService} from "./mapdata/map-info.service";
+import { AfterViewInit,ChangeDetectorRef,Component,DoCheck,ElementRef,OnDestroy,Renderer2,ViewChild } from '@angular/core';
+import { map,Observable,startWith,Subscription } from "rxjs";
+import { ViewerUiService } from "./actions/viewer-ui.service";
+import { CoordinatesPolicyService } from "./coords/coordinates-policy.service";
+import { environment } from "./environments/environment";
+import { InspectionStateService } from "./inspection/inspection-state.service";
+import { MapInfoService } from "./mapdata/map-info.service";
+import { MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT } from "./mapview/render-view.model";
+import { FeatureSearchService,FeatureSearchSession } from "./search/feature.search.service";
+import { AppLayoutService } from "./shared/app-layout.service";
+import { AppStateService,INSPECTION_DOCK_TAB_ID,LEGAL_INFO_DIALOG_LAYOUT_ID,SEARCH_DOCK_TAB_ID } from "./shared/appstate.service";
+import { DockedPanelDragController,DockedPanelDragOffset } from "./shared/docked-panel-drag.controller";
 
 @Component({
     selector: 'dockable-layout',
     template: `
         <div class="main-layout">
-            <div #viewerLayout class="viewer-layout" [ngClass]="{'open': !stateService.isDockOpen, 'collapsed': stateService.isDockOpen}">
+            <div #viewerLayout class="viewer-layout" [ngClass]="{'open': !layout.isDockOpen, 'collapsed': layout.isDockOpen}">
                 <mapview-container></mapview-container>
                 @if (!environment.visualizationOnly) {
                     <main-bar></main-bar>
@@ -21,10 +23,10 @@ import {MapInfoService} from "./mapdata/map-info.service";
                     @if (copyright$ | async; as copyright) {
                         <button type="button" class="map-attribution" data-testid="map-attribution"
                                 [title]="copyright" aria-label="Copyright and legal information"
-                                (click)="stateService.openDialog(legalInfoDialogId)">{{ copyright }}</button>
+                                (click)="layout.openDialog(legalInfoDialogId)">{{ copyright }}</button>
                     }
                     <div class="dock-toggle" data-testid="dock-toggle" (click)="toggleDock()">
-                        @if (stateService.isDockOpen) {
+                        @if (layout.isDockOpen) {
                             <span class="material-symbols-outlined" pTooltip="Collapse dock">
                                 chevron_forward
                             </span>
@@ -37,15 +39,15 @@ import {MapInfoService} from "./mapdata/map-info.service";
                 }
             </div>
             @if (!environment.visualizationOnly) {
-                <div #dock class="collapsible-dock" data-testid="inspection-dock" [style.width.px]="stateService.dockWidthState.getValue()"
-                     [ngClass]="{'collapsed': !this.stateService.isDockOpen, 'open': stateService.isDockOpen}">
-                    @if (stateService.isDockOpen) {
+                <div #dock class="collapsible-dock" data-testid="inspection-dock" [style.width.px]="layout.dockWidthState.getValue()"
+                     [ngClass]="{'collapsed': !this.layout.isDockOpen, 'open': layout.isDockOpen}">
+                    @if (layout.isDockOpen) {
                         <div class="resize-handle" (pointerdown)="onResizeStart($event)"></div>
                     }
                     <div class="drop-hint"></div>
                     @if (hasVisibleDockTabs()) {
                         <p-tabs class="app-dock-tabs"
-                                [value]="stateService.dockActiveTab"
+                                [value]="layout.dockActiveTab"
                                 (valueChange)="onDockTabChange($event)"
                                 scrollable>
                             <p-tablist>
@@ -73,7 +75,7 @@ import {MapInfoService} from "./mapdata/map-info.service";
                             <p-tabpanels>
                                 @if (hasDockedInspections()) {
                                     <p-tabpanel [value]="inspectionDockTabId">
-                                        <inspection-container [ngClass]="{'hidden': !stateService.isDockOpen}"></inspection-container>
+                                        <inspection-container [ngClass]="{'hidden': !layout.isDockOpen}"></inspection-container>
                                     </p-tabpanel>
                                 }
                                 @if (isFeatureSearchDocked()) {
@@ -149,7 +151,9 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
                 private featureSearchService: FeatureSearchService,
                 private cdr: ChangeDetectorRef,
                 private viewerUi: ViewerUiService,
-                mapService: MapInfoService) {
+                mapService: MapInfoService,
+        public readonly layout: AppLayoutService,
+        public readonly inspectionState: InspectionStateService) {
         // Keep the map-wide legal-information shortcut, but let layout—not a
         // fixed character limit—shorten its first notice. The dialog lists all notices.
         this.copyright$ = mapService.legalInformationUpdated.pipe(startWith(true), map(() => {
@@ -158,8 +162,8 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
             return notice ? `© ${notice}` : '';
         }));
         this.searchSessionsSubscription = this.featureSearchService.sessionsChanged.subscribe(() => this.cdr.markForCheck());
-        this.observedDockOpen = this.stateService.isDockOpen;
-        this.dockOpenSubscription = this.stateService.dockOpenState.subscribe(nextDockOpen => {
+        this.observedDockOpen = this.layout.isDockOpen;
+        this.dockOpenSubscription = this.layout.dockOpenState.subscribe(nextDockOpen => {
             if (nextDockOpen === this.observedDockOpen) {
                 return;
             }
@@ -185,7 +189,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
         });
         this.searchDockDrag = new DockedPanelDragController<string>({
             renderer: this.renderer,
-            baseFontSize: () => this.stateService.baseFontSize,
+            baseFontSize: () => this.layout.baseFontSize,
             container: () => this.dockRef?.nativeElement.querySelector('.feature-search-dock-container') ?? null,
             itemSelector: 'feature-search',
             readId: element => element.dataset['surfaceId'],
@@ -194,7 +198,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
             previewFillClass: 'app-dock-drag-preview-fill',
             applyReorder: nextDisplayOrder => {
                 const layoutOrder = nextDisplayOrder.map(id => FeatureSearchService.layoutIdForSearch(id));
-                this.stateService.reorderDockedSurfaces(SEARCH_DOCK_TAB_ID, layoutOrder);
+                this.layout.reorderDockedSurfaces(SEARCH_DOCK_TAB_ID, layoutOrder);
             },
             undock: (searchId, event, offset) => this.undockSearchAt(searchId, event, offset)
         });
@@ -208,15 +212,15 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
     ngAfterViewInit(): void {
         const dock = this.dockRef?.nativeElement;
         if (!dock) return;
-        const savedWidth = this.stateService.dockWidthState.getValue();
+        const savedWidth = this.layout.dockWidthState.getValue();
         if (savedWidth !== null) this.setDockWidth(savedWidth);
         this.unregisterResizeTarget = this.viewerUi.registerResizeTarget(dock, {
-            describe: () => ({kind: "dock", dimensions: this.stateService.isDockOpen ? ["widthPx"] : [], busy: this.dragging}),
+            describe: () => ({kind: "dock", dimensions: this.layout.isDockOpen ? ["widthPx"] : [], busy: this.dragging}),
             resize: size => {
                 if ("panelSizes" in size || size.widthPx === undefined) return;
                 this.dispatchDockResizePauseStart();
                 this.setDockWidth(size.widthPx);
-                this.stateService.dockWidthState.next(dock.getBoundingClientRect().width);
+                this.layout.dockWidthState.next(dock.getBoundingClientRect().width);
                 window.dispatchEvent(new Event(MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT));
                 this.scheduleDockResizePauseEnd();
             }
@@ -225,11 +229,11 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
 
     /** Toggles dock visibility; the dock-open subscription performs the resize preparation. */
     protected toggleDock() {
-        this.stateService.isDockOpen = !this.stateService.isDockOpen;
+        this.layout.isDockOpen = !this.layout.isDockOpen;
     }
 
     protected dockedInspectionCount(): number {
-        return this.stateService.selection.filter(panel => !panel.undocked).length;
+        return this.inspectionState.selection.filter(panel => !panel.undocked).length;
     }
 
     protected hasDockedInspections(): boolean {
@@ -257,16 +261,16 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
         if (!nextTab || !this.visibleDockTabs().includes(nextTab)) {
             return;
         }
-        this.stateService.dockActiveTab = nextTab;
+        this.layout.dockActiveTab = nextTab;
     }
 
     /** Keeps the selected tab aligned with tabs that are currently visible. */
     ngDoCheck(): void {
         const tabs = this.visibleDockTabs();
-        if (tabs.length === 0 || tabs.includes(this.stateService.dockActiveTab)) {
+        if (tabs.length === 0 || tabs.includes(this.layout.dockActiveTab)) {
             return;
         }
-        this.stateService.dockActiveTab = tabs[0];
+        this.layout.dockActiveTab = tabs[0];
     }
 
     /** Clears listeners and ensures the resize-pause state is reset on teardown. */
@@ -284,10 +288,10 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
 
     /** Closes the right-hand dock without changing any surface dock state. */
     protected closeDock() {
-        if (!this.stateService.isDockOpen) {
+        if (!this.layout.isDockOpen) {
             return;
         }
-        this.stateService.isDockOpen = false;
+        this.layout.isDockOpen = false;
     }
 
     /** Starts drag tracking for a docked Feature Search panel. */
@@ -300,7 +304,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
         if (!session) {
             return;
         }
-        this.stateService.setDialogPosition(session.layoutId, {
+        this.layout.setDialogPosition(session.layoutId, {
             left: Math.max(0, Math.round(event.clientX - offset.x)),
             top: Math.max(0, Math.round(event.clientY - offset.y))
         });
@@ -309,7 +313,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
 
     /** Starts a manual dock resize interaction from the resize handle. */
     onResizeStart(ev: PointerEvent) {
-        if (!this.stateService.isDockOpen || !this.dockRef) {
+        if (!this.layout.isDockOpen || !this.dockRef) {
             return;
         }
         ev.preventDefault();
@@ -345,7 +349,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
     private onPointerUp() {
         if (!this.dragging) return;
         this.dragging = false;
-        if (this.dockRef) this.stateService.dockWidthState.next(this.dockRef.nativeElement.getBoundingClientRect().width);
+        if (this.dockRef) this.layout.dockWidthState.next(this.dockRef.nativeElement.getBoundingClientRect().width);
         // Cleanup listeners and body styles
         this.detachMove?.();
         this.detachUp?.();

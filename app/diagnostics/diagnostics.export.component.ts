@@ -1,10 +1,11 @@
-import {Component, OnDestroy, ViewChild} from '@angular/core';
-import {Subscription} from 'rxjs';
-import {DiagnosticsFacadeService} from './diagnostics.facade.service';
-import type {DiagnosticsExportOptions} from './diagnostics.model';
-import {DialogStackService} from '../shared/dialog-stack.service';
-import {AppStateService, DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
-import {AppDialogComponent} from '../shared/app-dialog.component';
+import { Component,OnDestroy,ViewChild } from '@angular/core';
+import { Subscription } from 'rxjs';
+import { AppDialogComponent } from '../shared/app-dialog.component';
+import { AppLayoutService } from "../shared/app-layout.service";
+import { AppStateService,DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID } from '../shared/appstate.service';
+import { DialogStackService } from '../shared/dialog-stack.service';
+import { DiagnosticsFacadeService } from './diagnostics.facade.service';
+import type { DiagnosticsExportOptions } from './diagnostics.model';
 
 @Component({
     selector: 'diagnostics-export-dialog',
@@ -64,14 +65,15 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
 
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
                 public readonly stateService: AppStateService,
-                private readonly dialogStack: DialogStackService) {
-        const options = this.stateService.diagnosticsExportOptions;
+                private readonly dialogStack: DialogStackService,
+        public readonly layout: AppLayoutService) {
+        const options = this.diagnostics.diagnosticsExportOptions;
         this.exportOptions = {
             ...options,
             logFilter: {...options.logFilter}
         };
         this.subscriptions.push(
-            this.stateService.diagnosticsExportOptionsState.subscribe(options => {
+            this.diagnostics.diagnosticsExportOptionsState.subscribe(options => {
                 this.exportOptions = {
                     ...options,
                     logFilter: {...options.logFilter}
@@ -81,11 +83,11 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
     }
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.layoutId);
+        return this.layout.isDialogOpen(this.layoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.layoutId, visible);
+        this.layout.setDialogOpen(this.layoutId, visible);
     }
 
     /** Releases the persisted export-options subscription. */
@@ -105,7 +107,7 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
 
     /** Persists the current export-option toggles. */
     updateOptions() {
-        this.stateService.diagnosticsExportOptions = {
+        this.diagnostics.diagnosticsExportOptions = {
             ...this.exportOptions,
             logFilter: {...this.exportOptions.logFilter}
         };

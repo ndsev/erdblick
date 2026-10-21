@@ -47,7 +47,7 @@ function createService() {
     return {
         service: new ExternalViewerService(
             state as unknown as AppStateService,
-            configService as unknown as AppConfigService
+            configService as unknown as AppConfigService, state as unknown as AppStateService as never, Object.assign(state as unknown as AppStateService, {viewIdAt: (index: number) => String(index)}) as never
         ),
         state
     };

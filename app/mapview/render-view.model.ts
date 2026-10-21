@@ -78,6 +78,7 @@ export interface IRenderSceneHandle {
  * Views expose picking, camera sync, and movement without leaking deck-specific details upward.
  */
 export interface IRenderView {
+    readonly viewId: string;
     readonly viewIndex: number;
     readonly hoveredFeatureIds: BehaviorSubject<TileFeatureId[]>;
     readonly firstPersonViewActive: BehaviorSubject<boolean>;

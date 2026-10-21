@@ -1,8 +1,8 @@
-import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
-import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
-import {FrameBudgetLoop} from "../shared/frame-budget-loop";
-import {VIEWER_ACTION_CONTROL_FRAME_TYPE, viewerClientIdSchema} from "../actions/viewer-action-relay.contract";
-import {VIEWER_ACTION_INVOCATION_BYTES, VIEWER_ACTION_RESULT_BYTES} from "../actions/viewer-action.contract";
+import type { TileLayerParser } from "../../build/libs/core/erdblick-core";
+import { VIEWER_ACTION_CONTROL_FRAME_TYPE,viewerClientIdSchema } from "../actions/viewer-action-relay.contract";
+import { VIEWER_ACTION_INVOCATION_BYTES,VIEWER_ACTION_RESULT_BYTES } from "../actions/viewer-action.contract";
+import { coreLib,uint8ArrayToWasm } from "../integrations/wasm";
+import { FrameBudgetLoop } from "../shared/frame-budget-loop";
 
 export enum MapTileRequestStatus {
     Open = 0,
@@ -1809,4 +1809,4 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
 }
 
 // Preserve the established import name for the interactive viewport transport.
-export {MapTileStreamClientInteractive as MapTileStreamClient};
+export { MapTileStreamClientInteractive as MapTileStreamClient };

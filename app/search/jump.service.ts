@@ -1,16 +1,20 @@
-import {Injectable} from "@angular/core";
-import {BehaviorSubject, Subject} from "rxjs";
-import {MapInfoService} from "../mapdata/map-info.service";
-import {InspectionSelectionService} from "../inspection/inspection-selection.service";
-import {InfoMessageService} from "../shared/info.service";
-import {coreLib} from "../integrations/wasm";
-import {FeatureSearchService} from "./feature.search.service";
-import {HighlightMode} from "build/libs/core/erdblick-core";
-import {RightClickMenuService} from "../mapview/rightclickmenu.service";
-import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
-import {Cartographic, Rectangle} from "../integrations/geo";
-import {AppConfigService} from "../shared/app-config.service";
-import {parsePackedTileId} from "../coords/nds-coordinate.util";
+import {MapViewService} from "../mapview/map-view.service";
+import { Injectable } from "@angular/core";
+import { HighlightMode } from "build/libs/core/erdblick-core";
+import { BehaviorSubject,Subject } from "rxjs";
+import { CoordinatesService } from "../coords/coordinates.service";
+import { parsePackedTileId } from "../coords/nds-coordinate.util";
+import { InspectionSelectionService } from "../inspection/inspection-selection.service";
+import { InspectionStateService } from "../inspection/inspection-state.service";
+import { Cartographic,Rectangle } from "../integrations/geo";
+import { coreLib } from "../integrations/wasm";
+import { MapInfoService } from "../mapdata/map-info.service";
+import { MapViewStateService } from "../mapview/map-view-state.service";
+import { RightClickMenuService } from "../mapview/rightclickmenu.service";
+import { AppConfigService } from "../shared/app-config.service";
+import { AppStateService,SelectedSourceData,TileFeatureId } from "../shared/appstate.service";
+import { InfoMessageService } from "../shared/info.service";
+import { FeatureSearchService } from "./feature.search.service";
 
 export const FEATURE_SEARCH_TARGET_ID = "features";
 
@@ -108,7 +112,11 @@ export class JumpTargetService {
                 private menuService: RightClickMenuService,
                 private stateService: AppStateService,
                 private searchService: FeatureSearchService,
-                private configService: AppConfigService) {
+                private configService: AppConfigService,
+        public readonly coordinates: CoordinatesService,
+        public readonly inspectionState: InspectionStateService,
+        public readonly viewSettings: MapViewStateService,
+        private readonly views: MapViewService) {
         this.loadConfiguredJumpTargets();
 
         // Filter out feature jump targets based on search value.
@@ -119,8 +127,8 @@ export class JumpTargetService {
         // Forward marked cartesian position to AppStateService.
         this.markedPosition.subscribe(position => {
             if (position.length >= 2) {
-                this.stateService.setMarkerState(true);
-                this.stateService.setMarkerPosition(Cartographic.fromDegrees(
+                this.coordinates.setMarkerState(true);
+                this.coordinates.setMarkerPosition(Cartographic.fromDegrees(
                     position[1],
                     position[0],
                     position[2] ?? 0
@@ -302,7 +310,7 @@ export class JumpTargetService {
                                 if (sourceLayerId) {
                                     sourceLayerId = this.mapService.sourceDataLayerIdForLayerName(sourceLayerId) || "";
                                     if (sourceLayerId) {
-                                        this.stateService.setSelection({
+                                        this.inspectionState.setSelection({
                                             mapTileKey: coreLib.getSourceDataLayerKey(mapId, sourceLayerId, tileId)
                                         } as SelectedSourceData);
                                     } else {
@@ -354,7 +362,7 @@ export class JumpTargetService {
                     enabled: !fjt.error,
                     execute: (_: string) => {
                         this.highlightByJumpTarget(fjt, null, coreLib.HighlightMode.SELECTION_HIGHLIGHT,
-                            this.stateService.focusedView).then();
+                            this.viewSettings.focusedView).then();
                     },
                     validate: (_: string) => { return !fjt.error; },
                 }
@@ -396,6 +404,9 @@ export class JumpTargetService {
         mapId?: string | null,
         mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT,
         cameraMoveViewIndex?: number) {
+        const cameraTarget = cameraMoveViewIndex === undefined ? undefined : this.views.captureView(cameraMoveViewIndex);
+        if (cameraMoveViewIndex !== undefined && !cameraTarget) return;
+        const targetIsCurrent = () => !cameraTarget || !!this.views.resolveCapturedView(cameraTarget);
         // Select the map.
         if (!mapId) {
             if (action.maps.length > 1) {
@@ -409,9 +420,7 @@ export class JumpTargetService {
                 mapId = action.maps[0];
             }
         }
-        if (!mapId) {
-            return;
-        }
+        if (!mapId || !targetIsCurrent()) return;
 
         // Locate the feature.
         let resolveMe = {requests: [{
@@ -427,6 +436,7 @@ export class JumpTargetService {
             return;
         }
         let extRefsResolved = await response.json() as LocateResponse;
+        if (!targetIsCurrent()) return;
         if (extRefsResolved.responses[0].length < 1) {
             this.messageService.showError("Could not locate feature!")
             return;
@@ -436,7 +446,7 @@ export class JumpTargetService {
         // Set feature-to-select on MapService.
         const featureId = `${selectThisFeature.typeId}.${selectThisFeature.featureId.filter((_, index) => index % 2 === 1).join('.')}`;
         if (mode === coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
-            this.stateService.setSelection([{
+            this.inspectionState.setSelection([{
                 mapTileKey: selectThisFeature.tileId,
                 featureId: featureId
             } as TileFeatureId]);
@@ -449,7 +459,7 @@ export class JumpTargetService {
 
         // Center the camera on the feature if a view index was passed.
         if (cameraMoveViewIndex !== undefined) {
-            await this.inspectionSelection.focusOnFeature(cameraMoveViewIndex, {
+            await this.inspectionSelection.focusOnFeature(this.viewSettings.indexOfView(cameraTarget!.viewId), {
                 featureId: featureId,
                 mapTileKey: selectThisFeature.tileId,
             });

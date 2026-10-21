@@ -1,37 +1,38 @@
-import {Injectable, NgZone, OnDestroy} from "@angular/core";
-import {BehaviorSubject, interval, Subscription} from "rxjs";
-import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import { Injectable,NgZone,OnDestroy } from "@angular/core";
+import { BehaviorSubject,interval,Subscription } from "rxjs";
+import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
 import {
-    TileSubsetLayerRenderService
+TileSubsetLayerRenderService
 } from "../mapview/deck/tile-subset-layer-render.service";
 import {
-    type SubsetDiagnosticsError,
-    ViewLayerDiagnosticsService
+type SubsetDiagnosticsError,
+ViewLayerDiagnosticsService
 } from "../mapview/view-layer-diagnostics.service";
+import { AppLayoutService } from "../shared/app-layout.service";
 import {
-    AppStateService,
-    DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
+AppStateService,
+DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
 } from "../shared/appstate.service";
 import {
-    DiagnosticsSnapshot,
-    LogEntry,
-    LogLevel,
-    PerfStat,
-    TilePipelineProgress,
-    TileStateCounts
-} from "./diagnostics.model";
-import {
-    LOG_INTERVAL_MS,
-    MAX_LOGS,
-    PEAK_TILE_LIMIT,
-    PERF_INTERVAL_MS,
-    SNAPSHOT_INTERVAL_MS
-} from "./diagnostics.constants";
-import {buildAggregatedPerfStats} from "./diagnostics.perf-aggregation";
-import {
-    StyleValidationReportService
+StyleValidationReportService
 } from "../styledata/style-validation-report.service";
-import type {StyleValidationIssue} from "../styledata/style-validation.model";
+import type { StyleValidationIssue } from "../styledata/style-validation.model";
+import {
+LOG_INTERVAL_MS,
+MAX_LOGS,
+PEAK_TILE_LIMIT,
+PERF_INTERVAL_MS,
+SNAPSHOT_INTERVAL_MS
+} from "./diagnostics.constants";
+import {
+DiagnosticsSnapshot,
+LogEntry,
+LogLevel,
+PerfStat,
+TilePipelineProgress,
+TileStateCounts
+} from "./diagnostics.model";
+import { buildAggregatedPerfStats } from "./diagnostics.perf-aggregation";
 
 /**
  * Current-generation diagnostics assembled from live StyledMapgetLayers.
@@ -66,8 +67,16 @@ export class DiagnosticsDatasource implements OnDestroy {
         private readonly appStateService: AppStateService,
         private readonly styleValidationReportService:
             StyleValidationReportService,
-        private readonly ngZone: NgZone
-    ) {
+        private readonly ngZone: NgZone,
+        public readonly layout: AppLayoutService
+    ) {}
+
+    private initialized = false;
+
+    /** Starts background sampling after state and configuration registration are complete. */
+    initialize(): void {
+        if (this.initialized) return;
+        this.initialized = true;
         this.patchConsoleLogging();
         let wasPaused = this.mapService.tilePipelinePaused;
         const backgroundSubscriptions = this.ngZone.runOutsideAngular(() => [
@@ -282,7 +291,7 @@ export class DiagnosticsDatasource implements OnDestroy {
 
     /** Avoid expensive aggregation while the performance dialog is closed. */
     refreshPerfStatsIfVisible(): void {
-        if (this.appStateService.isDialogOpen(
+        if (this.layout.isDialogOpen(
             DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
         )) {
             this.refreshPerfStats();

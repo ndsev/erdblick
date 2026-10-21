@@ -295,7 +295,7 @@ describe("style option groups", () => {
             stateService as unknown as AppStateService,
             styleService as unknown as StyleService,
             emptyPresetService(),
-            false
+            false, Object.assign(stateService as unknown as AppStateService, {viewIdAt: (index: number) => String(index)}) as never, stateService as unknown as AppStateService as never
         );
         const layer = tree.maps.get("Map")?.layers.get("Roads");
         expect(stateService.mapLayerConfig).toHaveBeenCalledWith("Map", "Preview", false, 13);
@@ -442,7 +442,7 @@ describe("layer presets in the map tree", () => {
             stateService as unknown as AppStateService,
             styleService as unknown as StyleService,
             presetService as unknown as MapPresetService,
-            false);
+            false, Object.assign(stateService as unknown as AppStateService, {viewIdAt: (index: number) => String(index)}) as never, stateService as unknown as AppStateService as never);
         return {tree, stateService};
     }
 
@@ -632,7 +632,7 @@ describe("map presets in the map tree", () => {
             stateService as unknown as AppStateService,
             styleService as unknown as StyleService,
             presetService as unknown as MapPresetService,
-            false);
+            false, Object.assign(stateService as unknown as AppStateService, {viewIdAt: (index: number) => String(index)}) as never, stateService as unknown as AppStateService as never);
         const mapNode = tree.maps.get("Map")!;
         const renderedMap = filterMapTreeNodes(tree.nodes, "", 0)[0];
 

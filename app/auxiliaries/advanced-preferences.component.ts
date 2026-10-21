@@ -1,9 +1,10 @@
-import {Component, ElementRef, HostListener, ViewChild} from '@angular/core';
-import {Subscription} from 'rxjs';
-import {ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, AppStateService} from '../shared/appstate.service';
-import {EditorService} from '../shared/editor.service';
-import {AppDialogComponent} from '../shared/app-dialog.component';
-import {DialogStackService} from '../shared/dialog-stack.service';
+import { Component,ElementRef,HostListener,ViewChild } from '@angular/core';
+import { Subscription } from 'rxjs';
+import { AppDialogComponent } from '../shared/app-dialog.component';
+import { AppLayoutService } from "../shared/app-layout.service";
+import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID,AppStateService } from '../shared/appstate.service';
+import { DialogStackService } from '../shared/dialog-stack.service';
+import { EditorService } from '../shared/editor.service';
 
 @Component({
     selector: 'advanced-preferences',
@@ -80,14 +81,15 @@ export class AdvancedPreferencesComponent {
 
     constructor(public readonly stateService: AppStateService,
                 private readonly editorService: EditorService,
-                private readonly dialogStack: DialogStackService) {}
+                private readonly dialogStack: DialogStackService,
+        public readonly layout: AppLayoutService) {}
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.dialogLayoutId);
+        return this.layout.isDialogOpen(this.dialogLayoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+        this.layout.setDialogOpen(this.dialogLayoutId, visible);
     }
 
     onDialogShow() {

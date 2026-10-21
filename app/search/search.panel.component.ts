@@ -1,65 +1,62 @@
 import {
-    AfterViewInit,
-    ChangeDetectorRef,
-    Component,
-    ElementRef,
-    HostListener,
-    OnDestroy,
-    Renderer2,
-    ViewChild
+AfterViewInit,
+ChangeDetectorRef,
+Component,
+ElementRef,
+HostListener,
+OnDestroy,
+Renderer2,
+ViewChild
 } from "@angular/core";
-import {GeoMath, Rectangle} from "../integrations/geo";
-import {InfoMessageService} from "../shared/info.service";
+import { debounce,debounceTime,distinctUntilChanged,Subject,Subscription,switchMap,timer } from "rxjs";
 import {
-    JumpTargetService,
-    normalizeSearchJumpResult,
-    SearchJump,
-    SearchJumpResult,
-    SearchTarget
-} from "./jump.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {AppStateService} from "../shared/appstate.service";
-import {KeyboardService} from "../shared/keyboard.service";
-import {debounce, debounceTime, distinctUntilChanged, Subject, switchMap, timer, Subscription} from "rxjs";
-import {RightClickMenuService} from "../mapview/rightclickmenu.service";
-import {
-    FeatureSearchService,
-    featureSearchActionPayloadFromCompletion
-} from "./feature.search.service";
+packedTileIdFromMortonString,
+packedTileIdFromParsedNdsCoordinates,
+parseMortonCoordinateString,
+parseNdsCoordinateString,
+parsePackedTileId as parsePackedTileIdValue
+} from "../coords/nds-coordinate.util";
+import { GeoMath,Rectangle } from "../integrations/geo";
+import { coreLib } from "../integrations/wasm";
+import { MapViewStateService } from "../mapview/map-view-state.service";
+import { MapViewService } from "../mapview/map-view.service";
+import { RightClickMenuService } from "../mapview/rightclickmenu.service";
+import { AppDialogComponent } from "../shared/app-dialog.component";
+import { AppStateService } from "../shared/appstate.service";
 import getCaretCoordinates from "../shared/caret.util";
-import {CompletionCandidate} from "./search.model";
-import {coreLib} from "../integrations/wasm";
-import {AppDialogComponent} from "../shared/app-dialog.component";
+import { InfoMessageService } from "../shared/info.service";
+import { KeyboardService } from "../shared/keyboard.service";
 import {
-    historyEntryDedupeKey,
-    historyEntryKey,
-    isLegacySearchHistoryEntry,
-    LegacySearchHistoryEntry,
-    normalizeResolvedSearchHistoryEntry,
-    normalizeSearchHistoryEntry,
-    normalizeSearchHistoryPayload,
-    SearchHistoryEntry,
-    withSearchHistoryActionName
+historyEntryDedupeKey,
+historyEntryKey,
+isLegacySearchHistoryEntry,
+LegacySearchHistoryEntry,
+normalizeResolvedSearchHistoryEntry,
+normalizeSearchHistoryEntry,
+normalizeSearchHistoryPayload,
+SearchHistoryEntry,
+withSearchHistoryActionName
 } from "../shared/search-history";
 import {
-    isSupportedLocationSearchQuery,
-    LocationSearchService,
-    normalizeLocationSearchPayload
-} from "./location.search.service";
-import {LocationNavigationService} from "./location-navigation.service";
-import {
-    packedTileIdFromMortonString,
-    packedTileIdFromParsedNdsCoordinates,
-    parseMortonCoordinateString,
-    parseNdsCoordinateString,
-    parsePackedTileId as parsePackedTileIdValue
-} from "../coords/nds-coordinate.util";
-import {
-    ExternalViewerLocation,
-    ExternalViewerProvider,
-    ExternalViewerService,
-    ResolvedExternalViewerLocation
+ExternalViewerLocation,
+ExternalViewerProvider,
+ExternalViewerService,
+ResolvedExternalViewerLocation
 } from "./external-viewer.service";
+import {
+featureSearchActionPayloadFromCompletion,
+FeatureSearchService
+} from "./feature.search.service";
+import {
+JumpTargetService,
+normalizeSearchJumpResult,
+SearchJump,
+SearchJumpResult,
+SearchTarget
+} from "./jump.service";
+import { LocationNavigationService } from "./location-navigation.service";
+import { isSupportedLocationSearchQuery,LocationSearchService,normalizeLocationSearchPayload } from "./location.search.service";
+import { CompletionCandidate } from "./search.model";
 
 interface SearchHistoryViewEntry extends SearchHistoryEntry {
     label: string;
@@ -405,7 +402,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
      */
     constructor(private renderer: Renderer2,
                 private elRef: ElementRef,
-                public mapService: MapViewStateService,
+                public mapService: MapViewService,
                 public stateService: AppStateService,
                 private keyboardService: KeyboardService,
                 private messageService: InfoMessageService,
@@ -415,7 +412,9 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 private locationSearchService: LocationSearchService,
                 private locationNavigation: LocationNavigationService,
                 private externalViewerService: ExternalViewerService,
-                private changeDetectorRef: ChangeDetectorRef) {
+                private changeDetectorRef: ChangeDetectorRef,
+        public readonly locationSearch: LocationSearchService,
+        public readonly viewSettings: MapViewStateService) {
         this.keyboardService.registerShortcut("Ctrl+k", this.searchShortcutHandler);
 
         this.subscriptions.add(this.jumpService.targetValueSubject.subscribe((event: string) => {
@@ -430,7 +429,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
 
         this.subscriptions.add(this.locationSearchQueryChanged.pipe(
             debounce(() => timer(this.locationSearchService.debounceMs)),
-            switchMap(query => this.locationSearchService.search(query, this.stateService.locationSearchResultLimit))
+            switchMap(query => this.locationSearchService.search(query, this.locationSearch.locationSearchResultLimit))
         ).subscribe(matches => {
             const completedQuery = this.searchInputValue.trim();
             // A cached provider can complete synchronously while Angular is
@@ -452,7 +451,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             }, 0);
         }));
 
-        this.subscriptions.add(this.stateService.locationSearchResultLimitState.subscribe(() => {
+        this.subscriptions.add(this.locationSearch.locationSearchResultLimitState.subscribe(() => {
             this.updateLocationSearchQuery(this.searchInputValue);
             this.refreshSearchMenu();
         }));
@@ -1089,11 +1088,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         }
         const jump = normalizeSearchJumpResult(result);
         const coordinates = jump.target;
-        const targetViewIndex = this.stateService.focusedView;
+        const targetViewIndex = this.viewSettings.focusedView;
         if (Array.isArray(coordinates)) {
             let lat = coordinates[0];
             let lon = coordinates[1];
-            const cameraView = this.stateService.cameraViewDataState.getValue(targetViewIndex);
+            const cameraView = this.viewSettings.cameraViewDataState.getValue(targetViewIndex);
             let alt = coordinates[2] ? coordinates[2] : cameraView.destination.alt;
 
             this.mapService.moveToWgs84PositionTopic.next({

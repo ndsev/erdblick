@@ -1,55 +1,57 @@
-import {Injectable, NgZone, OnDestroy} from "@angular/core";
-import {auditTime, BehaviorSubject, combineLatest, Subject, Subscription} from "rxjs";
-import {MapInfoService} from "./map-info.service";
+import { Injectable,NgZone,OnDestroy } from "@angular/core";
+import { auditTime,BehaviorSubject,combineLatest,Subject,Subscription } from "rxjs";
 import {
-    MapTileRequestStatus,
-    MapTileStreamClientInteractive,
-    MapTileStreamClientTiles,
-    type MapTileStreamFilterStatusPayload,
-    type MapTileStreamSourceCatalogChangePayload,
-    type MapTileStreamStatusPayload,
-    type MapTileStreamTransportCompressionStats
-} from "./tilestream";
-import {
-    FilterSubscriptionCallbacks,
-    FilterSubscriptionCoverage,
-    FilterSubscriptionDefinition,
-    FilterSubscriptionRef,
-    TileAttachmentRef,
-    TileAttachmentValue,
-    TileSubsetDelivery
-} from "./filter-subscription.model";
-import {
-    FeatureWrapper,
-    InspectionFeatureTile
-} from "./feature-inspection.model";
-import {
-    coreLib,
-    uint8ArrayToWasm,
-    uint8ArrayToWasmOrThrow
+coreLib,
+uint8ArrayToWasmOrThrow
 } from "../integrations/wasm";
 import {
-    AppStateService,
-    MAX_NUM_TILES_TO_LOAD,
-    TileFeatureId
+AppStateService,
+MAX_NUM_TILES_TO_LOAD,
+TileFeatureId
 } from "../shared/appstate.service";
-import {InfoMessageService} from "../shared/info.service";
-import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
-import {TileExpiryScheduler} from "./tile-expiry-scheduler";
 import {
-    ConnectionRetryAttempt, ConnectionRetryPolicy, connectionRetryDeadline,
-    recordConnectionFailure
+ConnectionRetryAttempt,
+connectionRetryDeadline,
+ConnectionRetryPolicy,
+recordConnectionFailure
 } from "../shared/connection-retry-policy";
+import { InfoMessageService } from "../shared/info.service";
+import { stripFeatureInspectionTarget } from "../shared/tile-feature-id";
+import { ConnectionPreferencesService } from "./connection-preferences.service";
 import {
-    parseMapPartitionKey,
-    parsePartition,
-    partitionJson,
-    partitionKey,
-    partitionKeySuffix,
-    type ObjectPartitionId,
-    type PartitionId
+FeatureWrapper,
+InspectionFeatureTile
+} from "./feature-inspection.model";
+import {
+FilterSubscriptionCallbacks,
+FilterSubscriptionCoverage,
+FilterSubscriptionDefinition,
+FilterSubscriptionRef,
+TileAttachmentRef,
+TileAttachmentValue,
+TileSubsetDelivery
+} from "./filter-subscription.model";
+import { MapInfoService } from "./map-info.service";
+import type { MapgetLayer } from "./mapget-layer.model";
+import {
+parseMapPartitionKey,
+parsePartition,
+partitionJson,
+partitionKey,
+partitionKeySuffix,
+type ObjectPartitionId,
+type PartitionId
 } from "./partition.model";
-import type {MapgetLayer} from "./mapget-layer.model";
+import { TileExpiryScheduler } from "./tile-expiry-scheduler";
+import {
+MapTileRequestStatus,
+MapTileStreamClientInteractive,
+MapTileStreamClientTiles,
+type MapTileStreamFilterStatusPayload,
+type MapTileStreamSourceCatalogChangePayload,
+type MapTileStreamStatusPayload,
+type MapTileStreamTransportCompressionStats
+} from "./tilestream";
 
 export interface RetainedTileExpiryOwner {
     expireTiles(tokens: ReadonlyArray<{
@@ -178,16 +180,12 @@ export class MapTileStreamService implements OnDestroy {
         private readonly stateService: AppStateService,
         private readonly mapInfo: MapInfoService,
         private readonly messageService: InfoMessageService,
-        private readonly ngZone: NgZone
+        private readonly ngZone: NgZone,
+        public readonly connectionPreferences: ConnectionPreferencesService
     ) {
-        this.retryPolicy = this.stateService.connectionRetryPolicy;
-        this.stateSubscriptions.add(combineLatest([
-            this.stateService.connectionRetryEnabledState,
-            this.stateService.connectionRetryInitialDelayMsState,
-            this.stateService.connectionRetryBackoffMultiplierState,
-            this.stateService.connectionRetryMaxDelayMsState
-        ]).pipe(auditTime(0)).subscribe(() => this.applyRetryPolicy()));
-        this.stateService.tilePullCompressionEnabledState.subscribe(enabled =>
+        this.retryPolicy = this.connectionPreferences.connectionRetryPolicy;
+        this.stateSubscriptions.add(this.connectionPreferences.connectionRetryPolicyChanges.subscribe(() => this.applyRetryPolicy()));
+        this.connectionPreferences.tilePullCompressionEnabledState.subscribe(enabled =>
             this.tileStream?.setPullCompressionEnabled(enabled)
         );
         this.mapInfo.dataSourceInfoChanged.subscribe(() => {
@@ -206,7 +204,7 @@ export class MapTileStreamService implements OnDestroy {
         this.tileStream.onClientId = clientId => this.actionClientId$.next(clientId);
         this.tileStream.onActionControl = (payload, receivedAt) => this.actionControlReceived.next({payload, receivedAt});
         this.tileStream.setPullCompressionEnabled(
-            this.stateService.tilePullCompressionEnabled
+            this.connectionPreferences.tilePullCompressionEnabled
         );
         this.tileStream.setFrameProcessingPaused(this.tilePipelinePaused);
         this.tileStream.onSubsets = payload =>
@@ -1154,7 +1152,7 @@ export class MapTileStreamService implements OnDestroy {
 
     /** Recomputes waiting deadlines when preferences change, retaining attempts and live work. */
     private applyRetryPolicy(): void {
-        this.retryPolicy = this.stateService.connectionRetryPolicy;
+        this.retryPolicy = this.connectionPreferences.connectionRetryPolicy;
         if (this.connectionRetry && this.connectionRetry.at > 0) {
             this.connectionRetry.at = connectionRetryDeadline(this.retryPolicy, this.connectionRetry);
             this.connectionRetryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);

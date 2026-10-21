@@ -60,7 +60,7 @@ function createHarness(
     const service = new HoverDetailService(
         state as never,
         mapInfo as never,
-        tileStream as never
+        tileStream as never, state as never as never
     );
     const mapgetLayer = new MapgetLayer(
         "source",

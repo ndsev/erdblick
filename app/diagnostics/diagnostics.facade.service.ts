@@ -1,24 +1,23 @@
-import {Injectable, NgZone, OnDestroy} from '@angular/core';
-import {BehaviorSubject} from 'rxjs';
+import { Injectable,NgZone,OnDestroy } from "@angular/core";
+import { BehaviorSubject } from "rxjs";
+import { z } from "zod";
+import { MapTileStreamService } from '../mapdata/map-tile-stream.service';
+import { TileSubsetLayerRenderService } from '../mapview/deck/tile-subset-layer-render.service';
+import { ViewLayerDiagnosticsService } from '../mapview/view-layer-diagnostics.service';
+import { AppConfigService } from "../shared/app-config.service";
+import { AppLayoutService } from "../shared/app-layout.service";
+import { Boolish } from "../shared/app-state";
+import { DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../shared/app-state.model";
+import { AppStateService } from "../shared/appstate.service";
+import { StyleValidationReportService } from '../styledata/style-validation-report.service';
+import { DiagnosticsDatasource } from './diagnostics.datasource';
+import type { DiagnosticsExportOptions,DiagnosticsLogFilter } from "./diagnostics.model";
 import {
-    AppStateService,
-    DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
-    DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
-    DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
-} from '../shared/appstate.service';
-import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
-import {TileSubsetLayerRenderService} from '../mapview/deck/tile-subset-layer-render.service';
-import {ViewLayerDiagnosticsService} from '../mapview/view-layer-diagnostics.service';
-import {DiagnosticsDatasource} from './diagnostics.datasource';
-import {
-    DiagnosticsExportBundle,
-    DiagnosticsExportOptions,
-    DiagnosticsLogFilter,
-    LogEntry,
-    PerformanceDiagnosticsScope,
-    TileSizeDistribution
+DiagnosticsExportBundle,
+LogEntry,
+PerformanceDiagnosticsScope,
+TileSizeDistribution
 } from './diagnostics.model';
-import {StyleValidationReportService} from '../styledata/style-validation-report.service';
 
 interface MapgetStatusDataResponse {
     timestampMs?: unknown;
@@ -38,6 +37,61 @@ interface MapgetStatusDataResponse {
  * It extends the datasource with dialog-opening helpers and export bundling.
  */
 export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy {
+
+    readonly diagnosticsLogFilterState = this.stateService.registerState<DiagnosticsLogFilter>({
+        name: 'diagnosticsLogFilter',
+        defaultValue: {
+            info: true,
+            warn: true,
+            error: true
+        },
+        schema: z.object({
+            info: Boolish,
+            warn: Boolish,
+            error: Boolish
+        })
+    });
+
+
+    readonly diagnosticsExportOptionsState = this.stateService.registerState<DiagnosticsExportOptions>({
+        name: 'diagnosticsExportOptions',
+        defaultValue: {
+            includeProgress: true,
+            includePerformance: true,
+            includeLogs: true,
+            logFilter: {
+                info: true,
+                warn: true,
+                error: true
+            }
+        },
+        schema: z.object({
+            includeProgress: Boolish,
+            includePerformance: Boolish,
+            includeLogs: Boolish,
+            logFilter: z.object({
+                info: Boolish,
+                warn: Boolish,
+                error: Boolish
+            })
+        })
+    });
+
+    get diagnosticsLogFilter() {return this.diagnosticsLogFilterState.getValue();}
+
+    set diagnosticsLogFilter(val: DiagnosticsLogFilter) {
+        this.diagnosticsLogFilterState.next({...val});
+    }
+
+    get diagnosticsExportOptions() {return this.diagnosticsExportOptionsState.getValue();}
+
+    set diagnosticsExportOptions(val: DiagnosticsExportOptions) {
+        this.diagnosticsExportOptionsState.next({
+            ...val,
+            logFilter: {...val.logFilter}
+        });
+    }
+
     readonly performanceScope$ = new BehaviorSubject<PerformanceDiagnosticsScope | null>(null);
     private nextPerformanceScopeRequestId = 1;
 
@@ -46,9 +100,11 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
                 viewDiagnostics: ViewLayerDiagnosticsService,
                 private readonly stateService: AppStateService,
                 styleValidationReportService: StyleValidationReportService,
-                ngZone: NgZone) {
+                ngZone: NgZone,
+        public override readonly layout: AppLayoutService,
+        public readonly configService: AppConfigService) {
         super(mapService, renderService, viewDiagnostics, stateService,
-            styleValidationReportService, ngZone);
+            styleValidationReportService, ngZone, layout);
     }
 
     /** Opens the performance dialog after refreshing the current aggregated stats. */
@@ -58,15 +114,15 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
             requestId: this.nextPerformanceScopeRequestId++
         } : null);
         this.refreshPerfStats();
-        this.stateService.openDialog(DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID);
+        this.layout.openDialog(DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID);
     }
 
     /** Opens the log dialog and optionally prefilters it to errors only. */
     openLogDialog(errorsOnly: boolean = false) {
         this.refreshLogs();
-        this.stateService.openDialog(DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID);
+        this.layout.openDialog(DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID);
         if (errorsOnly) {
-            this.stateService.diagnosticsLogFilter = {info: false, warn: false, error: true};
+            this.diagnosticsLogFilter = {info: false, warn: false, error: true};
         }
     }
 
@@ -74,13 +130,13 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     openExportDialog(options?: Partial<DiagnosticsExportOptions>) {
         this.refreshPerfStats();
         this.refreshLogs();
-        const base = this.stateService.diagnosticsExportOptionsState.defaultValue;
-        this.stateService.diagnosticsExportOptions = {
+        const base = this.diagnosticsExportOptionsState.defaultValue;
+        this.diagnosticsExportOptions = {
             ...base,
             ...options,
             logFilter: {...(options?.logFilter ?? base.logFilter)}
         };
-        this.stateService.openDialog(DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID);
+        this.layout.openDialog(DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID);
     }
 
     /** Builds the export bundle from the currently cached diagnostics data. */
@@ -89,8 +145,8 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         const perfStats = this.perfStats$.getValue();
         const logs = this.logs$.getValue();
         const metadata = {
-            erdblickVersion: this.stateService.erdblickVersion.getValue() || undefined,
-            distributionVersions: this.stateService.distributionVersions.getValue() || undefined,
+            erdblickVersion: this.configService.erdblickVersion.getValue() || undefined,
+            distributionVersions: this.configService.distributionVersions.getValue() || undefined,
             userAgent: navigator.userAgent,
             url: window.location.href
         };

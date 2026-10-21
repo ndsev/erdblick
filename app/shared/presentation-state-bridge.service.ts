@@ -1,12 +1,15 @@
-import {Injectable, OnDestroy, Optional} from "@angular/core";
-import type {Params} from "@angular/router";
-import {AppStateService} from "./appstate.service";
-import type {CameraViewState} from "./appstate.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {StyleService} from "../styledata/style.service";
-import {FeatureSearchService} from "../search/feature.search.service";
-import {featureSearchDefinitionFromImportPayload} from "../search/feature-search-export.util";
-import {addMetersToLngLat} from "@math.gl/web-mercator";
+import { Injectable,OnDestroy,Optional } from "@angular/core";
+import type { Params } from "@angular/router";
+import { addMetersToLngLat } from "@math.gl/web-mercator";
+import { InspectionStateService } from "../inspection/inspection-state.service";
+import { MapViewStateService } from "../mapview/map-view-state.service";
+import { MapViewService } from "../mapview/map-view.service";
+import { featureSearchDefinitionFromImportPayload } from "../search/feature-search-export.util";
+import { FeatureSearchService } from "../search/feature.search.service";
+import { StyleService } from "../styledata/style.service";
+import { AppLayoutService } from "./app-layout.service";
+import type { CameraViewState } from "./appstate.service";
+import { AppStateService } from "./appstate.service";
 
 export const PRESENTATION_BRIDGE_PROTOCOL_VERSION = 2;
 export const PRESENTATION_BRIDGE_READY = "erdblick:presentation:ready";
@@ -70,9 +73,12 @@ export class PresentationStateBridgeService implements OnDestroy {
 
     constructor(
         private readonly stateService: AppStateService,
-        private readonly mapViewState: MapViewStateService,
+        private readonly mapViewState: MapViewService,
         private readonly styleService: StyleService,
-        @Optional() private readonly searchService?: FeatureSearchService
+        @Optional() private readonly searchService: FeatureSearchService | null,
+        public readonly viewSettings: MapViewStateService,
+        public readonly inspectionState: InspectionStateService,
+        public readonly layout: AppLayoutService
     ) {}
 
     /** Enables the bridge for a framed document carrying the presentation opt-in. */
@@ -287,7 +293,7 @@ export class PresentationStateBridgeService implements OnDestroy {
                 const duration = request.kind === "url" ? request.transitionMs : 0;
                 const motionGeneration = this.motionGeneration;
                 const from = duration > 0 ? (request.kind === "url" ? request.fromCamera : undefined)
-                    ?? structuredClone(this.stateService.cameraViewDataState.getValue(0)) : undefined;
+                    ?? structuredClone(this.viewSettings.cameraViewDataState.getValue(0)) : undefined;
                 const errors = request.kind === "snapshot"
                     ? await Promise.resolve(this.stateService.replaceSnapshotState(request.state))
                     : await this.applyUrlState(request.params, request.reset);
@@ -320,7 +326,7 @@ export class PresentationStateBridgeService implements OnDestroy {
                         }
                     }
                     if (from && !this.queuedRequest && motionGeneration === this.motionGeneration) {
-                        this.transitionCamera(from, structuredClone(this.stateService.cameraViewDataState.getValue(0)), duration);
+                        this.transitionCamera(from, structuredClone(this.viewSettings.cameraViewDataState.getValue(0)), duration);
                     }
                     this.postResult(request.requestId, request.origin, true);
                 }
@@ -340,9 +346,9 @@ export class PresentationStateBridgeService implements OnDestroy {
         await this.stateService.replaceUrlState(params, reset);
         // A URL encodes whether each inspection is docked, but not the dock's
         // open state. Make authored docked selections visible after replacement.
-        if (this.stateService.selection?.some(panel => !panel.undocked && panel.features.length > 0)) {
-            this.stateService.dockActiveTab = "inspection";
-            this.stateService.isDockOpen = true;
+        if (this.inspectionState.selection?.some(panel => !panel.undocked && panel.features.length > 0)) {
+            this.layout.dockActiveTab = "inspection";
+            this.layout.isDockOpen = true;
         }
         return [];
     }

@@ -1,3 +1,4 @@
+import {testPersistence, stateOwners} from '../../test/state-owners';
 import '@angular/compiler';
 import {ElementRef} from '@angular/core';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -56,7 +57,7 @@ describe('AppPanelComponent custom resizing', () => {
             baseFontSize: 16,
             setPanelLayout
         } as unknown as AppStateService;
-        component = new AppPanelComponent(stateService, new ViewerUiService());
+        component = new AppPanelComponent(stateService, new ViewerUiService(), stateOwners(stateService).layout);
         component.layoutId = 'test-panel';
         component.persistLayout = true;
         component.resizeMode = 'vertical';

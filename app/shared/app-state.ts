@@ -9,6 +9,13 @@ export type AppStateToStorageFun<T> = (value: T) => unknown;
 export type AppStateFromStorageFun<T> = (value: ZodTypeAny, currentValue: T) => T;
 export type AppStateSerializedValue = string | null;
 
+/** A stored compatibility key derived from an owner's authoritative state. */
+export interface AppStateProjection<T> {
+    read(): T;
+    write(value: T): void;
+    changes: Observable<T>;
+}
+
 /** Describes one persisted application state slot. */
 export interface AppStateOptions<T> {
     name: string;
@@ -21,6 +28,7 @@ export interface AppStateOptions<T> {
     urlIncludeInVisualizationOnly?: boolean;
     snapshotPersist?: boolean;
     configDefault?: boolean;
+    normalize?: (value: T) => T;
 }
 
 /**
@@ -202,6 +210,12 @@ export function deepEquals(a: unknown, b: unknown): boolean {
     if (a === b) {
         return true;
     }
+    if (a instanceof Map && b instanceof Map) {
+        return a.size === b.size && [...a].every(([key, value]) => b.has(key) && deepEquals(value, b.get(key)));
+    }
+    if (a instanceof Set && b instanceof Set) {
+        return a.size === b.size && [...a].every(value => b.has(value));
+    }
 
     // Handle NaN comparisons explicitly
     if (typeof a === 'number' && typeof b === 'number') {
@@ -300,6 +314,7 @@ export function deepCopy<V>(value: V): V {
  */
 export class AppState<T> extends Observable<T> {
     private currentValue: T;
+    private readonly normalize?: (value: T) => T;
     private readonly changes: Subject<T>;
     /** The persistence registry installs a synchronous publication boundary. */
     writeValue: ((value: T) => void) | undefined;
@@ -317,14 +332,16 @@ export class AppState<T> extends Observable<T> {
     protected readonly schema: ZodTypeAny;
 
     /** Registers the state slot in the shared pool and seeds it with the default value. */
-    constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>) {
+    constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>, private readonly projection?: AppStateProjection<T>) {
         const changes = new Subject<T>();
         super(subscriber => {
+            if (projection) return projection.changes.subscribe(subscriber);
             const subscription = changes.subscribe(subscriber);
             if (!subscriber.closed) subscriber.next(this.currentValue);
             return subscription;
         });
         this.changes = changes;
+        this.normalize = options.normalize;
         this.currentValue = deepCopy(options.defaultValue);
         this.name = options.name;
         this.defaultValue = deepCopy(options.defaultValue);
@@ -340,29 +357,34 @@ export class AppState<T> extends Observable<T> {
         this.configDefault = options.configDefault ?? this.snapshotPersist;
 
         if (pool.has(options.name)) {
-            console.warn(`[AppState] Duplicate state name detected: ${options.name}. Overwriting previous instance.`);
+            throw new Error(`Duplicate state registration: ${options.name}`);
         }
         pool.set(options.name, this as unknown as AppState<unknown>);
     }
 
     /** Reads staged values during a coordinated edit, before observers are notified. */
     getValue(): T {
-        return this.currentValue;
+        return this.projection ? this.projection.read() : this.currentValue;
     }
 
-    get value(): T { return this.currentValue; }
+    get value(): T { return this.getValue(); }
 
     /** Publishes immediately for a single edit, or at the enclosing transaction boundary. */
     next(value: T): void {
-        if (this.writeValue) this.writeValue(value);
-        else {
-            this.stage(value);
-            this.publish();
+        if (this.normalize) value = this.normalize(value);
+        if (this.projection) {
+            if (!deepEquals(this.getValue(), value)) this.projection.write(value);
+            return;
         }
+        if (this.writeValue) { this.writeValue(value); return; }
+        if (deepEquals(this.currentValue, value)) return;
+        this.stage(deepCopy(value));
+        this.publish();
     }
 
     /** Registry-only phase: install a value before any slot observer is notified. */
     stage(value: T): void {
+        if (this.projection) throw new Error("A derived persistence value cannot be staged independently.");
         this.currentValue = value;
     }
 
@@ -665,85 +687,80 @@ export class AppState<T> extends Observable<T> {
 }
 
 /**
- * Wrapper around `AppState<T[]>` that exposes per-view accessors while keeping
- * a single underlying state entry for URL/storage sync.
+ * Stores values by logical view identity. Only the deployed storage and URL formats
+ * are positional: they project through the owner's current ordered identity list.
+ * Numeric accessors are UI boundaries; subscriptions capture the resolved identity.
  */
-/** Convenience wrapper that exposes one `AppState<T[]>` as per-view accessors. */
 export class MapViewState<T> {
-    public appState: AppState<Array<T>>;
+    readonly appState: AppState<Record<string, T>>;
     private readonly defaultValue: T;
 
-    /** Wraps one array-valued state slot and exposes it as a per-view accessor set. */
-    constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>) {
+    constructor(
+        pool: Map<string, AppState<unknown>>,
+        options: AppStateOptions<T>,
+        private readonly viewIds: () => readonly string[]
+    ) {
         this.defaultValue = deepCopy(options.defaultValue);
-        this.appState = new AppState(pool, {
-            name: options.name,
-            defaultValue: [deepCopy(options.defaultValue)],
+        this.appState = new AppState<Record<string, T>>(pool, {
+            ...options,
+            defaultValue: {},
+            normalize: options.normalize ? values => Object.fromEntries(Object.entries(values).map(([id, value]) => [id, options.normalize!(value)])) : undefined,
             schema: z.array(options.schema),
-            toStorage: (array: Array<T>) => {
-                if (options.toStorage === undefined) {
-                    return array;
-                }
-                return array.map(options.toStorage);
-            },
-            fromStorage: (value: ZodTypeAny, currentValue: Array<T>): Array<T> => {
-                if (options.fromStorage === undefined) {
-                    return value as unknown as Array<T>;
-                }
-                return (value as unknown as Array<any>).map((el, i) => {
-                    const current = i < currentValue.length ? currentValue[i] : deepCopy(this.defaultValue);
-                    return options.fromStorage!(el as ZodTypeAny, current);
-                })
-            },
-            urlParamName: options.urlParamName,
-            urlFormEncode: options.urlFormEncode,
-            urlIncludeInVisualizationOnly: options.urlIncludeInVisualizationOnly,
-            snapshotPersist: options.snapshotPersist,
-            configDefault: options.configDefault
+            toStorage: values => this.viewIds().map(id => {
+                const value = values[id] ?? this.defaultValue;
+                return options.toStorage ? options.toStorage(value) : compactBooleans(value);
+            }),
+            fromStorage: (payload, current) => Object.fromEntries(this.viewIds().map((id, index) => {
+                const value = (payload as unknown as T[])[index];
+                const previous = current[id] ?? deepCopy(this.defaultValue);
+                return [id, value === undefined ? previous : options.fromStorage
+                    ? options.fromStorage(value as ZodTypeAny, previous) : value];
+            }))
         });
     }
 
-    /** Writes one view-specific value back into the underlying array state. */
-    next(viewIndex: number, value: T) {
-        const currentValue = [...this.appState.getValue()];
-        if (viewIndex >= currentValue.length) {
-            for (let i = currentValue.length; i <= viewIndex; ++i) {
-                currentValue.push(deepCopy(this.defaultValue));
-            }
-        }
-        currentValue[viewIndex] = value;
-        this.appState.next(currentValue);
+    private resolve(view: number | string): string {
+        const id = typeof view === "number" ? this.viewIds()[view] : view;
+        if (id === undefined || !this.viewIds().includes(id)) throw new Error(`View ${view} is unavailable.`);
+        return id;
     }
 
-    /** Subscribes to one view-specific slice of the shared array state. */
-    subscribe(viewIndex: number, cb: (value: T) => void) {
-        return this.appState.pipe(
-            map(arr => (arr[viewIndex] !== undefined ? arr[viewIndex] : this.appState.defaultValue[0])),
-            // distinctUntilChanged()
-        ).subscribe(cb);
+    next(view: number | string, value: T): void {
+        const id = this.resolve(view);
+        this.appState.next({...this.appState.value, [id]: value});
     }
 
-    pipe<R = T>(viewIndex: number, ...ops: OperatorFunction<T, any>[]): Observable<R> {
-        const base$ = this.appState.pipe(
-            map(arr => (arr[viewIndex] !== undefined ? arr[viewIndex] : this.appState.defaultValue[0])),
-            // distinctUntilChanged()
+    subscribe(view: number | string, callback: (value: T) => void) {
+        return this.pipe(view).subscribe(callback);
+    }
+
+    pipe<R = T>(view: number | string, ...operators: OperatorFunction<T, any>[]): Observable<R> {
+        const id = this.resolve(view);
+        const changes = this.appState.pipe(
+            map(values => values[id] ?? this.defaultValue),
+            distinctUntilChanged(deepEquals)
         );
-        return ops.length ? (base$ as any).pipe(...ops) : (base$ as unknown as Observable<R>);
+        return operators.length ? (changes as any).pipe(...operators) : changes as unknown as Observable<R>;
     }
 
-    /** Returns the value for one view, falling back to the first default entry. */
-    getValue(viewIndex: number): T {
-        const arr = this.appState.getValue();
-        if (arr[viewIndex] !== undefined) {
-            return arr[viewIndex];
-        }
-        return deepCopy(this.defaultValue);
+    getValue(view: number | string): T {
+        return this.appState.value[this.resolve(view)] ?? deepCopy(this.defaultValue);
     }
 
-    /** Returns the number of currently stored per-view entries. */
-    length() {
-        return this.appState.getValue().length;
+    /** Preserves positional defaults while a legacy import receives its first logical identities. */
+    rekey(previousIds: readonly string[], ids: readonly string[]): void {
+        const current = this.appState.value;
+        this.appState.next(Object.fromEntries(ids.map((id, index) => [id,
+            current[id] ?? current[previousIds[Math.min(index, previousIds.length - 1)]] ?? deepCopy(this.defaultValue)
+        ])));
     }
+
+    /** Removes retired values without changing any surviving identity association. */
+    retain(ids: readonly string[]): void {
+        this.appState.next(Object.fromEntries(Object.entries(this.appState.value).filter(([id]) => ids.includes(id))));
+    }
+
+    length(): number { return this.viewIds().length; }
 }
 
 /** Compacts booleans to `1`/`0` for shorter URL output, recursively. */
@@ -781,58 +798,63 @@ function compactBooleans(value: unknown): unknown {
  *
  */
 /** Specialized app-state slot for style option values keyed by map/layer/style metadata. */
-export class StyleState extends AppState<Map<string, (string|number|boolean)[]>> {
+export type StyleOptionValue = string | number | boolean;
+
+export class StyleState extends AppState<Map<string, Record<string, StyleOptionValue>>> {
     layerNamesState: AppState<string[]>;
-    numViewsState: AppState<number>;
 
     /** Creates the specialized style state used for per-style option persistence. */
-    constructor(pool: Map<string, AppState<unknown>>) {
+    constructor(pool: Map<string, AppState<unknown>>, private readonly viewIds: () => readonly string[]) {
         super(pool, {
             name: "styleOptions",
             schema: z.record(z.string(), z.string()),
-            defaultValue: new Map<string, (string|number|boolean)[]>(),
+            defaultValue: new Map<string, Record<string, StyleOptionValue>>(),
             snapshotPersist: false
         });
         const layerNamesState = pool.get("layerNames");
         if (layerNamesState === undefined) {
             throw Error("Expected layerNames state, got undefined!");
         }
-        // Backward-compat: accept either 'numberOfViews' or legacy 'numViews'
-        const numViewsState = pool.get("numberOfViews");
-        if (numViewsState === undefined) {
-            throw Error("Expected numberOfViews state, got undefined!");
-        }
         this.layerNamesState = layerNamesState as AppState<string[]>;
-        this.numViewsState = numViewsState as AppState<number>;
     }
 
     override isUrlState(): boolean {
         return true;
     }
 
-    override toSnapshotValue(): unknown {
-        const snapshot: Record<string, (string|number|boolean)[]> = {};
-        for (const [key, values] of this.value.entries()) {
-            snapshot[key] = [...values];
-        }
-        return snapshot;
+    /** Positional projection used only at compatibility boundaries. */
+    positionalValues(): Map<string, StyleOptionValue[]> {
+        return new Map([...this.value].map(([key, values]) => [key, this.viewIds().map(id => values[id]) ]));
     }
 
-    override applySnapshotValue(value: unknown): void {
-        const nextMap = this.validateSnapshotValue(value);
-        if (this.styleMapEquals(this.value, nextMap)) {
-            return;
-        }
-        this.next(nextMap);
+    replacePositional(values: ReadonlyMap<string, readonly StyleOptionValue[]>): void {
+        this.next(this.fromPositional(values));
     }
 
-    override validateSnapshotValue(value: unknown): Map<string, (string|number|boolean)[]> {
+    private fromPositional(values: ReadonlyMap<string, readonly StyleOptionValue[]>): Map<string, Record<string, StyleOptionValue>> {
+        return new Map([...values].map(([key, values]) => [key, Object.fromEntries(
+            this.viewIds().flatMap((id, index) => values[index] === undefined ? [] : [[id, values[index]]])
+        )]));
+    }
+
+    rekey(previousIds: readonly string[], ids: readonly string[]): void {
+        this.next(new Map([...this.value].map(([key, values]) => [key, Object.fromEntries(ids.flatMap((id, index) => {
+            const value = values[id] ?? values[previousIds[Math.min(index, previousIds.length - 1)]];
+            return value === undefined ? [] : [[id, value]];
+        }))])));
+    }
+
+    retain(ids: readonly string[]): void {
+        this.next(new Map([...this.value].map(([key, values]) => [key,
+            Object.fromEntries(Object.entries(values).filter(([id]) => ids.includes(id)))
+        ])));
+    }
+
+    override toSnapshotValue(): unknown { return Object.fromEntries(this.positionalValues()); }
+
+    override validateSnapshotValue(value: unknown): Map<string, Record<string, StyleOptionValue>> {
         const parsed = z.record(z.string(), z.array(z.union([z.string(), z.number(), z.boolean()]))).parse(value);
-        const nextMap = new Map<string, (string|number|boolean)[]>();
-        for (const [key, values] of Object.entries(parsed)) {
-            nextMap.set(key, [...values]);
-        }
-        return nextMap;
+        return this.fromPositional(new Map(Object.entries(parsed)));
     }
 
     override serialize(_: boolean): Record<string, string> | undefined {
@@ -842,7 +864,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         }
 
         const layerNames = this.layerNamesState.getValue();
-        const numViews = this.numViewsState.getValue();
+        const numViews = this.viewIds().length;
 
         // Group by style -> option -> mapLayerId
         // E.g. {
@@ -853,7 +875,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         // }
         const grouped = new Map<string, Map<string, Map<string, (string|number|boolean)[]>>>();
 
-        for (const [fullKey, values] of this.value.entries()) {
+        for (const [fullKey, values] of this.positionalValues()) {
             const fullKeyParts = fullKey.split("/");
             const optionId = fullKeyParts[fullKeyParts.length - 1];
             const shortStyleId = fullKeyParts[fullKeyParts.length - 2];
@@ -871,7 +893,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
             }
             const byLayer = byOption.get(optionId)!;
 
-            if (values.length < numViews) {
+            if (values.length < numViews || values.some(value => value === undefined)) {
                 console.warn(`[StyleState.serialize]: Omitting option ${fullKey}: Expected ${numViews} values, got: ${values.length}!`);
             } else if (values.length > numViews) {
                 byLayer.set(mapLayerId, values.slice(0, numViews));
@@ -936,8 +958,9 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
             }
 
             const layerNames = this.layerNamesState.getValue();
-            const numViews = this.numViewsState.getValue();
+            const numViews = this.viewIds().length;
 
+            const nextValues = this.positionalValues();
             for (const [key, value] of Object.entries(raw)) {
                 if (!this.isStyleOptionUrlParamKey(key)) {
                     continue;
@@ -983,7 +1006,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
                             }
                             const mapLayerId = layerNames[layerIndex];
                             const storeKey = this.styleOptionKeyFromMapLayer(mapLayerId, shortStyleId, optionId);
-                            const valuesForStoreKey = this.value.get(storeKey) || [];
+                            const valuesForStoreKey = [...(nextValues.get(storeKey) ?? [])];
                             const rawVal = perLayer[li] ?? '';
 
                             // Ensure length up to current view
@@ -991,11 +1014,12 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
                                 valuesForStoreKey.push(false);
                             }
                             valuesForStoreKey[view] = rawVal;
-                            this.value.set(storeKey, valuesForStoreKey);
+                            nextValues.set(storeKey, valuesForStoreKey);
                         }
                     }
                 }
             }
+            this.replacePositional(nextValues);
         } catch (error) {
             console.error(`[StyleState.deserialize]: Failed to deserialize style options from `, raw, error);
         }
@@ -1020,20 +1044,6 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         // Use a slash-delimited compound key; mapId may contain '/'.
         const mapLayerId = `${mapId}/${layerId}`;
         return `${mapLayerId}/${shortStyleId}/${optionId}`;
-    }
-
-    /** Compares two style-option maps structurally without relying on reference identity. */
-    private styleMapEquals(a: Map<string, (string|number|boolean)[]>, b: Map<string, (string|number|boolean)[]>): boolean {
-        if (a.size !== b.size) {
-            return false;
-        }
-        for (const [key, value] of a.entries()) {
-            const other = b.get(key);
-            if (!other || !deepEquals(value, other)) {
-                return false;
-            }
-        }
-        return true;
     }
 
     /** Builds the canonical style-option key from a combined map/layer id. */

@@ -1,3 +1,4 @@
+import {testPersistence, stateOwners} from '../../test/state-owners';
 import "@angular/compiler";
 import {ChangeDetectorRef, Renderer2} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
@@ -51,7 +52,7 @@ describe("inspection host render notifications", () => {
             stateService,
             mapService,
             {} as Renderer2,
-            cdr
+            cdr, stateOwners(stateService).layout, stateOwners(stateService).inspectionState
         );
         vi.mocked(cdr.markForCheck).mockClear();
 
@@ -69,7 +70,7 @@ describe("inspection host render notifications", () => {
         const mapService = {selectionTopic} as unknown as InspectionSelectionService;
         const stateService = {inspectionComparisonState} as unknown as AppStateService;
         const cdr = changeDetector();
-        const component = new InspectionDialogsComponent(mapService, stateService, cdr);
+        const component = new InspectionDialogsComponent(mapService, stateService, cdr, stateOwners(stateService).inspectionState);
         vi.mocked(cdr.markForCheck).mockClear();
 
         selectionTopic.next([loadingPanel(true)]);

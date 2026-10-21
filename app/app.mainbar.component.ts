@@ -1,28 +1,30 @@
-import {AfterViewInit, Component, ElementRef, NgZone, OnDestroy, ViewChild} from '@angular/core';
-import {Subscription} from 'rxjs';
-import {MapInfoService} from './mapdata/map-info.service';
-import {MapViewStateService} from './mapview/map-view-state.service';
+import { AfterViewInit,Component,ElementRef,NgZone,OnDestroy,ViewChild } from '@angular/core';
+import { MenuItem } from "primeng/api";
+import { Subscription } from 'rxjs';
+import { DiagnosticsFacadeService } from './diagnostics/diagnostics.facade.service';
+import { environment } from './environments/environment';
+import { MapInfoService } from './mapdata/map-info.service';
+import { MapViewStateService } from "./mapview/map-view-state.service";
+import { MapViewService } from './mapview/map-view.service';
+import { FeatureSearchService } from "./search/feature.search.service";
+import { AppLayoutService } from "./shared/app-layout.service";
 import {
-    ABOUT_DIALOG_LAYOUT_ID,
-    CACHE_RESET_DIALOG_LAYOUT_ID,
-    DATASOURCES_EDITOR_DIALOG_LAYOUT_ID,
-    KEYBOARD_DIALOG_LAYOUT_ID,
-    LEGAL_INFO_DIALOG_LAYOUT_ID,
-    PREFERENCES_DIALOG_LAYOUT_ID,
-    AppStateService,
-    STYLES_DIALOG_LAYOUT_ID,
-    VIEW_SYNC_LAYERS,
-    VIEW_SYNC_MOVEMENT,
-    VIEW_SYNC_POSITION,
-    VIEW_SYNC_PROJECTION
+ABOUT_DIALOG_LAYOUT_ID,
+AppStateService,
+CACHE_RESET_DIALOG_LAYOUT_ID,
+DATASOURCES_EDITOR_DIALOG_LAYOUT_ID,
+KEYBOARD_DIALOG_LAYOUT_ID,
+LEGAL_INFO_DIALOG_LAYOUT_ID,
+PREFERENCES_DIALOG_LAYOUT_ID,
+STYLES_DIALOG_LAYOUT_ID,
+VIEW_SYNC_LAYERS,
+VIEW_SYNC_MOVEMENT,
+VIEW_SYNC_POSITION,
+VIEW_SYNC_PROJECTION
 } from './shared/appstate.service';
-import {environment} from './environments/environment';
-import {DiagnosticsFacadeService} from './diagnostics/diagnostics.facade.service';
-import {MenuItem} from "primeng/api";
-import {FeatureSearchService} from "./search/feature.search.service";
-import {InfoMessageService} from "./shared/info.service";
-import {StyleService} from "./styledata/style.service";
-import {StyleEditorRequestService} from "./styledata/style-editor-request.service";
+import { InfoMessageService } from "./shared/info.service";
+import { StyleEditorRequestService } from "./styledata/style-editor-request.service";
+import { StyleService } from "./styledata/style.service";
 
 const MAIN_BAR_BREAKPOINT = '56em';
 const MAIN_BAR_MEDIA_QUERY = `(max-width: ${MAIN_BAR_BREAKPOINT})`;
@@ -134,35 +136,38 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     }
 
     get mapsPanelOpen(): boolean {
-        return this.stateService.mapsOpenState.getValue();
+        return this.layout.mapsOpenState.getValue();
     }
 
     constructor(public mapService: MapInfoService,
                 public stateService: AppStateService,
-                private mapViewState: MapViewStateService,
+                private mapViewState: MapViewService,
                 private diagnostics: DiagnosticsFacadeService,
                 private featureSearchService: FeatureSearchService,
                 private styleService: StyleService,
                 private styleEditorRequestService: StyleEditorRequestService,
                 private infoMessageService: InfoMessageService,
                 private elementRef: ElementRef<HTMLElement>,
-                private ngZone: NgZone) {
+                private ngZone: NgZone,
+        public readonly layout: AppLayoutService,
+        public readonly viewSettings: MapViewStateService,
+        public readonly searchService: FeatureSearchService) {
         this.setupMobileMenuTracking();
         this.initializeViewerLayoutMobileState();
         this.rebuildMenuItems();
-        this.subscriptions.add(this.stateService.numViewsState.subscribe(numViews => {
+        this.subscriptions.add(this.viewSettings.numViewsState.subscribe(numViews => {
             this.rebuildMenuItems(numViews);
         }));
-        this.subscriptions.add(this.stateService.viewSyncState.subscribe(() => {
+        this.subscriptions.add(this.viewSettings.viewSyncState.subscribe(() => {
             this.rebuildMenuItems();
         }));
-        this.subscriptions.add(this.stateService.dockOpenState.subscribe(() => {
+        this.subscriptions.add(this.layout.dockOpenState.subscribe(() => {
             this.scheduleMobileMenubarStateUpdate();
         }));
         this.subscriptions.add(this.featureSearchService.sessionsChanged.subscribe(() => {
             this.rebuildMenuItems();
         }));
-        this.subscriptions.add(this.stateService.featureSearchState.subscribe(() => {
+        this.subscriptions.add(this.searchService.featureSearchState.subscribe(() => {
             this.rebuildMenuItems();
         }));
         this.subscriptions.add(this.styleService.styleGroups.subscribe(() => {
@@ -202,12 +207,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the preferences dialog from the menu. */
     showPreferencesDialog() {
-        this.stateService.openDialog(PREFERENCES_DIALOG_LAYOUT_ID);
+        this.layout.openDialog(PREFERENCES_DIALOG_LAYOUT_ID);
     }
 
     /** Opens the keyboard-help dialog from the menu. */
     showControlsDialog() {
-        this.stateService.openDialog(KEYBOARD_DIALOG_LAYOUT_ID);
+        this.layout.openDialog(KEYBOARD_DIALOG_LAYOUT_ID);
     }
 
     /** Opens the diagnostics performance dialog from the menu. */
@@ -236,17 +241,17 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the About dialog. */
     openAboutDialog() {
-        this.stateService.openDialog(ABOUT_DIALOG_LAYOUT_ID);
+        this.layout.openDialog(ABOUT_DIALOG_LAYOUT_ID);
     }
 
     /** Opens the datasource editor dialog. */
     private openDatasources() {
-        this.stateService.openDialog(DATASOURCES_EDITOR_DIALOG_LAYOUT_ID);
+        this.layout.openDialog(DATASOURCES_EDITOR_DIALOG_LAYOUT_ID);
     }
 
     /** Opens the styles dialog. */
     private openStylesDialog() {
-        this.stateService.openDialog(STYLES_DIALOG_LAYOUT_ID);
+        this.layout.openDialog(STYLES_DIALOG_LAYOUT_ID);
     }
 
     /** Opens the hidden file input used to import feature-search JSON. */
@@ -313,12 +318,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the maps panel. */
     protected showMapsPanel() {
-        this.stateService.mapsOpenState.next(true);
+        this.layout.mapsOpenState.next(true);
     }
 
     /** Closes the maps panel. */
     protected closeMapsPanel() {
-        this.stateService.mapsOpenState.next(false);
+        this.layout.mapsOpenState.next(false);
     }
 
     /** Schedules tooltip alignment for the maps-panel button tooltip. */
@@ -344,7 +349,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the legal-information dialog. */
     protected openLegalInfo() {
-        this.stateService.openDialog(LEGAL_INFO_DIALOG_LAYOUT_ID);
+        this.layout.openDialog(LEGAL_INFO_DIALOG_LAYOUT_ID);
     }
 
     /** Aligns the maps-panel tooltip under the triggering button and keeps it on-screen. */
@@ -491,7 +496,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     }
 
     /** Rebuilds the current menu model using the latest view count and layout mode. */
-    private rebuildMenuItems(numViews: number = this.stateService.numViews): void {
+    private rebuildMenuItems(numViews: number = this.viewSettings.numViews): void {
         this.mobileMapsMenuIncluded = this.viewportMobileMenubar;
         this.menuItems = this.buildMenuItems(numViews, this.mobileMapsMenuIncluded);
     }
@@ -579,7 +584,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         name: 'Split View',
                         icon: 'add_column_right',
                         visible: numViews <= 1,
-                        command: () => { this.stateService.numViews = 2; }
+                        command: () => { this.viewSettings.numViews = 2; }
                     },
                     {
                         name: 'Close Left View',
@@ -628,7 +633,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                     {
                         name: 'Cache Reset',
                         icon: 'cycle',
-                        command: () => { this.stateService.openDialog(CACHE_RESET_DIALOG_LAYOUT_ID); }
+                        command: () => { this.layout.openDialog(CACHE_RESET_DIALOG_LAYOUT_ID); }
                     },
                     {
                         name: 'Performance Statistics',
@@ -775,10 +780,10 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Toggles one synchronized-view option and mirrors the change into state. */
     private toggleSyncOption(code: string): void {
-        const nextSelection = this.stateService.viewSync.includes(code)
-            ? this.stateService.viewSync.filter(currentCode => currentCode !== code)
-            : [...this.stateService.viewSync, code];
-        this.stateService.updateSelectedSyncOptions(nextSelection);
+        const nextSelection = this.viewSettings.viewSync.includes(code)
+            ? this.viewSettings.viewSync.filter(currentCode => currentCode !== code)
+            : [...this.viewSettings.viewSync, code];
+        this.viewSettings.updateSelectedSyncOptions(nextSelection);
     }
 
     /** Returns whether a menu item corresponds to an active synchronized-view option. */
@@ -786,13 +791,13 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         const itemName = item['name'];
         switch (itemName) {
             case 'Position':
-                return this.stateService.viewSync.includes(VIEW_SYNC_POSITION);
+                return this.viewSettings.viewSync.includes(VIEW_SYNC_POSITION);
             case 'Movement':
-                return this.stateService.viewSync.includes(VIEW_SYNC_MOVEMENT);
+                return this.viewSettings.viewSync.includes(VIEW_SYNC_MOVEMENT);
             case 'Projection':
-                return this.stateService.viewSync.includes(VIEW_SYNC_PROJECTION);
+                return this.viewSettings.viewSync.includes(VIEW_SYNC_PROJECTION);
             case 'Layers':
-                return this.stateService.viewSync.includes(VIEW_SYNC_LAYERS);
+                return this.viewSettings.viewSync.includes(VIEW_SYNC_LAYERS);
             default:
                 return false;
         }

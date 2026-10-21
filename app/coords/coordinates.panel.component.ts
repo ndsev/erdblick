@@ -1,19 +1,21 @@
-import {ChangeDetectorRef, Component, Input, OnDestroy} from "@angular/core";
-import {CoordinatesService} from "./coordinates.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {AppStateService} from "../shared/appstate.service";
-import {GeoMath} from "../integrations/geo";
-import {ClipboardService} from "../shared/clipboard.service";
-import {KeyValue} from "@angular/common";
-import {combineLatest, Subscription} from "rxjs";
+import {deepEquals} from "../shared/app-state";
+import { KeyValue } from "@angular/common";
+import { ChangeDetectorRef,Component,Input,OnDestroy } from "@angular/core";
+import { combineLatest,Subscription } from "rxjs";
+import { GeoMath } from "../integrations/geo";
+import { MapViewStateService } from "../mapview/map-view-state.service";
+import { MapViewService } from "../mapview/map-view.service";
+import { AppStateService } from "../shared/appstate.service";
+import { ClipboardService } from "../shared/clipboard.service";
+import { subscribeCoordinateFrames } from "./coordinate-frame-stream";
+import { CoordinatesService } from "./coordinates.service";
 import {
-    NDS_COORDINATES_OPTION,
-    ndsCoordinatesFromWgs84,
-    normalizeCoordinatePanelOptionName,
-    packedTileIdFromWgs84,
-    packedTileIdOptionName
+NDS_COORDINATES_OPTION,
+ndsCoordinatesFromWgs84,
+normalizeCoordinatePanelOptionName,
+packedTileIdFromWgs84,
+packedTileIdOptionName
 } from "./nds-coordinate.util";
-import {subscribeCoordinateFrames} from "./coordinate-frame-stream";
 
 interface PanelOption {
     name: string,
@@ -103,18 +105,17 @@ export class CoordinatesPanelComponent implements OnDestroy {
     readonly ndsCoordinatesOption = NDS_COORDINATES_OPTION;
     private subscriptions: Subscription[] = [];
 
-    constructor(public mapService: MapViewStateService,
+    constructor(public mapService: MapViewService,
                 public coordinatesService: CoordinatesService,
                 public clipboardService: ClipboardService,
                 public stateService: AppStateService,
-                private changeDetector: ChangeDetectorRef) {
+                private changeDetector: ChangeDetectorRef,
+        public readonly coordinates: CoordinatesService,
+        public readonly viewSettings: MapViewStateService) {
         for (let level = 0; level <= 15; level++) {
             this.displayOptions.push({name: packedTileIdOptionName(level)});
         }
-        this.subscriptions.push(combineLatest([
-            this.stateService.markerState,
-            this.stateService.markedPositionState
-        ]).subscribe(([markerEnabled, markedPosition]) => {
+        this.subscriptions.push(this.stateService.observe(() => [this.coordinates.markerState.value, this.coordinates.markedPositionState.value] as const, deepEquals).subscribe(([markerEnabled, markedPosition]) => {
             this.isMarkerEnabled = markerEnabled;
             if (markedPosition.length >= 2) {
                 this.longitude = markedPosition[0];
@@ -139,7 +140,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
             this.restoreSelectedOptions();
         }));
 
-        this.subscriptions.push(this.stateService.enabledCoordsTileIdsState.subscribe(() => {
+        this.subscriptions.push(this.coordinates.enabledCoordsTileIdsState.subscribe(() => {
             this.restoreSelectedOptions();
         }));
 
@@ -165,7 +166,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
 
     /** Reapplies persisted display-option selections after option lists change. */
     private restoreSelectedOptions() {
-        for (const option of this.stateService.enabledCoordsTileIds) {
+        for (const option of this.coordinates.enabledCoordsTileIds) {
             const normalizedOption = normalizeCoordinatePanelOptionName(option);
             if (!this.isSelectedOption(normalizedOption) && this.displayOptions.some(val => val.name == normalizedOption)) {
                 this.selectedOptions.push({name: normalizedOption});
@@ -229,26 +230,26 @@ export class CoordinatesPanelComponent implements OnDestroy {
     toggleMarker() {
         if (!this.isMarkerEnabled) {
             this.isMarkerEnabled = true;
-            this.stateService.setMarkerState(true);
-            this.stateService.setMarkerPosition(null);
+            this.coordinates.setMarkerState(true);
+            this.coordinates.setMarkerPosition(null);
             this.markerButtonIcon = "location_on";
             this.markerButtonTooltip = "Disable marker placement";
         } else if (!this.markerPosition) {
             this.isMarkerEnabled = false;
-            this.stateService.setMarkerState(false);
+            this.coordinates.setMarkerState(false);
             this.markerButtonIcon = "location_off";
             this.markerButtonTooltip = "Enable marker placement";
         } else if (this.markerPosition) {
             this.isMarkerEnabled = true;
-            this.stateService.setMarkerState(true);
-            this.stateService.setMarkerPosition(null);
+            this.coordinates.setMarkerState(true);
+            this.coordinates.setMarkerPosition(null);
             this.markerButtonIcon = "location_on";
             this.markerButtonTooltip = "Disable marker placement";
         } else {
             this.isMarkerEnabled = true;
             this.markerPosition = null;
-            this.stateService.setMarkerState(true);
-            this.stateService.setMarkerPosition(null);
+            this.coordinates.setMarkerState(true);
+            this.coordinates.setMarkerPosition(null);
             this.markerButtonIcon = "wrong_location";
             this.markerButtonTooltip = "Reset marker";
         }
@@ -266,7 +267,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
 
     /** Persists the currently selected coordinate and tile-id entries. */
     updateSelectedOptions() {
-        this.stateService.enabledCoordsTileIds = this.selectedOptions.reduce(
+        this.coordinates.enabledCoordsTileIds = this.selectedOptions.reduce(
             (array: Array<string>, option) => {
             array.push(option.name);
             return array;
@@ -283,7 +284,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
 
     /** Centers the focused map view on the current marker position. */
     focusOnMarker(markerPosition:  {x: number, y: number}) {
-        const focusedViewIndex = this.stateService.focusedView;
+        const focusedViewIndex = this.viewSettings.focusedView;
         this.mapService.moveToWgs84PositionTopic.next({
             targetView: focusedViewIndex,
             x: markerPosition.x,

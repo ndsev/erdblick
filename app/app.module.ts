@@ -1,3 +1,12 @@
+import {ConnectionPreferencesService} from "./mapdata/connection-preferences.service";
+import {RenderPreferencesService} from "./mapview/render-preferences.service";
+import {InspectionStateService} from "./inspection/inspection-state.service";
+import {MapLayerStateService} from "./mapdata/map-layer-state.service";
+import {MapViewStateService} from "./mapview/map-view-state.service";
+import {AppLayoutService} from "./shared/app-layout.service";
+import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
+import {AppUrlStateService} from "./shared/app-url-state.service";
+import {LocationSearchService} from "./search/location.search.service";
 import {inject, NgModule, provideAppInitializer} from '@angular/core';
 import {BrowserModule} from '@angular/platform-browser';
 import {AppRoutingModule} from './app.routing.module';
@@ -184,7 +193,18 @@ export const initializeServices = () => {
     const presentationBridge = inject(PresentationStateBridgeService);
     const viewerActions = inject(ViewerActionService);
     const webMcp = inject(WebMcpService);
-    inject(FeatureSearchService);
+    const featureSearch = inject(FeatureSearchService);
+    const diagnostics = inject(DiagnosticsFacadeService);
+    inject(LocationSearchService);
+    inject(AppUrlStateService);
+    // Resolve every durable-state owner before config/storage/URL hydration begins.
+    inject(AppLayoutService);
+    inject(MapViewStateService);
+    inject(MapLayerStateService);
+    inject(InspectionStateService);
+    inject(RenderPreferencesService);
+    inject(ConnectionPreferencesService);
+    stateService.sealRegistration();
 
     return (async () => {
         updateGlobalSpinner('Loading app config');
@@ -207,6 +227,8 @@ export const initializeServices = () => {
         updateGlobalSpinner('Initializing map data');
         await tileStream.initialize();
         inspectionSelection.initialize();
+        featureSearch.initialize();
+        diagnostics.initialize();
         presentationBridge.initialize();
         viewerActions.initialize();
         webMcp.initialize();

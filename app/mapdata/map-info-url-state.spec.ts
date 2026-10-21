@@ -1,3 +1,5 @@
+import {testPersistence} from '../../test/state-owners';
+import {stateOwners} from '../../test/state-owners';
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {BehaviorSubject, Subject} from "rxjs";
@@ -58,7 +60,7 @@ describe("MapInfoService external-state reconciliation", () => {
             stateService,
             styleService,
             mapPresetService,
-            {} as InfoMessageService
+            {} as InfoMessageService, stateOwners(stateService).layerState, stateOwners(stateService).viewSettings
         );
         const mapInfo: MapInfoItem = {
             extraJsonAttachment: {},
@@ -86,7 +88,7 @@ describe("MapInfoService external-state reconciliation", () => {
             stateService,
             styleService,
             mapPresetService,
-            false
+            false, stateOwners(stateService).viewSettings, stateOwners(stateService).layerState
         );
         service.maps$.getValue().destroy();
         service.maps$.next(tree);
@@ -102,7 +104,7 @@ describe("MapInfoService external-state reconciliation", () => {
         optionValue = true;
         stateApplied.next();
 
-        expect(stateService.numViewsState.getValue()).toBe(1);
+        expect(stateOwners(stateService).viewSettings.numViewsState.getValue()).toBe(1);
         expect(layer.viewConfig[0]).toEqual({autoLevel: false, level: 9, visible: false});
         expect(option.value).toEqual([true]);
         expect(reasons).toEqual(["external-state"]);

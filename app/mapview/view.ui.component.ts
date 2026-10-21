@@ -1,22 +1,23 @@
 import {
-    AfterViewInit,
-    Component,
-    computed,
-    ElementRef,
-    input,
-    InputSignal,
-    NgZone,
-    OnDestroy,
-    Signal,
-    ViewChild
+AfterViewInit,
+Component,
+computed,
+ElementRef,
+input,
+InputSignal,
+NgZone,
+OnDestroy,
+Signal,
+ViewChild
 } from "@angular/core";
-import {KeyboardService} from "../shared/keyboard.service";
-import {AppModeService} from "../shared/app-mode.service";
-import {IRenderView} from "./render-view.model";
-import {AppStateService} from "../shared/appstate.service";
-import {toObservable, toSignal} from "@angular/core/rxjs-interop";
-import {Observable, Subscription} from "rxjs";
-import {filter} from "rxjs/operators";
+import { toObservable,toSignal } from "@angular/core/rxjs-interop";
+import { Observable,Subscription } from "rxjs";
+import { filter } from "rxjs/operators";
+import { AppModeService } from "../shared/app-mode.service";
+import { AppStateService } from "../shared/appstate.service";
+import { KeyboardService } from "../shared/keyboard.service";
+import { MapViewStateService } from "./map-view-state.service";
+import { IRenderView } from "./render-view.model";
 
 @Component({
     selector: 'erdblick-view-ui',
@@ -97,8 +98,9 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
     constructor(public appModeService: AppModeService,
                 public stateService: AppStateService,
                 private keyboardService: KeyboardService,
-                private ngZone: NgZone) {
-        this.numViews = toSignal(this.stateService.numViewsState, {initialValue: this.stateService.numViewsState.getValue()});
+                private ngZone: NgZone,
+        public readonly viewSettings: MapViewStateService) {
+        this.numViews = toSignal(this.viewSettings.numViewsState, {initialValue: this.viewSettings.numViewsState.getValue()});
         this.mapView$ = toObservable(this.mapView);
     }
 
@@ -161,9 +163,9 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         if (!mapView) {
             return;
         }
-        this.stateService.focusedView = mapView.viewIndex;
-        const currentMode = this.stateService.mode2dState.getValue(mapView.viewIndex);
-        this.stateService.setProjectionMode(mapView.viewIndex, !currentMode);
+        this.viewSettings.focusedView = mapView.viewIndex;
+        const currentMode = this.viewSettings.mode2dState.getValue(mapView.viewIndex);
+        this.viewSettings.setProjectionMode(mapView.viewIndex, !currentMode);
     }
 
     /** Builds a stable test id for view UI controls. */

@@ -262,7 +262,7 @@ describe('MapViewState', () => {
             name: 'views',
             defaultValue: 0,
             schema: z.number(),
-        });
+        }, () => ["a", "b", "c"]);
 
         viewState.next(2, 10);
 
@@ -291,7 +291,7 @@ describe('StyleState', () => {
         const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane', 'Bavaria/Island6/Lane'];
         createLayerAndViewStates(pool, layers, 2);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
 
         const key = (layer: string, style: string, opt: string) => {
             // Split mapId/layerId for the helper
@@ -307,7 +307,7 @@ describe('StyleState', () => {
         store.set(key('Bavaria/Island2/Lane', 'NY0X', 'showLaneGroups'), [true, false]);
         store.set(key('Bavaria/Island6/Lane', 'NY0X', 'showLaneGroups'), [true, false]);
 
-        styles.next(store);
+        styles.replacePositional(store);
 
         const encoded = styles.serialize(true)!;
         expect(Object.keys(encoded)).toEqual(['NY0X~0-1~showLanes~showLaneGroups']);
@@ -318,14 +318,14 @@ describe('StyleState', () => {
         const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane', 'Bavaria/Island6/Lane'];
         createLayerAndViewStates(pool, layers, 2);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
 
         styles.resetToDefault();
         styles.deserialize({
             'NY0X~0-1~showLanes~showLaneGroups': '1,0:1,0~1,1:0,0',
         });
 
-        const v = styles.getValue();
+        const v = styles.positionalValues();
         const k = (layer: string, style: string, opt: string) => {
             const [mapId, ...rest] = layer.split('/');
             return styles.styleOptionKey(mapId, rest.join('/'), style, opt);
@@ -340,12 +340,12 @@ describe('StyleState', () => {
         const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane'];
         createLayerAndViewStates(pool, layers, 2);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
         const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
         try {
             const k = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'showLanes');
-            styles.next(new Map([[k, [true]]]));
+            styles.replacePositional(new Map([[k, [true]]]));
 
             const encoded = styles.serialize(true)!;
             // Underfilled values are skipped; no params produced for this style/option
@@ -359,10 +359,10 @@ describe('StyleState', () => {
         const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane'];
         createLayerAndViewStates(pool, layers, 2);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
 
         const k = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'opt');
-        styles.next(new Map([[k, [true, false, true]]]))
+        styles.replacePositional(new Map([[k, [true, false, true]]]))
 
         const encoded = styles.serialize(true)!;
         expect(encoded['NY0X~0~opt']).toBe('1:0'); // only first two views kept
@@ -371,7 +371,7 @@ describe('StyleState', () => {
     it('coerceOptionValue converts by declared type', () => {
         const pool = new Map<string, AppState<unknown>>();
         createLayerAndViewStates(pool, [], 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
 
         expect(styles.coerceOptionValue('1', 'bool')).toBe(true);
         expect(styles.coerceOptionValue('true', 'boolean')).toBe(true);
@@ -385,33 +385,33 @@ describe('StyleState', () => {
     it('styleOptionKey composes the compound key correctly', () => {
         const pool = new Map<string, AppState<unknown>>();
         createLayerAndViewStates(pool, [], 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
         expect(styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'opt')).toBe('Bavaria/Island2/Lane/NY0X/opt');
     });
 
     it('isUrlState always returns true', () => {
         const pool = new Map<string, AppState<unknown>>();
         createLayerAndViewStates(pool, [], 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
         expect(styles.isUrlState()).toBe(true);
     });
 
     it('serialize returns empty object when no styles set', () => {
         const pool = new Map<string, AppState<unknown>>();
         createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
         expect(styles.serialize(true)).toEqual({});
     });
 
     it('exports and applies snapshot values with a stable object shape', () => {
         const pool = new Map<string, AppState<unknown>>();
         createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
         const key = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'showLanes');
         styles.applySnapshotValue({
             [key]: [true]
         });
-        expect(styles.getValue().get(key)).toEqual([true]);
+        expect(styles.positionalValues().get(key)).toEqual([true]);
         expect(styles.toSnapshotValue()).toEqual({
             [key]: [true]
         });
@@ -420,11 +420,11 @@ describe('StyleState', () => {
     it('serialize excludes layers not present in layerNames', () => {
         const pool = new Map<string, AppState<unknown>>();
         createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
 
         const kPresent = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'opt');
         const kMissing = styles.styleOptionKey('Unknown', 'Layer', 'NY0X', 'opt');
-        styles.next(new Map([
+        styles.replacePositional(new Map([
             [kPresent, [true]],
             [kMissing, [false]],
         ]));
@@ -437,25 +437,25 @@ describe('StyleState', () => {
     it('serialize skips a style entirely if no layers match', () => {
         const pool = new Map<string, AppState<unknown>>();
         createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
         const kMissing = styles.styleOptionKey('Unknown', 'Layer', 'NY0X', 'opt');
-        styles.next(new Map([[kMissing, [true]]]));
+        styles.replacePositional(new Map([[kMissing, [true]]]));
         expect(styles.serialize(true)).toEqual({});
     });
 
     it('deserialize ignores keys that do not match the style option pattern', () => {
         const pool = new Map<string, AppState<unknown>>();
         createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
         styles.resetToDefault();
         styles.deserialize({ notAStyleKey: '1,0' });
-        expect(styles.getValue().size).toBe(0);
+        expect(styles.positionalValues().size).toBe(0);
     });
 
     it('deserialize skips malformed compact style option values without throwing', () => {
         const pool = new Map<string, AppState<unknown>>();
         createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
         const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
         try {
@@ -468,20 +468,20 @@ describe('StyleState', () => {
         }
 
         const key = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'valid');
-        expect(styles.getValue().get(key)).toEqual(['1']);
+        expect(styles.positionalValues().get(key)).toEqual(['1']);
     });
 
     it('deserialize uses only in-range layer indices', () => {
         const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane', 'Bavaria/Island6/Lane'];
         createLayerAndViewStates(pool, layers, 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
         styles.resetToDefault();
 
         // Indices 0 and 1 exist; 99 must be ignored
         styles.deserialize({ 'NY0X~0-99-1~opt': 'A,B,C' });
 
-        const v = styles.getValue();
+        const v = styles.positionalValues();
         const k = (layer: string, style: string, opt: string) => {
             const [mapId, ...rest] = layer.split('/');
             return styles.styleOptionKey(mapId, rest.join('/'), style, opt);
@@ -493,18 +493,18 @@ describe('StyleState', () => {
     it('deserialize accepts raw JSON storage string', () => {
         const pool = new Map<string, AppState<unknown>>();
         createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
         styles.resetToDefault();
         styles.deserialize('{"NY0X~0~opt":"1"}');
         const k = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'opt');
-        expect(styles.getValue().get(k)).toEqual(['1']);
+        expect(styles.positionalValues().get(k)).toEqual(['1']);
     });
 
     it('deserialize accepts show-option shorthand with broadcast and run-length payloads', () => {
         const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane', 'Bavaria/Island6/Lane'];
         createLayerAndViewStates(pool, layers, 2);
-        const styles = new StyleState(pool);
+        const styles = new StyleState(pool, () => Array.from({length: Number(pool.get("numberOfViews")?.value ?? 1)}, (_, index) => String(index)));
         styles.resetToDefault();
 
         styles.deserialize({
@@ -515,7 +515,7 @@ describe('StyleState', () => {
             const [mapId, ...rest] = layer.split('/');
             return styles.styleOptionKey(mapId, rest.join('/'), 'NY0X', 'showLanes');
         };
-        expect(styles.getValue().get(k(layers[0]))).toEqual(['1', '1']);
-        expect(styles.getValue().get(k(layers[1]))).toEqual(['1', '1']);
+        expect(styles.positionalValues().get(k(layers[0]))).toEqual(['1', '1']);
+        expect(styles.positionalValues().get(k(layers[1]))).toEqual(['1', '1']);
     });
 });

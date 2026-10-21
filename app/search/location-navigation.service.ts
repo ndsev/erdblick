@@ -1,12 +1,13 @@
-import {Injectable, OnDestroy} from "@angular/core";
-import {merge, skip, Subscription} from "rxjs";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
-import {AppStateService} from "../shared/appstate.service";
-import {deepEquals} from "../shared/app-state";
-import {InfoMessageService} from "../shared/info.service";
-import {JumpTargetService} from "./jump.service";
-import {LocationSearchService, type ResolvedLocationNavigation} from "./location.search.service";
+import { Injectable,OnDestroy } from "@angular/core";
+import { merge,skip,Subscription } from "rxjs";
+import { MapViewStateService } from "../mapview/map-view-state.service";
+import { MapViewService } from "../mapview/map-view.service";
+import { ViewLayerDiagnosticsService } from "../mapview/view-layer-diagnostics.service";
+import { deepEquals } from "../shared/app-state";
+import { AppStateService } from "../shared/appstate.service";
+import { InfoMessageService } from "../shared/info.service";
+import { JumpTargetService } from "./jump.service";
+import { LocationSearchService,type ResolvedLocationNavigation } from "./location.search.service";
 
 /** Owns one selected location lookup until its single camera commit; later user actions win. */
 @Injectable({providedIn: "root"})
@@ -17,11 +18,12 @@ export class LocationNavigationService implements OnDestroy {
     /** Connects resolution and renderer feedback without persisting transient navigation state. */
     constructor(
         private readonly locations: LocationSearchService,
-        private readonly views: MapViewStateService,
+        private readonly views: MapViewService,
         private readonly state: AppStateService,
         private readonly diagnostics: ViewLayerDiagnosticsService,
         private readonly jumps: JumpTargetService,
-        private readonly messages: InfoMessageService
+        private readonly messages: InfoMessageService,
+        public readonly viewSettings: MapViewStateService
     ) {
         this.boundaryFeedback = views.locationBoundaryUnavailableTopic.subscribe(() =>
             messages.showInfo("The location boundary could not be displayed. Showing its bounding extent."));
@@ -42,8 +44,9 @@ export class LocationNavigationService implements OnDestroy {
     /** Resolves fresh selections and saved identities through exactly the same path. */
     navigate(actionId: string, payload?: unknown): void {
         this.cancel();
-        const targetView = this.state.focusedView;
-        const renderer = this.views.renderViewFor(targetView);
+        const targetView = this.viewSettings.focusedView;
+        const target = this.views.captureView(targetView);
+        const renderer = target ? this.views.resolveCapturedView(target) : undefined;
         if (!renderer) {
             this.messages.showError("The destination map is unavailable.");
             return;
@@ -57,15 +60,15 @@ export class LocationNavigationService implements OnDestroy {
         const pose = renderer.getLiveCameraState();
         const cancel = () => this.cancel();
         const stillCurrent = () => !pending.closed && this.views.viewLayoutRevision === layoutRevision
-            && this.views.renderViewFor(targetView) === renderer && this.state.focusedView === targetView
+            && !!target && this.views.resolveCapturedView(target) === renderer && this.viewSettings.focusedView === targetView
             && !renderer.isCameraInteractionActive() && deepEquals(renderer.getLiveCameraState(), pose);
         pending.add(renderer.rendererInvalidated.subscribe(cancel));
-        pending.add(this.state.focusedViewState.pipe(skip(1)).subscribe(cancel));
-        pending.add(this.state.numViewsState.pipe(skip(1)).subscribe(cancel));
-        pending.add(this.state.viewSyncState.pipe(skip(1)).subscribe(cancel));
+        pending.add(this.viewSettings.focusedViewChanges.pipe(skip(1)).subscribe(cancel));
+        pending.add(this.viewSettings.viewIdsState.pipe(skip(1)).subscribe(cancel));
+        pending.add(this.viewSettings.viewSyncState.pipe(skip(1)).subscribe(cancel));
         pending.add(this.state.stateApplied.subscribe(cancel));
         pending.add(this.diagnostics.cameraInteracting$.subscribe(active => { if (active) cancel(); }));
-        pending.add(this.state.cameraViewDataState.appState.subscribe(() => { if (!stillCurrent()) cancel(); }));
+        pending.add(this.viewSettings.cameraViewDataState.appState.subscribe(() => { if (!stillCurrent()) cancel(); }));
         pending.add(merge(this.views.navigationStarted, this.views.moveToWgs84PositionTopic, this.views.moveToRectangleTopic,
             this.views.moveToLocationAreaTopic, this.views.presentationCameraViewStateTopic).subscribe(cancel));
         if (pending.closed) return;
@@ -101,7 +104,7 @@ export class LocationNavigationService implements OnDestroy {
         else if (result.point) {
             const [x, y] = result.point;
             this.views.moveToWgs84PositionTopic.next({targetView, x, y,
-                z: this.state.cameraViewDataState.getValue(targetView).destination.alt});
+                z: this.viewSettings.cameraViewDataState.getValue(targetView).destination.alt});
             if (result.label) this.views.showLocationLabelTopic.next({targetView, x, y, label: result.label});
             this.jumps.markedPosition.next([y, x, 0]);
         }

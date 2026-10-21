@@ -1,3 +1,5 @@
+import {testPersistence} from '../../test/state-owners';
+import {stateOwners} from '../../test/state-owners';
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {BehaviorSubject} from "rxjs";
@@ -78,7 +80,7 @@ function createHarness(
         {} as never,
         {registerShortcut: vi.fn()} as never,
         infoMessageService,
-        {run: (callback: () => unknown) => callback()} as never
+        {run: (callback: () => unknown) => callback()} as never, stateOwners(stateService).inspectionState, stateOwners(stateService).viewSettings
     );
     return {
         service,
@@ -178,7 +180,7 @@ describe("InspectionSelectionService multi-inspection", () => {
         const result = service.inspectFeatureIds([feature("new", "map/tile")]);
 
         expect(result).toEqual({foundFeatureCount: 1, inspectedFeatureCount: 0});
-        expect(stateService.setSelection).not.toHaveBeenCalled();
+        expect(stateOwners(stateService).inspectionState.setSelection).not.toHaveBeenCalled();
         expect(infoMessageService.showWarning).toHaveBeenCalledWith(
             "Inspecting 0 features out of 1 found features. " +
             "Decrease the selection or increase your max inspections limit to see more."
@@ -216,7 +218,7 @@ describe("InspectionSelectionService multi-inspection", () => {
 
         expect(result).toEqual({foundFeatureCount: 2, inspectedFeatureCount: 2});
         expect(panels().map(panel => panel.locked)).toEqual([true, true]);
-        expect(stateService.setInspectionPanelLockedState).toHaveBeenCalledTimes(2);
+        expect(stateOwners(stateService).inspectionState.setInspectionPanelLockedState).toHaveBeenCalledTimes(2);
     });
 
     it("retains a validity hover without loading its selected host feature", () => {

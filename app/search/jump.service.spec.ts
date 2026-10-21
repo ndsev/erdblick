@@ -63,7 +63,7 @@ const createService = (config: any = {}) => {
         menuService as any,
         stateService as any,
         searchService as any,
-        configService as any,
+        configService as any, stateService as any as never, stateService as any as never, Object.assign(stateService as any, {viewIdAt: (index: number) => String(index)}) as never, stateService as any as never
     );
 
     return {service, mapService, inspectionSelection, infoService, menuService, stateService, searchService, configService};

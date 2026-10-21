@@ -1,3 +1,4 @@
+import {testPersistence, stateOwners} from '../../test/state-owners';
 import "@angular/compiler";
 import {firstValueFrom, NEVER, of, throwError} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
@@ -33,7 +34,7 @@ const createService = (providers: LocationSearchProviderConfig[] = [
         }
     };
     return {
-        service: new LocationSearchService(httpClient as any, configService as any),
+        service: new LocationSearchService(httpClient as any, configService as any, testPersistence()),
         httpClient
     };
 };

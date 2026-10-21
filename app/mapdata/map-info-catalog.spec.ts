@@ -36,7 +36,19 @@ function fixture() {
         } as unknown as AppStateService,
         {styles: new Map(), styleGroups: new BehaviorSubject([])} as unknown as StyleService,
         {presets: [], presets$: new BehaviorSubject([]), presetsForLayer: () => []} as unknown as MapPresetService,
-        {clearBackendConnectionError: vi.fn(), showBackendConnectionError: vi.fn()} as unknown as InfoMessageService
+        {clearBackendConnectionError: vi.fn(), showBackendConnectionError: vi.fn()} as unknown as InfoMessageService, {
+            ready: new BehaviorSubject(true), numViews: 1, numViewsState: new BehaviorSubject(1),
+            stateApplied: new Subject<void>(),
+            mapLayerConfig: () => [{visible: true, level: 13, autoLevel: false}],
+            getMapPresetSelection: () => null, getLayerSyncOption: () => false,
+            prune: vi.fn()
+        } as unknown as AppStateService as never, Object.assign({
+            ready: new BehaviorSubject(true), numViews: 1, numViewsState: new BehaviorSubject(1),
+            stateApplied: new Subject<void>(),
+            mapLayerConfig: () => [{visible: true, level: 13, autoLevel: false}],
+            getMapPresetSelection: () => null, getLayerSyncOption: () => false,
+            prune: vi.fn()
+        } as unknown as AppStateService, {viewIdAt: (index: number) => String(index)}) as never
     );
     const resets = vi.fn();
     service.dataSourceInfoChanged.subscribe(resets);

@@ -1,3 +1,4 @@
+import {testPersistence, stateOwners} from '../../test/state-owners';
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {HttpResponse} from "@angular/common/http";
@@ -17,7 +18,7 @@ class HttpClientStub {
 
 const createService = () => {
     const httpClient = new HttpClientStub();
-    const service = new AppConfigService(httpClient as any);
+    const service = new AppConfigService(httpClient as any, testPersistence());
     return {service, httpClient};
 };
 

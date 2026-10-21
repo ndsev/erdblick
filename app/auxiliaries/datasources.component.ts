@@ -1,13 +1,14 @@
-import {Component, HostListener, ViewChild} from '@angular/core';
-import {HttpClient} from '@angular/common/http';
-import {Subscription} from 'rxjs';
-import {JSONSchema7} from 'json-schema';
-import {InfoMessageService} from '../shared/info.service';
-import {AppStateService, DATASOURCES_EDITOR_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
-import {EditorService} from '../shared/editor.service';
-import {MapInfoService} from '../mapdata/map-info.service';
-import {DialogStackService} from '../shared/dialog-stack.service';
-import {AppDialogComponent} from '../shared/app-dialog.component';
+import { HttpClient } from '@angular/common/http';
+import { Component,HostListener,ViewChild } from '@angular/core';
+import { JSONSchema7 } from 'json-schema';
+import { Subscription } from 'rxjs';
+import { MapInfoService } from '../mapdata/map-info.service';
+import { AppDialogComponent } from '../shared/app-dialog.component';
+import { AppLayoutService } from "../shared/app-layout.service";
+import { AppStateService,DATASOURCES_EDITOR_DIALOG_LAYOUT_ID } from '../shared/appstate.service';
+import { DialogStackService } from '../shared/dialog-stack.service';
+import { EditorService } from '../shared/editor.service';
+import { InfoMessageService } from '../shared/info.service';
 
 @Component({
     selector: 'datasources',
@@ -108,14 +109,15 @@ export class DatasourcesComponent {
                 public readonly editorService: EditorService,
                 private readonly http: HttpClient,
                 private readonly mapInfo: MapInfoService,
-                private readonly dialogStack: DialogStackService) {}
+                private readonly dialogStack: DialogStackService,
+        public readonly layout: AppLayoutService) {}
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.dialogLayoutId);
+        return this.layout.isDialogOpen(this.dialogLayoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+        this.layout.setDialogOpen(this.dialogLayoutId, visible);
     }
 
     /** Initializes the editor session whenever the datasource dialog becomes visible. */

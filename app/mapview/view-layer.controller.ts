@@ -1,69 +1,66 @@
-import {Subject, Subscription} from "rxjs";
-import type {FilterTileState} from "../mapdata/filter-tile-state.model";
-import type {MapInfoService} from "../mapdata/map-info.service";
-import type {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import { NgZone } from "@angular/core";
+import { Subject,Subscription } from "rxjs";
+import type {
+InspectionSelectionService
+} from "../inspection/inspection-selection.service";
+import { coreLib } from "../integrations/wasm";
+import type { FilterTileState } from "../mapdata/filter-tile-state.model";
+import type { HoverDetailService } from "../mapdata/hover-detail.service";
+import type { MapInfoService } from "../mapdata/map-info.service";
+import type { MapTileStreamService } from "../mapdata/map-tile-stream.service";
+import type { MapgetLayer } from "../mapdata/mapget-layer.model";
 import {
-    StyledMapgetLayer,
-    type StyleFilterPlan,
-    type StyledMapgetLayerEvent
+parseMapPartitionKey,
+partitionKey,
+tilePartition,
+type PartitionId
+} from "../mapdata/partition.model";
+import {
+StyledMapgetLayer,
+type StyleFilterPlan,
+type StyledMapgetLayerEvent
 } from "../mapdata/styled-mapget-layer.model";
-import type {MapgetLayer} from "../mapdata/mapget-layer.model";
-import type {StyleService, ErdblickStyle} from "../styledata/style.service";
-import {coreLib} from "../integrations/wasm";
-import type {IRenderSceneHandle} from "./render-view.model";
+import type { FeatureSearchService } from "../search/feature.search.service";
+import type {
+InspectionPanelModel,
+TileFeatureId
+} from "../shared/appstate.service";
+import { MAX_STYLE_LOD } from "../shared/lod-policy";
 import {
-    MapViewStateService,
-    ViewRecalculationReason
-} from "./map-view-state.service";
+tileFeatureInteractionTargetsEqual
+} from "../shared/tile-feature-id";
+import { sipHash64Hex } from "../styledata/hash";
+import type {
+StyleValidationReportService
+} from "../styledata/style-validation-report.service";
+import type { ErdblickStyle,StyleService } from "../styledata/style.service";
 import {
-    TileSubsetLayerRenderService
+resolveDeckInteractionEffect,
+type DeckInteractionEffect
+} from "./deck/deck-interaction-effect";
+import type { GpuSceneSnapshot } from "./deck/gpu-scene";
+import { tileCoordinateOrigin } from "./deck/tile-coordinate-origin";
+import { INTERACTION_STYLE_ORDER_BASE } from "./deck/tile-subset-interaction.model";
+import {
+TileSubsetLayerRenderService
 } from "./deck/tile-subset-layer-render.service";
 import {
-    TileSubsetLayerVisualization,
-    type TileSubsetInteractionOverlay
+TileSubsetLayerVisualization,
+type TileSubsetInteractionOverlay
 } from "./deck/tile-subset-layer.visualization";
 import {
-    resolveDeckInteractionEffect,
-    type DeckInteractionEffect
-} from
-    "./deck/deck-interaction-effect";
-import {tileCoordinateOrigin} from "./deck/tile-coordinate-origin";
-import type {FeatureSearchService} from "../search/feature.search.service";
-import type {
-    InspectionSelectionService
-} from "../inspection/inspection-selection.service";
-import type {
-    InspectionPanelModel,
-    TileFeatureId
-} from "../shared/appstate.service";
-import {sipHash64Hex} from "../styledata/hash";
-import {
-    tileFeatureInteractionTargetsEqual
-} from "../shared/tile-feature-id";
-import {
-    hasAuthoredInteractionHighlight,
-    interactionTargetKey,
-    planRemoteInteractionHighlights
+hasAuthoredInteractionHighlight,
+interactionTargetKey,
+planRemoteInteractionHighlights
 } from "./interaction-highlight-plan";
-import type {
-    ViewLayerDiagnosticsService
-} from "./view-layer-diagnostics.service";
-import type {
-    StyleValidationReportService
-} from "../styledata/style-validation-report.service";
-import type {HoverDetailService} from "../mapdata/hover-detail.service";
-import {NgZone} from "@angular/core";
-import type {GpuSceneSnapshot} from "./deck/gpu-scene";
-import {INTERACTION_STYLE_ORDER_BASE} from
-    "./deck/tile-subset-interaction.model";
-import {MAX_STYLE_LOD} from "../shared/lod-policy";
 import {
-    parseMapPartitionKey,
-    parsePartition,
-    partitionKey,
-    tilePartition,
-    type PartitionId
-} from "../mapdata/partition.model";
+MapViewService,
+ViewRecalculationReason
+} from "./map-view.service";
+import type { IRenderSceneHandle } from "./render-view.model";
+import type {
+ViewLayerDiagnosticsService
+} from "./view-layer-diagnostics.service";
 
 export type ViewTileOccupancy = "unknown" | "empty" | "non-empty" | "error";
 
@@ -147,7 +144,7 @@ export class ViewLayerController {
     constructor(
         readonly viewIndex: number,
         private readonly mapInfo: MapInfoService,
-        private readonly viewState: MapViewStateService,
+        private readonly viewState: MapViewService,
         private readonly tileStream: MapTileStreamService,
         private readonly styleService: StyleService,
         private readonly renderService: TileSubsetLayerRenderService,

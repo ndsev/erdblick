@@ -1,11 +1,13 @@
-import {Component, OnDestroy, QueryList, signal, ViewChild, ViewChildren} from "@angular/core";
-import {AppStateService} from "../shared/appstate.service";
-import {combineLatest, map, Subscription} from "rxjs";
-import {MapViewComponent} from "./view.component";
-import {KeyboardService} from "../shared/keyboard.service";
-import {environment} from "../environments/environment";
-import {Splitter} from "primeng/splitter";
-import {ViewerUiService} from "../actions/viewer-ui.service";
+import { Component,OnDestroy,QueryList,signal,ViewChild,ViewChildren } from "@angular/core";
+import { Splitter } from "primeng/splitter";
+import { Subscription } from "rxjs";
+import { ViewerUiService } from "../actions/viewer-ui.service";
+import { environment } from "../environments/environment";
+import { AppLayoutService } from "../shared/app-layout.service";
+import { AppStateService } from "../shared/appstate.service";
+import { KeyboardService } from "../shared/keyboard.service";
+import { MapViewStateService } from "./map-view-state.service";
+import { MapViewComponent } from "./view.component";
 
 @Component({
     selector: 'mapview-container',
@@ -46,38 +48,39 @@ export class MapViewContainerComponent implements OnDestroy {
         this.resizing = false;
         if (!splitter) return;
         this.unregisterResizeTarget = this.viewerUi.registerResizeTarget(splitter.el.nativeElement, {
-            describe: () => ({kind: "split", dimensions: this.stateService.numViews === 2 ? ["panelSizes"] : [], busy: this.resizing,
-                ...(this.stateService.numViews === 2 ? {panelSizes: [...splitter.panelSizes]} : {})}),
+            describe: () => ({kind: "split", dimensions: this.viewSettings.numViews === 2 ? ["panelSizes"] : [], busy: this.resizing,
+                ...(this.viewSettings.numViews === 2 ? {panelSizes: [...splitter.panelSizes]} : {})}),
             resize: size => {
                 if (!("panelSizes" in size)) return;
                 const left = Math.min(95, Math.max(5, size.panelSizes[0]));
                 const sizes = [left, 100 - left];
                 // PrimeNG's public setter updates flex-basis in place, retaining both Deck renderers.
                 splitter.panelSizes = [...sizes];
-                this.stateService.viewPanelSizesState.next(sizes);
+                this.layout.viewPanelSizesState.next(sizes);
             }
         });
     }
 
-    version = signal(0);
+    version = signal("");
 
-    viewModel$ = combineLatest([this.stateService.numViewsState, this.stateService.viewPanelSizesState]).pipe(
-        map(([n, storedSizes]) => n > 0
-            ? {
-                panelCount: n,
-                viewIndices: Array.from({ length: n }, (_, i) => i),
-                panelSizes: n === 2 && storedSizes.length === 2 && storedSizes[0] + storedSizes[1] > 0
-                    ? this.normalizePanelSizes(storedSizes)
-                    : Array.from({ length: n }, () => 100 / n)
-            }
-            : { panelCount: 0, viewIndices: [], panelSizes: [] }
-        )
-    );
+    viewModel$ = this.stateService.observe(() => {
+        const ids = this.viewSettings.viewIds;
+        const n = ids.length;
+        const storedSizes = this.layout.viewPanelSizesState.value;
+        return {
+            identity: ids.join(","), panelCount: n,
+            viewIndices: ids.map((_, index) => index),
+            panelSizes: n === 2 && storedSizes.length === 2 && storedSizes[0] + storedSizes[1] > 0
+                ? this.normalizePanelSizes(storedSizes) : ids.map(() => 100 / n)
+        };
+    });
 
     /** Keeps the container model in sync with app state and registers global focused-view shortcuts. */
-    constructor(private stateService: AppStateService, private keyboardService: KeyboardService, private viewerUi: ViewerUiService) {
+    constructor(private stateService: AppStateService, private keyboardService: KeyboardService, private viewerUi: ViewerUiService,
+        public readonly viewSettings: MapViewStateService,
+        public readonly layout: AppLayoutService) {
         this.subscriptions.add(this.viewModel$.subscribe(vm => {
-            this.version.update(_ => vm.panelCount);
+            this.version.set(vm.identity);
         }));
 
         // Register a shortcut to cycle the view focus.
@@ -85,7 +88,7 @@ export class MapViewContainerComponent implements OnDestroy {
         this.keyboardService.registerShortcut("Ctrl+ArrowLeft", this.cycleViewFocus.bind(this, -1), true);
 
         // Ensure that keyboard shortcuts are always registered for the focused view.
-        this.subscriptions.add(this.stateService.focusedViewState.subscribe(_ => {
+        this.subscriptions.add(this.viewSettings.focusedViewChanges.subscribe(_ => {
             this.setupKeyboardShortcutsForFocusedView();
         }));
 
@@ -94,7 +97,7 @@ export class MapViewContainerComponent implements OnDestroy {
     /** Persists a completed human resize, sharing the same local state as explicit size commands. */
     protected onSplitResizeEnd(sizes: Array<string | number>): void {
         this.resizing = false;
-        if (sizes.length === 2) this.stateService.viewPanelSizesState.next(this.normalizePanelSizes(sizes.map(Number)));
+        if (sizes.length === 2) this.layout.viewPanelSizesState.next(this.normalizePanelSizes(sizes.map(Number)));
     }
 
     /** Removes rounding drift while retaining PrimeNG's minimum visible panel sizes. */
@@ -113,8 +116,8 @@ export class MapViewContainerComponent implements OnDestroy {
     /** Cycles focused-view ownership left or right across the currently visible views. */
     cycleViewFocus(direction: number) {
         console.assert(direction === -1 || direction === 1);
-        const nextView = (this.stateService.focusedView + direction) % this.stateService.numViews;
-        this.stateService.focusedView = nextView < 0 ? this.stateService.numViews - 1 : nextView;
+        const nextView = (this.viewSettings.focusedView + direction) % this.viewSettings.numViews;
+        this.viewSettings.focusedView = nextView < 0 ? this.viewSettings.numViews - 1 : nextView;
     }
 
     /**
@@ -131,7 +134,7 @@ export class MapViewContainerComponent implements OnDestroy {
         }
 
         for (const viewComponent of this.mapViewComponents) {
-            if (viewComponent.mapView?.viewIndex !== this.stateService.focusedView) {
+            if (viewComponent.mapView?.viewIndex !== this.viewSettings.focusedView) {
                 continue;
             }
             const mapView = viewComponent.mapView;

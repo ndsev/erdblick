@@ -1,26 +1,27 @@
-import {Component, OnDestroy, ViewChild} from '@angular/core';
-import {Subscription} from 'rxjs';
-import {DiagnosticsFacadeService} from './diagnostics.facade.service';
-import {DialogStackService} from '../shared/dialog-stack.service';
-import {TreeTableNode} from 'primeng/api';
+import { Component,OnDestroy,ViewChild } from '@angular/core';
+import { TreeTableNode } from 'primeng/api';
+import { Subscription } from 'rxjs';
 import {
-    SubsetDiagnosticsTile,
-    ViewLayerDiagnosticsService
+SubsetDiagnosticsTile,
+ViewLayerDiagnosticsService
 } from '../mapview/view-layer-diagnostics.service';
-import {AppStateService, DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
-import {PerformanceDiagnosticsScope, PerfStat} from './diagnostics.model';
-import {buildAggregatedPerfStats} from './diagnostics.perf-aggregation';
+import { AppDialogComponent } from '../shared/app-dialog.component';
+import { AppLayoutService } from "../shared/app-layout.service";
+import { AppStateService,DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from '../shared/appstate.service';
+import { DialogStackService } from '../shared/dialog-stack.service';
 import {
-    CONVERSION_AGE_UNIT,
-    COUNT_KEY_PATTERN,
-    DISPLAY_DECIMALS,
-    LOAD_CONVERT_ROOT_BADGE_PATTERN,
-    RENDER_ROOT_BADGE_PATTERN,
-    ROOT_BADGE_LOAD_DT,
-    ROOT_BADGE_RENDER_DT,
-    UNIT_SUFFIXES
+CONVERSION_AGE_UNIT,
+COUNT_KEY_PATTERN,
+DISPLAY_DECIMALS,
+LOAD_CONVERT_ROOT_BADGE_PATTERN,
+RENDER_ROOT_BADGE_PATTERN,
+ROOT_BADGE_LOAD_DT,
+ROOT_BADGE_RENDER_DT,
+UNIT_SUFFIXES
 } from './diagnostics.constants';
-import {AppDialogComponent} from '../shared/app-dialog.component';
+import { DiagnosticsFacadeService } from './diagnostics.facade.service';
+import { PerformanceDiagnosticsScope,PerfStat } from './diagnostics.model';
+import { buildAggregatedPerfStats } from './diagnostics.perf-aggregation';
 
 interface LayerOption {
     label: string;
@@ -239,7 +240,8 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
                 public readonly stateService: AppStateService,
                 private readonly dialogStack: DialogStackService,
-                private readonly viewDiagnostics: ViewLayerDiagnosticsService) {
+                private readonly viewDiagnostics: ViewLayerDiagnosticsService,
+        public readonly layout: AppLayoutService) {
         this.subscriptions.push(
             this.diagnostics.perfStats$.subscribe(() => {
                 this.refreshAvailableMapLayers();
@@ -257,11 +259,11 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     }
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.layoutId);
+        return this.layout.isDialogOpen(this.layoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.layoutId, visible);
+        this.layout.setDialogOpen(this.layoutId, visible);
     }
 
     /** Releases subscriptions feeding the filter options and tree state. */

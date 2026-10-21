@@ -34,7 +34,7 @@ function serviceHarness(): MapTileStreamService {
         {
             run: (callback: () => unknown) => callback(),
             runOutsideAngular: (callback: () => unknown) => callback()
-        } as any
+        } as any, {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any as never
     );
 }
 
@@ -135,7 +135,11 @@ describe("MapTileStreamService page lifecycle", () => {
             {
                 run: (callback: () => unknown) => callback(),
                 runOutsideAngular: (callback: () => unknown) => callback()
-            } as any
+            } as any, {
+                ...retryStateHarness(),
+                tilePullCompressionEnabled: false,
+                tilePullCompressionEnabledState: new Subject<boolean>()
+            } as any as never
         );
         await service.initialize();
         client = service['tileStream']!;
@@ -273,7 +277,7 @@ describe("MapTileStreamService source catalog refresh", () => {
             {
                 run: (callback: () => unknown) => callback(),
                 runOutsideAngular: (callback: () => unknown) => callback()
-            } as any
+            } as any, {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any as never
         );
         const internals = service as any;
         internals.tileStream = {getSourcesRevision: () => 1};
@@ -324,7 +328,7 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
                 {
                     run: (callback: () => unknown) => callback(),
                     runOutsideAngular: (callback: () => unknown) => callback()
-                } as any
+                } as any, {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any as never
             );
             const internal = service as any;
             const ref = {filterId: "filter", released: false};

@@ -1,22 +1,23 @@
-import {NgClass, NgStyle, NgTemplateOutlet} from '@angular/common';
+import { NgClass,NgStyle,NgTemplateOutlet } from '@angular/common';
 import {
-    AfterViewInit,
-    Component,
-    ContentChild,
-    ElementRef,
-    EventEmitter,
-    HostBinding,
-    Input,
-    OnChanges,
-    OnDestroy,
-    Output,
-    SimpleChanges,
-    TemplateRef,
-    ViewChild
+AfterViewInit,
+Component,
+ContentChild,
+ElementRef,
+EventEmitter,
+HostBinding,
+Input,
+OnChanges,
+OnDestroy,
+Output,
+SimpleChanges,
+TemplateRef,
+ViewChild
 } from '@angular/core';
-import {AccordionModule} from 'primeng/accordion';
-import {AppStateService, DEFAULT_DOCKED_EM_HEIGHT} from './appstate.service';
-import {ViewerUiService} from '../actions/viewer-ui.service';
+import { AccordionModule } from 'primeng/accordion';
+import { ViewerUiService } from '../actions/viewer-ui.service';
+import { AppLayoutService } from "./app-layout.service";
+import { AppStateService,DEFAULT_DOCKED_EM_HEIGHT } from './appstate.service';
 
 export type AppPanelResizeMode = 'none' | 'vertical' | 'fill' | 'auto';
 
@@ -132,7 +133,8 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
     private resizeSession?: AppPanelResizeSession;
     private unregisterResizeTarget?: () => void;
 
-    constructor(private readonly stateService: AppStateService, private readonly viewerUi: ViewerUiService) {}
+    constructor(private readonly stateService: AppStateService, private readonly viewerUi: ViewerUiService,
+        public readonly layout: AppLayoutService) {}
 
     /** Applies persisted panel state and input changes to the accordion value and dock body size. */
     ngOnChanges(changes: SimpleChanges): void {
@@ -254,7 +256,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         }
         this.collapsed = nextCollapsed;
         if (this.persistLayout && this.layoutId) {
-            this.stateService.setPanelLayout(this.layoutId, {panelCollapsed: nextCollapsed});
+            this.layout.setPanelLayout(this.layoutId, {panelCollapsed: nextCollapsed});
         }
         this.collapsedChange.emit(nextCollapsed);
         if (nextCollapsed) {
@@ -272,7 +274,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
     /** Applies stored generic dock-panel layout when available. */
     private syncPanelLayout(): void {
         const layout = this.persistLayout && this.layoutId
-            ? this.stateService.getDialogLayout(this.layoutId)
+            ? this.layout.getDialogLayout(this.layoutId)
             : undefined;
         this.applyCollapsed(layout?.panelCollapsed ?? this.collapsed);
         const nextExpanded = layout?.panelExpanded ?? this.expanded;
@@ -396,7 +398,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
             return;
         }
         const width = this.currentBodyWidthPx();
-        this.stateService.setPanelLayout(this.layoutId, {
+        this.layout.setPanelLayout(this.layoutId, {
             panelSize: {
                 width,
                 height: Math.round(this.panelBodyHeightPx)
@@ -414,7 +416,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         if (Number.isFinite(containerWidth) && containerWidth! > 0) {
             return Math.round(containerWidth!);
         }
-        return Math.round(30 * this.stateService.baseFontSize);
+        return Math.round(30 * this.layout.baseFontSize);
     }
 
     private preferredBodyHeightPx(): number | undefined {
@@ -424,7 +426,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         if (!Number.isFinite(preferred) || preferred! <= 0) {
             return undefined;
         }
-        return preferred! * this.stateService.baseFontSize;
+        return preferred! * this.layout.baseFontSize;
     }
 
     private measuredContentHeightPx(): number | undefined {
@@ -437,7 +439,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
     }
 
     private defaultBodyHeightPx(): number {
-        return this.clampBodyHeightPx(this.defaultBodyHeightEm * this.stateService.baseFontSize);
+        return this.clampBodyHeightPx(this.defaultBodyHeightEm * this.layout.baseFontSize);
     }
 
     private seedBodyHeightPx(expanded = this.expanded): number {
@@ -450,14 +452,14 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
     }
 
     private minBodyHeightPx(): number {
-        return Math.max(1, this.minBodyHeightEm * this.stateService.baseFontSize);
+        return Math.max(1, this.minBodyHeightEm * this.layout.baseFontSize);
     }
 
     private maxBodyHeightPx(): number {
         if (Number.isFinite(this.maxBodyHeightEm) && this.maxBodyHeightEm! > 0) {
-            return Math.max(this.minBodyHeightPx(), this.maxBodyHeightEm! * this.stateService.baseFontSize);
+            return Math.max(this.minBodyHeightPx(), this.maxBodyHeightEm! * this.layout.baseFontSize);
         }
-        const viewportLimit = window.innerHeight - this.stateService.baseFontSize * 6;
+        const viewportLimit = window.innerHeight - this.layout.baseFontSize * 6;
         return Math.max(this.minBodyHeightPx(), viewportLimit);
     }
 

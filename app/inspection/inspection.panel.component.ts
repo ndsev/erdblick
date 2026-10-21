@@ -1,23 +1,24 @@
-import {Component, input, output, ViewChild, effect} from "@angular/core";
-import {Popover} from "primeng/popover";
+import { Component,effect,input,output,ViewChild } from "@angular/core";
+import { Popover } from "primeng/popover";
+import { coreLib } from "../integrations/wasm";
+import { FeatureWrapper } from "../mapdata/feature-inspection.model";
+import { MapInfoService } from "../mapdata/map-info.service";
 import {
-    AppStateService,
-    InspectionComparisonOption,
-    InspectionPanelModel
-} from "../shared/appstate.service";
-import {MapInfoService} from "../mapdata/map-info.service";
-import {InspectionSelectionService} from "./inspection-selection.service";
-import {FeatureWrapper} from "../mapdata/feature-inspection.model";
-import {coreLib} from "../integrations/wasm";
-import {FeaturePanelComponent} from "./feature.panel.component";
-import {SourceDataPanelComponent} from "./sourcedata.panel.component";
-import type {AppSurfaceHeaderAction, AppSurfaceHeaderActionCommandEvent} from "../shared/app-surface-header.component";
-import {displayFeatureId} from "../shared/tile-feature-id";
-import {AppPanelComponent} from "../shared/app-panel.component";
-import {
-    parseMapPartitionKey,
-    partitionKeySuffix
+parseMapPartitionKey,
+partitionKeySuffix
 } from "../mapdata/partition.model";
+import { AppPanelComponent } from "../shared/app-panel.component";
+import type { AppSurfaceHeaderAction,AppSurfaceHeaderActionCommandEvent } from "../shared/app-surface-header.component";
+import {
+AppStateService,
+InspectionComparisonOption,
+InspectionPanelModel
+} from "../shared/appstate.service";
+import { displayFeatureId } from "../shared/tile-feature-id";
+import { FeaturePanelComponent } from "./feature.panel.component";
+import { InspectionSelectionService } from "./inspection-selection.service";
+import { InspectionStateService } from "./inspection-state.service";
+import { SourceDataPanelComponent } from "./sourcedata.panel.component";
 
 /** Select option for switching between source-data layers within one inspected tile. */
 interface SourceLayerMenuItem {
@@ -170,7 +171,8 @@ export class InspectionPanelComponent {
 
     constructor(private mapService: MapInfoService,
                 private inspectionSelection: InspectionSelectionService,
-                public stateService: AppStateService) {
+                public stateService: AppStateService,
+        public readonly inspectionState: InspectionStateService) {
         effect(() => {
             this.title = "";
             this.errorMessage = "";
@@ -210,7 +212,7 @@ export class InspectionPanelComponent {
                                         partitionKeySuffix(partition)
                                     );
                                     sourceData.address = undefined;
-                                    this.stateService.setSelection(sourceData, this.panel().id);
+                                    this.inspectionState.setSelection(sourceData, this.panel().id);
                                 },
                             } as SourceLayerMenuItem;
                         }).sort((a, b) => a.label.localeCompare(b.label));
@@ -252,24 +254,24 @@ export class InspectionPanelComponent {
     protected toggleLockedState(event: MouseEvent) {
         event.stopPropagation();
         const p = this.panel();
-        this.stateService.setInspectionPanelLockedState(p.id, !p.locked);
+        this.inspectionState.setInspectionPanelLockedState(p.id, !p.locked);
     }
 
     /** Marks this docked panel as the active target for inspection shortcuts. */
     protected focusPanel() {
-        this.stateService.setFocusedInspectionPanel(this.panel().id);
+        this.inspectionState.setFocusedInspectionPanel(this.panel().id);
     }
 
     /** Persists the highlight color selected from the shared surface header. */
     protected onPanelColorChange(color: string) {
         const panel = this.panel();
         panel.color = color;
-        this.stateService.setInspectionPanelColor(panel.id, color);
+        this.inspectionState.setInspectionPanelColor(panel.id, color);
     }
 
     /** Removes this docked inspection panel from the selection set. */
     protected unsetPanel() {
-        this.stateService.unsetPanel(this.panel().id);
+        this.inspectionState.unsetPanel(this.panel().id);
     }
 
     /** Moves the panel into a floating dialog. */
@@ -424,7 +426,7 @@ export class InspectionPanelComponent {
 
     /** Refreshes compare candidates and drops ids that are no longer valid. */
     protected refreshCompareOptions() {
-        this.compareOptions = this.stateService.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue(), this.panel().id);
+        this.compareOptions = this.inspectionState.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue(), this.panel().id);
         this.selectedCompareIds = this.selectedCompareIds.filter(id =>
             this.compareOptions.some(option => option.value === id)
         );
@@ -436,7 +438,7 @@ export class InspectionPanelComponent {
         if (!this.selectedCompareIds.length) {
             return;
         }
-        const model = this.stateService.createComparisonModel(
+        const model = this.inspectionState.createComparisonModel(
             this.panel().id,
             this.selectedCompareIds,
             this.inspectionSelection.selectionTopic.getValue()
@@ -444,7 +446,7 @@ export class InspectionPanelComponent {
         if (!model) {
             return;
         }
-        this.stateService.openInspectionComparison(model);
+        this.inspectionState.openInspectionComparison(model);
         this.selectedCompareIds = [];
         this.comparePopover.hide();
     }

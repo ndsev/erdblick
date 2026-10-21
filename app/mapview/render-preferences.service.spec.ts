@@ -1,3 +1,4 @@
+import {stateOwners} from '../../test/state-owners';
 import '@angular/compiler';
 import {describe, expect, it, vi} from 'vitest';
 import {Subject} from 'rxjs';
@@ -11,7 +12,7 @@ function createPreferences() {
     const router = {events: new Subject(), navigate: vi.fn(),
         routerState: {snapshot: {root: {queryParams: {}}}}} as unknown as Router;
     const persistence = new AppStateService(router, {} as InfoMessageService);
-    return {persistence, preferences: new RenderPreferencesService(persistence)};
+    return {persistence, preferences: stateOwners(persistence).renderPreferences};
 }
 
 describe('service-owned rendering preferences', () => {

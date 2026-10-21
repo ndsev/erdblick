@@ -26,7 +26,7 @@ const createComponent = (enabled = true) => {
         cacheReset as any,
         config as any,
         messages as any,
-        state as any
+        state as any, state as any as never
     );
     return {component, cacheReset, messages, state};
 };

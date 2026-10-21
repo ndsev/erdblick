@@ -1,25 +1,26 @@
-import {Injectable} from "@angular/core";
-import {MenuItem} from "primeng/api";
-import {BehaviorSubject, Subject} from "rxjs";
-import {Color, HeightReference, Rectangle} from "../integrations/geo";
-import {coreLib} from "../integrations/wasm";
+import { Injectable } from "@angular/core";
+import { MenuItem } from "primeng/api";
+import { BehaviorSubject,Subject } from "rxjs";
+import { DiagnosticsFacadeService } from "../diagnostics/diagnostics.facade.service";
+import { PerformanceDiagnosticsScope } from "../diagnostics/diagnostics.model";
+import { InspectionSelectionService } from "../inspection/inspection-selection.service";
+import { InspectionStateService } from "../inspection/inspection-state.service";
+import { Color,HeightReference,Rectangle } from "../integrations/geo";
+import { coreLib } from "../integrations/wasm";
+import { parseMapPartitionKey } from "../mapdata/partition.model";
 import {
-    AppStateService,
-    SelectedSourceData,
-    type TileFeatureId
-} from "../shared/appstate.service";
-import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
-import {FeatureSearchService} from "../search/feature.search.service";
-import {InfoMessageService} from "../shared/info.service";
-import {DiagnosticsFacadeService} from "../diagnostics/diagnostics.facade.service";
-import {PerformanceDiagnosticsScope} from "../diagnostics/diagnostics.model";
-import {
-    ExternalViewerLocation,
-    ExternalViewerService
+ExternalViewerLocation,
+ExternalViewerService
 } from "../search/external-viewer.service";
-import type {RenderNavigationTarget} from "./render-view.model";
-import {InspectionSelectionService} from "../inspection/inspection-selection.service";
-import {parseMapPartitionKey} from "../mapdata/partition.model";
+import { FeatureSearchService } from "../search/feature.search.service";
+import {
+AppStateService,
+SelectedSourceData,
+type TileFeatureId
+} from "../shared/appstate.service";
+import type { FeatureSearchMapLayerRef } from "../shared/feature-search-state";
+import { InfoMessageService } from "../shared/info.service";
+import type { RenderNavigationTarget } from "./render-view.model";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {
@@ -102,7 +103,8 @@ export class RightClickMenuService {
                 private infoMessageService: InfoMessageService,
                 private diagnostics: DiagnosticsFacadeService,
                 private externalViewerService: ExternalViewerService,
-                private inspectionSelection: InspectionSelectionService) {
+                private inspectionSelection: InspectionSelectionService,
+        public readonly inspectionState: InspectionStateService) {
         this.rebuildMenuItems();
         this.tileIdsForSourceData.subscribe(tileIds => {
             this.sourceDataShortcut = null;
@@ -352,7 +354,7 @@ export class RightClickMenuService {
             label: 'Inspect Source Data with Last Layer',
             icon: 'pi pi-database',
             command: () => {
-                this.stateService.setSelection({
+                this.inspectionState.setSelection({
                     mapTileKey: coreLib.getSourceDataLayerKey(sourceDataParams.mapId, sourceDataParams.layerId, sourceDataParams.tileId)
                 } as SelectedSourceData);
             }

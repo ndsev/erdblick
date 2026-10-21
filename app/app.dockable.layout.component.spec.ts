@@ -18,7 +18,7 @@ describe("Map attribution", () => {
             {sessionsChanged: new Subject<void>()} as never,
             {markForCheck: vi.fn()} as never,
             {} as never,
-            mapInfo as never
+            mapInfo as never, {isDockOpen: false, dockOpenState: new BehaviorSubject(false)} as never as never, {isDockOpen: false, dockOpenState: new BehaviorSubject(false)} as never as never
         );
         const values: string[] = [];
         const subscription = layout["copyright$"].subscribe(value => values.push(value));

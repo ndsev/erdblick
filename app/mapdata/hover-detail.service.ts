@@ -1,29 +1,30 @@
-import {Injectable, OnDestroy} from "@angular/core";
-import {debounceTime, skip, Subject, Subscription} from "rxjs";
-import type {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
-import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
+import { Injectable,OnDestroy } from "@angular/core";
+import { debounceTime,skip,Subject,Subscription } from "rxjs";
+import type { FeatureLayerStyle } from "../../build/libs/core/erdblick-core";
+import { InspectionStateService } from "../inspection/inspection-state.service";
+import { coreLib,uint8ArrayToWasm } from "../integrations/wasm";
 import {
-    AppStateService,
-    defaultHoverLabelFieldKey,
-    type HoverLabelFieldConfig,
-    type TileFeatureId
+AppStateService,
+defaultHoverLabelFieldKey,
+type HoverLabelFieldConfig,
+type TileFeatureId
 } from "../shared/appstate.service";
-import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
-import type {ErdblickStyle} from "../styledata/style.service";
-import type {SearchResultTileEntry} from "./map-runtime.model";
-import {MapInfoService} from "./map-info.service";
-import {MapTileStreamService} from "./map-tile-stream.service";
-import type {MapgetLayer} from "./mapget-layer.model";
+import { MAX_STYLE_LOD } from "../shared/lod-policy";
+import { stripFeatureInspectionTarget } from "../shared/tile-feature-id";
+import type { ErdblickStyle } from "../styledata/style.service";
+import { MapInfoService } from "./map-info.service";
+import type { SearchResultTileEntry } from "./map-runtime.model";
+import { MapTileStreamService } from "./map-tile-stream.service";
+import type { MapgetLayer } from "./mapget-layer.model";
 import {
-    StyledMapgetLayer,
-    type StyleFilterPlan,
-    type StyledMapgetLayerEvent
-} from "./styled-mapget-layer.model";
-import {MAX_STYLE_LOD} from "../shared/lod-policy";
-import {
-    partitionKey,
-    type PartitionId
+partitionKey,
+type PartitionId
 } from "./partition.model";
+import {
+StyledMapgetLayer,
+type StyledMapgetLayerEvent,
+type StyleFilterPlan
+} from "./styled-mapget-layer.model";
 
 export type HoverDetailField = {key: string; value: string; colorKey: string};
 export type HoverFeatureDetails = {
@@ -65,18 +66,19 @@ export class HoverDetailService implements OnDestroy {
     constructor(
         private readonly state: AppStateService,
         private readonly mapInfo: MapInfoService,
-        private readonly tileStream: MapTileStreamService
+        private readonly tileStream: MapTileStreamService,
+        public readonly inspectionState: InspectionStateService
     ) {
-        this.enabled = this.state.hoverLabelsEnabled;
-        this.activeFields = this.normalizeFields(this.state.hoverLabelFields);
-        this.subscriptions.add(this.state.hoverLabelsEnabledState.pipe(
+        this.enabled = this.inspectionState.hoverLabelsEnabled;
+        this.activeFields = this.normalizeFields(this.inspectionState.hoverLabelFields);
+        this.subscriptions.add(this.inspectionState.hoverLabelsEnabledState.pipe(
             skip(1)
         ).subscribe(enabled => {
             this.enabled = enabled;
             this.rebuildLayers();
             this.valuesChanged.next(null);
         }));
-        this.subscriptions.add(this.state.hoverLabelFieldsState.pipe(
+        this.subscriptions.add(this.inspectionState.hoverLabelFieldsState.pipe(
             skip(1),
             debounceTime(200)
         ).subscribe(fields => {

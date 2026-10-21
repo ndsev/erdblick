@@ -1,9 +1,11 @@
-import {Injectable} from "@angular/core";
+import { Injectable } from "@angular/core";
+import { CoordinatesService } from "../coords/coordinates.service";
+import { MapViewStateService } from "../mapview/map-view-state.service";
 import {
-    AppConfigService,
-    type ExternalViewerConfig
+AppConfigService,
+type ExternalViewerConfig
 } from "../shared/app-config.service";
-import {AppStateService} from "../shared/appstate.service";
+import { AppStateService } from "../shared/appstate.service";
 
 /** A validated WGS84 point used by external map viewers. */
 export interface ExternalViewerLocation {
@@ -34,7 +36,9 @@ function isValidExternalViewerLocation(location: ExternalViewerLocation): boolea
 export class ExternalViewerService {
     constructor(
         private readonly stateService: AppStateService,
-        private readonly configService: AppConfigService
+        private readonly configService: AppConfigService,
+        public readonly coordinates: CoordinatesService,
+        public readonly viewSettings: MapViewStateService
     ) {}
 
     /** Returns the current ordered configuration shared by every external-viewer UI. */
@@ -47,13 +51,13 @@ export class ExternalViewerService {
         if (explicit) {
             return {...explicit, source: "input"};
         }
-        const marker = this.stateService.markedPosition;
+        const marker = this.coordinates.markedPosition;
         const markerLocation = {lon: marker[0], lat: marker[1]};
-        if (this.stateService.marker && marker.length >= 2 && isValidExternalViewerLocation(markerLocation)) {
+        if (this.coordinates.marker && marker.length >= 2 && isValidExternalViewerLocation(markerLocation)) {
             return {...markerLocation, source: "marker"};
         }
-        const destination = this.stateService.cameraViewDataState
-            .getValue(this.stateService.focusedView)
+        const destination = this.viewSettings.cameraViewDataState
+            .getValue(this.viewSettings.focusedView)
             .destination;
         return {lon: destination.lon, lat: destination.lat, source: "viewport"};
     }

@@ -1,8 +1,9 @@
-import {ChangeDetectorRef, Component, OnDestroy} from "@angular/core";
-import {Subscription} from "rxjs";
-import {InspectionSelectionService} from "./inspection-selection.service";
-import {FeatureWrapper} from "../mapdata/feature-inspection.model";
-import {AppStateService, InspectionComparisonModel, InspectionPanelModel} from "../shared/appstate.service";
+import { ChangeDetectorRef,Component,OnDestroy } from "@angular/core";
+import { Subscription } from "rxjs";
+import { FeatureWrapper } from "../mapdata/feature-inspection.model";
+import { AppStateService,InspectionComparisonModel,InspectionPanelModel } from "../shared/appstate.service";
+import { InspectionSelectionService } from "./inspection-selection.service";
+import { InspectionStateService } from "./inspection-state.service";
 
 @Component({
     selector: 'inspection-dialogs',
@@ -27,12 +28,13 @@ export class InspectionDialogsComponent implements OnDestroy {
 
     constructor(private mapService: InspectionSelectionService,
                 private stateService: AppStateService,
-                private readonly cdr: ChangeDetectorRef) {
+                private readonly cdr: ChangeDetectorRef,
+        public readonly inspectionState: InspectionStateService) {
         this.subscriptions.add(this.mapService.selectionTopic.subscribe(panels => {
             this.undockedPanels = panels.filter(panel => panel.undocked);
             this.cdr.markForCheck();
         }));
-        this.subscriptions.add(this.stateService.inspectionComparisonState.subscribe(comparison => {
+        this.subscriptions.add(this.inspectionState.inspectionComparisonState.subscribe(comparison => {
             this.comparison = comparison;
             this.cdr.markForCheck();
         }));

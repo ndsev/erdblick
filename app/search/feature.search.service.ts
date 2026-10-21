@@ -1,81 +1,88 @@
-import {Injectable} from "@angular/core";
-import {BehaviorSubject, filter, Subject, Subscription, take} from "rxjs";
-import {
-    FeatureSearchAttributeScopeCandidate,
-    SearchResultTileEntry,
-    SearchResultTilePayload
-} from "../mapdata/map-runtime.model";
-import {MapInfoService} from "../mapdata/map-info.service";
-import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
-import {
-    FeatureSearchResolvedDefinition,
-    featureSearchResultFields
-} from "../mapdata/feature-search-runtime-state.model";
-import {FeatureSearchSchemaService, FeatureSearchScopeAnalysis} from "../mapdata/feature-search-schema.service";
-import {
-    CompletionCandidate,
-    DiagnosticsMessage,
-    SearchResultFieldValueSummary,
-    SearchTraceValueSummary,
-    SearchValueHistogramBucket,
-    SearchValueKindCounts,
-    SearchValueNumericSummary,
-    SearchValueSummariesState,
-    SearchValueSummary
-} from "./search.model";
-import {GeoMath} from "../integrations/geo";
-import {coreLib, uint8ArrayFromWasm, uint8ArrayToWasm} from "../integrations/wasm";
-import {
-    AppStateService,
-    FEATURE_SEARCH_DIALOG_LAYOUT_ID,
-    FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID,
-    SEARCH_DOCK_TAB_ID
-} from "../shared/appstate.service";
-import {
-    DEFAULT_FEATURE_SEARCH_TILE_LEVELS,
-    DEFAULT_FEATURE_SEARCH_VIEW_INDICES,
-    defaultFeatureSearchViewIndicesForMapLayers,
-    FeatureSearchMapLayerRef,
-    FeatureSearchRenderStrategy,
-    FeatureSearchScope,
-    FeatureSearchStateEntry,
-    normalizeFeatureSearchFeatureTypes
-} from "../shared/feature-search-state";
-import type {MapTileStreamFilterStatusPayload} from "../mapdata/tilestream";
-import {
-    SearchResultDensityIndex,
-    SearchResultPoint,
-    SearchResultPointBucket
-} from "./search-result-density.model";
-import type {
-    SearchCompletionRequestMessage,
-    SearchCompletionWorkerOptions,
-    SearchCompletionResultMessage
-} from "./search-completion.worker.protocol";
-import {featureSearchDefinitionFromImportPayload} from "./feature-search-export.util";
-import {FrameBudgetLoop} from "../shared/frame-budget-loop";
-import {
-    StyledMapgetLayer,
-    type StyledMapgetLayerEvent
-} from "../mapdata/styled-mapget-layer.model";
-import {
-    filterSubscriptionCoverageEqual,
-    type FilterSubscriptionCoverage
-} from "../mapdata/filter-subscription.model";
-import type {FilterTileState} from "../mapdata/filter-tile-state.model";
-import type {MapgetLayer} from "../mapdata/mapget-layer.model";
+import {deepEquals} from "../shared/app-state";
 import {MapViewStateService} from "../mapview/map-view-state.service";
+import { Injectable } from "@angular/core";
+import { BehaviorSubject,Subject,Subscription,take } from "rxjs";
+import { filter } from "rxjs/operators";
+import { z } from "zod";
+import { InspectionStateService } from "../inspection/inspection-state.service";
+import { GeoMath } from "../integrations/geo";
+import { coreLib,uint8ArrayFromWasm,uint8ArrayToWasm } from "../integrations/wasm";
 import {
-    compileFeatureSearchStyle,
-    type CompiledFeatureSearchStyle
-} from "./feature-search-style";
-import {formatFeatureInspectionTarget} from "../shared/tile-feature-id";
-import {MAX_STYLE_LOD} from "../shared/lod-policy";
+FeatureSearchResolvedDefinition,
+featureSearchResultFields
+} from "../mapdata/feature-search-runtime-state.model";
+import { FeatureSearchSchemaService,FeatureSearchScopeAnalysis } from "../mapdata/feature-search-schema.service";
 import {
-    partitionKey,
-    tilePartition,
-    type PartitionId
+filterSubscriptionCoverageEqual,
+type FilterSubscriptionCoverage
+} from "../mapdata/filter-subscription.model";
+import type { FilterTileState } from "../mapdata/filter-tile-state.model";
+import { MapInfoService } from "../mapdata/map-info.service";
+import {
+FeatureSearchAttributeScopeCandidate,
+SearchResultTileEntry,
+SearchResultTilePayload
+} from "../mapdata/map-runtime.model";
+import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
+import type { MapgetLayer } from "../mapdata/mapget-layer.model";
+import {
+partitionKey,
+tilePartition,
+type PartitionId
 } from "../mapdata/partition.model";
+import {
+StyledMapgetLayer,
+type StyledMapgetLayerEvent
+} from "../mapdata/styled-mapget-layer.model";
+import type { MapTileStreamFilterStatusPayload } from "../mapdata/tilestream";
+import { MapViewService } from "../mapview/map-view.service";
+import { AppLayoutService } from "../shared/app-layout.service";
+import { DEFAULT_FEATURE_SEARCH_GROUPING,FEATURE_SEARCH_DIALOG_LAYOUT_ID,FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID,normalizeFeatureSearchGrouping,SEARCH_DOCK_TAB_ID } from "../shared/app-state.model";
+import { AppStateService } from "../shared/appstate.service";
+import {
+createFeatureSearchStateEntry,
+DEFAULT_FEATURE_SEARCH_TILE_LEVELS,
+DEFAULT_FEATURE_SEARCH_VIEW_INDICES,
+defaultFeatureSearchViewIndicesForMapLayers,
+FeatureSearchMapLayerRef,
+FeatureSearchRenderStrategy,
+FeatureSearchScope,
+FeatureSearchStateEntry,
+FeatureSearchStatePatch,
+FeatureSearchStateSchema,
+normalizeFeatureSearchFeatureTypes,
+normalizeFeatureSearchState,
+serializeFeatureSearchState
+} from "../shared/feature-search-state";
+import { FrameBudgetLoop } from "../shared/frame-budget-loop";
+import { MAX_STYLE_LOD } from "../shared/lod-policy";
+import { formatFeatureInspectionTarget } from "../shared/tile-feature-id";
+import { featureSearchDefinitionFromImportPayload } from "./feature-search-export.util";
+import {
+compileFeatureSearchStyle,
+type CompiledFeatureSearchStyle
+} from "./feature-search-style";
+import type {
+SearchCompletionRequestMessage,
+SearchCompletionResultMessage,
+SearchCompletionWorkerOptions
+} from "./search-completion.worker.protocol";
+import {
+SearchResultDensityIndex,
+SearchResultPoint,
+SearchResultPointBucket
+} from "./search-result-density.model";
+import {
+CompletionCandidate,
+DiagnosticsMessage,
+SearchResultFieldValueSummary,
+SearchTraceValueSummary,
+SearchValueHistogramBucket,
+SearchValueKindCounts,
+SearchValueNumericSummary,
+SearchValueSummariesState,
+SearchValueSummary
+} from "./search.model";
 
 export interface FeatureSearchResultEntry {
     label: string;
@@ -355,6 +362,89 @@ export type FeatureSearchRunOptions = Partial<Pick<
  * Search execution is delegated to mapget; this service keeps server progress and UI-friendly result caches in sync.
  */
 export class FeatureSearchService {
+
+    readonly featureSearchGroupingState = this.stateService.registerState<number[]>({
+        name: 'featureSearchGrouping',
+        defaultValue: [...DEFAULT_FEATURE_SEARCH_GROUPING],
+        schema: z.array(z.coerce.number()),
+        toStorage: (value: number[]) => normalizeFeatureSearchGrouping(value),
+        fromStorage: (payload: any): number[] => normalizeFeatureSearchGrouping(payload),
+        snapshotPersist: false
+    });
+
+
+    readonly featureSearchState = this.stateService.registerState<Array<Omit<FeatureSearchStateEntry, "selectedViewIndices"> & {selectedViewIds: string[]}>>({
+        name: 'featureSearchState',
+        defaultValue: [],
+        schema: FeatureSearchStateSchema,
+        toStorage: entries => serializeFeatureSearchState(entries.map(entry => this.presentSearch(entry))),
+        fromStorage: payload => normalizeFeatureSearchState(payload).map(entry => this.storeSearch(entry)),
+        snapshotPersist: false
+    });
+
+    get featureSearchGrouping() {return this.featureSearchGroupingState.getValue();}
+
+    set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
+
+    get featureSearches(): FeatureSearchStateEntry[] { return this.featureSearchState.value.map(entry => this.presentSearch(entry)); }
+
+    set featureSearches(values: FeatureSearchStateEntry[]) {
+        this.featureSearchState.next(normalizeFeatureSearchState(values).map(entry => this.storeSearch(entry)));
+    }
+
+    /** UI indices are converted once; persisted runtime ownership follows logical views. */
+    private storeSearch(entry: FeatureSearchStateEntry) {
+        const {selectedViewIndices, ...fields} = entry;
+        return {...fields, selectedViewIds: selectedViewIndices.flatMap(index => {
+            const id = this.viewSettings.viewIds[index];
+            return id === undefined ? [] : [id];
+        })};
+    }
+
+    private presentSearch(entry: Omit<FeatureSearchStateEntry, "selectedViewIndices"> & {selectedViewIds: string[]}): FeatureSearchStateEntry {
+        const {selectedViewIds, ...fields} = entry;
+        return {...fields, selectedViewIndices: selectedViewIds.map(id => this.viewSettings.viewIds.indexOf(id)).filter(index => index >= 0)};
+    }
+
+
+    /** Adds a persisted feature-search definition. Runtime results remain service-owned. */
+    addFeatureSearch(value: {query: string} & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
+        const entry = createFeatureSearchStateEntry(value);
+        this.featureSearches = [...this.featureSearches, entry];
+        return entry;
+    }
+
+
+    /** Patches one persisted feature-search definition. */
+    patchFeatureSearch(id: string, patch: FeatureSearchStatePatch): FeatureSearchStateEntry | undefined {
+        let updated: FeatureSearchStateEntry | undefined;
+        const next = this.featureSearches.map(entry => {
+            if (entry.id !== id) {
+                return entry;
+            }
+            updated = createFeatureSearchStateEntry({
+                ...entry,
+                ...patch,
+                id: entry.id,
+                query: patch.query ?? entry.query
+            });
+            return updated;
+        });
+        if (updated) {
+            this.featureSearches = next;
+        }
+        return updated;
+    }
+
+
+    /** Removes one persisted feature-search definition. */
+    removeFeatureSearch(id: string): void {
+        const next = this.featureSearches.filter(entry => entry.id !== id);
+        if (next.length !== this.featureSearches.length) {
+            this.featureSearches = next;
+        }
+    }
+
     private static readonly LOCATION_MARKER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 0 24 24" width="48"><path d="M12 2C8.1 2 5 5.1 5 9c0 3.3 4.2 8.6 6.6 11.6.4.5 1.3.5 1.7 0C14.8 17.6 19 12.3 19 9c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5S13.4 11.5 12 11.5z" fill="white"/></svg>`;
     private static readonly FLOATING_DIALOG_WIDTH_EM = 42;
     private static readonly FLOATING_DIALOG_HEIGHT_EM = 42;
@@ -425,16 +515,44 @@ export class FeatureSearchService {
     constructor(private mapInfo: MapInfoService,
                 private searchSchema: FeatureSearchSchemaService,
                 private tileStream: MapTileStreamService,
-                private viewState: MapViewStateService,
-                private stateService: AppStateService) {
+                private viewState: MapViewService,
+                private stateService: AppStateService,
+        public readonly layout: AppLayoutService,
+        public readonly inspectionState: InspectionStateService,
+        public readonly viewSettings: MapViewStateService) {
+        viewSettings.registerMembershipOwner({
+            seed: (previous, count) => {
+                const sourceId = viewSettings.viewIdAt(previous - 1);
+                const added = viewSettings.viewIds.slice(previous, count);
+                this.featureSearchState.next(this.featureSearchState.value.map(entry => entry.selectedViewIds.includes(sourceId)
+                    ? {...entry, selectedViewIds: [...entry.selectedViewIds, ...added]} : entry));
+            },
+            import: (previous, ids) => this.featureSearchState.next(this.featureSearchState.value.map(entry => ({...entry,
+                selectedViewIds: entry.selectedViewIds.flatMap(id => ids.includes(id) ? [id]
+                    : ids[previous.indexOf(id)] ? [ids[previous.indexOf(id)]] : [])
+            }))),
+            retain: indices => {
+                const ids = indices.map(index => viewSettings.viewIdAt(index));
+                this.featureSearchState.next(this.featureSearchState.value.map(entry => ({...entry,
+                    selectedViewIds: entry.selectedViewIds.filter(id => ids.includes(id))})));
+            }
+        });
+    }
+
+    private initialized = false;
+
+    /** Starts runtime reconciliation after every state owner has registered its values. */
+    initialize(): void {
+        if (this.initialized) return;
+        this.initialized = true;
         this.stateService.ready.pipe(
             filter((ready): ready is true => ready),
             take(1)
         ).subscribe(() => {
             this.resetStaleDockState();
-            this.reconcilePersistedFeatureSearchState(this.stateService.featureSearches);
+            this.reconcilePersistedFeatureSearchState(this.featureSearches);
         });
-        this.stateService.featureSearchState.subscribe(entries => {
+        this.stateService.observe(() => this.featureSearches, deepEquals).subscribe(entries => {
             if (!this.stateService.ready.getValue()) {
                 return;
             }
@@ -452,7 +570,7 @@ export class FeatureSearchService {
         this.mapInfo.layerStateChanged.subscribe(reason => {
             if (reason === "datasources" && this.stateService.ready.getValue()) {
                 this.invalidateAllSchemaAnalysis();
-                this.reconcilePersistedFeatureSearchState(this.stateService.featureSearches);
+                this.reconcilePersistedFeatureSearchState(this.featureSearches);
             }
         });
         this.installFeatureSearchDiagnostics();
@@ -474,8 +592,8 @@ export class FeatureSearchService {
             timestamp: new Date().toISOString(),
             url: typeof location === "undefined" ? "" : location.href,
             appReady: this.stateService.ready.getValue(),
-            numViews: this.stateService.numViews,
-            persistedFeatureSearches: this.stateService.featureSearches.map(entry => this.searchDefinitionDiagnostics(entry)),
+            numViews: this.viewSettings.numViews,
+            persistedFeatureSearches: this.featureSearches.map(entry => this.searchDefinitionDiagnostics(entry)),
             sessions: this.searchSessions.map(session => ({
                 id: session.id,
                 refresh: session.refresh,
@@ -525,12 +643,12 @@ export class FeatureSearchService {
     /** Removes persisted dock chrome for searches that cannot survive a page reload. */
     private resetStaleDockState(): void {
         const activeLayoutIds = new Set(
-            this.stateService.featureSearches.map(entry => FeatureSearchService.layoutIdForSearch(entry.id))
+            this.featureSearches.map(entry => FeatureSearchService.layoutIdForSearch(entry.id))
         );
-        for (const layoutId of Object.keys(this.stateService.dialogLayoutsState.getValue())) {
+        for (const layoutId of Object.keys(this.layout.dialogLayoutsState.getValue())) {
             if ((layoutId === FEATURE_SEARCH_DIALOG_LAYOUT_ID || layoutId.startsWith(`${FEATURE_SEARCH_DIALOG_LAYOUT_ID}:`))
                 && !activeLayoutIds.has(layoutId)) {
-                this.stateService.removeDialogLayout(layoutId);
+                this.layout.removeDialogLayout(layoutId);
             }
         }
     }
@@ -588,12 +706,12 @@ export class FeatureSearchService {
     /** Returns whether a session is currently represented inside the dock. */
     isSessionDocked(sessionId: string): boolean {
         const session = this.getInternalSession(sessionId);
-        return !!session && this.stateService.isSurfaceDocked(session.layoutId);
+        return !!session && this.layout.isSurfaceDocked(session.layoutId);
     }
 
     /** Returns the persisted dock position for one session, falling back to creation order. */
     private sessionDockOrder(session: FeatureSearchSession): number {
-        const order = this.stateService.getDialogLayout(session.layoutId)?.dockOrder;
+        const order = this.layout.getDialogLayout(session.layoutId)?.dockOrder;
         if (typeof order === 'number' && Number.isFinite(order)) {
             return order;
         }
@@ -792,7 +910,7 @@ export class FeatureSearchService {
         const selected = new Map<string, FeatureSearchMapLayerRef>();
         for (const [mapId, map] of this.mapInfo.maps.maps) {
             for (const layer of map.allFeatureLayers()) {
-                for (let viewIndex = 0; viewIndex < this.stateService.numViews; ++viewIndex) {
+                for (let viewIndex = 0; viewIndex < this.viewSettings.numViews; ++viewIndex) {
                     if (!this.mapInfo.maps.getMapLayerVisibility(viewIndex, mapId, layer.id)) {
                         continue;
                     }
@@ -809,7 +927,7 @@ export class FeatureSearchService {
     private activeFeatureSearchViewIndices(selectedMapLayers: FeatureSearchMapLayerRef[] = []): number[] {
         return defaultFeatureSearchViewIndicesForMapLayers(
             selectedMapLayers,
-            this.stateService.numViews,
+            this.viewSettings.numViews,
             (viewIndex, ref) => this.mapInfo.maps.getMapLayerVisibility(viewIndex, ref.mapId, ref.layerId)
         );
     }
@@ -817,7 +935,7 @@ export class FeatureSearchService {
     /** Returns all feature map/layers enabled in a specific view. */
     featureSearchLayersForView(viewIndex: number): FeatureSearchMapLayerRef[] {
         const selected = new Map<string, FeatureSearchMapLayerRef>();
-        if (!Number.isInteger(viewIndex) || viewIndex < 0 || viewIndex >= this.stateService.numViews) {
+        if (!Number.isInteger(viewIndex) || viewIndex < 0 || viewIndex >= this.viewSettings.numViews) {
             return [];
         }
         for (const [mapId, map] of this.mapInfo.maps.maps) {
@@ -867,7 +985,7 @@ export class FeatureSearchService {
             : this.mapLayersForSearchContext(options.selectedMapLayers);
         const selectedViewIndices = options.selectedViewIndices
             ?? this.activeFeatureSearchViewIndices(selectedMapLayers);
-        const entry = this.stateService.addFeatureSearch({
+        const entry = this.addFeatureSearch({
             query,
             ...(options.scope ? {scope: options.scope} : {}),
             ...(options.autoUpdate === undefined ? {} : {autoUpdate: options.autoUpdate}),
@@ -881,7 +999,7 @@ export class FeatureSearchService {
         this.placeNewSearchSurface(entry.id);
         let session = this.getInternalSession(entry.id);
         if (!session) {
-            this.reconcilePersistedFeatureSearchState(this.stateService.featureSearches);
+            this.reconcilePersistedFeatureSearchState(this.featureSearches);
             session = this.getInternalSession(entry.id);
         }
         return session!;
@@ -891,7 +1009,7 @@ export class FeatureSearchService {
     importSearchJsonPayload(payload: unknown): FeatureSearchSession {
         const imported = featureSearchDefinitionFromImportPayload(payload).definition;
         const selectedMapLayers = imported.selectedMapLayers.map(ref => ({...ref}));
-        const entry = this.stateService.addFeatureSearch({
+        const entry = this.addFeatureSearch({
             query: imported.query,
             scope: imported.scope,
             autoUpdate: imported.autoUpdate,
@@ -911,7 +1029,7 @@ export class FeatureSearchService {
         this.placeNewSearchSurface(entry.id);
         let session = this.getInternalSession(entry.id);
         if (!session) {
-            this.reconcilePersistedFeatureSearchState(this.stateService.featureSearches);
+            this.reconcilePersistedFeatureSearchState(this.featureSearches);
             session = this.getInternalSession(entry.id);
         }
         return session!;
@@ -924,7 +1042,7 @@ export class FeatureSearchService {
             return;
         }
         this.pendingForcedGenerationIds.add(session.id);
-        const patched = this.stateService.patchFeatureSearch(sessionId, {query, paused: false});
+        const patched = this.patchFeatureSearch(sessionId, {query, paused: false});
         if (patched) {
             return;
         }
@@ -954,7 +1072,7 @@ export class FeatureSearchService {
             forceGenerationIds: [session.id],
             updateCoverageIds: [session.id]
         });
-        this.stateService.patchFeatureSearch(sessionId, {paused: false});
+        this.patchFeatureSearch(sessionId, {paused: false});
     }
 
     /** Toggles whether viewport changes automatically update this search's tile coverage. */
@@ -963,7 +1081,7 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.stateService.patchFeatureSearch(sessionId, {autoUpdate})) {
+        if (!this.patchFeatureSearch(sessionId, {autoUpdate})) {
             session.definition = {
                 ...session.definition,
                 autoUpdate
@@ -1023,7 +1141,7 @@ export class FeatureSearchService {
         if (!session || !session.definition.enabled) {
             return;
         }
-        if (!this.stateService.patchFeatureSearch(sessionId, {paused: true})) {
+        if (!this.patchFeatureSearch(sessionId, {paused: true})) {
             this.applySearchPause(session);
         }
     }
@@ -1034,7 +1152,7 @@ export class FeatureSearchService {
         if (!session || !session.definition.enabled) {
             return;
         }
-        if (!this.stateService.patchFeatureSearch(sessionId, {paused: false})) {
+        if (!this.patchFeatureSearch(sessionId, {paused: false})) {
             this.applySearchResume(session);
         }
     }
@@ -1056,7 +1174,7 @@ export class FeatureSearchService {
             autoUpdate: false,
             paused: true
         };
-        if (!this.stateService.patchFeatureSearch(sessionId, {autoUpdate: false, paused: true})) {
+        if (!this.patchFeatureSearch(sessionId, {autoUpdate: false, paused: true})) {
             this.progress.next(session);
         }
         this.syncSearchRequestsToMapService();
@@ -1068,7 +1186,7 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.stateService.patchFeatureSearch(sessionId, {pinColor: color})) {
+        if (!this.patchFeatureSearch(sessionId, {pinColor: color})) {
             this.updateSessionColor(session, color);
         }
     }
@@ -1079,7 +1197,7 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.stateService.patchFeatureSearch(sessionId, {bookmarked})) {
+        if (!this.patchFeatureSearch(sessionId, {bookmarked})) {
             session.definition = {...session.definition, bookmarked};
             this.progress.next(session);
         }
@@ -1099,7 +1217,7 @@ export class FeatureSearchService {
             grouping: options.grouping ?? [],
             filterValue: options.filterValue ?? ""
         });
-        this.stateService.openDialog(FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID);
+        this.layout.openDialog(FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID);
     }
 
     /** Clears the current feature-search export request after the dialog closes. */
@@ -1113,7 +1231,7 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.stateService.patchFeatureSearch(sessionId, {enabled, paused: enabled ? session.definition.paused : false})) {
+        if (!this.patchFeatureSearch(sessionId, {enabled, paused: enabled ? session.definition.paused : false})) {
             const definition = {...session.definition, enabled, paused: enabled ? session.definition.paused : false};
             if (enabled) {
                 this.resetSessionSearch(session, definition);
@@ -1134,7 +1252,7 @@ export class FeatureSearchService {
             session.definition.selectedFeatureTypes,
             selectedMapLayers
         );
-        if (!this.stateService.patchFeatureSearch(sessionId, {
+        if (!this.patchFeatureSearch(sessionId, {
             selectedMapLayers,
             selectedMapLayersManual: true,
             selectedFeatureTypes
@@ -1151,7 +1269,7 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.stateService.patchFeatureSearch(sessionId, {selectedTileLevels})) {
+        if (!this.patchFeatureSearch(sessionId, {selectedTileLevels})) {
             session.definition = {...session.definition, selectedTileLevels};
             this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
             this.progress.next(session);
@@ -1168,7 +1286,7 @@ export class FeatureSearchService {
         if (JSON.stringify(session.definition.selectedFeatureTypes) === JSON.stringify(normalizedTypes)) {
             return;
         }
-        if (!this.stateService.patchFeatureSearch(sessionId, {selectedFeatureTypes: normalizedTypes})) {
+        if (!this.patchFeatureSearch(sessionId, {selectedFeatureTypes: normalizedTypes})) {
             session.definition = {...session.definition, selectedFeatureTypes: normalizedTypes};
             this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
             this.progress.next(session);
@@ -1202,7 +1320,7 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.stateService.patchFeatureSearch(sessionId, {selectedViewIndices})) {
+        if (!this.patchFeatureSearch(sessionId, {selectedViewIndices})) {
             session.definition = {...session.definition, selectedViewIndices};
             this.bumpSearchResultLayersVersion();
             this.syncSearchRequestsToMapService();
@@ -1219,11 +1337,11 @@ export class FeatureSearchService {
         if (!docked) {
             this.ensureInitialFloatingDialogLayout(session.layoutId);
         }
-        this.stateService.setSurfaceDocked(session.layoutId, docked, SEARCH_DOCK_TAB_ID);
+        this.layout.setSurfaceDocked(session.layoutId, docked, SEARCH_DOCK_TAB_ID);
         if (docked) {
             this.moveDockedSurfaceToTop(session.layoutId);
-            this.stateService.dockActiveTab = SEARCH_DOCK_TAB_ID;
-            this.stateService.isDockOpen = true;
+            this.layout.dockActiveTab = SEARCH_DOCK_TAB_ID;
+            this.layout.isDockOpen = true;
         }
         this.notifySessionsChanged();
     }
@@ -1235,7 +1353,7 @@ export class FeatureSearchService {
             return undefined;
         }
         const definition = session.definition;
-        const entry = this.stateService.addFeatureSearch({
+        const entry = this.addFeatureSearch({
             query: definition.query,
             scope: definition.scope,
             autoUpdate: definition.autoUpdate,
@@ -1254,7 +1372,7 @@ export class FeatureSearchService {
         });
         const layoutId = FeatureSearchService.layoutIdForSearch(entry.id);
         if (this.isSessionDocked(session.id)) {
-            this.stateService.setSurfaceDocked(layoutId, true, SEARCH_DOCK_TAB_ID);
+            this.layout.setSurfaceDocked(layoutId, true, SEARCH_DOCK_TAB_ID);
             this.moveDockedSurfaceToTop(layoutId);
         } else {
             this.positionClonedFloatingSearch(session.layoutId, layoutId);
@@ -1270,18 +1388,18 @@ export class FeatureSearchService {
 
     /** Places a floating clone near its source dialog while preserving viewport bounds. */
     private positionClonedFloatingSearch(sourceLayoutId: string, cloneLayoutId: string): void {
-        const sourceLayout = this.stateService.getDialogLayout(sourceLayoutId);
+        const sourceLayout = this.layout.getDialogLayout(sourceLayoutId);
         if (!sourceLayout) {
             this.ensureInitialFloatingDialogLayout(cloneLayoutId);
             return;
         }
-        const baseFontSize = this.stateService.baseFontSize || 16;
+        const baseFontSize = this.layout.baseFontSize || 16;
         const offset = Math.round(baseFontSize * 1.25);
         const width = sourceLayout.size.width;
         const height = sourceLayout.size.height;
         const left = Math.min(Math.max(0, sourceLayout.position.left + offset), Math.max(0, window.innerWidth - width));
         const top = Math.min(Math.max(0, sourceLayout.position.top + offset), Math.max(0, window.innerHeight - height));
-        this.stateService.upsertDialogLayout(cloneLayoutId, {
+        this.layout.upsertDialogLayout(cloneLayoutId, {
             position: {left, top},
             size: {...sourceLayout.size},
             open: false,
@@ -1295,14 +1413,14 @@ export class FeatureSearchService {
         const existingOrder = this.getDockedSessions()
             .map(session => session.layoutId)
             .filter(id => id !== layoutId);
-        this.stateService.reorderDockedSurfaces(SEARCH_DOCK_TAB_ID, [layoutId, ...existingOrder]);
+        this.layout.reorderDockedSurfaces(SEARCH_DOCK_TAB_ID, [layoutId, ...existingOrder]);
     }
 
     /** Docks a newly created search when the Search dock is already active. */
     private placeNewSearchSurface(searchId: string): void {
         const layoutId = FeatureSearchService.layoutIdForSearch(searchId);
-        if (this.getDockedSessions().length > 0 || this.stateService.hasDockedSurface(SEARCH_DOCK_TAB_ID)) {
-            this.stateService.setSurfaceDocked(layoutId, true, SEARCH_DOCK_TAB_ID);
+        if (this.getDockedSessions().length > 0 || this.layout.hasDockedSurface(SEARCH_DOCK_TAB_ID)) {
+            this.layout.setSurfaceDocked(layoutId, true, SEARCH_DOCK_TAB_ID);
             this.moveDockedSurfaceToTop(layoutId);
             this.notifySessionsChanged();
         }
@@ -1310,11 +1428,11 @@ export class FeatureSearchService {
 
     /** Centers searches that were first created in the dock and only have the generic dock fallback position. */
     private ensureInitialFloatingDialogLayout(layoutId: string): void {
-        const current = this.stateService.getDialogLayout(layoutId);
+        const current = this.layout.getDialogLayout(layoutId);
         if (current && (current.position.left !== 0 || current.position.top !== 0)) {
             return;
         }
-        const baseFontSize = this.stateService.baseFontSize || 16;
+        const baseFontSize = this.layout.baseFontSize || 16;
         const width = Math.round(Math.min(
             FeatureSearchService.FLOATING_DIALOG_WIDTH_EM * baseFontSize,
             Math.max(baseFontSize, window.innerWidth - FeatureSearchService.FLOATING_DIALOG_HORIZONTAL_MARGIN_EM * baseFontSize)
@@ -1323,7 +1441,7 @@ export class FeatureSearchService {
             FeatureSearchService.FLOATING_DIALOG_HEIGHT_EM * baseFontSize,
             Math.max(baseFontSize, window.innerHeight - FeatureSearchService.FLOATING_DIALOG_VERTICAL_MARGIN_EM * baseFontSize)
         ));
-        this.stateService.upsertDialogLayout(layoutId, {
+        this.layout.upsertDialogLayout(layoutId, {
             ...(current ?? {
                 position: {left: 0, top: 0},
                 size: {width, height},
@@ -1341,7 +1459,7 @@ export class FeatureSearchService {
 
     /** Dismisses all runtime searches for a new scene, retaining saved definitions for later edits or reload. */
     dismissForPresentation(): void {
-        for (const definition of this.stateService.featureSearches) {
+        for (const definition of this.featureSearches) {
             this.presentationDismissedSearches.set(definition.id, JSON.stringify(definition));
         }
         for (const session of [...this.searchSessions]) this.closeRuntimeSearch(session.id);
@@ -1349,8 +1467,8 @@ export class FeatureSearchService {
 
     /** Closes one search session and removes its persisted definition. */
     closeSearch(sessionId: string): void {
-        if (this.stateService.featureSearches.some(entry => entry.id === sessionId)) {
-            this.stateService.removeFeatureSearch(sessionId);
+        if (this.featureSearches.some(entry => entry.id === sessionId)) {
+            this.removeFeatureSearch(sessionId);
             return;
         }
         this.closeRuntimeSearch(sessionId);
@@ -1363,15 +1481,15 @@ export class FeatureSearchService {
             return false;
         }
         const [session] = this.searchSessions.splice(index, 1);
-        this.stateService.removeDialogLayout(session.layoutId);
+        this.layout.removeDialogLayout(session.layoutId);
         this.bumpSearchResultLayersVersion();
         this.notifySessionsChanged();
         this.progress.next(null);
         this.syncSearchRequestsToMapService();
-        if (this.stateService.isDockAutoCollapsible
-            && !this.stateService.selection.some(panel => !panel.undocked)
+        if (this.layout.isDockAutoCollapsible
+            && !this.inspectionState.selection.some(panel => !panel.undocked)
             && this.getDockedSessions().length === 0) {
-            this.stateService.isDockOpen = false;
+            this.layout.isDockOpen = false;
         }
         return true;
     }
@@ -2206,7 +2324,7 @@ export class FeatureSearchService {
         if (this.sameSelectedMapLayers(session.definition.selectedMapLayers, normalizedLayers)) {
             return false;
         }
-        if (this.stateService.patchFeatureSearch(session.id, {selectedMapLayers: normalizedLayers, selectedMapLayersManual: false})) {
+        if (this.patchFeatureSearch(session.id, {selectedMapLayers: normalizedLayers, selectedMapLayersManual: false})) {
             return true;
         }
 
