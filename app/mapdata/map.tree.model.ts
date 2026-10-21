@@ -549,7 +549,10 @@ export class MapLayerTree {
             this.initializeStyleOptions([...this.styleService.styles.values()]);
             this.configureTreeParameters();
         }));
-        this.subscriptions.add(this.viewSettings.numViewsState.subscribe(_ => {
+        // Refresh cached controls during membership notification, before completed
+        // observers clone the tree for display. All per-view owner values are
+        // already staged together; the numeric count projection arrives too late.
+        this.subscriptions.add(this.viewSettings.viewIdsState.subscribe(() => {
             this.configureTreeParameters();
         }));
     }
@@ -734,7 +737,7 @@ export class MapLayerTree {
 
     /**
      * Reapplies persisted per-view state and infers unambiguous presets from hydrated option values.
-     * This is called after map/style changes and when the number of views changes.
+     * This is called after map/style changes and ordered view-membership changes.
      */
     configureTreeParameters(): void {
         this.stateService.withSystemStateMutation(() => this.applyTreeParameters());

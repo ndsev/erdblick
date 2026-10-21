@@ -143,6 +143,29 @@ Lint exits 0 with 0 errors / 8 warnings. Evidence: `dock-lifecycle-before.log`,
 `lint-dock-keyboard-final.log`. The catalog digest remains `e2df8ee059d0`.
 The parent's rebuilt browser rerun is still required to verify real hit testing.
 
+At `23e5d313`, both real inspection browser scenarios passed. The following
+comparison-view scenario exposed a stale map-panel clone: the tree listened to
+the numeric count's completed observation, so its system-owned cache refresh was
+deferred until after the panel copied the previous one-view arrays. Seeding had
+already supplied the correct durable values, making that later refresh a state
+no-op with no second projection notification.
+
+The tree now refreshes from authoritative ordered IDs during slot publication,
+before completed UI projections. This also handles a reorder with unchanged
+count. The panel consumes the existing external-state notification after URL or
+snapshot reconciliation refreshes its cached controls. Three actual-owner/tree/
+component regressions fail before the fix and pass afterward: adding a view,
+reordering distinct layer/style settings, and replacing external values with
+unchanged membership. No missing-value fallback was added to the template.
+
+The focused gate passes 4 files / 28 tests; the whole official suite passes
+129 files / 1,387 tests. Lint exits 0 with 0 errors / 8 warnings. Evidence:
+`map-panel-projection-before.log`, `map-panel-projection-gate.log`,
+`full-suite-map-panel-final.log` and `lint-map-panel-final.log`. Catalog output is
+unchanged. The canonical guide now explicitly records the current splitter cost:
+ordered membership changes preserve logical values but recreate renderer
+components, so their new generations reject captured obsolete work.
+
 The parent independently verified earlier checkpoints:
 
 - `d7048247`: 180-test state/URL/identity gate, profiling build and native browser

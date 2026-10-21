@@ -638,7 +638,7 @@ export class MapPanelComponent {
         this.mapPresetService.presets$,
         this.stylePresetProjectionChanges,
         this.mapService.layerStateChanged.pipe(
-            filter(reason => reason === "visibility"),
+            filter(reason => reason === "visibility" || reason === "external-state"),
             startWith("visibility")
         )
     ]).pipe(
@@ -1413,9 +1413,8 @@ export class MapPanelComponent {
         return `${node.mapId}-${node.layerId}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
     }
 
-    /** Adds another synchronized map view up to the current supported limit. */
+    /** Adds the comparison view exposed by the Maps panel's two-view controls. */
     addView() {
-        // Limit the increment for now since we do not yet support more than 2 views
         if (this.viewSettings.numViews < 2) {
             this.viewSettings.numViews += 1;
         }

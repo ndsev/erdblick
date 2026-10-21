@@ -166,9 +166,13 @@ snapshots. Corrupt saved identity/count fields recover individually, preserving
 other saved state. Explicit invalid URL/snapshot IDs remain strict errors.
 
 Renderer registrations pair logical IDs with runtime generations. Removing and
-restoring a URL ID invalidates captured async work. Reorder preserves the live
-renderer and resolves its current index at commit. Feature navigation without an
-explicit view still addresses every matching visible view, with focused fallback.
+restoring a URL ID invalidates captured async work. Reorder preserves logical
+camera, layer and option associations. The current PrimeNG splitter recreates
+renderer components whenever ordered membership changes, including a reorder;
+replacement renderers receive new generations. Async work resolves the current
+index only if its captured renderer generation is still live. Feature navigation
+without an explicit view still addresses every matching visible view, with
+focused fallback.
 
 ## Catalog and verification
 
