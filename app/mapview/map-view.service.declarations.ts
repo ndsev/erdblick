@@ -146,7 +146,7 @@ export const mapViewControls = {
     layer: {
         name: "view.layer",
         description:
-            "Read/write one layer's visibility, requested level and automatic level policy. Select viewId/mapId/layerId. Read this channel first, then assign {visible, level, autoLevel}, preserving fields you do not want to change.",
+            "Read/write one layer's visibility, requested level and automatic level policy. Select viewId/mapId/layerId. Read this control first, then assign {visible, level, autoLevel}, preserving fields you do not want to change.",
         selectorSchema: layerSelectorSchema,
         valueSchema: layerConfigSchema,
         readable: true,

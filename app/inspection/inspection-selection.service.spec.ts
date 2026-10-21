@@ -4,6 +4,7 @@ import {InspectionStateService} from "./inspection-state.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
 import {AppStateService} from "../shared/appstate.service";
+import {AppLayoutService} from "../shared/app-layout.service";
 import "@angular/compiler";
 import {BehaviorSubject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
@@ -14,6 +15,33 @@ import {InspectionSelectionService} from "./inspection-selection.service";
 import type {InspectionPanelModel, TileFeatureId} from "./inspection-state.model";
 
 const feature = (featureId: string, mapTileKey: string): TileFeatureId => ({featureId, mapTileKey});
+
+/** Actual persisted owners for assertions about one complete inspection publication. */
+function coherentInspectionHarness() {
+    const injector = ownerTestInjector([
+        MapViewStateService, AppLayoutService, InspectionStateService,
+        {provide: ViewLayerDiagnosticsService, useValue: {}}
+    ]);
+    injector.get(MapViewStateService);
+    const inspections = injector.get(InspectionStateService);
+    const layout = injector.get(AppLayoutService);
+    const service = runInInjectionContext(injector, () => new InspectionSelectionService(
+        injector.get(AppStateService),
+        {parseMapPartitionKeySafe: () => ["Map", "Layer", 42]} as never,
+        {} as never,
+        {registerShortcut() {}} as never,
+        {showWarning() {}} as never,
+        {run: (callback: () => unknown) => callback()} as never
+    ));
+    const observed: unknown[] = [];
+    const subscription = inspections.selectionState.subscribe(panels => observed.push({
+        features: panels.map(panel => panel.features.map(item => item.featureId)),
+        locked: panels.map(panel => panel.locked),
+        colors: panels.map(panel => panel.color),
+        dockOpen: layout.isDockOpen
+    }));
+    return {service, inspections, observed, subscription};
+}
 
 function createHarness(
     limit: number,
@@ -95,6 +123,42 @@ function createHarness(
 }
 
 describe("InspectionSelectionService multi-inspection", () => {
+    it("publishes a direct multi-inspection with all requested locks and the dock together", () => {
+        const {service, inspections, observed, subscription} = coherentInspectionHarness();
+        const priorPanels = inspections.selectionState.signal();
+
+        service.inspectFeatureIds([
+            feature("first", "Features:Map:Layer:42"),
+            feature("second", "Features:Map:Layer:42")
+        ], true);
+
+        expect(observed).toEqual([
+            {features: [], locked: [], colors: [], dockOpen: false},
+            {features: [["first"], ["second"]], locked: [true, true],
+                colors: [expect.any(String), expect.any(String)], dockOpen: true}
+        ]);
+        expect(priorPanels).toEqual([]);
+        subscription.unsubscribe();
+    });
+
+    it("publishes a resolved grouped inspection with its requested lock and color in one revision", async () => {
+        const {service, observed, subscription} = coherentInspectionHarness();
+
+        const result = await service.inspect({
+            features: [feature("first", "Features:Map:Layer:42"), feature("second", "Features:Map:Layer:42")],
+            newPanel: true,
+            lock: true,
+            color: "#123456"
+        });
+
+        expect(result).toMatchObject({status: "applied", complete: true, panelIds: [0]});
+        expect(observed).toEqual([
+            {features: [], locked: [], colors: [], dockOpen: false},
+            {features: [["first", "second"]], locked: [true], colors: ["#123456"], dockOpen: true}
+        ]);
+        subscription.unsubscribe();
+    });
+
     it("uses the same native bounds for single/multi-feature fits and unwraps the antimeridian", () => {
         const {service} = createHarness(3);
         const wrapper = (x: number, y = 40) => ({peek: (callback: (value: unknown) => unknown) => callback({

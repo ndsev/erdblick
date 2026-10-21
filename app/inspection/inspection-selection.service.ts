@@ -307,64 +307,67 @@ export class InspectionSelectionService {
 
     /**
      * Opens one inspection per exact rendered-feature hit, bounded by the configured panel limit.
+     * Panel creation, locking and dock state publish together before wrapper loading begins.
      * The warning reports logical features after merged-object expansion, not raw render objects.
      */
     inspectFeatureIds(tileFeatureIds: TileFeatureId[], lockNewPanels = false): MultiInspectionResult {
-        const featureIds = this.uniqueTileFeatureIds(tileFeatureIds);
-        const foundFeatureCount = featureIds.length;
-        if (!foundFeatureCount) {
-            return {foundFeatureCount: 0, inspectedFeatureCount: 0};
-        }
-
-        if (foundFeatureCount === 1) {
-            const currentPanels = this.inspectionState.selection;
-            const featureAlreadyInspected = this.panelsContainFeature(currentPanels, featureIds[0]);
-            const reusableFeaturePanel = currentPanels.some((panel) => panel.sourceData === undefined && !panel.locked);
-            if (
-                featureAlreadyInspected ||
-                reusableFeaturePanel ||
-                currentPanels.length < this.inspectionState.inspectionsLimit
-            ) {
-                const panelId = this.inspectionState.setSelection([featureIds[0]], undefined, lockNewPanels);
-                if (lockNewPanels && panelId !== undefined) {
-                    this.inspectionState.setInspectionPanelLockedState(panelId, true);
-                }
+        return this.stateService.transaction(() => {
+            const featureIds = this.uniqueTileFeatureIds(tileFeatureIds);
+            const foundFeatureCount = featureIds.length;
+            if (!foundFeatureCount) {
+                return {foundFeatureCount: 0, inspectedFeatureCount: 0};
             }
-        } else {
-            // Match the existing merged-feature flow: preserve pinned/source-data panels and
-            // create one new inspection panel for each candidate that still fits.
-            this.inspectionState.unsetUnlockedSelections();
-            let remainingSlots = Math.max(
-                0,
-                this.inspectionState.inspectionsLimit - this.inspectionState.selection.length
-            );
-            for (const featureId of featureIds) {
-                if (this.panelsContainFeature(this.inspectionState.selection, featureId)) {
-                    continue;
-                }
-                if (remainingSlots <= 0) {
-                    break;
-                }
-                const panelId = this.inspectionState.setSelection([featureId], undefined, true);
-                if (panelId !== undefined) {
-                    remainingSlots -= 1;
-                    if (lockNewPanels) {
+
+            if (foundFeatureCount === 1) {
+                const currentPanels = this.inspectionState.selection;
+                const featureAlreadyInspected = this.panelsContainFeature(currentPanels, featureIds[0]);
+                const reusableFeaturePanel = currentPanels.some((panel) => panel.sourceData === undefined && !panel.locked);
+                if (
+                    featureAlreadyInspected ||
+                    reusableFeaturePanel ||
+                    currentPanels.length < this.inspectionState.inspectionsLimit
+                ) {
+                    const panelId = this.inspectionState.setSelection([featureIds[0]], undefined, lockNewPanels);
+                    if (lockNewPanels && panelId !== undefined) {
                         this.inspectionState.setInspectionPanelLockedState(panelId, true);
                     }
                 }
+            } else {
+                // Match the existing merged-feature flow: preserve pinned/source-data panels and
+                // create one new inspection panel for each candidate that still fits.
+                this.inspectionState.unsetUnlockedSelections();
+                let remainingSlots = Math.max(
+                    0,
+                    this.inspectionState.inspectionsLimit - this.inspectionState.selection.length
+                );
+                for (const featureId of featureIds) {
+                    if (this.panelsContainFeature(this.inspectionState.selection, featureId)) {
+                        continue;
+                    }
+                    if (remainingSlots <= 0) {
+                        break;
+                    }
+                    const panelId = this.inspectionState.setSelection([featureId], undefined, true);
+                    if (panelId !== undefined) {
+                        remainingSlots -= 1;
+                        if (lockNewPanels) {
+                            this.inspectionState.setInspectionPanelLockedState(panelId, true);
+                        }
+                    }
+                }
             }
-        }
 
-        const inspectedFeatureCount = featureIds.filter((featureId) =>
-            this.panelsContainFeature(this.inspectionState.selection, featureId)
-        ).length;
-        if (inspectedFeatureCount < foundFeatureCount) {
-            this.messageService.showWarning(
-                `Inspecting ${inspectedFeatureCount} features out of ${foundFeatureCount} found features. ` +
-                    "Decrease the selection or increase your max inspections limit to see more."
-            );
-        }
-        return {foundFeatureCount, inspectedFeatureCount};
+            const inspectedFeatureCount = featureIds.filter((featureId) =>
+                this.panelsContainFeature(this.inspectionState.selection, featureId)
+            ).length;
+            if (inspectedFeatureCount < foundFeatureCount) {
+                this.messageService.showWarning(
+                    `Inspecting ${inspectedFeatureCount} features out of ${foundFeatureCount} found features. ` +
+                        "Decrease the selection or increase your max inspections limit to see more."
+                );
+            }
+            return {foundFeatureCount, inspectedFeatureCount};
+        });
     }
 
     /** Deduplicates full map-tile/feature identities without changing traversal order. */
@@ -790,7 +793,7 @@ export class InspectionSelectionService {
     ): Promise<ViewerActionOutput<"viewer_inspect">> {
         if (input.color !== undefined && !input.newPanel)
             rejectAction(
-                "color requires newPanel:true; use inspection.panel state to recolor an existing panel",
+                "color requires newPanel:true; use inspection.panel control to recolor an existing panel",
                 "invalid_arguments"
             );
         if (input.panelId !== undefined && input.newPanel)
@@ -800,7 +803,7 @@ export class InspectionSelectionService {
             if (!panel || panel.locked || panel.sourceData)
                 rejectAction("An explicit target must be an existing unlocked feature panel");
         }
-        // Selection setters can mutate the same array in place; reference equality is not a change guard.
+        // Any panel edit during feature resolution invalidates this pending inspection intent.
         let changed: boolean;
         const guard = this.inspectionState.selectionState.subscribe(() => {
             changed = true;
@@ -814,7 +817,7 @@ export class InspectionSelectionService {
         } finally {
             guard.unsubscribe();
         }
-        return this.ngZone.run(() => {
+        return this.ngZone.run(() => this.stateService.transaction(() => {
             let newPanelId: number | undefined;
             if (input.panelId !== undefined || input.newPanel) {
                 newPanelId = this.inspectionState.setSelection(features, input.panelId, input.newPanel ?? false);
@@ -849,7 +852,7 @@ export class InspectionSelectionService {
                 complete: represented.length === features.length,
                 ...(represented.length < features.length ? {reason: "item_limit" as const} : {})
             };
-        });
+        }));
     }
 
     /** Owns cancellation only until the camera commit; human edits, layout changes and retired renderers win. */
