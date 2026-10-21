@@ -232,7 +232,13 @@ test('native MCP starts, styles, exports and inspects a real search through the 
     const layer = {mapId: TEST_MAP_NAMES[0], layerId: TEST_LAYER_NAMES[0]};
     await call('viewer_set_control', {target: {control: 'view.layer', viewId: 'left', ...layer},
         value: {visible: true, level: 13, autoLevel: false}});
-    expect(await call('viewer_list_layers', {viewId: 'left', mapId: layer.mapId})).toMatchObject({items: [{visible: true, available: true}]});
+    // Discovery lists every layer in the map. Check the layer we changed even
+    // when the native fixture also exposes its referenced intersection layer.
+    expect(await call('viewer_list_layers', {viewId: 'left', mapId: layer.mapId})).toMatchObject({
+        items: expect.arrayContaining([expect.objectContaining({
+            id: layer.layerId, visible: true, available: true
+        })])
+    });
     await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThan(0);
     // Visibility must change rendered geometry, not only the persisted/catalog flag.
     const styleCatalog = viewerResult('viewer_list_styles', await call('viewer_list_styles', { limit: 100}));
