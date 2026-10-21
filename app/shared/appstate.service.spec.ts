@@ -1,6 +1,5 @@
 import "@angular/compiler";
 import { stateOwners } from '../../test/state-owners';
-import { RenderPreferencesService } from "../mapview/render-preferences.service";
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { Subject } from 'rxjs';
 
@@ -86,7 +85,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         // Trigger initial hydration (service wires up after first NavigationEnd)
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -121,7 +119,6 @@ describe('AppStateService', () => {
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -137,7 +134,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -166,7 +162,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         await expect(service.replaceUrlState({ v2: '1' })).rejects.toThrow('before AppStateService is ready');
         expect(routerStub.navigate).not.toHaveBeenCalled();
@@ -179,7 +174,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).inspectionState.selection = [{
             id: 0,
             features: [feature(
@@ -212,7 +206,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).inspectionState.selection = [{
             id: 0,
             features: [feature(
@@ -246,7 +239,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).inspectionState.selection = [{
             id: 0,
             features: [
@@ -283,7 +275,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).inspectionState.selection = [{
             id: 0,
             features: [feature(
@@ -364,7 +355,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         expect(stateOwners(service).inspectionState.drillPickRadius).toBe(3);
 
@@ -387,7 +377,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         expect(stateOwners(service).viewSettings.featureZoomClearanceMeters).toBe(20);
 
@@ -424,7 +413,6 @@ describe('AppStateService', () => {
             infoServiceStub()
         );
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -492,7 +480,6 @@ describe('AppStateService', () => {
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -518,7 +505,6 @@ describe('AppStateService', () => {
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -558,7 +544,6 @@ describe('AppStateService', () => {
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -618,7 +603,6 @@ describe('AppStateService', () => {
         });
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -638,7 +622,6 @@ describe('AppStateService', () => {
         });
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -664,7 +647,6 @@ describe('AppStateService', () => {
         });
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -695,7 +677,6 @@ describe('AppStateService', () => {
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -735,7 +716,6 @@ describe('AppStateService', () => {
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         service.initializePersistence();
         await flushMicrotasks();
@@ -764,7 +744,6 @@ describe('AppStateService', () => {
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).viewSettings.numViews = 2;
 
         service.initializePersistence();
@@ -787,7 +766,6 @@ describe('AppStateService', () => {
         });
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const params = (service as any).serializeUrlV2();
         expect(params.s).toBeUndefined();
@@ -802,7 +780,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         const restoreRouter = createRouterStub();
         let restored: AppStateService | undefined;
         try {
@@ -847,7 +824,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).layerState.layerNamesState.next(['MapA/Lane', 'MapC/POI']);
         stateOwners(service).layerState.layerVisibilityState.next(0, [true, false]);
@@ -891,7 +867,6 @@ describe('AppStateService', () => {
         });
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -915,7 +890,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).layerState.layerNamesState.next(['MapA/Lane']);
         stateOwners(service).layerState.layerVisibilityState.next(0, [false]);
@@ -942,7 +916,6 @@ describe('AppStateService', () => {
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         const stateApplied = vi.fn();
         service.stateApplied.subscribe(stateApplied);
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
@@ -980,7 +953,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -996,7 +968,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1030,7 +1001,6 @@ describe('AppStateService', () => {
         } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).coordinates.setMarkerPosition(Cartographic.fromDegrees(11.25, 48.5, 127.75));
 
@@ -1044,7 +1014,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1061,7 +1030,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1090,7 +1058,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1107,7 +1074,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1140,7 +1106,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const destination = Cartographic.fromDegrees(11.25, 48.5, 987654);
         const orientation = { heading: 1.25, pitch: -0.75, roll: 0.125 };
@@ -1186,7 +1151,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).layerState.layerNamesState.next(['m1/layerA']);
         stateOwners(service).layerState.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
@@ -1206,7 +1170,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).viewSettings.numViews = 2;
         stateOwners(service).layerState.layerNamesState.next(['m1/layerA']);
         for (const index of [0, 1]) {
@@ -1272,7 +1235,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).viewSettings.numViewsState.next(3);
         const camera = { ...stateOwners(service).viewSettings.cameraViewDataState.getValue(2), position: [1, 2, 3] as [number, number, number] };
         const defaultBackground = stateOwners(service).viewSettings.backgroundState.getValue(2);
@@ -1288,7 +1250,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).layerState.layerNamesState.next(['m1/layerA']);
         stateOwners(service).viewSettings.numViews = 2;
         const nextSpy = vi.spyOn(stateOwners(service).layerState.stylesState, 'next');
@@ -1322,7 +1283,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).layerState.layerNamesState.next(['m1/layerA']);
 
         expect(() => stateOwners(service).layerState.setStyleOptionValuesBatch([
@@ -1351,7 +1311,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).viewSettings.numViews = 2;
 
         stateOwners(service).layerState.setLayerPresetSelection(0, 'Vendor/Map', 'Lane', {
@@ -1392,7 +1351,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const errors = service.seedConfigDefaultState({ mapPresets: [{ id: 'legacy' }] }, 'map-preset-config');
 
@@ -1415,7 +1373,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         service.initializePersistence();
 
@@ -1432,7 +1389,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         expect(stateOwners(service).inspectionState.hoverLabelsEnabled).toBe(true);
         expect(stateOwners(service).inspectionState.hoverLabelFields).toEqual([{
@@ -1452,7 +1408,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).layerState.layerNamesState.next(['m1/layerA']);
         stateOwners(service).layerState.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
@@ -1508,7 +1463,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1525,7 +1479,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).viewSettings.numViews = 2;
 
         const destination = new Cartographic(Math.PI / 2, Math.PI / 4, 500);
@@ -1546,7 +1499,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const destination = Cartographic.fromDegrees(11.141985707869166, 48.002375728153766, 123.123456789123);
         const orientation = { heading: 1.123456789, pitch: -2.987654321, roll: 3.000000009 };
@@ -1580,7 +1532,6 @@ describe('AppStateService', () => {
             infoServiceStub
         );
         stateOwners(restoredService);
-        const restoredServiceRenderPreferences = stateOwners(restoredService).renderPreferences;
         stateOwners(restoredService).viewSettings.cameraViewDataState.appState.deserialize(storageState!['cameraView']!);
         expect(stateOwners(restoredService).viewSettings.cameraViewDataState.getValue(0).position)
             .toEqual([1.12345679, -2.98765432, 3.00000001]);
@@ -1601,7 +1552,6 @@ describe('AppStateService', () => {
         });
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1616,7 +1566,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).viewSettings.numViews = 2;
         stateOwners(service).viewSettings.focusedView = 0;
         const orientation = { heading: 0.25, pitch: -0.5, roll: 0 };
@@ -1663,7 +1612,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -1706,7 +1654,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         // Trigger initial hydration (service wires up after first NavigationEnd)
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
@@ -1753,7 +1700,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1769,7 +1715,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const config = stateOwners(service).layerState.materializeLayerDefaults('m1', 'layerA', false, 9);
 
@@ -1791,7 +1736,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         // Prime internal state so indices exist before updating.
         stateOwners(service).layerState.materializeLayerDefaults('m2', 'layerB');
@@ -1818,7 +1762,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [feature('old-docked')], locked: false, size: [30, 20], color: '#111111', undocked: false },
@@ -1855,7 +1798,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [feature('old-first')], locked: false, size: [30, 20], color: '#111111', undocked: false },
@@ -1880,7 +1822,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -1905,7 +1846,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -1932,7 +1872,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).layout.dockActiveTab = 'search';
         stateOwners(service).layout.isDockOpen = false;
@@ -1952,7 +1891,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).layout.dockActiveTab = 'search';
         stateOwners(service).layout.isDockOpen = true;
@@ -1976,7 +1914,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             {
@@ -2019,7 +1956,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             {
@@ -2048,7 +1984,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         const expandedNodes = new Map<string, boolean | undefined>([['root', true], ['child', false]]);
         const restoreSnapshot = new Map<string, boolean | undefined>([['root', false]]);
 
@@ -2082,7 +2017,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).inspectionState.selection = [{
             id: 7,
             features: [],
@@ -2112,7 +2046,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -2142,7 +2075,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).layout.isDockOpen = false;
         stateOwners(service).inspectionState.selection = [
@@ -2161,7 +2093,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:1'), locked: false, size: [30, 40], color: '#111111', undocked: true },
@@ -2185,7 +2116,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [feature('feature-panel')], locked: false, size: [30, 20], color: '#111111', undocked: false },
@@ -2209,7 +2139,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [feature('feature-panel')], locked: false, size: [30, 20], color: '#111111', undocked: false },
@@ -2235,7 +2164,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [feature('remove-me')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -2257,7 +2185,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -2280,7 +2207,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const duplicated = feature('same-feature');
         stateOwners(service).inspectionState.selection = [
@@ -2312,7 +2238,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [feature('remove-me')], locked: false, size: [30, 20], color: '#111111', undocked: false },
@@ -2337,7 +2262,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [feature('remove-a')], locked: false, size: [30, 20], color: '#111111', undocked: false },
@@ -2375,7 +2299,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 11, features: [], locked: false, size: [30, 40], color: '#111111', undocked: true },
@@ -2406,7 +2329,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -2447,7 +2369,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -2489,7 +2410,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -2547,7 +2467,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).inspectionState.selection = [
             { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -2588,7 +2507,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         expect(service.seedConfigDefaultState({
             connectionRetryInitialDelayMs: 7000,
             connectionRetryMaxDelayMs: 90000
@@ -2637,7 +2555,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).coordinates.markerState.next(true);
         stateOwners(service).layerState.layerNamesState.next(['m1/layerA']);
@@ -2658,7 +2575,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).layout.openDialog('advanced-preferences-dialog');
         const snapshot = service.exportSnapshot();
@@ -2673,7 +2589,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).coordinatePolicy.coordinatesEnabledState.next(false);
         stateOwners(service).coordinatePolicy.coordinatesLegalTermsAcceptedState.next(true);
@@ -2694,7 +2609,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const errors = service.importSnapshot({
             dialogLayouts: {
@@ -2718,7 +2632,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const errors = service.importSnapshot({
             styleEditorTarget: 'generic',
@@ -2750,7 +2663,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).coordinates.markerState.next(false);
         const errors = service.importSnapshot({
@@ -2770,7 +2682,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         stateOwners(service).coordinates.markerState.next(false);
 
@@ -2790,7 +2701,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
         stateOwners(service).layout.mapsOpenState.next(true);
@@ -2809,7 +2719,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         expect(() => service.replaceSnapshotState({ marker: true }))
             .toThrow('before AppStateService is ready');
@@ -2822,7 +2731,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
         const stateApplied = vi.fn();
@@ -2846,7 +2754,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -2890,7 +2797,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const errors = service.importSnapshot({
             layerNames: ['m1/layerA'],
@@ -2910,7 +2816,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const errors = service.importSnapshot({
             marker: true,
@@ -2930,7 +2835,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const payload = JSON.parse('{"marker": true, "__proto__": {"polluted": true}}');
         const errors = service.importSnapshot(payload);
@@ -2948,7 +2852,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const payload = JSON.parse('{"styleOptions": {"valid/key": [true], "__proto__": {"polluted": true}}}');
         const errors = service.importSnapshot(payload);
@@ -2966,7 +2869,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const payload = JSON.parse('{"styleOptions": {"constructor": {"prototype": {"polluted": true}}}}');
         const errors = service.importSnapshot(payload);
@@ -2984,7 +2886,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         const limits = service.getSnapshotImportLimits();
 
         const errors = service.importSnapshot({
@@ -3003,7 +2904,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
         const limits = service.getSnapshotImportLimits();
 
         const deepValue: Record<string, unknown> = {};
@@ -3090,7 +2990,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const errors = service.seedConfigDefaultState({
             marker: true,
@@ -3112,7 +3011,6 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const errors = service.seedConfigDefaultState({ coordinatesEnabled: false }, "coordinates-cfg");
         expect(errors).toEqual([]);
@@ -3133,7 +3031,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         service.seedConfigDefaultState({ marker: true }, "cfg-hash-2");
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
@@ -3162,7 +3059,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         service.seedConfigDefaultState({ marker: true }, "cfg-hash-3");
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
@@ -3191,7 +3087,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         service.seedConfigDefaultState({ marker: true }, "cfg-hash-4");
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
@@ -3220,7 +3115,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         service.seedConfigDefaultState({ marker: false }, "cfg-hash-5");
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
@@ -3238,7 +3132,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const errors = service.seedConfigDefaultState({ marker: ["bad"] }, "cfg-hash-6");
         expect(errors.length).toBeGreaterThan(0);
@@ -3259,7 +3152,6 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
-        const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
         const errors = service.seedConfigDefaultState({}, "cfg-hash-empty");
         expect(errors).toEqual([]);

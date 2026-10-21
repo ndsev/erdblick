@@ -50,7 +50,7 @@ The table below lists all query parameters used by erdblick when encoding or res
 | Parameter | Scope | Description |
 | --- | --- | --- |
 | `n` | Global | Number of active map views (1–32). The ordinary split-view UI opens two. |
-| `vid` | Global | Ordered, comma-separated logical view IDs. Each ID has 1–64 ASCII letters, digits, underscores or hyphens; Object.prototype names are reserved. IDs must be unique and match `n`. |
+| `vid` | Global | Ordered, comma-separated logical view IDs. Each ID has 1–64 ASCII letters, digits, underscores or hyphens; Object.prototype names are reserved. IDs must be unique and match `n` if it is supplied; otherwise the ID list determines the count. |
 | `lon`, `lat`, `alt` | Per view | Camera destination (degrees and meters). Values are encoded per view; with multiple views they are stored as colon-separated lists. |
 | `h`, `p`, `r` | Per view | Camera orientation in radians (heading, pitch, roll), encoded in the same way as `lon`/`lat`/`alt`. |
 | `px`, `py`, `pz` | Per view | Optional local map-centre offset in metres accepted for backward-compatible/exact input. Active target navigation may transiently use a nonzero offset, but ordinary settled state is re-expressed as an equivalent ground-centred camera with zero offset. Legacy links that omit these fields also use zero. |
