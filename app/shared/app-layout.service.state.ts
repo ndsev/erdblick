@@ -31,7 +31,7 @@ export const ownerState = {
     viewPanelSizes: {
         name: "viewPanelSizes",
         defaultValue: [],
-        schema: z.array(z.number().min(0).max(100)).max(2)
+        schema: z.array(z.number().min(0).max(100)).max(32)
     } satisfies AppStateOptions<AppLayoutServiceValues["viewPanelSizes"]>,
 
     dockActiveTab: {

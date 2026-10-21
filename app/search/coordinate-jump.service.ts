@@ -1,6 +1,8 @@
 import {inject, Injectable} from "@angular/core";
-import {AppActionService} from "../actions/app-action.service";
-import type {SearchJump, SearchTarget} from "../actions/omnibar";
+import {z} from "zod";
+import {rejectAction} from "../actions/action-utils";
+import {ActionDeclaration, AppActionService} from "../actions/app-action.service";
+import {normalizeSearchJumpResult, SearchJump, SearchJumpResult, SearchTarget} from "../actions/omnibar";
 import {
     packedTileIdFromMortonString,
     packedTileIdFromParsedNdsCoordinates,
@@ -8,8 +10,11 @@ import {
     parseNdsCoordinateString,
     parsePackedTileId as parsePackedTileIdValue
 } from "../coords/nds-coordinate.util";
-import {Rectangle} from "../integrations/geo";
+import {GeoMath, Rectangle} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewService} from "../mapview/map-view.service";
+import {ViewIdentity, viewIdentitySchema} from "../mapview/view-id";
 import {InfoMessageService} from "../shared/info.service";
 
 interface ParsedCoordinateJump extends SearchJump {
@@ -28,14 +33,95 @@ interface ParsedNdsCoordinateLabel {
 /** Owns the six coordinate/tile interpretations offered by the omnibar. */
 @Injectable({providedIn: "root"})
 export class CoordinateJumpService {
+    static readonly actions = {
+        navigate: {
+            name: "omnibar_coordinates",
+            description: "Navigate using one of the six coordinate or packed-tile interpretations.",
+            mutation: true,
+            exposure: "omnibar",
+            inputSchema: z
+                .object({
+                    parser: z.enum([
+                        "j:packed-tile-id",
+                        "j:nds-x-y",
+                        "j:nds-y-x",
+                        "j:morton-code",
+                        "j:wgs84-lon-lat",
+                        "j:wgs84-lat-lon"
+                    ]),
+                    query: z.string().min(1).max(8192),
+                    target: viewIdentitySchema
+                })
+                .strict(),
+            outputSchema: z.void()
+        }
+    } as const satisfies Record<string, ActionDeclaration>;
+
     private readonly messageService = inject(InfoMessageService);
+    private readonly actions = inject(AppActionService);
+    private readonly views = inject(MapViewService);
+    private readonly viewState = inject(MapViewStateService);
+
     constructor() {
-        inject(AppActionService).registerOmnibar("coordinates", (query) => this.targets(query), 30);
+        this.actions.registerAction(CoordinateJumpService.actions.navigate, ({parser, query, target}) => {
+            const interpretation = this.interpretations(query).find((candidate) => candidate.id === parser)!;
+            if (!interpretation.validate(query)) rejectAction("Invalid coordinate input", "invalid_arguments");
+            this.navigate(interpretation.jump!(query), target);
+        });
+        this.actions.registerOmnibar("coordinates", (query) => this.targets(query), 30);
+    }
+
+    /** Bind each parser choice to the same validated navigation operation and a live view lifetime. */
+    targets(query: string): SearchTarget[] {
+        const target = this.viewState.captureView(this.viewState.focusedView)!;
+        const declaration = CoordinateJumpService.actions.navigate;
+        return this.interpretations(query).map(({jump, ...presentation}) =>
+            this.actions.candidate(declaration, {
+                ...presentation,
+                arguments: (input) => ({
+                    parser: declaration.inputSchema.shape.parser.parse(presentation.id),
+                    query: input,
+                    target
+                }),
+                isCurrent: () => this.viewState.isCurrent(target),
+                saveToHistory: () => true
+            })
+        );
+    }
+
+    /** Publish a parsed coordinate/plugin jump through ordinary camera and marker owners. */
+    navigate(result: SearchJumpResult | undefined, target: ViewIdentity, label?: string | null): void {
+        if (result === undefined) rejectAction("Could not parse coordinates from the input", "invalid_arguments");
+        const index = this.viewState.requireCurrentView(target);
+        const jump = normalizeSearchJumpResult(result);
+        const coordinates = jump.target;
+        if (Array.isArray(coordinates)) {
+            const [lat, lon] = coordinates;
+            const alt = coordinates[2] || this.viewState.cameraViewDataState.getValue(index).destination.alt;
+            this.views.moveToWgs84PositionTopic.next({x: lon, y: lat, z: alt, targetView: index});
+            if (label) this.views.showLocationLabelTopic.next({targetView: index, x: lon, y: lat, label});
+        } else {
+            this.views.moveToRectangleTopic.next({
+                targetView: index,
+                rectangle: {
+                    west: GeoMath.toDegrees(coordinates.west),
+                    south: GeoMath.toDegrees(coordinates.south),
+                    east: GeoMath.toDegrees(coordinates.east),
+                    north: GeoMath.toDegrees(coordinates.north)
+                }
+            });
+        }
+        if (jump.markerPosition) {
+            const [lat, lon, alt = 0] = jump.markerPosition;
+            this.viewState.setMarkerControl({enabled: true, position: {lat, lon, alt}});
+        }
     }
 
     /** Builds static search targets for the current input value. */
-    targets(inputValue: string) {
-        const targetsArray: Array<SearchTarget> = [];
+    private interpretations(inputValue: string) {
+        const targetsArray: Array<
+            Omit<SearchTarget, "jump"> & {jump: (value: string) => SearchJumpResult | undefined}
+        > = [];
         const value = inputValue.trim();
 
         /////////// Jump to packed tile id

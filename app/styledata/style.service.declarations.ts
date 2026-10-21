@@ -1,5 +1,5 @@
 import {z} from "zod";
-import {bounded, count, identifierSchema, indexSchema, text} from "../actions/action-schema";
+import {bounded, count, identifierSchema, indexSchema, pageInput, pageOutput, text} from "../actions/action-schema";
 import {boundedUnicodeString} from "../shared/unicode-string.js";
 
 const sourceText = boundedUnicodeString(48000, true);
@@ -74,7 +74,6 @@ export const styleActions = {
     }
 } as const;
 
-import {pageInput, pageOutput} from "../actions/action-schema";
 
 export const styleDiscoveryActions = {
     listStyles: {

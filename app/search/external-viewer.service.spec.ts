@@ -1,11 +1,15 @@
-import {runInInjectionContext} from "@angular/core";
-import {ownerTestInjector} from "../../test/owner-test-injector";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {CoordinateJumpService} from "./coordinate-jump.service";
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
+import {runInInjectionContext} from "@angular/core";
+import {afterEach, describe, expect, it, vi} from "vitest";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {AppActionService} from "../actions/app-action.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewService} from "../mapview/map-view.service";
 import type {AppConfigService, ExternalViewerConfig} from "../shared/app-config.service";
+import {CoordinateJumpService} from "./coordinate-jump.service";
 import {ExternalViewerService} from "./external-viewer.service";
+
+afterEach(() => vi.restoreAllMocks());
 
 const PROVIDERS: ExternalViewerConfig[] = [
     {
@@ -36,6 +40,8 @@ function createService() {
         marker: false,
         markedPosition: [] as number[],
         focusedView: 0,
+        captureView: () => ({id: "test", generation: 1}),
+        isCurrent: () => true,
         cameraViewDataState: {
             getValue: vi.fn((viewIndex: number) => ({
                 destination: viewIndex === 1
@@ -47,13 +53,12 @@ function createService() {
     const configService = {
         snapshot: {externalViewers: PROVIDERS}
     };
-    const injector = ownerTestInjector([CoordinateJumpService, {provide: MapViewStateService, useValue: state}]);
+    const injector = ownerTestInjector([CoordinateJumpService, {provide: MapViewService, useValue: {}}, {provide: MapViewStateService, useValue: state}]);
     return {
         service: runInInjectionContext(injector, () => new ExternalViewerService(
-            (state) as never,
             configService as unknown as AppConfigService
         )),
-        state
+        state, configService, actions: injector.get(AppActionService)
     };
 }
 
@@ -104,6 +109,21 @@ describe("ExternalViewerService", () => {
 
         expect(service.resolveLocation()).toEqual({lon: 11.5, lat: 48.1, source: "viewport"});
         expect(state.cameraViewDataState.getValue).toHaveBeenCalledWith(1);
+    });
+
+    it("dispatches a candidate synchronously and rejects invalid arguments or a replaced provider", async () => {
+        const {actions, configService} = createService();
+        const open = vi.spyOn(window, "open").mockReturnValue(null);
+        const candidate = actions.omnibarTargets("48, 11").find(target => target.id === "e:gm")!;
+        const pending = candidate.execute!("48, 11");
+        expect(open).toHaveBeenCalledOnce();
+        await pending;
+        expect(() => actions.execute("omnibar_external_viewer", {providerId: "e:gm", location: {lat: 100, lon: 11}}))
+            .toThrow("Arguments do not match");
+        configService.snapshot = {externalViewers: PROVIDERS.map(provider => ({...provider}))};
+        expect(candidate.validate("48, 11")).toBe(false);
+        await expect(candidate.execute!("48, 11")).rejects.toThrow("no longer available");
+        expect(open).toHaveBeenCalledOnce();
     });
 
     it("opens the provider synchronously in a noopener tab", () => {

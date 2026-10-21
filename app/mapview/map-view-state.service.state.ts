@@ -219,7 +219,11 @@ export const ownerState = {
     } satisfies AppStateOptions<MapViewStateServiceValues["tilesLoadLimit"]>
 };
 
-/** The application composes this feature; its owner binds codecs to these same declarations. */
+/**
+ * The store starts with no live view records. registerView materializes each UI pane from
+ * its declaration's per-view default when MapViewStateService establishes membership.
+ * The owner binds those same declarations to storage/URL codecs; there is no second set of defaults.
+ */
 export function withMapViewState() {
     return signalStoreFeature(
         withState(() => {

@@ -109,7 +109,12 @@ export class MapViewStateService {
         const current = this.membership.read();
         const next = current.slice(0, count);
         while (next.length < count) next.push(this.newViewId());
-        this.membership.write(next);
+        this.copySourceId = current.at(-1);
+        try {
+            this.membership.write(next);
+        } finally {
+            this.copySourceId = undefined;
+        }
     }
 
     /** Creates one view using an explicit live source for camera, layers, styles and search visibility. */
@@ -182,7 +187,7 @@ export class MapViewStateService {
     /** Resolve missing identity once, before any positional URL importer runs. */
     private prepareUrl(params: Params, resetMissing: boolean): Params {
         const hasIds = Object.prototype.hasOwnProperty.call(params, "vid");
-        const count =
+        let count =
             params["n"] === undefined
                 ? resetMissing
                     ? 1
@@ -193,6 +198,7 @@ export class MapViewStateService {
             const raw = params["vid"];
             if (Array.isArray(raw)) throw new Error("vid must occur once as an ordered CSV array");
             ids = this.idSchema.parse(String(raw).split(","));
+            if (params["n"] === undefined) count = ids.length;
             if (ids.length !== count) throw new Error("The view-ID count must match the effective number of views");
         } else {
             // A legacy link has positional values, so reuse the current mapping for

@@ -5,7 +5,11 @@ import {InspectionStateService} from "../inspection/inspection-state.service";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {MapViewService} from "../mapview/map-view.service";
+import {CoordinateJumpService} from "../search/coordinate-jump.service";
+import {ExternalViewerService} from "../search/external-viewer.service";
 import {FeatureSearchService} from "../search/feature.search.service";
+import {JumpTargetService} from "../search/jump.service";
+import {LocationNavigationService} from "../search/location-navigation.service";
 import {AppConfigService} from "../shared/app-config.service";
 import {AppUrlStateService} from "../shared/app-url-state.service";
 import {StyleService} from "../styledata/style.service";
@@ -36,6 +40,15 @@ export const actionDeclarations = [
     ...Object.values(DiagnosticsFacadeService.actions),
     ...Object.values(ViewerUiService.actions),
     ...Object.values(AppConfigService.actions)
+] as const;
+
+/** Fixed local operations join startup verification but are deliberately absent from the MCP artifact. */
+export const omnibarActionDeclarations = [
+    ...Object.values(CoordinateJumpService.actions),
+    ...Object.values(ExternalViewerService.actions),
+    ...Object.values(JumpTargetService.actions),
+    ...Object.values(LocationNavigationService.actions),
+    ...Object.values(FeatureSearchService.omnibarActions)
 ] as const;
 if (
     new Set(actionDeclarations.map((action) => action.name)).size !== actionDeclarations.length ||

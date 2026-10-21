@@ -7,7 +7,7 @@ const uid = z
     .max(48);
 const text = boundedUnicodeString(512);
 const pixels = z.number().positive().max(32768);
-const percentages = z.array(z.number().positive().max(100)).min(2).max(2);
+const percentages = z.array(z.number().positive().max(100)).min(2).max(32);
 export const viewerResizeSizeSchema = z.union([
     z.strictObject({widthPx: pixels, heightPx: pixels.optional()}),
     z.strictObject({heightPx: pixels, widthPx: pixels.optional()}),

@@ -11,7 +11,6 @@ import {
 } from "@angular/core";
 import {debounce, debounceTime, distinctUntilChanged, Subject, Subscription, switchMap, timer} from "rxjs";
 import {AppActionService} from "../actions/app-action.service";
-import {GeoMath} from "../integrations/geo";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {MapViewService} from "../mapview/map-view.service";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
@@ -34,7 +33,7 @@ import {
 import {CoordinateJumpService} from "./coordinate-jump.service";
 import {ExternalViewerService} from "./external-viewer.service";
 import {featureSearchActionPayloadFromCompletion, FeatureSearchService} from "./feature.search.service";
-import {JumpTargetService, normalizeSearchJumpResult, SearchJumpResult, SearchTarget} from "./jump.service";
+import {JumpTargetService, SearchTarget} from "./jump.service";
 import {LocationNavigationService} from "./location-navigation.service";
 import {
     isSupportedLocationSearchQuery,
@@ -259,7 +258,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         // Delay for requesting completion candidates
         completionDelay: 150,
         // Keep completion above Search Actions dialog without using a hardcoded global z-index.
-        zIndex: SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 2000
+        zIndex: SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 2000,
     };
     private acceptedCompletionCandidate: CompletionCandidate | null = null;
     private dismissedCompletionSignature: string | null = null;
@@ -269,16 +268,16 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     mapSelectionVisible: boolean = false;
     mapSelection: Array<string> = [];
 
-    @ViewChild("textarea") textarea!: ElementRef<HTMLTextAreaElement>;
-    @ViewChild("actionsdialog") dialog!: AppDialogComponent;
-    @ViewChild("searchcontrols") private searchControls?: ElementRef<HTMLElement>;
+    @ViewChild('textarea') textarea!: ElementRef<HTMLTextAreaElement>;
+    @ViewChild('actionsdialog') dialog!: AppDialogComponent;
+    @ViewChild('searchcontrols') private searchControls?: ElementRef<HTMLElement>;
 
     cursorPosition: number = 0;
 
     // Selection state preservation for text selection across focus changes
     private savedSelectionStart: number = 0;
     private savedSelectionEnd: number = 0;
-    private savedSelectionDirection: "forward" | "backward" | "none" = "none";
+    private savedSelectionDirection: 'forward' | 'backward' | 'none' = 'none';
 
     /**
      * Computes the static jump targets whose labels depend on the current query string.
@@ -307,17 +306,15 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     ) {
         this.keyboardService.registerShortcut("Ctrl+k", this.searchShortcutHandler);
 
-        this.subscriptions.add(
-            this.jumpService.targetValueSubject.subscribe((event: string) => {
-                this.validateMenuItems();
-            })
-        );
+        this.subscriptions.add(this.jumpService.targetValueSubject.subscribe((event: string) => {
+            this.validateMenuItems();
+        }));
 
         this.subscriptions.add(
             this.jumpService.jumpTargets.subscribe((jumpTargets: Array<SearchTarget>) => {
                 this.setCurrentSearchItems(this.currentSearchItems());
-                this.reloadSearchHistory();
-                this.refreshSearchMenu();
+            this.reloadSearchHistory();
+            this.refreshSearchMenu();
             })
         );
 
@@ -328,31 +325,29 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                     switchMap((query) => this.actions.asyncOmnibarTargets(query))
                 )
                 .subscribe((matches) => {
-                    const completedQuery = this.searchInputValue.trim();
+            const completedQuery = this.searchInputValue.trim();
                     // A cached provider can complete synchronously while Angular is
                     // checking the search-menu ngFor inputs. Publish the replacement
                     // in the next task and discard it if the input has moved on.
                     setTimeout(() => {
-                        if (
-                            this.destroyed ||
-                            this.searchInputValue.trim() !== completedQuery ||
-                            !this.shouldRequestLocationSearch(this.searchInputValue)
-                        ) {
-                            return;
-                        }
+                if (this.destroyed ||
+                    this.searchInputValue.trim() !== completedQuery ||
+                    !this.shouldRequestLocationSearch(this.searchInputValue)) {
+                    return;
+                }
                         this.locationSearchItems = matches;
-                        this.setCurrentSearchItems(this.currentSearchItems());
-                        this.reloadSearchHistory();
-                        this.refreshSearchMenu();
-                        this.changeDetectorRef.markForCheck();
+                this.setCurrentSearchItems(this.currentSearchItems());
+                this.reloadSearchHistory();
+                this.refreshSearchMenu();
+                this.changeDetectorRef.markForCheck();
                     }, 0);
                 })
         );
 
         this.subscriptions.add(
             this.locationSearchService.locationSearchResultLimitState.subscribe(() => {
-                this.updateLocationSearchQuery(this.searchInputValue);
-                this.refreshSearchMenu();
+            this.updateLocationSearchQuery(this.searchInputValue);
+            this.refreshSearchMenu();
             })
         );
 
@@ -361,101 +356,89 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         //  just search all maps simultaneously.
         // NOTE: Currently users must select specific maps to search. Once cross-map
         // multi-selection is implemented, search can operate on all maps at once.
-        this.subscriptions.add(
-            jumpService.mapSelectionSubject.subscribe((maps) => {
-                this.mapSelection = maps;
-                this.mapSelectionVisible = true;
-            })
-        );
+        this.subscriptions.add(jumpService.mapSelectionSubject.subscribe(maps => {
+            this.mapSelection = maps;
+            this.mapSelectionVisible = true;
+        }));
 
-        this.subscriptions.add(
-            this.menuService.lastInspectedTileSourceDataOption.subscribe((lastInspectedData) => {
-                if (
-                    lastInspectedData &&
-                    lastInspectedData.tileId &&
-                    lastInspectedData.mapId &&
-                    lastInspectedData.layerId
-                ) {
-                    const value = `${lastInspectedData?.tileId} "${lastInspectedData?.mapId}" "${lastInspectedData?.layerId}"`;
-                    this.executeAndRememberSearchEntry({
-                        version: 2,
-                        actionId: "source-data",
-                        input: value,
-                        actionName: "Inspect Tile Layer Source Data"
-                    });
-                }
-            })
-        );
+        this.subscriptions.add(this.menuService.lastInspectedTileSourceDataOption.subscribe(lastInspectedData => {
+            if (lastInspectedData && lastInspectedData.tileId && lastInspectedData.mapId && lastInspectedData.layerId) {
+                const value = `${lastInspectedData?.tileId} "${lastInspectedData?.mapId}" "${lastInspectedData?.layerId}"`;
+                this.executeAndRememberSearchEntry({
+                    version: 2,
+                    actionId: "source-data",
+                    input: value,
+                    actionName: "Inspect Tile Layer Source Data"
+                });
+            }
+        }));
 
         this.reloadSearchHistory();
 
-        this.subscriptions.add(
-            this.searchService.completionCandidates
-                .pipe(distinctUntilChanged())
-                .subscribe((value: CompletionCandidate[]) => {
-                    if (this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
-                        this.completionItems = [];
-                        this.completion.visible = false;
-                        this.changeDetectorRef.markForCheck();
-                        return;
-                    }
-                    this.completionItems = value.filter((item, index, array) => {
-                        // Discard any candidate that is equal to the current input
-                        // or does not relate to the current input (e.g. delayed results).
-                        return item.query !== this.searchInputValue && item.source === this.searchInputValue;
-                    });
-
-                    const length = this.completionItems.length;
-                    if (length === 0) {
-                        this.completion.selectionIndex = 0;
-                    } else if (this.completion.selectionIndex >= length) {
-                        this.completion.selectionIndex = length - 1;
-                    }
-
-                    // Only show the pop-up if the pop-up was prev. hidden
-                    // or the currently focused element is the query input.
-                    // This is to prevent the pop-up showing if the user quickly
-                    // tabs out of the query input before the first completion
-                    // items are ready.
-                    const textarea = this.textarea?.nativeElement;
-                    const focusValid =
-                        this.completion.visible || this.completion.pending || textarea === document.activeElement;
-
-                    if (length > 0 && focusValid) {
-                        this.refreshSearchOverlayZIndices();
-                    }
-                    this.completion.visible = length > 0 && focusValid;
-                    this.changeDetectorRef.markForCheck();
-                })
-        );
-
-        this.subscriptions.add(
-            this.searchService.completionPending.pipe(distinctUntilChanged()).subscribe((pending: boolean) => {
-                if (pending && this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
-                    this.completion.pending = false;
-                    this.completion.visible = false;
-                    this.changeDetectorRef.markForCheck();
-                    return;
-                }
-                const textarea = this.textarea?.nativeElement;
-                const focusValid = this.completion.visible || pending || textarea === document.activeElement;
-
-                this.completion.pending = pending && focusValid;
-                if (this.completion.pending) {
-                    this.refreshSearchOverlayZIndices();
-                    this.updateCursor();
-                } else if (this.completionItems.length === 0) {
-                    this.completion.visible = false;
-                }
+        this.subscriptions.add(this.searchService.completionCandidates.pipe(distinctUntilChanged()).subscribe((value: CompletionCandidate[]) => {
+            if (this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
+                this.completionItems = [];
+                this.completion.visible = false;
                 this.changeDetectorRef.markForCheck();
-            })
-        );
+                return;
+            }
+            this.completionItems = value.filter((item, index, array) => {
+                // Discard any candidate that is equal to the current input
+                // or does not relate to the current input (e.g. delayed results).
+                return item.query !== this.searchInputValue && item.source === this.searchInputValue;
+            });
 
-        this.subscriptions.add(
-            this.searchInputChanged.pipe(debounceTime(this.completion.completionDelay)).subscribe(() => {
-                this.completeQuery(this.searchInputValue, this.cursorPosition);
-            })
-        );
+            const length = this.completionItems.length;
+            if (length === 0) {
+                this.completion.selectionIndex = 0;
+            } else if (this.completion.selectionIndex >= length) {
+                this.completion.selectionIndex = length - 1;
+            }
+
+            // Only show the pop-up if the pop-up was prev. hidden
+            // or the currently focused element is the query input.
+            // This is to prevent the pop-up showing if the user quickly
+            // tabs out of the query input before the first completion
+            // items are ready.
+            const textarea = this.textarea?.nativeElement;
+            const focusValid =
+                this.completion.visible ||
+                this.completion.pending ||
+                textarea === document.activeElement;
+
+            if (length > 0 && focusValid) {
+                this.refreshSearchOverlayZIndices();
+            }
+            this.completion.visible = length > 0 && focusValid;
+            this.changeDetectorRef.markForCheck();
+        }));
+
+        this.subscriptions.add(this.searchService.completionPending.pipe(distinctUntilChanged()).subscribe((pending: boolean) => {
+            if (pending && this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
+                this.completion.pending = false;
+                this.completion.visible = false;
+                this.changeDetectorRef.markForCheck();
+                return;
+            }
+            const textarea = this.textarea?.nativeElement;
+            const focusValid =
+                this.completion.visible ||
+                pending ||
+                textarea === document.activeElement;
+
+            this.completion.pending = pending && focusValid;
+            if (this.completion.pending) {
+                this.refreshSearchOverlayZIndices();
+                this.updateCursor();
+            } else if (this.completionItems.length === 0) {
+                this.completion.visible = false;
+            }
+            this.changeDetectorRef.markForCheck();
+        }));
+
+        this.subscriptions.add(this.searchInputChanged.pipe(debounceTime(this.completion.completionDelay)).subscribe(() => {
+            this.completeQuery(this.searchInputValue, this.cursorPosition);
+        }));
     }
 
     /**
@@ -463,25 +446,21 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
      */
     ngAfterViewInit() {
         this.subscriptions.add(
-            this.searchService.fixedDiagnosticsSearchQuery.subscribe((fixedQuery) => this.setSearchValue(fixedQuery))
+            this.searchService.fixedDiagnosticsSearchQuery.subscribe(fixedQuery => this.setSearchValue(fixedQuery))
         );
 
-        this.subscriptions.add(
-            this.dialog.onShow.subscribe(() => {
-                setTimeout(() => {
-                    this.expandTextarea();
-                    this.refreshSearchOverlayZIndices();
-                }, 10);
-            })
-        );
+        this.subscriptions.add(this.dialog.onShow.subscribe(() => {
+            setTimeout(() => {
+                this.expandTextarea();
+                this.refreshSearchOverlayZIndices();
+            }, 10);
+        }));
 
-        this.subscriptions.add(
-            this.dialog.onHide.subscribe(() => {
-                setTimeout(() => {
-                    this.shrinkTextarea();
-                }, 10);
-            })
-        );
+        this.subscriptions.add(this.dialog.onHide.subscribe(() => {
+            setTimeout(() => {
+                this.shrinkTextarea();
+            }, 10);
+        }));
     }
 
     /** Releases subscriptions and global shortcuts when the responsive shell replaces the panel. */
@@ -528,8 +507,8 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             bodyUserSelect: body.style.userSelect
         };
         container.style.width = `${bounds.width}px`;
-        body.style.cursor = getComputedStyle(handle).cursor || "col-resize";
-        body.style.userSelect = "none";
+        body.style.cursor = getComputedStyle(handle).cursor || 'col-resize';
+        body.style.userSelect = 'none';
         handle.setPointerCapture(event.pointerId);
     }
 
@@ -621,13 +600,10 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         if (entry.viewId !== undefined && this.viewStateOwner.indexOf(entry.viewId) < 0) return undefined;
         const locationPayload = normalizeLocationSearchPayload(entry.payload);
         if (locationPayload) {
-            const locationTarget = this.locationSearchService.createSearchTarget(locationPayload);
+            const locationTarget = this.locationNavigation.createTarget(locationPayload);
             if (locationTarget.id === entry.actionId) {
                 return locationTarget;
             }
-        }
-        if (entry.input === this.targetByIdInput) {
-            return this.targetById.get(entry.actionId);
         }
         return this.buildTargetById(this.searchItemsForValue(entry.input)).get(entry.actionId);
     }
@@ -702,8 +678,9 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         let searchHistory: Array<SearchHistoryEntry> = [];
         if (searchHistoryString) {
             const parsed = JSON.parse(searchHistoryString) as unknown;
-            const rawEntries =
-                Array.isArray(parsed) && !(parsed.length === 2 && typeof parsed[1] === "string") ? parsed : [parsed];
+            const rawEntries = Array.isArray(parsed) && !(parsed.length === 2 && typeof parsed[1] === "string")
+                ? parsed
+                : [parsed];
             const seen = new Set<string>();
             for (const rawEntry of rawEntries) {
                 const entry = normalizeResolvedSearchHistoryEntry(rawEntry);
@@ -718,7 +695,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 searchHistory.push(entry);
             }
         }
-        searchHistory = searchHistory.filter((entry) => historyEntryDedupeKey(entry) !== historyEntryDedupeKey(value));
+        searchHistory = searchHistory.filter(entry => historyEntryDedupeKey(entry) !== historyEntryDedupeKey(value));
         searchHistory.unshift(value);
         while (searchHistory.length > 100) {
             searchHistory.pop();
@@ -738,11 +715,10 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         }
 
         const rawSearchHistory = JSON.parse(searchHistoryString) as unknown;
-        const rawEntries =
-            Array.isArray(rawSearchHistory) &&
+        const rawEntries = Array.isArray(rawSearchHistory) &&
             !(rawSearchHistory.length === 2 && typeof rawSearchHistory[1] === "string")
-                ? rawSearchHistory
-                : [rawSearchHistory];
+            ? rawSearchHistory
+            : [rawSearchHistory];
         const migratedEntries: Array<SearchHistoryEntry> = [];
         const seenKeys = new Set<string>();
         let shouldRewrite = false;
@@ -779,8 +755,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             }
             seenKeys.add(dedupeKey);
             migratedEntries.push(refreshedEntry);
-            shouldRewrite ||=
-                entry !== normalized ||
+            shouldRewrite ||= entry !== normalized ||
                 JSON.stringify(refreshedEntry) !== JSON.stringify(normalizeResolvedSearchHistoryEntry(rawEntry));
         }
 
@@ -789,7 +764,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             shouldRewrite = true;
         }
 
-        this.searchHistory = migratedEntries.map((entry) => this.toHistoryViewEntry(entry));
+        this.searchHistory = migratedEntries.map(entry => this.toHistoryViewEntry(entry));
         this.refreshVisibleSearchHistory();
         if (shouldRewrite) {
             this.writeSearchHistory(migratedEntries);
@@ -802,7 +777,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         event?.stopPropagation();
 
         const key = historyEntryKey(entry);
-        this.searchHistory = this.searchHistory.filter((historyEntry) => historyEntryKey(historyEntry) !== key);
+        this.searchHistory = this.searchHistory.filter(historyEntry => historyEntryKey(historyEntry) !== key);
         this.writeSearchHistory(
             this.searchHistory.map((historyEntry) => ({
                 version: 2,
@@ -818,57 +793,10 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     /**
-     * Dispatches the parsed jump target either as a camera move or a rectangle fit request.
-     */
-    jumpToLocation(result: SearchJumpResult | undefined, label?: string | null) {
-        if (result === undefined) {
-            this.messageService.showError("Could not parse coordinates from the input.");
-            return;
-        }
-        const jump = normalizeSearchJumpResult(result);
-        const coordinates = jump.target;
-        const targetViewIndex = this.viewStateOwner.focusedView;
-        if (Array.isArray(coordinates)) {
-            let lat = coordinates[0];
-            let lon = coordinates[1];
-            const cameraView = this.viewStateOwner.cameraViewDataState.getValue(targetViewIndex);
-            let alt = coordinates[2] ? coordinates[2] : cameraView.destination.alt;
-
-            this.mapService.moveToWgs84PositionTopic.next({
-                x: lon,
-                y: lat,
-                z: alt,
-                targetView: targetViewIndex
-            });
-            if (label) {
-                this.mapService.showLocationLabelTopic.next({
-                    targetView: targetViewIndex,
-                    x: lon,
-                    y: lat,
-                    label
-                });
-            }
-        } else {
-            this.mapService.moveToRectangleTopic.next({
-                targetView: targetViewIndex,
-                rectangle: {
-                    west: GeoMath.toDegrees(coordinates.west),
-                    south: GeoMath.toDegrees(coordinates.south),
-                    east: GeoMath.toDegrees(coordinates.east),
-                    north: GeoMath.toDegrees(coordinates.north)
-                }
-            });
-        }
-        if (jump.markerPosition) {
-            this.jumpService.markedPosition.next(jump.markerPosition);
-        }
-    }
-
-    /**
      * Re-evaluates which jump targets are currently executable for the active input.
      */
     validateMenuItems() {
-        this.searchItems.forEach((item) => (item.enabled = this.canRunTarget(item, this.searchInputValue)));
+        this.searchItems.forEach(item => item.enabled = this.canRunTarget(item, this.searchInputValue));
     }
 
     /**
@@ -887,12 +815,12 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     private refreshSearchOverlayZIndices() {
         const container = this.dialog?.container();
         const inlineZIndex = container ? Number.parseInt(container.style.zIndex, 10) : Number.NaN;
-        const computedZIndex = container ? Number.parseInt(window.getComputedStyle(container).zIndex, 10) : Number.NaN;
+        const computedZIndex = container
+            ? Number.parseInt(window.getComputedStyle(container).zIndex, 10)
+            : Number.NaN;
         const dialogZIndex = Number.isFinite(inlineZIndex)
             ? inlineZIndex
-            : Number.isFinite(computedZIndex)
-              ? computedZIndex
-              : SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX;
+            : (Number.isFinite(computedZIndex) ? computedZIndex : SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX);
         this.searchResizeHandleZIndex = dialogZIndex + 1;
         this.completion.zIndex = dialogZIndex + 2000;
         this.changeDetectorRef.markForCheck();
@@ -959,25 +887,22 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             return;
         }
         this.visibleSearchHistory = Object.values(
-            this.searchHistory.reduce(
-                (acc, obj) => {
-                    if (obj.input.includes(value)) {
-                        const key = historyEntryDedupeKey(obj);
-                        if (!acc[key]) {
-                            acc[key] = obj;
-                        }
+            this.searchHistory.reduce((acc, obj) => {
+                if (obj.input.includes(value)) {
+                    const key = historyEntryDedupeKey(obj);
+                    if (!acc[key]) {
+                        acc[key] = obj;
                     }
-                    return acc;
-                },
-                {} as Record<string, (typeof this.searchHistory)[number]>
-            )
+                }
+                return acc;
+            }, {} as Record<string, typeof this.searchHistory[number]>)
         );
     }
 
     /**
      * Resolves the pending multi-map selection dialog used by jump targets.
      */
-    setSelectedMap(value: string | null) {
+    setSelectedMap(value: string|null) {
         this.jumpService.setSelectedMap!(value);
         this.mapSelectionVisible = false;
     }
@@ -1023,7 +948,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         const item = this.resolveTargetForEntry(entry);
         if (!item) {
             if (this.locationSearchService.isLocationTargetId(entry.actionId)) {
-                this.locationNavigation.navigate(entry.actionId, entry.payload);
+                this.locationNavigation.runFromHistory(entry.actionId, entry.payload);
                 return;
             }
             this.messageService.showError("Search action is no longer available");
@@ -1052,16 +977,6 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             this.messageService.showError("Search action is not valid for the stored input");
             return;
         }
-        if (this.locationSearchService.isLocationTargetId(item.id)) {
-            this.locationNavigation.navigate(item.id, entry.payload ?? item.payload);
-            return;
-        }
-        if (item.jump !== undefined) {
-            const payload = entry.payload ?? item.payload;
-            this.jumpToLocation(item.jump(entry.input, payload), this.locationSearchService.labelFromPayload(payload));
-            return;
-        }
-
         if (item.execute !== undefined) {
             try {
                 const result = item.execute(entry.input, entry.payload ?? item.payload);
@@ -1109,8 +1024,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     onBlur() {
         this.savedSelectionStart = this.textarea.nativeElement.selectionStart || 0;
         this.savedSelectionEnd = this.textarea.nativeElement.selectionEnd || 0;
-        this.savedSelectionDirection =
-            (this.textarea.nativeElement.selectionDirection as "forward" | "backward" | "none") || "none";
+        this.savedSelectionDirection = (this.textarea.nativeElement.selectionDirection as 'forward' | 'backward' | 'none') || 'none';
 
         setTimeout(() => {
             this.completion.visible = false;
@@ -1140,18 +1054,9 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.updateCursor();
 
         const ignoredKeys = [
-            "Home",
-            "End",
-            "PageUp",
-            "PageDown",
-            "Escape",
-            "Enter",
-            "Tab",
-            "ArrowLeft",
-            "ArrowRight",
-            "ArrowUp",
-            "ArrowDown"
-        ];
+            'Home', 'End', 'PageUp', 'PageDown', 'Escape',
+            'Enter', 'Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'
+        ]
         if (ignoredKeys.indexOf(event.key) == -1) {
             this.dismissedCompletionSignature = null;
             this.searchInputChanged.next();
@@ -1163,23 +1068,26 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
      */
     onKeydown(event: KeyboardEvent) {
         const textarea = this.textarea.nativeElement;
-        const dismissCompletionKeys = ["Home", "End", "PageUp", "PageDown", "ArrowLeft", "ArrowRight", "Delete"];
+        const dismissCompletionKeys = [
+            'Home', 'End', 'PageUp', 'PageDown', 'ArrowLeft', 'ArrowRight', 'Delete'
+        ]
 
         // Dismiss the completion pop-up for control-keys
         if (dismissCompletionKeys.indexOf(event.key) >= 0) {
-            if (this.completion.visible) event.preventDefault();
+            if (this.completion.visible)
+                event.preventDefault();
             this.hideCompletionPopup();
             textarea.focus();
         }
 
         // Prevent defaults if completion is active
         if (this.completion.visible) {
-            if (["ArrowUp", "ArrowDown", "Tab"].indexOf(event.key) >= 0) {
+            if (['ArrowUp', 'ArrowDown', 'Tab'].indexOf(event.key) >= 0) {
                 event.preventDefault();
             }
         }
 
-        if (event.key === "Enter") {
+        if (event.key === 'Enter') {
             event.preventDefault();
 
             if (this.shouldApplyCompletionOnEnter()) {
@@ -1193,7 +1101,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
 
             this.resetCompletion();
             textarea.blur();
-        } else if (event.key === "Escape") {
+        } else if (event.key === 'Escape') {
             event.stopPropagation();
             if (this.completion.visible || this.completion.pending || this.completionItems.length > 0) {
                 this.dismissCompletionForCurrentInput();
@@ -1206,15 +1114,15 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 this.dialog.close(event);
                 return;
             }
-        } else if (event.key === "Tab") {
+        } else if (event.key === 'Tab') {
             if (this.shouldApplyCompletionOnEnter()) {
                 this.applyCompletion();
             }
-        } else if (event.key === "ArrowDown") {
+        } else if (event.key === 'ArrowDown') {
             if (this.completion.visible) {
                 this.selectNextCompletion(true);
             }
-        } else if (event.key === "ArrowUp") {
+        } else if (event.key === 'ArrowUp') {
             if (this.completion.visible) {
                 this.selectNextCompletion(false);
             }
@@ -1237,9 +1145,10 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 this.setSearchValue(item.query);
                 this.acceptedCompletionCandidate = item;
 
-                let cursor = item.begin + item.text.length;
+                let cursor = item.begin + item.text.length
                 setTimeout(() => {
-                    this.textarea.nativeElement.setSelectionRange(cursor, cursor, "forward");
+                    this.textarea.nativeElement.setSelectionRange(
+                        cursor, cursor, "forward");
                 }, 0);
             }
 
@@ -1252,19 +1161,17 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
 
     /** Returns whether Enter should accept a visible omnibox completion instead of executing the action. */
     private shouldApplyCompletionOnEnter(): boolean {
-        return (
-            this.completion.visible &&
-            this.completionItems.length > 0 &&
-            !this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition) &&
-            !this.searchService.hasExactCompletionCandidate(this.searchInputValue)
-        );
+        return this.completion.visible
+            && this.completionItems.length > 0
+            && !this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)
+            && !this.searchService.hasExactCompletionCandidate(this.searchInputValue);
     }
 
     /**
      * Rotates the completion selection index with wrap-around.
      */
     selectNextCompletion(next: boolean = true) {
-        const direction = (next && +1) || -1;
+        const direction = next && +1 || -1
         const count = this.completionItems.length || 0;
         if (this.isCompletionDismissedFor(this.searchInputValue, this.cursorPosition)) {
             this.completion.selectionIndex = 0;
@@ -1272,12 +1179,16 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             return;
         }
 
-        let index = this.completion.selectionIndex;
-        if (count == 0) index = 0;
-        else index = index + direction;
+        let index = this.completion.selectionIndex
+        if (count == 0)
+            index = 0
+        else
+            index = index + direction
 
-        if (index < 0) index = count - 1;
-        else if (index >= count) index = 0;
+        if (index < 0)
+            index = count - 1;
+        else if (index >= count)
+            index = 0
 
         this.completion.selectionIndex = index;
         this.completion.visible = count > 0;
@@ -1303,11 +1214,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
      */
     expandTextarea() {
         this.jumpService.searchIsFocused = true;
-        this.renderer.setAttribute(this.textarea.nativeElement, "rows", "3");
-        this.renderer.removeClass(this.textarea.nativeElement, "single-line");
+        this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '3');
+        this.renderer.removeClass(this.textarea.nativeElement, 'single-line');
         setTimeout(() => {
             this.textarea.nativeElement.focus();
-        }, 100);
+        }, 100)
     }
 
     /**
@@ -1315,8 +1226,8 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
      */
     shrinkTextarea() {
         this.cursorPosition = this.textarea.nativeElement.selectionStart || 0;
-        this.renderer.setAttribute(this.textarea.nativeElement, "rows", "1");
-        this.renderer.addClass(this.textarea.nativeElement, "single-line");
+        this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '1');
+        this.renderer.addClass(this.textarea.nativeElement, 'single-line');
         this.jumpService.searchIsFocused = false;
     }
 
@@ -1328,7 +1239,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.textarea.nativeElement.focus();
     }
 
-    @HostListener("document:pointerdown", ["$event"])
+    @HostListener('document:pointerdown', ['$event'])
     /**
      * Pointer-event path for dismissing the action dialog when clicking outside it.
      */
@@ -1336,7 +1247,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.handleGlobalDown(event);
     }
 
-    @HostListener("document:mousedown", ["$event"])
+    @HostListener('document:mousedown', ['$event'])
     /**
      * Mouse fallback for browsers that do not emit PointerEvent.
      */
@@ -1357,7 +1268,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             return;
         }
         const clickedInsideComponent = this.elRef.nativeElement.contains(target as Node);
-        const clickedInsideCompletionPopup = !!target.closest(".search-completion-popup");
+        const clickedInsideCompletionPopup = !!target.closest('.search-completion-popup');
         if (!clickedInsideComponent && !clickedInsideCompletionPopup) {
             this.closeSearchOverlay(event);
         }

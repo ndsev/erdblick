@@ -1,22 +1,27 @@
-import {ownerTestInjector} from "../../test/owner-test-injector";
-import {MapViewStateService} from "../mapview/map-view-state.service";
 import "@angular/compiler";
 import {BehaviorSubject, Observable, Subject, of} from "rxjs";
-import {afterEach, describe, expect, it, vi} from "vitest";
+import {describe, expect, it, vi} from "vitest";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {MapViewStateService} from "../mapview/map-view-state.service";
 import {MapViewService} from "../mapview/map-view.service";
 import {ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
 import {AppStateService} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 import {JumpTargetService} from "./jump.service";
-import {LocationSearchService, ResolvedLocationNavigation} from "./location.search.service";
 import {LocationNavigationService} from "./location-navigation.service";
+import {LocationSearchService, ResolvedLocationNavigation} from "./location.search.service";
 
 const areaResult: ResolvedLocationNavigation = {area: {label: "Place", rectangle: {west: 10, south: 47, east: 14, north: 49}}};
 
 /** Creates controlled transport and renderer lifecycles without bootstrapping the map. */
 function setup() {
     const response = new Subject<ResolvedLocationNavigation>();
-    const locations = {resolveNavigation: vi.fn<() => Observable<ResolvedLocationNavigation>>(() => response)};
+    const locations = {
+        resolveNavigation: vi.fn<() => Observable<ResolvedLocationNavigation>>(() => response),
+        createSearchTarget: (match: {id: string; name: string}) => ({id: `loc:mapget-offline:${match.id}`,
+            name: match.name, label: match.name, icon: "location_city", color: "green", enabled: true,
+            payload: match, validate: () => true})
+    };
     const camera = {destination: {lon: 1, lat: 2, alt: 300}, orientation: {heading: 0, pitch: -90, roll: 0}};
     const renderer = {rendererInvalidated: new Subject<void>(), getLiveCameraState: () => camera,
         isCameraInteractionActive: () => false, getCanvasClientRect: () => ({width: 600, height: 400}),
@@ -46,6 +51,23 @@ function setup() {
 
 
 describe("Location navigation ownership", () => {
+    it("uses the typed candidate for a live lookup and rebuilds history after retirement", async () => {
+        const h = setup();
+        const match = {id: "wof:1", name: "Place", providerId: "mapget-offline", providerName: "Mapget"};
+        const candidate = h.service.createTarget(match);
+        await candidate.execute!("Place");
+        expect(h.locations.resolveNavigation).toHaveBeenCalledWith("loc:mapget-offline:wof:1", match);
+        h.viewState.viewIdsState.next(["right"]);
+        h.viewState.viewIdsState.next(["left", "right"]);
+        h.response.next(areaResult);
+        expect(h.area).not.toHaveBeenCalled();
+        await expect(candidate.execute!("Place")).rejects.toThrow("no longer available");
+        h.locations.resolveNavigation.mockReturnValueOnce(of(areaResult));
+        h.viewState.focusedView = 0;
+        h.service.runFromHistory(candidate.id, match);
+        expect(h.area).toHaveBeenCalledExactlyOnceWith({targetView: 0, area: areaResult.area});
+    });
+
     it("commits an area once without creating a point marker", () => {
         const h = setup();
         h.service.navigate("loc:mapget-offline:wof:1");

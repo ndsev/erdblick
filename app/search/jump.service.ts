@@ -1,21 +1,25 @@
 import {inject, Injectable} from "@angular/core";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {BehaviorSubject, Subject} from "rxjs";
-import {AppActionService} from "../actions/app-action.service";
-import type {SearchJump, SearchJumpResult, SearchTarget} from "../actions/omnibar";
+import {z} from "zod";
+import {rejectAction} from "../actions/action-utils";
+import {ActionDeclaration, AppActionService} from "../actions/app-action.service";
+import type {SearchTarget} from "../actions/omnibar";
 import {parsePackedTileId} from "../coords/nds-coordinate.util";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {SelectedSourceData, TileFeatureId} from "../inspection/inspection-state.model";
 import {InspectionStateService} from "../inspection/inspection-state.service";
-import {Cartographic} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
+import {viewIdentitySchema} from "../mapview/view-id";
 import {AppConfigService} from "../shared/app-config.service";
 import {AppStateService} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
+import {CoordinateJumpService} from "./coordinate-jump.service";
 import {FeatureSearchService} from "./feature.search.service";
+export {normalizeSearchJumpResult} from "../actions/omnibar";
 export type {SearchJump, SearchJumpResult, SearchTarget} from "../actions/omnibar";
 
 export const FEATURE_SEARCH_TARGET_ID = "features";
@@ -31,17 +35,6 @@ interface LocateResponse {
             featureId: Array<string>;
         }>
     >;
-}
-
-/** Normalizes plugin and built-in jump results while preserving point markers for legacy array targets. */
-export function normalizeSearchJumpResult(result: SearchJumpResult): SearchJump {
-    if (Array.isArray(result)) {
-        return {target: result, markerPosition: result};
-    }
-    if ("target" in result) {
-        return result;
-    }
-    return {target: result};
 }
 
 /**
@@ -63,6 +56,48 @@ interface FeatureJumpAction {
  * and the temporary map-selection flow used when a feature can exist in multiple maps.
  */
 export class JumpTargetService {
+    static readonly actions = {
+        inspectSource: {
+            name: "omnibar_source_data",
+            description: "Inspect a packed tile's source data using the current map catalog.",
+            mutation: true,
+            exposure: "omnibar",
+            inputSchema: z.object({query: z.string().min(1).max(8192)}).strict(),
+            outputSchema: z.void()
+        },
+        jumpFeature: {
+            name: "omnibar_feature_jump",
+            description: "Locate a current feature composition and navigate to the captured view.",
+            mutation: true,
+            exposure: "omnibar",
+            inputSchema: z
+                .object({
+                    compositionId: z.string().min(1),
+                    query: z.string().min(1).max(8192),
+                    target: viewIdentitySchema
+                })
+                .strict(),
+            outputSchema: z.void()
+        },
+        runPlugin: {
+            name: "omnibar_jump_plugin",
+            description: "Run a currently configured jump provider after revalidating its input and view.",
+            mutation: true,
+            exposure: "omnibar",
+            inputSchema: z
+                .object({
+                    pluginId: z.string().min(1),
+                    query: z.string().max(8192),
+                    payload: z.unknown().optional(),
+                    target: viewIdentitySchema
+                })
+                .strict(),
+            outputSchema: z.void()
+        }
+    } as const satisfies Record<string, ActionDeclaration>;
+    private readonly actions = inject(AppActionService);
+    private readonly coordinates = inject(CoordinateJumpService);
+
     readonly viewStateOwner = inject(MapViewStateService);
     readonly inspectionState = inject(InspectionStateService);
 
@@ -92,19 +127,43 @@ export class JumpTargetService {
         private searchService: FeatureSearchService,
         private configService: AppConfigService
     ) {
-        inject(AppActionService).registerOmnibar(
-            "feature-and-plugin-jumps",
-            (query) => this.getJumpTargetsForValue(query),
-            10
-        );
+        this.actions.registerAction(JumpTargetService.actions.inspectSource, ({query}) => {
+            if (!this.getInspectTileSourceDataTarget(query).validate(query))
+                rejectAction("Source-data input is no longer valid", "not_available");
+            this.inspectTileSourceData(query);
+        });
+        this.actions.registerAction(JumpTargetService.actions.jumpFeature, async ({compositionId, query, target}) => {
+            const current = (
+                this.mapService.tileLayerParser.filterFeatureJumpTargets(query) as FeatureJumpAction[]
+            ).find((candidate) => candidate.id === compositionId && !candidate.error);
+            if (!current) rejectAction("Feature jump is no longer available", "not_available");
+            const index = this.viewStateOwner.requireCurrentView(target);
+            await this.highlightByJumpTarget(current, null, coreLib.HighlightMode.SELECTION_HIGHLIGHT, index);
+        });
+        this.actions.registerAction(JumpTargetService.actions.runPlugin, async ({pluginId, query, payload, target}) => {
+            this.viewStateOwner.requireCurrentView(target);
+            const provider = this.extJumpTargets.find((candidate) => candidate.id === pluginId);
+            if (!provider || !provider.validate(query))
+                rejectAction("Jump provider is no longer available", "not_available");
+            if (provider.jump) {
+                const result = await provider.jump(query, payload);
+                this.viewStateOwner.requireCurrentView(target);
+                if (!this.extJumpTargets.includes(provider))
+                    rejectAction("Jump provider is no longer available", "not_available");
+                this.coordinates.navigate(result, target);
+            } else {
+                await provider.execute?.(query, payload);
+            }
+        });
+        this.actions.registerOmnibar("feature-and-plugin-jumps", (query) => this.getJumpTargetsForValue(query), 10);
 
-        // Forward marked cartesian position to AppStateService.
+        // Forward point selections to the persisted marker owner.
         this.markedPosition.subscribe((position) => {
             if (position.length >= 2) {
-                this.viewStateOwner.setMarkerState(true);
-                this.viewStateOwner.setMarkerPosition(
-                    Cartographic.fromDegrees(position[1], position[0], position[2] ?? 0)
-                );
+                this.viewStateOwner.setMarkerControl({
+                    enabled: true,
+                    position: {lon: position[1], lat: position[0], alt: position[2] ?? 0}
+                });
             }
         });
     }
@@ -170,20 +229,21 @@ export class JumpTargetService {
         if (simfilError) {
             label += `<br><span class="search-option-warning">${simfilError}</span>`;
         }
-        return {
+        const target = this.viewStateOwner.captureView(this.viewStateOwner.focusedView)!;
+        return this.actions.candidate(FeatureSearchService.omnibarActions.run, {
             id: FEATURE_SEARCH_TARGET_ID,
             icon: "pi-bolt",
             color: "blue",
             name: "Search Features and Attributes",
             label: label,
             enabled: false,
-            execute: (value: string, payload?: unknown) => {
-                this.searchService.runFromActionPayload(value, payload);
-            },
+            arguments: (query, payload) => ({query, payload, target}),
+            isCurrent: () => this.viewStateOwner.isCurrent(target),
+            saveToHistory: () => true,
             validate: (_: string) => {
                 return !simfilError;
             }
-        };
+        });
     }
 
     /** Accepts only valid signed NDS.Live packed tile ids without embedded whitespace. */
@@ -200,48 +260,7 @@ export class JumpTargetService {
         let label = "packedTileId = ? | (mapId = ?) | (sourceLayerId = ?)";
         let valid = true;
 
-        const matchSourceDataElements = (value: string): [number, string, string] | null => {
-            const regex =
-                /^\s*(-?\d+)(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?\s*$/;
-            const match = value.match(regex);
-            let tileId: number;
-            let mapId = "";
-            let sourceLayerId = "";
-
-            if (match) {
-                const [_, tileIdStr, quoted1, unquoted1, quoted2, unquoted2] = match;
-                const packedTileId = parsePackedTileId(tileIdStr);
-                if (!packedTileId) {
-                    return null;
-                }
-                tileId = packedTileId.value;
-
-                if (quoted1 || unquoted1) {
-                    mapId = (quoted1 ? quoted1 : unquoted1).replace(/\\ /g, " ");
-                    if (mapId.startsWith('"') || mapId.startsWith("'")) {
-                        mapId = mapId.slice(1, -1);
-                    }
-                    if (mapId.endsWith('"') || mapId.endsWith("'")) {
-                        mapId = mapId.slice(1, -1);
-                    }
-                }
-                if (quoted2 || unquoted2) {
-                    sourceLayerId = (quoted2 ? quoted2 : unquoted2).replace(/\\ /g, " ");
-                    if (sourceLayerId.startsWith('"') || sourceLayerId.startsWith("'")) {
-                        sourceLayerId = sourceLayerId.slice(1, -1);
-                    }
-                    if (sourceLayerId.endsWith('"') || sourceLayerId.endsWith("'")) {
-                        mapId = sourceLayerId.slice(1, -1);
-                    }
-                }
-            } else {
-                return null;
-            }
-
-            return [tileId, mapId, sourceLayerId];
-        };
-
-        const matches = matchSourceDataElements(searchString);
+        const matches = this.matchSourceDataElements(searchString);
         if (matches) {
             const [tileId, mapId, sourceLayerId] = matches;
             label = `packedTileId = ${tileId}`;
@@ -275,45 +294,90 @@ export class JumpTargetService {
             valid = false;
         }
 
-        return {
+        return this.actions.candidate(JumpTargetService.actions.inspectSource, {
             id: "source-data",
             icon: "pi-database",
             color: "red",
             name: "Inspect Tile Layer Source Data",
             label: label,
             enabled: false,
-            execute: (value: string) => {
-                const matches = matchSourceDataElements(value);
-                if (matches) {
-                    let [tileId, mapId, sourceLayerId] = matches;
-                    try {
-                        if (tileId) {
-                            if (mapId) {
-                                if (sourceLayerId) {
-                                    sourceLayerId = this.mapService.sourceDataLayerIdForLayerName(sourceLayerId) || "";
-                                    if (sourceLayerId) {
-                                        this.inspectionState.setSelection({
-                                            mapTileKey: coreLib.getSourceDataLayerKey(mapId, sourceLayerId, tileId)
-                                        } as SelectedSourceData);
-                                    } else {
-                                        this.menuService.customTileAndMapId.next([String(tileId), mapId]);
-                                    }
-                                } else {
-                                    this.menuService.customTileAndMapId.next([String(tileId), mapId]);
-                                }
-                            } else {
-                                this.menuService.customTileAndMapId.next([String(tileId), ""]);
-                            }
-                        }
-                    } catch (e) {
-                        this.messageService.showError(String(e));
-                    }
-                }
-            },
+            arguments: (query) => ({query}),
+            isCurrent: () => true,
+            saveToHistory: () => true,
             validate: (_: string) => {
                 return valid;
             }
-        };
+        });
+    }
+
+    private matchSourceDataElements(value: string): [number, string, string] | null {
+        const regex =
+            /^\s*(-?\d+)(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?\s*$/;
+        const match = value.match(regex);
+        let tileId: number;
+        let mapId = "";
+        let sourceLayerId = "";
+
+        if (match) {
+            const [_, tileIdStr, quoted1, unquoted1, quoted2, unquoted2] = match;
+            const packedTileId = parsePackedTileId(tileIdStr);
+            if (!packedTileId) {
+                return null;
+            }
+            tileId = packedTileId.value;
+
+            if (quoted1 || unquoted1) {
+                mapId = (quoted1 ? quoted1 : unquoted1).replace(/\\ /g, " ");
+                if (mapId.startsWith('"') || mapId.startsWith("'")) {
+                    mapId = mapId.slice(1, -1);
+                }
+                if (mapId.endsWith('"') || mapId.endsWith("'")) {
+                    mapId = mapId.slice(1, -1);
+                }
+            }
+            if (quoted2 || unquoted2) {
+                sourceLayerId = (quoted2 ? quoted2 : unquoted2).replace(/\\ /g, " ");
+                if (sourceLayerId.startsWith('"') || sourceLayerId.startsWith("'")) {
+                    sourceLayerId = sourceLayerId.slice(1, -1);
+                }
+                if (sourceLayerId.endsWith('"') || sourceLayerId.endsWith("'")) {
+                    mapId = sourceLayerId.slice(1, -1);
+                }
+            }
+        } else {
+            return null;
+        }
+
+        return [tileId, mapId, sourceLayerId];
+    }
+
+    private inspectTileSourceData(value: string): void {
+        const matches = this.matchSourceDataElements(value);
+        if (matches) {
+            let [tileId, mapId, sourceLayerId] = matches;
+            try {
+                if (tileId) {
+                    if (mapId) {
+                        if (sourceLayerId) {
+                            sourceLayerId = this.mapService.sourceDataLayerIdForLayerName(sourceLayerId) || "";
+                            if (sourceLayerId) {
+                                this.inspectionState.setSelection({
+                                    mapTileKey: coreLib.getSourceDataLayerKey(mapId, sourceLayerId, tileId)
+                                } as SelectedSourceData);
+                            } else {
+                                this.menuService.customTileAndMapId.next([String(tileId), mapId]);
+                            }
+                        } else {
+                            this.menuService.customTileAndMapId.next([String(tileId), mapId]);
+                        }
+                    } else {
+                        this.menuService.customTileAndMapId.next([String(tileId), ""]);
+                    }
+                }
+            } catch (e) {
+                this.messageService.showError(String(e));
+            }
+        }
     }
 
     /**
@@ -327,43 +391,38 @@ export class JumpTargetService {
      * Recomputes the active search targets whenever the query string or plugin state changes.
      */
     getJumpTargetsForValue(value: string): Array<SearchTarget> {
-        let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(
-            value
-        ) as Array<FeatureJumpAction>;
-        let featureJumpTargetsConverted: Array<SearchTarget> = [];
-        if (featureJumpTargets) {
-            featureJumpTargetsConverted = featureJumpTargets.map((fjt: FeatureJumpAction) => {
-                let label = fjt.idParts.map((idPart) => `${idPart.key}=${idPart.value}`).join(" | ");
-                if (fjt.error) {
-                    label += `<br><span class="search-option-warning">${fjt.error}</span>`;
-                }
-                return {
-                    id: `fj:${fjt.id}`,
-                    icon: "pi-arrow-down-left-and-arrow-up-right-to-center",
-                    color: "orange",
-                    name: `Jump to ${fjt.name}`,
-                    label: label,
-                    enabled: !fjt.error,
-                    execute: (_: string) => {
-                        this.highlightByJumpTarget(
-                            fjt,
-                            null,
-                            coreLib.HighlightMode.SELECTION_HIGHLIGHT,
-                            this.viewStateOwner.focusedView
-                        ).then();
-                    },
-                    validate: (_: string) => {
-                        return !fjt.error;
-                    }
-                };
+        const target = this.viewStateOwner.captureView(this.viewStateOwner.focusedView)!;
+        const compositions = this.mapService.tileLayerParser.filterFeatureJumpTargets(value) as FeatureJumpAction[];
+        const featureTargets = (compositions ?? []).map((composition) => {
+            let label = composition.idParts.map((part) => `${part.key}=${part.value}`).join(" | ");
+            if (composition.error) label += `<br><span class="search-option-warning">${composition.error}</span>`;
+            return this.actions.candidate(JumpTargetService.actions.jumpFeature, {
+                id: `fj:${composition.id}`,
+                icon: "pi-arrow-down-left-and-arrow-up-right-to-center",
+                color: "orange",
+                name: `Jump to ${composition.name}`,
+                label,
+                enabled: !composition.error,
+                arguments: (query) => ({compositionId: composition.id, query, target}),
+                validate: () => !composition.error,
+                isCurrent: () => this.viewStateOwner.isCurrent(target),
+                saveToHistory: () => true
             });
-        }
-
+        });
+        const plugins = this.extJumpTargets.map((provider) => {
+            const {execute, jump, ...presentation} = provider;
+            return this.actions.candidate(JumpTargetService.actions.runPlugin, {
+                ...presentation,
+                arguments: (query, payload) => ({pluginId: provider.id, query, payload, target}),
+                isCurrent: () => this.viewStateOwner.isCurrent(target) && this.extJumpTargets.includes(provider),
+                saveToHistory: provider.saveToHistory ?? (() => true)
+            });
+        });
         return [
             this.getFeatureMatchTarget(value),
             this.getInspectTileSourceDataTarget(value),
-            ...featureJumpTargetsConverted,
-            ...this.extJumpTargets
+            ...featureTargets,
+            ...plugins
         ];
     }
 
@@ -434,10 +493,8 @@ export class JumpTargetService {
         let response = await fetch("locate", {
             body: JSON.stringify(resolveMe),
             method: "POST"
-        }).catch((err) => console.error(`Error during /locate call: ${err}`));
-        if (!response) {
-            return;
-        }
+        });
+        if (!response.ok) throw new Error(`Feature lookup failed (${response.status})`);
         let extRefsResolved = (await response.json()) as LocateResponse;
         if (extRefsResolved.responses[0].length < 1) {
             this.messageService.showError("Could not locate feature!");

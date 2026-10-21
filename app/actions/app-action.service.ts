@@ -15,6 +15,8 @@ export interface ActionDeclaration<Input extends z.ZodType = z.ZodType, Output e
     mutation: boolean;
     inputSchema: Input;
     outputSchema: Output;
+    /** Fixed local operations use the same dispatch contract without becoming browser MCP tools. */
+    exposure?: "omnibar";
 }
 
 export interface ActionContext {
@@ -39,6 +41,7 @@ export class AppActionService {
         }
     >();
 
+    /** Bind an owner reader and optional setter; the registry stores behavior, never a second value. */
     registerControl<Selector extends z.ZodObject, Value extends z.ZodType>(
         declaration: ControlDeclaration<Selector, Value>,
         binding: {
@@ -62,6 +65,7 @@ export class AppActionService {
         });
     }
 
+    /** Bind the three generic wire operations to the registered owner controls. */
     registerControlActions(declarations: ReturnType<typeof createControlActions>): void {
         this.registerAction(declarations.describeControls, (input) => {
             const controls = [];
@@ -174,6 +178,7 @@ export class AppActionService {
         };
     }
 
+    /** Seal startup registration only when every bound declaration is the exported owner object. */
     assertControlsComplete(declarations: readonly ControlDeclaration[]): void {
         const names = new Set(declarations.map((control) => control.name));
         if (names.size !== declarations.length) throw new Error("Duplicate control in exported catalog");
@@ -194,6 +199,7 @@ export class AppActionService {
         }
     >();
 
+    /** Validate arguments and results around the owner handler, preserving synchronous work and async failures. */
     registerAction<Input extends z.ZodType, Output extends z.ZodType>(
         declaration: ActionDeclaration<Input, Output>,
         execute: (input: z.output<Input>, context: ActionContext) => z.input<Output> | Promise<z.input<Output>>,
@@ -201,7 +207,8 @@ export class AppActionService {
     ): void {
         if (this.actionsSealed) throw new Error(`Late action registration: ${declaration.name}`);
         if (this.actions.has(declaration.name)) throw new Error(`Duplicate action: ${declaration.name}`);
-        if (omnibar && this.omnibar.has(declaration.name)) throw new Error(`Duplicate omnibar producer: ${declaration.name}`);
+        if (omnibar && this.omnibar.has(declaration.name))
+            throw new Error(`Duplicate omnibar producer: ${declaration.name}`);
         this.actions.set(declaration.name, {
             declaration,
             execute: (input, context) => {
@@ -216,23 +223,39 @@ export class AppActionService {
         });
         if (omnibar)
             this.registerOmnibar(declaration.name, (query) =>
-                omnibar.suggest(query).map((candidate) => ({
-                    ...candidate,
-                    saveToHistory: () => false,
-                    validate: (input) => candidate.isCurrent() && candidate.validate(input),
-                    execute: async () => {
-                        // A menu may stay open while its target is removed or replaced.
-                        if (!candidate.isCurrent())
-                            rejectAction("The suggested target is no longer available", "not_available");
-                        await this.execute(declaration.name, candidate.arguments);
-                    }
-                }))
+                omnibar.suggest(query).map((candidate) => this.candidate(declaration, candidate))
             );
+    }
+
+    /** Adapts query/provider candidates to the exact registered operation, including saved-history payloads. */
+    candidate<Input extends z.ZodType, Output extends z.ZodType>(
+        declaration: ActionDeclaration<Input, Output>,
+        candidate: ActionSuggestion<z.input<Input>>
+    ): SearchTarget {
+        if (this.actions.get(declaration.name)?.declaration !== declaration)
+            throw new Error(`Unregistered candidate action: ${declaration.name}`);
+        return {
+            ...candidate,
+            saveToHistory: candidate.saveToHistory ?? (() => false),
+            validate: (query) => candidate.isCurrent() && candidate.validate(query),
+            execute: async (query, payload) => {
+                // An open menu may outlive a view, inspection, or configured provider.
+                if (!candidate.isCurrent())
+                    rejectAction("The suggested target is no longer available", "not_available");
+                const arguments_ =
+                    typeof candidate.arguments === "function"
+                        ? (candidate.arguments as (query: string, payload?: unknown) => z.input<Input>)(query, payload)
+                        : candidate.arguments;
+                // Preserve synchronous browser actions such as opening a provider in a new tab.
+                await this.execute(declaration.name, arguments_);
+            }
+        };
     }
 
     private readonly omnibar = new Map<string, {order: number; targets: (query: string) => SearchTarget[]}>();
     private readonly asyncOmnibar = new Map<string, (query: string) => Observable<SearchTarget[]>>();
 
+    /** Candidate providers may change with configuration; cleanup removes only this registration. */
     registerOmnibar(name: string, targets: (query: string) => SearchTarget[], order = 0): () => void {
         if (this.omnibar.has(name)) throw new Error(`Duplicate omnibar producer: ${name}`);
         const registration = {order, targets};
@@ -242,6 +265,7 @@ export class AppActionService {
         };
     }
 
+    /** Network providers supply candidates; each candidate still executes its registered owner action. */
     registerAsyncOmnibar(name: string, targets: (query: string) => Observable<SearchTarget[]>): () => void {
         if (this.asyncOmnibar.has(name)) throw new Error(`Duplicate omnibar producer: ${name}`);
         this.asyncOmnibar.set(name, targets);
@@ -262,6 +286,7 @@ export class AppActionService {
         return requests.length ? forkJoin(requests).pipe(map((results) => results.flat())) : of([]);
     }
 
+    /** Shared dispatch for MCP adapters and local omnibar actions; owner methods remain directly callable. */
     execute(name: string, input: unknown, context: ActionContext = {}): unknown {
         const action = this.actions.get(name);
         if (!action) rejectAction(`Unknown action: ${name}`, "invalid_arguments");
@@ -272,7 +297,7 @@ export class AppActionService {
         return this.actions.has(name);
     }
 
-    /** Fail startup on missing/extra bindings instead of advertising unusable tools. */
+    /** Verify exact declarations, then reject late public/local action registration. Providers remain dynamic. */
     assertComplete(declarations: readonly ActionDeclaration[]): void {
         const expected = new Set(declarations.map((action) => action.name));
         if (expected.size !== declarations.length) throw new Error("Duplicate action in exported catalog");

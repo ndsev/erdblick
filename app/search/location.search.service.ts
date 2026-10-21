@@ -5,6 +5,7 @@ import {AppStateService} from "../shared/appstate.service";
 import {clampLocationSearchResultLimit} from "./location-search-limits";
 import {ownerState} from "./location.search.service.state";
 
+import type {SearchTarget} from "../actions/omnibar";
 import type {LocationArea} from "../mapview/render-view.model";
 import {
     AppConfigService,
@@ -12,7 +13,6 @@ import {
     LocationSearchFieldSelector,
     LocationSearchProviderConfig
 } from "../shared/app-config.service";
-import {SearchTarget} from "./jump.service";
 import {locationExtent, locationGeometryExtent, locationPoint, locationPolygons} from "./location-geometry";
 
 export type LocationPoint = [number, number];
@@ -346,10 +346,6 @@ export class LocationSearchService {
             label: this.labelForMatch(match),
             enabled: true,
             payload: match,
-            jump: (_value: string, payload: unknown) => {
-                const selected = normalizeLocationSearchPayload(payload ?? match);
-                return selected?.lonLat ? [selected.lonLat[1], selected.lonLat[0], 0] : undefined;
-            },
             validate: () => true
         };
     }

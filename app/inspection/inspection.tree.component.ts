@@ -40,12 +40,12 @@ import {inspectionValueBubbleClasses} from "./inspection-value-bubble.presentati
 
 /** Column definition used by the inspection tree's generic table renderer. */
 export interface Column {
-    key: string;
-    header: string;
-    width: string;
-    transform: (colKey: string, rowData: any) => any;
-    toggleable?: boolean;
-    toggleIcon?: string;
+    key: string,
+    header: string,
+    width: string,
+    transform: (colKey: string, rowData: any) => any,
+    toggleable?: boolean,
+    toggleIcon?: string
 }
 
 /** User-facing switches that control which inspection fields participate in tree filtering. */
@@ -504,8 +504,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private activeMapHoverOwner?: string;
     private mapHoverEpoch = 0;
 
-    @ViewChild("tt") table!: TreeTable;
-    @ViewChild("filterPanel") filterPanel!: Popover;
+    @ViewChild('tt') table!: TreeTable;
+    @ViewChild('filterPanel') filterPanel!: Popover;
 
     data: TreeTableNode[] = [];
     treeData = input.required<TreeTableNode[]>();
@@ -525,12 +525,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Returns columns currently participating in the table layout. */
     protected visibleColumns(): Column[] {
-        return this.columns().filter((column) => this.isColumnVisible(column));
+        return this.columns().filter(column => this.isColumnVisible(column));
     }
 
     /** Returns columns for which the caller requested a visibility control. */
     protected toggleableColumns(): Column[] {
-        return this.columns().filter((column) => column.toggleable);
+        return this.columns().filter(column => column.toggleable);
     }
 
     /** Returns whether one column is currently shown. */
@@ -551,7 +551,10 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.cdr.markForCheck();
     }
 
-    filterFields: string[] = ["key", "value"];
+    filterFields: string[] = [
+        "key",
+        "value"
+    ];
     tooltipOptions = {
         showDelay: 1000,
         autoHide: false
@@ -589,9 +592,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.applyFreezeState();
     };
 
-    @ViewChild("inspectionMenu") inspectionMenu!: Menu;
+    @ViewChild('inspectionMenu') inspectionMenu!: Menu;
     inspectionMenuItems: MenuItem[] | undefined;
-    @ViewChild("geoJsonMenu") geoJsonMenu!: Menu;
+    @ViewChild('geoJsonMenu') geoJsonMenu!: Menu;
     geoJsonMenuItems: MenuItem[] = [];
 
     constructor(
@@ -609,7 +612,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             const columns = this.columns();
             const savedHiddenColumns = this.inspectionState.getInspectionTreeHiddenColumns(this.panelId());
             const defaultVisibleColumns = this.defaultVisibleColumnKeys();
-            const visibleByDefault = defaultVisibleColumns === undefined ? undefined : new Set(defaultVisibleColumns);
+            const visibleByDefault = defaultVisibleColumns === undefined
+                ? undefined
+                : new Set(defaultVisibleColumns);
 
             this.hiddenColumnKeys.clear();
             for (const column of columns) {
@@ -638,7 +643,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             const targetedHighlightIndex = expandPathToFirstHighlightedRow(this.data);
 
             this.refreshLayout();
-            this.scrollToHighlightedIndex(targetedHighlightIndex ?? this.firstHighlightedItemIndex());
+            this.scrollToHighlightedIndex(
+                targetedHighlightIndex ?? this.firstHighlightedItemIndex()
+            );
             this.cdr.markForCheck();
         });
         effect(() => {
@@ -653,29 +660,27 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.suppressFilterEmit = false;
             this.cdr.markForCheck();
         });
-        this.subscriptions.push(
-            this.firstHighlightedItemIndex$.subscribe((index) => {
-                this.scrollToHighlightedIndex(index);
-            })
-        );
+        this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
+            this.scrollToHighlightedIndex(index);
+        }));
         this.subscriptions.push(
             this.inspectionState.inspectionTreeExpandByDefaultState.subscribe((expandByDefault) => {
-                if (!this.data.length) {
-                    return;
-                }
-                if (expandByDefault) {
-                    this.setTreeExpansion(this.data, true, true);
-                } else if (this.isFeatureInspectionTree(this.data)) {
-                    this.expandTreeNodes(this.data);
-                }
-                this.fullExpansionActive = false;
-                this.expansionSnapshotBeforeFullExpand = undefined;
-                this.fullCollapseActive = false;
-                this.expansionSnapshotBeforeFullCollapse = undefined;
-                this.data = [...this.data];
-                this.savePanelExpansionState();
-                this.refreshLayout();
-                this.cdr.markForCheck();
+            if (!this.data.length) {
+                return;
+            }
+            if (expandByDefault) {
+                this.setTreeExpansion(this.data, true, true);
+            } else if (this.isFeatureInspectionTree(this.data)) {
+                this.expandTreeNodes(this.data);
+            }
+            this.fullExpansionActive = false;
+            this.expansionSnapshotBeforeFullExpand = undefined;
+            this.fullCollapseActive = false;
+            this.expansionSnapshotBeforeFullCollapse = undefined;
+            this.data = [...this.data];
+            this.savePanelExpansionState();
+            this.refreshLayout();
+            this.cdr.markForCheck();
             })
         );
         this.subscriptions.push(
@@ -727,7 +732,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.valueBubblePopoverHost?.remove();
         this.valueBubblePopoverHost = undefined;
         this.valueBubblePopoverElement = undefined;
-        this.subscriptions.forEach((s) => s.unsubscribe());
+        this.subscriptions.forEach(s => s.unsubscribe());
     }
 
     /** Suspends change detection and scroller work while an outer drag operation is in progress. */
@@ -829,7 +834,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (!hostElement) {
             return;
         }
-        hostElement.querySelectorAll<HTMLElement>(".inspection-value-bubbles").forEach((element) => {
+        hostElement.querySelectorAll<HTMLElement>(".inspection-value-bubbles").forEach(element => {
             element.classList.toggle(
                 "inspection-value-bubbles-overflowing",
                 element.scrollWidth > element.clientWidth + 1
@@ -849,18 +854,17 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             return undefined;
         }
 
-        const filterHeightPx =
-            hostElement.querySelector<HTMLElement>(".p-treetable-header")?.getBoundingClientRect().height ?? 0;
-        const headerHeightPx =
-            hostElement.querySelector<HTMLElement>(".p-treetable-thead")?.getBoundingClientRect().height ?? 0;
+        const filterHeightPx = hostElement.querySelector<HTMLElement>('.p-treetable-header')
+            ?.getBoundingClientRect().height ?? 0;
+        const headerHeightPx = hostElement.querySelector<HTMLElement>('.p-treetable-thead')
+            ?.getBoundingClientRect().height ?? 0;
 
-        let contentHeightPx =
-            hostElement.querySelector<HTMLElement>(".p-virtualscroller-spacer")?.getBoundingClientRect().height ?? 0;
+        let contentHeightPx = hostElement.querySelector<HTMLElement>('.p-virtualscroller-spacer')
+            ?.getBoundingClientRect().height ?? 0;
         if (!contentHeightPx) {
-            contentHeightPx = Array.from(hostElement.querySelectorAll<HTMLElement>(".p-treetable-tbody > tr")).reduce(
-                (sum, row) => sum + row.getBoundingClientRect().height,
-                0
-            );
+            contentHeightPx = Array
+                .from(hostElement.querySelectorAll<HTMLElement>('.p-treetable-tbody > tr'))
+                .reduce((sum, row) => sum + row.getBoundingClientRect().height, 0);
         }
         if (!contentHeightPx) {
             return undefined;
@@ -874,7 +878,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Clears the filter input and restores the original tree. */
     clearFilter() {
         this.filterString = "";
-        this.table.filterGlobal("", "contains");
+        this.table.filterGlobal("" , 'contains');
         this.data = this.treeData();
         this.applyInitialExpansion(this.data);
         this.emitFilterChange("");
@@ -884,7 +888,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     onKeydown(event: any) {
         event.stopPropagation();
 
-        if (event.key === "Escape") {
+        if (event.key === 'Escape') {
             this.clearFilter();
         }
     }
@@ -892,12 +896,10 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Toggles row expansion unless the user clicked an explicit action control. */
     onRowClick(event: MouseEvent, rowNode: any) {
         const target = event.target as HTMLElement | null;
-        if (
-            target?.closest(".inspection-row-actions") ||
-            target?.closest(".inspection-value-bubble") ||
-            target?.closest(".p-treetable-toggler") ||
-            target?.closest("a")
-        ) {
+        if (target?.closest(".inspection-row-actions")
+            || target?.closest(".inspection-value-bubble")
+            || target?.closest(".p-treetable-toggler")
+            || target?.closest("a")) {
             return;
         }
         const node: TreeNode = rowNode.node;
@@ -992,10 +994,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Returns whether a value cell should use the structured bubble popover instead of a plain tooltip. */
     protected valueCellUsesBubblePopover(rowNode: any, rowData: any, colKey: string): boolean {
-        return (
-            colKey === "value" &&
-            (this.shouldShowValueBubbles(rowNode, rowData) ||
-                this.formattedInspectionHtml(rowData?.["value"]) !== undefined)
+        return colKey === "value" && (
+            this.shouldShowValueBubbles(rowNode, rowData)
+            || this.formattedInspectionHtml(rowData?.["value"]) !== undefined
         );
     }
 
@@ -1034,8 +1035,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (this.inspectionHtmlCache.has(value)) {
             return this.inspectionHtmlCache.get(value) ?? undefined;
         }
-        const presentation = inspectionHtmlPresentation(value, (html) =>
-            this.sanitizer.sanitize(SecurityContext.HTML, html)
+        const presentation = inspectionHtmlPresentation(
+            value,
+            html => this.sanitizer.sanitize(SecurityContext.HTML, html)
         );
         this.inspectionHtmlCache.set(value, presentation ?? null);
         return presentation;
@@ -1157,10 +1159,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
         const top = Math.min(
             Math.max(this.valueBubblePopoverMarginPx, cellRect.top + cellRect.height / 2 - container.offsetHeight / 2),
-            Math.max(
-                this.valueBubblePopoverMarginPx,
-                window.innerHeight - container.offsetHeight - this.valueBubblePopoverMarginPx
-            )
+            Math.max(this.valueBubblePopoverMarginPx, window.innerHeight - container.offsetHeight - this.valueBubblePopoverMarginPx)
         );
         container.style.left = `${placement.left}px`;
         container.style.top = `${top}px`;
@@ -1168,10 +1167,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     }
 
     /** Computes left-side placement and width for a value bubble popover without overlapping the source cell. */
-    private calculateValueBubblePopoverPlacement(
-        cellRect: DOMRect,
-        desiredWidth: number
-    ): {
+    private calculateValueBubblePopoverPlacement(cellRect: DOMRect, desiredWidth: number): {
         left: number;
         maxWidth: number;
         width: number | undefined;
@@ -1254,17 +1250,18 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Activates the same map hover behavior as the row represented by a bubble. */
     protected onValueBubbleHover(bubble: any, rowData: any): void {
-        const hoverTargetNodeId =
-            typeof bubble?.hoverTargetNodeId === "string" && bubble.hoverTargetNodeId.length
-                ? bubble.hoverTargetNodeId
-                : bubble?.targetNodeId;
+        const hoverTargetNodeId = typeof bubble?.hoverTargetNodeId === "string" && bubble.hoverTargetNodeId.length
+            ? bubble.hoverTargetNodeId
+            : bubble?.targetNodeId;
         const targetRow = this.rowDataForNodeId(this.data, hoverTargetNodeId);
         if (!targetRow) {
             return;
         }
         this.claimMapHover(this.valueBubbleHoverOwner(bubble, rowData));
         if (this.isFeatureIdValueRow(targetRow)) {
-            this.activeFeatureIdNodeId = typeof targetRow?.["nodeId"] === "string" ? targetRow["nodeId"] : undefined;
+            this.activeFeatureIdNodeId = typeof targetRow?.["nodeId"] === "string"
+                ? targetRow["nodeId"]
+                : undefined;
             this.highlightVisibleFeatureReference(targetRow);
             return;
         }
@@ -1283,12 +1280,10 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Shows the inline copy button only for leaf rows with a non-empty value cell. */
     protected shouldShowValueCopyButton(rowNode: any, rowData: any, colKey: string): boolean {
-        if (
-            colKey !== "value" ||
-            this.hasValueBubbles(rowData) ||
-            this.hasChildNodes(rowNode?.node) ||
-            !rowData?.hasOwnProperty?.("value")
-        ) {
+        if (colKey !== "value"
+            || this.hasValueBubbles(rowData)
+            || this.hasChildNodes(rowNode?.node)
+            || !rowData?.hasOwnProperty?.("value")) {
             return false;
         }
         const value = rowData["value"];
@@ -1319,13 +1314,13 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (showScalarActions) {
             this.inspectionMenuItems.push(
                 {
-                    label: "Copy Key/Value",
+                    label: 'Copy Key/Value',
                     command: () => {
                         this.copyToClipboard(`{${key}: ${value}}`);
                     }
                 },
                 {
-                    label: "Open NDS.Live Docs",
+                    label: 'Open NDS.Live Docs',
                     command: () => {
                         window.open(`https://doc.nds.live/search?q=${key}`, "_blank");
                     }
@@ -1335,7 +1330,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (showScalarActions && rowData.hasOwnProperty("geoJsonPath")) {
             const path = rowData["geoJsonPath"];
             this.inspectionMenuItems.push({
-                label: "Copy Search Path",
+                label: 'Copy Search Path',
                 command: () => {
                     if (path) {
                         this.copyToClipboard(path);
@@ -1345,11 +1340,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             const keyValueSearch = this.keyValueSearchRequestForRow(rowData);
             if (keyValueSearch) {
                 this.inspectionMenuItems.push({
-                    label: "Search for key/value",
-                    icon: "pi pi-search",
+                    label: 'Search for key/value',
+                    icon: 'pi pi-search',
                     command: () => {
                         this.featureSearchService.run(keyValueSearch.query, {
-                            scope: "auto",
+                            scope: 'auto',
                             selectedMapLayers: keyValueSearch.selectedMapLayers
                         });
                     }
@@ -1362,11 +1357,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             }
             this.inspectionMenuItems.push(
                 {
-                    label: "Expand child nodes",
+                    label: 'Expand child nodes',
                     command: () => this.expandChildNodes(node)
                 },
                 {
-                    label: "Collapse child nodes",
+                    label: 'Collapse child nodes',
                     command: () => this.collapseChildNodes(node)
                 }
             );
@@ -1377,10 +1372,10 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             if (this.inspectionMenuItems.length) {
                 this.inspectionMenuItems.push({separator: true});
             }
-            const targetLabel =
-                parseFeatureInspectionTarget(inspectionTarget).scope === "relation"
-                    ? "Relation/Validity"
-                    : "Attr/Validity";
+            const targetLabel = parseFeatureInspectionTarget(inspectionTarget)
+                .scope === "relation"
+                ? "Relation/Validity"
+                : "Attr/Validity";
             const baseId = stripFeatureInspectionTarget(inspectionTarget);
             const ownedByPanel = this.inspectionState.selection
                 .find((panel) => panel.id === this.panelId())
@@ -1421,24 +1416,24 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Returns the attribute or validity pseudo-feature id represented by a row, preferring exact validities. */
     private inspectionTargetForRow(rowData: any): string | undefined {
-        const candidates = [rowData?.["strongHoverGroupId"], rowData?.["hoverId"], rowData?.["softHoverGroupId"]];
-        return candidates.find(
-            (value): value is string => typeof value === "string" && isFeatureInspectionSubTarget(value)
-        );
+        const candidates = [
+            rowData?.["strongHoverGroupId"],
+            rowData?.["hoverId"],
+            rowData?.["softHoverGroupId"]
+        ];
+        return candidates.find((value): value is string =>
+            typeof value === "string" && isFeatureInspectionSubTarget(value));
     }
 
     /** Checks whether this panel already highlights the requested attribute/validity target. */
     private isInspectionTargetHighlighted(mapTileKey: string, targetFeatureId: string): boolean {
         const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
         const panel = this.inspectionState.selection.find((item) => item.id === this.panelId());
-        return (
-            panel?.features.some(
-                (feature) =>
-                    feature.mapTileKey === mapTileKey &&
-                    stripFeatureInspectionTarget(feature.featureId) === targetBaseFeatureId &&
-                    feature.featureId === targetFeatureId
-            ) ?? false
-        );
+        return panel?.features.some(feature =>
+            feature.mapTileKey === mapTileKey &&
+            stripFeatureInspectionTarget(feature.featureId) === targetBaseFeatureId &&
+            feature.featureId === targetFeatureId
+        ) ?? false;
     }
 
     /** Builds a feature-root equality search from one scalar inspection row. */
@@ -1466,10 +1461,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Converts the typed inspection cell value into a Simfil literal for equality searches. */
     private searchLiteralForInspectionValue(rowData: any): string | undefined {
         const type = Number(rowData?.["type"] ?? coreLib.ValueType.NULL.value);
-        if (
-            (type & coreLib.ValueType.ARRAY.value) === coreLib.ValueType.ARRAY.value ||
-            type === coreLib.ValueType.SECTION.value
-        ) {
+        if ((type & coreLib.ValueType.ARRAY.value) === coreLib.ValueType.ARRAY.value ||
+            type === coreLib.ValueType.SECTION.value) {
             return undefined;
         }
 
@@ -1540,7 +1533,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Jumps or highlights the feature referenced by a FeatureId cell. */
     onValueClick(event: any, rowData: any) {
         event.stopPropagation();
-        this.jumpService.highlightByJumpTargetFilter(rowData["mapId"], rowData["value"]).then();
+        this.jumpService.highlightByJumpTargetFilter(
+            rowData["mapId"],
+            rowData["value"]).then();
     }
 
     /** Converts the rendered feature-id anchor back into the same value-click behavior. */
@@ -1552,10 +1547,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Activates row-based soft or strong hover highlighting while the pointer is over a row. */
     onRowHover(rowData: any) {
         this.claimMapHover(this.rowHoverOwner(rowData));
-        this.activeSoftHoverGroupId =
-            typeof rowData?.["softHoverGroupId"] === "string" ? rowData["softHoverGroupId"] : undefined;
-        this.activeStrongHoverGroupId =
-            typeof rowData?.["strongHoverGroupId"] === "string" ? rowData["strongHoverGroupId"] : undefined;
+        this.activeSoftHoverGroupId = typeof rowData?.["softHoverGroupId"] === "string"
+            ? rowData["softHoverGroupId"]
+            : undefined;
+        this.activeStrongHoverGroupId = typeof rowData?.["strongHoverGroupId"] === "string"
+            ? rowData["strongHoverGroupId"]
+            : undefined;
         this.activeFeatureIdNodeId = undefined;
         this.highlightRowHoverTarget(rowData);
     }
@@ -1563,30 +1560,22 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Clears any hover highlight emitted from row-level annotations. */
     onRowHoverExit(rowData: any) {
         const owner = this.rowHoverOwner(rowData);
-        this.deferMapHoverTransition(
-            owner,
-            () => {
-                this.activeMapHoverOwner = undefined;
-                this.activeSoftHoverGroupId = undefined;
-                this.activeStrongHoverGroupId = undefined;
-                this.activeFeatureIdNodeId = undefined;
-                if (
-                    !rowData.hasOwnProperty("type") &&
-                    !rowData.hasOwnProperty("hoverId") &&
-                    !rowData.hasOwnProperty("softHoverGroupId")
-                ) {
-                    return;
-                }
-                if (
-                    rowData["type"] === this.InspectionValueType.FEATUREID.value ||
-                    rowData["hoverId"] ||
-                    rowData["softHoverGroupId"]
-                ) {
-                    this.mapService.setHoveredFeatures([]);
-                }
-            },
-            true
-        );
+        this.deferMapHoverTransition(owner, () => {
+            this.activeMapHoverOwner = undefined;
+            this.activeSoftHoverGroupId = undefined;
+            this.activeStrongHoverGroupId = undefined;
+            this.activeFeatureIdNodeId = undefined;
+            if (!rowData.hasOwnProperty("type") &&
+                !rowData.hasOwnProperty("hoverId") &&
+                !rowData.hasOwnProperty("softHoverGroupId")) {
+                return;
+            }
+            if (rowData["type"] === this.InspectionValueType.FEATUREID.value ||
+                rowData["hoverId"] ||
+                rowData["softHoverGroupId"]) {
+                this.mapService.setHoveredFeatures([]);
+            }
+        }, true);
     }
 
     /** Highlights feature-id values independently from the row hover group. */
@@ -1595,7 +1584,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             return;
         }
         this.claimMapHover(this.featureValueHoverOwner(rowData, colKey));
-        this.activeFeatureIdNodeId = typeof rowData?.["nodeId"] === "string" ? rowData["nodeId"] : undefined;
+        this.activeFeatureIdNodeId = typeof rowData?.["nodeId"] === "string"
+            ? rowData["nodeId"]
+            : undefined;
         this.highlightVisibleFeatureReference(rowData);
     }
 
@@ -1614,15 +1605,16 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Chooses the strongest available hover target annotation for a tree row and forwards it to the map. */
     private highlightRowHoverTarget(rowData: any) {
-        const hoverId =
-            typeof rowData["strongHoverGroupId"] === "string"
-                ? String(rowData["strongHoverGroupId"])
-                : typeof rowData["softHoverGroupId"] === "string"
-                  ? String(rowData["softHoverGroupId"])
-                  : typeof rowData["hoverId"] === "string"
+        const hoverId = typeof rowData["strongHoverGroupId"] === "string"
+            ? String(rowData["strongHoverGroupId"])
+            : typeof rowData["softHoverGroupId"] === "string"
+                ? String(rowData["softHoverGroupId"])
+                : typeof rowData["hoverId"] === "string"
                     ? String(rowData["hoverId"])
                     : "";
-        const mapTileKey = typeof rowData["mapTileKey"] === "string" ? rowData["mapTileKey"] : undefined;
+        const mapTileKey = typeof rowData["mapTileKey"] === "string"
+            ? rowData["mapTileKey"]
+            : undefined;
         if (!mapTileKey || !hoverId) {
             this.mapService.setHoveredFeatures([]);
             return;
@@ -1635,7 +1627,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         const mapTileKey = rowData?.["mapTileKey"];
         const featureId = rowData?.["value"];
         const valid = typeof mapTileKey === "string" && typeof featureId === "string";
-        this.mapService.setHoveredFeatures(valid && mapTileKey && featureId ? [{mapTileKey, featureId}] : [], true);
+        this.mapService.setHoveredFeatures(valid && mapTileKey && featureId
+            ? [{mapTileKey, featureId}]
+            : [], true);
     }
 
     /** Stable DOM-independent owner identity for one tree row hover. */
@@ -1662,22 +1656,29 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     }
 
     /** Ignore a delayed leave after another row or nested value has taken ownership. */
-    private deferMapHoverTransition(owner: string, transition: () => void, acceptNestedOwner = false): void {
+    private deferMapHoverTransition(
+        owner: string,
+        transition: () => void,
+        acceptNestedOwner = false
+    ): void {
         const ownerMatches = (): boolean => {
             const currentOwner = this.activeMapHoverOwner;
-            return (
-                currentOwner === owner ||
-                (acceptNestedOwner && currentOwner?.startsWith(`feature:${owner.slice("row:".length)}:`)) ||
-                (acceptNestedOwner && currentOwner?.startsWith(`bubble:${owner.slice("row:".length)}:`)) ||
-                false
-            );
+            return currentOwner === owner ||
+                (acceptNestedOwner && currentOwner?.startsWith(
+                    `feature:${owner.slice("row:".length)}:`
+                )) ||
+                (acceptNestedOwner && currentOwner?.startsWith(
+                    `bubble:${owner.slice("row:".length)}:`
+                )) || false;
         };
         if (!ownerMatches()) {
             return;
         }
         const transitionEpoch = ++this.mapHoverEpoch;
         queueMicrotask(() => {
-            if (this.destroyed || transitionEpoch !== this.mapHoverEpoch || !ownerMatches()) {
+            if (this.destroyed ||
+                transitionEpoch !== this.mapHoverEpoch ||
+                !ownerMatches()) {
                 return;
             }
             transition();
@@ -1691,12 +1692,10 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Tracks whether a FeatureId cell currently owns the dedicated hover highlight styling. */
     isHoveredFeatureIdValue(rowData: any, colKey: string): boolean {
-        return (
-            colKey === "value" &&
+        return colKey === "value" &&
             this.isFeatureIdValueRow(rowData) &&
             typeof rowData?.["nodeId"] === "string" &&
-            rowData["nodeId"] === this.activeFeatureIdNodeId
-        );
+            rowData["nodeId"] === this.activeFeatureIdNodeId;
     }
 
     /** Extracts the row depth from PrimeNG's row wrapper regardless of the current template shape. */
@@ -1730,19 +1729,22 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Builds the CSS class map for geometry badges, hover groups, and special inspection rows. */
     getRowClasses(rowData: any): Record<string, boolean> {
-        const strongHoverGroupId =
-            typeof rowData?.["strongHoverGroupId"] === "string" ? rowData["strongHoverGroupId"] : undefined;
-        const softHoverGroupId =
-            typeof rowData?.["softHoverGroupId"] === "string" ? rowData["softHoverGroupId"] : undefined;
+        const strongHoverGroupId = typeof rowData?.["strongHoverGroupId"] === "string"
+            ? rowData["strongHoverGroupId"]
+            : undefined;
+        const softHoverGroupId = typeof rowData?.["softHoverGroupId"] === "string"
+            ? rowData["softHoverGroupId"]
+            : undefined;
         return {
             [rowData?.styleClass ?? ""]: !!rowData?.styleClass,
-            "inspection-value-bubble-target":
-                typeof rowData?.["nodeId"] === "string" && rowData["nodeId"] === this.activeValueBubbleTargetNodeId,
+            "inspection-value-bubble-target": typeof rowData?.["nodeId"] === "string" &&
+                rowData["nodeId"] === this.activeValueBubbleTargetNodeId,
             "inspection-selection-soft": rowData?.["selectionHighlight"] === "soft",
             "inspection-selection-strong": rowData?.["selectionHighlight"] === "strong",
-            "inspection-hover-soft": !!this.activeSoftHoverGroupId && softHoverGroupId === this.activeSoftHoverGroupId,
-            "inspection-hover-strong":
-                !!this.activeStrongHoverGroupId && strongHoverGroupId === this.activeStrongHoverGroupId
+            "inspection-hover-soft": !!this.activeSoftHoverGroupId &&
+                softHoverGroupId === this.activeSoftHoverGroupId,
+            "inspection-hover-strong": !!this.activeStrongHoverGroupId &&
+                strongHoverGroupId === this.activeStrongHoverGroupId
         };
     }
 
@@ -1764,14 +1766,20 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Returns the compact qualifier initial used by a source-data navigation button. */
     protected sourceDataReferenceLabel(sourceDataRef: any): string {
-        const qualifier = typeof sourceDataRef?.qualifier === "string" ? sourceDataRef.qualifier.trim() : "";
+        const qualifier = typeof sourceDataRef?.qualifier === "string"
+            ? sourceDataRef.qualifier.trim()
+            : "";
         return qualifier ? qualifier[0].toUpperCase() : "S";
     }
 
     /** Describes source-data navigation even when the backend supplied no qualifier. */
     protected sourceDataReferenceTooltip(sourceDataRef: any): string {
-        const qualifier = typeof sourceDataRef?.qualifier === "string" ? sourceDataRef.qualifier.trim() : "";
-        return qualifier ? `Go to ${qualifier} source data.` : "Go to source data.";
+        const qualifier = typeof sourceDataRef?.qualifier === "string"
+            ? sourceDataRef.qualifier.trim()
+            : "";
+        return qualifier
+            ? `Go to ${qualifier} source data.`
+            : "Go to source data.";
     }
 
     /** Maps inspection value types to the CSS classes used by the table template. */
@@ -1874,18 +1882,18 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
         this.geoJsonMenuItems = [
             {
-                label: "Open in new tab",
-                icon: "pi pi-external-link",
+                label: 'Open in new tab',
+                icon: 'pi pi-external-link',
                 command: () => this.openGeoJsonInNewTab()
             },
             {
-                label: "Download (.geojson)",
-                icon: "pi pi-download",
+                label: 'Download (.geojson)',
+                icon: 'pi pi-download',
                 command: () => this.downloadGeoJson()
             },
             {
-                label: "Copy to clipboard",
-                icon: "pi pi-copy",
+                label: 'Copy to clipboard',
+                icon: 'pi pi-copy',
                 command: () => this.copyGeoJson()
             }
         ];
@@ -1907,16 +1915,16 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (!data) {
             return;
         }
-        const blob = new Blob([data], {type: "application/geo+json"});
+        const blob = new Blob([data], {type: 'application/geo+json'});
         const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
+        const link = document.createElement('a');
         link.href = url;
         link.download = this.geoJsonFilename();
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-        this.messageService.showSuccess("GeoJSON download started");
+        this.messageService.showSuccess('GeoJSON download started');
     }
 
     /** Opens the current inspection GeoJSON in a separate tab via a blob URL. */
@@ -1925,11 +1933,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (!data) {
             return;
         }
-        const blob = new Blob([data], {type: "application/geo+json"});
+        const blob = new Blob([data], {type: 'application/geo+json'});
         const url = URL.createObjectURL(blob);
-        window.open(url, "_blank");
+        window.open(url, '_blank');
         setTimeout(() => URL.revokeObjectURL(url), 10_000);
-        this.messageService.showSuccess("Opened GeoJSON in new tab");
+        this.messageService.showSuccess('Opened GeoJSON in new tab');
     }
 
     /** Resolve potentially large feature exports only for an explicit export action. */
@@ -1968,7 +1976,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Sets expansion state throughout a tree, optionally preserving explicit user/restored states. */
     private setTreeExpansion(nodes: TreeNode[], expanded: boolean, onlyUndefined = false): void {
-        nodes.forEach((node) => {
+        nodes.forEach(node => {
             if (this.hasChildNodes(node) && (!onlyUndefined || node.expanded === undefined)) {
                 node.expanded = expanded;
             }
@@ -1980,7 +1988,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Collapses all expandable rows while keeping top-level inspection section rows open. */
     private collapseTreeBelowRootSections(nodes: TreeNode[], depth = 0): void {
-        nodes.forEach((node) => {
+        nodes.forEach(node => {
             const isRootSection = depth === 0 && node.data?.["type"] === this.InspectionValueType.SECTION.value;
             if (this.hasChildNodes(node)) {
                 node.expanded = isRootSection ? true : false;
@@ -2079,7 +2087,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Expands the inspection branches that are usually most useful on first render, preserving explicit row state. */
     expandTreeNodes(nodes: TreeTableNode[], parent: TreeTableNode | null = null): void {
-        nodes.forEach((node) => {
+        nodes.forEach(node => {
             const isTopLevelNode = parent === null;
             const isRelationTypeNode = parent && parent.data["key"] === "Relations";
             const isSection = node.data && node.data["type"] === this.InspectionValueType.SECTION.value;
@@ -2087,12 +2095,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             const isAttributeLayerNode = parent?.data?.["key"] === "Attribute Layers";
             const attributeCount = node.children?.length ?? 0;
             if (node.expanded === undefined) {
-                node.expanded =
-                    isTopLevelNode ||
-                    isRelationTypeNode ||
-                    isSection ||
-                    hasSingleChild ||
-                    (isAttributeLayerNode && attributeCount <= 10);
+                node.expanded = isTopLevelNode
+                    || isRelationTypeNode
+                    || isSection
+                    || hasSingleChild
+                    || (isAttributeLayerNode && attributeCount <= 10);
             }
 
             if (node.children) {
@@ -2160,9 +2167,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (!hostElement) {
             return false;
         }
-        const targetRow = Array.from(hostElement.querySelectorAll<HTMLElement>("[data-inspection-node-id]")).find(
-            (element) => element.dataset["inspectionNodeId"] === targetNodeId
-        );
+        const targetRow = Array.from(hostElement.querySelectorAll<HTMLElement>("[data-inspection-node-id]"))
+            .find(element => element.dataset["inspectionNodeId"] === targetNodeId);
         const viewport = hostElement.querySelector<HTMLElement>(".p-scroller-viewport, .p-treetable-scrollable-body");
         if (!targetRow || !viewport) {
             return false;

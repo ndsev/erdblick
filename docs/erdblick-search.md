@@ -102,7 +102,7 @@ Typing `tileId "Map" "SourceLayer"` is not the only way to reach SourceData:
 
 <!-- mcp:
 keywords: [search, sessions, scope, attribute, pause, stop, viewport]
-hint: "Start a visible search with viewer_start_search using explicit mapLayers, viewIndices and the current viewLayoutRevision. MCP autoUpdate defaults to false. Keep the returned searchId; use viewer_control_search for pause/resume/stop/close/rerun/refresh. Read progress with viewer_get_search; stopping retains partial results."
+hint: "Start a visible search with viewer_start_search using explicit mapLayers and stable viewIds from app.views. MCP autoUpdate defaults to false. Keep the returned searchId; use viewer_control_search for pause/resume/stop/close/rerun/refresh. Read progress with viewer_get_search; stopping retains partial results."
 -->
 ## Feature Search Sessions
 

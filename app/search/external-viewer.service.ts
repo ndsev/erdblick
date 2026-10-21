@@ -1,9 +1,10 @@
 import {inject, Injectable} from "@angular/core";
-import {AppActionService} from "../actions/app-action.service";
+import {z} from "zod";
+import {rejectAction} from "../actions/action-utils";
+import {ActionDeclaration, AppActionService} from "../actions/app-action.service";
 import type {SearchTarget} from "../actions/omnibar";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppConfigService, type ExternalViewerConfig} from "../shared/app-config.service";
-import {AppStateService} from "../shared/appstate.service";
 import {CoordinateJumpService} from "./coordinate-jump.service";
 
 /** A validated WGS84 point used by external map viewers. */
@@ -35,13 +36,36 @@ function isValidExternalViewerLocation(location: ExternalViewerLocation): boolea
 @Injectable({providedIn: "root"})
 /** Owns configured external-viewer URLs and the omnibox marker/viewport fallback policy. */
 export class ExternalViewerService {
+    static readonly actions = {
+        open: {
+            name: "omnibar_external_viewer",
+            description: "Open a currently configured external viewer at a validated location.",
+            mutation: true,
+            exposure: "omnibar",
+            inputSchema: z
+                .object({
+                    providerId: z.string().min(1),
+                    location: z
+                        .object({
+                            lat: z.number().min(-90).max(90),
+                            lon: z.number().min(-180).max(180)
+                        })
+                        .strict()
+                })
+                .strict(),
+            outputSchema: z.void()
+        }
+    } as const satisfies Record<string, ActionDeclaration>;
+    private readonly actions = inject(AppActionService);
     readonly viewStateOwner = inject(MapViewStateService);
     private readonly coordinates = inject(CoordinateJumpService);
-    constructor(
-        private readonly stateService: AppStateService,
-        private readonly configService: AppConfigService
-    ) {
-        inject(AppActionService).registerOmnibar(
+    constructor(private readonly configService: AppConfigService) {
+        this.actions.registerAction(ExternalViewerService.actions.open, ({providerId, location}) => {
+            const provider = this.providers.find((current) => current.id === providerId);
+            if (!provider) rejectAction("External viewer is no longer configured", "not_available");
+            this.open(provider, location);
+        });
+        this.actions.registerOmnibar(
             "external-viewers",
             (query) => {
                 const location = this.externalViewerLocation(query);
@@ -92,7 +116,7 @@ export class ExternalViewerService {
         provider: ExternalViewerProvider,
         location: ResolvedExternalViewerLocation | undefined
     ): SearchTarget {
-        return {
+        return this.actions.candidate(ExternalViewerService.actions.open, {
             id: provider.id,
             icon: "pi-map-marker",
             color: "green",
@@ -103,14 +127,14 @@ export class ExternalViewerService {
             enabled: location !== undefined,
             acceptsEmptyInput: true,
             saveToHistory: (input: string) => this.explicitExternalViewerLocation(input) !== undefined,
-            execute: (input: string) => {
+            arguments: (input: string) => {
                 const resolved = this.externalViewerLocation(input);
-                if (resolved) {
-                    this.open(provider, resolved);
-                }
+                if (!resolved) rejectAction("Invalid external-viewer coordinates", "invalid_arguments");
+                return {providerId: provider.id, location: {lat: resolved.lat, lon: resolved.lon}};
             },
+            isCurrent: () => this.providers.includes(provider),
             validate: (input: string) => this.externalViewerLocation(input) !== undefined
-        };
+        });
     }
 
     /** Formats the coordinate and fallback source shown below an external-viewer action. */

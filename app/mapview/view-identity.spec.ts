@@ -5,12 +5,12 @@ import {afterEach, describe, expect, it, vi} from "vitest";
 import {AppActionService} from "../actions/app-action.service";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {InspectionStateService} from "../inspection/inspection-state.service";
+import {Cartographic} from "../integrations/geo";
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {MapLayerStateService} from "../mapdata/map-layer-state.service";
 import {createStateOwners, StateOwners} from "../shared/state-test-owners";
 import {MapViewStateService} from "./map-view-state.service";
 import {ViewLayerDiagnosticsService} from "./view-layer-diagnostics.service";
-import {Cartographic} from "../integrations/geo";
 
 const systems: StateOwners[] = [];
 function fixture(params: Record<string, string> = {}) {
@@ -45,6 +45,17 @@ describe("logical view ownership", () => {
         expect(state.layers.styles.get("Map/Layer/Style/opacity")).toEqual([0.8, 0.2]);
         expect(state.searches.featureSearches[0].selectedViewIds).toEqual([right]);
         expect(state.searches.featureSearches[0].selectedViewIndices).toEqual([0]);
+    });
+
+    it("keeps the established snapshot encodings distinct from runtime view values", () => {
+        const {state, views} = fixture();
+        views.marker = true;
+        views.mode2dState.next(0, true);
+        views.markedPosition = [11, 48, 0];
+        const snapshot = state.persistence.exportSnapshot();
+        expect(snapshot).toMatchObject({marker: 1, markedPosition: [11, 48, 0], mode2d: [true]});
+        expect(snapshot['cameraView']).toEqual([expect.objectContaining({lon: expect.any(Number), lat: expect.any(Number)})]);
+        expect(snapshot).not.toHaveProperty('featureSearchState');
     });
 
     it("copies an explicit source across cameras, style options and selected searches", () => {
@@ -135,6 +146,16 @@ describe("logical view ownership", () => {
         expect(messages.showError).toHaveBeenCalledOnce();
     });
 
+    it("derives URL count from explicit IDs during startup and direct replacement", async () => {
+        const {state, views} = fixture({vid: "west,east"});
+        state.persistence.initializePersistence();
+        expect(views.viewIds()).toEqual(["west", "east"]);
+        expect(views.numViews).toBe(2);
+        await state.persistence.replaceUrlState({vid: "north,south,central"}, true);
+        expect(views.viewIds()).toEqual(["north", "south", "central"]);
+        expect(views.numViews).toBe(3);
+    });
+
     it("rejects inconsistent snapshot and config identities before changing any owner", () => {
         const {state, views} = fixture();
         state.persistence.initializePersistence();
@@ -216,6 +237,23 @@ describe("logical view ownership", () => {
 
 
 describe("view membership preparations", () => {
+    it.each(["URL", "snapshot"])("keeps live search targets by ID during a partial %s import", async format => {
+        const {state, views} = fixture();
+        state.persistence.initializePersistence();
+        views.viewIdsState.next(["a", "b"]);
+        state.searches.addFeatureSearch({query: "Road", selectedViewIndices: [1]});
+        const importIds = async (ids: string[]) => {
+            if (format === "URL") await state.persistence.replaceUrlState({vid: ids.join(",")});
+            else expect(state.persistence.importSnapshot({viewIds: ids})).toEqual([]);
+        };
+        await importIds(["b", "c"]);
+        expect(state.searches.featureSearches[0].selectedViewIds).toEqual(["b"]);
+        await importIds(["a", "c"]);
+        expect(state.searches.featureSearches[0].selectedViewIds).toEqual([]);
+        await importIds(["b", "c"]);
+        expect(state.searches.featureSearches[0].selectedViewIds).toEqual([]);
+    });
+
     it("publishes synchronized camera and projection changes atomically through ordinary owner methods", () => {
         const {views} = fixture();
         views.numViews = 2;

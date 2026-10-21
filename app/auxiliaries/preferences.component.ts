@@ -765,7 +765,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     readonly dialogLayoutId = PREFERENCES_DIALOG_LAYOUT_ID;
     readonly advancedPreferencesDialogLayoutId = ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID;
 
-    @ViewChild("pref") preferencesDialog?: AppDialogComponent;
+    @ViewChild('pref') preferencesDialog?: AppDialogComponent;
 
     tilesToLoadInput: number | string = 0;
     limitSimultaneousInspectionsInput: number | string = 0;
@@ -782,9 +782,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     semanticCompositingEnabledSetting: boolean = true;
     contactShadingEnabledSetting: boolean = true;
     lod3TileThresholdInput: number | string = DEFAULT_LOD3_TILE_THRESHOLD;
-    renderWorkerCountInput: number | string = AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
+    renderWorkerCountInput: number | string =
+        AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
     mapZoomStepInput: number | string = DEFAULT_MAP_ZOOM_STEP;
-    featureZoomClearanceMetersInput: number | string = DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS;
+    featureZoomClearanceMetersInput: number | string =
+        DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS;
     tilesToLoadChanged: boolean = false;
     inspectionsLimitChanged: boolean = false;
     drillPickRadiusChanged: boolean = false;
@@ -794,14 +796,14 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     mapZoomStepChanged: boolean = false;
     featureZoomClearanceMetersChanged: boolean = false;
     toggleOptions = [
-        {label: "Off", value: false},
-        {label: "On", value: true}
+        {label: 'Off', value: false},
+        {label: 'On', value: true}
     ];
-    darkModeSetting: "off" | "on" | "auto" = "auto";
+    darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
     darkModeOptions = [
-        {label: "Off", value: "off"},
-        {label: "On", value: "on"},
-        {label: "Auto", value: "auto"}
+        { label: 'Off', value: 'off' },
+        { label: 'On', value: 'on' },
+        { label: 'Auto', value: 'auto' }
     ];
     readonly inspectionValuePresentationOptions = [
         {label: "Vary Value Colors", value: "colors"},
@@ -815,18 +817,16 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     inspectionValuePresentationSelection: string[] = [];
     sourceDataColumnSelection: string[] = [];
     hoverLabelFields: HoverLabelFieldConfig[] = [];
-    hoverLabelFieldOptions: Array<{label: string; value: string}> = [
-        {
-            label: "Feature ID",
-            value: "id"
-        }
-    ];
+    hoverLabelFieldOptions: Array<{label: string; value: string}> = [{
+        label: "Feature ID",
+        value: "id"
+    }];
     private mediaQueryList?: MediaQueryList;
-    private readonly DARK_MODE_CLASS = "erdblick-dark";
-    private readonly DARK_MODE_KEY = "ui.darkMode";
-    private readonly PREFERS_DARK_QUERY = "(prefers-color-scheme: dark)";
+    private readonly DARK_MODE_CLASS = 'erdblick-dark';
+    private readonly DARK_MODE_KEY = 'ui.darkMode';
+    private readonly PREFERS_DARK_QUERY = '(prefers-color-scheme: dark)';
     private handleSystemSchemeChange = (e: MediaQueryListEvent) => {
-        if (this.darkModeSetting === "auto") {
+        if (this.darkModeSetting === 'auto') {
             this.updateDarkClass(e.matches);
         }
     };
@@ -872,59 +872,59 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         );
         this.subscriptions.push(
             this.viewStateOwner.tilesLoadLimitState.subscribe((limit) => {
-                this.tilesToLoadInput = limit;
+            this.tilesToLoadInput = limit;
             })
         );
         this.subscriptions.push(
             this.inspectionState.inspectionsLimitState.subscribe((limit) => {
-                this.limitSimultaneousInspectionsInput = limit;
+            this.limitSimultaneousInspectionsInput = limit;
             })
         );
         this.subscriptions.push(
             this.inspectionState.drillPickRadiusState.subscribe((radius) => {
-                this.drillPickRadiusInput = radius;
+            this.drillPickRadiusInput = radius;
             })
         );
         this.subscriptions.push(
             this.locationSearch.locationSearchResultLimitState.subscribe((limit) => {
-                this.locationSearchResultLimitInput = limit;
+            this.locationSearchResultLimitInput = limit;
             })
         );
         this.subscriptions.push(
             this.connectionState.tilePullCompressionEnabledState.subscribe((enabled) => {
-                this.tilePullCompressionEnabledSetting = enabled;
+            this.tilePullCompressionEnabledSetting = enabled;
             })
         );
         this.subscriptions.push(
             this.viewStateOwner.deckAntialiasingEnabledState.subscribe((enabled) => {
-                this.deckAntialiasingEnabledSetting = enabled;
+            this.deckAntialiasingEnabledSetting = enabled;
             })
         );
         this.subscriptions.push(
             this.viewStateOwner.semanticCompositingEnabledState.subscribe((enabled) => {
-                this.semanticCompositingEnabledSetting = enabled;
+            this.semanticCompositingEnabledSetting = enabled;
             })
         );
         this.subscriptions.push(
             this.viewStateOwner.contactShadingEnabledState.subscribe((enabled) => {
-                this.contactShadingEnabledSetting = enabled;
+            this.contactShadingEnabledSetting = enabled;
             })
         );
         this.subscriptions.push(
             this.viewStateOwner.lod3TileThresholdState.subscribe((threshold) => {
-                this.lod3TileThresholdInput = threshold;
-                this.updateLod3TileThresholdChangeState();
+            this.lod3TileThresholdInput = threshold;
+            this.updateLod3TileThresholdChangeState();
             })
         );
         this.subscriptions.push(
             this.viewStateOwner.tileSubsetRenderWorkerCountState.subscribe((workerCount) => {
-                this.renderWorkerCountInput = workerCount;
-                this.updateRenderWorkerCountChangeState();
+                    this.renderWorkerCountInput = workerCount;
+                    this.updateRenderWorkerCountChangeState();
             })
         );
         this.subscriptions.push(
             this.viewStateOwner.mapZoomStepState.subscribe((step) => {
-                this.mapZoomStepInput = step;
+            this.mapZoomStepInput = step;
             })
         );
         this.subscriptions.push(
@@ -934,27 +934,27 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         );
         this.subscriptions.push(
             this.inspectionState.inspectionValueVaryColorsState.subscribe(() => {
-                this.syncInspectionValuePresentationSelection();
+            this.syncInspectionValuePresentationSelection();
             })
         );
         this.subscriptions.push(
             this.inspectionState.inspectionValueVaryOutlinesState.subscribe(() => {
-                this.syncInspectionValuePresentationSelection();
+            this.syncInspectionValuePresentationSelection();
             })
         );
         this.subscriptions.push(
             this.inspectionState.inspectionValueVaryStripingState.subscribe(() => {
-                this.syncInspectionValuePresentationSelection();
+            this.syncInspectionValuePresentationSelection();
             })
         );
         this.subscriptions.push(
             this.inspectionState.sourceDataInspectionDefaultColumnsState.subscribe((columns) => {
-                this.sourceDataColumnSelection = [...columns];
+            this.sourceDataColumnSelection = [...columns];
             })
         );
         this.subscriptions.push(
             this.inspectionState.hoverLabelFieldsState.subscribe((fields) => {
-                this.hoverLabelFields = fields.map((field) => ({...field}));
+            this.hoverLabelFields = fields.map(field => ({...field}));
             })
         );
         this.syncInspectionValuePresentationSelection();
@@ -972,9 +972,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             backoffMultiplier: this.connectionBackoffMultiplier,
             maxDelayMs: this.connectionMaximumSeconds * 1000
         });
-        this.connectionValidationMessage = result.success
-            ? ""
-            : result.error.issues.map((issue) => issue.message).join(" ");
+        this.connectionValidationMessage = result.success ? "" : result.error.issues.map(issue => issue.message).join(" ");
         if (result.success) this.connectionState.setConnectionRetryPolicy(result.data);
     }
 
@@ -983,7 +981,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     get renderWorkerCountDescription(): string {
-        const configured = clampTileSubsetRenderWorkerCount(this.renderWorkerCountInput);
+        const configured = clampTileSubsetRenderWorkerCount(
+            this.renderWorkerCountInput
+        );
         return configured === AUTO_TILE_SUBSET_RENDER_WORKER_COUNT
             ? `Auto (${getTileSubsetLayerRenderAutoWorkerCount()})`
             : `${configured} active worker${configured === 1 ? "" : "s"}`;
@@ -1027,14 +1027,14 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Restores the persisted dark-mode preference during component startup. */
     ngOnInit() {
-        const saved = localStorage.getItem(this.DARK_MODE_KEY) as "off" | "on" | "auto" | null;
-        this.darkModeSetting = saved ?? "auto";
+        const saved = (localStorage.getItem(this.DARK_MODE_KEY) as 'off' | 'on' | 'auto' | null);
+        this.darkModeSetting = saved ?? 'auto';
         this.applyDarkModeSetting(this.darkModeSetting);
     }
 
     /** Releases dialog-owned subscriptions and media-query listeners. */
     ngOnDestroy() {
-        this.subscriptions.forEach((sub) => sub.unsubscribe());
+        this.subscriptions.forEach(sub => sub.unsubscribe());
         this.cleanupMediaQueryListener();
     }
 
@@ -1062,8 +1062,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Adds one schema-backed hover field without duplicating an existing picker value. */
     addHoverLabelField(): void {
-        const selected = new Set(this.hoverLabelFields.map((field) => field.expression));
-        const expression = this.hoverLabelFieldOptions.find((option) => !selected.has(option.value))?.value ?? "";
+        const selected = new Set(this.hoverLabelFields.map(field => field.expression));
+        const expression = this.hoverLabelFieldOptions.find(option =>
+            !selected.has(option.value))?.value ?? "";
         this.inspectionState.hoverLabelFields = [...this.hoverLabelFields, {expression, customExpression: false}];
     }
 
@@ -1099,18 +1100,25 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Loads unique scalar feature fields from the shared schema worker. */
     private refreshHoverLabelFieldOptions(): void {
-        this.searchSchema
-            .requestSearchStyleFields("true", "feature")
-            .then((options) => this.applyHoverLabelFieldOptions(options));
+        this.searchSchema.requestSearchStyleFields("true", "feature")
+            .then(options => this.applyHoverLabelFieldOptions(options));
     }
 
     /** Merges per-layer schema candidates into the concise hover-field picker. */
-    private applyHoverLabelFieldOptions(candidates: FeatureSearchStyleFieldCandidate[]): void {
-        const scalarKinds = new Set(["number", "integer", "string", "boolean", "enum"]);
-        const paths = new Set(
-            candidates.filter((candidate) => scalarKinds.has(candidate.valueKind)).map((candidate) => candidate.path)
-        );
-        this.hoverLabelFields.forEach((field) => {
+    private applyHoverLabelFieldOptions(
+        candidates: FeatureSearchStyleFieldCandidate[]
+    ): void {
+        const scalarKinds = new Set([
+            "number",
+            "integer",
+            "string",
+            "boolean",
+            "enum"
+        ]);
+        const paths = new Set(candidates
+            .filter(candidate => scalarKinds.has(candidate.valueKind))
+            .map(candidate => candidate.path));
+        this.hoverLabelFields.forEach(field => {
             if (!field.customExpression && field.expression) {
                 paths.add(field.expression);
             }
@@ -1118,7 +1126,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         paths.delete("id");
         this.hoverLabelFieldOptions = [
             {label: "Feature ID", value: "id"},
-            ...[...paths].sort().map((path) => ({label: path, value: path}))
+            ...[...paths].sort().map(path => ({label: path, value: path}))
         ];
     }
 
@@ -1203,10 +1211,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         const threshold = Number(this.lod3TileThresholdInput);
-        if (!Number.isFinite(threshold) || threshold < MIN_LOD3_TILE_THRESHOLD || threshold > MAX_LOD3_TILE_THRESHOLD) {
+        if (!Number.isFinite(threshold)
+            || threshold < MIN_LOD3_TILE_THRESHOLD || threshold > MAX_LOD3_TILE_THRESHOLD) {
             this.messageService.showError(
-                `Please enter a tile threshold between ${MIN_LOD3_TILE_THRESHOLD} and ${MAX_LOD3_TILE_THRESHOLD}.`
-            );
+                `Please enter a tile threshold between ${MIN_LOD3_TILE_THRESHOLD} and ${MAX_LOD3_TILE_THRESHOLD}.`);
             return;
         }
         const normalized = clampLod3TileThreshold(threshold);
@@ -1224,9 +1232,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     applyPointCloudPolicy(): void {
         const parsed = pointCloudPolicySchema.safeParse(this.pointCloudPolicyDraft);
         if (!parsed.success) {
-            this.messageService.showError(
-                "Point spacing must be 0.5–32 pixels, working memory 32–4096 MiB, and GPU allowance 16–2048 MiB."
-            );
+            this.messageService.showError("Point spacing must be 0.5–32 pixels, working memory 32–4096 MiB, and GPU allowance 16–2048 MiB.");
             return;
         }
         this.viewStateOwner.setPointCloudPolicy(parsed.data);
@@ -1238,15 +1244,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         const workerCount = Number(this.renderWorkerCountInput);
-        if (
-            !Number.isInteger(workerCount) ||
+        if (!Number.isInteger(workerCount) ||
             workerCount < AUTO_TILE_SUBSET_RENDER_WORKER_COUNT ||
-            workerCount > MAX_TILE_SUBSET_RENDER_WORKER_COUNT
-        ) {
+            workerCount > MAX_TILE_SUBSET_RENDER_WORKER_COUNT) {
             this.messageService.showError(
                 `Please enter a render worker count between ` +
-                    `${AUTO_TILE_SUBSET_RENDER_WORKER_COUNT} (Auto) and ` +
-                    `${MAX_TILE_SUBSET_RENDER_WORKER_COUNT}.`
+                `${AUTO_TILE_SUBSET_RENDER_WORKER_COUNT} (Auto) and ` +
+                `${MAX_TILE_SUBSET_RENDER_WORKER_COUNT}.`
             );
             return;
         }
@@ -1263,9 +1267,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const step = Number(this.mapZoomStepInput);
         if (!Number.isFinite(step) || step < MIN_MAP_ZOOM_STEP || step > MAX_MAP_ZOOM_STEP) {
-            this.messageService.showError(
-                `Please enter a zoom speed between ${MIN_MAP_ZOOM_STEP} and ${MAX_MAP_ZOOM_STEP}.`
-            );
+            this.messageService.showError(`Please enter a zoom speed between ${MIN_MAP_ZOOM_STEP} and ${MAX_MAP_ZOOM_STEP}.`);
             return;
         }
         const clampedStep = clampMapZoomStep(step);
@@ -1280,15 +1282,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         const clearance = Number(this.featureZoomClearanceMetersInput);
-        if (
-            !Number.isFinite(clearance) ||
-            clearance < MIN_FEATURE_ZOOM_CLEARANCE_METERS ||
-            clearance > MAX_FEATURE_ZOOM_CLEARANCE_METERS
-        ) {
+        if (!Number.isFinite(clearance)
+            || clearance < MIN_FEATURE_ZOOM_CLEARANCE_METERS
+            || clearance > MAX_FEATURE_ZOOM_CLEARANCE_METERS) {
             this.messageService.showError(
                 `Please enter a 3D feature zoom clearance between ` +
-                    `${MIN_FEATURE_ZOOM_CLEARANCE_METERS} and ` +
-                    `${MAX_FEATURE_ZOOM_CLEARANCE_METERS} metres.`
+                `${MIN_FEATURE_ZOOM_CLEARANCE_METERS} and ` +
+                `${MAX_FEATURE_ZOOM_CLEARANCE_METERS} metres.`
             );
             return;
         }
@@ -1299,21 +1299,21 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     /** Persists the dark-mode preference and updates the root document class immediately. */
-    setDarkMode(setting: "off" | "on" | "auto") {
+    setDarkMode(setting: 'off' | 'on' | 'auto') {
         this.darkModeSetting = setting;
         localStorage.setItem(this.DARK_MODE_KEY, setting);
         this.applyDarkModeSetting(setting);
     }
 
     /** Applies explicit dark/light mode or follows the system color scheme in auto mode. */
-    private applyDarkModeSetting(setting: "off" | "on" | "auto") {
-        if (setting === "on") {
+    private applyDarkModeSetting(setting: 'off' | 'on' | 'auto') {
+        if (setting === 'on') {
             this.cleanupMediaQueryListener();
             this.updateDarkClass(true);
             return;
         }
 
-        if (setting === "off") {
+        if (setting === 'off') {
             this.cleanupMediaQueryListener();
             this.updateDarkClass(false);
             return;
@@ -1322,7 +1322,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         // AUTO: follow system preference
         this.cleanupMediaQueryListener();
         this.mediaQueryList = window.matchMedia(this.PREFERS_DARK_QUERY);
-        this.mediaQueryList.addEventListener("change", this.handleSystemSchemeChange);
+        this.mediaQueryList.addEventListener('change', this.handleSystemSchemeChange);
         this.updateDarkClass(this.mediaQueryList.matches);
     }
 
@@ -1339,7 +1339,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Removes the active system color-scheme listener before reconfiguring it. */
     private cleanupMediaQueryListener() {
         if (this.mediaQueryList) {
-            this.mediaQueryList.removeEventListener("change", this.handleSystemSchemeChange);
+            this.mediaQueryList.removeEventListener('change', this.handleSystemSchemeChange);
             this.mediaQueryList = undefined;
         }
     }
@@ -1351,9 +1351,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const limit = Number(this.limitSimultaneousInspectionsInput);
         if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > MAX_SIMULTANEOUS_INSPECTIONS) {
-            this.messageService.showError(
-                `Please enter a valid inspections limit (1-${MAX_SIMULTANEOUS_INSPECTIONS})!`
-            );
+            this.messageService.showError(`Please enter a valid inspections limit (1-${MAX_SIMULTANEOUS_INSPECTIONS})!`);
             return;
         }
         this.inspectionState.inspectionsLimit = limit;
@@ -1367,12 +1365,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         const radius = Number(this.drillPickRadiusInput);
-        if (
-            !Number.isFinite(radius) ||
-            !Number.isInteger(radius) ||
-            radius < MIN_DRILL_PICK_RADIUS ||
-            radius > MAX_DRILL_PICK_RADIUS
-        ) {
+        if (!Number.isFinite(radius) || !Number.isInteger(radius)
+            || radius < MIN_DRILL_PICK_RADIUS || radius > MAX_DRILL_PICK_RADIUS) {
             this.messageService.showError(
                 `Please enter a valid drill pick radius (${MIN_DRILL_PICK_RADIUS}-${MAX_DRILL_PICK_RADIUS})!`
             );
@@ -1388,15 +1382,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         const limit = Number(this.locationSearchResultLimitInput);
-        if (
-            !Number.isFinite(limit) ||
-            !Number.isInteger(limit) ||
-            limit < 1 ||
-            limit > MAX_LOCATION_SEARCH_RESULT_LIMIT
-        ) {
-            this.messageService.showError(
-                `Please enter a valid location match limit (1-${MAX_LOCATION_SEARCH_RESULT_LIMIT})!`
-            );
+        if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > MAX_LOCATION_SEARCH_RESULT_LIMIT) {
+            this.messageService.showError(`Please enter a valid location match limit (1-${MAX_LOCATION_SEARCH_RESULT_LIMIT})!`);
             return;
         }
         this.locationSearch.locationSearchResultLimit = limit;
@@ -1514,7 +1501,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Updates the dirty flag for the LOD 3 threshold control. */
     private updateLod3TileThresholdChangeState(): void {
         const threshold = Number(this.lod3TileThresholdInput);
-        if (!Number.isFinite(threshold) || threshold < MIN_LOD3_TILE_THRESHOLD || threshold > MAX_LOD3_TILE_THRESHOLD) {
+        if (!Number.isFinite(threshold)
+            || threshold < MIN_LOD3_TILE_THRESHOLD || threshold > MAX_LOD3_TILE_THRESHOLD) {
             this.lod3TileThresholdChanged = true;
             return;
         }
@@ -1524,11 +1512,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Updates the dirty flag for the subset-render worker control. */
     private updateRenderWorkerCountChangeState(): void {
         const workerCount = Number(this.renderWorkerCountInput);
-        if (
-            !Number.isInteger(workerCount) ||
+        if (!Number.isInteger(workerCount) ||
             workerCount < AUTO_TILE_SUBSET_RENDER_WORKER_COUNT ||
-            workerCount > MAX_TILE_SUBSET_RENDER_WORKER_COUNT
-        ) {
+            workerCount > MAX_TILE_SUBSET_RENDER_WORKER_COUNT) {
             this.renderWorkerCountChanged = true;
             return;
         }
@@ -1552,10 +1538,14 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected readonly MAX_LOCATION_SEARCH_RESULT_LIMIT = MAX_LOCATION_SEARCH_RESULT_LIMIT;
     protected readonly MIN_MAP_ZOOM_STEP = MIN_MAP_ZOOM_STEP;
     protected readonly MAX_MAP_ZOOM_STEP = MAX_MAP_ZOOM_STEP;
-    protected readonly MIN_FEATURE_ZOOM_CLEARANCE_METERS = MIN_FEATURE_ZOOM_CLEARANCE_METERS;
-    protected readonly MAX_FEATURE_ZOOM_CLEARANCE_METERS = MAX_FEATURE_ZOOM_CLEARANCE_METERS;
+    protected readonly MIN_FEATURE_ZOOM_CLEARANCE_METERS =
+        MIN_FEATURE_ZOOM_CLEARANCE_METERS;
+    protected readonly MAX_FEATURE_ZOOM_CLEARANCE_METERS =
+        MAX_FEATURE_ZOOM_CLEARANCE_METERS;
     protected readonly MIN_LOD3_TILE_THRESHOLD = MIN_LOD3_TILE_THRESHOLD;
     protected readonly MAX_LOD3_TILE_THRESHOLD = MAX_LOD3_TILE_THRESHOLD;
-    protected readonly AUTO_TILE_SUBSET_RENDER_WORKER_COUNT = AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
-    protected readonly MAX_TILE_SUBSET_RENDER_WORKER_COUNT = MAX_TILE_SUBSET_RENDER_WORKER_COUNT;
+    protected readonly AUTO_TILE_SUBSET_RENDER_WORKER_COUNT =
+        AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
+    protected readonly MAX_TILE_SUBSET_RENDER_WORKER_COUNT =
+        MAX_TILE_SUBSET_RENDER_WORKER_COUNT;
 }

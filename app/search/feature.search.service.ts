@@ -2,7 +2,7 @@ import {computed, inject, Injectable} from "@angular/core";
 import {BehaviorSubject, filter, Subject, Subscription, take} from "rxjs";
 import {z} from "zod";
 import {appliedAction, collectActionItems, rejectAction} from "../actions/action-utils";
-import {AppActionService} from "../actions/app-action.service";
+import {ActionDeclaration, AppActionService} from "../actions/app-action.service";
 import {ControlReadContext} from "../actions/control";
 import type {ViewerActionInput, ViewerActionOutput} from "../actions/viewer-action.contract";
 import {InspectionStateService} from "../inspection/inspection-state.service";
@@ -28,7 +28,7 @@ import {StyledMapgetLayer, type StyledMapgetLayerEvent} from "../mapdata/styled-
 import type {MapTileStreamFilterStatusPayload} from "../mapdata/tilestream";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {MapViewService} from "../mapview/map-view.service";
-import {ViewId, viewIdSchema} from "../mapview/view-id";
+import {ViewId, viewIdentitySchema, viewIdSchema} from "../mapview/view-id";
 import {featureSearchDefinitionExport} from "../search/feature-search-export.util";
 import {searchSettingsSchema} from "../search/feature.search.service.declarations";
 import {
@@ -360,6 +360,22 @@ export type FeatureSearchRunOptions = Partial<
 export class FeatureSearchService {
     static readonly controls = featureSearchControls;
     static readonly actions = featureSearchActions;
+    static readonly omnibarActions = {
+        run: {
+            name: "omnibar_feature_search",
+            description: "Run a feature/attribute query with its completion or saved-history scope.",
+            mutation: true,
+            exposure: "omnibar",
+            inputSchema: z
+                .object({
+                    query: z.string().min(1).max(8192),
+                    payload: z.unknown().optional(),
+                    target: viewIdentitySchema
+                })
+                .strict(),
+            outputSchema: z.void()
+        }
+    } as const satisfies Record<string, ActionDeclaration>;
     private readonly actionEncoder = new TextEncoder();
 
     readonly viewStateOwner = inject(MapViewStateService);
@@ -548,6 +564,10 @@ export class FeatureSearchService {
         this.registerControls();
 
         const actions = inject(AppActionService);
+        actions.registerAction(FeatureSearchService.omnibarActions.run, ({query, payload, target}) => {
+            this.viewStateOwner.requireCurrentView(target);
+            this.runFromActionPayload(query, payload);
+        });
         actions.registerAction(FeatureSearchService.actions.viewer_start_search, (input, context) =>
             this.startSearch(input)
         );
@@ -568,16 +588,6 @@ export class FeatureSearchService {
         );
 
         this.searchValues.write([]);
-        this.stateService.importingUrl.subscribe((params) => {
-            const nextIds = String(params["vid"]).split(",");
-            const previousIds = this.viewStateOwner.viewIds();
-            this.searchValues.write(
-                this.searchValues.read().map((entry) => ({
-                    ...entry,
-                    selectedViewIds: entry.selectedViewIds.map((id) => nextIds[previousIds.indexOf(id)]).filter(Boolean)
-                }))
-            );
-        });
         this.stateService.values.beforeCommit(
             () => {
                 const previous = this.viewStateOwner.viewIds();
@@ -591,13 +601,13 @@ export class FeatureSearchService {
                 this.searchValues.write(
                     this.searchValues.read().map((entry) => {
                         const selected = new Set(entry.selectedViewIds.filter((id) => ids.includes(id)));
-                        ids.forEach((id, index) => {
-                            const source =
-                                this.stateService.values.read(
-                                    (state) => state.viewEntityMap[id]?.copySourceId,
-                                    () => this.stateService.store.viewEntityMap()[id]?.copySourceId
-                                ) ?? previous[Math.min(index, previous.length - 1)];
-                            if (!previous.includes(id) && entry.selectedViewIds.includes(source)) selected.add(id);
+                        ids.forEach((id) => {
+                            const source = this.stateService.values.read(
+                                (state) => state.viewEntityMap[id]?.copySourceId,
+                                () => this.stateService.store.viewEntityMap()[id]?.copySourceId
+                            );
+                            if (source && !previous.includes(id) && entry.selectedViewIds.includes(source))
+                                selected.add(id);
                         });
                         return {...entry, selectedViewIds: ids.filter((id) => selected.has(id))};
                     })
@@ -4056,8 +4066,11 @@ export class FeatureSearchService {
         textOmitted ||= query !== session.definition.query;
         const parsedSettings = searchSettingsSchema.safeParse({
             ...settings,
-            selectedViewIds: session.definition.selectedViewIds ?? session.definition.selectedViewIndices
-                .map(index => this.viewStateOwner.idAt(index)).filter(id => id !== undefined)
+            selectedViewIds:
+                session.definition.selectedViewIds ??
+                session.definition.selectedViewIndices
+                    .map((index) => this.viewStateOwner.idAt(index))
+                    .filter((id) => id !== undefined)
         });
         if (!parsedSettings.success)
             rejectAction("Search settings exceed the public contract; narrow them in the UI first");

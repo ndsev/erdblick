@@ -1,18 +1,38 @@
 import {inject, Injectable, OnDestroy} from "@angular/core";
 import {map, merge, skip, Subscription} from "rxjs";
-import {AppActionService} from "../actions/app-action.service";
+import {z} from "zod";
+import {ActionDeclaration, AppActionService} from "../actions/app-action.service";
+import {SearchTarget} from "../actions/omnibar";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {MapViewService} from "../mapview/map-view.service";
+import {ViewIdentity, viewIdentitySchema} from "../mapview/view-id";
 import {ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
 import {deepEquals} from "../shared/app-state";
 import {AppStateService} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 import {JumpTargetService} from "./jump.service";
-import {LocationSearchService, type ResolvedLocationNavigation} from "./location.search.service";
+import {LocationSearchService, type LocationSearchMatch, type ResolvedLocationNavigation} from "./location.search.service";
 
 /** Owns one selected location lookup until its single camera commit; later user actions win. */
 @Injectable({providedIn: "root"})
 export class LocationNavigationService implements OnDestroy {
+    static readonly actions = {
+        navigate: {
+            name: "omnibar_location",
+            description: "Resolve a current or saved location through its provider and navigate once.",
+            mutation: true,
+            exposure: "omnibar",
+            inputSchema: z
+                .object({
+                    actionId: z.string().startsWith("loc:").max(2048),
+                    payload: z.unknown().optional(),
+                    target: viewIdentitySchema
+                })
+                .strict(),
+            outputSchema: z.void()
+        }
+    } as const satisfies Record<string, ActionDeclaration>;
+    private readonly actions = inject(AppActionService);
     readonly viewStateOwner = inject(MapViewStateService);
     private pending?: Subscription;
     private readonly boundaryFeedback: Subscription;
@@ -26,14 +46,36 @@ export class LocationNavigationService implements OnDestroy {
         private readonly jumps: JumpTargetService,
         private readonly messages: InfoMessageService
     ) {
-        inject(AppActionService).registerAsyncOmnibar("locations", (query) =>
+        this.actions.registerAction(LocationNavigationService.actions.navigate, ({actionId, payload, target}) => {
+            this.viewStateOwner.requireCurrentView(target);
+            this.navigate(actionId, payload, target);
+        });
+        this.actions.registerAsyncOmnibar("locations", (query) =>
             this.locations
                 .search(query, this.locations.locationSearchResultLimit)
-                .pipe(map((matches) => matches.map((match) => this.locations.createSearchTarget(match))))
+                .pipe(map((matches) => matches.map((match) => this.createTarget(match))))
         );
         this.boundaryFeedback = views.locationBoundaryUnavailableTopic.subscribe(() =>
             messages.showInfo("The location boundary could not be displayed. Showing its bounding extent.")
         );
+    }
+
+    /** Bind transient provider metadata to the fixed location action and a live destination. */
+    createTarget(match: LocationSearchMatch): SearchTarget {
+        const target = this.viewStateOwner.captureView(this.viewStateOwner.focusedView)!;
+        const {jump, ...presentation} = this.locations.createSearchTarget(match);
+        return this.actions.candidate(LocationNavigationService.actions.navigate, {
+            ...presentation,
+            arguments: (_, payload) => ({actionId: presentation.id, payload: payload ?? match, target}),
+            isCurrent: () => this.viewStateOwner.isCurrent(target),
+            saveToHistory: () => true
+        });
+    }
+
+    /** Reconstruct a saved identity through the same registered handler; never replay an old candidate closure. */
+    runFromHistory(actionId: string, payload?: unknown): void {
+        const target = this.viewStateOwner.captureView(this.viewStateOwner.focusedView)!;
+        this.actions.execute(LocationNavigationService.actions.navigate.name, {actionId, payload, target});
     }
 
     /** Releases the tab-level feedback subscription together with pending navigation. */
@@ -49,9 +91,10 @@ export class LocationNavigationService implements OnDestroy {
     }
 
     /** Resolves fresh selections and saved identities through exactly the same path. */
-    navigate(actionId: string, payload?: unknown): void {
+    navigate(actionId: string, payload?: unknown, captured?: ViewIdentity): void {
         this.cancel();
-        const targetView = this.viewStateOwner.focusedView;
+        const target = captured ?? this.viewStateOwner.captureView(this.viewStateOwner.focusedView)!;
+        const targetView = this.viewStateOwner.requireCurrentView(target);
         const renderer = this.views.renderViewFor(targetView);
         if (!renderer) {
             this.messages.showError("The destination map is unavailable.");
@@ -62,7 +105,6 @@ export class LocationNavigationService implements OnDestroy {
         this.views.clearLocationHighlightTopic.next(targetView);
         const pending = new Subscription();
         this.pending = pending;
-        const target = this.viewStateOwner.captureView(targetView)!;
         const pose = renderer.getLiveCameraState();
         const cancel = () => this.cancel();
         const stillCurrent = () =>

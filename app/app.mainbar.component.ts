@@ -29,10 +29,10 @@ import {InfoMessageService} from "./shared/info.service";
 import {StyleEditorRequestService} from "./styledata/style-editor-request.service";
 import {StyleService} from "./styledata/style.service";
 
-const MAIN_BAR_BREAKPOINT = "56em";
+const MAIN_BAR_BREAKPOINT = '56em';
 const MAIN_BAR_MEDIA_QUERY = `(max-width: ${MAIN_BAR_BREAKPOINT})`;
 const MAIN_BAR_AVAILABLE_WIDTH_BREAKPOINT_EM = 56;
-const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = "1000000px";
+const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
 const SEARCH_JSON_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 const STYLE_YAML_IMPORT_MAX_BYTES = 1024 * 1024;
 const MENU_LABEL_MAX_LENGTH = 48;
@@ -154,11 +154,13 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     protected readonly forcedMobileMenubarBreakpoint = MAIN_BAR_FORCED_MOBILE_BREAKPOINT;
     protected readonly environment = environment;
     menuItems: MenuItem[] = [];
-    @ViewChild("searchJsonImportInput") private searchJsonImportInput?: ElementRef<HTMLInputElement>;
-    @ViewChild("styleYamlImportInput") private styleYamlImportInput?: ElementRef<HTMLInputElement>;
+    @ViewChild('searchJsonImportInput') private searchJsonImportInput?: ElementRef<HTMLInputElement>;
+    @ViewChild('styleYamlImportInput') private styleYamlImportInput?: ElementRef<HTMLInputElement>;
 
     protected get menubarBreakpoint(): string {
-        return this.isMobileMenubar ? this.forcedMobileMenubarBreakpoint : this.desktopMenubarBreakpoint;
+        return this.isMobileMenubar
+            ? this.forcedMobileMenubarBreakpoint
+            : this.desktopMenubarBreakpoint;
     }
 
     get mapsPanelOpen(): boolean {
@@ -182,34 +184,30 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.rebuildMenuItems();
         this.subscriptions.add(
             this.viewStateOwner.numViewsState.subscribe((numViews) => {
-                this.rebuildMenuItems(numViews);
+            this.rebuildMenuItems(numViews);
             })
         );
         this.subscriptions.add(
             this.viewStateOwner.viewSyncState.subscribe(() => {
-                this.rebuildMenuItems();
+            this.rebuildMenuItems();
             })
         );
         this.subscriptions.add(
             this.layoutState.dockOpenState.subscribe(() => {
-                this.scheduleMobileMenubarStateUpdate();
+            this.scheduleMobileMenubarStateUpdate();
             })
         );
-        this.subscriptions.add(
-            this.featureSearchService.sessionsChanged.subscribe(() => {
-                this.rebuildMenuItems();
-            })
-        );
+        this.subscriptions.add(this.featureSearchService.sessionsChanged.subscribe(() => {
+            this.rebuildMenuItems();
+        }));
         this.subscriptions.add(
             this.featureSearchService.featureSearchState.subscribe(() => {
-                this.rebuildMenuItems();
+            this.rebuildMenuItems();
             })
         );
-        this.subscriptions.add(
-            this.styleService.styleGroups.subscribe(() => {
-                this.rebuildMenuItems();
-            })
-        );
+        this.subscriptions.add(this.styleService.styleGroups.subscribe(() => {
+            this.rebuildMenuItems();
+        }));
     }
 
     /** Starts observing the viewer layout width once the main bar is attached to the DOM. */
@@ -239,7 +237,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             this.viewportMobileMenubar = event.matches;
             this.scheduleMobileMenubarStateUpdate();
         };
-        this.mediaQueryList.addEventListener("change", this.mediaQueryChangeListener);
+        this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
     }
 
     /** Opens the preferences dialog from the menu. */
@@ -273,7 +271,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the external user guide. */
     openHelp() {
-        window.open("https://developer.nds.live/tools/mapviewer/", "_blank");
+        window.open('https://developer.nds.live/tools/mapviewer/', '_blank');
     }
 
     /** Opens the About dialog. */
@@ -320,7 +318,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             const message = error instanceof Error ? error.message : String(error);
             this.infoMessageService.showError(`Could not import Search JSON: ${message}`);
         } finally {
-            input.value = "";
+            input.value = '';
         }
     }
 
@@ -348,7 +346,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             const message = error instanceof Error ? error.message : String(error);
             this.infoMessageService.showError(`Could not import Style Sheet: ${message}`);
         } finally {
-            input.value = "";
+            input.value = '';
             this.openStylesDialog();
         }
     }
@@ -391,12 +389,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Aligns the maps-panel tooltip under the triggering button and keeps it on-screen. */
     private alignMapsPanelTooltipToTarget(target: HTMLElement) {
-        const tooltip = document.querySelector<HTMLElement>(".maps-panel-button-tooltip");
+        const tooltip = document.querySelector<HTMLElement>('.maps-panel-button-tooltip');
         if (!tooltip) {
             return;
         }
 
-        const button = target.querySelector<HTMLElement>("button") ?? target;
+        const button = target.querySelector<HTMLElement>('button') ?? target;
         const targetRect = button.getBoundingClientRect();
         const tooltipRect = tooltip.getBoundingClientRect();
         const viewportPaddingPx = 4;
@@ -408,7 +406,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         tooltip.style.left = `${left + window.scrollX}px`;
         tooltip.style.top = `${targetRect.bottom + window.scrollY + viewportPaddingPx}px`;
 
-        const arrow = tooltip.querySelector<HTMLElement>(".p-tooltip-arrow");
+        const arrow = tooltip.querySelector<HTMLElement>('.p-tooltip-arrow');
         if (arrow) {
             arrow.style.left = `${targetRect.left - left + targetRect.width / 2}px`;
         }
@@ -431,7 +429,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         if (!this.mediaQueryList || !this.mediaQueryChangeListener) {
             return;
         }
-        this.mediaQueryList.removeEventListener("change", this.mediaQueryChangeListener);
+        this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
         this.mediaQueryChangeListener = undefined;
         this.mediaQueryList = undefined;
     }
@@ -445,7 +443,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
         this.viewerLayoutElement = viewerLayoutElement;
         const width = viewerLayoutElement.getBoundingClientRect().width;
-        if (typeof width !== "number" || width <= 0) {
+        if (typeof width !== 'number' || width <= 0) {
             return;
         }
 
@@ -461,10 +459,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }
 
         this.viewerLayoutElement = viewerLayoutElement;
-        this.viewerLayoutResizeObserver = new ResizeObserver((entries) => {
+        this.viewerLayoutResizeObserver = new ResizeObserver(entries => {
             this.ngZone.run(() => {
                 const [entry] = entries;
-                const width = entry?.contentRect.width ?? this.viewerLayoutElement?.getBoundingClientRect().width ?? 0;
+                const width = entry?.contentRect.width
+                    ?? this.viewerLayoutElement?.getBoundingClientRect().width
+                    ?? 0;
                 this.updateViewerLayoutMobileState(width);
             });
         });
@@ -519,7 +519,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Locates the enclosing viewer layout element for width-based menu decisions. */
     private findViewerLayoutElement(): HTMLElement | undefined {
-        const viewerLayoutElement = this.elementRef.nativeElement.closest(".viewer-layout");
+        const viewerLayoutElement = this.elementRef.nativeElement.closest('.viewer-layout');
         return viewerLayoutElement instanceof HTMLElement ? viewerLayoutElement : undefined;
     }
 
@@ -539,12 +539,16 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     /** Builds the PrimeNG menu model for the current application and layout state. */
     private buildMenuItems(numViews: number, includeMobileMaps: boolean): MenuItem[] {
         const exportSearchItems = this.buildExportSearchItems();
-        const editStyleSheetItems = this.buildStyleSheetItems("Edit", "edit", (styleId) => {
-            this.styleEditorRequestService.open(styleId);
-        });
-        const exportStyleSheetItems = this.buildStyleSheetItems("Export", "file_save", (styleId) => {
-            this.exportStyleSheet(styleId);
-        });
+        const editStyleSheetItems = this.buildStyleSheetItems(
+            'Edit',
+            'edit',
+            styleId => { this.styleEditorRequestService.open(styleId); }
+        );
+        const exportStyleSheetItems = this.buildStyleSheetItems(
+            'Export',
+            'file_save',
+            styleId => { this.exportStyleSheet(styleId); }
+        );
         const menuItems: MenuItem[] = [
             {
                 name: "File",
@@ -553,22 +557,19 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                     {
                         name: "Import Search",
                         icon: "manage_search",
-                        command: () => {
-                            this.triggerSearchJsonImport();
+                        command: () => { this.triggerSearchJsonImport();
                         }
                     },
                     {
                         name: "Import Style Sheet",
                         icon: "palette",
-                        command: () => {
-                            this.triggerStyleYamlImport();
+                        command: () => { this.triggerStyleYamlImport();
                         }
                     },
                     {
                         name: "Export Diagnostics",
                         icon: "download",
-                        command: () => {
-                            this.openDiagnosticsExport();
+                        command: () => { this.openDiagnosticsExport();
                         }
                     },
                     {
@@ -592,8 +593,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                     {
                         name: "Styles Configurator",
                         icon: "palette",
-                        command: () => {
-                            this.openStylesDialog();
+                        command: () => { this.openStylesDialog();
                         }
                     },
                     {
@@ -606,15 +606,13 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                     {
                         name: "Datasources",
                         icon: "data_table",
-                        command: () => {
-                            this.openDatasources();
+                        command: () => { this.openDatasources();
                         }
                     },
                     {
                         name: "Preferences",
                         icon: "settings",
-                        command: () => {
-                            this.showPreferencesDialog();
+                        command: () => { this.showPreferencesDialog();
                         }
                     }
                 ]
@@ -635,16 +633,14 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         name: "Close Left View",
                         icon: "tab_close",
                         visible: numViews > 1,
-                        command: () => {
-                            this.mapViewState.removeView(0);
+                        command: () => { this.mapViewState.removeView(0);
                         }
                     },
                     {
                         name: "Close Right View",
                         icon: "tab_close",
                         visible: numViews > 1,
-                        command: () => {
-                            this.mapViewState.removeView(1);
+                        command: () => { this.mapViewState.removeView(1);
                         }
                     },
                     {
@@ -654,29 +650,25 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                             {
                                 name: "Position",
                                 icon: "location_on",
-                                command: () => {
-                                    this.toggleSyncOption(VIEW_SYNC_POSITION);
+                                command: () => { this.toggleSyncOption(VIEW_SYNC_POSITION);
                                 }
                             },
                             {
                                 name: "Movement",
                                 icon: "drag_pan",
-                                command: () => {
-                                    this.toggleSyncOption(VIEW_SYNC_MOVEMENT);
+                                command: () => { this.toggleSyncOption(VIEW_SYNC_MOVEMENT);
                                 }
                             },
                             {
                                 name: "Projection",
                                 icon: "3d_rotation",
-                                command: () => {
-                                    this.toggleSyncOption(VIEW_SYNC_PROJECTION);
+                                command: () => { this.toggleSyncOption(VIEW_SYNC_PROJECTION);
                                 }
                             },
                             {
                                 name: "Layers",
                                 icon: "layers",
-                                command: () => {
-                                    this.toggleSyncOption(VIEW_SYNC_LAYERS);
+                                command: () => { this.toggleSyncOption(VIEW_SYNC_LAYERS);
                                 }
                             }
                         ]
@@ -697,15 +689,13 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                     {
                         name: "Performance Statistics",
                         icon: "insights",
-                        command: () => {
-                            this.openDiagnosticsPerformance();
+                        command: () => { this.openDiagnosticsPerformance();
                         }
                     },
                     {
                         name: "Logs",
                         icon: "list_alt",
-                        command: () => {
-                            this.openDiagnosticsLog();
+                        command: () => { this.openDiagnosticsLog();
                         }
                     }
                 ]
@@ -717,22 +707,19 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                     {
                         name: "Controls",
                         icon: "keyboard",
-                        command: () => {
-                            this.showControlsDialog();
+                        command: () => { this.showControlsDialog();
                         }
                     },
                     {
                         name: "Help",
                         icon: "question_mark",
-                        command: () => {
-                            this.openHelp();
+                        command: () => { this.openHelp();
                         }
                     },
                     {
                         name: "About",
                         icon: "info",
-                        command: () => {
-                            this.openAboutDialog();
+                        command: () => { this.openAboutDialog();
                         }
                     }
                 ]
@@ -740,11 +727,9 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         ];
         if (includeMobileMaps) {
             menuItems.unshift({
-                name: "Maps",
-                icon: "stacks",
-                command: () => {
-                    this.showMapsPanel();
-                }
+                name: 'Maps',
+                icon: 'stacks',
+                command: () => { this.showMapsPanel(); }
             });
         }
         return menuItems;
@@ -756,12 +741,10 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         if (!sessions.length) {
             return [];
         }
-        return sessions.map((session) => ({
+        return sessions.map(session => ({
             name: this.ellipsizeMenuLabel(session.definition.query, session.id),
-            icon: "manage_search",
-            command: () => {
-                this.featureSearchService.openExportDialog(session.id);
-            }
+            icon: 'manage_search',
+            command: () => { this.featureSearchService.openExportDialog(session.id); }
         }));
     }
 
@@ -772,7 +755,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         action: (styleId: string) => void
     ): MenuItem[] {
         const styles = Array.from(this.styleService.styles.values())
-            .filter((style) => !!style.source)
+            .filter(style => !!style.source)
             .sort((left, right) => left.id.localeCompare(right.id));
         if (!styles.length) {
             return [];
@@ -790,17 +773,15 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             }
             current.styleId = style.id;
         }
-        return Array.from(root.children.values()).map((node) =>
-            this.styleSheetMenuItem(node, actionName, actionIcon, action)
-        );
+        return Array.from(root.children.values())
+            .map(node => this.styleSheetMenuItem(node, actionName, actionIcon, action));
     }
 
     /** Splits a style id into menu path segments, ignoring empty slash path parts. */
     private styleSheetMenuSegments(styleId: string): string[] {
-        const segments = styleId
-            .split("/")
-            .map((segment) => segment.trim())
-            .filter((segment) => !!segment);
+        const segments = styleId.split("/")
+            .map(segment => segment.trim())
+            .filter(segment => !!segment);
         return segments.length ? segments : [styleId];
     }
 
@@ -811,31 +792,26 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         actionIcon: string,
         action: (styleId: string) => void
     ): MenuItem {
-        const childItems = Array.from(node.children.values()).map((childNode) =>
-            this.styleSheetMenuItem(childNode, actionName, actionIcon, action)
-        );
+        const childItems = Array.from(node.children.values())
+            .map(childNode => this.styleSheetMenuItem(childNode, actionName, actionIcon, action));
         const styleId = node.styleId;
         if (styleId && !childItems.length) {
             return {
                 name: this.ellipsizeMenuLabel(node.name, styleId),
-                icon: "palette",
-                command: () => {
-                    action(styleId);
-                }
+                icon: 'palette',
+                command: () => { action(styleId); }
             };
         }
         if (styleId) {
             childItems.unshift({
                 name: actionName,
                 icon: actionIcon,
-                command: () => {
-                    action(styleId);
-                }
+                command: () => { action(styleId); }
             });
         }
         return {
             name: this.ellipsizeMenuLabel(node.name, styleId ?? node.name),
-            icon: "folder_open",
+            icon: 'folder_open',
             items: childItems
         };
     }
@@ -868,7 +844,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Returns whether a menu item corresponds to an active synchronized-view option. */
     protected isSyncViewOptionActive(item: MenuItem): boolean {
-        const itemName = item["name"];
+        const itemName = item['name'];
         switch (itemName) {
             case "Position":
                 return this.viewStateOwner.viewSync.includes(VIEW_SYNC_POSITION);

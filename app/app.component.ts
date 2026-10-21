@@ -21,6 +21,7 @@ import {DialogStackService} from "./shared/dialog-stack.service";
 import {InfoMessageService} from "./shared/info.service";
 import {KeyboardService} from "./shared/keyboard.service";
 import {StyleService} from "./styledata/style.service";
+import {AppActionService} from "./actions/app-action.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -101,14 +102,15 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         private dialogStack: DialogStackService,
         private configService: AppConfigService,
         private diagnostics: DiagnosticsFacadeService,
-        private titleService: Title
+        private titleService: Title,
+        private actions: AppActionService
     ) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
         this.titleService.setTitle(this.capitalizeTitle(this.title));
         this.bindDialogFocusStacking();
         this.bindDialogDragSelectionGuard();
-        window.ebDebug = new ErdblickDebugApi(this.tileStream, this.subsetRenderer, this.stateService);
+        window.ebDebug = new ErdblickDebugApi(this.tileStream, this.subsetRenderer, this.stateService, this.actions);
 
         this.loadDistributionVersions();
 

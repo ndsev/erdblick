@@ -16,7 +16,6 @@ import {type StateBinding} from "./viewer-state";
 export {Boolish, deepCopy, deepEquals} from "./state-value";
 export type {AppStateOptions} from "./state-value";
 
-// TODO: Do we actually need this?
 /** Removes optional/default/lazy wrappers so scalar checks can inspect the underlying schema. */
 function unwrapScalar(schema: z.ZodTypeAny): z.ZodTypeAny {
     // unwrap until it stabilizes
@@ -156,17 +155,11 @@ function isArrayOfPrimitiveArrays(schema: z.ZodTypeAny): schema is z.ZodArray<z.
     return isScalar(inner);
 }
 
-/**
- * Use colon ":" to join of CSV groups
- * */
 /** Joins arrays-of-arrays into the colon-delimited compact URL representation. */
 function joinColonCSV(groups: unknown[][]): string {
     return groups.map((g) => joinCSV(g)).join(":");
 }
 
-/**
- * Split by colon ":" into CSV groups; empty segment => empty array
- * */
 /** Splits the colon-delimited compact URL representation of arrays-of-arrays. */
 function splitColonCSV(val: string): string[][] {
     if (!val) {
@@ -178,17 +171,13 @@ function splitColonCSV(val: string): string[][] {
 }
 
 /**
- * Generic state container with optional URL/storage serialization hooks.
+ * Codec and read/notification adapter for one SignalStore value; it never caches a second value.
  *
  * URL encoding strategy is schema-aware:
  * - scalar arrays -> CSV (with optional run-length tokens),
  * - nested primitive arrays -> colon-separated CSV groups,
  * - form-encoded object arrays -> per-field CSV columns,
  * - everything else -> JSON.
- */
-/**
- * Represents one persisted application state slot with schema validation and URL/storage
- * serialization helpers.
  */
 export class AppState<T> extends Observable<T> {
     /** Native read-only signal. The Observable API is retained for existing RxJS consumers. */
@@ -201,10 +190,11 @@ export class AppState<T> extends Observable<T> {
     getValue(): T {
         return this.binding.read();
     }
-    /** Reads one portion, including prepared values inside a transaction. Values are immutable. */
+    /** Origin of this value in the current coherent publication, including queued observer writes. */
     get writeOrigin() {
         return this.binding.writeOrigin?.();
     }
+    /** Reads one portion, including prepared values inside a transaction. Values are immutable. */
     read<R>(select: (value: T) => R): R {
         return select(this.binding.read());
     }
@@ -362,7 +352,6 @@ export class AppState<T> extends Observable<T> {
      * Serialize current state either for URL parameters (`forUrl=true`) or
      * for local storage payload (`forUrl=false`).
      */
-    /** Serializes the state slot into URL or storage key/value pairs. */
     serialize(forUrl: boolean): Record<string, AppStateSerializedValue> | undefined {
         if (forUrl && !this.isUrlState()) {
             return undefined;
@@ -436,7 +425,6 @@ export class AppState<T> extends Observable<T> {
      * Deserialize from either a storage JSON string or URL params.
      * URL parsing mirrors `serialize()` and supports compact CSV/run-length forms.
      */
-    /** Restores the state slot from URL params or local-storage key/value input. */
     deserialize(raw: string | Params) {
         try {
             // Raw storage path (JSON string)
@@ -553,11 +541,7 @@ export class AppState<T> extends Observable<T> {
     }
 }
 
-/**
- * Wrapper around `AppState<T[]>` that exposes per-view accessors while keeping
- * a single underlying state entry for URL/storage sync.
- */
-/** Convenience wrapper that exposes one `AppState<T[]>` as per-view accessors. */
+/** Resolves positional codec access to the authoritative record for one live view ID. */
 export interface ViewValueBinding<T> {
     idAt(index: number): string | undefined;
     read(id: string): T;
@@ -565,6 +549,7 @@ export interface ViewValueBinding<T> {
     select(id: string): Signal<T>;
 }
 
+/** Projects ID-keyed owner values into the positional arrays used by existing storage and URL codecs. */
 export class MapViewState<T> {
     public appState: AppState<Array<T>>;
     private readonly defaultValue: T;
@@ -574,7 +559,7 @@ export class MapViewState<T> {
         pool: Map<string, AppState<unknown>>,
         options: AppStateOptions<T>,
         binding: StateBinding<T[]>,
-        private readonly views?: ViewValueBinding<T>
+        private readonly views: ViewValueBinding<T>
     ) {
         this.defaultValue = deepCopy(options.defaultValue);
         this.appState = new AppState(
@@ -608,22 +593,11 @@ export class MapViewState<T> {
         );
     }
 
-    /** Writes one view-specific value back into the underlying array state. */
+    /** Writes through a current logical view; value assignment never creates view membership. */
     next(viewIndex: number, value: T) {
-        if (this.views) {
-            const id = this.views.idAt(viewIndex);
-            if (!id) throw new Error(`View index ${viewIndex} is unavailable`);
-            this.views.write(id, value);
-            return;
-        }
-        const currentValue = [...this.appState.getValue()];
-        if (viewIndex >= currentValue.length) {
-            for (let i = currentValue.length; i <= viewIndex; ++i) {
-                currentValue.push(deepCopy(this.defaultValue));
-            }
-        }
-        currentValue[viewIndex] = value;
-        this.appState.next(currentValue);
+        const id = this.views.idAt(viewIndex);
+        if (!id) throw new Error(`View index ${viewIndex} is unavailable`);
+        this.views.write(id, value);
     }
 
     /** Subscribes to one view-specific slice of the shared array state. */
@@ -632,27 +606,23 @@ export class MapViewState<T> {
     }
 
     pipe<R = T>(viewIndex: number, ...ops: OperatorFunction<T, any>[]): Observable<R> {
-        const id = this.views?.idAt(viewIndex);
+        const id = this.views.idAt(viewIndex);
         const base$ = this.appState.pipe(
-            map((array) => (id && this.views ? this.views.read(id) : (array[viewIndex] ?? this.defaultValue))),
+            map(() => id ? this.views.read(id) : this.defaultValue),
             distinctUntilChanged()
         );
         return ops.length ? (base$ as any).pipe(...ops) : (base$ as unknown as Observable<R>);
     }
 
-    /** Returns the value for one view, falling back to the first default entry. */
     /** Native per-view reader for ordinary consumers; logical identity survives reordering. */
     signal(viewId: string): Signal<T> {
-        if (!this.views) throw new Error("This codec has no registered view owner");
         return this.views.select(viewId);
     }
 
+    /** Returns the current positional view's value, or the declaration default if it is absent. */
     getValue(viewIndex: number): T {
-        if (this.views) {
-            const id = this.views.idAt(viewIndex);
-            return id ? this.views.read(id) : this.defaultValue;
-        }
-        return this.appState.read((values) => values[viewIndex] ?? this.defaultValue);
+        const id = this.views.idAt(viewIndex);
+        return id ? this.views.read(id) : this.defaultValue;
     }
 
     /** Returns the number of currently stored per-view entries. */
@@ -678,7 +648,7 @@ function compactBooleans(value: unknown): unknown {
 }
 
 /**
- * Style Option State Encoding:
+ * Specialized codec for style options keyed by map/layer/style metadata.
  *
  *    Style option values are encoded per style sheet, per referenced layer index
  *    and per view. One URL parameter stores all option bodies for one style key:
@@ -697,7 +667,6 @@ function compactBooleans(value: unknown): unknown {
  *    5,7:6,8        - option B values (`view0`, `view1`) for layer indices `0` and `2`.
  *
  */
-/** Specialized app-state slot for style option values keyed by map/layer/style metadata. */
 export class StyleState extends AppState<Map<string, (string | number | boolean)[]>> {
     get layerNamesState(): AppState<string[]> {
         return this.pool.get("layerNames") as AppState<string[]>;

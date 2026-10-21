@@ -43,15 +43,12 @@ interface OwnedStyledLayer {
     subscription: Subscription;
     visualizations: Map<string, TileSubsetLayerVisualization>;
     visualizationKeyByPartition: Map<string, string>;
-    pendingPartitions: Map<
-        string,
-        {
-            state: FilterTileState;
-            lod: number;
-            lineSimplificationToleranceMeters: number;
-            preservedContributionIdentity: string | null;
-        }
-    >;
+    pendingPartitions: Map<string, {
+        state: FilterTileState;
+        lod: number;
+        lineSimplificationToleranceMeters: number;
+        preservedContributionIdentity: string | null;
+    }>;
     disposeLayer: boolean;
     replacementSlot: string | null;
     replacementPartitionKeys: Set<string>;
@@ -79,7 +76,8 @@ export class ViewLayerController {
     readonly occupancyChanged = new Subject<void>();
     private readonly subscriptions: Subscription[] = [];
     private readonly styledLayers = new Map<string, OwnedStyledLayer>();
-    private readonly retiringRegularLayers = new Map<string, RetiringRegularLayer>();
+    private readonly retiringRegularLayers =
+        new Map<string, RetiringRegularLayer>();
     private sceneHandle: IRenderSceneHandle | null = null;
     private disposed = false;
     private reconcileQueued = false;
@@ -87,8 +85,10 @@ export class ViewLayerController {
     private interactionReconcileRequired = true;
     private lastViewportPresentationSignature = "";
     private lastInteractionViewportSignature = "";
-    private localInteractionOverlaysByLayer = new Map<string, readonly TileSubsetInteractionOverlay[]>();
-    private readonly localInteractionVisualizationsWithOverlays = new Set<TileSubsetLayerVisualization>();
+    private localInteractionOverlaysByLayer =
+        new Map<string, readonly TileSubsetInteractionOverlay[]>();
+    private readonly localInteractionVisualizationsWithOverlays =
+        new Set<TileSubsetLayerVisualization>();
     private readonly regularCoverageByLayer = new WeakMap<
         StyledMapgetLayer,
         {
@@ -96,14 +96,22 @@ export class ViewLayerController {
             priorityPartitions: readonly PartitionId[];
         }
     >();
-    private readonly tilePartitionsByCoverage = new WeakMap<readonly number[], readonly PartitionId[]>();
-    private readonly objectCoverageByLayer = new Map<MapgetLayer, ObjectLayerCoverageState>();
-    private interactionLayerAffinityCache = new WeakMap<ErdblickStyle, Map<string, boolean>>();
-    private interactionFilterPlanCache = new WeakMap<ErdblickStyle, Map<string, StyleFilterPlan | null>>();
-    private interactionEffectCache = new WeakMap<ErdblickStyle, Map<string, DeckInteractionEffect | null>>();
+    private readonly tilePartitionsByCoverage = new WeakMap<
+        readonly number[],
+        readonly PartitionId[]
+    >();
+    private readonly objectCoverageByLayer =
+        new Map<MapgetLayer, ObjectLayerCoverageState>();
+    private interactionLayerAffinityCache =
+        new WeakMap<ErdblickStyle, Map<string, boolean>>();
+    private interactionFilterPlanCache =
+        new WeakMap<ErdblickStyle, Map<string, StyleFilterPlan | null>>();
+    private interactionEffectCache =
+        new WeakMap<ErdblickStyle, Map<string, DeckInteractionEffect | null>>();
     private pendingDispatchQueued = false;
     private nextStyledLayerDispatchIndex = 0;
-    private readonly pendingVisualizationRenders = new Set<TileSubsetLayerVisualization>();
+    private readonly pendingVisualizationRenders =
+        new Set<TileSubsetLayerVisualization>();
     private readonly unregisterDiagnostics: () => void;
 
     /** Bind one logical view to catalog, style, search, inspection, and worker state. */
@@ -217,7 +225,9 @@ export class ViewLayerController {
             return;
         }
 
-        for (const [slot, fallback] of [...this.retiringRegularLayers]) {
+        for (const [slot, fallback] of
+             [...this.retiringRegularLayers])
+        {
             if (fallback.owned.layer.identity.mapId !== mapId) {
                 continue;
             }
@@ -227,7 +237,9 @@ export class ViewLayerController {
 
         let refreshed = false;
         for (const owned of this.styledLayers.values()) {
-            if (owned.layer.identity.mapId !== mapId || owned.layer.identity.presentationKind === "search") {
+            if (owned.layer.identity.mapId !== mapId ||
+                owned.layer.identity.presentationKind === "search")
+            {
                 continue;
             }
             this.clearOwnedVisualizations(owned);
@@ -243,7 +255,10 @@ export class ViewLayerController {
 
     /** Bridges view-local Deck screen-pass timing into global diagnostics. */
     recordDeckFrameTime(milliseconds: number): void {
-        this.renderService.recordDeckFrameTime(this.viewIndex, milliseconds);
+        this.renderService.recordDeckFrameTime(
+            this.viewIndex,
+            milliseconds
+        );
     }
 
     /** Let diagnostics defer Angular publications while this view's camera moves. */
@@ -252,8 +267,13 @@ export class ViewLayerController {
     }
 
     /** Exposes view-owned Deck counters to diagnostics without sampling every frame. */
-    setDeckPresentationDiagnosticsProvider(provider: () => {layers: number; scene: GpuSceneSnapshot}): void {
-        this.renderService.setDeckPresentationDiagnosticsProvider(this.viewIndex, provider);
+    setDeckPresentationDiagnosticsProvider(
+        provider: () => {layers: number; scene: GpuSceneSnapshot}
+    ): void {
+        this.renderService.setDeckPresentationDiagnosticsProvider(
+            this.viewIndex,
+            provider
+        );
     }
 
     /** Removes a Deck diagnostics provider when its renderer generation ends. */
@@ -264,13 +284,13 @@ export class ViewLayerController {
     /** Current regular-presentation styled layers, for diagnostics and grid aggregation. */
     regularStyledLayers(): Iterable<StyledMapgetLayer> {
         return [...this.styledLayers.values()]
-            .map((owned) => owned.layer)
-            .filter((layer) => layer.identity.presentationKind === "regular");
+            .map(owned => owned.layer)
+            .filter(layer => layer.identity.presentationKind === "regular");
     }
 
     /** Current presentation state exposed read-only to diagnostics. */
     diagnosticStyledLayers(): Iterable<StyledMapgetLayer> {
-        return [...this.styledLayers.values()].map((owned) => owned.layer);
+        return [...this.styledLayers.values()].map(owned => owned.layer);
     }
 
     /** Resolves source occupancy without interpreting filtered entry counts. */
@@ -286,14 +306,14 @@ export class ViewLayerController {
             const observations: number[] = [];
             for (const owned of this.styledLayers.values()) {
                 const styled = owned.layer;
-                if (
-                    styled.identity.presentationKind !== "regular" ||
+                if (styled.identity.presentationKind !== "regular" ||
                     styled.mapgetLayer.mapId !== source.mapId ||
-                    styled.mapgetLayer.layerId !== source.layerId
-                ) {
+                    styled.mapgetLayer.layerId !== source.layerId) {
                     continue;
                 }
-                const state = styled.tileStates.get(partitionKey(tilePartition(tileId)));
+                const state = styled.tileStates.get(
+                    partitionKey(tilePartition(tileId))
+                );
                 if (!state) {
                     continue;
                 }
@@ -311,7 +331,7 @@ export class ViewLayerController {
             }
             sawObservation = true;
             const first = observations[0];
-            if (observations.some((value) => value !== first)) {
+            if (observations.some(value => value !== first)) {
                 return "unknown";
             }
             if (first > 0) {
@@ -335,7 +355,7 @@ export class ViewLayerController {
             return;
         }
         this.disposed = true;
-        this.subscriptions.splice(0).forEach((subscription) => subscription.unsubscribe());
+        this.subscriptions.splice(0).forEach(subscription => subscription.unsubscribe());
         for (const owned of this.styledLayers.values()) {
             this.destroyOwnedLayer(owned);
         }
@@ -397,7 +417,8 @@ export class ViewLayerController {
             const full = this.fullReconcileRequired;
             this.fullReconcileRequired = false;
             const viewportSignature = this.viewportPresentationSignature();
-            const viewportChanged = viewportSignature !== this.lastViewportPresentationSignature;
+            const viewportChanged = viewportSignature !==
+                this.lastViewportPresentationSignature;
             if (!full && !viewportChanged) {
                 if (this.interactionReconcileRequired) {
                     this.reconcileInteractions();
@@ -405,16 +426,19 @@ export class ViewLayerController {
                 return;
             }
             this.reconcile();
-            this.lastViewportPresentationSignature = this.viewportPresentationSignature();
+            this.lastViewportPresentationSignature =
+                this.viewportPresentationSignature();
         });
     }
 
     /** Reconcile semantic masks and authored interaction styles against retained tiles. */
     private reconcileInteractions(): void {
         this.interactionReconcileRequired = false;
-        const orderedStyles = [...this.styleService.styles.values()].filter((style) => style.visible);
+        const orderedStyles = [...this.styleService.styles.values()]
+            .filter(style => style.visible);
         this.reconcileHighlightLayers(orderedStyles);
-        this.lastInteractionViewportSignature = this.interactionViewportSignature();
+        this.lastInteractionViewportSignature =
+            this.interactionViewportSignature();
     }
 
     /**
@@ -432,9 +456,14 @@ export class ViewLayerController {
             // The sampler applies hysteresis; this cheap scale key only schedules its policy check.
             String(viewState?.metersPerPixel ?? 0)
         ];
-        const orderedStyles = [...this.styleService.styles.values()].filter((style) => style.visible);
+        const orderedStyles = [...this.styleService.styles.values()]
+            .filter(style => style.visible);
         for (const mapgetLayer of this.mapInfo.mapgetLayers()) {
-            if (!this.mapInfo.maps.getMapLayerVisibility(this.viewIndex, mapgetLayer.mapId, mapgetLayer.layerId)) {
+            if (!this.mapInfo.maps.getMapLayerVisibility(
+                this.viewIndex,
+                mapgetLayer.mapId,
+                mapgetLayer.layerId
+            )) {
                 continue;
             }
             const level = this.viewState.getEffectiveMapLayerLevel(
@@ -443,18 +472,31 @@ export class ViewLayerController {
                 mapgetLayer.layerId
             );
             for (const style of orderedStyles) {
-                if (style.featureLayerStyle.hasLayerAffinity(mapgetLayer.layerId)) {
-                    const plannedLod = this.viewState.styleLod(this.viewIndex, level, style.featureLayerStyle);
-                    const presentationLod = this.viewState.stylePresentationLod(
+                if (style.featureLayerStyle.hasLayerAffinity(
+                    mapgetLayer.layerId
+                )) {
+                    const plannedLod = this.viewState.styleLod(
                         this.viewIndex,
                         level,
                         style.featureLayerStyle
                     );
-                    parts.push(mapgetLayer.key, style.id, String(plannedLod), String(presentationLod));
+                    const presentationLod =
+                        this.viewState.stylePresentationLod(
+                            this.viewIndex,
+                            level,
+                            style.featureLayerStyle
+                        );
+                    parts.push(
+                        mapgetLayer.key,
+                        style.id,
+                        String(plannedLod),
+                        String(presentationLod)
+                    );
                 }
             }
         }
-        for (const layer of this.featureSearch.searchStyledLayersForView(this.viewIndex)) {
+        for (const layer of this.featureSearch
+            .searchStyledLayersForView(this.viewIndex)) {
             parts.push(layer.ownerId, String(layer.coverageVersion));
             const levelSamples = new Map<number, number>();
             for (const state of layer.tileStates.values()) {
@@ -467,10 +509,15 @@ export class ViewLayerController {
                     levelSamples.set(level, tileId);
                 }
             }
-            for (const [level, tileId] of [...levelSamples].sort(([left], [right]) => left - right)) {
+            for (const [level, tileId] of [...levelSamples]
+                .sort(([left], [right]) => left - right)) {
                 parts.push(
                     `${level}:` +
-                        `${this.featureSearch.shouldRenderSearchStyledLayer(this.viewIndex, layer, tileId) ? 1 : 0}`
+                    `${this.featureSearch.shouldRenderSearchStyledLayer(
+                        this.viewIndex,
+                        layer,
+                        tileId
+                    ) ? 1 : 0}`
                 );
             }
         }
@@ -479,29 +526,31 @@ export class ViewLayerController {
 
     /** Reconcile desired regular/search/interaction owners without rebuilding the view. */
     private reconcile(): void {
-        const desired = new Map<
-            string,
-            {
-                mapgetLayer: MapgetLayer;
-                style: ErdblickStyle;
-                styleOrder: number;
-                partitions: readonly PartitionId[];
-                priorityPartitions: readonly PartitionId[];
-                options: Record<string, boolean | number | string>;
-                plannedLod: number;
-                plan: StyleFilterPlan;
-                planSignature: string;
-                replacementSlot: string;
-            }
-        >();
+        const desired = new Map<string, {
+            mapgetLayer: MapgetLayer;
+            style: ErdblickStyle;
+            styleOrder: number;
+            partitions: readonly PartitionId[];
+            priorityPartitions: readonly PartitionId[];
+            options: Record<string, boolean | number | string>;
+            plannedLod: number;
+            plan: StyleFilterPlan;
+            planSignature: string;
+            replacementSlot: string;
+        }>();
         const hoverDetailCoverage: Array<{
             mapgetLayer: MapgetLayer;
             partitions: readonly PartitionId[];
             priorityPartitions: readonly PartitionId[];
         }> = [];
-        const orderedStyles = [...this.styleService.styles.values()].filter((style) => style.visible);
+        const orderedStyles = [...this.styleService.styles.values()]
+            .filter(style => style.visible);
         for (const mapgetLayer of this.mapInfo.mapgetLayers()) {
-            if (!this.mapInfo.maps.getMapLayerVisibility(this.viewIndex, mapgetLayer.mapId, mapgetLayer.layerId)) {
+            if (!this.mapInfo.maps.getMapLayerVisibility(
+                this.viewIndex,
+                mapgetLayer.mapId,
+                mapgetLayer.layerId
+            )) {
                 continue;
             }
             const level = this.viewState.getEffectiveMapLayerLevel(
@@ -510,16 +559,19 @@ export class ViewLayerController {
                 mapgetLayer.layerId
             );
             const visibleTileIds = this.viewState.visibleTileIdsForLevel(this.viewIndex, level);
-            const partitions =
-                mapgetLayer.partitionKind === "object"
-                    ? this.objectPartitionsForViewport(mapgetLayer)
-                    : this.tilePartitionsForCoverage(visibleTileIds);
+            const partitions = mapgetLayer.partitionKind === "object"
+                ? this.objectPartitionsForViewport(mapgetLayer)
+                : this.tilePartitionsForCoverage(visibleTileIds);
             for (let styleOrder = 0; styleOrder < orderedStyles.length; ++styleOrder) {
                 const style = orderedStyles[styleOrder];
                 if (!style.featureLayerStyle.hasLayerAffinity(mapgetLayer.layerId)) {
                     continue;
                 }
-                const plannedLod = this.viewState.styleLod(this.viewIndex, level, style.featureLayerStyle);
+                const plannedLod = this.viewState.styleLod(
+                    this.viewIndex,
+                    level,
+                    style.featureLayerStyle
+                );
                 const plan = this.mapInfo.planStyleFilter(
                     style.featureLayerStyle,
                     mapgetLayer.mapId,
@@ -535,14 +587,17 @@ export class ViewLayerController {
                     continue;
                 }
                 const planSignature = this.filterPlanSignature(plan);
-                const key = this.regularKey(mapgetLayer, style, planSignature);
-                const options =
-                    this.mapInfo.maps.getLayerStyleOptions(
-                        this.viewIndex,
-                        mapgetLayer.mapId,
-                        mapgetLayer.layerId,
-                        style.id
-                    ) ?? {};
+                const key = this.regularKey(
+                    mapgetLayer,
+                    style,
+                    planSignature
+                );
+                const options = this.mapInfo.maps.getLayerStyleOptions(
+                    this.viewIndex,
+                    mapgetLayer.mapId,
+                    mapgetLayer.layerId,
+                    style.id
+                ) ?? {};
                 desired.set(key, {
                     mapgetLayer,
                     style,
@@ -553,7 +608,10 @@ export class ViewLayerController {
                     plannedLod,
                     plan,
                     planSignature,
-                    replacementSlot: this.regularReplacementSlot(mapgetLayer, style)
+                    replacementSlot: this.regularReplacementSlot(
+                        mapgetLayer,
+                        style
+                    )
                 });
             }
             hoverDetailCoverage.push({
@@ -569,13 +627,11 @@ export class ViewLayerController {
             if (this.styledLayers.has(key)) {
                 continue;
             }
-            const fallback = this.retiringRegularLayers.get(next.replacementSlot);
-            if (
-                !fallback ||
-                fallback.key !== key ||
+            const fallback =
+                this.retiringRegularLayers.get(next.replacementSlot);
+            if (!fallback || fallback.key !== key ||
                 fallback.owned.layer.style !== next.style ||
-                fallback.owned.layer.mapgetLayer !== next.mapgetLayer
-            ) {
+                fallback.owned.layer.mapgetLayer !== next.mapgetLayer) {
                 continue;
             }
             this.retiringRegularLayers.delete(next.replacementSlot);
@@ -588,16 +644,25 @@ export class ViewLayerController {
                 continue;
             }
             const next = desired.get(key);
-            if (next && owned.layer.style === next.style && owned.layer.mapgetLayer === next.mapgetLayer) {
+            if (next && owned.layer.style === next.style &&
+                owned.layer.mapgetLayer === next.mapgetLayer) {
                 continue;
             }
             this.styledLayers.delete(key);
             const replacementSlot = owned.replacementSlot;
             const replacement = replacementSlot
-                ? [...desired.entries()].find(([, candidate]) => candidate.replacementSlot === replacementSlot)
+                ? [...desired.entries()].find(
+                    ([, candidate]) =>
+                        candidate.replacementSlot === replacementSlot
+                )
                 : undefined;
-            if (replacementSlot && replacement && replacement[0] !== key) {
-                this.retainAsRegularFallback(replacementSlot, key, owned);
+            if (replacementSlot && replacement &&
+                replacement[0] !== key) {
+                this.retainAsRegularFallback(
+                    replacementSlot,
+                    key,
+                    owned
+                );
             } else {
                 this.destroyOwnedLayer(owned);
             }
@@ -614,7 +679,8 @@ export class ViewLayerController {
                             layerId: next.mapgetLayer.layerId,
                             presentationKind: "regular",
                             presentationInstanceId:
-                                `${next.style.id}:${this.styleVersion(next.style)}` + `/p${next.planSignature}`
+                                `${next.style.id}:${this.styleVersion(next.style)}` +
+                                `/p${next.planSignature}`
                         },
                         next.mapgetLayer,
                         next.style,
@@ -637,7 +703,9 @@ export class ViewLayerController {
                         pendingPartitions: new Map(),
                         disposeLayer: true,
                         replacementSlot: next.replacementSlot,
-                        replacementPartitionKeys: new Set(next.priorityPartitions.map(partitionKey))
+                        replacementPartitionKeys: new Set(
+                            next.priorityPartitions.map(partitionKey)
+                        )
                     };
                     this.styledLayers.set(key, owned);
                 } catch (error) {
@@ -646,14 +714,22 @@ export class ViewLayerController {
                 }
             }
             owned.layer.styleOrder = next.styleOrder;
-            owned.replacementPartitionKeys = new Set(next.priorityPartitions.map(partitionKey));
+            owned.replacementPartitionKeys =
+                new Set(next.priorityPartitions.map(partitionKey));
             owned.layer.setOptions(next.options);
-            this.setRegularCoverage(owned.layer, next.partitions, next.priorityPartitions);
+            this.setRegularCoverage(
+                owned.layer,
+                next.partitions,
+                next.priorityPartitions
+            );
             this.reconcileOwnedVisualizations(owned);
             this.releaseRegularFallbackWhenReady(owned);
         }
-        const desiredReplacementSlots = new Set([...desired.values()].map((next) => next.replacementSlot));
-        for (const [slot, fallback] of [...this.retiringRegularLayers]) {
+        const desiredReplacementSlots = new Set(
+            [...desired.values()].map(next => next.replacementSlot)
+        );
+        for (const [slot, fallback] of
+            [...this.retiringRegularLayers]) {
             if (desiredReplacementSlots.has(slot)) {
                 continue;
             }
@@ -661,14 +737,15 @@ export class ViewLayerController {
             this.destroyOwnedLayer(fallback.owned);
         }
         this.reconcileSearchLayers(orderedStyles.length);
-        const interactionViewportSignature = this.interactionViewportSignature();
-        if (
-            this.interactionReconcileRequired ||
-            interactionViewportSignature !== this.lastInteractionViewportSignature
-        ) {
+        const interactionViewportSignature =
+            this.interactionViewportSignature();
+        if (this.interactionReconcileRequired ||
+            interactionViewportSignature !==
+                this.lastInteractionViewportSignature) {
             this.interactionReconcileRequired = false;
             this.reconcileHighlightLayers(orderedStyles);
-            this.lastInteractionViewportSignature = interactionViewportSignature;
+            this.lastInteractionViewportSignature =
+                interactionViewportSignature;
         }
         this.occupancyChanged.next();
         this.diagnostics.notifyChanged();
@@ -676,14 +753,18 @@ export class ViewLayerController {
 
     /** Routes high-volume tile events through the non-Angular render pipeline. */
     private subscribeToStyledLayer(layer: StyledMapgetLayer): Subscription {
-        return layer.events.subscribe((event) =>
-            this.ngZone.runOutsideAngular(() => this.handleStyledLayerEvent(layer, event))
+        return layer.events.subscribe(event =>
+            this.ngZone.runOutsideAngular(() =>
+                this.handleStyledLayerEvent(layer, event))
         );
     }
 
     /** Turn immutable filter events into singleton visualization lifecycle changes. */
-    private handleStyledLayerEvent(layer: StyledMapgetLayer, event: StyledMapgetLayerEvent): void {
-        const owned = [...this.styledLayers.values()].find((candidate) => candidate.layer === layer);
+    private handleStyledLayerEvent(
+        layer: StyledMapgetLayer,
+        event: StyledMapgetLayerEvent
+    ): void {
+        const owned = [...this.styledLayers.values()].find(candidate => candidate.layer === layer);
         if (!owned) {
             return;
         }
@@ -704,7 +785,8 @@ export class ViewLayerController {
             this.diagnostics.notifyChanged();
             return;
         }
-        if (event.type === "status" && ["Success", "Failed", "Aborted"].includes(event.status.state)) {
+        if (event.type === "status" &&
+            ["Success", "Failed", "Aborted"].includes(event.status.state)) {
             this.reconcileOwnedVisualizations(owned);
         }
         if (event.type === "error") {
@@ -735,7 +817,9 @@ export class ViewLayerController {
         }
         for (const visualization of owned.visualizations.values()) {
             this.pendingVisualizationRenders.delete(visualization);
-            this.localInteractionVisualizationsWithOverlays.delete(visualization);
+            this.localInteractionVisualizationsWithOverlays.delete(
+                visualization
+            );
             visualization.destroy(this.sceneHandle);
         }
         owned.visualizations.clear();
@@ -746,7 +830,11 @@ export class ViewLayerController {
     }
 
     /** Keeps one fully rendered regular owner as the visual replacement fallback. */
-    private retainAsRegularFallback(slot: string, key: string, owned: OwnedStyledLayer): void {
+    private retainAsRegularFallback(
+        slot: string,
+        key: string,
+        owned: OwnedStyledLayer
+    ): void {
         const previous = this.retiringRegularLayers.get(slot);
         if (previous && previous.owned !== owned) {
             this.destroyOwnedLayer(previous.owned);
@@ -759,7 +847,9 @@ export class ViewLayerController {
      * Retires the old owner only after every visible successor tile has its
      * current immutable value installed in a Deck contribution.
      */
-    private releaseRegularFallbackWhenReady(owned: OwnedStyledLayer): void {
+    private releaseRegularFallbackWhenReady(
+        owned: OwnedStyledLayer
+    ): void {
         const slot = owned.replacementSlot;
         if (!slot) {
             return;
@@ -776,7 +866,9 @@ export class ViewLayerController {
     }
 
     /** Require every demanded successor tile to be visibly installed before handover. */
-    private regularReplacementIsReady(owned: OwnedStyledLayer): boolean {
+    private regularReplacementIsReady(
+        owned: OwnedStyledLayer
+    ): boolean {
         if (!owned.replacementPartitionKeys.size) {
             return true;
         }
@@ -785,9 +877,13 @@ export class ViewLayerController {
         }
         for (const tileId of owned.replacementPartitionKeys) {
             const state = owned.layer.tileStates.get(tileId);
-            const visualizationKey = owned.visualizationKeyByPartition.get(tileId);
-            const visualization = visualizationKey ? owned.visualizations.get(visualizationKey) : undefined;
-            if (!state || state.status !== "ready" || !visualization?.isCurrentPresentationInstalled()) {
+            const visualizationKey =
+                owned.visualizationKeyByPartition.get(tileId);
+            const visualization = visualizationKey
+                ? owned.visualizations.get(visualizationKey)
+                : undefined;
+            if (!state || state.status !== "ready" ||
+                !visualization?.isCurrentPresentationInstalled()) {
                 return false;
             }
         }
@@ -795,8 +891,17 @@ export class ViewLayerController {
     }
 
     /** Build the immutable transport-owner key for one regular style incarnation. */
-    private regularKey(mapgetLayer: MapgetLayer, style: ErdblickStyle, planSignature: string): string {
-        return [mapgetLayer.key, "regular", `${style.id}:${this.styleVersion(style)}`, `p${planSignature}`].join("/");
+    private regularKey(
+        mapgetLayer: MapgetLayer,
+        style: ErdblickStyle,
+        planSignature: string
+    ): string {
+        return [
+            mapgetLayer.key,
+            "regular",
+            `${style.id}:${this.styleVersion(style)}`,
+            `p${planSignature}`
+        ].join("/");
     }
 
     /** Hash one immutable server-filter plan for owner reuse across equivalent LODs. */
@@ -805,7 +910,10 @@ export class ViewLayerController {
     }
 
     /** Build the stable handover slot shared by successive style incarnations. */
-    private regularReplacementSlot(mapgetLayer: MapgetLayer, style: ErdblickStyle): string {
+    private regularReplacementSlot(
+        mapgetLayer: MapgetLayer,
+        style: ErdblickStyle
+    ): string {
         return `${mapgetLayer.key}/regular/${style.id}`;
     }
 
@@ -824,7 +932,9 @@ export class ViewLayerController {
     /** Reconciles service-owned search presentations into this view. */
     private reconcileSearchLayers(styleOrderBase: number): void {
         const layers = this.featureSearch.searchStyledLayersForView(this.viewIndex);
-        const desired = new Map(layers.map((layer) => [this.searchKey(layer), layer]));
+        const desired = new Map(
+            layers.map(layer => [this.searchKey(layer), layer])
+        );
 
         for (const [key, owned] of [...this.styledLayers]) {
             if (owned.disposeLayer) {
@@ -865,7 +975,8 @@ export class ViewLayerController {
 
     /** Reconciles exact-ID hover and selection bundles through the normal filter path. */
     private reconcileHighlightLayers(orderedStyles: readonly ErdblickStyle[]): void {
-        const selectedTargets = this.inspection.selectionIdsTopic.getValue().flatMap((panel) => panel.features);
+        const selectedTargets = this.inspection.selectionIdsTopic.getValue()
+            .flatMap(panel => panel.features);
         const groups: Array<{
             kind: "selection" | "hover";
             id: string;
@@ -873,54 +984,52 @@ export class ViewLayerController {
             features: TileFeatureId[];
             mode: typeof coreLib.HighlightMode.SELECTION_HIGHLIGHT;
         }> = [
-            ...this.inspection.selectionIdsTopic.getValue().map((panel: InspectionPanelModel<TileFeatureId>) => ({
-                kind: "selection" as const,
-                id: String(panel.id),
-                color: panel.color,
-                features: panel.features,
-                mode: coreLib.HighlightMode.SELECTION_HIGHLIGHT
-            })),
+            ...this.inspection.selectionIdsTopic.getValue().map(
+                (panel: InspectionPanelModel<TileFeatureId>) => ({
+                    kind: "selection" as const,
+                    id: String(panel.id),
+                    color: panel.color,
+                    features: panel.features,
+                    mode: coreLib.HighlightMode.SELECTION_HIGHLIGHT
+                })
+            ),
             {
                 kind: "hover",
                 id: "current",
                 // Selection dominates hover only for the exact same semantic
                 // target. Nested attribute/validity rows remain hoverable so
                 // their authored inspection visualizations can still run.
-                features: this.inspection.hoverIdsTopic
-                    .getValue()
-                    .filter(
-                        (hovered) =>
-                            !selectedTargets.some((selected) => tileFeatureInteractionTargetsEqual(hovered, selected))
-                    ),
+                features: this.inspection.hoverIdsTopic.getValue().filter(
+                    hovered => !selectedTargets.some(selected =>
+                        tileFeatureInteractionTargetsEqual(
+                            hovered,
+                            selected))),
                 mode: coreLib.HighlightMode.HOVER_HIGHLIGHT
             }
         ];
-        const desired = new Map<
+        const desired = new Map<string, {
+            mapgetLayer: MapgetLayer;
+            style: ErdblickStyle;
+            mode: typeof coreLib.HighlightMode.SELECTION_HIGHLIGHT;
+            presentationKind: "selection" | "hover";
+            presentationId: string;
+            options: Record<string, boolean | number | string>;
+            plan: StyleFilterPlan;
+            partitions: PartitionId[];
+            roots: Array<{partition: PartitionId; featureId: string}>;
+            styleOrder: number;
+            plannedLod: number;
+        }>();
+        const localOverlaysByLayer = new Map<
             string,
-            {
-                mapgetLayer: MapgetLayer;
-                style: ErdblickStyle;
-                mode: typeof coreLib.HighlightMode.SELECTION_HIGHLIGHT;
-                presentationKind: "selection" | "hover";
-                presentationId: string;
-                options: Record<string, boolean | number | string>;
-                plan: StyleFilterPlan;
-                partitions: PartitionId[];
-                roots: Array<{partition: PartitionId; featureId: string}>;
-                styleOrder: number;
-                plannedLod: number;
-            }
+            Map<string, TileSubsetInteractionOverlay>
         >();
-        const localOverlaysByLayer = new Map<string, Map<string, TileSubsetInteractionOverlay>>();
 
         for (const group of groups) {
-            const byLayer = new Map<
-                string,
-                {
-                    mapgetLayer: MapgetLayer;
-                    features: Array<TileFeatureId & {partition: PartitionId}>;
-                }
-            >();
+            const byLayer = new Map<string, {
+                mapgetLayer: MapgetLayer;
+                features: Array<TileFeatureId & {partition: PartitionId}>;
+            }>();
             for (const feature of group.features) {
                 const resolved = this.resolveInteractionTargetLayer(feature);
                 if (!resolved) {
@@ -932,20 +1041,23 @@ export class ViewLayerController {
                     entry = {mapgetLayer, features: []};
                     byLayer.set(mapgetLayer.key, entry);
                 }
-                if (
-                    !entry.features.some(
-                        (candidate) =>
-                            candidate.mapTileKey === feature.mapTileKey && candidate.featureId === feature.featureId
-                    )
-                ) {
+                if (!entry.features.some(candidate =>
+                    candidate.mapTileKey === feature.mapTileKey &&
+                    candidate.featureId === feature.featureId
+                )) {
                     entry.features.push({...feature, partition});
                 }
             }
 
             for (const {mapgetLayer, features} of byLayer.values()) {
-                for (let styleIndex = 0; styleIndex < orderedStyles.length; ++styleIndex) {
+                for (let styleIndex = 0;
+                     styleIndex < orderedStyles.length;
+                     ++styleIndex) {
                     const style = orderedStyles[styleIndex];
-                    if (!this.hasInteractionLayerAffinity(style, mapgetLayer.layerId)) {
+                    if (!this.hasInteractionLayerAffinity(
+                        style,
+                        mapgetLayer.layerId
+                    )) {
                         continue;
                     }
                     const options = {
@@ -959,31 +1071,59 @@ export class ViewLayerController {
                     if (group.color) {
                         options["selectableFeatureHighlightColor"] = group.color;
                     }
-                    const remoteAllowed = group.kind !== "hover" || this.inspection.remoteHoverHighlightAllowed;
-                    const targetLevel =
-                        features[0].partition.kind === "tile"
-                            ? Number(coreLib.getTileLevel(features[0].partition.id))
-                            : this.viewState.getEffectiveMapLayerLevel(
-                                  this.viewIndex,
-                                  mapgetLayer.mapId,
-                                  mapgetLayer.layerId
-                              );
-                    const plannedLod = this.viewState.styleLod(this.viewIndex, targetLevel, style.featureLayerStyle);
-                    const optionsSignature = sipHash64Hex(JSON.stringify(options));
-                    const effect = this.interactionEffect(style, group.mode, options, optionsSignature);
+                    const remoteAllowed = group.kind !== "hover" ||
+                        this.inspection.remoteHoverHighlightAllowed;
+                    const targetLevel = features[0].partition.kind === "tile"
+                        ? Number(coreLib.getTileLevel(
+                            features[0].partition.id
+                        ))
+                        : this.viewState.getEffectiveMapLayerLevel(
+                            this.viewIndex,
+                            mapgetLayer.mapId,
+                            mapgetLayer.layerId
+                        );
+                    const plannedLod = this.viewState.styleLod(
+                        this.viewIndex,
+                        targetLevel,
+                        style.featureLayerStyle
+                    );
+                    const optionsSignature = sipHash64Hex(
+                        JSON.stringify(options)
+                    );
+                    const effect = this.interactionEffect(
+                        style,
+                        group.mode,
+                        options,
+                        optionsSignature
+                    );
                     const localTargetKeys = new Set(
                         effect
                             ? features
-                                  .filter((feature) => this.hasLocalInteractionTarget(mapgetLayer, feature))
-                                  .map(interactionTargetKey)
+                                .filter(feature =>
+                                    this.hasLocalInteractionTarget(
+                                        mapgetLayer,
+                                        feature
+                                    ))
+                                .map(interactionTargetKey)
                             : []
                     );
                     let rawPlan: StyleFilterPlan | null = null;
-                    let remotePlans: ReturnType<typeof planRemoteInteractionHighlights> = [];
+                    let remotePlans: ReturnType<
+                        typeof planRemoteInteractionHighlights
+                    > = [];
                     if (remoteAllowed) {
-                        rawPlan = this.interactionFilterPlan(style, mapgetLayer, group.mode, plannedLod);
+                        rawPlan = this.interactionFilterPlan(
+                            style,
+                            mapgetLayer,
+                            group.mode,
+                            plannedLod
+                        );
                         if (rawPlan) {
-                            remotePlans = planRemoteInteractionHighlights(rawPlan, features, {localTargetKeys});
+                            remotePlans = planRemoteInteractionHighlights(
+                                rawPlan,
+                                features,
+                                {localTargetKeys}
+                            );
                         }
                     }
                     if (effect) {
@@ -1006,32 +1146,33 @@ export class ViewLayerController {
                             // target is absent from the retained scene. Relation
                             // rules on a whole feature remain additive and do
                             // not replace this local host-feature highlight.
-                            if (
-                                rawPlan &&
-                                hasAuthoredInteractionHighlight(rawPlan, feature) &&
-                                !localTargetKeys.has(interactionTargetKey(feature))
-                            ) {
+                            if (rawPlan &&
+                                hasAuthoredInteractionHighlight(
+                                    rawPlan,
+                                    feature
+                                ) &&
+                                !localTargetKeys.has(
+                                    interactionTargetKey(feature)
+                                )) {
                                 continue;
                             }
                             const existing = byId.get(overlayId);
                             if (existing) {
-                                if (
-                                    !existing.targets.some(
-                                        (target) => interactionTargetKey(target) === interactionTargetKey(feature)
-                                    )
-                                ) {
+                                if (!existing.targets.some(target =>
+                                    interactionTargetKey(target) ===
+                                        interactionTargetKey(feature))) {
                                     byId.set(overlayId, {
                                         ...existing,
                                         targets: [...existing.targets, feature]
                                     });
                                 }
-                            } else {
+                            }
+                            else {
                                 byId.set(overlayId, {
                                     id: overlayId,
                                     targets: [feature],
                                     effect,
-                                    order:
-                                        styleIndex +
+                                    order: styleIndex +
                                         (group.kind === "hover"
                                             ? INTERACTION_STYLE_ORDER_BASE + 1_000
                                             : INTERACTION_STYLE_ORDER_BASE)
@@ -1043,18 +1184,23 @@ export class ViewLayerController {
                     // must therefore replace the remote owner even when the
                     // interaction targets and style options did not change.
                     for (const remotePlan of remotePlans) {
-                        const identitySignature = sipHash64Hex(
-                            JSON.stringify({
-                                filterPlan: remotePlan.plan,
-                                partitions: remotePlan.partitions,
-                                roots: remotePlan.roots,
-                                options
-                            })
-                        );
-                        const presentationId = [group.id, style.id, this.styleVersion(style), identitySignature].join(
-                            ":"
-                        );
-                        const key = [mapgetLayer.key, group.kind, presentationId].join("/");
+                        const identitySignature = sipHash64Hex(JSON.stringify({
+                            filterPlan: remotePlan.plan,
+                            partitions: remotePlan.partitions,
+                            roots: remotePlan.roots,
+                            options
+                        }));
+                        const presentationId = [
+                            group.id,
+                            style.id,
+                            this.styleVersion(style),
+                            identitySignature
+                        ].join(":");
+                        const key = [
+                            mapgetLayer.key,
+                            group.kind,
+                            presentationId
+                        ].join("/");
                         desired.set(key, {
                             mapgetLayer,
                             style,
@@ -1065,8 +1211,7 @@ export class ViewLayerController {
                             plan: remotePlan.plan,
                             partitions: remotePlan.partitions,
                             roots: remotePlan.roots,
-                            styleOrder:
-                                styleIndex +
+                            styleOrder: styleIndex +
                                 (group.kind === "hover"
                                     ? INTERACTION_STYLE_ORDER_BASE + 1_000
                                     : INTERACTION_STYLE_ORDER_BASE),
@@ -1083,7 +1228,9 @@ export class ViewLayerController {
                 continue;
             }
             const next = desired.get(key);
-            if (next && owned.layer.style === next.style && owned.layer.mapgetLayer === next.mapgetLayer) {
+            if (next &&
+                owned.layer.style === next.style &&
+                owned.layer.mapgetLayer === next.mapgetLayer) {
                 continue;
             }
             this.styledLayers.delete(key);
@@ -1128,15 +1275,25 @@ export class ViewLayerController {
                 }
             }
             owned.layer.styleOrder = next.styleOrder;
-            owned.layer.setPartitionCoverage(next.partitions, next.partitions, next.roots);
+            owned.layer.setPartitionCoverage(
+                next.partitions,
+                next.partitions,
+                next.roots
+            );
             this.reconcileOwnedVisualizations(owned);
         }
 
         this.localInteractionOverlaysByLayer = new Map(
-            [...localOverlaysByLayer].map(([layerKey, overlays]) => [layerKey, [...overlays.values()]])
+            [...localOverlaysByLayer].map(([layerKey, overlays]) => [
+                layerKey,
+                [...overlays.values()]
+            ])
         );
-        const nextVisualizations = this.localInteractionVisualizations(localOverlaysByLayer);
-        for (const visualization of this.localInteractionVisualizationsWithOverlays) {
+        const nextVisualizations = this.localInteractionVisualizations(
+            localOverlaysByLayer
+        );
+        for (const visualization of
+            this.localInteractionVisualizationsWithOverlays) {
             if (!nextVisualizations.has(visualization)) {
                 visualization.setInteractionOverlays([]);
             }
@@ -1148,7 +1305,10 @@ export class ViewLayerController {
     }
 
     /** Memoizes the immutable layer-affinity query across hover targets. */
-    private hasInteractionLayerAffinity(style: ErdblickStyle, layerId: string): boolean {
+    private hasInteractionLayerAffinity(
+        style: ErdblickStyle,
+        layerId: string
+    ): boolean {
         let byLayer = this.interactionLayerAffinityCache.get(style);
         if (!byLayer) {
             byLayer = new Map();
@@ -1175,7 +1335,11 @@ export class ViewLayerController {
             byContext = new Map();
             this.interactionFilterPlanCache.set(style, byContext);
         }
-        const key = [mapgetLayer.key, mode.value, lod].join("\n");
+        const key = [
+            mapgetLayer.key,
+            mode.value,
+            lod
+        ].join("\n");
         if (byContext.has(key)) {
             return byContext.get(key) ?? null;
         }
@@ -1212,7 +1376,11 @@ export class ViewLayerController {
         if (byContext.has(key)) {
             return byContext.get(key) ?? null;
         }
-        const effect = resolveDeckInteractionEffect(style.featureLayerStyle, mode, options);
+        const effect = resolveDeckInteractionEffect(
+            style.featureLayerStyle,
+            mode,
+            options
+        );
         byContext.set(key, effect);
         return effect;
     }
@@ -1225,14 +1393,19 @@ export class ViewLayerController {
     }
 
     /** Apply retained semantic overlays only to targets present in one rendered contribution. */
-    private applyLocalInteractionOverlays(visualization: TileSubsetLayerVisualization): void {
+    private applyLocalInteractionOverlays(
+        visualization: TileSubsetLayerVisualization
+    ): void {
         const kind = visualization.owner.identity.presentationKind;
         if (kind !== "regular" && kind !== "search") {
             return;
         }
-        const overlays = this.localInteractionOverlaysByLayer.get(visualization.owner.mapgetLayer.key) ?? [];
-        const applicable = overlays.flatMap((overlay) => {
-            const targets = overlay.targets.filter((target) => visualization.hasLocalInteractionTarget(target));
+        const overlays = this.localInteractionOverlaysByLayer.get(
+            visualization.owner.mapgetLayer.key
+        ) ?? [];
+        const applicable = overlays.flatMap(overlay => {
+            const targets = overlay.targets.filter(target =>
+                visualization.hasLocalInteractionTarget(target));
             return targets.length ? [{...overlay, targets}] : [];
         });
         visualization.setInteractionOverlays(applicable);
@@ -1245,7 +1418,10 @@ export class ViewLayerController {
 
     /** Resolve only tile visualizations named by the next request-free local masks. */
     private localInteractionVisualizations(
-        overlaysByLayer: ReadonlyMap<string, ReadonlyMap<string, TileSubsetInteractionOverlay>>
+        overlaysByLayer: ReadonlyMap<
+            string,
+            ReadonlyMap<string, TileSubsetInteractionOverlay>
+        >
     ): Set<TileSubsetLayerVisualization> {
         const result = new Set<TileSubsetLayerVisualization>();
         const partitionKeysByLayer = new Map<string, Set<string>>();
@@ -1265,13 +1441,19 @@ export class ViewLayerController {
         }
         const collect = (owned: OwnedStyledLayer) => {
             const kind = owned.layer.identity.presentationKind;
-            const partitionKeys = partitionKeysByLayer.get(owned.layer.mapgetLayer.key);
-            if ((kind !== "regular" && kind !== "search") || !partitionKeys) {
+            const partitionKeys = partitionKeysByLayer.get(
+                owned.layer.mapgetLayer.key
+            );
+            if ((kind !== "regular" && kind !== "search") ||
+                !partitionKeys) {
                 return;
             }
             for (const key of partitionKeys) {
-                const visualizationKey = owned.visualizationKeyByPartition.get(key);
-                const visualization = visualizationKey ? owned.visualizations.get(visualizationKey) : undefined;
+                const visualizationKey =
+                    owned.visualizationKeyByPartition.get(key);
+                const visualization = visualizationKey
+                    ? owned.visualizations.get(visualizationKey)
+                    : undefined;
                 if (visualization) {
                     result.add(visualization);
                 }
@@ -1307,18 +1489,28 @@ export class ViewLayerController {
     }
 
     /** Test exact entity presence in any regular/search contribution for this map layer. */
-    private hasLocalInteractionTarget(mapgetLayer: MapgetLayer, target: TileFeatureId): boolean {
+    private hasLocalInteractionTarget(
+        mapgetLayer: MapgetLayer,
+        target: TileFeatureId
+    ): boolean {
         const parsed = this.parseFeaturePartition(target);
-        if (!parsed || parsed.mapId !== mapgetLayer.mapId || parsed.layerId !== mapgetLayer.layerId) {
+        if (!parsed || parsed.mapId !== mapgetLayer.mapId ||
+            parsed.layerId !== mapgetLayer.layerId) {
             return false;
         }
         const matches = (owned: OwnedStyledLayer): boolean => {
             const kind = owned.layer.identity.presentationKind;
-            if ((kind !== "regular" && kind !== "search") || owned.layer.mapgetLayer.key !== mapgetLayer.key) {
+            if ((kind !== "regular" && kind !== "search") ||
+                owned.layer.mapgetLayer.key !== mapgetLayer.key) {
                 return false;
             }
-            const visualizationKey = owned.visualizationKeyByPartition.get(partitionKey(parsed.partition));
-            const visualization = visualizationKey ? owned.visualizations.get(visualizationKey) : undefined;
+            const visualizationKey =
+                owned.visualizationKeyByPartition.get(
+                    partitionKey(parsed.partition)
+                );
+            const visualization = visualizationKey
+                ? owned.visualizations.get(visualizationKey)
+                : undefined;
             return visualization?.hasLocalInteractionTarget(target) ?? false;
         };
         for (const owned of this.styledLayers.values()) {
@@ -1326,28 +1518,31 @@ export class ViewLayerController {
                 return true;
             }
         }
-        return [...this.retiringRegularLayers.values()].some(({owned}) => matches(owned));
+        return [...this.retiringRegularLayers.values()]
+            .some(({owned}) => matches(owned));
     }
 
     /** Re-evaluate local-versus-authored highlighting after scene geometry changes. */
-    private scheduleInteractionPresenceReconcile(layer: StyledMapgetLayer, changedPartitionKey?: string): void {
+    private scheduleInteractionPresenceReconcile(
+        layer: StyledMapgetLayer,
+        changedPartitionKey?: string
+    ): void {
         const kind = layer.identity.presentationKind;
         if (kind !== "regular" && kind !== "search") {
             return;
         }
         const matchesChangedPresentation = (target: TileFeatureId) => {
             const parsed = this.parseFeaturePartition(target);
-            return (
-                parsed?.mapId === layer.mapgetLayer.mapId &&
+            return parsed?.mapId === layer.mapgetLayer.mapId &&
                 parsed.layerId === layer.mapgetLayer.layerId &&
-                (changedPartitionKey === undefined || partitionKey(parsed.partition) === changedPartitionKey)
-            );
+                (changedPartitionKey === undefined ||
+                    partitionKey(parsed.partition) === changedPartitionKey);
         };
         const relevantTargetExists =
-            this.inspection.selectionIdsTopic
-                .getValue()
-                .some((panel) => panel.features.some(matchesChangedPresentation)) ||
-            this.inspection.hoverIdsTopic.getValue().some(matchesChangedPresentation);
+            this.inspection.selectionIdsTopic.getValue().some(panel =>
+                panel.features.some(matchesChangedPresentation)) ||
+            this.inspection.hoverIdsTopic.getValue()
+                .some(matchesChangedPresentation);
         if (relevantTargetExists) {
             this.scheduleInteractionReconcile();
         }
@@ -1360,7 +1555,10 @@ export class ViewLayerController {
         partition: PartitionId;
     } | null {
         try {
-            const [mapId, layerId, partition] = parseMapPartitionKey(coreLib, feature.mapTileKey);
+            const [mapId, layerId, partition] = parseMapPartitionKey(
+                coreLib,
+                feature.mapTileKey
+            );
             return {
                 mapId: String(mapId),
                 layerId: String(layerId),
@@ -1373,16 +1571,14 @@ export class ViewLayerController {
 
     /** Track viewport-derived state that can switch targets between local and authored rendering. */
     private interactionViewportSignature(): string {
-        const layers = new Map<
-            string,
-            {
-                mapId: string;
-                layerId: string;
-                partition: PartitionId;
-            }
-        >();
+        const layers = new Map<string, {
+            mapId: string;
+            layerId: string;
+            partition: PartitionId;
+        }>();
         const features = [
-            ...this.inspection.selectionIdsTopic.getValue().flatMap((panel) => panel.features),
+            ...this.inspection.selectionIdsTopic.getValue()
+                .flatMap(panel => panel.features),
             ...this.inspection.hoverIdsTopic.getValue()
         ];
         for (const feature of features) {
@@ -1395,24 +1591,51 @@ export class ViewLayerController {
                 layers.set(key, parsed);
             }
         }
-        const styles = [...this.styleService.styles.values()].filter((style) => style.visible);
+        const styles = [...this.styleService.styles.values()]
+            .filter(style => style.visible);
         return [...layers.values()]
-            .sort((left, right) => left.mapId.localeCompare(right.mapId) || left.layerId.localeCompare(right.layerId))
+            .sort((left, right) =>
+                left.mapId.localeCompare(right.mapId) ||
+                left.layerId.localeCompare(right.layerId))
             .map(({mapId, layerId, partition}) => {
-                const visible = this.mapInfo.maps.getMapLayerVisibility(this.viewIndex, mapId, layerId);
+                const visible = this.mapInfo.maps.getMapLayerVisibility(
+                    this.viewIndex,
+                    mapId,
+                    layerId
+                );
                 const visibleLevel = visible
-                    ? this.viewState.getEffectiveMapLayerLevel(this.viewIndex, mapId, layerId)
+                    ? this.viewState.getEffectiveMapLayerLevel(
+                        this.viewIndex,
+                        mapId,
+                        layerId
+                    )
                     : -1;
-                const targetLevel =
-                    partition.kind === "tile"
-                        ? Number(coreLib.getTileLevel(partition.id))
-                        : this.viewState.getEffectiveMapLayerLevel(this.viewIndex, mapId, layerId);
-                const parts: Array<string | number> = [mapId, layerId, visible ? 1 : 0, visibleLevel, targetLevel];
+                const targetLevel = partition.kind === "tile"
+                    ? Number(coreLib.getTileLevel(partition.id))
+                    : this.viewState.getEffectiveMapLayerLevel(
+                        this.viewIndex,
+                        mapId,
+                        layerId
+                    );
+                const parts: Array<string | number> = [
+                    mapId,
+                    layerId,
+                    visible ? 1 : 0,
+                    visibleLevel,
+                    targetLevel
+                ];
                 for (const style of styles) {
                     if (!this.hasInteractionLayerAffinity(style, layerId)) {
                         continue;
                     }
-                    parts.push(style.id, this.viewState.styleLod(this.viewIndex, targetLevel, style.featureLayerStyle));
+                    parts.push(
+                        style.id,
+                        this.viewState.styleLod(
+                            this.viewIndex,
+                            targetLevel,
+                            style.featureLayerStyle
+                        )
+                    );
                 }
                 return parts.join(":");
             })
@@ -1435,25 +1658,22 @@ export class ViewLayerController {
             }
             visualization.setLineSimplificationTolerance(this.lineSimplificationToleranceMeters());
             visualization.setPointCloudScale(this.viewState.viewStateFor(this.viewIndex)?.metersPerPixel ?? null);
-            if (state.status === "ready" && state.subsetBlob && !visualization.isCurrentPresentationInstalled()) {
+            if (state.status === "ready" && state.subsetBlob &&
+                !visualization.isCurrentPresentationInstalled()) {
                 this.queueVisualizationRender(visualization);
             }
         }
 
         for (const state of owned.layer.tileStates.values()) {
-            if (
-                this.shouldVisualize(owned.layer, state) &&
-                !owned.visualizationKeyByPartition.has(state.partitionKey)
-            ) {
+            if (this.shouldVisualize(owned.layer, state) &&
+                !owned.visualizationKeyByPartition.has(state.partitionKey)) {
                 this.enqueueTile(owned, state);
             }
         }
 
         for (const [key, pending] of [...owned.pendingPartitions]) {
-            if (
-                owned.layer.tileStates.get(key) !== pending.state ||
-                !this.shouldVisualize(owned.layer, pending.state)
-            ) {
+            if (owned.layer.tileStates.get(key) !== pending.state ||
+                !this.shouldVisualize(owned.layer, pending.state)) {
                 this.discardPendingTile(owned, key);
             }
         }
@@ -1461,11 +1681,16 @@ export class ViewLayerController {
     }
 
     /** Re-render a changed ready tile or reserve its first worker credit. */
-    private reconcileReadyTile(owned: OwnedStyledLayer, state: FilterTileState): void {
+    private reconcileReadyTile(
+        owned: OwnedStyledLayer,
+        state: FilterTileState
+    ): void {
         if (!this.shouldVisualize(owned.layer, state)) {
             return;
         }
-        const existingKey = owned.visualizationKeyByPartition.get(state.partitionKey);
+        const existingKey = owned.visualizationKeyByPartition.get(
+            state.partitionKey
+        );
         if (!existingKey) {
             this.enqueueTile(owned, state);
             return;
@@ -1496,22 +1721,31 @@ export class ViewLayerController {
         owned.pendingPartitions.set(state.partitionKey, {
             state,
             lod: this.presentationLod(owned.layer, state),
-            lineSimplificationToleranceMeters: this.lineSimplificationToleranceMeters(),
+            lineSimplificationToleranceMeters:
+                this.lineSimplificationToleranceMeters(),
             preservedContributionIdentity:
-                preservedContributionIdentity ?? previous?.preservedContributionIdentity ?? null
+                preservedContributionIdentity ??
+                previous?.preservedContributionIdentity ??
+                null
         });
         this.schedulePendingTiles();
     }
 
     /** Drop one pending successor and retire any installed contribution it inherited. */
-    private discardPendingTile(owned: OwnedStyledLayer, key: string): void {
+    private discardPendingTile(
+        owned: OwnedStyledLayer,
+        key: string
+    ): void {
         const pending = owned.pendingPartitions.get(key);
         if (!pending) {
             return;
         }
         owned.pendingPartitions.delete(key);
         if (pending.preservedContributionIdentity) {
-            TileSubsetLayerVisualization.retireContribution(this.sceneHandle, pending.preservedContributionIdentity);
+            TileSubsetLayerVisualization.retireContribution(
+                this.sceneHandle,
+                pending.preservedContributionIdentity
+            );
             this.scheduleInteractionPresenceReconcile(owned.layer, key);
         }
     }
@@ -1538,9 +1772,8 @@ export class ViewLayerController {
             return;
         }
         while (this.renderService.availableWorkerSlots() > 0) {
-            const rerender = this.pendingVisualizationRenders.values().next().value as
-                | TileSubsetLayerVisualization
-                | undefined;
+            const rerender = this.pendingVisualizationRenders.values()
+                .next().value as TileSubsetLayerVisualization | undefined;
             if (rerender) {
                 this.pendingVisualizationRenders.delete(rerender);
                 this.startVisualizationRender(rerender);
@@ -1577,11 +1810,9 @@ export class ViewLayerController {
             return false;
         }
         for (const [key, pending] of owned.pendingPartitions) {
-            if (
-                owned.layer.tileStates.get(key) !== pending.state ||
+            if (owned.layer.tileStates.get(key) !== pending.state ||
                 !this.shouldVisualize(owned.layer, pending.state) ||
-                owned.visualizationKeyByPartition.has(key)
-            ) {
+                owned.visualizationKeyByPartition.has(key)) {
                 this.discardPendingTile(owned, key);
                 continue;
             }
@@ -1592,8 +1823,9 @@ export class ViewLayerController {
                 `partition-${encodeURIComponent(key)}`,
                 `s${pending.lineSimplificationToleranceMeters}`
             ].join("/");
-            const coordinateOrigin =
-                pending.state.partition.kind === "tile" ? tileCoordinateOrigin(pending.state.partition.id) : null;
+            const coordinateOrigin = pending.state.partition.kind === "tile"
+                ? tileCoordinateOrigin(pending.state.partition.id)
+                : null;
             const visualization = new TileSubsetLayerVisualization(
                 owned.layer,
                 pending.state,
@@ -1604,7 +1836,7 @@ export class ViewLayerController {
                 pending.lod,
                 pending.lineSimplificationToleranceMeters,
                 this.viewIndex,
-                (item) => this.queueVisualizationRender(item)
+                item => this.queueVisualizationRender(item)
             );
             owned.visualizations.set(visualizationKey, visualization);
             owned.visualizationKeyByPartition.set(key, visualizationKey);
@@ -1615,7 +1847,10 @@ export class ViewLayerController {
     }
 
     /** Remove one tile and its exact GPU contribution without touching siblings. */
-    private removeTileVisualization(owned: OwnedStyledLayer, key: string): void {
+    private removeTileVisualization(
+        owned: OwnedStyledLayer,
+        key: string
+    ): void {
         this.discardPendingTile(owned, key);
         const visualizationKey = owned.visualizationKeyByPartition.get(key);
         if (!visualizationKey) {
@@ -1634,11 +1869,16 @@ export class ViewLayerController {
     }
 
     /** Remove one coverage delta as a single scene and diagnostics transaction. */
-    private removeTileVisualizations(owned: OwnedStyledLayer, states: readonly FilterTileState[]): void {
+    private removeTileVisualizations(
+        owned: OwnedStyledLayer,
+        states: readonly FilterTileState[]
+    ): void {
         const visualizations: TileSubsetLayerVisualization[] = [];
         for (const state of states) {
             this.discardPendingTile(owned, state.partitionKey);
-            const key = owned.visualizationKeyByPartition.get(state.partitionKey);
+            const key = owned.visualizationKeyByPartition.get(
+                state.partitionKey
+            );
             if (!key) {
                 continue;
             }
@@ -1649,17 +1889,26 @@ export class ViewLayerController {
             }
             owned.visualizations.delete(key);
             this.pendingVisualizationRenders.delete(visualization);
-            this.localInteractionVisualizationsWithOverlays.delete(visualization);
+            this.localInteractionVisualizationsWithOverlays.delete(
+                visualization
+            );
             visualizations.push(visualization);
         }
-        TileSubsetLayerVisualization.destroyMany(visualizations, this.sceneHandle);
+        TileSubsetLayerVisualization.destroyMany(
+            visualizations,
+            this.sceneHandle
+        );
         if (visualizations.length) {
             this.scheduleInteractionPresenceReconcile(owned.layer);
         }
     }
 
     /** Replace one tile owner while retaining its installed contribution until admission. */
-    private replaceVisualization(owned: OwnedStyledLayer, key: string, requeue: boolean): void {
+    private replaceVisualization(
+        owned: OwnedStyledLayer,
+        key: string,
+        requeue: boolean
+    ): void {
         const visualization = owned.visualizations.get(key);
         if (!visualization) {
             return;
@@ -1668,107 +1917,152 @@ export class ViewLayerController {
         this.pendingVisualizationRenders.delete(visualization);
         this.localInteractionVisualizationsWithOverlays.delete(visualization);
         const state = visualization.state;
-        if (state && owned.visualizationKeyByPartition.get(state.partitionKey) === key) {
+        if (state && owned.visualizationKeyByPartition.get(
+            state.partitionKey
+        ) === key) {
             owned.visualizationKeyByPartition.delete(state.partitionKey);
         }
-        const preserve =
-            requeue &&
-            !!state &&
+        const preserve = requeue && !!state &&
             owned.layer.tileStates.get(state.partitionKey) === state &&
             this.shouldVisualize(owned.layer, state);
-        const preservedContributionIdentity = visualization.destroy(this.sceneHandle, preserve);
+        const preservedContributionIdentity = visualization.destroy(
+            this.sceneHandle,
+            preserve
+        );
         if (!preservedContributionIdentity) {
-            this.scheduleInteractionPresenceReconcile(owned.layer, state?.partitionKey);
+            this.scheduleInteractionPresenceReconcile(
+                owned.layer,
+                state?.partitionKey
+            );
         }
         if (preserve && state) {
-            this.enqueueTile(owned, state, preservedContributionIdentity);
+            this.enqueueTile(
+                owned,
+                state,
+                preservedContributionIdentity
+            );
         }
     }
 
     /** Coalesce one visualization's desired revision behind global worker credit. */
-    private queueVisualizationRender(visualization: TileSubsetLayerVisualization): void {
+    private queueVisualizationRender(
+        visualization: TileSubsetLayerVisualization
+    ): void {
         visualization.setPointCloudScale(this.viewState.viewStateFor(this.viewIndex)?.metersPerPixel ?? null);
         this.pendingVisualizationRenders.add(visualization);
         this.schedulePendingTiles();
     }
 
     /** Start one credited immutable worker render and publish state on admission. */
-    private startVisualizationRender(visualization: TileSubsetLayerVisualization): void {
+    private startVisualizationRender(
+        visualization: TileSubsetLayerVisualization
+    ): void {
         if (!this.sceneHandle) {
             return;
         }
-        visualization
-            .render(this.sceneHandle)
-            .then((rendered) => {
+        visualization.render(this.sceneHandle)
+            .then(rendered => {
                 if (!rendered) {
                     return;
                 }
                 const owned = [...this.styledLayers.values()].find(
-                    (candidate) => candidate.layer === visualization.owner
+                    candidate => candidate.layer === visualization.owner
                 );
                 if (owned) {
                     this.releaseRegularFallbackWhenReady(owned);
                 }
                 this.applyLocalInteractionOverlays(visualization);
-                this.scheduleInteractionPresenceReconcile(visualization.owner, visualization.state.partitionKey);
+                this.scheduleInteractionPresenceReconcile(
+                    visualization.owner,
+                    visualization.state.partitionKey
+                );
                 this.diagnostics.notifyChanged();
             })
-            .catch((error) => console.error("TileSubsetLayer visualization failed.", error));
+            .catch(error =>
+                console.error("TileSubsetLayer visualization failed.", error)
+            );
     }
 
     /** Resolve continuous GPU LOD independently of an owner's integer filter plan. */
-    private presentationLod(layer: StyledMapgetLayer, state: FilterTileState): number {
+    private presentationLod(
+        layer: StyledMapgetLayer,
+        state: FilterTileState
+    ): number {
         if (layer.identity.presentationKind !== "regular") {
             return MAX_STYLE_LOD;
         }
-        const level =
-            state.partition.kind === "tile"
-                ? Number(coreLib.getTileLevel(state.partition.id))
-                : this.viewState.getEffectiveMapLayerLevel(
-                      this.viewIndex,
-                      layer.mapgetLayer.mapId,
-                      layer.mapgetLayer.layerId
-                  );
-        return this.viewState.stylePresentationLod(this.viewIndex, level, layer.featureLayerStyle);
+        const level = state.partition.kind === "tile"
+            ? Number(coreLib.getTileLevel(state.partition.id))
+            : this.viewState.getEffectiveMapLayerLevel(
+                this.viewIndex,
+                layer.mapgetLayer.mapId,
+                layer.mapgetLayer.layerId
+            );
+        return this.viewState.stylePresentationLod(
+            this.viewIndex,
+            level,
+            layer.featureLayerStyle
+        );
     }
 
     /** Return the view's quantized line LOD without coupling it to tile state. */
     private lineSimplificationToleranceMeters(): number {
-        return this.viewState.viewStateFor(this.viewIndex)?.lineSimplificationToleranceMeters ?? 0;
+        return this.viewState.viewStateFor(this.viewIndex)
+            ?.lineSimplificationToleranceMeters ?? 0;
     }
 
     /** Test whether diagnostics may retain a tile after asynchronous state changes. */
-    private presentationStillDemanded(layer: StyledMapgetLayer, state: FilterTileState): boolean {
+    private presentationStillDemanded(
+        layer: StyledMapgetLayer,
+        state: FilterTileState
+    ): boolean {
         if (layer.tileStates.get(state.partitionKey) !== state) {
             return false;
         }
-        if (layer.identity.presentationKind !== "search" || state.status !== "ready") {
+        if (layer.identity.presentationKind !== "search" ||
+            state.status !== "ready") {
             return true;
         }
-        return this.featureSearch.shouldRenderSearchStyledLayer(this.viewIndex, layer, state.partition);
+        return this.featureSearch.shouldRenderSearchStyledLayer(
+            this.viewIndex,
+            layer,
+            state.partition
+        );
     }
 
     /** Gate scene ownership on ready data and search-density policy. */
-    private shouldVisualize(layer: StyledMapgetLayer, state: FilterTileState): boolean {
+    private shouldVisualize(
+        layer: StyledMapgetLayer,
+        state: FilterTileState
+    ): boolean {
         if (state.status !== "ready" || !state.subsetBlob) {
             return false;
         }
         if (layer.identity.presentationKind !== "search") {
             return true;
         }
-        return this.featureSearch.shouldRenderSearchStyledLayer(this.viewIndex, layer, state.partition);
+        return this.featureSearch.shouldRenderSearchStyledLayer(
+            this.viewIndex,
+            layer,
+            state.partition
+        );
     }
 
     /**
      * Return the last complete object union and asynchronously refresh it when
      * the fixed-level discovery footprint or semantic TTL changes.
      */
-    private objectPartitionsForViewport(layer: MapgetLayer): readonly PartitionId[] {
+    private objectPartitionsForViewport(
+        layer: MapgetLayer
+    ): readonly PartitionId[] {
         const level = layer.tileAssociationLevel;
         if (level === null) {
             return [];
         }
-        const discoveryTileIds = this.viewState.visibleTileIdsForLevel(this.viewIndex, level);
+        const discoveryTileIds = this.viewState.visibleTileIdsForLevel(
+            this.viewIndex,
+            level
+        );
         const signature = discoveryTileIds.join(",");
         let state = this.objectCoverageByLayer.get(layer);
         if (!state) {
@@ -1789,22 +2083,27 @@ export class ViewLayerController {
             clearTimeout(state.timer);
             state.timer = null;
         }
-        void this.tileStream
-            .discoverObjectPartitions(layer, discoveryTileIds)
-            .then((coverage) => {
-                if (
-                    this.disposed ||
-                    state!.requestVersion !== requestVersion ||
-                    state!.discoverySignature !== signature
-                ) {
+        void this.tileStream.discoverObjectPartitions(layer, discoveryTileIds)
+            .then(coverage => {
+                if (this.disposed || state!.requestVersion !== requestVersion ||
+                    state!.discoverySignature !== signature) {
                     return;
                 }
-                state!.partitions = coverage.associations.map((association) => association.partition);
+                state!.partitions = coverage.associations.map(
+                    association => association.partition
+                );
                 if (coverage.expiresAtMs !== null) {
-                    const delay = Math.min(0x7fff_ffff, Math.max(0, Math.ceil(coverage.expiresAtMs - Date.now()) + 1));
+                    const delay = Math.min(
+                        0x7fff_ffff,
+                        Math.max(
+                            0,
+                            Math.ceil(coverage.expiresAtMs - Date.now()) + 1
+                        )
+                    );
                     state!.timer = setTimeout(() => {
                         state!.timer = null;
-                        if (!this.disposed && state!.discoverySignature === signature) {
+                        if (!this.disposed &&
+                            state!.discoverySignature === signature) {
                             state!.discoverySignature = "";
                             this.scheduleReconcile();
                         }
@@ -1812,12 +2111,16 @@ export class ViewLayerController {
                 }
                 this.scheduleReconcile();
             })
-            .catch((error) => {
+            .catch(error => {
                 if (!this.disposed && state!.requestVersion === requestVersion) {
-                    console.error(`Object discovery failed for '${layer.key}'.`, error);
+                    console.error(
+                        `Object discovery failed for '${layer.key}'.`,
+                        error
+                    );
                     state!.timer = setTimeout(() => {
                         state!.timer = null;
-                        if (!this.disposed && state!.discoverySignature === signature) {
+                        if (!this.disposed &&
+                            state!.discoverySignature === signature) {
                             state!.discoverySignature = "";
                             this.scheduleReconcile();
                         }
@@ -1828,7 +2131,9 @@ export class ViewLayerController {
     }
 
     /** Preserve cached viewport-array identity across its tagged representation. */
-    private tilePartitionsForCoverage(tileIds: readonly number[]): readonly PartitionId[] {
+    private tilePartitionsForCoverage(
+        tileIds: readonly number[]
+    ): readonly PartitionId[] {
         let partitions = this.tilePartitionsByCoverage.get(tileIds);
         if (!partitions) {
             partitions = tileIds.map(tilePartition);
@@ -1844,7 +2149,8 @@ export class ViewLayerController {
         priorityPartitions: readonly PartitionId[]
     ): void {
         const previous = this.regularCoverageByLayer.get(layer);
-        if (previous?.partitions === partitions && previous.priorityPartitions === priorityPartitions) {
+        if (previous?.partitions === partitions &&
+            previous.priorityPartitions === priorityPartitions) {
             return;
         }
         layer.setPartitionCoverage(partitions, priorityPartitions);

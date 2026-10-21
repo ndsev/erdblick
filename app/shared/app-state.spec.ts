@@ -2,7 +2,7 @@
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
 
-import {signal} from '@angular/core';
+import {computed, signal} from '@angular/core';
 import {Subject} from 'rxjs';
 import {Boolish, AppState as StateCodec, StyleState as StyleCodec, MapViewState as ViewCodec} from './app-state';
 import {AppStateOptions, deepCopy} from './state-value';
@@ -18,11 +18,6 @@ function binding<T>(initial: T): StateBinding<T> {
 class AppState<T> extends StateCodec<T> {
     constructor(pool: Map<string, StateCodec<unknown>>, options: AppStateOptions<T>) {
         super(pool, options, binding(options.defaultValue));
-    }
-}
-class MapViewState<T> extends ViewCodec<T> {
-    constructor(pool: Map<string, StateCodec<unknown>>, options: AppStateOptions<T>) {
-        super(pool, options, binding([options.defaultValue]));
     }
 }
 class StyleState extends StyleCodec {
@@ -282,20 +277,21 @@ describe('AppState', () => {
 });
 
 describe('MapViewState', () => {
-    it('extends the underlying array when writing to a higher view index', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const viewState = new MapViewState(pool, {
-            name: 'views',
-            defaultValue: 0,
-            schema: z.number(),
+    it('projects registered views and rejects writes outside their membership', () => {
+        const values = binding([0, 0, 0]);
+        const ids = ['left', 'middle', 'right'];
+        const viewState = new ViewCodec(new Map(), {name: 'views', defaultValue: 0, schema: z.number()}, values, {
+            idAt: index => ids[index],
+            read: id => values.read()[ids.indexOf(id)],
+            write: (id, value) => values.write(values.read().map((previous, index) => ids[index] === id ? value : previous)),
+            select: id => computed(() => values.signal()[ids.indexOf(id)])
         });
-
         viewState.next(2, 10);
-
         expect(viewState.getValue(0)).toBe(0);
-        expect(viewState.getValue(1)).toBe(0);
-        expect(viewState.getValue(2)).toBe(10);
+        expect(viewState.signal('right')()).toBe(10);
+        expect(viewState.appState.toSnapshotValue()).toEqual([0, 0, 10]);
         expect(viewState.length()).toBe(3);
+        expect(() => viewState.next(3, 11)).toThrow('unavailable');
     });
 });
 

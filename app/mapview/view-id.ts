@@ -6,6 +6,9 @@ export const viewIdSchema = z
     .regex(/^[A-Za-z0-9_-]{1,64}$/)
     .refine((id) => !Object.prototype.hasOwnProperty.call(Object.prototype, id), "Reserved view ID");
 
+/** Local asynchronous operations capture a lifetime; URLs intentionally carry only the logical ID. */
+export const viewIdentitySchema = z.object({id: viewIdSchema, generation: z.number().int().positive()});
+
 /** Logical view identity shared by durable state, links, and live renderer targets. */
 export type ViewId = string;
 

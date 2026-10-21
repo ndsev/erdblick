@@ -9,6 +9,7 @@ import {
     type TileSubsetLayerRenderDebugSnapshot
 } from "./mapview/deck/tile-subset-layer-render.service";
 import {AppStateService} from "./shared/appstate.service";
+import {AppActionService} from "./actions/app-action.service";
 
 /** Browser-console helpers which use only supported S4E2 boundaries. */
 export interface DebugWindow extends Window {
@@ -22,8 +23,14 @@ export class ErdblickDebugApi {
     constructor(
         private readonly tileStream: MapTileStreamService,
         private readonly subsetRenderer: TileSubsetLayerRenderService,
-        public readonly stateService: AppStateService
+        public readonly stateService: AppStateService,
+        private readonly actions: AppActionService
     ) {
+    }
+
+    /** Run a registered owner action through its argument/result validation, including async failures. */
+    executeAction(name: string, input: unknown): unknown {
+        return this.actions.execute(name, input);
     }
 
     /** Apply one serialized camera state after validating its logical view index. */

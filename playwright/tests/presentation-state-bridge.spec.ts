@@ -63,6 +63,7 @@ test("presentation scenes apply state and authored searches without reloading th
             }
         };
         snapshot["numberOfViews"] = 2;
+        snapshot["viewIds"] = ["presentation-left", "presentation-right"];
         for (const name of [
             "cameraView", "layerSyncOptions", "background", "visibility", "tileBorders",
             "tileGridMode", "tileGridLevel", "tileGridAutoLevel", "tileGridColor",
@@ -89,9 +90,9 @@ test("presentation scenes apply state and authored searches without reloading th
         && message.ok === true
     )).toBe(true);
     await expect.poll(() => child.evaluate(() => {
-        const state = window.ebDebug?.stateService;
+        const state = window.ebDebug?.stateService.exportSnapshot();
         return state
-            ? [state.numViews, state.mode2dState.getValue(0), state.mode2dState.getValue(1)]
+            ? [state['numberOfViews'], ...(state['mode2d'] as boolean[])]
             : null;
     })).toEqual([2, true, false]);
     await expect.poll(() => child.evaluate(() => [0, 1].map(viewIndex => {
@@ -115,7 +116,7 @@ test("presentation scenes apply state and authored searches without reloading th
     )).toBe(true);
     await expect(child.getByTestId("feature-search-panel")).toHaveCount(1);
     await expect.poll(() => child.evaluate(() =>
-        window.ebDebug!.stateService.featureSearches.map(entry => entry.query)
+        (JSON.parse(localStorage.getItem('featureSearchState') ?? '[]') as Array<{query: string}>).map(entry => entry.query)
     )).toEqual(["true"]);
     await expect(child.getByTestId("feature-search-panel").getByRole("tab", {name: /^Results/}))
         .toContainText(/Results\s*[1-9][0-9]*/);
@@ -132,7 +133,7 @@ test("presentation scenes apply state and authored searches without reloading th
         message.requestId === 3 && message.ok === true
     )).toBe(true);
     await expect(child.getByTestId("feature-search-panel")).toHaveCount(0);
-    expect(await child.evaluate(() => window.ebDebug!.stateService.featureSearches)).toEqual([]);
+    await expect.poll(() => child.evaluate(() => JSON.parse(localStorage.getItem('featureSearchState') ?? '[]'))).toEqual([]);
 
     expect(await child.evaluate(() => performance.timeOrigin)).toBe(initialTimeOrigin);
     expect(childDocumentRequests).toBe(1);

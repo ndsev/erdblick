@@ -6,6 +6,7 @@ import {
     identifierSchema,
     view
 } from "../actions/action-schema";
+import {viewIdSchema} from "../mapview/view-id";
 import {boundedUnicodeString} from "../shared/unicode-string.js";
 
 /** Public operations owned and bound by the adjacent service. */
@@ -20,7 +21,6 @@ export const mapViewActions = {
     }
 } as const;
 
-import {viewIdSchema} from "../mapview/view-id";
 
 const tabSelectorSchema = z.strictObject({});
 const viewSelectorSchema = z.strictObject({viewId: viewIdSchema});

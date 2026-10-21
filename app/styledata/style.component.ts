@@ -61,19 +61,11 @@ interface QuickPresetOption {
 @Component({
     selector: "style-panel",
     template: `
-        <app-dialog
-            class="styles-dialog"
-            data-testid="styles-dialog"
-            header="Style Sheets"
-            [(visible)]="stylesDialogVisible"
-            [modal]="false"
-            [style]="{'min-width': 'min(38em, calc(100vw - 1em))', width: 'min(72em, 92vw)'}"
-            #styles
-            [closeOnEscape]="false"
-            [persistLayout]="true"
-            [layoutId]="stylesDialogLayoutId"
-            (onShow)="onStylesDialogShow()"
-        >
+        <app-dialog class="styles-dialog" data-testid="styles-dialog" header="Style Sheets" [(visible)]="stylesDialogVisible"
+                  [modal]="false" [style]="{ 'min-width': 'min(38em, calc(100vw - 1em))', 'width': 'min(72em, 92vw)' }"
+                  #styles [closeOnEscape]="false"
+                  [persistLayout]="true" [layoutId]="stylesDialogLayoutId"
+                  (onShow)="onStylesDialogShow()">
             <p-tabs [(value)]="stylesDialogTab" class="style-sheets-tabs" data-testid="style-sheets-tabs">
                 <p-tablist>
                     <p-tab value="styles">Styles</p-tab>
@@ -81,14 +73,14 @@ interface QuickPresetOption {
                         <span>Map Presets </span>
                         @if (presetService.issues$ | async; as presetIssues) {
                             @if (presetIssues.length) {
-                                <p-badge [value]="presetIssues.length" />
+                                <p-badge [value]="presetIssues.length"/>
                             }
                         }
                     </p-tab>
                     <p-tab value="errors">
                         <span>Errors </span>
                         @if (styleValidationReportService.reports$ | async; as styleIssues) {
-                            <p-badge [value]="styleIssueCount(styleIssues)" />
+                            <p-badge [value]="styleIssueCount(styleIssues)"/>
                         }
                     </p-tab>
                 </p-tablist>
@@ -102,147 +94,84 @@ interface QuickPresetOption {
                                 <p-tree [value]="styleGroups" data-testid="style-tree">
                                     <!-- Group Node Template -->
                                     <ng-template let-node pTemplate="Group">
-                                        <span>
-                                            <p-checkbox
-                                                [ngModel]="node.visible"
-                                                (click)="$event.stopPropagation()"
-                                                (ngModelChange)="toggleStyleGroup(node.id, $event)"
-                                                [binary]="true"
-                                                [inputId]="node.id"
-                                                [name]="node.id"
-                                                tabindex="0"
-                                            />
-                                            <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">{{
-                                                removeGroupPrefix(node.id)
-                                            }}</label>
-                                        </span>
+                                    <span>
+                                        <p-checkbox [ngModel]="node.visible"
+                                                    (click)="$event.stopPropagation()"
+                                                    (ngModelChange)="toggleStyleGroup(node.id, $event)"
+                                                    [binary]="true"
+                                                    [inputId]="node.id"
+                                                    [name]="node.id" tabindex="0"/>
+                                        <label [for]="node.id" style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
+                                    </span>
                                     </ng-template>
                                     <!-- Style Node Template -->
                                     <ng-template let-node pTemplate="Style">
-                                        <div
-                                            class="flex-container"
-                                            [attr.data-testid]="'style-row-' + styleTestIdSuffix(node.id)"
-                                        >
-                                            <div
-                                                class="font-bold white-space-nowrap"
-                                                style="display: flex; align-items: center;"
-                                            >
-                                                <span
-                                                    onEnterClick
-                                                    class="material-symbols-outlined menu-toggler"
-                                                    [attr.data-testid]="
-                                                        'style-menu-button-' + styleTestIdSuffix(node.id)
-                                                    "
-                                                    (click)="showStylesToggleMenu($event, node.id)"
-                                                    tabindex="0"
-                                                >
-                                                    more_vert
-                                                </span>
+                                        <div class="flex-container" [attr.data-testid]="'style-row-' + styleTestIdSuffix(node.id)">
+                                            <div class="font-bold white-space-nowrap" style="display: flex; align-items: center;">
+                                            <span onEnterClick class="material-symbols-outlined menu-toggler"
+                                                  [attr.data-testid]="'style-menu-button-' + styleTestIdSuffix(node.id)"
+                                                  (click)="showStylesToggleMenu($event, node.id)" tabindex="0">
+                                                more_vert
+                                            </span>
                                                 <span>
-                                                    <p-checkbox
-                                                        [(ngModel)]="node.visible"
-                                                        [attr.data-testid]="
-                                                            'style-visibility-' + styleTestIdSuffix(node.id)
-                                                        "
-                                                        (click)="$event.stopPropagation()"
-                                                        (ngModelChange)="applyStyleConfig(node.id)"
-                                                        [binary]="true"
-                                                        [inputId]="node.id"
-                                                        [name]="node.id"
-                                                    />
-                                                    <label
-                                                        [for]="node.id"
-                                                        style="margin-left: 0.5em; cursor: pointer"
-                                                        >{{ removeGroupPrefix(node.id) }}</label
-                                                    >
-                                                    @if (node.additional) {
-                                                        <p-tag
-                                                            class="additional-style-tag"
-                                                            [class.clickable-style-tag]="node.overridesBaseStyle"
-                                                            severity="info"
-                                                            value="Additional"
-                                                            [rounded]="true"
-                                                            (click)="openCompareFromAdditionalTag($event, node.id)"
-                                                        />
-                                                    }
-                                                    @if (node.category === "search") {
-                                                        <p-tag
-                                                            class="search-style-tag"
-                                                            severity="danger"
-                                                            value="Search"
-                                                            [rounded]="true"
-                                                        />
-                                                    }
-                                                    @if (node.modified && !node.imported) {
-                                                        <p-tag
-                                                            class="modified-style-tag"
-                                                            severity="warn"
-                                                            value="Modified"
-                                                            [rounded]="true"
-                                                            (click)="openCompareFromModifiedTag($event, node.id)"
-                                                        />
-                                                    }
-                                                    @if (styleErrorCount(node) > 0) {
-                                                        <span
-                                                            onEnterClick
-                                                            class="material-symbols-outlined style-validation-error-icon"
-                                                            [attr.data-testid]="
-                                                                'style-validation-error-button-' +
-                                                                styleTestIdSuffix(node.id)
-                                                            "
-                                                            pTooltip="Open style validation errors"
-                                                            tooltipPosition="bottom"
-                                                            tabindex="0"
-                                                            style="font-size: 1.5em"
-                                                            (click)="openStyleErrorsForStyle($event, node)"
-                                                        >
-                                                            error
-                                                        </span>
-                                                    }
-                                                </span>
+                                                <p-checkbox [(ngModel)]="node.visible"
+                                                            [attr.data-testid]="'style-visibility-' + styleTestIdSuffix(node.id)"
+                                                            (click)="$event.stopPropagation()"
+                                                            (ngModelChange)="applyStyleConfig(node.id)"
+                                                            [binary]="true"
+                                                            [inputId]="node.id"
+                                                            [name]="node.id"/>
+                                                <label [for]="node.id"
+                                                       style="margin-left: 0.5em; cursor: pointer">{{ removeGroupPrefix(node.id) }}</label>
+                                                @if (node.additional) {
+                                                    <p-tag class="additional-style-tag"
+                                                           [class.clickable-style-tag]="node.overridesBaseStyle"
+                                                           severity="info" value="Additional" [rounded]="true"
+                                                           (click)="openCompareFromAdditionalTag($event, node.id)"/>
+                                                }
+                                                @if (node.category === 'search') {
+                                                    <p-tag class="search-style-tag"
+                                                           severity="danger" value="Search" [rounded]="true"/>
+                                                }
+                                                @if (node.modified && !node.imported) {
+                                                    <p-tag class="modified-style-tag"
+                                                           severity="warn" value="Modified" [rounded]="true"
+                                                           (click)="openCompareFromModifiedTag($event, node.id)"/>
+                                                }
+                                                @if (styleErrorCount(node) > 0) {
+                                                    <span onEnterClick
+                                                          class="material-symbols-outlined style-validation-error-icon"
+                                                          [attr.data-testid]="'style-validation-error-button-' + styleTestIdSuffix(node.id)"
+                                                          pTooltip="Open style validation errors"
+                                                          tooltipPosition="bottom"
+                                                          tabindex="0" style="font-size: 1.5em"
+                                                          (click)="openStyleErrorsForStyle($event, node)">
+                                                        error
+                                                    </span>
+                                                }
+                                            </span>
                                             </div>
                                             <div class="tree-node-controls">
                                                 @if (node.imported) {
-                                                    <p-button
-                                                        onEnterClick
-                                                        (click)="removeStyle(node.id)"
-                                                        [attr.data-testid]="
-                                                            'style-remove-button-' + styleTestIdSuffix(node.id)
-                                                        "
-                                                        icon="pi pi-trash"
-                                                        label=""
-                                                        pTooltip="Remove style"
-                                                        tooltipPosition="bottom"
-                                                        tabindex="0"
-                                                    >
+                                                    <p-button onEnterClick (click)="removeStyle(node.id)"
+                                                              [attr.data-testid]="'style-remove-button-' + styleTestIdSuffix(node.id)"
+                                                              icon="pi pi-trash"
+                                                              label="" pTooltip="Remove style"
+                                                              tooltipPosition="bottom" tabindex="0">
                                                     </p-button>
                                                 } @else {
-                                                    <p-button
-                                                        onEnterClick
-                                                        (click)="resetStyle(node.id)"
-                                                        [attr.data-testid]="
-                                                            'style-reset-button-' + styleTestIdSuffix(node.id)
-                                                        "
-                                                        icon="pi pi-refresh"
-                                                        label=""
-                                                        pTooltip="Reset style to server version"
-                                                        tooltipPosition="bottom"
-                                                        tabindex="0"
-                                                    >
+                                                    <p-button onEnterClick (click)="resetStyle(node.id)"
+                                                              [attr.data-testid]="'style-reset-button-' + styleTestIdSuffix(node.id)"
+                                                              icon="pi pi-refresh"
+                                                              label="" pTooltip="Reset style to server version"
+                                                              tooltipPosition="bottom" tabindex="0">
                                                     </p-button>
                                                 }
-                                                <p-button
-                                                    onEnterClick
-                                                    (click)="showStyleEditor(node.id)"
-                                                    [attr.data-testid]="
-                                                        'style-edit-button-' + styleTestIdSuffix(node.id)
-                                                    "
-                                                    icon="pi pi-file-edit"
-                                                    label=""
-                                                    pTooltip="Edit style"
-                                                    tooltipPosition="bottom"
-                                                    tabindex="0"
-                                                >
+                                                <p-button onEnterClick (click)="showStyleEditor(node.id)"
+                                                          [attr.data-testid]="'style-edit-button-' + styleTestIdSuffix(node.id)"
+                                                          icon="pi pi-file-edit"
+                                                          label="" pTooltip="Edit style"
+                                                          tooltipPosition="bottom" tabindex="0">
                                                 </p-button>
                                             </div>
                                         </div>
@@ -250,28 +179,21 @@ interface QuickPresetOption {
                                     <!-- Bool Node Template -->
                                     <ng-template let-node pTemplate="Bool">
                                         <div style="display: flex; align-items: center;">
-                                            <span style="font-style: oblique">
-                                                <label
-                                                    [for]="node.styleId + '_' + node.id"
-                                                    style="margin-left: 0.5em; cursor: pointer"
-                                                    >{{ node.label }}</label
-                                                >
-                                            </span>
+                                        <span style="font-style: oblique">
+                                            <label [for]="node.styleId + '_' + node.id"
+                                                   style="margin-left: 0.5em; cursor: pointer">{{ node.label }}</label>
+                                        </span>
                                         </div>
                                     </ng-template>
-                                    <ng-template let-node pTemplate="String"> </ng-template>
+                                    <ng-template let-node pTemplate="String">
+                                    </ng-template>
                                 </p-tree>
                             }
                             @if (styleService.erroredStyleIds.size > 0) {
                                 <div class="styles-error-list">
-                                    <div
-                                        *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered"
-                                        class="flex-container"
-                                    >
-                                        <span
-                                            class="font-bold white-space-nowrap"
-                                            style="margin-left: 0.5em; color: red"
-                                        >
+                                    <div *ngFor="let message of styleService.erroredStyleIds | keyvalue: unordered"
+                                         class="flex-container">
+                                        <span class="font-bold white-space-nowrap" style="margin-left: 0.5em; color: red">
                                             {{ message.key }}: {{ message.value }}
                                         </span>
                                     </div>
@@ -282,80 +204,57 @@ interface QuickPresetOption {
                     <p-tabpanel value="presets">
                         <div class="style-presets-tab" data-testid="style-presets-panel">
                             <div class="style-presets-toolbar">
-                                <p-button
-                                    label="Add"
-                                    icon="pi pi-plus"
-                                    data-testid="style-preset-add-button"
-                                    [disabled]="presetEditorSourceModified || !presetService.canWrite"
-                                    (click)="toggleQuickPresetForm()"
-                                />
-                                <p-button
-                                    label="Edit raw map presets"
-                                    icon="pi pi-file-edit"
-                                    data-testid="style-preset-raw-edit-button"
-                                    [disabled]="!presetService.canWrite"
-                                    (click)="openPresetEditor()"
-                                />
+                                <p-button label="Add" icon="pi pi-plus"
+                                          data-testid="style-preset-add-button"
+                                          [disabled]="presetEditorSourceModified || !presetService.canWrite"
+                                          (click)="toggleQuickPresetForm()"/>
+                                <p-button label="Edit raw map presets" icon="pi pi-file-edit"
+                                          data-testid="style-preset-raw-edit-button"
+                                          [disabled]="!presetService.canWrite"
+                                          (click)="openPresetEditor()"/>
                                 @if (presetService.readOnlyReason; as readOnlyReason) {
-                                    <p-tag
-                                        severity="secondary"
-                                        value="Read only"
-                                        [rounded]="true"
-                                        [pTooltip]="readOnlyReason"
-                                    />
+                                    <p-tag severity="secondary" value="Read only" [rounded]="true"
+                                           [pTooltip]="readOnlyReason"/>
                                 }
                             </div>
 
                             @if (presetService.readOnlyCatalogMessage; as catalogMessage) {
-                                <p-message
-                                    severity="info"
-                                    data-testid="style-presets-read-only-message"
-                                    [text]="catalogMessage"
-                                />
+                                <p-message severity="info"
+                                           data-testid="style-presets-read-only-message"
+                                           [text]="catalogMessage"/>
                             }
 
                             @if (quickPresetFormVisible) {
                                 <div class="quick-preset-form" data-testid="style-preset-add-form">
                                     <p-iftalabel>
-                                        <input
-                                            id="quick-preset-name"
-                                            pInputText
-                                            data-testid="style-preset-name"
-                                            [(ngModel)]="quickPresetName"
-                                        />
+                                        <input id="quick-preset-name" pInputText
+                                               data-testid="style-preset-name"
+                                               [(ngModel)]="quickPresetName"/>
                                         <label for="quick-preset-name">Preset name</label>
                                     </p-iftalabel>
                                     <p-iftalabel class="quick-preset-options-select">
-                                        <p-multiSelect
-                                            inputId="quick-preset-options"
-                                            data-testid="style-preset-options"
-                                            [options]="quickPresetOptionChoices"
-                                            [(ngModel)]="quickPresetSelectedOptionKeys"
-                                            optionLabel="label"
-                                            optionValue="key"
-                                            [filter]="true"
-                                            [showToggleAll]="true"
-                                            [maxSelectedLabels]="2"
-                                            selectedItemsLabel="{0} layer presets"
-                                            placeholder="Select layer presets"
-                                            appendTo="body"
-                                        />
+                                        <p-multiSelect inputId="quick-preset-options"
+                                                       data-testid="style-preset-options"
+                                                       [options]="quickPresetOptionChoices"
+                                                       [(ngModel)]="quickPresetSelectedOptionKeys"
+                                                       optionLabel="label"
+                                                       optionValue="key"
+                                                       [filter]="true"
+                                                       [showToggleAll]="true"
+                                                       [maxSelectedLabels]="2"
+                                                       selectedItemsLabel="{0} layer presets"
+                                                       placeholder="Select layer presets"
+                                                       appendTo="body"/>
                                         <label for="quick-preset-options">Layer presets</label>
                                     </p-iftalabel>
                                     <div class="quick-preset-actions">
-                                        <p-button
-                                            label="Save"
-                                            icon="pi pi-check"
-                                            data-testid="style-preset-save-button"
-                                            [disabled]="!canSaveQuickPreset()"
-                                            (click)="saveQuickPreset()"
-                                        />
-                                        <p-button
-                                            label="Cancel"
-                                            icon="pi pi-times"
-                                            severity="secondary"
-                                            (click)="closeQuickPresetForm()"
-                                        />
+                                        <p-button label="Save" icon="pi pi-check"
+                                                  data-testid="style-preset-save-button"
+                                                  [disabled]="!canSaveQuickPreset()"
+                                                  (click)="saveQuickPreset()"/>
+                                        <p-button label="Cancel" icon="pi pi-times"
+                                                  severity="secondary"
+                                                  (click)="closeQuickPresetForm()"/>
                                     </div>
                                 </div>
                             }
@@ -364,7 +263,8 @@ interface QuickPresetOption {
                                 @if (presetIssues.length) {
                                     <div class="style-preset-issues" data-testid="style-preset-issues">
                                         @for (issue of presetIssues; track $index) {
-                                            <p-message severity="error" [text]="presetIssueText(issue)" />
+                                            <p-message severity="error"
+                                                       [text]="presetIssueText(issue)"/>
                                         }
                                     </div>
                                 }
@@ -372,32 +272,25 @@ interface QuickPresetOption {
 
                             <div class="style-preset-list">
                                 @for (preset of presetService.presets$ | async; track preset.id) {
-                                    <div
-                                        class="style-preset-list-row"
-                                        [attr.data-testid]="'style-preset-definition-' + preset.id"
-                                    >
+                                    <div class="style-preset-list-row"
+                                         [attr.data-testid]="'style-preset-definition-' + preset.id">
                                         <p-toggleswitch
                                             [inputId]="'style-preset-enabled-' + preset.id"
                                             [ngModel]="presetService.isAvailable(preset)"
                                             [disabled]="presetEditorSourceModified || !presetService.canWrite"
-                                            (ngModelChange)="setPresetAvailability(preset.id, $event)"
-                                        />
+                                            (ngModelChange)="setPresetAvailability(preset.id, $event)"/>
                                         <label [for]="'style-preset-enabled-' + preset.id">
                                             <strong>{{ preset.name }}</strong>
                                             <span>{{ mapPresetLayersLabel(preset) }}</span>
                                         </label>
-                                        <p-tag
-                                            severity="secondary"
-                                            [value]="preset.layerPresets.length + ' layer presets'"
-                                            [rounded]="true"
-                                        />
+                                        <p-tag severity="secondary"
+                                               [value]="preset.layerPresets.length + ' layer presets'"
+                                               [rounded]="true"/>
                                     </div>
                                 } @empty {
-                                    <p-message
-                                        severity="info"
-                                        data-testid="style-presets-empty-message"
-                                        [text]="presetService.emptyCatalogMessage"
-                                    />
+                                    <p-message severity="info"
+                                               data-testid="style-presets-empty-message"
+                                               [text]="presetService.emptyCatalogMessage"/>
                                 }
                             </div>
                         </div>
@@ -410,35 +303,25 @@ interface QuickPresetOption {
                                         <p-inputicon>
                                             <i class="pi pi-filter"></i>
                                         </p-inputicon>
-                                        <input
-                                            pInputText
-                                            type="text"
-                                            [ngModel]="styleIssueFilter"
-                                            (ngModelChange)="styleIssueFilter = $event"
-                                            placeholder="Filter"
-                                        />
+                                        <input pInputText type="text"
+                                               [ngModel]="styleIssueFilter"
+                                               (ngModelChange)="styleIssueFilter = $event"
+                                               placeholder="Filter">
                                     </p-iconfield>
-                                    <p-checkbox
-                                        inputId="style-errors-only"
-                                        [(ngModel)]="styleErrorsOnly"
-                                        [binary]="true"
-                                    ></p-checkbox>
+                                    <p-checkbox inputId="style-errors-only"
+                                                [(ngModel)]="styleErrorsOnly"
+                                                [binary]="true"></p-checkbox>
                                     <label for="style-errors-only">Errors only</label>
-                                    <p-button
-                                        size="small"
-                                        label="Clear duplicates"
-                                        (click)="styleValidationReportService.clearRuntimeDuplicates()"
-                                    />
+                                    <p-button size="small" label="Clear duplicates"
+                                              (click)="styleValidationReportService.clearRuntimeDuplicates()"/>
                                 </div>
-                                <p-table
-                                    [value]="filteredStyleIssues(styleIssues)"
-                                    [scrollable]="true"
-                                    scrollHeight="flex"
-                                    class="style-errors-table"
-                                    styleClass="style-errors-table"
-                                    data-testid="style-errors-table"
-                                    [rowTrackBy]="trackByStyleIssue"
-                                >
+                                <p-table [value]="filteredStyleIssues(styleIssues)"
+                                         [scrollable]="true"
+                                         scrollHeight="flex"
+                                         class="style-errors-table"
+                                         styleClass="style-errors-table"
+                                         data-testid="style-errors-table"
+                                         [rowTrackBy]="trackByStyleIssue">
                                     <ng-template pTemplate="header">
                                         <tr>
                                             <th>Time</th>
@@ -452,37 +335,19 @@ interface QuickPresetOption {
                                         </tr>
                                     </ng-template>
                                     <ng-template pTemplate="body" let-issue>
-                                        <tr
-                                            onEnterClick
-                                            tabindex="0"
-                                            class="style-error-row"
+                                        <tr onEnterClick tabindex="0" class="style-error-row"
                                             [ngClass]="'style-issue-' + issue.severity"
-                                            (click)="openStyleIssue(issue)"
-                                        >
+                                            (click)="openStyleIssue(issue)">
                                             <td>{{ formatIssueTime(issue) }}</td>
                                             <td>{{ issue.severity }}</td>
                                             <td>{{ issue.impact }}</td>
                                             <td [pTooltip]="issue.source.url || issue.source.configId || ''">
-                                                {{
-                                                    issue.source.styleName ||
-                                                        issue.source.url ||
-                                                        issue.source.configId ||
-                                                        issue.source.sourceKind
-                                                }}
+                                                {{ issue.source.styleName || issue.source.url || issue.source.configId || issue.source.sourceKind }}
                                             </td>
-                                            <td>
-                                                {{
-                                                    issue.rulePath ||
-                                                        (issue.ruleIndex !== undefined
-                                                            ? "rules[" + issue.ruleIndex + "]"
-                                                            : "")
-                                                }}
-                                            </td>
-                                            <td>{{ issue.property || "" }}</td>
+                                            <td>{{ issue.rulePath || (issue.ruleIndex !== undefined ? 'rules[' + issue.ruleIndex + ']' : '') }}</td>
+                                            <td>{{ issue.property || '' }}</td>
                                             <td>{{ formatIssueLocation(issue) }}</td>
-                                            <td [pTooltip]="issue.detail || issue.expression || ''">
-                                                {{ issue.message }}
-                                            </td>
+                                            <td [pTooltip]="issue.detail || issue.expression || ''">{{ issue.message }}</td>
                                         </tr>
                                     </ng-template>
                                     <ng-template pTemplate="emptymessage">
@@ -499,77 +364,40 @@ interface QuickPresetOption {
                 </p-tabpanels>
             </p-tabs>
             <div class="dialog-controls">
-                <p-button
-                    data-testid="styles-close-button"
-                    (click)="styles.close($event)"
-                    label="Close"
-                    icon="pi pi-times"
-                ></p-button>
-                <p-fileupload
-                    #styleUploader
-                    onEnterClick
-                    mode="basic"
-                    name="demo[]"
-                    chooseIcon="pi pi-upload"
-                    accept=".yaml"
-                    maxFileSize="1048576"
-                    fileLimit="1"
-                    multiple="false"
-                    customUpload="true"
-                    (uploadHandler)="importStyle($event)"
-                    [auto]="true"
-                    data-testid="style-import-button"
-                    class="import-dialog"
-                    pTooltip="Import style"
-                    tooltipPosition="bottom"
-                    chooseLabel="Import Style"
-                    tabindex="0"
-                />
+                <p-button data-testid="styles-close-button" (click)="styles.close($event)" label="Close" icon="pi pi-times"></p-button>
+                <p-fileupload #styleUploader onEnterClick mode="basic" name="demo[]" chooseIcon="pi pi-upload"
+                              accept=".yaml" maxFileSize="1048576" fileLimit="1" multiple="false"
+                              customUpload="true" (uploadHandler)="importStyle($event)" [auto]="true"
+                              data-testid="style-import-button"
+                              class="import-dialog" pTooltip="Import style" tooltipPosition="bottom"
+                              chooseLabel="Import Style" tabindex="0"/>
             </div>
         </app-dialog>
-        <p-menu
-            #styleMenu
-            [model]="toggleMenuItems"
-            [popup]="true"
-            [baseZIndex]="1000"
-            [style]="{'font-size': '0.9em'}"
-            appendTo="body"
-        ></p-menu>
-        <app-dialog
-            [(visible)]="styleEditorVisible"
-            [modal]="false"
-            #editorDialog
-            data-testid="style-editor-dialog"
-            class="editor-dialog"
-            [closable]="false"
-            [closeOnEscape]="false"
-            [persistLayout]="true"
-            [layoutId]="styleEditorDialogLayoutId"
-            (onShow)="onEditorDialogShow()"
-            (onHide)="onEditorDialogHide()"
-        >
+        <p-menu #styleMenu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
+                [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
+        <app-dialog [(visible)]="styleEditorVisible" [modal]="false" #editorDialog
+                  data-testid="style-editor-dialog" class="editor-dialog"
+                  [closable]="false" [closeOnEscape]="false"
+                  [persistLayout]="true" [layoutId]="styleEditorDialogLayoutId"
+                  (onShow)="onEditorDialogShow()" (onHide)="onEditorDialogHide()">
             <ng-template #header>
-                <app-surface-header
-                    data-testid="style-editor-header"
-                    [title]="styleEditorHeaderTitle()"
-                    [hasSmartControl]="!!currentEditorStyle()"
-                    [dragEnabled]="true"
-                    (dragPointerDown)="editorDialog.startDrag($event)"
-                    (closeRequest)="closeEditorDialog($event)"
-                >
+                <app-surface-header data-testid="style-editor-header"
+                                    [title]="styleEditorHeaderTitle()"
+                                    [hasSmartControl]="!!currentEditorStyle()"
+                                    [dragEnabled]="true"
+                                    (dragPointerDown)="editorDialog.startDrag($event)"
+                                    (closeRequest)="closeEditorDialog($event)">
                     @if (currentEditorStyle(); as style) {
-                        <p-toggleswitch
-                            surfaceHeaderSmartControl
-                            inputId="style-editor-enabled"
-                            data-testid="style-editor-enabled"
-                            [ngModel]="style.visible"
-                            (ngModelChange)="toggleEditorStyle($event)"
-                            (click)="$event.stopPropagation()"
-                            (mousedown)="$event.stopPropagation()"
-                            [pTooltip]="style.visible ? 'Disable style sheet' : 'Enable style sheet'"
-                            tooltipPosition="bottom"
-                            aria-label="Enable style sheet"
-                        >
+                        <p-toggleswitch surfaceHeaderSmartControl
+                                        inputId="style-editor-enabled"
+                                        data-testid="style-editor-enabled"
+                                        [ngModel]="style.visible"
+                                        (ngModelChange)="toggleEditorStyle($event)"
+                                        (click)="$event.stopPropagation()"
+                                        (mousedown)="$event.stopPropagation()"
+                                        [pTooltip]="style.visible ? 'Disable style sheet' : 'Enable style sheet'"
+                                        tooltipPosition="bottom"
+                                        aria-label="Enable style sheet">
                         </p-toggleswitch>
                     }
                 </app-surface-header>
@@ -584,82 +412,69 @@ interface QuickPresetOption {
                 <p-tabpanels>
                     @if (styleEditorQuickAvailable) {
                         <p-tabpanel value="quick" class="style-editor-quick-panel">
-                            <div class="style-editor-quick-content" [class.read-only]="quickProjectionStale">
+                            <div class="style-editor-quick-content"
+                                 [class.read-only]="quickProjectionStale">
                                 @if (quickProjectionStale) {
                                     <div class="style-editor-quick-stale">
-                                        Quick is read-only until Advanced contains valid YAML:
-                                        {{ quickProjectionError }}
+                                        Quick is read-only until Advanced contains valid YAML: {{ quickProjectionError }}
                                     </div>
                                 }
                                 <div class="style-editor-quick-metadata">
                                     <div class="style-editor-quick-field">
                                         <label for="style-editor-quick-name">Name</label>
-                                        <input
-                                            id="style-editor-quick-name"
-                                            data-testid="style-editor-quick-name"
-                                            pInputText
-                                            autocomplete="off"
-                                            [ngModel]="quickStyleName"
-                                            (ngModelChange)="onQuickStyleNameChange($event)"
-                                            [disabled]="quickProjectionStale"
-                                        />
+                                        <input id="style-editor-quick-name"
+                                               data-testid="style-editor-quick-name"
+                                               pInputText
+                                               autocomplete="off"
+                                               [ngModel]="quickStyleName"
+                                               (ngModelChange)="onQuickStyleNameChange($event)"
+                                               [disabled]="quickProjectionStale">
                                         @if (quickStyleNameIssue(); as issue) {
                                             <small class="style-editor-quick-error" role="alert">{{ issue }}</small>
                                         }
                                     </div>
                                     <div class="style-editor-quick-field style-editor-quick-affinity">
                                         <label for="style-editor-quick-layers">Layer affinity</label>
-                                        @if (quickLayerAffinityKind === "custom" && !quickReplacingCustomAffinity) {
-                                            <div
-                                                class="style-editor-custom-affinity"
-                                                data-testid="style-editor-custom-affinity"
-                                            >
+                                        @if (quickLayerAffinityKind === 'custom' && !quickReplacingCustomAffinity) {
+                                            <div class="style-editor-custom-affinity" data-testid="style-editor-custom-affinity">
                                                 <span [pTooltip]="quickCustomLayerAffinity">
                                                     Custom affinity — edit in Advanced or replace
                                                 </span>
-                                                <p-button
-                                                    label="Choose exact layers"
-                                                    size="small"
-                                                    severity="secondary"
-                                                    [outlined]="true"
-                                                    [disabled]="quickProjectionStale"
-                                                    (click)="beginReplacingQuickAffinity()"
-                                                />
-                                                <p-button
-                                                    label="Any layer"
-                                                    size="small"
-                                                    severity="secondary"
-                                                    [text]="true"
-                                                    [disabled]="quickProjectionStale"
-                                                    (click)="setQuickAffinityAny()"
-                                                />
+                                                <p-button label="Choose exact layers"
+                                                          size="small"
+                                                          severity="secondary"
+                                                          [outlined]="true"
+                                                          [disabled]="quickProjectionStale"
+                                                          (click)="beginReplacingQuickAffinity()"/>
+                                                <p-button label="Any layer"
+                                                          size="small"
+                                                          severity="secondary"
+                                                          [text]="true"
+                                                          [disabled]="quickProjectionStale"
+                                                          (click)="setQuickAffinityAny()"/>
                                             </div>
                                         } @else {
-                                            <p-multiSelect
-                                                inputId="style-editor-quick-layers"
-                                                data-testid="style-editor-quick-layers"
-                                                [options]="quickLayerOptions"
-                                                [ngModel]="quickLayerAffinityIds"
-                                                (ngModelChange)="onQuickLayerAffinityChange($event)"
-                                                optionLabel="label"
-                                                optionValue="value"
-                                                placeholder="Any layer"
-                                                [filter]="true"
-                                                [showToggleAll]="true"
-                                                [maxSelectedLabels]="3"
-                                                [disabled]="quickProjectionStale"
-                                                appendTo="body"
-                                            >
+                                            <p-multiSelect inputId="style-editor-quick-layers"
+                                                           data-testid="style-editor-quick-layers"
+                                                           [options]="quickLayerOptions"
+                                                           [ngModel]="quickLayerAffinityIds"
+                                                           (ngModelChange)="onQuickLayerAffinityChange($event)"
+                                                           optionLabel="label"
+                                                           optionValue="value"
+                                                           placeholder="Any layer"
+                                                           [filter]="true"
+                                                           [showToggleAll]="true"
+                                                           [maxSelectedLabels]="3"
+                                                           [disabled]="quickProjectionStale"
+                                                           appendTo="body">
                                             </p-multiSelect>
                                             <small>No selection means any layer.</small>
                                             @if (quickReplacingCustomAffinity) {
-                                                <p-button
-                                                    label="Clear custom affinity to Any"
-                                                    size="small"
-                                                    severity="secondary"
-                                                    [text]="true"
-                                                    (click)="setQuickAffinityAny()"
-                                                />
+                                                <p-button label="Clear custom affinity to Any"
+                                                          size="small"
+                                                          severity="secondary"
+                                                          [text]="true"
+                                                          (click)="setQuickAffinityAny()"/>
                                             }
                                         }
                                     </div>
@@ -676,8 +491,7 @@ interface QuickPresetOption {
                                     [notesBySourceIndex]="quickWarningsBySourceIndex"
                                     [expandRulesByDefault]="true"
                                     [expansionContext]="styleEditorRequestService.styleEditorTargetId ?? ''"
-                                    [canRefreshValueSummaries]="false"
-                                >
+                                    [canRefreshValueSummaries]="false">
                                 </search-style-rule-editor>
                             </div>
                         </p-tabpanel>
@@ -690,105 +504,61 @@ interface QuickPresetOption {
             <div class="editor-actions style-editor-actions">
                 <div class="editor-actions-left">
                     <p-button
-                        [attr.data-testid]="
-                            canSaveCurrentStyleToSource()
-                                ? 'style-editor-save-source-button'
-                                : 'style-editor-apply-button'
-                        "
+                        [attr.data-testid]="canSaveCurrentStyleToSource() ? 'style-editor-save-source-button' : 'style-editor-apply-button'"
                         (click)="saveOrApplyEditedStyle()"
                         [label]="canSaveCurrentStyleToSource() ? 'Save to Source' : 'Apply'"
                         [icon]="canSaveCurrentStyleToSource() ? 'pi pi-save' : 'pi pi-check'"
-                        [disabled]="
-                            !!quickStyleNameIssue() ||
-                            (canSaveCurrentStyleToSource() ? !currentStyleHasSourceChanges() : !sourceWasModified)
-                        "
-                        [pTooltip]="canSaveCurrentStyleToSource() ? styleSourceSaveTooltip() : ''"
-                    ></p-button>
-                    <p-button
-                        data-testid="style-editor-close-button"
-                        (click)="closeEditorDialog($event)"
-                        [label]="sourceWasModified ? 'Discard' : 'Close'"
-                        icon="pi pi-times"
-                    ></p-button>
+                        [disabled]="!!quickStyleNameIssue() || (canSaveCurrentStyleToSource() ? !currentStyleHasSourceChanges() : !sourceWasModified)"
+                        [pTooltip]="canSaveCurrentStyleToSource() ? styleSourceSaveTooltip() : ''"></p-button>
+                    <p-button data-testid="style-editor-close-button" (click)="closeEditorDialog($event)"
+                              [label]='sourceWasModified ? "Discard" : "Close"'
+                              icon="pi pi-times"></p-button>
                     <div class="editor-shortcuts">
-                        <div>
-                            Press <span style="color: grey">Ctrl-S/Cmd-S</span> to
-                            {{ canSaveCurrentStyleToSource() ? "save to source" : "apply changes" }}
-                        </div>
+                        <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to {{ canSaveCurrentStyleToSource() ? 'save to source' : 'apply changes' }}</div>
                         <div>Press <span style="color: grey">Esc</span> to quit</div>
                     </div>
                 </div>
                 <div class="editor-actions-right">
-                    <p-button
-                        data-testid="style-editor-export-button"
-                        (click)="exportStyle(styleEditorRequestService.styleEditorTargetId ?? '')"
-                        [disabled]="sourceWasModified || !styleEditorRequestService.styleEditorTargetId"
-                        label="Export"
-                        icon="pi pi-file-export"
-                    >
+                    <p-button data-testid="style-editor-export-button" (click)="exportStyle(styleEditorRequestService.styleEditorTargetId ?? '')"
+                              [disabled]="sourceWasModified || !styleEditorRequestService.styleEditorTargetId"
+                              label="Export" icon="pi pi-file-export">
                     </p-button>
-                    <p-button
-                        data-testid="style-editor-help-button"
-                        (click)="openStyleHelp()"
-                        label="Help"
-                        icon="pi pi-book"
-                    ></p-button>
+                    <p-button data-testid="style-editor-help-button" (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
                 </div>
             </div>
         </app-dialog>
-        <app-dialog
-            header="Map Presets"
-            [(visible)]="presetEditorVisible"
-            [modal]="false"
-            #presetEditorDialog
-            data-testid="style-preset-editor-dialog"
-            class="editor-dialog style-preset-editor-dialog"
-            [closable]="false"
-            [closeOnEscape]="false"
-            [persistLayout]="true"
-            [layoutId]="stylePresetEditorDialogLayoutId"
-            (onShow)="onPresetEditorDialogShow()"
-        >
+        <app-dialog header="Map Presets" [(visible)]="presetEditorVisible" [modal]="false"
+                    #presetEditorDialog data-testid="style-preset-editor-dialog"
+                    class="editor-dialog style-preset-editor-dialog"
+                    [closable]="false" [closeOnEscape]="false"
+                    [persistLayout]="true" [layoutId]="stylePresetEditorDialogLayoutId"
+                    (onShow)="onPresetEditorDialogShow()">
             <editor [sessionId]="presetEditorSessionId"></editor>
             <div class="editor-actions style-editor-actions">
                 <div class="editor-actions-left">
-                    <p-button
-                        data-testid="style-preset-editor-apply-button"
-                        label="Apply"
-                        icon="pi pi-check"
-                        [disabled]="!presetEditorSourceModified || !presetService.canWrite"
-                        (click)="applyPresetEditorSource()"
-                    />
-                    <p-button
-                        data-testid="style-preset-editor-close-button"
-                        [label]="presetEditorSourceModified ? 'Discard' : 'Close'"
-                        icon="pi pi-times"
-                        (click)="closePresetEditor($event)"
-                    />
+                    <p-button data-testid="style-preset-editor-apply-button"
+                              label="Apply" icon="pi pi-check"
+                              [disabled]="!presetEditorSourceModified || !presetService.canWrite"
+                              (click)="applyPresetEditorSource()"/>
+                    <p-button data-testid="style-preset-editor-close-button"
+                              [label]="presetEditorSourceModified ? 'Discard' : 'Close'"
+                              icon="pi pi-times"
+                              (click)="closePresetEditor($event)"/>
                 </div>
             </div>
         </app-dialog>
-        <app-dialog
-            header="Discard preset edits?"
-            [(visible)]="presetEditorDiscardDialogVisible"
-            [modal]="true"
-            [closeOnEscape]="false"
-            #presetEditorDiscardDialog
-        >
+        <app-dialog header="Discard preset edits?" [(visible)]="presetEditorDiscardDialogVisible"
+                    [modal]="true" [closeOnEscape]="false" #presetEditorDiscardDialog>
             <p>The raw preset source contains unapplied changes.</p>
             <div class="dialog-controls">
-                <p-button label="Discard" severity="danger" (click)="discardPresetEditorChanges($event)" />
-                <p-button label="Cancel" (click)="presetEditorDiscardDialog.close($event)" />
+                <p-button label="Discard" severity="danger"
+                          (click)="discardPresetEditorChanges($event)"/>
+                <p-button label="Cancel"
+                          (click)="presetEditorDiscardDialog.close($event)"/>
             </div>
         </app-dialog>
-        <app-dialog
-            header="Warning!"
-            [(visible)]="warningDialogVisible"
-            [modal]="true"
-            #warningDialog
-            [closeOnEscape]="false"
-            (onShow)="onWarningShow()"
-        >
+        <app-dialog header="Warning!" [(visible)]="warningDialogVisible" [modal]="true" #warningDialog
+                  [closeOnEscape]="false" (onShow)="onWarningShow()">
             <p>You have already edited the style data. Do you want to save the changes?</p>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                 <p-button (click)="saveOrApplyEditedStyle(); warningDialog.close($event)" label="Save"></p-button>
@@ -796,27 +566,18 @@ interface QuickPresetOption {
                 <p-button (click)="discardStyleEdits(); closeEditorDialog($event)" label="Discard"></p-button>
             </div>
         </app-dialog>
-        <app-dialog
-            header="Style Validation Failed"
-            [(visible)]="styleValidationDialogVisible"
-            [modal]="true"
-            #styleValidationDialog
-            data-testid="style-validation-failed-dialog"
-        >
+        <app-dialog header="Style Validation Failed" [(visible)]="styleValidationDialogVisible" [modal]="true"
+                  #styleValidationDialog data-testid="style-validation-failed-dialog">
             @if (lastEditorValidationReport) {
                 <div class="style-validation-summary">
-                    {{
-                        lastEditorValidationReport.source.styleName || lastEditorValidationReport.source.url || "Style"
-                    }}
+                    {{ lastEditorValidationReport.source.styleName || lastEditorValidationReport.source.url || 'Style' }}
                     has {{ validationErrorCount(lastEditorValidationReport) }} validation error(s).
                 </div>
                 <div class="style-validation-details">
                     @for (issue of firstValidationErrors(lastEditorValidationReport); track issue.id) {
                         <div class="style-validation-issue">
                             <span class="style-validation-location">{{ formatIssueLocation(issue) }}</span>
-                            <span class="style-validation-path">{{
-                                issue.rulePath || issue.property || issue.impact
-                            }}</span>
+                            <span class="style-validation-path">{{ issue.rulePath || issue.property || issue.impact }}</span>
                             <span>{{ issue.message }}</span>
                         </div>
                     }
@@ -824,34 +585,21 @@ interface QuickPresetOption {
             }
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                 <p-button (click)="styleValidationDialog.close($event)" label="Ok"></p-button>
-                <p-button
-                    (click)="openStyleErrorsTab(); styleValidationDialog.close($event)"
-                    label="Open Errors"
-                ></p-button>
+                <p-button (click)="openStyleErrorsTab(); styleValidationDialog.close($event)" label="Open Errors"></p-button>
             </div>
         </app-dialog>
-        <app-dialog
-            header="Updated Modified Styles"
-            [(visible)]="styleUpdateDialogVisible"
-            [modal]="true"
-            (onHide)="resetUpdatedStyleIds()"
-            #updatedStyleDialog
-            appendTo="body"
-        >
+        <app-dialog header="Updated Modified Styles" [(visible)]="styleUpdateDialogVisible" [modal]="true"
+                  (onHide)="resetUpdatedStyleIds()" #updatedStyleDialog appendTo="body">
             @if (getUpdatedModifiedStyles().length > 0) {
                 <div class="updated-styles-container">
-                    <p>
-                        The following styles were updated in the datasource while their modifications persist in local
-                        memory:
-                    </p>
+                    <p>The following styles were updated in the datasource while their modifications persist in local
+                        memory:</p>
                     @for (entry of getUpdatedModifiedStyles(); track entry.url) {
-                        <p-chip
-                            class="updated-modified-style-chip"
-                            [label]="entry.id"
-                            [pTooltip]="entry.url"
-                            tooltipPosition="bottom"
-                            (click)="openCompareFromUpdatedChip($event, entry.url)"
-                        />
+                        <p-chip class="updated-modified-style-chip"
+                                [label]="entry.id"
+                                [pTooltip]="entry.url"
+                                tooltipPosition="bottom"
+                                (click)="openCompareFromUpdatedChip($event, entry.url)"/>
                     }
                 </div>
             }
@@ -859,15 +607,9 @@ interface QuickPresetOption {
                 <p-button (click)="updatedStyleDialog.close($event)" label="Ok"></p-button>
             </div>
         </app-dialog>
-        <app-dialog
-            header="Style Comparison"
-            [(visible)]="styleCompareDialogVisible"
-            [modal]="true"
-            class="style-compare-dialog"
-            #styleCompareDialog
-            (onShow)="onStyleCompareDialogShow()"
-            (onHide)="onStyleCompareDialogHide()"
-        >
+        <app-dialog header="Style Comparison" [(visible)]="styleCompareDialogVisible" [modal]="true"
+                  class="style-compare-dialog" #styleCompareDialog (onShow)="onStyleCompareDialogShow()"
+                  (onHide)="onStyleCompareDialogHide()">
             @if (styleCompareStyleId) {
                 <div class="style-compare-labels">
                     <div>{{ styleCompareLeftLabel }}</div>
@@ -876,37 +618,25 @@ interface QuickPresetOption {
                 <div #styleCompareHost class="style-compare-host"></div>
             }
             <div class="style-compare-actions">
-                <p-button
-                    label="Apply"
-                    icon="pi pi-check"
-                    pTooltip="Apply the current left-side style source"
-                    tooltipPosition="bottom"
-                    [disabled]="styleCompareReadOnly || !styleCompareLeftModified"
-                    (click)="applyComparedStyle()"
-                />
-                <p-button
-                    [label]="styleCompareReadOnly ? 'Close' : styleCompareLeftModified ? 'Discard' : 'Close'"
-                    icon="pi pi-times"
-                    pTooltip="Close compare or discard unsaved left-side edits"
-                    tooltipPosition="bottom"
-                    (click)="closeOrDiscardComparedStyle($event)"
-                />
-                <p-button
-                    label="Export"
-                    icon="pi pi-file-export"
-                    pTooltip="Export the modified style source"
-                    tooltipPosition="bottom"
-                    [disabled]="styleCompareReadOnly"
-                    (click)="exportComparedStyle()"
-                />
-                <p-button
-                    label="Reset"
-                    icon="pi pi-refresh"
-                    pTooltip="Reset this modified builtin style to the server version"
-                    tooltipPosition="bottom"
-                    [disabled]="styleCompareReadOnly"
-                    (click)="resetComparedStyle()"
-                />
+                <p-button label="Apply" icon="pi pi-check"
+                          pTooltip="Apply the current left-side style source"
+                          tooltipPosition="bottom"
+                          [disabled]="styleCompareReadOnly || !styleCompareLeftModified"
+                          (click)="applyComparedStyle()"/>
+                <p-button [label]="styleCompareReadOnly ? 'Close' : (styleCompareLeftModified ? 'Discard' : 'Close')" icon="pi pi-times"
+                          pTooltip="Close compare or discard unsaved left-side edits"
+                          tooltipPosition="bottom"
+                          (click)="closeOrDiscardComparedStyle($event)"/>
+                <p-button label="Export" icon="pi pi-file-export"
+                          pTooltip="Export the modified style source"
+                          tooltipPosition="bottom"
+                          [disabled]="styleCompareReadOnly"
+                          (click)="exportComparedStyle()"/>
+                <p-button label="Reset" icon="pi pi-refresh"
+                          pTooltip="Reset this modified builtin style to the server version"
+                          tooltipPosition="bottom"
+                          [disabled]="styleCompareReadOnly"
+                          (click)="resetComparedStyle()"/>
             </div>
         </app-dialog>
     `,
@@ -923,14 +653,14 @@ export class StyleComponent implements OnDestroy {
     readonly stylesDialogLayoutId = STYLES_DIALOG_LAYOUT_ID;
     readonly styleEditorDialogLayoutId = STYLE_EDITOR_DIALOG_LAYOUT_ID;
     readonly stylePresetEditorDialogLayoutId = STYLE_PRESET_EDITOR_DIALOG_LAYOUT_ID;
-    readonly styleEditorSessionId = "style-editor";
-    readonly presetEditorSessionId = "map-presets-editor";
+    readonly styleEditorSessionId = 'style-editor';
+    readonly presetEditorSessionId = 'map-presets-editor';
     warningDialogVisible: boolean = false;
     styleUpdateDialogVisible: boolean = false;
     styleEditorSourceSubscription: Subscription = new Subscription();
     styleEditorSaveSubscription: Subscription = new Subscription();
     sourceWasModified: boolean = false;
-    private styleEditorOriginalSource: string = "";
+    private styleEditorOriginalSource: string = '';
     styleEditorTab: "quick" | "advanced" = "quick";
     styleEditorQuickAvailable = false;
     quickRuleDrafts: FeatureSearchStyleRuleDraft[] = [];
@@ -964,10 +694,10 @@ export class StyleComponent implements OnDestroy {
     private readonly compareThemeCompartmentA = new Compartment();
     private readonly compareThemeCompartmentB = new Compartment();
     private compareModeObserver?: MutationObserver;
-    private readonly DARK_MODE_CLASS = "erdblick-dark";
+    private readonly DARK_MODE_CLASS = 'erdblick-dark';
     private readonly styleEditorRequestSubscription: Subscription;
-    stylesDialogTab: "styles" | "presets" | "errors" = "styles";
-    styleIssueFilter: string = "";
+    stylesDialogTab: 'styles' | 'presets' | 'errors' = 'styles';
+    styleIssueFilter: string = '';
     styleErrorsOnly: boolean = false;
     styleValidationDialogVisible: boolean = false;
     lastEditorValidationReport?: StyleValidationReport;
@@ -983,18 +713,18 @@ export class StyleComponent implements OnDestroy {
     private presetEditorSaveSubscription = new Subscription();
     private readonly presetMapSubscription: Subscription;
 
-    @ViewChild("styleMenu") toggleMenu!: Menu;
+    @ViewChild('styleMenu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
 
-    @ViewChild("styleUploader") styleUploader: FileUpload | undefined;
-    @ViewChild("styles") stylesDialog: AppDialogComponent | undefined;
-    @ViewChild("editorDialog") editorDialog: AppDialogComponent | undefined;
-    @ViewChild("warningDialog") warningDialog: AppDialogComponent | undefined;
-    @ViewChild("styleValidationDialog") styleValidationDialog: AppDialogComponent | undefined;
-    @ViewChild("styleCompareDialog") styleCompareDialog: AppDialogComponent | undefined;
-    @ViewChild("styleCompareHost") styleCompareHost?: ElementRef<HTMLDivElement>;
-    @ViewChild("presetEditorDialog") presetEditorDialog: AppDialogComponent | undefined;
-    @ViewChild("presetEditorDiscardDialog") presetEditorDiscardDialog: AppDialogComponent | undefined;
+    @ViewChild('styleUploader') styleUploader: FileUpload | undefined;
+    @ViewChild('styles') stylesDialog: AppDialogComponent | undefined;
+    @ViewChild('editorDialog') editorDialog: AppDialogComponent | undefined;
+    @ViewChild('warningDialog') warningDialog: AppDialogComponent | undefined;
+    @ViewChild('styleValidationDialog') styleValidationDialog: AppDialogComponent | undefined;
+    @ViewChild('styleCompareDialog') styleCompareDialog: AppDialogComponent | undefined;
+    @ViewChild('styleCompareHost') styleCompareHost?: ElementRef<HTMLDivElement>;
+    @ViewChild('presetEditorDialog') presetEditorDialog: AppDialogComponent | undefined;
+    @ViewChild('presetEditorDiscardDialog') presetEditorDiscardDialog: AppDialogComponent | undefined;
 
     // Group visibility is derived from leaf styles; bind directly to node.visible.
 
@@ -1012,10 +742,10 @@ export class StyleComponent implements OnDestroy {
         private changeDetector: ChangeDetectorRef,
         public readonly styleEditorRequestService: StyleEditorRequestService
     ) {
-        this.stateService.ready.pipe(filter((state) => state)).subscribe((_) => {
+        this.stateService.ready.pipe(filter(state => state)).subscribe(_ => {
             this.refreshUpdatedStylesDialogVisibility();
         });
-        this.styleEditorRequestSubscription = styleEditorRequestService.requests.subscribe((styleId) => {
+        this.styleEditorRequestSubscription = styleEditorRequestService.requests.subscribe(styleId => {
             this.showStyleEditor(styleId);
         });
         this.presetMapSubscription = this.mapInfoService.maps$.subscribe(() => {
@@ -1113,30 +843,29 @@ export class StyleComponent implements OnDestroy {
             }
         }
         this.quickPresetOptionChoices = [...choices.values()].sort((lhs, rhs) => lhs.label.localeCompare(rhs.label));
-        const validKeys = new Set(this.quickPresetOptionChoices.map((option) => option.key));
-        this.quickPresetSelectedOptionKeys = this.quickPresetSelectedOptionKeys.filter((key) => validKeys.has(key));
+        const validKeys = new Set(this.quickPresetOptionChoices.map(option => option.key));
+        this.quickPresetSelectedOptionKeys = this.quickPresetSelectedOptionKeys.filter(key => validKeys.has(key));
     }
 
     /** Returns selected quick-form options in their stable stylesheet order. */
     quickPresetSelectedOptions(): QuickPresetOption[] {
         const selectedKeys = new Set(this.quickPresetSelectedOptionKeys);
-        return this.quickPresetOptionChoices.filter((option) => selectedKeys.has(option.key));
+        return this.quickPresetOptionChoices.filter(option => selectedKeys.has(option.key));
     }
 
     /** Returns whether the quick form is complete and assigns each layer at most once. */
     canSaveQuickPreset(): boolean {
         const name = this.quickPresetName.trim();
         const selectedOptions = this.quickPresetSelectedOptions();
-        if (
-            !this.presetService.canWrite ||
-            this.presetEditorSourceModified ||
-            !name ||
-            !selectedOptions.length ||
-            this.presetService.presets.some((preset) => preset.name.toLocaleLowerCase() === name.toLocaleLowerCase())
-        ) {
+        if (!this.presetService.canWrite
+            || this.presetEditorSourceModified
+            || !name
+            || !selectedOptions.length
+            || this.presetService.presets.some(preset =>
+                preset.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
             return false;
         }
-        return new Set(selectedOptions.map((option) => option.layerId)).size === selectedOptions.length;
+        return new Set(selectedOptions.map(option => option.layerId)).size === selectedOptions.length;
     }
 
     /** Validates and appends the quick-form definition to the normalized map-preset catalog. */
@@ -1149,7 +878,7 @@ export class StyleComponent implements OnDestroy {
             id: this.nextPresetId(this.quickPresetName),
             name: this.quickPresetName.trim(),
             enabled: true,
-            layerPresets: selectedOptions.map((option) => ({
+            layerPresets: selectedOptions.map(option => ({
                 layerId: option.layerId,
                 styleId: option.styleId,
                 presetId: option.presetId
@@ -1165,14 +894,14 @@ export class StyleComponent implements OnDestroy {
 
     /** Updates one preset's enabled flag in the combined map-preset AppState. */
     async setPresetAvailability(presetId: string, available: boolean): Promise<void> {
-        if (!(await this.presetService.setAvailable(presetId, available))) {
+        if (!await this.presetService.setAvailable(presetId, available)) {
             this.messageService.showError("Could not update the map preset. The server catalog remains authoritative.");
         }
     }
 
     /** Formats the exact schema-level layer targets composed by one map preset. */
     mapPresetLayersLabel(preset: MapPresetDefinition): string {
-        return preset.layerPresets.map((component) => component.layerId).join(", ");
+        return preset.layerPresets.map(component => component.layerId).join(", ");
     }
 
     /** Formats one preset validation issue with its most specific available identity. */
@@ -1194,9 +923,10 @@ export class StyleComponent implements OnDestroy {
         });
         this.presetEditorOriginalSource = this.presetService.source.replace(/\n+$/, "");
         this.presetEditorSourceSubscription = this.editorService
-            .getSession(this.presetEditorSessionId)!
-            .source$.subscribe((source) => {
-                this.presetEditorSourceModified = source.replace(/\n+$/, "") !== this.presetEditorOriginalSource;
+            .getSession(this.presetEditorSessionId)!.source$
+            .subscribe(source => {
+                this.presetEditorSourceModified =
+                    source.replace(/\n+$/, "") !== this.presetEditorOriginalSource;
             });
         this.presetEditorSaveSubscription = this.editorService
             .onSaveRequested(this.presetEditorSessionId)!
@@ -1208,7 +938,7 @@ export class StyleComponent implements OnDestroy {
     /** Validates and atomically activates the current raw preset source. */
     async applyPresetEditorSource(): Promise<void> {
         const source = this.editorService.getSessionSource(this.presetEditorSessionId);
-        if (!(await this.presetService.applyOverrideSource(source))) {
+        if (!await this.presetService.applyOverrideSource(source)) {
             this.messageService.showError("The preset source is invalid. The previous presets remain active.");
             return;
         }
@@ -1246,15 +976,12 @@ export class StyleComponent implements OnDestroy {
 
     /** Derives a unique stable ID from a user-visible preset name. */
     private nextPresetId(name: string): string {
-        const base =
-            name
-                .trim()
-                .toLocaleLowerCase()
-                .normalize("NFKD")
-                .replace(/[\u0300-\u036f]/g, "")
-                .replace(/[^a-z0-9]+/g, "-")
-                .replace(/^-+|-+$/g, "") || "preset";
-        const ids = new Set(this.presetService.presets.map((preset) => preset.id));
+        const base = name.trim().toLocaleLowerCase()
+            .normalize("NFKD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "") || "preset";
+        const ids = new Set(this.presetService.presets.map(preset => preset.id));
         let candidate = base;
         let suffix = 2;
         while (ids.has(candidate)) {
@@ -1286,7 +1013,7 @@ export class StyleComponent implements OnDestroy {
         this.toggleMenu.toggle(event);
         this.toggleMenuItems = [
             {
-                label: "Toggle All off but This",
+                label: 'Toggle All off but This',
                 command: () => {
                     for (const id of this.styleService.styles.keys()) {
                         this.styleService.toggleStyle(id, styleId == id, true);
@@ -1296,7 +1023,7 @@ export class StyleComponent implements OnDestroy {
                 }
             },
             {
-                label: "Toggle All on but This",
+                label: 'Toggle All on but This',
                 command: () => {
                     for (const id of this.styleService.styles.keys()) {
                         this.styleService.toggleStyle(id, styleId != id, true);
@@ -1306,7 +1033,7 @@ export class StyleComponent implements OnDestroy {
                 }
             },
             {
-                label: "Toggle All Off",
+                label: 'Toggle All Off',
                 command: () => {
                     for (const id of this.styleService.styles.keys()) {
                         this.styleService.toggleStyle(id, false, true);
@@ -1316,7 +1043,7 @@ export class StyleComponent implements OnDestroy {
                 }
             },
             {
-                label: "Toggle All On",
+                label: 'Toggle All On',
                 command: () => {
                     for (const id of this.styleService.styles.keys()) {
                         this.styleService.toggleStyle(id, true, true);
@@ -1356,7 +1083,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Exports one style as YAML. */
     exportStyle(styleId: string) {
-        if (!this.styleService.exportStyleYamlFile(styleId)) {
+        if(!this.styleService.exportStyleYamlFile(styleId)) {
             this.messageService.showError(`Error occurred while trying to export style: ${styleId}`);
         }
     }
@@ -1367,8 +1094,7 @@ export class StyleComponent implements OnDestroy {
             const file: File = event.files[0];
             let styleId = file.name;
             event.xhr = new XMLHttpRequest();
-            this.styleService
-                .importStyleYamlFile(file)
+            this.styleService.importStyleYamlFile(file)
                 .then((ok) => {
                     if (!ok) {
                         if (this.styleService.lastValidationReport && !this.styleService.lastValidationReport.valid) {
@@ -1401,15 +1127,16 @@ export class StyleComponent implements OnDestroy {
     /** Opens or reuses an editor session while preserving unsaved edits in another style. */
     private openStyleEditor(styleId: string): boolean {
         const currentTargetId = this.styleEditorRequestService.styleEditorTargetId;
-        const sameEditorSession =
-            this.styleEditorVisible &&
-            currentTargetId === styleId &&
-            this.editorService.hasSession(this.styleEditorSessionId);
+        const sameEditorSession = this.styleEditorVisible
+            && currentTargetId === styleId
+            && this.editorService.hasSession(this.styleEditorSessionId);
         if (sameEditorSession) {
             return true;
         }
-        if (this.styleEditorVisible && this.sourceWasModified && currentTargetId !== styleId) {
-            this.messageService.showWarning("Discard or apply the current style edits before opening another style.");
+        if (this.styleEditorVisible
+            && this.sourceWasModified
+            && currentTargetId !== styleId) {
+            this.messageService.showWarning('Discard or apply the current style edits before opening another style.');
             return false;
         }
         if (!this.prepareStyleEditorSession(styleId)) {
@@ -1423,7 +1150,7 @@ export class StyleComponent implements OnDestroy {
     /** Applies the current editor contents to the selected style. */
     applyEditedStyle(): string | undefined {
         const styleId = this.styleEditorRequestService.styleEditorTargetId;
-        const styleData = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, "");
+        const styleData = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, '');
         if (!styleId) {
             this.messageService.showError(`No cached style ID found!`);
             return undefined;
@@ -1433,13 +1160,12 @@ export class StyleComponent implements OnDestroy {
             return undefined;
         }
         if (!this.styleService.styles.has(styleId)) {
-            this.messageService.showError(`Could not apply changes to style: ${styleId}. Failed to access!`);
+            this.messageService.showError(`Could not apply changes to style: ${styleId}. Failed to access!`)
             return undefined;
         }
         const report = this.styleService.validateStyleSource(
             styleData,
-            this.styleService.createEditorSourceRef(styleId, styleData)
-        );
+            this.styleService.createEditorSourceRef(styleId, styleData));
         if (!report.valid) {
             this.showValidationFailure(report);
             return undefined;
@@ -1471,7 +1197,7 @@ export class StyleComponent implements OnDestroy {
             this.messageService.showError("The selected style is not backed by an editable source file.");
             return;
         }
-        if (!(await this.styleService.saveStyleToSource(styleId))) {
+        if (!await this.styleService.saveStyleToSource(styleId)) {
             this.messageService.showError(`Could not save style ${styleId} to its source file.`);
             return;
         }
@@ -1534,9 +1260,9 @@ export class StyleComponent implements OnDestroy {
     }
 
     /** Uses Escape to close the warning or editor dialog while the style editor is active. */
-    @HostListener("window:keydown", ["$event"])
+    @HostListener('window:keydown', ['$event'])
     onWindowKeydown(event: KeyboardEvent) {
-        if (event.key !== "Escape" || !this.styleEditorVisible) {
+        if (event.key !== 'Escape' || !this.styleEditorVisible) {
             return;
         }
         event.preventDefault();
@@ -1601,18 +1327,17 @@ export class StyleComponent implements OnDestroy {
 
     /** Creates a fresh editor session and installs common dirty/save tracking. */
     private prepareStyleEditorSource(source: string): boolean {
-        this.styleEditorOriginalSource = source.replace(/\n+$/, "");
+        this.styleEditorOriginalSource = source.replace(/\n+$/, '');
         this.editorService.createSession({
             id: this.styleEditorSessionId,
             source: `${source}\n\n\n\n\n`,
-            language: "yaml",
+            language: 'yaml',
             readOnly: false
         });
         this.styleEditorSourceSubscription.unsubscribe();
-        this.styleEditorSourceSubscription = this.editorService
-            .getSession(this.styleEditorSessionId)!
-            .source$.subscribe((editedStyleSource) => {
-                this.sourceWasModified = editedStyleSource.replace(/\n+$/, "") !== this.styleEditorOriginalSource;
+        this.styleEditorSourceSubscription = this.editorService.getSession(this.styleEditorSessionId)!.source$.subscribe(
+            editedStyleSource => {
+                this.sourceWasModified = editedStyleSource.replace(/\n+$/, '') !== this.styleEditorOriginalSource;
                 if (this.updatingSourceFromQuick) {
                     return;
                 }
@@ -1626,12 +1351,12 @@ export class StyleComponent implements OnDestroy {
                         this.changeDetector.detectChanges();
                     }, 150);
                 });
-            });
+            }
+        );
         this.styleEditorSaveSubscription.unsubscribe();
-        this.styleEditorSaveSubscription =
-            this.editorService.onSaveRequested(this.styleEditorSessionId)?.subscribe(() => {
-                this.saveOrApplyEditedStyle();
-            }) ?? new Subscription();
+        this.styleEditorSaveSubscription = this.editorService.onSaveRequested(this.styleEditorSessionId)?.subscribe(() => {
+            this.saveOrApplyEditedStyle();
+        }) ?? new Subscription();
         this.sourceWasModified = false;
         this.styleEditorQuickAvailable = !!this.styleEditorRequestService.styleEditorTargetId;
         this.styleEditorTab = this.styleEditorQuickAvailable ? "quick" : "advanced";
@@ -1647,8 +1372,7 @@ export class StyleComponent implements OnDestroy {
         try {
             const projection = projectStyleSourceToQuick(source.replace(/\n+$/, ""));
             const drafts = this.quickRuleDraftCodec.toDrafts(
-                projection.editableRules.map((projected) => projected.rule)
-            );
+                projection.editableRules.map(projected => projected.rule));
             this.quickRuleSourceIndices.clear();
             drafts.forEach((draft, index) => {
                 this.quickRuleSourceIndices.set(draft.id, projection.editableRules[index].sourceIndex);
@@ -1665,10 +1389,12 @@ export class StyleComponent implements OnDestroy {
             this.quickReadOnlyRuleIndices = projection.readOnlyRuleIndices;
             this.quickStyleName = projection.name;
             this.quickLayerAffinityKind = projection.layerAffinity.kind;
-            this.quickLayerAffinityIds =
-                projection.layerAffinity.kind === "exact" ? [...projection.layerAffinity.layerIds] : [];
-            this.quickCustomLayerAffinity =
-                projection.layerAffinity.kind === "custom" ? projection.layerAffinity.expression : "";
+            this.quickLayerAffinityIds = projection.layerAffinity.kind === "exact"
+                ? [...projection.layerAffinity.layerIds]
+                : [];
+            this.quickCustomLayerAffinity = projection.layerAffinity.kind === "custom"
+                ? projection.layerAffinity.expression
+                : "";
             this.quickReplacingCustomAffinity = false;
             this.refreshQuickLayerOptions();
             this.quickProjectionStale = false;
@@ -1685,19 +1411,17 @@ export class StyleComponent implements OnDestroy {
         if (!projection || this.quickProjectionStale) {
             return;
         }
-        const retainedDraftIds = new Set(drafts.map((draft) => draft.id));
+        const retainedDraftIds = new Set(drafts.map(draft => draft.id));
         const deletedPartialRules = [...this.quickRuleSourceIndices]
             .filter(([draftId]) => !retainedDraftIds.has(draftId))
-            .map(([, sourceIndex]) => projection.editableRules.find((rule) => rule.sourceIndex === sourceIndex))
-            .filter((rule) => rule?.support === "partial");
+            .map(([, sourceIndex]) => projection.editableRules.find(rule => rule.sourceIndex === sourceIndex))
+            .filter(rule => rule?.support === "partial");
         if (deletedPartialRules.length > 0) {
-            const indices = deletedPartialRules.map((rule) => rule!.sourceIndex + 1).join(", ");
-            if (
-                !window.confirm(
-                    `Delete YAML rule${deletedPartialRules.length === 1 ? "" : "s"} ${indices}? ` +
-                        "Unsupported properties on the whole rule will also be removed."
-                )
-            ) {
+            const indices = deletedPartialRules.map(rule => (rule!.sourceIndex + 1)).join(", ");
+            if (!window.confirm(
+                `Delete YAML rule${deletedPartialRules.length === 1 ? "" : "s"} ${indices}? `
+                + "Unsupported properties on the whole rule will also be removed."
+            )) {
                 this.refreshQuickProjection(this.editorService.getSessionSource(this.styleEditorSessionId));
                 return;
             }
@@ -1713,8 +1437,7 @@ export class StyleComponent implements OnDestroy {
             this.commitQuickSource(updatedSource);
         } catch (error) {
             this.messageService.showError(
-                `Could not apply the Quick style change: ${error instanceof Error ? error.message : String(error)}`
-            );
+                `Could not apply the Quick style change: ${error instanceof Error ? error.message : String(error)}`);
             this.refreshQuickProjection(this.editorService.getSessionSource(this.styleEditorSessionId));
         }
     }
@@ -1760,7 +1483,9 @@ export class StyleComponent implements OnDestroy {
     protected onQuickLayerAffinityChange(layerIds: string[] | null): void {
         const selected = [...(layerIds ?? [])];
         this.updateQuickMetadata({
-            layerAffinity: selected.length ? {kind: "exact", layerIds: selected} : {kind: "any"}
+            layerAffinity: selected.length
+                ? {kind: "exact", layerIds: selected}
+                : {kind: "any"}
         });
     }
 
@@ -1781,12 +1506,13 @@ export class StyleComponent implements OnDestroy {
             return;
         }
         try {
-            const currentSource = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, "");
+            const currentSource = this.editorService
+                .getSessionSource(this.styleEditorSessionId)
+                .replace(/\n+$/, "");
             this.commitQuickSource(updateStyleSourceMetadata(currentSource, patch));
         } catch (error) {
             this.messageService.showError(
-                `Could not apply the Quick metadata change: ${error instanceof Error ? error.message : String(error)}`
-            );
+                `Could not apply the Quick metadata change: ${error instanceof Error ? error.message : String(error)}`);
             this.refreshQuickProjection(this.editorService.getSessionSource(this.styleEditorSessionId));
         }
     }
@@ -1812,12 +1538,12 @@ export class StyleComponent implements OnDestroy {
         }
         this.quickLayerOptions = [...ids]
             .sort((left, right) => left.localeCompare(right))
-            .map((value) => ({label: value, value}));
+            .map(value => ({label: value, value}));
     }
 
     /** Opens the style-definition documentation in a new browser tab. */
     openStyleHelp() {
-        window.open("https://github.com/ndsev/erdblick?tab=readme-ov-file#style-definitions", "_blank");
+        window.open( "https://github.com/ndsev/erdblick?tab=readme-ov-file#style-definitions", "_blank");
     }
 
     /** Keeps PrimeNG keyvalue iteration in insertion order. */
@@ -1827,7 +1553,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Toggles visibility for every style nested under one style group. */
     toggleStyleGroup(id: string, enabled: boolean) {
-        if (!id || id === "ungrouped") {
+        if (!id || id === 'ungrouped') {
             return;
         }
         const rootGroups = this.styleService.styleGroups.getValue();
@@ -1844,15 +1570,12 @@ export class StyleComponent implements OnDestroy {
     }
 
     /** Narrows a tree node to a style-group node. */
-    private checkIsStyleGroup(e: any): e is ErdblickStyleGroup {
+    private checkIsStyleGroup (e: any): e is ErdblickStyleGroup {
         return e.type === "Group";
     }
 
     /** Finds a style group by id inside the nested style-group tree. */
-    private findStyleGroupById(
-        elements: (ErdblickStyleGroup | ErdblickStyle)[],
-        id: string
-    ): ErdblickStyleGroup | undefined {
+    private findStyleGroupById(elements: (ErdblickStyleGroup | ErdblickStyle)[], id: string): ErdblickStyleGroup | undefined {
         for (const elem of elements) {
             if (!this.checkIsStyleGroup(elem)) {
                 continue;
@@ -1872,7 +1595,7 @@ export class StyleComponent implements OnDestroy {
     private collectStyleIds(group: ErdblickStyleGroup): string[] {
         const ids: string[] = [];
         for (const child of group.children) {
-            if ((child as any).type === "Group") {
+            if ((child as any).type === 'Group') {
                 ids.push(...this.collectStyleIds(child as ErdblickStyleGroup));
             } else {
                 ids.push((child as ErdblickStyle).id);
@@ -1940,8 +1663,7 @@ export class StyleComponent implements OnDestroy {
         }
         const report = this.styleService.validateStyleSource(
             leftSource,
-            this.styleService.createEditorSourceRef(this.styleCompareStyleId, leftSource)
-        );
+            this.styleService.createEditorSourceRef(this.styleCompareStyleId, leftSource));
         if (!report.valid) {
             this.showValidationFailure(report);
             return;
@@ -1999,14 +1721,14 @@ export class StyleComponent implements OnDestroy {
 
     /** Returns the number of issues associated with a style. */
     styleIssueCount(issues: StyleValidationIssue[]): number {
-        return issues.filter((issue) => issue.severity === "error").length;
+        return issues.filter(issue => issue.severity === 'error').length;
     }
 
     /** Returns validation issues that match the active style filters. */
     filteredStyleIssues(issues: StyleValidationIssue[]): StyleValidationIssue[] {
         const filterText = this.styleIssueFilter.trim().toLowerCase();
-        return issues.filter((issue) => {
-            if (this.styleErrorsOnly && issue.severity !== "error") {
+        return issues.filter(issue => {
+            if (this.styleErrorsOnly && issue.severity !== 'error') {
                 return false;
             }
             if (!filterText) {
@@ -2023,10 +1745,7 @@ export class StyleComponent implements OnDestroy {
                 issue.message,
                 issue.detail,
                 issue.expression
-            ]
-                .filter(Boolean)
-                .join(" ")
-                .toLowerCase();
+            ].filter(Boolean).join(' ').toLowerCase();
             return haystack.includes(filterText);
         });
     }
@@ -2039,7 +1758,9 @@ export class StyleComponent implements OnDestroy {
     styleErrorCount(style: ErdblickStyle): number {
         let count = 0;
         for (const issue of this.styleValidationReportService.reports$.getValue()) {
-            if (issue.severity === "error" && issue.phase !== "runtime" && this.issueMatchesStyle(issue, style, true)) {
+            if (issue.severity === 'error'
+                && issue.phase !== 'runtime'
+                && this.issueMatchesStyle(issue, style, true)) {
                 ++count;
             }
         }
@@ -2054,24 +1775,24 @@ export class StyleComponent implements OnDestroy {
     /** Formats a validation issue source location for display. */
     formatIssueLocation(issue: StyleValidationIssue): string {
         if (!issue.location?.line) {
-            return "";
+            return '';
         }
         return issue.location.column ? `${issue.location.line}:${issue.location.column}` : `${issue.location.line}`;
     }
 
     /** Returns the number of visible validation errors. */
     validationErrorCount(report: StyleValidationReport): number {
-        return report.issues.filter((issue) => issue.severity === "error").length;
+        return report.issues.filter(issue => issue.severity === 'error').length;
     }
 
     /** Returns the first visible validation errors for the dialog footer. */
     firstValidationErrors(report: StyleValidationReport): StyleValidationIssue[] {
-        return report.issues.filter((issue) => issue.severity === "error").slice(0, 6);
+        return report.issues.filter(issue => issue.severity === 'error').slice(0, 6);
     }
 
     /** Opens the styles dialog on the validation errors tab. */
     openStyleErrorsTab(): void {
-        this.stylesDialogTab = "errors";
+        this.stylesDialogTab = 'errors';
         this.stylesDialogVisible = true;
     }
 
@@ -2107,16 +1828,15 @@ export class StyleComponent implements OnDestroy {
     /** Reveals a validation issue location after the editor is ready. */
     private revealStyleIssueLocation(issue: StyleValidationIssue): void {
         if (!issue.location?.line) {
-            this.messageService.showInfo("This style issue has no source location.");
+            this.messageService.showInfo('This style issue has no source location.');
             return;
         }
         /** Moves the editor cursor to the requested validation issue. */
-        const reveal = () =>
-            this.editorService.revealLocation(this.styleEditorSessionId, {
-                line: issue.location!.line!,
-                column: issue.location!.column,
-                length: issue.location!.length
-            });
+        const reveal = () => this.editorService.revealLocation(this.styleEditorSessionId, {
+            line: issue.location!.line!,
+            column: issue.location!.column,
+            length: issue.location!.length
+        });
         window.requestAnimationFrame(reveal);
     }
 
@@ -2136,8 +1856,8 @@ export class StyleComponent implements OnDestroy {
         const sameHash = !!source.sourceHash && source.sourceHash === style.sourceRef?.sourceHash;
         const sameName = !!source.styleName && source.styleName === style.id;
         const sameUrl = !!source.url && !!style.url && source.url === style.url;
-        const sameConfig =
-            !!source.configId && (source.configId === style.sourceRef?.configId || source.configId === style.id);
+        const sameConfig = !!source.configId
+            && (source.configId === style.sourceRef?.configId || source.configId === style.id);
 
         if (!currentSourceOnly) {
             return sameHash || sameName || sameUrl || sameConfig;
@@ -2155,27 +1875,23 @@ export class StyleComponent implements OnDestroy {
 
     /** Returns the display label for a validation issue source. */
     private issueSourceLabel(issue: StyleValidationIssue): string {
-        return (
-            issue.source.styleName ||
-            issue.source.url ||
-            issue.source.configId ||
-            issue.source.sourceKind ||
-            "style issue"
-        );
+        return issue.source.styleName
+            || issue.source.url
+            || issue.source.configId
+            || issue.source.sourceKind
+            || 'style issue';
     }
 
     protected readonly removeGroupPrefix = removeGroupPrefix;
 
     /** Builds a stable test id suffix for a style entry. */
     styleTestIdSuffix(styleId: string): string {
-        return (
-            styleId
-                .trim()
-                .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
-                .toLowerCase()
-                .replace(/[^a-z0-9]+/g, "-")
-                .replace(/^-+|-+$/g, "") || "unknown"
-        );
+        return styleId
+            .trim()
+            .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '') || 'unknown';
     }
 
     /** Promotes the editor discard-warning dialog above other overlays. */
@@ -2185,9 +1901,10 @@ export class StyleComponent implements OnDestroy {
 
     /** Initializes compare-dialog state from a builtin style id or builtin style URL. */
     private openStyleCompareDialog(styleIdOrUrl: string, fromUpdatedModifiedDialog: boolean) {
-        const style =
-            this.styleService.styles.get(styleIdOrUrl) ??
-            Array.from(this.styleService.styles.values()).find((s) => !s.imported && s.url === styleIdOrUrl);
+        const style = this.styleService.styles.get(styleIdOrUrl)
+            ?? Array.from(this.styleService.styles.values()).find(
+                s => !s.imported && s.url === styleIdOrUrl
+            );
         if (!style || style.imported) {
             this.messageService.showError(`Style comparison is only available for builtin styles.`);
             return;
@@ -2218,20 +1935,22 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareView = undefined;
         host.innerHTML = "";
 
-        const leftEditorExtensions = [basicSetup, yaml(), this.compareThemeCompartmentA.of(compareTheme)];
+        const leftEditorExtensions = [
+            basicSetup,
+            yaml(),
+            this.compareThemeCompartmentA.of(compareTheme),
+        ];
         if (this.styleCompareReadOnly) {
             leftEditorExtensions.push(EditorState.readOnly.of(true));
         } else {
-            leftEditorExtensions.push(
-                EditorView.updateListener.of((update) => {
-                    if (!update.docChanged) {
-                        return;
-                    }
-                    this.ngZone.run(() => {
-                        this.styleCompareLeftModified = this.getComparedLeftSource() !== this.styleCompareLeftSource;
-                    });
-                })
-            );
+            leftEditorExtensions.push(EditorView.updateListener.of(update => {
+                if (!update.docChanged) {
+                    return;
+                }
+                this.ngZone.run(() => {
+                    this.styleCompareLeftModified = this.getComparedLeftSource() !== this.styleCompareLeftSource;
+                });
+            }));
         }
 
         this.styleCompareView = new MergeView({
@@ -2274,10 +1993,8 @@ export class StyleComponent implements OnDestroy {
 
     /** Returns the trimmed left-side source currently shown in the compare view. */
     private getComparedLeftSource(): string {
-        return (
-            this.styleCompareView?.a.state.doc.toString().replace(/\n+$/, "") ??
-            this.styleCompareLeftSource.replace(/\n+$/, "")
-        );
+        return this.styleCompareView?.a.state.doc.toString().replace(/\n+$/, '')
+            ?? this.styleCompareLeftSource.replace(/\n+$/, '');
     }
 
     /** Shows or hides the updated-styles dialog depending on current lifecycle state. */
@@ -2291,7 +2008,7 @@ export class StyleComponent implements OnDestroy {
         this.compareModeObserver?.disconnect();
         this.compareModeObserver = new MutationObserver((records) => {
             for (const record of records) {
-                if (record.type !== "attributes" || record.attributeName !== "class") {
+                if (record.type !== 'attributes' || record.attributeName !== 'class') {
                     continue;
                 }
                 const theme = this.currentCodeMirrorTheme();
@@ -2303,7 +2020,7 @@ export class StyleComponent implements OnDestroy {
                 });
             }
         });
-        this.compareModeObserver.observe(root, {attributes: true, attributeFilter: ["class"]});
+        this.compareModeObserver.observe(root, {attributes: true, attributeFilter: ['class']});
     }
 
     /** Returns the CodeMirror theme extension matching the current app theme. */

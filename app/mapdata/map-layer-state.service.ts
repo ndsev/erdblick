@@ -2,18 +2,14 @@ import {ownerState} from "./map-layer-state.service.state";
 
 import {Injectable} from "@angular/core";
 import {Params} from "@angular/router";
-import {InspectionPanelModel, TileFeatureId} from "../inspection/inspection-state.model";
-import {InspectionStateService} from "../inspection/inspection-state.service";
-import {coreLib} from "../integrations/wasm";
 import {MapTreeNode} from "../mapdata/map.tree.model";
-import {parseMapPartitionKey} from "../mapdata/partition.model";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import {BackgroundLayerConfig, clampBackgroundOpacity} from "../shared/app-config.service";
 import {MapViewState} from "../shared/app-state";
 import {AppStateService} from "../shared/appstate.service";
 import {firstParamValue} from "../shared/url-state-codec";
 import type {LayerPresetRef} from "../styledata/layer-preset.model";
-import {ErdblickStyle, StyleService} from "../styledata/style.service";
+import {ErdblickStyle} from "../styledata/style.service";
 import {
     BackgroundLayerViewState,
     isSourceOrMetaData,

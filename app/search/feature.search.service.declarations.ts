@@ -13,6 +13,7 @@ import {
     text,
     tileId
 } from "../actions/action-schema";
+import {viewIdSchema} from "../mapview/view-id";
 import {boundedUnicodeString} from "../shared/unicode-string.js";
 
 const mapLayerSchema = z.strictObject({mapId: identifierSchema, layerId: identifierSchema});
@@ -208,7 +209,6 @@ export const featureSearchActions = {
     }
 } as const;
 
-import {viewIdSchema} from "../mapview/view-id";
 
 const searchesSchema = z
     .array(

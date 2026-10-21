@@ -3,35 +3,36 @@ import {
     APP_STATE_COLLECTION_LIMIT,
     identifierSchema,
     indexSchema,
-    styleOptionValueSchema
+    pageInput,
+    pageOutput,
+    styleOptionValueSchema,
+    text
 } from "../actions/action-schema";
 import {viewIdSchema} from "../mapview/view-id";
 
 const viewSelectorSchema = z.strictObject({viewId: viewIdSchema});
 const layerSelectorSchema = viewSelectorSchema.extend({mapId: identifierSchema, layerId: identifierSchema});
-const presetSchema = z.strictObject({styleId: identifierSchema, presetId: identifierSchema}).nullable();
-const layersSchema = z
-    .array(
-        z.strictObject({
-            mapId: identifierSchema,
-            layerId: identifierSchema,
-            visible: z.boolean(),
-            level: indexSchema,
-            autoLevel: z.boolean()
-        })
-    )
-    .max(APP_STATE_COLLECTION_LIMIT);
-
+/** MapInfo binds these controls and discovery operations to the currently available map/style catalog. */
 export const mapInfoControls = {
     layers: {
         name: "view.layers",
         description:
-            "Read-only layer overview; mapId/layerId selectors also include hidden layers. To change visibility or level, use viewer_set_control with the singular view.layer channel.",
+            "Read-only layer overview; mapId/layerId selectors also include hidden layers. To change visibility or level, use viewer_set_control with the singular view.layer control.",
         selectorSchema: viewSelectorSchema.extend({
             mapId: identifierSchema.optional(),
             layerId: identifierSchema.optional()
         }),
-        valueSchema: layersSchema,
+        valueSchema: z
+            .array(
+                z.strictObject({
+                    mapId: identifierSchema,
+                    layerId: identifierSchema,
+                    visible: z.boolean(),
+                    level: indexSchema,
+                    autoLevel: z.boolean()
+                })
+            )
+            .max(APP_STATE_COLLECTION_LIMIT),
         readable: true,
         writable: false,
         persistence: "runtime-summary",
@@ -53,7 +54,7 @@ export const mapInfoControls = {
         description:
             "Apply all options of a qualified layer preset. Discover viewer_list_presets with mapId/layerId, then assign {styleId,presetId}; null clears its association without resetting options.",
         selectorSchema: layerSelectorSchema,
-        valueSchema: presetSchema,
+        valueSchema: z.strictObject({styleId: identifierSchema, presetId: identifierSchema}).nullable(),
         readable: true,
         writable: true,
         persistence: "url-and-local-storage",
@@ -70,8 +71,6 @@ export const mapInfoControls = {
         synchronization: "follow-view-sync"
     }
 } as const;
-
-import {pageInput, pageOutput, text} from "../actions/action-schema";
 
 export const mapInfoActions = {
     listMaps: {
