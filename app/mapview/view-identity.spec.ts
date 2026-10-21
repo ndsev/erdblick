@@ -146,6 +146,59 @@ describe("logical view ownership", () => {
         expect(messages.showError).toHaveBeenCalledOnce();
     });
 
+    it.each(["URL", "storage"])("ignores retired legacy osm positions during one-view %s startup", format => {
+        const params: Record<string, string> = format === "URL" ? {
+            osm: "0~6,0~6", lon: "42.5", lat: "11.615", alt: "500", h: "0.02", p: "-0.75", r: "0"
+        } : {};
+        if (format === "storage") localStorage.setItem("osm", JSON.stringify(["0~6", "0~6"]));
+        const {state, views, messages} = fixture(params);
+        const ids = views.viewIds();
+
+        state.persistence.initializePersistence();
+
+        expect(state.persistence.ready.getValue()).toBe(true);
+        expect(views.viewIds()).toEqual(ids);
+        expect(views.numViews).toBe(1);
+        expect(state.layers.backgroundState.appState.getValue()).toEqual([{layerId: null, opacity: 6}]);
+        expect(messages.showError).not.toHaveBeenCalled();
+        if (format === "URL") {
+            expect(views.cameraViewDataState.getValue(0).destination).toEqual({lon: 42.5, lat: 11.615, alt: 500});
+        }
+        // Ignoring retired positions is an import rule, not permission to write an absent live pane.
+        expect(() => state.layers.setBackgroundState(1, "osm", 40)).toThrow("unavailable");
+        expect(state.layers.backgroundState.appState.getValue()).toEqual([{layerId: null, opacity: 6}]);
+    });
+
+    it("rejects invalid explicit IDs before applying legacy osm or camera fields", () => {
+        const {state, views, messages} = fixture({n: "1", vid: "left,right", osm: "0~6,0~6", lon: "42.5"});
+        const ids = views.viewIds();
+        const camera = views.cameraViewDataState.getValue(0);
+        const background = state.layers.getBackgroundState(0);
+
+        state.persistence.initializePersistence();
+
+        expect(state.persistence.ready.getValue()).toBe(true);
+        expect(messages.showError).toHaveBeenCalledOnce();
+        expect(views.viewIds()).toEqual(ids);
+        expect(views.cameraViewDataState.getValue(0)).toEqual(camera);
+        expect(state.layers.getBackgroundState(0)).toEqual(background);
+    });
+
+    it("migrates saved legacy backgrounds while rejecting every field from an invalid URL", () => {
+        localStorage.setItem("viewIds", JSON.stringify(["saved"]));
+        localStorage.setItem("osm", JSON.stringify(["0~6", "0~6"]));
+        const {state, views, messages} = fixture({n: "1", vid: "left,right", osm: "1~80", lon: "42.5"});
+        const camera = views.cameraViewDataState.getValue(0);
+
+        state.persistence.initializePersistence();
+
+        expect(state.persistence.ready.getValue()).toBe(true);
+        expect(messages.showError).toHaveBeenCalledOnce();
+        expect(views.viewIds()).toEqual(["saved"]);
+        expect(views.cameraViewDataState.getValue(0)).toEqual(camera);
+        expect(state.layers.backgroundState.appState.getValue()).toEqual([{layerId: null, opacity: 6}]);
+    });
+
     it("derives URL count from explicit IDs during startup and direct replacement", async () => {
         const {state, views} = fixture({vid: "west,east"});
         state.persistence.initializePersistence();

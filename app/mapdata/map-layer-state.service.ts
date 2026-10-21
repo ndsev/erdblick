@@ -440,7 +440,9 @@ export class MapLayerStateService {
                 return;
             }
 
-            serializedStates.forEach((state, viewIndex) => {
+            // Old links/storage can retain entries for a comparison pane that is now closed.
+            // Membership was resolved before migration; trailing positions must not create views.
+            serializedStates.slice(0, this.viewState.numViews).forEach((state, viewIndex) => {
                 this.setBackgroundState(viewIndex, state.layerId, state.opacity);
             });
         });

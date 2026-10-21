@@ -363,12 +363,15 @@ export class AppStateService implements OnDestroy {
         this.setupStateSubscriptions();
         const queryParams = this.currentBrowserQueryParams();
         this.hydrateFromStorage();
+        let acceptedQueryParams: Params = {};
         try {
             this.hydrateFromUrl(this.prepareUrl(queryParams));
-            this.importedStartupUrl.next(queryParams);
+            acceptedQueryParams = queryParams;
         } catch (error) {
             this.infoMessageService.showError(`Could not import view link: ${String(error)}`);
         }
+        // Legacy owners may still migrate saved state after a rejected URL, but must not consume its fields.
+        this.importedStartupUrl.next(acceptedQueryParams);
         this.isHydrating = false;
         // Keep inbound links stable during passive startup hydration.
         this.skipNextUrlSync = true;
