@@ -80,6 +80,23 @@ observer regression confirms that contract. The full official suite passes
 `inspection-atomicity-before.log`, `full-suite-inspection-final.log` and
 `lint-inspection-final.log`. Public schemas and the catalog digest are unchanged.
 
+A complete follow-up audit of InspectionStateService found four additional
+ordinary operations that needed outer transactions: single/bulk panel removal,
+docking and validity-highlight changes. The other public mutations either already
+batch their writes or change one persisted slot. Removal now publishes comparison,
+dialog-layout and column cleanup with the new selection; docking/highlighting
+publish final focus and dock state. Feature Search's Ctrl-result selection also
+batches panel creation and locking, and its direct focus request reports rejected
+loads. The existing inspection-tree jump already handled rejection.
+
+The focused official gate passes 3 files / 17 tests and the whole official gate
+passes 126 files / 1,372 tests. Lint exits 0 with 0 errors / 8 warnings. Logs:
+`inspection-owner-gate.log`, `full-suite-inspection-owner-final.log` and
+`lint-inspection-owner-final.log`. Supplementary actual-source before/after
+observer traces are `inspection-owner-publication-{before,after}.json`; they show
+only initial and final observations after the change. The public catalog remains
+unchanged.
+
 The parent independently verified earlier checkpoints:
 
 - `d7048247`: 180-test state/URL/identity gate, profiling build and native browser

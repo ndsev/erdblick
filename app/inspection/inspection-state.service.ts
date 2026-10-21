@@ -504,42 +504,44 @@ export class InspectionStateService {
 
     /** Toggles one inspection panel between base-feature and attribute/validity-highlight pseudo-feature ids. */
     toggleInspectionFeatureHighlight(panelId: number, mapTileKey: string, targetFeatureId: string): void {
-        const allPanels = structuredClone(this.selectionState.getValue());
-        const panelIndex = allPanels.findIndex(panel => panel.id === panelId && panel.sourceData === undefined);
-        if (panelIndex === -1) {
-            return;
-        }
-
-        const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
-        const panel = allPanels[panelIndex];
-        let changed = false;
-        const nextFeatures = panel.features.map(feature => {
-            if (feature.mapTileKey !== mapTileKey ||
-                stripFeatureInspectionTarget(feature.featureId) !== targetBaseFeatureId) {
-                return feature;
+        this.persistence.transaction(() => {
+            const allPanels = structuredClone(this.selectionState.getValue());
+            const panelIndex = allPanels.findIndex(panel => panel.id === panelId && panel.sourceData === undefined);
+            if (panelIndex === -1) {
+                return;
             }
-            changed = true;
-            return {
-                ...feature,
-                featureId: feature.featureId === targetFeatureId ? targetBaseFeatureId : targetFeatureId
-            };
-        });
-        if (!changed) {
-            return;
-        }
 
-        const nextPanels = allPanels.slice();
-        nextPanels[panelIndex] = {
-            ...panel,
-            features: nextFeatures
-        };
-        this.selectionState.next(nextPanels);
-        if (!panel.undocked) {
-            this.layout.dockActiveTab = INSPECTION_DOCK_TAB_ID;
-            this.layout.isDockOpen = true;
-        }
-        this.setFocusedInspectionPanel(panelId);
-        this.sanitizeInspectionComparisonForSelection(nextPanels);
+            const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
+            const panel = allPanels[panelIndex];
+            let changed = false;
+            const nextFeatures = panel.features.map(feature => {
+                if (feature.mapTileKey !== mapTileKey ||
+                    stripFeatureInspectionTarget(feature.featureId) !== targetBaseFeatureId) {
+                    return feature;
+                }
+                changed = true;
+                return {
+                    ...feature,
+                    featureId: feature.featureId === targetFeatureId ? targetBaseFeatureId : targetFeatureId
+                };
+            });
+            if (!changed) {
+                return;
+            }
+
+            const nextPanels = allPanels.slice();
+            nextPanels[panelIndex] = {
+                ...panel,
+                features: nextFeatures
+            };
+            this.selectionState.next(nextPanels);
+            if (!panel.undocked) {
+                this.layout.dockActiveTab = INSPECTION_DOCK_TAB_ID;
+                this.layout.isDockOpen = true;
+            }
+            this.setFocusedInspectionPanel(panelId);
+            this.sanitizeInspectionComparisonForSelection(nextPanels);
+        });
     }
 
     /** Persists the size of one inspection panel. */
@@ -566,23 +568,25 @@ export class InspectionStateService {
 
     /** Persists whether one inspection panel is undocked. */
     setInspectionPanelUndockedState(id: number, undocked: boolean) {
-        const allPanels = structuredClone(this.selectionState.getValue());
-        const index = allPanels.findIndex(panel => panel.id === id);
-        if (index === -1) {
-            return;
-        }
-        allPanels[index].undocked = undocked;
-        allPanels[index].size = [
-            allPanels[index].size[0],
-            undocked ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT
-        ];
-        if (!undocked) {
-            allPanels[index].locked = true;
-            this.layout.dockActiveTab = INSPECTION_DOCK_TAB_ID;
-            this.layout.isDockOpen = true;
-        }
-        this.selectionState.next(allPanels);
-        this.setFocusedInspectionPanel(id);
+        this.persistence.transaction(() => {
+            const allPanels = structuredClone(this.selectionState.getValue());
+            const index = allPanels.findIndex(panel => panel.id === id);
+            if (index === -1) {
+                return;
+            }
+            allPanels[index].undocked = undocked;
+            allPanels[index].size = [
+                allPanels[index].size[0],
+                undocked ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT
+            ];
+            if (!undocked) {
+                allPanels[index].locked = true;
+                this.layout.dockActiveTab = INSPECTION_DOCK_TAB_ID;
+                this.layout.isDockOpen = true;
+            }
+            this.selectionState.next(allPanels);
+            this.setFocusedInspectionPanel(id);
+        });
     }
 
     /** Marks one inspection panel as the active target for inspection-level shortcuts. */
@@ -820,23 +824,27 @@ export class InspectionStateService {
 
     /** Drops all unlocked inspection panels, preserving only pinned selections. */
     unsetUnlockedSelections() {
-        const nextSelection = this.selectionState.getValue().filter(panel =>
-            panel.locked || panel.sourceData !== undefined
-        );
-        this.selectionState.next(nextSelection);
-        this.sanitizeInspectionComparisonForSelection(nextSelection);
+        this.persistence.transaction(() => {
+            const nextSelection = this.selectionState.getValue().filter(panel =>
+                panel.locked || panel.sourceData !== undefined
+            );
+            this.selectionState.next(nextSelection);
+            this.sanitizeInspectionComparisonForSelection(nextSelection);
+        });
     }
 
     /** Removes one inspection panel and any associated persisted layout state. */
     unsetPanel(id: number) {
-        const allPanels = structuredClone(this.selectionState.getValue());
-        const index = allPanels.findIndex(panel => panel.id === id);
-        if (index === -1) {
-            return;
-        }
-        allPanels.splice(index, 1);
-        this.selectionState.next(allPanels);
-        this.sanitizeInspectionComparisonForSelection(allPanels);
+        this.persistence.transaction(() => {
+            const allPanels = structuredClone(this.selectionState.getValue());
+            const index = allPanels.findIndex(panel => panel.id === id);
+            if (index === -1) {
+                return;
+            }
+            allPanels.splice(index, 1);
+            this.selectionState.next(allPanels);
+            this.sanitizeInspectionComparisonForSelection(allPanels);
+        });
     }
 
     /** Finds the first regular inspection panel containing any of the requested feature identities. */

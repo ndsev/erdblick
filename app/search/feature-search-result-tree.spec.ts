@@ -3,6 +3,9 @@ import {describe, expect, it, vi} from "vitest";
 
 import {AppModule} from "../app.module";
 import {FeatureSearchComponent} from "./feature.search.component";
+import {testPersistence} from "../../test/state-owners";
+import {AppLayoutService} from "../shared/app-layout.service";
+import {InspectionStateService} from "../inspection/inspection-state.service";
 
 void AppModule;
 
@@ -65,5 +68,60 @@ describe("Feature Search result-tree completion", () => {
 
         expect(rootGroup.expanded).toBe(false);
         expect(component.scheduleTreeScrollHeightSync).toHaveBeenCalledOnce();
+    });
+});
+
+function inspectionSelectionFixture() {
+    const persistence = testPersistence();
+    const layout = new AppLayoutService(persistence);
+    const inspectionState = new InspectionStateService(persistence, layout, {} as never);
+    const focusOnFeature = vi.fn().mockResolvedValue(undefined);
+    const showError = vi.fn();
+    const component = Object.create(FeatureSearchComponent.prototype) as FeatureSearchComponent;
+    Object.assign(component, {
+        stateService: persistence,
+        inspectionState,
+        isDocked: () => true,
+        inspectionSelection: {focusOnFeature},
+        infoMessageService: {showError}
+    });
+    return {component, persistence, layout, inspectionState, focusOnFeature, showError};
+}
+
+describe("Feature Search result inspection", () => {
+    it("publishes a Ctrl-selected result as one fully locked floating panel", () => {
+        const {component, persistence, layout, inspectionState, focusOnFeature} = inspectionSelectionFixture();
+        const observed: unknown[] = [];
+        const subscription = persistence.observe(() => ({
+            panels: inspectionState.selection.map(panel => ({
+                featureId: panel.features[0].featureId, locked: panel.locked, undocked: panel.undocked
+            })),
+            dockOpen: layout.isDockOpen
+        })).subscribe(value => observed.push(value));
+
+        component.selectResult({
+            value: {mapTileKey: "Features:map:layer:42", featureId: "Road.1"},
+            originalEvent: {ctrlKey: true}
+        });
+
+        expect(observed).toEqual([
+            {panels: [], dockOpen: false},
+            {panels: [{featureId: "Road.1", locked: true, undocked: true}], dockOpen: false}
+        ]);
+        expect(focusOnFeature).toHaveBeenCalledWith(undefined, {
+            mapTileKey: "Features:map:layer:42", featureId: "Road.1"
+        });
+        subscription.unsubscribe();
+    });
+
+    it("reports a rejected result-focus request without an unhandled promise", async () => {
+        const {component, inspectionState, focusOnFeature, showError} = inspectionSelectionFixture();
+        focusOnFeature.mockRejectedValueOnce(new Error("Feature load failed"));
+
+        component.selectResult({mapTileKey: "Features:map:layer:42", featureId: "Road.1"});
+        await Promise.resolve();
+
+        expect(showError).toHaveBeenCalledExactlyOnceWith("Feature load failed");
+        expect(inspectionState.selection[0].features[0].featureId).toBe("Road.1");
     });
 });
