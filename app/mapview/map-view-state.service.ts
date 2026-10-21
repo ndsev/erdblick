@@ -649,8 +649,12 @@ export class MapViewStateService {
             return;
         }
 
-        serializedStates.forEach((state, viewIndex) => {
-            this.setBackgroundState(viewIndex, state.layerId, state.opacity);
+        this.persistence.transaction(() => {
+            // Old links/storage can retain a second positional entry while only one
+            // view is active. Migration must not create or address retired views.
+            serializedStates.slice(0, this.numViews).forEach((state, viewIndex) => {
+                this.setBackgroundState(viewIndex, state.layerId, state.opacity);
+            });
         });
     }
 

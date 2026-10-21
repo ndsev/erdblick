@@ -102,6 +102,7 @@ When you enable split view, erdblick still encodes the full layout into the quer
 You do not need to set these parameters manually for normal usage, but they make generated URLs stable even for complex multi-view layouts.
 
 Legacy `osm` links from older releases are still accepted during startup and are migrated to the new `bg` state automatically.
+Migration uses the active view count and ignores trailing positional entries.
 
 ## Presentation Embedding
 

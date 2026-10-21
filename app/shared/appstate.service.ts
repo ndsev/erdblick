@@ -31,6 +31,7 @@ type MutationOrigin = "user" | "system" | "hydration" | "config";
 export interface AppUrlProjection {
     serialize(params: Record<string, string | string[]>): Record<string, string | string[]>;
     hydrate(params: Params): void;
+    /** Runs startup migrations with accepted URL params, or an empty set after URL rejection. */
     initialize(params: Params): void;
     prepareSnapshot(values: Record<string, unknown>, replaceMissing: boolean): Record<string, unknown>;
     /** Applies coordinated owner values and returns the keys already consumed before generic codecs run. */
@@ -258,9 +259,13 @@ export class AppStateService implements OnDestroy {
         const queryParams = this.currentBrowserQueryParams();
         try { this.hydrateFromStorage(queryParams); }
         catch (error) { this.reportHydrationError("saved state", error); this.hydrateFromStorage({}); }
+        let acceptedQueryParams = queryParams;
         try { this.hydrateFromUrl(queryParams); }
-        catch (error) { this.reportHydrationError("share link", error); }
-        this.urlProjection?.initialize(queryParams);
+        catch (error) {
+            this.reportHydrationError("share link", error);
+            acceptedQueryParams = {};
+        }
+        this.urlProjection?.initialize(acceptedQueryParams);
         this.isHydrating = false;
         // Keep inbound links stable during passive startup hydration.
         this.skipNextUrlSync = true;

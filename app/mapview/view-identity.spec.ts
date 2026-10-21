@@ -29,6 +29,67 @@ describe('logical view identity', () => {
         expect(() => registry.registerState({ name: 'late', defaultValue: false, schema: {} as never })).toThrow('closed');
     });
 
+    it.each(['url', 'storage'])('starts one view from legacy %s values with trailing old view entries', async source => {
+        localStorage.setItem('marker', '1');
+        if (source === 'url') {
+            window.history.replaceState({}, '', '?osm=0~6,0~6&lon=42.5&lat=11.615&alt=500&h=0.02&p=-0.75&r=0');
+        } else {
+            localStorage.setItem('osm', JSON.stringify(['0~6', '1~45']));
+            localStorage.setItem('cameraView', JSON.stringify([
+                { lon: 42.5, lat: 11.615, alt: 500, h: 0.02, p: -0.75, r: 0 },
+                { lon: 99, lat: 50, alt: 800 }
+            ]));
+            localStorage.setItem('layerNames', JSON.stringify(['Map/Lane']));
+            localStorage.setItem('visibility', JSON.stringify([[false], [true]]));
+            localStorage.setItem('STY0~0~active', '0:1');
+        }
+        const { registry, owners: { viewSettings: views, coordinates, layerState: layers }, messages } = setup();
+        try {
+            expect(() => registry.initializePersistence()).not.toThrow();
+            expect(registry.ready.value).toBe(true);
+            expect(views.numViews).toBe(1);
+            expect(views.viewIds).toHaveLength(1);
+            expect(views.getBackgroundState(0)).toEqual({ layerId: null, opacity: 6 });
+            expect(views.cameraViewDataState.getValue(0)).toEqual({
+                destination: { lon: 42.5, lat: 11.615, alt: 500 },
+                orientation: { heading: 0.02, pitch: -0.75, roll: 0 },
+                position: [0, 0, 0]
+            });
+            expect(coordinates.marker).toBe(true);
+            expect(messages.showError).not.toHaveBeenCalled();
+            expect(() => views.setBackgroundState(1, 'osm', 50)).toThrow('unavailable');
+            if (source === 'storage') {
+                expect(layers.layerVisibilityState.getValue(0)).toEqual([false]);
+                expect(layers.styles.get('Map/Lane/STY0/active')).toEqual(['0']);
+            }
+            await Promise.resolve();
+            expect(JSON.parse(localStorage.getItem('background')!)).toEqual(['~6']);
+            expect(JSON.parse(localStorage.getItem('numberOfViews')!)).toBe(1);
+        } finally {
+            registry.ngOnDestroy();
+        }
+    });
+
+    it('ignores legacy URL background values after rejecting its explicit view identities', () => {
+        localStorage.setItem('viewIds', '["saved-view"]');
+        localStorage.setItem('numberOfViews', '1');
+        localStorage.setItem('osm', JSON.stringify(['1~27', '0~40']));
+        localStorage.setItem('cameraView', JSON.stringify([{ lon: 7, lat: 8, alt: 900 }]));
+        const { registry, owners: { viewSettings: views }, messages } = setup({
+            n: '2', vid: 'duplicate,duplicate', osm: '0~6', lon: '42.5'
+        });
+        try {
+            expect(() => registry.initializePersistence()).not.toThrow();
+            expect(registry.ready.value).toBe(true);
+            expect(views.viewIds).toEqual(['saved-view']);
+            expect(views.getBackgroundState(0)).toEqual({ layerId: 'osm', opacity: 27 });
+            expect(views.cameraViewDataState.getValue(0).destination).toEqual({ lon: 7, lat: 8, alt: 900 });
+            expect(messages.showError).toHaveBeenCalled();
+        } finally {
+            registry.ngOnDestroy();
+        }
+    });
+
     it('preserves scalar and per-view boolean storage codecs independently of compact URL encoding', () => {
         const { registry, owners: { coordinates, viewSettings: views, layerState: layers } } = setup();
         views.numViews = 2;

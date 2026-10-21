@@ -97,6 +97,20 @@ observer traces are `inspection-owner-publication-{before,after}.json`; they sho
 only initial and final observations after the change. The public catalog remains
 unchanged.
 
+The final Python browser fixture exposed an old `osm` payload with two positional
+entries and one active view. Its migration now applies only live entries in one
+transaction, while ordinary out-of-range setters remain strict. Startup also
+passes no URL values to legacy migrations after rejecting explicit view IDs;
+valid saved legacy values can still migrate. Actual startup regressions cover
+the exact old URL, stored background/camera/layer/style values with trailing
+entries, persisted output, and rejected URL identities. Other positional codecs
+already iterate active membership rather than payload length.
+
+The official focused gate passes 2 files / 165 tests; the full suite passes
+126 files / 1,375 tests. Lint exits 0 with the same 8 warnings. Evidence:
+`legacy-osm-before.log`, `legacy-osm-gate.log`, `full-suite-legacy-osm-final.log`
+and `lint-legacy-osm-final.log`. The public catalog remains unchanged.
+
 The parent independently verified earlier checkpoints:
 
 - `d7048247`: 180-test state/URL/identity gate, profiling build and native browser
