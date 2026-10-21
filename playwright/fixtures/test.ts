@@ -111,16 +111,16 @@ export const test = base.extend<SnapshotFixtures>({
     darkMode: [FORCED_DARK_MODE_SETTING, {option: true}],
     context: async ({ context, stateSnapshot, darkMode }, use) => {
         const snapshotEntries = loadStateSnapshotLocalStorageEntries(stateSnapshot);
-        await context.addInitScript(([key, value]) => {
-            window.localStorage.setItem(key, value);
-        }, [DARK_MODE_KEY, darkMode]);
-        if (snapshotEntries) {
-            await context.addInitScript((entries) => {
-                for (const [key, value] of Object.entries(entries)) {
-                    window.localStorage.setItem(key, value);
-                }
-            }, snapshotEntries);
-        }
+        await context.addInitScript(({darkModeKey, darkModeValue, entries}) => {
+            // A newly opened tab first visits an opaque about:blank document,
+            // where localStorage is unavailable. Seed the actual application
+            // document before Angular starts, including after a reload.
+            if (!['http:', 'https:'].includes(window.location.protocol)) return;
+            window.localStorage.setItem(darkModeKey, darkModeValue);
+            for (const [key, value] of Object.entries(entries ?? {})) {
+                window.localStorage.setItem(key, value);
+            }
+        }, {darkModeKey: DARK_MODE_KEY, darkModeValue: darkMode, entries: snapshotEntries});
 
         await use(context);
     },
