@@ -1,15 +1,15 @@
-import {testPersistence} from '../../test/state-owners';
-import {stateOwners} from '../../test/state-owners';
+import { testPersistence } from '../../test/state-owners';
+import { stateOwners } from '../../test/state-owners';
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
-import {BehaviorSubject, Subject} from "rxjs";
-import type {HttpClient} from "@angular/common/http";
-import {MapInfoService} from "./map-info.service";
-import {layerStyleOptions, MapLayerTree, type MapInfoItem} from "./map.tree.model";
-import type {AppStateService} from "../shared/appstate.service";
-import type {ErdblickStyle, StyleService} from "../styledata/style.service";
-import type {MapPresetService} from "../styledata/map-preset.service";
-import type {InfoMessageService} from "../shared/info.service";
+import { describe, expect, it, vi } from "vitest";
+import { BehaviorSubject, Subject } from "rxjs";
+import type { HttpClient } from "@angular/common/http";
+import { MapInfoService } from "./map-info.service";
+import { layerStyleOptions, MapLayerTree, type MapInfoItem } from "./map.tree.model";
+import type { AppStateService } from "../shared/appstate.service";
+import type { ErdblickStyle, StyleService } from "../styledata/style.service";
+import type { MapPresetService } from "../styledata/map-preset.service";
+import type { InfoMessageService } from "../shared/info.service";
 
 describe("MapInfoService external-state reconciliation", () => {
     it("reapplies layer and style state without relying on a view-count change", () => {
@@ -17,18 +17,11 @@ describe("MapInfoService external-state reconciliation", () => {
         let visible = true;
         let level = 13;
         let optionValue = false;
-        const stateService = {
-            ready: new BehaviorSubject(true),
-            numViewsState: new BehaviorSubject(1),
-            stateApplied,
-            mapLayerConfig: vi.fn(() => [{autoLevel: false, level, visible}]),
-            styleOptionValues: vi.fn(() => [optionValue]),
-            getLayerPresetSelection: vi.fn(() => null),
-            setLayerPresetSelection: vi.fn(),
-            getMapPresetSelection: vi.fn(() => null),
-            setMapPresetSelection: vi.fn(),
-            prune: vi.fn()
-        } as unknown as AppStateService;
+        const stateService = testPersistence();
+        const owners = stateOwners(stateService);
+        stateService.ready.next(true);
+        owners.layerState.materializeLayerDefaults = vi.fn(() => [{ autoLevel: false, level, visible }]);
+        owners.layerState.materializeStyleOptionDefaults = vi.fn(() => [optionValue]);
         const style = {
             id: "Style",
             shortId: "Style",
@@ -42,7 +35,7 @@ describe("MapInfoService external-state reconciliation", () => {
                 defaultValue: false,
                 internal: false
             }],
-            featureLayerStyle: {hasLayerAffinity: () => true}
+            featureLayerStyle: { hasLayerAffinity: () => true }
         } as unknown as ErdblickStyle;
         const styleService = {
             styles: new Map([[style.id, style]]),
@@ -60,7 +53,7 @@ describe("MapInfoService external-state reconciliation", () => {
             stateService,
             styleService,
             mapPresetService,
-            {} as InfoMessageService, stateOwners(stateService).layerState, stateOwners(stateService).viewSettings
+            {} as InfoMessageService, stateOwners(stateService).layerState, stateOwners(stateService).viewSettings, stateOwners(stateService).inspectionState
         );
         const mapInfo: MapInfoItem = {
             extraJsonAttachment: {},
@@ -72,7 +65,7 @@ describe("MapInfoService external-state reconciliation", () => {
                     canWrite: false,
                     coverage: [],
                     featureTypes: [],
-                    version: {major: 1, minor: 0, patch: 0},
+                    version: { major: 1, minor: 0, patch: 0 },
                     zoomLevels: [13]
                 }
             },
@@ -80,21 +73,20 @@ describe("MapInfoService external-state reconciliation", () => {
             maxParallelJobs: 0,
             sourceId: "Map",
             stringPoolId: "Map",
-            protocolVersion: {major: 1, minor: 0, patch: 0},
+            protocolVersion: { major: 1, minor: 0, patch: 0 },
             addOn: false
         };
         const tree = new MapLayerTree(
             [mapInfo],
             stateService,
             styleService,
-            mapPresetService,
-            false, stateOwners(stateService).viewSettings, stateOwners(stateService).layerState
+            mapPresetService, stateOwners(stateService).viewSettings, stateOwners(stateService).layerState
         );
         service.maps$.getValue().destroy();
         service.maps$.next(tree);
         const layer = tree.maps.get("Map")!.layers.get("Layer")!;
         const option = layerStyleOptions(layer)[0]!;
-        expect(layer.viewConfig[0]).toEqual({autoLevel: false, level: 13, visible: true});
+        expect(layer.viewConfig[0]).toEqual({ autoLevel: false, level: 13, visible: true });
         expect(option.value).toEqual([false]);
 
         const reasons: string[] = [];
@@ -102,10 +94,10 @@ describe("MapInfoService external-state reconciliation", () => {
         visible = false;
         level = 9;
         optionValue = true;
-        stateApplied.next();
+        stateService.stateApplied.next();
 
         expect(stateOwners(stateService).viewSettings.numViewsState.getValue()).toBe(1);
-        expect(layer.viewConfig[0]).toEqual({autoLevel: false, level: 9, visible: false});
+        expect(layer.viewConfig[0]).toEqual({ autoLevel: false, level: 9, visible: false });
         expect(option.value).toEqual([true]);
         expect(reasons).toEqual(["external-state"]);
         tree.destroy();

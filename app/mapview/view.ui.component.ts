@@ -1,17 +1,17 @@
 import {
-AfterViewInit,
-Component,
-computed,
-ElementRef,
-input,
-InputSignal,
-NgZone,
-OnDestroy,
-Signal,
-ViewChild
+    AfterViewInit,
+    Component,
+    computed,
+    ElementRef,
+    input,
+    InputSignal,
+    NgZone,
+    OnDestroy,
+    Signal,
+    ViewChild
 } from "@angular/core";
-import { toObservable,toSignal } from "@angular/core/rxjs-interop";
-import { Observable,Subscription } from "rxjs";
+import { toObservable, toSignal } from "@angular/core/rxjs-interop";
+import { Observable, Subscription } from "rxjs";
 import { filter } from "rxjs/operators";
 import { AppModeService } from "../shared/app-mode.service";
 import { AppStateService } from "../shared/appstate.service";
@@ -72,7 +72,7 @@ import { IRenderView } from "./render-view.model";
  * It hosts movement controls, projection toggles, and the animated compass bound to the active renderer.
  */
 export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
-    @ViewChild('compassNeedle', {static: false}) needleRef!: ElementRef<HTMLElement>;
+    @ViewChild('compassNeedle', { static: false }) needleRef!: ElementRef<HTMLElement>;
 
     mapView: InputSignal<IRenderView | undefined> = input<IRenderView | undefined>(undefined);
     is2D: InputSignal<boolean> = input<boolean>(false);
@@ -84,11 +84,11 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         }
         return this.numViews() > 1 && mapView.viewIndex === 0;
     });
-    projectionOptions: {icon: string, label: string, mode: string}[] = [
+    projectionOptions: { icon: string, label: string, mode: string }[] = [
         { icon: '3d', label: '3D', mode: '3D projection' },
         { icon: '2d', label: '2D', mode: '2D projection' },
     ];
-    projection: {icon: string, label: string, mode: string} = this.projectionOptions[0];
+    projection: { icon: string, label: string, mode: string } = this.projectionOptions[0];
 
     private mapViewSubscription = new Subscription();
     private mapView$: Observable<IRenderView | undefined>;
@@ -96,11 +96,11 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
 
     /** Bridges the current renderer input signal into subscriptions used by the compass and projection toggle. */
     constructor(public appModeService: AppModeService,
-                public stateService: AppStateService,
-                private keyboardService: KeyboardService,
-                private ngZone: NgZone,
+        public stateService: AppStateService,
+        private keyboardService: KeyboardService,
+        private ngZone: NgZone,
         public readonly viewSettings: MapViewStateService) {
-        this.numViews = toSignal(this.viewSettings.numViewsState, {initialValue: this.viewSettings.numViewsState.getValue()});
+        this.numViews = toSignal(this.viewSettings.numViewsState, { initialValue: this.viewSettings.numViewsState.getValue() });
         this.mapView$ = toObservable(this.mapView);
     }
 
@@ -108,7 +108,7 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
     ngAfterViewInit(): void {
         const needle = this.needleRef.nativeElement;
         this.mapViewSubscription.add(this.mapView$.pipe(
-            filter(mv=> mv !== undefined)).subscribe(mapView => {
+            filter(mv => mv !== undefined)).subscribe(mapView => {
                 this.projection = this.is2D() ?
                     { icon: '2d', label: '2D', mode: '2D projection' } :
                     { icon: '3d', label: '3D', mode: '3D projection' };

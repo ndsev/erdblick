@@ -38,7 +38,7 @@ Once the editor is available, you can adjust data sources directly from within e
 <!-- mcp:
 title: "Datasource configuration persistence"
 keywords: ["configuration", "persist", "server file", "deployment", "reload"]
-hint: "Use mapget_get_config to read the masked datasource model and revision, then mapget_set_config with expectedRevision when configuration writes are authorized and available. Preserve untouched sections and masked secrets; do not automatically retry an uncertain write. viewer_edit_style and viewer_set_app_state affect browser-local presentation, not server datasource configuration."
+hint: "Use mapget_get_config to read the masked datasource model and revision, then mapget_set_config with expectedRevision when configuration writes are authorized and available. Preserve untouched sections and masked secrets; do not automatically retry an uncertain write. viewer_edit_style and viewer_set_control affect browser-local presentation, not server datasource configuration."
 -->
 ## File-Based vs. UI Edits
 

@@ -1,36 +1,36 @@
-import {AppActionService} from "../actions/app-action.service";
-import {boundedCollection, rejectAction} from "../actions/app-action";
-import type {ViewerActionOutput} from "../actions/viewer-action.contract";
-import {urlActions} from "./app-url-state.service.declarations";
-import {StyleService} from "../styledata/style.service";
-import {FeatureSearchService} from "../search/feature.search.service";
-import {unicodePrefix} from "./unicode-string";
 import { Injectable } from "@angular/core";
 import { Params } from "@angular/router";
+import { boundedCollection, rejectAction } from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
+import type { ViewerActionOutput } from "../actions/viewer-action.contract";
+import { DEFAULT_HIGHLIGHT_COLORS } from "../inspection/inspection-state.model";
 import { InspectionStateService } from "../inspection/inspection-state.service";
 import { coreLib } from "../integrations/wasm";
 import { MapLayerStateService } from "../mapdata/map-layer-state.service";
-import { MapViewStateService } from "../mapview/map-view-state.service";
+import { MapViewStateService, viewCountSchema, viewIdsSchema } from "../mapview/map-view-state.service";
+import { FeatureSearchService } from "../search/feature.search.service";
+import { StyleService } from "../styledata/style.service";
 import { MapViewState } from "./app-state";
-import { DEFAULT_HIGHLIGHT_COLORS } from "./app-state.model";
+import { urlActions } from "./app-url-state.service.declarations";
 import { AppStateService } from "./appstate.service";
+import { unicodePrefix } from "./unicode-string";
 import type { UrlV2MapTileKeyFactory } from "./url-state-codec";
 import {
-compressUrlCsvRuns,
-decodeLayerNamesV2,
-decodeMapNamesV2,
-decodeSelectionsV2,
-decodeStyleOptionsV2,
-encodeLayerNamesV2,
-encodeSelectionsV2,
-encodeStyleOptionsV2,
-featureSelectionLayerNames,
-firstParamValue,
-sourceDataSelectionMapIds
+    compressUrlCsvRuns,
+    decodeLayerNamesV2,
+    decodeMapNamesV2,
+    decodeSelectionsV2,
+    decodeStyleOptionsV2,
+    encodeLayerNamesV2,
+    encodeSelectionsV2,
+    encodeStyleOptionsV2,
+    featureSelectionLayerNames,
+    firstParamValue,
+    sourceDataSelectionMapIds
 } from "./url-state-codec";
 
 /** Coordinates the shared URL layer/style/selection dictionary and legacy share-link migration. */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class AppUrlStateService {
     /** Validates identity first, so a malformed share link cannot partially replace state. */
     hydrate(params: Params): void {
@@ -55,21 +55,38 @@ export class AppUrlStateService {
         const ids = values["viewIds"];
         const count = values["numberOfViews"] ?? (Array.isArray(ids) ? ids.length : replaceMissing ? 1 : this.viewSettings.numViews);
         const nextIds = this.viewSettings.prepareImportedViews(count, ids, replaceMissing);
-        return {viewIds: nextIds, numberOfViews: nextIds.length,
-            focus: Math.max(0, nextIds.indexOf(this.viewSettings.focusedViewIdState.value)), ...values};
+        return {
+            viewIds: nextIds, numberOfViews: nextIds.length,
+            focus: Math.max(0, nextIds.indexOf(this.viewSettings.focusedViewIdState.value)), ...values
+        };
+    }
+
+    /** Applies membership through its owner before generic positional snapshot codecs run. */
+    applySnapshot(values: Record<string, unknown>): ReadonlySet<string> {
+        if (!Object.hasOwn(values, "viewIds")) return new Set();
+        this.viewSettings.importViews(viewIdsSchema.parse(values["viewIds"]));
+        return new Set(["viewIds", "numberOfViews"]);
     }
 
     /** Applies config-versus-user storage choices before any positional value is decoded. */
     prepareStoredViews(values: Map<string, string>, params: Params, configKeys: ReadonlySet<string> = new Set()): void {
         if (Array.isArray(params["vid"])) throw new Error("The share link contains more than one view ID list.");
         const urlIds = firstParamValue(params, "vid");
-        const savedIds = values.get("viewIds");
-        const savedCount = values.get("numberOfViews");
+        let savedIds: string[] | undefined;
+        let savedCount: number | undefined;
+        try {
+            const raw = values.get("viewIds");
+            if (raw !== undefined) savedIds = viewIdsSchema.parse(JSON.parse(raw));
+        } catch (error) { this.persistence.reportHydrationError("saved view identities", error); }
+        try {
+            const raw = values.get("numberOfViews");
+            if (raw !== undefined) savedCount = viewCountSchema.parse(JSON.parse(raw));
+        } catch (error) { this.persistence.reportHydrationError("saved view count", error); }
         let ids = urlIds !== undefined ? urlIds.split(",").map(decodeURIComponent)
-            : savedIds === undefined ? undefined : JSON.parse(savedIds);
+            : savedIds;
         const configuredCount = savedCount === undefined && configKeys.has("numberOfViews");
         const count = firstParamValue(params, "n") ?? (urlIds !== undefined && Array.isArray(ids) ? ids.length
-            : savedCount !== undefined ? JSON.parse(savedCount) : configuredCount ? this.viewSettings.numViews
+            : savedCount !== undefined ? savedCount : configuredCount ? this.viewSettings.numViews
                 : Array.isArray(ids) ? ids.length : this.viewSettings.numViews);
         // Legacy links omit identities. Preserve saved/current identities, resizing only
         // for the effective count; explicit lists still require an exact count match.
@@ -87,7 +104,7 @@ export class AppUrlStateService {
         const ids = raw === undefined ? undefined : raw.split(",").map(decodeURIComponent);
         const count = firstParamValue(params, "n") ?? ids?.length ?? (resetMissing ? 1 : this.viewSettings.numViews);
         const prepared = this.viewSettings.prepareImportedViews(count, ids, resetMissing);
-        return {...params, n: String(prepared.length), vid: prepared.join(",")};
+        return { ...params, n: String(prepared.length), vid: prepared.join(",") };
     }
 
     /** Applies the old OSM alias only when no explicit background preference exists. */
@@ -101,7 +118,6 @@ export class AppUrlStateService {
         private readonly searches: FeatureSearchService) {
         persistence.registerUrlProjection(this);
     }
-
 
     /** Builds a complete v2 query-param set so all layer-indexed params share one order. */
     serialize(params: Record<string, string | string[]>): Record<string, string | string[]> {
@@ -167,7 +183,6 @@ export class AppUrlStateService {
         return params;
     }
 
-
     /** Returns URL layers that are currently visible or required by feature selections. */
     private urlLayerNamesForSerialization(): string[] {
         const selectedLayerNames = new Set(featureSelectionLayerNames(this.inspectionState.selection));
@@ -187,7 +202,6 @@ export class AppUrlStateService {
         return urlLayerNames;
     }
 
-
     /** Returns whether a layer slot is active in at least one configured map view. */
     private isLayerVisibleInAnyView(layerIndex: number): boolean {
         for (let viewIndex = 0; viewIndex < Math.max(1, this.viewSettings.numViews); viewIndex++) {
@@ -198,14 +212,12 @@ export class AppUrlStateService {
         return false;
     }
 
-
     /** Returns true for per-view arrays whose entries are indexed by `layerNames`. */
     private isLayerIndexedMapViewState(state: unknown): boolean {
         return state === this.layerState.layerVisibilityState.appState
             || state === this.layerState.layerZoomLevelState.appState
             || state === this.layerState.layerAutoZoomLevelState.appState;
     }
-
 
     /** Serializes one layer-indexed per-view state against the finalized v2 URL layer order. */
     private serializeLayerIndexedMapViewParam<T>(
@@ -234,7 +246,6 @@ export class AppUrlStateService {
         params[key] = compressUrlCsvRuns(groups.join(":"));
     }
 
-
     /** Creates persisted selection MapTileKeys exclusively through mapget's C++ serializer. */
     private readonly createMapTileKeyFromUrlComponents: UrlV2MapTileKeyFactory = (
         layerType,
@@ -248,7 +259,6 @@ export class AppUrlStateService {
             layerId,
             tileId);
     };
-
 
     /** Restores v2 URL params through a coordinated layer-indexed decode path. */
     private hydrateFromUrlV2(params: Params): void {
@@ -297,7 +307,7 @@ export class AppUrlStateService {
                     this.inspectionState.selectionState.next(panels);
                 } else {
                     this.inspectionState.selectionState.next([]);
-                    this.persistence.deserializeStateSafely(this.inspectionState.selectionState, {sel: selectionParam});
+                    this.persistence.deserializeStateSafely(this.inspectionState.selectionState, { sel: selectionParam });
                 }
             } catch (error) {
                 console.error("[AppStateService] Failed to hydrate v2 selection state", error);
@@ -307,7 +317,6 @@ export class AppUrlStateService {
         }
     }
 
-
     /** Detects pre-v2 `sel` payloads that may still be attached to a v2 URL during upgrades or shared-link reuse. */
     private looksLikeLegacySelectionParam(selectionParam: string): boolean {
         if (!selectionParam.trim()) {
@@ -316,17 +325,14 @@ export class AppUrlStateService {
         return selectionParam.includes("Features:") || selectionParam.includes("SourceData:");
     }
 
-
     /** Returns whether the params contain compact style-option entries. */
     private hasStyleOptionParams(params: Params): boolean {
         return Object.keys(params).some(key => this.layerState.stylesState.isStyleOptionUrlParamKey(key));
     }
 
-
     registerActions(actions: AppActionService): void {
         actions.registerAction(urlActions.getShareLink, () => this.getShareLink());
     }
-
 
     /** Exports the normal URL projection without browser navigation or credentials. */
     getShareLink(): ViewerActionOutput<"viewer_get_share_link"> {
@@ -343,10 +349,12 @@ export class AppUrlStateService {
                 if (search.enabled && search.showResultsOnMap) yield unicodePrefix(search.id, 4096);
             }
         }).call(this), 100, 64000);
-        return {observedAt: new Date().toISOString(), url,
+        return {
+            observedAt: new Date().toISOString(), url,
             localOnly: hostname === "localhost" || hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(hostname),
             localStyleIds: styles.items, localSearchIds: searches.items,
-            complete: styles.complete && searches.complete, reason: styles.reason ?? searches.reason};
+            complete: styles.complete && searches.complete, reason: styles.reason ?? searches.reason
+        };
     }
 
 }

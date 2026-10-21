@@ -1,4 +1,4 @@
-import { Component,OnDestroy,QueryList,signal,ViewChild,ViewChildren } from "@angular/core";
+import { Component, OnDestroy, QueryList, signal, ViewChild, ViewChildren } from "@angular/core";
 import { Splitter } from "primeng/splitter";
 import { Subscription } from "rxjs";
 import { ViewerUiService } from "../actions/viewer-ui.service";
@@ -48,8 +48,10 @@ export class MapViewContainerComponent implements OnDestroy {
         this.resizing = false;
         if (!splitter) return;
         this.unregisterResizeTarget = this.viewerUi.registerResizeTarget(splitter.el.nativeElement, {
-            describe: () => ({kind: "split", dimensions: this.viewSettings.numViews === 2 ? ["panelSizes"] : [], busy: this.resizing,
-                ...(this.viewSettings.numViews === 2 ? {panelSizes: [...splitter.panelSizes]} : {})}),
+            describe: () => ({
+                kind: "split", dimensions: this.viewSettings.numViews === 2 ? ["panelSizes"] : [], busy: this.resizing,
+                ...(this.viewSettings.numViews === 2 ? { panelSizes: [...splitter.panelSizes] } : {})
+            }),
             resize: size => {
                 if (!("panelSizes" in size)) return;
                 const left = Math.min(95, Math.max(5, size.panelSizes[0]));
@@ -150,8 +152,6 @@ export class MapViewContainerComponent implements OnDestroy {
             break;
         }
     }
-
-
 
     protected readonly environment = environment;
 }

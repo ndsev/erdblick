@@ -1,22 +1,22 @@
 import '@angular/compiler';
-import {describe, expect, it, vi} from 'vitest';
-import {Subject} from 'rxjs';
-import {Router} from '@angular/router';
-import {z} from 'zod';
-import {AppStateService} from './appstate.service';
-import {InfoMessageService} from './info.service';
+import { describe, expect, it, vi } from 'vitest';
+import { Subject } from 'rxjs';
+import { Router } from '@angular/router';
+import { z } from 'zod';
+import { AppStateService } from "./appstate.service";
+import { InfoMessageService } from './info.service';
 
 /** Provides registration and publication without starting browser navigation. */
 function setup() {
-    const registry = new AppStateService({events: new Subject()} as unknown as Router, {} as InfoMessageService);
-    const left = registry.registerState({name: 'left', defaultValue: 0, schema: z.number()});
-    const right = registry.registerState({name: 'right', defaultValue: 0, schema: z.number()});
-    return {registry, left, right};
+    const registry = new AppStateService({ events: new Subject() } as unknown as Router, {} as InfoMessageService);
+    const left = registry.registerState({ name: 'left', defaultValue: 0, schema: z.number() });
+    const right = registry.registerState({ name: 'right', defaultValue: 0, schema: z.number() });
+    return { registry, left, right };
 }
 
 describe('AppState publication', () => {
     it('rolls back a failed edit without publishing slot or completed-state events', () => {
-        const {registry, left, right} = setup();
+        const { registry, left, right } = setup();
         const values: number[] = [];
         left.subscribe(value => values.push(value));
         const observations: number[][] = [];
@@ -33,7 +33,7 @@ describe('AppState publication', () => {
     });
 
     it('stages every value before slot notifications and publishes one completed projection', () => {
-        const {registry, left, right} = setup();
+        const { registry, left, right } = setup();
         const slotObservations: number[][] = [];
         left.subscribe(value => slotObservations.push([value, right.getValue()]));
         const complete: number[][] = [];
@@ -48,7 +48,7 @@ describe('AppState publication', () => {
     });
 
     it('queues writes from a completed-state observer until every observer sees the same commit', () => {
-        const {registry, left} = setup();
+        const { registry, left } = setup();
         const first: number[] = [], second: number[] = [];
         registry.observe(() => left.value).subscribe(value => {
             first.push(value);
@@ -63,8 +63,8 @@ describe('AppState publication', () => {
 
 describe('publication rollback and reactive edits', () => {
     it('does not publish a net-no-op and preserves touched object identity', () => {
-        const {registry, left, right} = setup();
-        const object = registry.registerState({name: 'object', defaultValue: {items: [1]}, schema: z.unknown()});
+        const { registry, left, right } = setup();
+        const object = registry.registerState({ name: 'object', defaultValue: { items: [1] }, schema: z.unknown() });
         const original = object.value;
         const slots: unknown[] = [];
         const commits: unknown[] = [];
@@ -72,10 +72,10 @@ describe('publication rollback and reactive edits', () => {
         registry.observe(() => [left.value, right.value, object.value]).subscribe(value => commits.push(value));
         registry.transaction(() => {
             left.next(1);
-            object.next({items: [2]});
-            registry.transaction(() => {right.next(4); right.next(0);});
+            object.next({ items: [2] });
+            registry.transaction(() => { right.next(4); right.next(0); });
             left.next(0);
-            object.next({items: [1]});
+            object.next({ items: [1] });
         });
         expect(object.value).toBe(original);
         expect(slots).toEqual([original]);
@@ -83,45 +83,45 @@ describe('publication rollback and reactive edits', () => {
     });
 
     it('keeps a previously staged outer change when a nested transaction is a no-op', () => {
-        const {registry, left} = setup();
+        const { registry, left } = setup();
         const observed: number[] = [];
         left.subscribe(value => observed.push(value));
         registry.transaction(() => {
             left.next(1);
-            registry.transaction(() => {left.next(2); left.next(1);});
+            registry.transaction(() => { left.next(2); left.next(1); });
         });
         expect(observed).toEqual([0, 1]);
     });
 
     it('preserves untouched object identity and restores touched objects after failure', () => {
-        const {registry, left} = setup();
-        const unrelated = registry.registerState({name: 'unrelated', defaultValue: {large: [1, 2, 3]}, schema: z.unknown()});
-        const touched = registry.registerState({name: 'touched', defaultValue: {items: ['original']}, schema: z.unknown()});
+        const { registry, left } = setup();
+        const unrelated = registry.registerState({ name: 'unrelated', defaultValue: { large: [1, 2, 3] }, schema: z.unknown() });
+        const touched = registry.registerState({ name: 'touched', defaultValue: { items: ['original'] }, schema: z.unknown() });
         const oldUnrelated = unrelated.value, oldTouched = touched.value;
-        expect(() => registry.transaction(() => { touched.next({items: ['changed']}); left.next(1); throw new Error('rollback'); })).toThrow();
+        expect(() => registry.transaction(() => { touched.next({ items: ['changed'] }); left.next(1); throw new Error('rollback'); })).toThrow();
         expect(unrelated.value).toBe(oldUnrelated);
         expect(touched.value).toBe(oldTouched);
-        expect(oldTouched).toEqual({items: ['original']});
+        expect(oldTouched).toEqual({ items: ['original'] });
     });
 
     it('queues a complete owner transaction from a completed-state subscriber', () => {
-        const {registry, left, right} = setup();
+        const { registry, left, right } = setup();
         const first: number[][] = [], second: number[][] = [];
         registry.observe(() => [left.value, right.value]).subscribe(value => {
             first.push(value);
-            if (value[0] === 1) registry.transaction(() => {left.next(2); right.next(20);});
+            if (value[0] === 1) registry.transaction(() => { left.next(2); right.next(20); });
         });
         registry.observe(() => [left.value, right.value]).subscribe(value => second.push(value));
-        registry.transaction(() => {left.next(1); right.next(10);});
+        registry.transaction(() => { left.next(1); right.next(10); });
         expect(first).toEqual([[0, 0], [1, 10], [2, 20]]);
         expect(second).toEqual(first);
     });
 
     it('keeps outer staged values after a caught nested rollback', () => {
-        const {registry, left, right} = setup();
+        const { registry, left, right } = setup();
         registry.transaction(() => {
             left.next(1);
-            expect(() => registry.transaction(() => {left.next(2); right.next(2); throw new Error('inner');})).toThrow();
+            expect(() => registry.transaction(() => { left.next(2); right.next(2); throw new Error('inner'); })).toThrow();
             expect([left.value, right.value]).toEqual([1, 0]);
             right.next(3);
         });
@@ -131,7 +131,7 @@ describe('publication rollback and reactive edits', () => {
 
 describe('subscriptions during edits', () => {
     it('delays a new completed observer until success or rollback, while slot reads remain staged', () => {
-        const {registry, left} = setup();
+        const { registry, left } = setup();
         const observed: number[] = [];
         expect(() => registry.transaction(() => {
             left.next(1);
@@ -145,11 +145,11 @@ describe('subscriptions during edits', () => {
     });
 
     it('honors ordered writes from completed observers even when the later value matches the old commit', () => {
-        const {registry, left} = setup();
+        const { registry, left } = setup();
         const values: number[] = [];
         let acted = false;
         registry.observe(() => left.value).subscribe(value => {
-            if (value === 1 && !acted) {acted = true; left.next(2); left.next(1);}
+            if (value === 1 && !acted) { acted = true; left.next(2); left.next(1); }
         });
         registry.observe(() => left.value).subscribe(value => values.push(value));
         left.next(1);
@@ -158,12 +158,11 @@ describe('subscriptions during edits', () => {
     });
 });
 
-
 describe('persistence ownership of reactive writes', () => {
     it('retains system origin through a queued batch without hiding nested user edits', () => {
-        const {registry, left, right} = setup();
-        const user = registry.registerState({name: 'user', defaultValue: 0, schema: z.number()});
-        const projected = registry.registerProjection({name: 'projected', defaultValue: 0, schema: z.number()}, {
+        const { registry, left, right } = setup();
+        const user = registry.registerState({ name: 'user', defaultValue: 0, schema: z.number() });
+        const projected = registry.registerProjection({ name: 'projected', defaultValue: 0, schema: z.number() }, {
             sourceState: right, read: () => right.value, write: value => right.next(value), changes: registry.observe(() => right.value)
         });
         registry['setupStateSubscriptions']();
@@ -182,7 +181,7 @@ describe('persistence ownership of reactive writes', () => {
     });
 
     it('keeps hydration and config writes suppressed when their scopes end before the outer commit', () => {
-        const {registry, left, right} = setup();
+        const { registry, left, right } = setup();
         registry['setupStateSubscriptions']();
         registry['isReady'] = true;
         registry['scheduleFlush'] = vi.fn();
@@ -197,14 +196,14 @@ describe('persistence ownership of reactive writes', () => {
 
     it('seeds reentrant configuration values and metadata together without claiming user ownership', () => {
         localStorage.clear();
-        const {registry, left, right} = setup();
-        registry.registerState({name: 'layerNames', defaultValue: [], schema: z.array(z.string())});
+        const { registry, left, right } = setup();
+        registry.registerState({ name: 'layerNames', defaultValue: [], schema: z.array(z.string()) });
         registry.registerStyleState(() => ['view-0']);
         registry['setupStateSubscriptions']();
         registry['isReady'] = true;
         registry['scheduleFlush'] = vi.fn();
         registry.observe(() => left.value).subscribe(value => {
-            if (value === 1) expect(registry.seedConfigDefaultState({right: 7}, 'config-2')).toEqual([]);
+            if (value === 1) expect(registry.seedConfigDefaultState({ right: 7 }, 'config-2')).toEqual([]);
         });
         left.next(1);
         expect(right.value).toBe(7);

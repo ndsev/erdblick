@@ -1,11 +1,12 @@
 import { HttpClient } from '@angular/common/http';
-import { Component,HostListener,ViewChild } from '@angular/core';
+import { Component, HostListener, ViewChild } from '@angular/core';
 import { JSONSchema7 } from 'json-schema';
 import { Subscription } from 'rxjs';
 import { MapInfoService } from '../mapdata/map-info.service';
 import { AppDialogComponent } from '../shared/app-dialog.component';
+import { DATASOURCES_EDITOR_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService,DATASOURCES_EDITOR_DIALOG_LAYOUT_ID } from '../shared/appstate.service';
+import { AppStateService } from "../shared/appstate.service";
 import { DialogStackService } from '../shared/dialog-stack.service';
 import { EditorService } from '../shared/editor.service';
 import { InfoMessageService } from '../shared/info.service';
@@ -105,12 +106,12 @@ export class DatasourcesComponent {
 
     /** Wires shared dialog, editor, and map services used by the datasource editor. */
     constructor(private readonly messageService: InfoMessageService,
-                public readonly stateService: AppStateService,
-                public readonly editorService: EditorService,
-                private readonly http: HttpClient,
-                private readonly mapInfo: MapInfoService,
-                private readonly dialogStack: DialogStackService,
-        public readonly layout: AppLayoutService) {}
+        public readonly stateService: AppStateService,
+        public readonly editorService: EditorService,
+        private readonly http: HttpClient,
+        private readonly mapInfo: MapInfoService,
+        private readonly dialogStack: DialogStackService,
+        public readonly layout: AppLayoutService) { }
 
     get dialogVisible(): boolean {
         return this.layout.isDialogOpen(this.dialogLayoutId);
@@ -160,7 +161,7 @@ export class DatasourcesComponent {
     /** Persists datasource configuration changes and refreshes map content after the backend accepts them. */
     private postConfig(config: string) {
         this.loading = true;
-        this.http.post('config', config, {observe: 'response', responseType: 'text'}).subscribe({
+        this.http.post('config', config, { observe: 'response', responseType: 'text' }).subscribe({
             next: (data: any) => {
                 this.messageService.showSuccess(data.body);
                 setTimeout(() => {

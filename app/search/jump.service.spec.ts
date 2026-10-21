@@ -1,18 +1,20 @@
 import "@angular/compiler";
-import {beforeAll, describe, expect, it, vi} from 'vitest';
-import {Subject} from 'rxjs';
-import {coreLib, initializeLibrary} from '../integrations/wasm';
-import {Rectangle} from '../integrations/geo';
-import {JumpTargetService, normalizeSearchJumpResult} from './jump.service';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { Subject } from 'rxjs';
+import { AppActionService } from '../actions/app-action.service';
+import { testPersistence } from '../../test/state-owners';
+import { coreLib, initializeLibrary } from '../integrations/wasm';
+import { Rectangle } from '../integrations/geo';
+import { JumpTargetService, normalizeSearchJumpResult } from './jump.service';
 
 beforeAll(async () => {
     await initializeLibrary();
 });
 
 class MapInfoServiceStub {
-    maps = {maps: new Map<string, any>()};
+    maps = { maps: new Map<string, any>() };
     sourceDataLayerIdForLayerName = vi.fn();
-    tileLayerParser: any = {filterFeatureJumpTargets: vi.fn().mockReturnValue([])};
+    tileLayerParser: any = { filterFeatureJumpTargets: vi.fn().mockReturnValue([]) };
 }
 
 class InspectionSelectionServiceStub {
@@ -61,24 +63,22 @@ const createService = (config: any = {}, initialize = true) => {
         inspectionSelection as any,
         infoService as any,
         menuService as any,
-        stateService as any,
-        searchService as any,
-        configService as any, stateService as any as never, stateService as any as never, Object.assign(stateService as any, {viewIdAt: (index: number) => String(index)}) as never, stateService as any as never
+        configService as any, stateService as any as never, stateService as any as never, Object.assign(stateService as any, { viewIdAt: (index: number) => String(index) }) as never, stateService as any as never
     );
 
     if (initialize) service.initialize();
-    return {service, mapService, inspectionSelection, infoService, menuService, stateService, searchService, configService};
+    return { service, mapService, inspectionSelection, infoService, menuService, stateService, searchService, configService };
 };
 
 describe('JumpTargetService', () => {
 
     it('does not construct the native parser before explicit startup', () => {
-        const {service, mapService} = createService({}, false);
+        const { service, mapService } = createService({}, false);
         expect(mapService.tileLayerParser.filterFeatureJumpTargets).not.toHaveBeenCalled();
         service.initialize();
-        expect(mapService.tileLayerParser.filterFeatureJumpTargets).toHaveBeenCalledTimes(1);
+        expect(mapService.tileLayerParser.filterFeatureJumpTargets).not.toHaveBeenCalled();
         service.initialize();
-        expect(mapService.tileLayerParser.filterFeatureJumpTargets).toHaveBeenCalledTimes(1);
+        expect(mapService.tileLayerParser.filterFeatureJumpTargets).not.toHaveBeenCalled();
     });
 
     it('loads jump-target plugin and merges its targets into jumpTargets', async () => {
@@ -95,14 +95,14 @@ describe('JumpTargetService', () => {
             },
         ];
         const loaderSpy = vi.spyOn(JumpTargetService.prototype as any, 'loadJumpTargetsModule')
-            .mockResolvedValue({default: () => pluginTargets});
+            .mockResolvedValue({ default: () => pluginTargets });
 
         const config = {
             extensionModules: {
                 jumpTargets: 'jump_plugin',
             },
         };
-        const {service} = createService(config);
+        const { service } = createService(config);
 
         try {
             for (let i = 0; i < 10 && service.extJumpTargets.length === 0; i++) {
@@ -110,7 +110,9 @@ describe('JumpTargetService', () => {
             }
             expect(service.extJumpTargets.length).toBeGreaterThan(0);
 
-            const combined = service.jumpTargets.getValue();
+            const actions = new AppActionService(testPersistence());
+            service.registerActions(actions);
+            const combined = actions.getCandidates("test");
             expect(combined.length).toBeGreaterThanOrEqual(service.extJumpTargets.length + 2);
 
             const pluginNames = new Set(service.extJumpTargets.map(t => t.name));
@@ -137,10 +139,10 @@ describe('JumpTargetService', () => {
         ];
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
         const loaderSpy = vi.spyOn(JumpTargetService.prototype as any, 'loadJumpTargetsModule')
-            .mockResolvedValue({default: () => pluginTargets});
+            .mockResolvedValue({ default: () => pluginTargets });
 
         try {
-            const {service} = createService({extensionModules: {jumpTargets: 'jump_plugin'}});
+            const { service } = createService({ extensionModules: { jumpTargets: 'jump_plugin' } });
             for (let i = 0; i < 10; i++) {
                 await new Promise(resolve => setTimeout(resolve, 0));
             }
@@ -153,25 +155,25 @@ describe('JumpTargetService', () => {
     });
 
     it('builds feature jump target ids from core composition ids', () => {
-        const {service, mapService} = createService();
+        const { service, mapService } = createService();
         mapService.tileLayerParser.filterFeatureJumpTargets = vi.fn(() => [
             {
                 id: 'Lane.id:4',
                 name: 'Lane',
                 error: null,
-                idParts: [{key: 'id', value: '1'}],
+                idParts: [{ key: 'id', value: '1' }],
                 maps: ['m1'],
             },
             {
                 id: 'Lane.primary_id:4.secondary_id:8',
                 name: 'Lane',
                 error: null,
-                idParts: [{key: 'primary_id', value: '1'}, {key: 'secondary_id', value: '2'}],
+                idParts: [{ key: 'primary_id', value: '1' }, { key: 'secondary_id', value: '2' }],
                 maps: ['m1'],
             },
         ]);
 
-        const featureJumpIds = service.getJumpTargetsForValue('Lane 1')
+        const featureJumpIds = service.featureTargetsForValue('Lane 1')
             .filter(target => target.name === 'Jump to Lane')
             .map(target => target.id);
 
@@ -182,7 +184,7 @@ describe('JumpTargetService', () => {
     });
 
     it('validates packed tile IDs as signed NDS.Live tile ids without whitespace', () => {
-        const {service} = createService();
+        const { service } = createService();
 
         expect(service.validatePackedTileId('65536')).toBe(true);
         expect(service.validatePackedTileId(' 65536 ')).toBe(true);
@@ -195,7 +197,7 @@ describe('JumpTargetService', () => {
     });
 
     it('builds inspect-tile source-data target label and validity based on map and layer presence', () => {
-        const {service, mapService} = createService();
+        const { service, mapService } = createService();
 
         mapService.maps.maps.set('m1', {});
         mapService.sourceDataLayerIdForLayerName.mockImplementation((name: string) =>
@@ -233,7 +235,7 @@ describe('JumpTargetService', () => {
     });
 
     it('executes inspect-tile source-data target and sets selection when map and layer exist', () => {
-        const {service, mapService, stateService, menuService} = createService();
+        const { service, mapService, stateService, menuService } = createService();
 
         mapService.maps.maps.set('m1', {});
         mapService.sourceDataLayerIdForLayerName.mockImplementation((name: string) =>
@@ -263,7 +265,7 @@ describe('JumpTargetService', () => {
     });
 
     it('forwards latitude, longitude, and altitude to AppStateService in the expected order', () => {
-        const {service, stateService} = createService();
+        const { service, stateService } = createService();
 
         service.markedPosition.next([48.25, 11.75, 125]);
 
@@ -292,21 +294,21 @@ describe('JumpTargetService', () => {
     });
 
     it('highlightByJumpTargetFilter chooses the first non-error feature jump action', async () => {
-        const {service, mapService} = createService();
+        const { service, mapService } = createService();
 
         const actions = [
             {
                 id: 'A1.id:4',
                 name: 'A1',
                 error: 'oops',
-                idParts: [{key: 'id', value: '1'}],
+                idParts: [{ key: 'id', value: '1' }],
                 maps: ['m1'],
             },
             {
                 id: 'A2.id:4',
                 name: 'A2',
                 error: null,
-                idParts: [{key: 'id', value: '2'}],
+                idParts: [{ key: 'id', value: '2' }],
                 maps: ['m1'],
             },
         ];

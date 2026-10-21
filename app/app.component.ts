@@ -1,25 +1,24 @@
 import { HttpClient } from "@angular/common/http";
-import { AfterViewInit,Component,OnDestroy,ViewContainerRef } from '@angular/core';
+import { AfterViewInit, Component, OnDestroy, ViewContainerRef } from '@angular/core';
 import { Title } from "@angular/platform-browser";
-import { DebugWindow,ErdblickDebugApi } from "./app.debugapi.component";
+import { DebugWindow, ErdblickDebugApi } from "./app.debugapi.component";
 import { DiagnosticsFacadeService } from "./diagnostics/diagnostics.facade.service";
 import { environment } from "./environments/environment";
 import { MapInfoService } from "./mapdata/map-info.service";
 import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
 import {
-TileSubsetLayerRenderService
+    TileSubsetLayerRenderService
 } from "./mapview/deck/tile-subset-layer-render.service";
-import { AppConfigService } from "./shared/app-config.service";
-import { AppLayoutService } from "./shared/app-layout.service";
+import { AppConfigService, Versions } from "./shared/app-config.service";
 import {
-AppStateService,
-CACHE_RESET_DIALOG_LAYOUT_ID,
-DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
-DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
-DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
-FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID,
-Versions
-} from "./shared/appstate.service";
+    CACHE_RESET_DIALOG_LAYOUT_ID,
+    DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
+    DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
+    DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
+    FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID
+} from "./shared/app-layout.model";
+import { AppLayoutService } from "./shared/app-layout.service";
+import { AppStateService } from "./shared/appstate.service";
 import { DialogStackService } from "./shared/dialog-stack.service";
 import { InfoMessageService } from "./shared/info.service";
 import { KeyboardService } from "./shared/keyboard.service";
@@ -92,18 +91,18 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     private dialogDragActive = false;
 
     constructor(public stateService: AppStateService,
-                private httpClient: HttpClient,
-                private mapInfo: MapInfoService,
-                private tileStream: MapTileStreamService,
-                private subsetRenderer: TileSubsetLayerRenderService,
-                private styleService: StyleService,
-                private keyboardService: KeyboardService,
-                private viewContainerRef: ViewContainerRef,
-                private infoMessageService: InfoMessageService,
-                private dialogStack: DialogStackService,
-                private configService: AppConfigService,
-                private diagnostics: DiagnosticsFacadeService,
-                private titleService: Title,
+        private httpClient: HttpClient,
+        private mapInfo: MapInfoService,
+        private tileStream: MapTileStreamService,
+        private subsetRenderer: TileSubsetLayerRenderService,
+        private styleService: StyleService,
+        private keyboardService: KeyboardService,
+        private viewContainerRef: ViewContainerRef,
+        private infoMessageService: InfoMessageService,
+        private dialogStack: DialogStackService,
+        private configService: AppConfigService,
+        private diagnostics: DiagnosticsFacadeService,
+        private titleService: Title,
         public readonly layout: AppLayoutService) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
@@ -264,7 +263,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
 
     /** Loads the bundled fallback version string when distribution metadata is unavailable. */
     getBasicVersion() {
-        this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
+        this.httpClient.get('./bundle/VERSION', { responseType: 'text' }).subscribe(
             data => {
                 this.configService.erdblickVersion.next(`${this.title} ${data.toString()}`);
                 this.titleService.setTitle(this.capitalizeTitle(this.title));

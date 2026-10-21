@@ -1,15 +1,29 @@
-import { AfterViewInit,ChangeDetectorRef,Component,DoCheck,ElementRef,OnDestroy,Renderer2,ViewChild } from '@angular/core';
-import { map,Observable,startWith,Subscription } from "rxjs";
+import {
+    AfterViewInit,
+    ChangeDetectorRef,
+    Component,
+    DoCheck,
+    ElementRef,
+    OnDestroy,
+    Renderer2,
+    ViewChild
+} from '@angular/core';
+import { map, Observable, startWith, Subscription } from "rxjs";
 import { ViewerUiService } from "./actions/viewer-ui.service";
 import { CoordinatesPolicyService } from "./coords/coordinates-policy.service";
 import { environment } from "./environments/environment";
 import { InspectionStateService } from "./inspection/inspection-state.service";
 import { MapInfoService } from "./mapdata/map-info.service";
 import { MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT } from "./mapview/render-view.model";
-import { FeatureSearchService,FeatureSearchSession } from "./search/feature.search.service";
+import { FeatureSearchService, FeatureSearchSession } from "./search/feature.search.service";
+import {
+    INSPECTION_DOCK_TAB_ID,
+    LEGAL_INFO_DIALOG_LAYOUT_ID,
+    SEARCH_DOCK_TAB_ID
+} from "./shared/app-layout.model";
 import { AppLayoutService } from "./shared/app-layout.service";
-import { AppStateService,INSPECTION_DOCK_TAB_ID,LEGAL_INFO_DIALOG_LAYOUT_ID,SEARCH_DOCK_TAB_ID } from "./shared/appstate.service";
-import { DockedPanelDragController,DockedPanelDragOffset } from "./shared/docked-panel-drag.controller";
+import { AppStateService } from "./shared/appstate.service";
+import { DockedPanelDragController, DockedPanelDragOffset } from "./shared/docked-panel-drag.controller";
 
 @Component({
     selector: 'dockable-layout',
@@ -146,12 +160,12 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
     protected readonly legalInfoDialogId = LEGAL_INFO_DIALOG_LAYOUT_ID;
 
     constructor(public stateService: AppStateService,
-                public coordinatesPolicy: CoordinatesPolicyService,
-                private renderer: Renderer2,
-                private featureSearchService: FeatureSearchService,
-                private cdr: ChangeDetectorRef,
-                private viewerUi: ViewerUiService,
-                mapService: MapInfoService,
+        public coordinatesPolicy: CoordinatesPolicyService,
+        private renderer: Renderer2,
+        private featureSearchService: FeatureSearchService,
+        private cdr: ChangeDetectorRef,
+        private viewerUi: ViewerUiService,
+        mapService: MapInfoService,
         public readonly layout: AppLayoutService,
         public readonly inspectionState: InspectionStateService) {
         // Keep the map-wide legal-information shortcut, but let layout—not a
@@ -215,7 +229,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
         const savedWidth = this.layout.dockWidthState.getValue();
         if (savedWidth !== null) this.setDockWidth(savedWidth);
         this.unregisterResizeTarget = this.viewerUi.registerResizeTarget(dock, {
-            describe: () => ({kind: "dock", dimensions: this.layout.isDockOpen ? ["widthPx"] : [], busy: this.dragging}),
+            describe: () => ({ kind: "dock", dimensions: this.layout.isDockOpen ? ["widthPx"] : [], busy: this.dragging }),
             resize: size => {
                 if ("panelSizes" in size || size.widthPx === undefined) return;
                 this.dispatchDockResizePauseStart();
@@ -295,7 +309,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
     }
 
     /** Starts drag tracking for a docked Feature Search panel. */
-    protected onFeatureSearchPanelDragRequest(payload: {session: FeatureSearchSession, event: PointerEvent}): void {
+    protected onFeatureSearchPanelDragRequest(payload: { session: FeatureSearchSession, event: PointerEvent }): void {
         this.searchDockDrag.start(payload.session.id, payload.event);
     }
 

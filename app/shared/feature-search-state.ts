@@ -1,4 +1,4 @@
-import {z} from "zod";
+import { z } from "zod";
 
 export type FeatureSearchScope = "attribute" | "feature" | "auto";
 
@@ -23,9 +23,9 @@ export interface FeatureSearchMapLayerRef {
 export type FeatureSearchGeometryKind = "any" | "point" | "line" | "surface" | "polygon" | "mesh" | "label";
 
 export type FeatureSearchColorMode =
-    | {mode: "solid"; color: string}
-    | {mode: "gradient"; field: string; customField?: boolean; stops: FeatureSearchColorStop[]; fallbackColor?: string}
-    | {mode: "categories"; field: string; customField?: boolean; stops: FeatureSearchColorStop[]; fallbackColor?: string};
+    | { mode: "solid"; color: string }
+    | { mode: "gradient"; field: string; customField?: boolean; stops: FeatureSearchColorStop[]; fallbackColor?: string }
+    | { mode: "categories"; field: string; customField?: boolean; stops: FeatureSearchColorStop[]; fallbackColor?: string };
 
 export interface FeatureSearchStyleRule {
     name?: string;
@@ -93,7 +93,7 @@ const MAX_HIGH_FIDELITY_VISIBLE_TILES = 64 * 1024;
 const MIN_DENSITY_SIZE_MULTIPLIER = 0.5;
 const MAX_DENSITY_SIZE_MULTIPLIER = 3;
 export const DEFAULT_FEATURE_SEARCH_VIEW_INDICES: number[] = Array.from(
-    {length: MAX_SUPPORTED_FEATURE_SEARCH_VIEWS},
+    { length: MAX_SUPPORTED_FEATURE_SEARCH_VIEWS },
     (_, index) => index
 );
 export const DEFAULT_FEATURE_SEARCH_TILE_LEVELS: number[] = [];
@@ -217,8 +217,8 @@ function normalizeRuleFilters(value: unknown): FeatureSearchRuleFilter[] {
             field,
             // Accept the Simfil spelling while keeping the GUI's canonical operator.
             op: op === "==" ? "=" : op,
-            ...("value" in raw ? {value: raw["value"]} : {}),
-            ...(normalizeBoolean(raw["customExpression"], false) ? {customExpression: true} : {})
+            ...("value" in raw ? { value: raw["value"] } : {}),
+            ...(normalizeBoolean(raw["customExpression"], false) ? { customExpression: true } : {})
         }];
     });
 }
@@ -264,7 +264,7 @@ function normalizeSearchMapLayerRefs(value: unknown): FeatureSearchMapLayerRef[]
             continue;
         }
         seen.add(key);
-        refs.push({mapId, layerId});
+        refs.push({ mapId, layerId });
     }
     return refs;
 }
@@ -342,32 +342,32 @@ function normalizeSearchColorMode(raw: Record<string, unknown>): FeatureSearchCo
             return {
                 mode,
                 field: normalizeString(color["field"]) ?? "",
-                ...(normalizeBoolean(color["customField"], false) ? {customField: true} : {}),
+                ...(normalizeBoolean(color["customField"], false) ? { customField: true } : {}),
                 stops: normalizeColorStops(color["stops"]),
                 ...(normalizeString(color["fallbackColor"])
-                    ? {fallbackColor: normalizeHexColor(color["fallbackColor"], DEFAULT_PIN_COLOR)}
+                    ? { fallbackColor: normalizeHexColor(color["fallbackColor"], DEFAULT_PIN_COLOR) }
                     : {})
             };
         }
         if (!VALID_COLOR_MODES.has(mode)) {
-            return {mode: "solid", color: DEFAULT_PIN_COLOR};
+            return { mode: "solid", color: DEFAULT_PIN_COLOR };
         }
     }
 
     const legacyExpression = normalizeString(raw["dataExpression"]) ?? "";
     const legacySolidColor = normalizeString(raw["solidColor"]);
     if (legacySolidColor) {
-        return {mode: "solid", color: normalizeHexColor(legacySolidColor)};
+        return { mode: "solid", color: normalizeHexColor(legacySolidColor) };
     }
     const legacyGradient = normalizeColorStops(raw["gradient"]);
     if (legacyGradient.length) {
-        return {mode: "gradient", field: legacyExpression, stops: legacyGradient};
+        return { mode: "gradient", field: legacyExpression, stops: legacyGradient };
     }
     const legacyColorMap = normalizeColorStops(raw["colorMap"]);
     if (legacyColorMap.length) {
-        return {mode: "categories", field: legacyExpression, stops: legacyColorMap};
+        return { mode: "categories", field: legacyExpression, stops: legacyColorMap };
     }
-    return {mode: "solid", color: DEFAULT_PIN_COLOR};
+    return { mode: "solid", color: DEFAULT_PIN_COLOR };
 }
 
 function normalizePositiveNumber(value: unknown, min = 0): number | undefined {
@@ -377,7 +377,7 @@ function normalizePositiveNumber(value: unknown, min = 0): number | undefined {
 
 export function normalizeFeatureSearchRenderStrategy(value: unknown): FeatureSearchRenderStrategy {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return {...DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY};
+        return { ...DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY };
     }
     const raw = value as Record<string, unknown>;
     const highFidelityMaxVisibleTiles = normalizePositiveNumber(
@@ -441,17 +441,17 @@ export function normalizeFeatureSearchStyleRule(value: unknown): FeatureSearchSt
         ? undefined
         : normalizeHexColor(raw["labelBackgroundColor"], DEFAULT_FEATURE_SEARCH_LABEL_BACKGROUND_COLOR);
     return {
-        ...(normalizeString(raw["name"]) ? {name: normalizeString(raw["name"])} : {}),
-        ...(normalizeBoolean(raw["autoGenerated"], false) ? {autoGenerated: true} : {}),
+        ...(normalizeString(raw["name"]) ? { name: normalizeString(raw["name"]) } : {}),
+        ...(normalizeBoolean(raw["autoGenerated"], false) ? { autoGenerated: true } : {}),
         geometry: normalizeFeatureSearchGeometry(raw["geometry"] ?? raw["type"]),
         filter: normalizeRuleFilters(raw["filter"]),
         color: normalizeSearchColorMode(raw),
-        ...(width !== undefined ? {width} : {}),
-        ...(pointRadius !== undefined ? {pointRadius} : {}),
-        ...(opacity !== undefined ? {opacity: Math.min(opacity, 1)} : {}),
-        ...(labelExpression ? {labelExpression} : {}),
-        ...(normalizeBoolean(raw["labelCustomExpression"], false) ? {labelCustomExpression: true} : {}),
-        ...(labelBackgroundColor ? {labelBackgroundColor} : {})
+        ...(width !== undefined ? { width } : {}),
+        ...(pointRadius !== undefined ? { pointRadius } : {}),
+        ...(opacity !== undefined ? { opacity: Math.min(opacity, 1) } : {}),
+        ...(labelExpression ? { labelExpression } : {}),
+        ...(normalizeBoolean(raw["labelCustomExpression"], false) ? { labelCustomExpression: true } : {}),
+        ...(labelBackgroundColor ? { labelBackgroundColor } : {})
     };
 }
 
@@ -558,7 +558,7 @@ export function defaultFeatureSearchViewIndicesForMapLayers(
         : fallback;
 }
 
-export function createFeatureSearchStateEntry(value: {query: string} & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
+export function createFeatureSearchStateEntry(value: { query: string } & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
     return normalizeFeatureSearchStateEntry({
         id: createFeatureSearchId(),
         scope: "auto",
@@ -581,4 +581,25 @@ export function createFeatureSearchStateEntry(value: {query: string} & Partial<F
 
 export function serializeFeatureSearchState(value: FeatureSearchStateEntry[]): FeatureSearchStateEntry[] {
     return normalizeFeatureSearchState(value);
+}
+
+export const DEFAULT_FEATURE_SEARCH_GROUPING = [1];
+
+export const FEATURE_SEARCH_GROUPING_OPTION_IDS = new Set([1, 2, 3, 4]);
+
+/** Normalizes feature search grouping values from persisted state. */
+export function normalizeFeatureSearchGrouping(value: unknown): number[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const result: number[] = [];
+    for (const item of value) {
+        const numeric = Number(item);
+        if (!Number.isInteger(numeric) || !FEATURE_SEARCH_GROUPING_OPTION_IDS.has(numeric) || result.includes(numeric)) {
+            continue;
+        }
+        result.push(numeric);
+    }
+    return result;
 }

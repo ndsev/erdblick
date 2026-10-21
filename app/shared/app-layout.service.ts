@@ -1,16 +1,22 @@
 import { Injectable } from "@angular/core";
 import { z } from "zod";
+import { InspectionDialogLayout } from "../inspection/inspection-state.model";
+import {
+    AppDialogLayout,
+    AppDialogPosition,
+    DEFAULT_EM_HEIGHT,
+    DEFAULT_EM_WIDTH,
+    INSPECTION_DOCK_TAB_ID
+} from "./app-layout.model";
 import { Boolish } from "./app-state";
-import { AppDialogLayout,AppDialogPosition,DEFAULT_EM_HEIGHT,DEFAULT_EM_WIDTH,INSPECTION_DOCK_TAB_ID,InspectionDialogLayout } from "./app-state.model";
 import { AppStateService } from "./appstate.service";
 
 /** Owns dialog and dock layout, pending surface opening and positional split preferences. */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class AppLayoutService {
     constructor(private readonly persistence: AppStateService) {
         persistence.snapshotReplaced.subscribe(() => this.pendingOpenDialogs.clear());
     }
-
 
     // Base UI metrics
     /** Returns the configured base font size. */
@@ -18,20 +24,17 @@ export class AppLayoutService {
         return parseFloat(window.getComputedStyle(document.documentElement).fontSize);
     }
 
-
     readonly mapsOpenState = this.persistence.registerState<boolean>({
         name: 'mapsOpenState',
         defaultValue: false,
         schema: Boolish
     });
 
-
     readonly dockOpenState = this.persistence.registerState<boolean>({
         name: 'dockOpenState',
         defaultValue: false,
         schema: Boolish
     });
-
 
     /** Local layout preferences; deliberately absent from shareable map URLs. */
     readonly dockWidthState = this.persistence.registerState<number | null>({
@@ -42,20 +45,17 @@ export class AppLayoutService {
         name: 'viewPanelSizes', defaultValue: [], schema: z.array(z.number().min(0).max(100)).max(2)
     });
 
-
     readonly dockActiveTabState = this.persistence.registerState<string>({
         name: 'dockActiveTabState',
         defaultValue: INSPECTION_DOCK_TAB_ID,
         schema: z.string()
     });
 
-
     readonly dockAutoCollapse = this.persistence.registerState<boolean>({
         name: 'dockAutoCollapse',
         defaultValue: true,
         schema: Boolish
     });
-
 
     readonly dialogLayoutsState = this.persistence.registerState<Record<string, AppDialogLayout | InspectionDialogLayout>>({
         name: 'dialogLayouts',
@@ -84,33 +84,29 @@ export class AppLayoutService {
         }))
     });
 
-
     private readonly pendingOpenDialogs = new Set<string>();
 
-    get isDockOpen() {return this.dockOpenState.getValue();}
+    get isDockOpen() { return this.dockOpenState.getValue(); }
 
-    set isDockOpen(val: boolean) {this.dockOpenState.next(val);}
+    set isDockOpen(val: boolean) { this.dockOpenState.next(val); }
 
-    get dockActiveTab() {return this.dockActiveTabState.getValue();}
+    get dockActiveTab() { return this.dockActiveTabState.getValue(); }
 
-    set dockActiveTab(val: string) {this.dockActiveTabState.next(val || INSPECTION_DOCK_TAB_ID);}
+    set dockActiveTab(val: string) { this.dockActiveTabState.next(val || INSPECTION_DOCK_TAB_ID); }
 
-    get isDockAutoCollapsible() {return this.dockAutoCollapse.getValue();}
+    get isDockAutoCollapsible() { return this.dockAutoCollapse.getValue(); }
 
-    set isDockAutoCollapsible(val: boolean) {this.dockAutoCollapse.next(val);}
-
+    set isDockAutoCollapsible(val: boolean) { this.dockAutoCollapse.next(val); }
 
     /** Returns the persisted layout for a dialog if one exists. */
     getDialogLayout(id: string): AppDialogLayout | InspectionDialogLayout | undefined {
         return this.dialogLayoutsState.getValue()[id];
     }
 
-
     /** Returns whether the persisted layout marks the dialog as open. */
     getDialogLayoutOpen(id: string): boolean {
         return this.getDialogLayout(id)?.open ?? false;
     }
-
 
     /** Returns whether a persisted dialog should currently be mounted and visible. */
     isDialogOpen(id: string): boolean {
@@ -120,7 +116,6 @@ export class AppLayoutService {
         }
         return this.pendingOpenDialogs.has(id);
     }
-
 
     /** Marks a persisted dialog as open or closed, even before its first measured layout exists. */
     setDialogOpen(id: string, open: boolean): void {
@@ -137,60 +132,56 @@ export class AppLayoutService {
         this.pendingOpenDialogs.delete(id);
     }
 
-
     /** Convenience helper that opens one persisted dialog. */
     openDialog(id: string): void {
         this.setDialogOpen(id, true);
     }
-
 
     /** Convenience helper that closes one persisted dialog. */
     closeDialog(id: string): void {
         this.setDialogOpen(id, false);
     }
 
-
     /** Returns whether a persisted surface is currently represented in the dock. */
     isSurfaceDocked(id: string): boolean {
         return this.getDialogLayout(id)?.docked ?? false;
     }
 
-
     /** Switches a generic surface between docked and floating representations. */
     setSurfaceDocked(id: string, docked: boolean, dockTab: string = INSPECTION_DOCK_TAB_ID): void {
-        const current = this.getDialogLayout(id);
-        const fallbackSize = {
-            width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
-            height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
-        };
-        const nextDockOrder = current?.dockOrder ?? (docked ? this.nextSurfaceDockOrder(dockTab) : undefined);
-        this.upsertDialogLayout(id, {
-            position: current?.position ?? {left: 0, top: 0},
-            size: current?.size ?? fallbackSize,
-            open: current?.open ?? false,
-            docked,
-            dockTab,
-            ...(nextDockOrder !== undefined ? {dockOrder: nextDockOrder} : {})
+        this.persistence.transaction(() => {
+            const current = this.getDialogLayout(id);
+            const fallbackSize = {
+                width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
+                height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
+            };
+            const nextDockOrder = current?.dockOrder ?? (docked ? this.nextSurfaceDockOrder(dockTab) : undefined);
+            this.upsertDialogLayout(id, {
+                position: current?.position ?? { left: 0, top: 0 },
+                size: current?.size ?? fallbackSize,
+                open: current?.open ?? false,
+                docked,
+                dockTab,
+                ...(nextDockOrder !== undefined ? { dockOrder: nextDockOrder } : {})
+            });
+            if (docked) {
+                this.dockActiveTab = dockTab;
+                this.isDockOpen = true;
+            }
         });
-        if (docked) {
-            this.dockActiveTab = dockTab;
-            this.isDockOpen = true;
-        }
     }
-
 
     /** Toggles the docked representation for a generic surface. */
     toggleSurfaceDocked(id: string, dockTab: string = INSPECTION_DOCK_TAB_ID): void {
         this.setSurfaceDocked(id, !this.isSurfaceDocked(id), dockTab);
     }
 
-
     /** Persists generic docked-panel metadata without changing floating dialog geometry. */
     setPanelLayout(id: string, layout: Partial<Pick<AppDialogLayout, 'panelSize' | 'panelCollapsed' | 'panelExpanded' | 'dockOrder'>>): void {
         const current = this.getDialogLayout(id);
         if (!current) {
             this.upsertDialogLayout(id, {
-                position: {left: 0, top: 0},
+                position: { left: 0, top: 0 },
                 size: {
                     width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
                     height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
@@ -205,14 +196,12 @@ export class AppLayoutService {
         });
     }
 
-
     /** Returns whether any generic surface is docked, optionally filtered by tab id. */
     hasDockedSurface(tabId?: string): boolean {
         return Object.values(this.dialogLayoutsState.getValue()).some(layout =>
             (layout.docked ?? false) && (tabId === undefined || layout.dockTab === tabId)
         );
     }
-
 
     /** Reorders generic docked surfaces within one dock tab. */
     reorderDockedSurfaces(tabId: string, displayOrder: string[]): void {
@@ -231,7 +220,7 @@ export class AppLayoutService {
             }
         }
         let changed = false;
-        const nextLayouts = {...currentLayouts};
+        const nextLayouts = { ...currentLayouts };
         normalizedOrder.forEach((id, index) => {
             const layout = currentLayouts[id];
             if (!layout || layout.dockOrder === index) {
@@ -248,7 +237,6 @@ export class AppLayoutService {
         }
     }
 
-
     /** Stores the next floating position for a generic surface. */
     setDialogPosition(id: string, position: AppDialogPosition): void {
         const current = this.getDialogLayout(id);
@@ -262,10 +250,9 @@ export class AppLayoutService {
             open: current?.open ?? false,
             docked: current?.docked,
             dockTab: current?.dockTab,
-            ...(current?.dockOrder !== undefined ? {dockOrder: current.dockOrder} : {})
+            ...(current?.dockOrder !== undefined ? { dockOrder: current.dockOrder } : {})
         });
     }
-
 
     /** Append a newly docked surface after existing siblings in the same tab. */
     private nextSurfaceDockOrder(dockTab: string): number {
@@ -275,7 +262,6 @@ export class AppLayoutService {
             .filter((order): order is number => typeof order === 'number' && Number.isFinite(order));
         return orders.length ? Math.max(...orders) + 1 : 0;
     }
-
 
     /** Returns or creates the persisted layout record for a dialog. */
     ensureDialogLayout(id: string, fallbackFactory: () => AppDialogLayout): AppDialogLayout | InspectionDialogLayout {
@@ -287,7 +273,6 @@ export class AppLayoutService {
         this.upsertDialogLayout(id, layout);
         return layout;
     }
-
 
     /** Inserts or updates one persisted dialog layout record. */
     upsertDialogLayout(id: string, layout: AppDialogLayout | InspectionDialogLayout): void {
@@ -306,8 +291,8 @@ export class AppLayoutService {
             }
         } : {
             ...layout,
-            position: {...layout.position},
-            size: {...layout.size}
+            position: { ...layout.position },
+            size: { ...layout.size }
         };
         this.dialogLayoutsState.next({
             ...currentLayouts,
@@ -315,7 +300,6 @@ export class AppLayoutService {
         });
         this.pendingOpenDialogs.delete(id);
     }
-
 
     /** Persists the open/closed state for an existing dialog layout. */
     setDialogLayoutOpen(id: string, open: boolean): void {
@@ -332,7 +316,6 @@ export class AppLayoutService {
         });
     }
 
-
     /** Removes one persisted generic dialog layout and any pending open marker for it. */
     removeDialogLayout(id: string): void {
         const currentLayouts = this.dialogLayoutsState.getValue();
@@ -340,7 +323,7 @@ export class AppLayoutService {
             this.pendingOpenDialogs.delete(id);
             return;
         }
-        const nextLayouts = {...currentLayouts};
+        const nextLayouts = { ...currentLayouts };
         delete nextLayouts[id];
         this.dialogLayoutsState.next(nextLayouts);
         this.pendingOpenDialogs.delete(id);

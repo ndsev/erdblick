@@ -1,19 +1,19 @@
 import {
-AfterViewInit,
-ChangeDetectorRef,
-Component,
-ElementRef,
-EventEmitter,
-Input,
-NgZone,
-OnChanges,
-OnDestroy,
-Output,
-SimpleChanges,
-ViewChild,
-ViewContainerRef
+    AfterViewInit,
+    ChangeDetectorRef,
+    Component,
+    ElementRef,
+    EventEmitter,
+    Input,
+    NgZone,
+    OnChanges,
+    OnDestroy,
+    Output,
+    SimpleChanges,
+    ViewChild,
+    ViewContainerRef
 } from "@angular/core";
-import { OverlayOptions,TreeNode } from "primeng/api";
+import { OverlayOptions, TreeNode } from "primeng/api";
 import { Scroller } from "primeng/scroller";
 import { Tree } from "primeng/tree";
 import type { MeterItem } from "primeng/types/metergroup";
@@ -24,76 +24,77 @@ import { coreLib } from "../integrations/wasm";
 import { FeatureSearchSchemaService } from "../mapdata/feature-search-schema.service";
 import { MapInfoService } from "../mapdata/map-info.service";
 import type {
-FeatureSearchAttributeScopeCandidate,
-FeatureSearchStyleFieldCandidate
+    FeatureSearchAttributeScopeCandidate,
+    FeatureSearchStyleFieldCandidate
 } from "../mapdata/map-runtime.model";
-import { GroupTreeNode,LayerTreeNode,MapTreeNode,removeGroupPrefix } from "../mapdata/map.tree.model";
+import { GroupTreeNode, LayerTreeNode, MapTreeNode, removeGroupPrefix } from "../mapdata/map.tree.model";
 import { MapViewStateService } from "../mapview/map-view-state.service";
 import { AppConfirmPopupService } from "../shared/app-confirm-popup.service";
 import { AppDialogComponent } from "../shared/app-dialog.component";
+import { SEARCH_DOCK_TAB_ID } from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
 import { AppPanelComponent } from "../shared/app-panel.component";
 import type { AppSurfaceHeaderAction } from "../shared/app-surface-header.component";
-import { AppStateService,SEARCH_DOCK_TAB_ID } from "../shared/appstate.service";
+import { AppStateService } from "../shared/appstate.service";
 import { DialogStackService } from "../shared/dialog-stack.service";
 import type {
-FeatureSearchMapLayerRef,
-FeatureSearchRenderStrategy,
-FeatureSearchScope,
-FeatureSearchStyleRule
+    FeatureSearchMapLayerRef,
+    FeatureSearchRenderStrategy,
+    FeatureSearchScope,
+    FeatureSearchStyleRule
 } from "../shared/feature-search-state";
 import {
-DEFAULT_FEATURE_SEARCH_LABEL_BACKGROUND_COLOR,
-DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY,
-DEFAULT_FEATURE_SEARCH_TILE_LEVELS,
-MAX_FEATURE_SEARCH_TILE_LEVEL,
-MIN_FEATURE_SEARCH_TILE_LEVEL,
-normalizeFeatureSearchFeatureTypes
+    DEFAULT_FEATURE_SEARCH_LABEL_BACKGROUND_COLOR,
+    DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY,
+    DEFAULT_FEATURE_SEARCH_TILE_LEVELS,
+    MAX_FEATURE_SEARCH_TILE_LEVEL,
+    MIN_FEATURE_SEARCH_TILE_LEVEL,
+    normalizeFeatureSearchFeatureTypes
 } from "../shared/feature-search-state";
 import { InfoMessageService } from "../shared/info.service";
 import { StyleEditorRequestService } from "../styledata/style-editor-request.service";
-import { ErdblickStyle,StyleService } from "../styledata/style.service";
+import { ErdblickStyle, StyleService } from "../styledata/style.service";
 import type { FeatureSearchAutoStyleOption } from "./feature-search-auto-style.util";
 import {
-defaultSearchStyleFieldOptionsForAnalysis,
-preferredSearchAutoStyleField,
-searchAutoStyleFieldOptions,
-searchAutoStyleFieldOptionsArePortable
+    defaultSearchStyleFieldOptionsForAnalysis,
+    preferredSearchAutoStyleField,
+    searchAutoStyleFieldOptions,
+    searchAutoStyleFieldOptionsArePortable
 } from "./feature-search-auto-style.util";
 import {
-featureSearchActionPayloadFromCompletion,
-FeatureSearchExportGroupingOption,
-FeatureSearchResultEntry,
-featureSearchSelectedMapLayersFromPayload,
-FeatureSearchService,
-FeatureSearchSession
+    featureSearchActionPayloadFromCompletion,
+    FeatureSearchExportGroupingOption,
+    FeatureSearchResultEntry,
+    featureSearchSelectedMapLayersFromPayload,
+    FeatureSearchService,
+    FeatureSearchSession
 } from "./feature.search.service";
 import { JumpTargetService } from "./jump.service";
 import {
-autoInitializeSearchStyleColorDraft,
-DEFAULT_SEARCH_STYLE_SOLID_COLOR,
-defaultSearchStyleColorDraft,
-isNumericStyleValueKind,
-normalizeHexColor,
-SearchStyleColorDraft
+    autoInitializeSearchStyleColorDraft,
+    DEFAULT_SEARCH_STYLE_SOLID_COLOR,
+    defaultSearchStyleColorDraft,
+    isNumericStyleValueKind,
+    normalizeHexColor,
+    SearchStyleColorDraft
 } from "./search-style-color.util";
 import {
-FeatureSearchStyleFilterDraft,
-FeatureSearchStyleRuleDraft,
-SearchStyleRuleDraftCodec
+    FeatureSearchStyleFilterDraft,
+    FeatureSearchStyleRuleDraft,
+    SearchStyleRuleDraftCodec
 } from "./search-style-rule-editor.model";
 import type { SearchStyleSaveRequest } from "./search-style-save.dialog.component";
 import {
-convertSearchStyleRulesToYaml,
-projectStyleSourceForSearch,
-SearchStyleApplicationProjection
+    convertSearchStyleRulesToYaml,
+    projectStyleSourceForSearch,
+    SearchStyleApplicationProjection
 } from "./search-style-sheet.converter";
 import {
-CompletionCandidate,
-DiagnosticsMessage,
-SearchResultFieldValueSummary,
-SearchValueSummariesState,
-SearchValueSummary
+    CompletionCandidate,
+    DiagnosticsMessage,
+    SearchResultFieldValueSummary,
+    SearchValueSummariesState,
+    SearchValueSummary
 } from "./search.model";
 import { SimfilExpressionInputComponent } from "./simfil-expression-input.component";
 
@@ -404,7 +405,6 @@ interface FeatureSearchResultTreeItem {
                                                optionLabel="name">
                                 </p-multiSelect> 
                             </div>
-                            
 
                             <div #featureSearchTreeHost class="feature-search-tree-host">
                                 <p-tree #tree [value]="resultsTree" data-testid="feature-search-tree"
@@ -748,9 +748,9 @@ interface FeatureSearchResultTreeItem {
  * Dialog that presents long-running feature-search progress, result grouping, styles, and diagnostics.
  */
 export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestroy {
-    @Input({required: true}) searchId!: string;
+    @Input({ required: true }) searchId!: string;
     @Input() dockedPanelCount = 1;
-    @Output() panelDragRequest = new EventEmitter<{session: FeatureSearchSession, event: PointerEvent}>();
+    @Output() panelDragRequest = new EventEmitter<{ session: FeatureSearchSession, event: PointerEvent }>();
 
     session?: FeatureSearchSession;
     private readonly subscriptions = new Subscription();
@@ -777,10 +777,10 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     searchTotalFeatureCount = 0;
     resultsTree: TreeNode[] = [];
     grouping: FeatureSearchGroupingOption[] = [
-        {name: 'Maps', value: 1},
-        {name: 'Layers', value: 2},
-        {name: 'Features', value: 3},
-        {name: 'Tiles', value: 4}
+        { name: 'Maps', value: 1 },
+        { name: 'Layers', value: 2 },
+        { name: 'Features', value: 3 },
+        { name: 'Tiles', value: 4 }
     ];
     selectedGroupingOptions: FeatureSearchGroupingOption[] = [];
     styleAttributeOptions: FeatureSearchStyleOption[] = [];
@@ -795,13 +795,13 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     featureSearchViewOptions: FeatureSearchViewOption[] = [];
     selectedViewIndices: number[] = [];
     styleOperatorOptions: FeatureSearchStyleOption[] = [
-        {label: '>', value: '>'},
-        {label: '>=', value: '>='},
-        {label: '=', value: '='},
-        {label: '!=', value: '!='},
-        {label: '<=', value: '<='},
-        {label: '<', value: '<'},
-        {label: 'contains', value: 'contains'}
+        { label: '>', value: '>' },
+        { label: '>=', value: '>=' },
+        { label: '=', value: '=' },
+        { label: '!=', value: '!=' },
+        { label: '<=', value: '<=' },
+        { label: '<', value: '<' },
+        { label: 'contains', value: 'contains' }
     ];
     private nextStyleRuleId = 1;
     private nextStyleConditionId = 1;
@@ -842,9 +842,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     featureSearchScopeSummary = "";
     featureSearchScopeSummaryTitle = "";
     featureSearchScopeOptions: FeatureSearchScopeOption[] = [
-        {label: 'Auto', value: 'auto'},
-        {label: 'Attribute', value: 'attribute'},
-        {label: 'Feature', value: 'feature'}
+        { label: 'Auto', value: 'auto' },
+        { label: 'Attribute', value: 'attribute' },
+        { label: 'Feature', value: 'feature' }
     ];
     private lastSearchQuery = "";
     private activeSearchGroupId = "";
@@ -909,18 +909,18 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
      * Subscribes to search progress and keeps the dialog state synchronized with the active search.
      */
     constructor(public searchService: FeatureSearchService,
-                public jumpService: JumpTargetService,
-                public mapService: MapInfoService,
-                private readonly searchSchema: FeatureSearchSchemaService,
-                private readonly styleService: StyleService,
-                private readonly styleEditorRequestService: StyleEditorRequestService,
-                private readonly inspectionSelection: InspectionSelectionService,
-                public stateService: AppStateService,
-                private infoMessageService: InfoMessageService,
-                private dialogStack: DialogStackService,
-                private confirmPopupService: AppConfirmPopupService,
-                private readonly changeDetector: ChangeDetectorRef,
-                private readonly ngZone: NgZone,
+        public jumpService: JumpTargetService,
+        public mapService: MapInfoService,
+        private readonly searchSchema: FeatureSearchSchemaService,
+        private readonly styleService: StyleService,
+        private readonly styleEditorRequestService: StyleEditorRequestService,
+        private readonly inspectionSelection: InspectionSelectionService,
+        public stateService: AppStateService,
+        private infoMessageService: InfoMessageService,
+        private dialogStack: DialogStackService,
+        private confirmPopupService: AppConfirmPopupService,
+        private readonly changeDetector: ChangeDetectorRef,
+        private readonly ngZone: NgZone,
         public readonly layout: AppLayoutService,
         public readonly viewSettings: MapViewStateService,
         public readonly inspectionState: InspectionStateService) {
@@ -1062,23 +1062,23 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     }
 
     /** Returns non-zero kind counters in display order. */
-    protected summaryKindEntries(summary: SearchValueSummary): Array<{label: string; count: number}> {
+    protected summaryKindEntries(summary: SearchValueSummary): Array<{ label: string; count: number }> {
         return [
-            {label: "int", count: summary.kinds.integer},
-            {label: "number", count: summary.kinds.number},
-            {label: "bool", count: summary.kinds.boolean},
-            {label: "string", count: summary.kinds.string},
-            {label: "object", count: summary.kinds.object},
-            {label: "list", count: summary.kinds.list},
-            {label: "blob", count: summary.kinds.blob},
-            {label: "null", count: summary.nulls},
-            {label: "missing", count: summary.missing},
-            {label: "unknown", count: summary.kinds.unknown}
+            { label: "int", count: summary.kinds.integer },
+            { label: "number", count: summary.kinds.number },
+            { label: "bool", count: summary.kinds.boolean },
+            { label: "string", count: summary.kinds.string },
+            { label: "object", count: summary.kinds.object },
+            { label: "list", count: summary.kinds.list },
+            { label: "blob", count: summary.kinds.blob },
+            { label: "null", count: summary.nulls },
+            { label: "missing", count: summary.missing },
+            { label: "unknown", count: summary.kinds.unknown }
         ].filter(entry => entry.count > 0);
     }
 
     /** Limits per-card histogram rows to keep dense searches readable. */
-    protected visibleHistogramBuckets(summary: SearchValueSummary): Array<{value: string; count: number}> {
+    protected visibleHistogramBuckets(summary: SearchValueSummary): Array<{ value: string; count: number }> {
         return summary.histogram.slice(0, 8);
     }
 
@@ -1090,7 +1090,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         if (Number.isInteger(value)) {
             return String(value);
         }
-        return value.toLocaleString(undefined, {maximumFractionDigits: 3});
+        return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
     }
 
     /** Converts a done/total pair into a clamped progress percentage. */
@@ -1125,7 +1125,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             ? this.resultTreeIngressPercent
             : (session.complete ? 100 : 0);
         this.progressMeterItems = session.complete
-            ? [{label: "Complete", value: 100, color: "var(--p-primary-color)"}]
+            ? [{ label: "Complete", value: 100, color: "var(--p-primary-color)" }]
             : [
                 {
                     label: "Search",
@@ -1302,8 +1302,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         return isNumericStyleValueKind(this.styleFieldOption(filter.attributeField)?.valueKind);
     }
 
-    protected filterFieldEnumOptions(filter: FeatureSearchStyleFilterDraft): Array<{label: string; value: string}> {
-        return (this.styleFieldOption(filter.attributeField)?.enumValues ?? []).map(value => ({label: value, value}));
+    protected filterFieldEnumOptions(filter: FeatureSearchStyleFilterDraft): Array<{ label: string; value: string }> {
+        return (this.styleFieldOption(filter.attributeField)?.enumValues ?? []).map(value => ({ label: value, value }));
     }
 
     protected styleOperatorOptionsForFilter(filter: FeatureSearchStyleFilterDraft): FeatureSearchStyleOption[] {
@@ -1546,7 +1546,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.searchStyleApplicationWarning = false;
         }
         this.selectedSearchStyleId = null;
-        this.searchService.patchFeatureSearch(session.id, {searchStyleRules});
+        this.searchService.patchFeatureSearch(session.id, { searchStyleRules });
     }
 
     /** Accepts detached drafts emitted by the reusable rule editor. */
@@ -1570,7 +1570,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                     : projection.omissions.length
                         ? `${projection.rules.length} of ${projection.totalRuleCount} rules can be applied.`
                         : `${projection.rules.length} compatible rule${projection.rules.length === 1 ? "" : "s"}.`;
-                return {label: style.id, value: style.id, disabled, summary, projection};
+                return { label: style.id, value: style.id, disabled, summary, projection };
             } catch (error) {
                 return {
                     label: style.id,
@@ -1624,7 +1624,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         const detachedRules = structuredClone(projection.rules);
         this.styleRuleDrafts = this.styleRuleDraftCodec.toDrafts(detachedRules);
         this.styleRulesStateSignature = JSON.stringify(detachedRules);
-        this.searchService.patchFeatureSearch(this.session.id, {searchStyleRules: detachedRules});
+        this.searchService.patchFeatureSearch(this.session.id, { searchStyleRules: detachedRules });
         this.selectedSearchStyleId = styleId;
         this.searchStyleApplicationWarning = projection.omissions.length > 0;
         this.searchStyleApplicationMessage = projection.omissions.length
@@ -1655,7 +1655,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         if (this.searchStyleSavePending || !this.searchStyleSaveVisible) {
             return;
         }
-        const {options, action} = request;
+        const { options, action } = request;
         const conflict = this.styleService.styleIdentityConflict(options.name);
         if (conflict) {
             this.infoMessageService.showError(
@@ -1709,7 +1709,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             return;
         }
         const nextValue = this.normalizedRenderStrategyValue(key, value);
-        const renderStrategy: FeatureSearchRenderStrategy = {...this.searchRenderStrategy()};
+        const renderStrategy: FeatureSearchRenderStrategy = { ...this.searchRenderStrategy() };
         renderStrategy[key] = nextValue;
         if (key === "showHighFiGeometry" && nextValue === false) {
             renderStrategy.showHighFiResultDots = false;
@@ -1770,7 +1770,6 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         return this.styleRuleDraftCodec.fromDrafts(this.styleRuleDrafts);
     }
 
-
     /**
      * Refreshes the style-rule field picker from schema metadata.
      *
@@ -1806,7 +1805,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     ): void {
         const activeOptions = rawOptions.filter(option => this.isStyleFieldCandidateActive(option.mapId, option.layerId));
         const sourceOptions = activeOptions.length ? activeOptions : rawOptions;
-        const byValue = new Map<string, {option: FeatureSearchStyleOption, contexts: Set<string>}>();
+        const byValue = new Map<string, { option: FeatureSearchStyleOption, contexts: Set<string> }>();
         for (const option of sourceOptions) {
             const key = this.searchStyleFieldAggregationKey(option);
             let entry = byValue.get(key);
@@ -1883,7 +1882,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                     min: Math.min(target.numericRange.min, source.numericRange.min),
                     max: Math.max(target.numericRange.max, source.numericRange.max)
                 }
-                : {...source.numericRange};
+                : { ...source.numericRange };
         }
         if (target.featureType !== source.featureType) {
             // A shared path across feature types cannot use one portable type
@@ -1897,7 +1896,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         if (!mapLayers.some(ref =>
             ref.mapId === source.mapId &&
             ref.layerId === source.layerId)) {
-            mapLayers.push({mapId: source.mapId, layerId: source.layerId});
+            mapLayers.push({ mapId: source.mapId, layerId: source.layerId });
             mapLayers.sort((left, right) =>
                 left.mapId.localeCompare(right.mapId) ||
                 left.layerId.localeCompare(right.layerId));
@@ -2187,7 +2186,6 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         return searchAutoStyleFieldOptions(this.styleScalarAttributeOptions, session.schemaAnalysis);
     }
 
-
     /** Defers expensive WASM-backed field enumeration until the browser can paint the style tab. */
     private scheduleStyleAttributeOptionsRefresh(sessionId: string, patchMissingFields: boolean): void {
         if (this.styleAttributeOptionsRefreshTimer) {
@@ -2326,7 +2324,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             return {
                 key: `group:${node.key}`,
                 label: removeGroupPrefix(node.id),
-                data: {kind: "group"},
+                data: { kind: "group" },
                 expanded: node.expanded,
                 children
             };
@@ -2339,7 +2337,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         return {
             key: `map:${node.key}`,
             label: mapLabel,
-            data: {kind: "map", mapId: node.id},
+            data: { kind: "map", mapId: node.id },
             expanded: node.expanded,
             children
         };
@@ -2495,7 +2493,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         selectedKeys: Set<string>
     ): Map<string, FeatureSearchLayerTreeNodeSelectionState> {
         const stateByNodeKey = new Map<string, FeatureSearchLayerTreeNodeSelectionState>();
-        const visit = (node: TreeNode<FeatureSearchLayerTreeNodeData>): {selected: number; total: number} => {
+        const visit = (node: TreeNode<FeatureSearchLayerTreeNodeData>): { selected: number; total: number } => {
             const layerKey = this.searchLayerKeyFromTreeNode(node);
             if (layerKey) {
                 const selected = selectedKeys.has(layerKey);
@@ -2508,7 +2506,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 if (node.key) {
                     stateByNodeKey.set(node.key, state);
                 }
-                return {selected: selected ? 1 : 0, total: 1};
+                return { selected: selected ? 1 : 0, total: 1 };
             }
             let selected = 0;
             let total = 0;
@@ -2525,7 +2523,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                     partial: selected > 0 && selected < total
                 });
             }
-            return {selected, total};
+            return { selected, total };
         };
         for (const node of this.mapLayerTreeOptions) {
             visit(node);
@@ -2658,7 +2656,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     }
 
     protected onSearchMapLayerTreeNodeExpansionChange(
-        event?: {node?: TreeNode<FeatureSearchLayerTreeNodeData>},
+        event?: { node?: TreeNode<FeatureSearchLayerTreeNodeData> },
         expanded?: boolean
     ): void {
         if (event?.node?.key && expanded !== undefined) {
@@ -2686,7 +2684,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             .join("\u0001");
         if (signature !== this.selectedSearchMapLayersCacheSignature) {
             this.selectedSearchMapLayersCacheSignature = signature;
-            this.selectedSearchMapLayersCache = refs.map(ref => ({...ref}));
+            this.selectedSearchMapLayersCache = refs.map(ref => ({ ...ref }));
         }
         return this.selectedSearchMapLayersCache;
     }
@@ -2694,7 +2692,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     /** Rebuilds the feature-type selector from the currently selected map/layer scope. */
     private refreshSearchFeatureTypeOptions(session?: FeatureSearchSession): void {
         const options = this.availableSearchFeatureTypes(session)
-            .map(featureType => ({label: featureType, value: featureType}));
+            .map(featureType => ({ label: featureType, value: featureType }));
         const signature = JSON.stringify(options.map(option => option.value));
         if (signature === this.featureSearchFeatureTypeOptionsSignature) {
             return;
@@ -2791,8 +2789,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private refreshSearchViewOptions(): void {
         const viewLabels = ["Left", "Right"];
         const options = Array.from(
-            {length: Math.min(this.viewSettings.numViews, viewLabels.length)},
-            (_, index) => ({label: viewLabels[index], value: index})
+            { length: Math.min(this.viewSettings.numViews, viewLabels.length) },
+            (_, index) => ({ label: viewLabels[index], value: index })
         );
         const signature = JSON.stringify(options);
         if (signature === this.searchViewOptionsSignature) {
@@ -3275,7 +3273,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             return;
         }
         if (this.isDocked()) {
-            this.panelDragRequest.emit({session, event});
+            this.panelDragRequest.emit({ session, event });
         } else {
             this.featureSearchDialog?.startDrag(event);
         }
@@ -3360,7 +3358,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
         if (this.session && this.searchEnabled() && this.session.definition.scope !== scope) {
             this.styleAttributeOptionsSessionSignature = "";
-            this.searchService.patchFeatureSearch(this.session.id, {scope});
+            this.searchService.patchFeatureSearch(this.session.id, { scope });
         }
     }
 
@@ -3648,7 +3646,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             const keepDockedSearchVisible = this.isDocked();
             const lockSelection = !!event?.originalEvent?.ctrlKey;
             const panelId = this.inspectionState.setSelection(
-                [{mapTileKey, featureId: selectedFeatureId}],
+                [{ mapTileKey, featureId: selectedFeatureId }],
                 undefined,
                 lockSelection,
                 keepDockedSearchVisible);
@@ -3669,7 +3667,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     /** Mirrors result-tree hover into the map hover highlighter, including attribute-validity suffixes. */
     protected hoverResultNode(node: TreeNode): void {
-        const data = node.data as {mapTileKey?: string; hoverFeatureId?: string} | undefined;
+        const data = node.data as { mapTileKey?: string; hoverFeatureId?: string } | undefined;
         if (!data?.mapTileKey || !data.hoverFeatureId) {
             return;
         }
@@ -3684,7 +3682,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.inspectionSelection.setHoveredFeatures([]);
     }
 
-    protected onResultTreeFilter(event: {filter?: string | null | undefined}): void {
+    protected onResultTreeFilter(event: { filter?: string | null | undefined }): void {
         this.resultTreeFilterValue = String(event?.filter ?? "");
     }
 
@@ -3904,13 +3902,13 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     /** Reads the cached aggregate count stored on a grouping node. */
     private groupNodeCount(node: TreeNode): number {
-        const data = node.data as {count?: number} | undefined;
+        const data = node.data as { count?: number } | undefined;
         return typeof data?.count === "number" ? data.count : 0;
     }
 
     /** Updates the displayed label and cached count for one grouping node. */
     private setGroupNodeCount(node: TreeNode, label: string, value: string | number, count: number): void {
-        node.data = {...(node.data ?? {}), count};
+        node.data = { ...(node.data ?? {}), count };
         node.label = `${label}: ${String(value)} (${count})`;
     }
 
@@ -3960,7 +3958,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 // while streamed ingress is still active; keep the leaf-heavy level closed.
                 expanded: this.resultTreeGroupExpandedByDefault(depth, selectedOrder),
                 children: [],
-                data: {count: 0}
+                data: { count: 0 }
             } as TreeNode;
             this.setGroupNodeCount(node, accessor.label, value, 0);
             nodes.push(node);
@@ -4206,7 +4204,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                     label: `${acc.label}: ${String(value)} (${childCount})`,
                     selectable: false,
                     expanded: this.resultTreeGroupExpandedByDefault(depth, selectedOrder),
-                    data: {count: childCount},
+                    data: { count: childCount },
                     children
                 } as TreeNode;
                 nodes.push(node);

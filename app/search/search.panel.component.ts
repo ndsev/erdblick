@@ -1,79 +1,45 @@
 import {
-AfterViewInit,
-ChangeDetectorRef,
-Component,
-ElementRef,
-HostListener,
-OnDestroy,
-Renderer2,
-ViewChild
+    AfterViewInit,
+    ChangeDetectorRef,
+    Component,
+    ElementRef,
+    HostListener,
+    OnDestroy,
+    Renderer2,
+    ViewChild
 } from "@angular/core";
-import { debounce,debounceTime,distinctUntilChanged,Subject,Subscription,switchMap,timer } from "rxjs";
-import {
-packedTileIdFromMortonString,
-packedTileIdFromParsedNdsCoordinates,
-parseMortonCoordinateString,
-parseNdsCoordinateString,
-parsePackedTileId as parsePackedTileIdValue
-} from "../coords/nds-coordinate.util";
-import { GeoMath,Rectangle } from "../integrations/geo";
-import { coreLib } from "../integrations/wasm";
-import { MapViewStateService } from "../mapview/map-view-state.service";
-import { MapViewService } from "../mapview/map-view.service";
+import { debounce, debounceTime, distinctUntilChanged, Subject, Subscription, switchMap, timer } from "rxjs";
+import { RegisteredActionCandidate } from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
 import { RightClickMenuService } from "../mapview/rightclickmenu.service";
 import { AppDialogComponent } from "../shared/app-dialog.component";
-import { AppStateService } from "../shared/appstate.service";
 import getCaretCoordinates from "../shared/caret.util";
 import { InfoMessageService } from "../shared/info.service";
 import { KeyboardService } from "../shared/keyboard.service";
 import {
-historyEntryDedupeKey,
-historyEntryKey,
-isLegacySearchHistoryEntry,
-LegacySearchHistoryEntry,
-normalizeResolvedSearchHistoryEntry,
-normalizeSearchHistoryEntry,
-normalizeSearchHistoryPayload,
-SearchHistoryEntry,
-withSearchHistoryActionName
+    historyEntryDedupeKey,
+    historyEntryKey,
+    isLegacySearchHistoryEntry,
+    LegacySearchHistoryEntry,
+    normalizeResolvedSearchHistoryEntry,
+    normalizeSearchHistoryEntry,
+    normalizeSearchHistoryPayload,
+    SearchHistoryEntry,
+    withSearchHistoryActionName
 } from "../shared/search-history";
 import {
-ExternalViewerLocation,
-ExternalViewerProvider,
-ExternalViewerService,
-ResolvedExternalViewerLocation
-} from "./external-viewer.service";
-import {
-featureSearchActionPayloadFromCompletion,
-FeatureSearchService
+    featureSearchActionPayloadFromCompletion,
+    FeatureSearchService
 } from "./feature.search.service";
 import {
-JumpTargetService,
-normalizeSearchJumpResult,
-SearchJump,
-SearchJumpResult,
-SearchTarget
+    JumpTargetService
 } from "./jump.service";
 import { LocationNavigationService } from "./location-navigation.service";
-import { isSupportedLocationSearchQuery,LocationSearchService,normalizeLocationSearchPayload } from "./location.search.service";
+import { isSupportedLocationSearchQuery, LocationSearchService } from "./location.search.service";
 import { CompletionCandidate } from "./search.model";
 
 interface SearchHistoryViewEntry extends SearchHistoryEntry {
     label: string;
-}
-
-interface ParsedCoordinateJump extends SearchJump {
-    label: string;
-    markerPosition: number[];
-    x?: number;
-    y?: number;
-    level?: number;
-}
-
-interface ParsedNdsCoordinateLabel {
-    x: number;
-    y: number;
-    level?: number;
 }
 
 interface SearchResizeSession {
@@ -213,12 +179,9 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     readonly searchActionsBaseZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX;
     searchResizeHandleZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 1;
 
-    searchItems: Array<SearchTarget> = [];
-    private locationSearchItems: Array<SearchTarget> = [];
-    private targetById = new Map<string, SearchTarget>();
-    private targetByIdInput = "";
-    activeSearchItems: Array<SearchTarget> = [];
-    inactiveSearchItems: Array<SearchTarget> = [];
+    searchItems: Array<RegisteredActionCandidate> = [];
+    activeSearchItems: Array<RegisteredActionCandidate> = [];
+    inactiveSearchItems: Array<RegisteredActionCandidate> = [];
     searchInputValue: string = "";
     searchHistory: Array<SearchHistoryViewEntry> = [];
     visibleSearchHistory: Array<SearchHistoryViewEntry> = [];
@@ -264,172 +227,35 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     private savedSelectionDirection: 'forward' | 'backward' | 'none' = 'none';
 
     /**
-     * Computes the static jump targets whose labels depend on the current query string.
-     */
-    public get staticTargets() {
-        return this.staticTargetsForValue(this.searchInputValue);
-    }
-
-    /** Builds static search targets for the current input value. */
-    private staticTargetsForValue(inputValue: string) {
-        const targetsArray: Array<SearchTarget> = [];
-        const value = inputValue.trim();
-
-        /////////// Jump to packed tile id
-        let label = "packedTileId = ?";
-        const packedTileIdValid = this.jumpService.validatePackedTileId(value);
-        if (packedTileIdValid) {
-            label = `packedTileId = ${value}`;
-        } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
-        }
-        targetsArray.push({
-            id: "j:packed-tile-id",
-            icon: "pi-table",
-            color: "green",
-            name: "PackedTileId",
-            label: label,
-            enabled: packedTileIdValid,
-            jump: (value: string) => { return this.parsePackedTileId(value) },
-            validate: (value: string) => { return this.jumpService.validatePackedTileId(value) }
-        });
-
-        /////////// Jump to NDS x-y
-        label = "x = ? | y = ? | (level = ?)";
-        const ndsXyValid = this.validateNdsCoordinates(value, true);
-        if (ndsXyValid) {
-            label = this.parseNdsCoordinates(value, true)!.label;
-        } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
-        }
-        targetsArray.push({
-            id: "j:nds-x-y",
-            icon: "pi-map-marker",
-            color: "green",
-            name: "NDS X-Y Coordinates",
-            label: label,
-            enabled: ndsXyValid,
-            jump: (value: string) => this.parseNdsCoordinates(value, true),
-            validate: (value: string) => { return this.validateNdsCoordinates(value, true) }
-        });
-
-        /////////// Jump to NDS y-x
-        label = "y = ? | x = ? | (level = ?)";
-        const ndsYxValid = this.validateNdsCoordinates(value, false);
-        if (ndsYxValid) {
-            label = this.parseNdsCoordinates(value, false)!.label;
-        } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
-        }
-        targetsArray.push({
-            id: "j:nds-y-x",
-            icon: "pi-map-marker",
-            color: "green",
-            name: "NDS Y-X Coordinates",
-            label: label,
-            enabled: ndsYxValid,
-            jump: (value: string) => this.parseNdsCoordinates(value, false),
-            validate: (value: string) => { return this.validateNdsCoordinates(value, false) }
-        });
-
-        /////////// Jump to Morton code
-        label = "mortonCode = ? | (level = ?)";
-        const mortonValid = this.validateMortonCoordinates(value);
-        if (mortonValid) {
-            label = this.parseMortonCoordinates(value)!.label;
-        } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
-        }
-        targetsArray.push({
-            id: "j:morton-code",
-            icon: "pi-map-marker",
-            color: "green",
-            name: "Morton Code Coordinates",
-            label: label,
-            enabled: mortonValid,
-            jump: (value: string) => this.parseMortonCoordinates(value),
-            validate: (value: string) => { return this.validateMortonCoordinates(value) }
-        });
-
-        /////////// Jump to lon-lat
-        label = "lon = ? | lat = ? | (level = ?)"
-        const lonLatValid = this.validateWGS84(value, true);
-        if (lonLatValid) {
-            label = this.parseWgs84Coordinates(value, true)!.label;
-        } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
-        }
-        targetsArray.push({
-            id: "j:wgs84-lon-lat",
-            icon: "pi-map-marker",
-            color: "green",
-            name: "WGS84 Lon-Lat Coordinates",
-            label: label,
-            enabled: lonLatValid,
-            jump: (value: string) => this.parseWgs84Coordinates(value, true),
-            validate: (value: string) => { return this.validateWGS84(value, true) }
-        });
-
-        /////////// Jump to lat-lon
-        label = "lat = ? | lon = ? | (level = ?)"
-        const latLonValid = this.validateWGS84(value, false);
-        if (latLonValid) {
-            label = this.parseWgs84Coordinates(value, false)!.label;
-        } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
-        }
-        targetsArray.push({
-            id: "j:wgs84-lat-lon",
-            icon: "pi-map-marker",
-            color: "green",
-            name: "WGS84 Lat-Lon Coordinates",
-            label: label,
-            enabled: latLonValid,
-            jump: (value: string) => this.parseWgs84Coordinates(value, false),
-            validate: (value: string) => { return this.validateWGS84(value, false) }
-        });
-
-        /////////// Open in external viewers
-        const externalLocation = this.externalViewerLocation(value);
-        for (const provider of this.externalViewerService.providers) {
-            targetsArray.push(this.externalViewerTarget(provider, externalLocation));
-        }
-        return targetsArray;
-    }
-
-    /**
      * Wires the omnibox to global keyboard shortcuts, jump-target updates, history persistence, and completion streams.
      */
     constructor(private renderer: Renderer2,
-                private elRef: ElementRef,
-                public mapService: MapViewService,
-                public stateService: AppStateService,
-                private keyboardService: KeyboardService,
-                private messageService: InfoMessageService,
-                private jumpService: JumpTargetService,
-                private menuService: RightClickMenuService,
-                public searchService: FeatureSearchService,
-                private locationSearchService: LocationSearchService,
-                private locationNavigation: LocationNavigationService,
-                private externalViewerService: ExternalViewerService,
-                private changeDetectorRef: ChangeDetectorRef,
+        private elRef: ElementRef,
+        private keyboardService: KeyboardService,
+        private messageService: InfoMessageService,
+        private jumpService: JumpTargetService,
+        private menuService: RightClickMenuService,
+        public searchService: FeatureSearchService,
+        private locationNavigation: LocationNavigationService,
+        private changeDetectorRef: ChangeDetectorRef,
         public readonly locationSearch: LocationSearchService,
-        public readonly viewSettings: MapViewStateService) {
+        private readonly actions: AppActionService) {
         this.keyboardService.registerShortcut("Ctrl+k", this.searchShortcutHandler);
 
         this.subscriptions.add(this.jumpService.targetValueSubject.subscribe((event: string) => {
+            this.setCurrentSearchItems(this.currentSearchItems());
             this.validateMenuItems();
         }));
 
-        this.subscriptions.add(this.jumpService.jumpTargets.subscribe((jumpTargets: Array<SearchTarget>) => {
-            this.setCurrentSearchItems(this.currentSearchItems(jumpTargets));
+        this.subscriptions.add(this.jumpService.targetsChanged.subscribe(() => {
+            this.setCurrentSearchItems(this.currentSearchItems());
             this.reloadSearchHistory();
             this.refreshSearchMenu();
         }));
 
         this.subscriptions.add(this.locationSearchQueryChanged.pipe(
-            debounce(() => timer(this.locationSearchService.debounceMs)),
-            switchMap(query => this.locationSearchService.search(query, this.locationSearch.locationSearchResultLimit))
+            debounce(() => timer(this.locationSearch.debounceMs)),
+            switchMap(query => this.locationSearch.search(query, this.locationSearch.locationSearchResultLimit))
         ).subscribe(matches => {
             const completedQuery = this.searchInputValue.trim();
             // A cached provider can complete synchronously while Angular is
@@ -441,9 +267,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                     !this.shouldRequestLocationSearch(this.searchInputValue)) {
                     return;
                 }
-                this.locationSearchItems = matches.map(match =>
-                    this.locationSearchService.createSearchTarget(match)
-                );
+                this.locationNavigation.updateSuggestions(completedQuery, matches);
                 this.setCurrentSearchItems(this.currentSearchItems());
                 this.reloadSearchHistory();
                 this.refreshSearchMenu();
@@ -664,72 +488,31 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.runTarget(entry);
         this.dialog?.close(new Event("close-on-execute"));
     }
-
-    /** Returns search targets applicable to an input value. */
-    private searchItemsForValue(value: string): Array<SearchTarget> {
-        const locationItems = value === this.searchInputValue ? this.locationSearchItems : [];
-        return [
-            ...this.jumpService.getJumpTargetsForValue(value),
-            ...locationItems,
-            ...this.staticTargetsForValue(value)
-        ];
+    /** Choices are regenerated by the same registered owners that execute them. */
+    private searchItemsForValue(value: string): RegisteredActionCandidate[] {
+        return this.actions.getCandidates(value);
     }
-
-    /** Builds the search menu from current jump targets, async location matches, and static local actions. */
-    private currentSearchItems(jumpTargets: Array<SearchTarget> = this.jumpService.jumpTargets.getValue()): Array<SearchTarget> {
-        return [
-            ...jumpTargets,
-            ...this.locationSearchItems,
-            ...this.staticTargets
-        ];
+    private currentSearchItems(): RegisteredActionCandidate[] {
+        return this.searchItemsForValue(this.searchInputValue);
     }
-
-    /** Indexes search targets by id while ignoring duplicates. */
-    private buildTargetById(targets: Array<SearchTarget>): Map<string, SearchTarget> {
-        const result = new Map<string, SearchTarget>();
-        for (const target of targets) {
-            if (!target.id) {
-                throw new Error(`Search target is missing a stable id: ${target.name}`);
-            }
-            if (result.has(target.id)) {
-                throw new Error(`Duplicate search target id: ${target.id}`);
-            }
-            result.set(target.id, target);
-        }
-        return result;
-    }
-
-    /** Stores the current search targets and their id index. */
-    private setCurrentSearchItems(searchItems: Array<SearchTarget>, input: string = this.searchInputValue) {
+    private setCurrentSearchItems(searchItems: RegisteredActionCandidate[]): void {
         this.searchItems = searchItems;
-        this.targetById = this.buildTargetById(searchItems);
-        this.targetByIdInput = input;
     }
-
-    /** Finds the current search target represented by a history entry. */
-    private resolveTargetForEntry(entry: SearchHistoryEntry): SearchTarget | undefined {
-        const locationPayload = normalizeLocationSearchPayload(entry.payload);
-        if (locationPayload) {
-            const locationTarget = this.locationSearchService.createSearchTarget(locationPayload);
-            if (locationTarget.id === entry.actionId) {
-                return locationTarget;
-            }
-        }
-        if (entry.input === this.targetByIdInput) {
-            return this.targetById.get(entry.actionId);
-        }
-        return this.buildTargetById(this.searchItemsForValue(entry.input)).get(entry.actionId);
+    /** Resolve live identities and saved payloads afresh; stale displayed choices are never reused. */
+    private resolveTargetForEntry(entry: SearchHistoryEntry): RegisteredActionCandidate | undefined {
+        return this.actions.getCandidates(entry.input, { id: entry.actionId, payload: entry.payload })
+            .find(candidate => candidate.id === entry.actionId);
     }
 
     /** Creates a persisted history entry for a selected target. */
-    private searchHistoryEntryForTarget(target: SearchTarget, input: string): SearchHistoryEntry | null {
+    private searchHistoryEntryForTarget(target: RegisteredActionCandidate, input: string): SearchHistoryEntry | null {
         const trimmedInput = input.trim();
         if (!trimmedInput) {
             return null;
         }
         const payload = normalizeSearchHistoryPayload(
             target.id === "features"
-                ? this.featureSearchPayloadForInput(trimmedInput) ?? target.payload
+                ? this.searchService.actionPayloadForHistory(this.featureSearchPayloadForInput(trimmedInput) ?? target.payload)
                 : target.payload
         );
         return {
@@ -737,7 +520,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             actionId: target.id,
             input: trimmedInput,
             actionName: target.name,
-            ...(payload !== undefined ? {payload} : {}),
+            ...(payload !== undefined ? { payload } : {}),
             savedAt: Date.now()
         };
     }
@@ -753,7 +536,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     /** Converts a legacy index-based history entry to target-id form. */
     private migrateLegacySearchHistoryEntry(entry: LegacySearchHistoryEntry): SearchHistoryEntry | null {
         const [index, input] = entry;
-        const targets = this.searchItemsForValue(input);
+        const legacyOrder = ["search_feature_input", "inspect_source_input", "jump_feature_input", "jump_plugin_input",
+            "navigate_location_result", "jump_coordinates", "open_external_viewer"];
+        const targets = this.searchItemsForValue(input)
+            .filter(target => legacyOrder.includes(target.action))
+            .sort((left, right) => legacyOrder.indexOf(left.action) - legacyOrder.indexOf(right.action));
         if (index < 0 || index >= targets.length) {
             return null;
         }
@@ -853,9 +640,9 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 version: 2 as const,
                 actionId: viewEntry.actionId,
                 input: viewEntry.input,
-                ...(viewEntry.actionName ? {actionName: viewEntry.actionName} : {}),
-                ...(viewEntry.payload !== undefined ? {payload: viewEntry.payload} : {}),
-                ...(viewEntry.savedAt !== undefined ? {savedAt: viewEntry.savedAt} : {})
+                ...(viewEntry.actionName ? { actionName: viewEntry.actionName } : {}),
+                ...(viewEntry.payload !== undefined ? { payload: viewEntry.payload } : {}),
+                ...(viewEntry.savedAt !== undefined ? { savedAt: viewEntry.savedAt } : {})
             };
             const dedupeKey = historyEntryDedupeKey(refreshedEntry);
             if (seenKeys.has(dedupeKey)) {
@@ -891,300 +678,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             version: 2,
             actionId: historyEntry.actionId,
             input: historyEntry.input,
-            ...(historyEntry.actionName ? {actionName: historyEntry.actionName} : {}),
-            ...(historyEntry.payload !== undefined ? {payload: historyEntry.payload} : {}),
-            ...(historyEntry.savedAt !== undefined ? {savedAt: historyEntry.savedAt} : {})
+            ...(historyEntry.actionName ? { actionName: historyEntry.actionName } : {}),
+            ...(historyEntry.payload !== undefined ? { payload: historyEntry.payload } : {}),
+            ...(historyEntry.savedAt !== undefined ? { savedAt: historyEntry.savedAt } : {})
         })));
         this.reloadSearchHistory();
-    }
-
-    /**
-     * Parses decimal or degree-minute-second WGS84 coordinate strings, optionally with a tile level.
-     */
-    parseWgs84Coordinates(coordinateString: string, isLonLat: boolean): ParsedCoordinateJump | undefined {
-        let lon = 0;
-        let lat = 0;
-        let level = 0;
-        let isMatched = false;
-        coordinateString = coordinateString.trim();
-
-        // WGS (decimal)
-        let exp = /^[^\d-]*(-?\d+(?:\.\d*)?)[^\d-]+(-?\d+(?:\.\d*)?)[^\d\.]*(\d+)?[^\d]*$/g;
-        let matches = [...coordinateString.matchAll(exp)];
-        if (matches.length > 0) {
-            let matchResults = matches[0];
-            if (matchResults.length >= 3) {
-                if (isLonLat) {
-                    lon = Number(matchResults[1]);
-                    lat = Number(matchResults[2]);
-                } else {
-                    lon = Number(matchResults[2]);
-                    lat = Number(matchResults[1]);
-                }
-
-                if (matchResults.length >= 4 && matchResults[3] !== undefined) {
-                    // Zoom level provided.
-                    level = Math.max(1, Math.min(Number(matchResults[3].toString()), 14));
-                }
-                isMatched = true;
-            }
-        }
-
-        // WGS (degree)
-        if (!isMatched) {
-            if (isLonLat) {
-                exp = /((?:[0-9]{0,1}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])\s*((?:[0-9]{0,2}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])[^\d\.]*(\d+)?[^\d]*$/g
-            } else {
-                exp = /((?:[0-9]{0,2}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([NS])\s*((?:[0-9]{0,1}[0-9])(?:.{1}[0-9]*)?)[º°]([0-5]{0,1}[0-9])'((?:[0-5]{0,1}[0-9])(?:.{1}[0-9][0-9]{0,3})?)["]([WE])[^\d\.]*(\d+)?[^\d]*$/g;
-            }
-            matches = [...coordinateString.matchAll(exp)];
-        }
-        if (!isMatched && matches.length > 0) {
-            let matchResults = matches[0];
-            if (matchResults.length >= 9) {
-                let degreeLon = isLonLat ? Number(matchResults[1]) : Number(matchResults[5]);
-                let minutesLon = isLonLat ? Number(matchResults[2]) : Number(matchResults[6]);
-                let secondsLon = isLonLat ? Number(matchResults[3]) : Number(matchResults[7]);
-                let degreeLat = isLonLat ? Number(matchResults[5]) : Number(matchResults[1]);
-                let minutesLat = isLonLat ? Number(matchResults[6]) : Number(matchResults[2]);
-                let secondsLat = isLonLat ? Number(matchResults[7]) : Number(matchResults[3]);
-
-                lat = degreeLat + (minutesLat * 60.0 + secondsLat) / 3600.0;
-                if (matchResults[4][0] == 'S') {
-                    lat = -lat;
-                }
-
-                lon = degreeLon + (minutesLon * 60.0 + secondsLon) / 3600.0;
-                if (matchResults[8][0] == 'W') {
-                    lon = -lon;
-                }
-
-                if (matchResults.length >= 10 && matchResults[9] !== undefined) {
-                    // Zoom level provided.
-                    level = Math.max(1, Math.min(Number(matchResults[9].toString()), 14));
-                }
-
-                isMatched = true;
-            }
-        }
-
-        if (isMatched) {
-            if (level) {
-                const tileId = coreLib.getTileIdFromPosition(lon, lat, level);
-                return {
-                    target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
-                    label: isLonLat ? `lon = ${lon} | lat = ${lat} | level = ${level}` : `lat = ${lat} | lon = ${lon} | level = ${level}`,
-                    markerPosition: [lat, lon]
-                };
-            }
-            return {
-                target: [lat, lon, 0],
-                label: isLonLat ? `lon = ${lon} | lat = ${lat}` : `lat = ${lat} | lon = ${lon}`,
-                markerPosition: [lat, lon]
-            };
-        }
-        return undefined;
-    }
-
-    /** Converts a signed NDS.Live packed tile id into a WGS84 rectangle for camera jumps. */
-    parsePackedTileId(value: string): Rectangle | undefined {
-        if (!value) {
-            this.messageService.showError("No value provided!");
-            return;
-        }
-        try {
-            const packedTileId = parsePackedTileIdValue(value);
-            if (!packedTileId) {
-                throw new Error("TileId is not a valid PackedTileId.");
-            }
-            return Rectangle.fromDegrees(...coreLib.getTileBox(packedTileId.value));
-        } catch (e) {
-            this.messageService.showError("Possibly malformed PackedTileId: " + (e as Error).message.toString());
-        }
-        return undefined;
-    }
-
-    /** Parses NDS coordinate pairs into either a point jump or a tile-extent jump when a level is present. */
-    parseNdsCoordinates(value: string, isXyOrder: boolean): ParsedCoordinateJump | undefined {
-        const parsed = parseNdsCoordinateString(value, isXyOrder);
-        if (!parsed) {
-            return undefined;
-        }
-        const label = this.ndsCoordinateLabel(parsed, isXyOrder);
-        if (parsed.level !== undefined) {
-            const tileId = packedTileIdFromParsedNdsCoordinates(parsed);
-            if (tileId === undefined) {
-                return undefined;
-            }
-            return {
-                target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
-                label,
-                markerPosition: [parsed.lat, parsed.lon],
-                x: parsed.x,
-                y: parsed.y,
-                level: parsed.level
-            };
-        }
-        return {
-            target: [parsed.lat, parsed.lon, 0],
-            label,
-            markerPosition: [parsed.lat, parsed.lon],
-            x: parsed.x,
-            y: parsed.y
-        };
-    }
-
-    /** Parses a Morton code into either a point jump or a tile-extent jump when a level is present. */
-    parseMortonCoordinates(value: string): ParsedCoordinateJump | undefined {
-        const parsed = parseMortonCoordinateString(value);
-        if (!parsed) {
-            return undefined;
-        }
-        const label = this.mortonCoordinateLabel(parsed);
-        if (parsed.level !== undefined) {
-            const tileId = packedTileIdFromMortonString(value);
-            if (tileId === undefined) {
-                return undefined;
-            }
-            return {
-                target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
-                label,
-                markerPosition: [parsed.lat, parsed.lon],
-                x: parsed.x,
-                y: parsed.y,
-                level: parsed.level
-            };
-        }
-        return {
-            target: [parsed.lat, parsed.lon, 0],
-            label,
-            markerPosition: [parsed.lat, parsed.lon],
-            x: parsed.x,
-            y: parsed.y
-        };
-    }
-
-    /** Builds the search-action label for parsed NDS coordinate input. */
-    private ndsCoordinateLabel(parsed: ParsedNdsCoordinateLabel, isXyOrder: boolean): string {
-        const ordered = isXyOrder
-            ? `x = ${parsed.x} | y = ${parsed.y}`
-            : `y = ${parsed.y} | x = ${parsed.x}`;
-        return parsed.level === undefined ? ordered : `${ordered} | level = ${parsed.level}`;
-    }
-
-    /** Builds the search-action label for parsed Morton-code input. */
-    private mortonCoordinateLabel(parsed: ParsedNdsCoordinateLabel): string {
-        const base = `x = ${parsed.x} | y = ${parsed.y}`;
-        return parsed.level === undefined ? base : `${base} | level = ${parsed.level}`;
-    }
-
-    /**
-     * Dispatches the parsed jump target either as a camera move or a rectangle fit request.
-     */
-    jumpToLocation(result: SearchJumpResult | undefined, label?: string | null) {
-        if (result === undefined) {
-            this.messageService.showError("Could not parse coordinates from the input.");
-            return;
-        }
-        const jump = normalizeSearchJumpResult(result);
-        const coordinates = jump.target;
-        const targetViewIndex = this.viewSettings.focusedView;
-        if (Array.isArray(coordinates)) {
-            let lat = coordinates[0];
-            let lon = coordinates[1];
-            const cameraView = this.viewSettings.cameraViewDataState.getValue(targetViewIndex);
-            let alt = coordinates[2] ? coordinates[2] : cameraView.destination.alt;
-
-            this.mapService.moveToWgs84PositionTopic.next({
-                x: lon,
-                y: lat,
-                z: alt,
-                targetView: targetViewIndex
-            });
-            if (label) {
-                this.mapService.showLocationLabelTopic.next({
-                    targetView: targetViewIndex,
-                    x: lon,
-                    y: lat,
-                    label
-                });
-            }
-        } else {
-            this.mapService.moveToRectangleTopic.next({
-                targetView: targetViewIndex,
-                rectangle: {
-                    west: GeoMath.toDegrees(coordinates.west),
-                    south: GeoMath.toDegrees(coordinates.south),
-                    east: GeoMath.toDegrees(coordinates.east),
-                    north: GeoMath.toDegrees(coordinates.north),
-                }
-            });
-        }
-        if (jump.markerPosition) {
-            this.jumpService.markedPosition.next(jump.markerPosition);
-        }
-    }
-
-    /** Builds one omnibox action for a configured external map viewer. */
-    private externalViewerTarget(
-        provider: ExternalViewerProvider,
-        location: ResolvedExternalViewerLocation | undefined
-    ): SearchTarget {
-        return {
-            id: provider.id,
-            icon: "pi-map-marker",
-            color: "green",
-            name: provider.name,
-            label: location
-                ? this.externalViewerLabel(location)
-                : `lat = ? | lon = ?<br><span class="search-option-warning">Invalid coordinates</span>`,
-            enabled: location !== undefined,
-            acceptsEmptyInput: true,
-            saveToHistory: (input: string) => this.explicitExternalViewerLocation(input) !== undefined,
-            execute: (input: string) => {
-                const resolved = this.externalViewerLocation(input);
-                if (resolved) {
-                    this.externalViewerService.open(provider, resolved);
-                }
-            },
-            validate: (input: string) => this.externalViewerLocation(input) !== undefined
-        };
-    }
-
-    /** Formats the coordinate and fallback source shown below an external-viewer action. */
-    private externalViewerLabel(location: ResolvedExternalViewerLocation): string {
-        const sourceLabels = {
-            input: "search input",
-            marker: "current marker",
-            viewport: "viewport centre"
-        } as const;
-        return `lat = ${location.lat} | lon = ${location.lon} | ${sourceLabels[location.source]}`;
-    }
-
-    /** Resolves valid explicit coordinates or applies the shared marker/viewport fallback. */
-    private externalViewerLocation(value: string): ResolvedExternalViewerLocation | undefined {
-        const explicit = this.explicitExternalViewerLocation(value);
-        if (explicit) {
-            return this.externalViewerService.resolveLocation(explicit);
-        }
-        if (this.looksLikeCoordinateInput(value)) {
-            return undefined;
-        }
-        return this.externalViewerService.resolveLocation();
-    }
-
-    /** Returns a valid explicit latitude/longitude input without applying fallback behavior. */
-    private explicitExternalViewerLocation(value: string): ExternalViewerLocation | undefined {
-        const parsed = this.parseWgs84Coordinates(value, false);
-        if (!parsed || !this.validateWGS84(value, false)) {
-            return undefined;
-        }
-        return {lat: parsed.markerPosition[0], lon: parsed.markerPosition[1]};
-    }
-
-    /** Distinguishes malformed two-coordinate input from ordinary search text. */
-    private looksLikeCoordinateInput(value: string): boolean {
-        return (value.match(/-?\d+(?:\.\d+)?/g) ?? []).length >= 2;
     }
 
     /**
@@ -1192,28 +690,6 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
      */
     validateMenuItems() {
         this.searchItems.forEach(item => item.enabled = this.canRunTarget(item, this.searchInputValue));
-    }
-
-    /**
-     * Validates coordinate inputs by parsing them and checking geographic bounds.
-     */
-    validateWGS84(value: string, isLonLat: boolean = false) {
-        const result = this.parseWgs84Coordinates(value, isLonLat);
-        if (result) {
-            return result.markerPosition[0] >= -90 && result.markerPosition[0] <= 90 &&
-                result.markerPosition[1] >= -180 && result.markerPosition[1] <= 180;
-        }
-        return false;
-    }
-
-    /** Validates integer NDS coordinate input accepted by the built-in NDS jump targets. */
-    validateNdsCoordinates(value: string, isXyOrder: boolean) {
-        return this.parseNdsCoordinates(value, isXyOrder) !== undefined;
-    }
-
-    /** Validates Morton-code input accepted by the built-in Morton jump target. */
-    validateMortonCoordinates(value: string) {
-        return this.parseMortonCoordinates(value) !== undefined;
     }
 
     /**
@@ -1264,17 +740,10 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.updateLocationSearchQuery(value);
         this.refreshSearchMenu();
     }
-
-    /** Requests place completions only for Unicode name-like queries, not numeric ids or ZIP codes. */
     private updateLocationSearchQuery(value: string): void {
-        if (this.shouldRequestLocationSearch(value)) {
-            this.locationSearchQueryChanged.next(value.trim());
-            return;
-        }
-        if (this.locationSearchItems.length) {
-            this.locationSearchItems = [];
-            this.setCurrentSearchItems(this.currentSearchItems());
-        }
+        this.locationNavigation.updateSuggestions(value.trim(), []);
+        this.setCurrentSearchItems(this.currentSearchItems());
+        if (this.shouldRequestLocationSearch(value)) this.locationSearchQueryChanged.next(value.trim());
     }
 
     /** Returns whether the current input is suitable for the configured place-name providers. */
@@ -1319,7 +788,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     /**
      * Resolves the pending multi-map selection dialog used by jump targets.
      */
-    setSelectedMap(value: string|null) {
+    setSelectedMap(value: string | null) {
         this.jumpService.setSelectedMap!(value);
         this.mapSelectionVisible = false;
     }
@@ -1327,12 +796,12 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     /**
      * Persists the currently selected target and input so the central search-state flow executes it.
      */
-    targetToHistory(target: SearchTarget) {
+    targetToHistory(target: RegisteredActionCandidate) {
         if (!this.canRunTarget(target, this.searchInputValue)) {
             return;
         }
         const entry = this.searchHistoryEntryForTarget(target, this.searchInputValue);
-        if (entry && (target.saveToHistory?.(this.searchInputValue) ?? true)) {
+        if (entry && (target.saveToHistory ?? true)) {
             this.executeAndRememberSearchEntry(entry);
             return;
         }
@@ -1346,54 +815,36 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     }
 
     /** Source/license links are independently actionable inside a location-result row. */
-    protected onSearchTargetClick(event: Event, target: SearchTarget): void {
+    protected onSearchTargetClick(event: Event, target: RegisteredActionCandidate): void {
         if (event.target instanceof Element && event.target.closest("a")) return;
         this.targetToHistory(target);
     }
 
     /** Returns whether a target can run for the supplied input, including empty-input actions. */
-    private canRunTarget(target: SearchTarget, input: string): boolean {
-        return (!!input.trim() || target.acceptsEmptyInput === true) && target.validate(input);
+    private canRunTarget(target: RegisteredActionCandidate, input: string): boolean {
+        return (!!input.trim() || target.acceptsEmptyInput === true) && target.enabled;
     }
-
-    /**
-     * Executes the chosen search target by either jumping locally or delegating to its side-effect callback.
-     */
-    runTarget(entry: SearchHistoryEntry) {
+    runTarget(entry: SearchHistoryEntry): void {
         this.locationNavigation.cancel();
         const item = this.resolveTargetForEntry(entry);
         if (!item) {
-            if (this.locationSearchService.isLocationTargetId(entry.actionId)) {
-                this.locationNavigation.navigate(entry.actionId, entry.payload);
-                return;
-            }
             this.messageService.showError("Search action is no longer available");
             return;
         }
         this.executeResolvedTarget(item, entry);
     }
-
-    /** Executes an already resolved target. */
-    private executeResolvedTarget(item: SearchTarget, entry: SearchHistoryEntry) {
+    /** The UI supplies presentation/history; argument validation and dispatch stay in AppActionService. */
+    private executeResolvedTarget(item: RegisteredActionCandidate, entry: SearchHistoryEntry): void {
         this.locationNavigation.cancel();
-        if (!item.validate(entry.input)) {
+        if (!this.canRunTarget(item, entry.input)) {
             this.messageService.showError("Search action is not valid for the stored input");
             return;
         }
-        if (this.locationSearchService.isLocationTargetId(item.id)) {
-            this.locationNavigation.navigate(item.id, entry.payload ?? item.payload);
-            return;
-        }
-        if (item.jump !== undefined) {
-            const payload = entry.payload ?? item.payload;
-            this.jumpToLocation(item.jump(entry.input, payload), this.locationSearchService.labelFromPayload(payload));
-            return;
-        }
-
-        if (item.execute !== undefined) {
-            item.execute(entry.input, entry.payload ?? item.payload);
-            return;
-        }
+        const failed = (error: unknown) => this.messageService.showError(error instanceof Error ? error.message : String(error));
+        try {
+            const result = this.actions.execute(item.action, item.input);
+            if (result instanceof Promise) result.catch(failed);
+        } catch (error) { failed(error); }
     }
 
     /**
@@ -1432,7 +883,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         this.savedSelectionStart = this.textarea.nativeElement.selectionStart || 0;
         this.savedSelectionEnd = this.textarea.nativeElement.selectionEnd || 0;
         this.savedSelectionDirection = (this.textarea.nativeElement.selectionDirection as 'forward' | 'backward' | 'none') || 'none';
-        
+
         setTimeout(() => {
             this.completion.visible = false;
             this.completion.pending = false;
@@ -1609,9 +1060,9 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             version: 2,
             actionId: entry.actionId,
             input: entry.input,
-            ...(entry.actionName ? {actionName: entry.actionName} : {}),
-            ...(entry.payload !== undefined ? {payload: entry.payload} : {}),
-            ...(entry.savedAt !== undefined ? {savedAt: entry.savedAt} : {})
+            ...(entry.actionName ? { actionName: entry.actionName } : {}),
+            ...(entry.payload !== undefined ? { payload: entry.payload } : {}),
+            ...(entry.savedAt !== undefined ? { savedAt: entry.savedAt } : {})
         });
     }
 

@@ -1,27 +1,29 @@
-import { AfterViewInit,Component,ElementRef,NgZone,OnDestroy,ViewChild } from '@angular/core';
+import { AfterViewInit, Component, ElementRef, NgZone, OnDestroy, ViewChild } from '@angular/core';
 import { MenuItem } from "primeng/api";
 import { Subscription } from 'rxjs';
 import { DiagnosticsFacadeService } from './diagnostics/diagnostics.facade.service';
 import { environment } from './environments/environment';
 import { MapInfoService } from './mapdata/map-info.service';
+import {
+    VIEW_SYNC_LAYERS,
+    VIEW_SYNC_MOVEMENT,
+    VIEW_SYNC_POSITION,
+    VIEW_SYNC_PROJECTION
+} from "./mapview/map-view-state.model";
 import { MapViewStateService } from "./mapview/map-view-state.service";
 import { MapViewService } from './mapview/map-view.service';
 import { FeatureSearchService } from "./search/feature.search.service";
-import { AppLayoutService } from "./shared/app-layout.service";
 import {
-ABOUT_DIALOG_LAYOUT_ID,
-AppStateService,
-CACHE_RESET_DIALOG_LAYOUT_ID,
-DATASOURCES_EDITOR_DIALOG_LAYOUT_ID,
-KEYBOARD_DIALOG_LAYOUT_ID,
-LEGAL_INFO_DIALOG_LAYOUT_ID,
-PREFERENCES_DIALOG_LAYOUT_ID,
-STYLES_DIALOG_LAYOUT_ID,
-VIEW_SYNC_LAYERS,
-VIEW_SYNC_MOVEMENT,
-VIEW_SYNC_POSITION,
-VIEW_SYNC_PROJECTION
-} from './shared/appstate.service';
+    ABOUT_DIALOG_LAYOUT_ID,
+    CACHE_RESET_DIALOG_LAYOUT_ID,
+    DATASOURCES_EDITOR_DIALOG_LAYOUT_ID,
+    KEYBOARD_DIALOG_LAYOUT_ID,
+    LEGAL_INFO_DIALOG_LAYOUT_ID,
+    PREFERENCES_DIALOG_LAYOUT_ID,
+    STYLES_DIALOG_LAYOUT_ID
+} from "./shared/app-layout.model";
+import { AppLayoutService } from "./shared/app-layout.service";
+import { AppStateService } from "./shared/appstate.service";
 import { InfoMessageService } from "./shared/info.service";
 import { StyleEditorRequestService } from "./styledata/style-editor-request.service";
 import { StyleService } from "./styledata/style.service";
@@ -140,15 +142,15 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     }
 
     constructor(public mapService: MapInfoService,
-                public stateService: AppStateService,
-                private mapViewState: MapViewService,
-                private diagnostics: DiagnosticsFacadeService,
-                private featureSearchService: FeatureSearchService,
-                private styleService: StyleService,
-                private styleEditorRequestService: StyleEditorRequestService,
-                private infoMessageService: InfoMessageService,
-                private elementRef: ElementRef<HTMLElement>,
-                private ngZone: NgZone,
+        public stateService: AppStateService,
+        private mapViewState: MapViewService,
+        private diagnostics: DiagnosticsFacadeService,
+        private featureSearchService: FeatureSearchService,
+        private styleService: StyleService,
+        private styleEditorRequestService: StyleEditorRequestService,
+        private infoMessageService: InfoMessageService,
+        private elementRef: ElementRef<HTMLElement>,
+        private ngZone: NgZone,
         public readonly layout: AppLayoutService,
         public readonly viewSettings: MapViewStateService,
         public readonly searchService: FeatureSearchService) {
@@ -563,7 +565,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         disabled: !editStyleSheetItems.length,
                         items: editStyleSheetItems
                     },
-                    {separator: true},
+                    { separator: true },
                     {
                         name: 'Datasources',
                         icon: 'data_table',
@@ -704,13 +706,13 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         if (!styles.length) {
             return [];
         }
-        const root: StyleSheetMenuNode = {name: "", children: new Map()};
+        const root: StyleSheetMenuNode = { name: "", children: new Map() };
         for (const style of styles) {
             let current = root;
             for (const segment of this.styleSheetMenuSegments(style.id)) {
                 let child = current.children.get(segment);
                 if (!child) {
-                    child = {name: segment, children: new Map()};
+                    child = { name: segment, children: new Map() };
                     current.children.set(segment, child);
                 }
                 current = child;

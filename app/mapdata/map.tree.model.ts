@@ -1,22 +1,22 @@
 import { Subscription } from "rxjs";
-import { filter,take } from "rxjs/operators";
+import { filter, take } from "rxjs/operators";
+import {
+    clampTileGridLevel,
+    clampTileGridOpacity,
+    normalizeTileGridColor,
+    TileGridMode
+} from "../mapview/map-view-state.model";
 import { MapViewStateService } from "../mapview/map-view-state.service";
-import {
-AppStateService,
-clampTileGridLevel,
-clampTileGridOpacity,
-LayerViewConfig,
-normalizeTileGridColor,
-TileGridMode
-} from "../shared/appstate.service";
+import { AppStateService } from "../shared/appstate.service";
 import { LayerPresetRef } from "../styledata/layer-preset.model";
-import { MapPresetDefinition,MapPresetLayer } from "../styledata/map-preset.model";
+import { MapPresetDefinition, MapPresetLayer } from "../styledata/map-preset.model";
 import {
-MapPresetService,
-NO_PRESET_ID,
-ResolvedLayerPreset
+    MapPresetService,
+    NO_PRESET_ID,
+    ResolvedLayerPreset
 } from "../styledata/map-preset.service";
-import { ErdblickStyle,FeatureStyleOptionWithStringType,StyleService } from "../styledata/style.service";
+import { ErdblickStyle, FeatureStyleOptionWithStringType, StyleService } from "../styledata/style.service";
+import { LayerViewConfig } from "./map-layer-state.model";
 import { MapLayerStateService } from "./map-layer-state.service";
 
 export type DataSourceCatalogStatus = "initializing" | "ready" | "failed";
@@ -97,7 +97,7 @@ export function dataSourceProgressPercent(item: Pick<MapInfoItem, "progress">): 
 /** Sorts catalog snapshots in config order while keeping legacy entries stable at the end. */
 export function sortDataSourceCatalogEntries(entries: MapInfoItem[]): MapInfoItem[] {
     return entries
-        .map((entry, index) => ({entry, index}))
+        .map((entry, index) => ({ entry, index }))
         .sort((lhs, rhs) => {
             const lhsIndex = Number.isFinite(lhs.entry.configIndex)
                 ? Number(lhs.entry.configIndex)
@@ -107,7 +107,7 @@ export function sortDataSourceCatalogEntries(entries: MapInfoItem[]): MapInfoIte
                 : Number.MAX_SAFE_INTEGER;
             return lhsIndex - rhsIndex || lhs.index - rhs.index;
         })
-        .map(({entry}) => entry);
+        .map(({ entry }) => entry);
 }
 
 /** Tree node that mirrors one style option entry for a concrete map/layer pairing. */
@@ -118,7 +118,7 @@ export class StyleOptionNode {
     info: FeatureStyleOptionWithStringType;
     mapId: string;
     layerId: string;
-    value: (boolean|number|string)[] = [];
+    value: (boolean | number | string)[] = [];
     shortStyleId: string;
     styleId: string;
     styleOptionGroupId: string;
@@ -154,7 +154,7 @@ export class LayerPresetNode {
     readonly mapId: string;
     readonly layerId: string;
     readonly presets: ResolvedLayerPreset[];
-    readonly selectOptions: Array<{label: string; value: string}>;
+    readonly selectOptions: Array<{ label: string; value: string }>;
     selectedPresetKeys: string[] = [];
     expandedPresetOptions: boolean[] = [];
 
@@ -169,8 +169,8 @@ export class LayerPresetNode {
         this.key = `${mapId}/${layerId}/layer-preset`;
         this.presets = presets;
         this.selectOptions = [
-            {label: "Custom options", value: NO_PRESET_ID},
-            ...presets.map(preset => ({label: `${preset.styleId} — ${preset.name}`, value: preset.key}))
+            { label: "Custom options", value: NO_PRESET_ID },
+            ...presets.map(preset => ({ label: `${preset.styleId} — ${preset.name}`, value: preset.key }))
         ];
     }
 }
@@ -263,7 +263,7 @@ export class MapTreeNode {
     expanded: boolean = true;
     visible: boolean[] = [];  // This is an array, because the values are stored per MapView.
     mapPresets: MapPresetDefinition[] = [];
-    mapPresetOptions: Array<{label: string; value: string}> = [{label: "Custom options", value: NO_PRESET_ID}];
+    mapPresetOptions: Array<{ label: string; value: string }> = [{ label: "Custom options", value: NO_PRESET_ID }];
     selectedMapPresetIds: string[] = [];
 
     /** Materializes layer child nodes once so the tree can be reconfigured without rebuilding metadata. */
@@ -271,7 +271,7 @@ export class MapTreeNode {
         this.info = mapInfo;
         this.key = mapInfo.mapId;
         this.id = mapInfo.mapId;
-        this.layers =  new Map(Object.entries(mapInfo.layers).map(([_, layerInfo]) =>
+        this.layers = new Map(Object.entries(mapInfo.layers).map(([_, layerInfo]) =>
             [layerInfo.layerId, new LayerTreeNode(layerInfo, mapInfo.mapId)])
         );
         this.onlyFeatureLayers = Array.from(this.layers.values().filter(layer => layer.type !== "SourceData"));
@@ -291,10 +291,10 @@ export class MapTreeNode {
         // based on the view config state of the layers. We must assume
         // that all layers have the same number of view config entries.
         if (!this.children.length) {
-            this.visible = Array.from({length: numViews}, () => false);
+            this.visible = Array.from({ length: numViews }, () => false);
             return;
         }
-        this.visible = Array.from({length: numViews}, () => false);
+        this.visible = Array.from({ length: numViews }, () => false);
         for (const child of this.children) {
             if (child.type === "SourceData") {
                 continue;
@@ -344,10 +344,10 @@ export class GroupTreeNode {
         // based on the view config state of the maps. We must assume
         // that all maps have the same number of view config entries.
         if (!this.children.length) {
-            this.visible = Array.from({length: numViews}, () => false);
+            this.visible = Array.from({ length: numViews }, () => false);
             return;
         }
-        this.visible = Array.from({length: numViews}, () => false);
+        this.visible = Array.from({ length: numViews }, () => false);
         for (const child of this.children) {
             child.updateVisibilityFromChildren(numViews);
             this.visible = this.visible.map((v, i) => v || child.visible[i]);
@@ -434,7 +434,7 @@ function cloneMapTreeSubtree(
 ): MapTreeViewNode {
     const children = mapTreeNodeChildren(node, viewIndex, query);
     if (children === undefined) {
-        return {...node};
+        return { ...node };
     }
     return {
         ...node,
@@ -517,8 +517,8 @@ export interface ResolvedMapPresetComponent {
 
 /**
  * Holds the map/layer/style tree shown in the maps panel.
- * The tree owns UI-only grouping and visibility state, while `AppStateService`
- * remains the source of truth for persisted per-view settings.
+ * The tree owns UI grouping and cached controls. Durable per-view values belong
+ * to MapLayerStateService and MapViewStateService.
  */
 export class MapLayerTree {
     nodes: (GroupTreeNode | MapTreeNode)[] = [];
@@ -532,7 +532,6 @@ export class MapLayerTree {
         private stateService: AppStateService,
         private styleService: StyleService,
         private mapPresetService: MapPresetService,
-        private readonly pruneUnavailableState = true,
         public readonly viewSettings: MapViewStateService,
         public readonly layerState: MapLayerStateService) {
         this.initializeMapGroups(mapInfo);
@@ -540,9 +539,6 @@ export class MapLayerTree {
             this.stateService.ready.pipe(filter(ready => ready), take(1)).subscribe(_ => {
                 this.initializeStyleOptions([...this.styleService.styles.values()]);
                 this.configureTreeParameters();
-                if (this.mapsForMapIds.size && this.pruneUnavailableState) {
-                    this.layerState.prune(this.mapsForMapIds, this.styleService.styles);
-                }
             })
         );
         this.subscriptions.add(this.styleService.styleGroups.subscribe(_ => {
@@ -684,8 +680,8 @@ export class MapLayerTree {
                 return true;
             });
             map.mapPresetOptions = [
-                {label: "Custom options", value: NO_PRESET_ID},
-                ...map.mapPresets.map(preset => ({label: preset.name, value: preset.id}))
+                { label: "Custom options", value: NO_PRESET_ID },
+                ...map.mapPresets.map(preset => ({ label: preset.name, value: preset.id }))
             ];
         }
     }
@@ -706,12 +702,12 @@ export class MapLayerTree {
             }
             const resolvedPreset = this.mapPresetService.resolveLayerPreset(
                 layer.id,
-                {styleId: definition.styleId, presetId: definition.presetId},
+                { styleId: definition.styleId, presetId: definition.presetId },
                 layerStyleOptions(layer));
             if (!resolvedPreset) {
                 return undefined;
             }
-            result.push({definition, layer, preset: resolvedPreset});
+            result.push({ definition, layer, preset: resolvedPreset });
         }
         return result.length ? result : undefined;
     }
@@ -770,7 +766,7 @@ export class MapLayerTree {
                 const presetNode = layerPresetNode(featureLayer);
                 if (presetNode) {
                     const viewCount = this.viewSettings.numViewsState.getValue();
-                    presetNode.selectedPresetKeys = Array.from({length: viewCount}, (_, viewIndex) => {
+                    presetNode.selectedPresetKeys = Array.from({ length: viewCount }, (_, viewIndex) => {
                         const selectedRef = this.layerState.getLayerPresetSelection(
                             viewIndex,
                             featureLayer.mapId,
@@ -817,7 +813,7 @@ export class MapLayerTree {
                         return NO_PRESET_ID;
                     });
                     presetNode.expandedPresetOptions = Array.from(
-                        {length: viewCount},
+                        { length: viewCount },
                         (_, viewIndex) => presetNode.expandedPresetOptions[viewIndex] ?? false);
                 }
             }
@@ -827,7 +823,7 @@ export class MapLayerTree {
 
         const viewCount = this.viewSettings.numViewsState.getValue();
         for (const map of this.maps.values()) {
-            map.selectedMapPresetIds = Array.from({length: viewCount}, (_, viewIndex) => {
+            map.selectedMapPresetIds = Array.from({ length: viewCount }, (_, viewIndex) => {
                 const matchingPresets = map.mapPresets.filter(preset => {
                     const components = this.resolveMapPresetComponents(map, preset);
                     return components?.every(component =>
@@ -1025,7 +1021,7 @@ export class MapLayerTree {
     }
 
     /** Returns the persisted style option values for one layer/style combination in one view. */
-    getLayerStyleOptions(viewIndex: number, mapId: string, layerId: string, styleId: string): Record<string, boolean|number|string> | undefined {
+    getLayerStyleOptions(viewIndex: number, mapId: string, layerId: string, styleId: string): Record<string, boolean | number | string> | undefined {
         const mapItem = this.maps.get(mapId);
         if (!mapItem || !mapItem.children.some(layer => layer.id === layerId)) {
             return;
@@ -1037,7 +1033,7 @@ export class MapLayerTree {
         }
         return Object.fromEntries(
             options.filter(option => option.styleId === styleId).map(option => [option.id, option.value[viewIndex]])
-        ) as Record<string, boolean|number|string>;
+        ) as Record<string, boolean | number | string>;
     }
 
     /** Iterates all feature layers across groups and maps in tree order. */
@@ -1200,12 +1196,12 @@ export class MapLayerTree {
     }
 
     /** Runtime type guard for synthetic group nodes. */
-    private checkIsMapGroup (e: any): e is GroupTreeNode {
+    private checkIsMapGroup(e: any): e is GroupTreeNode {
         return e.type === "Group";
     }
 
     /** Recursively resolves a tree node by id across group and map children. */
-    private findChildById(id: string, elements: (GroupTreeNode | MapTreeNode)[]|undefined = undefined): GroupTreeNode | MapTreeNode | undefined {
+    private findChildById(id: string, elements: (GroupTreeNode | MapTreeNode)[] | undefined = undefined): GroupTreeNode | MapTreeNode | undefined {
         if (!elements) {
             elements = this.nodes;
         }

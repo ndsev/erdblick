@@ -1,27 +1,28 @@
-import {AppActionService} from "../actions/app-action.service";
-import {ActionInput, ActionOutput, boundedCollection, catalogPage, rejectAction} from "../actions/app-action";
-import {styleActions, styleDiscoveryActions} from "./style.service.declarations";
-import {unicodePrefix} from "../shared/unicode-string";
+
 import { HttpClient } from "@angular/common/http";
 import { Injectable } from "@angular/core";
-import { BehaviorSubject,catchError,firstValueFrom,forkJoin,map,of,Subject } from "rxjs";
+import { BehaviorSubject, catchError, firstValueFrom, forkJoin, map, of, Subject } from "rxjs";
 import { filter } from "rxjs/operators";
 import { z } from "zod";
-import { FeatureLayerStyle,FeatureStyleOptionType } from "../../build/libs/core/erdblick-core";
-import { coreLib,uint8ArrayToWasmOrThrow } from "../integrations/wasm";
+import { FeatureLayerStyle, FeatureStyleOptionType } from "../../build/libs/core/erdblick-core";
+import { ActionInput, ActionOutput, boundedCollection, catalogPage, rejectAction } from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
+import { coreLib, uint8ArrayToWasmOrThrow } from "../integrations/wasm";
 import { canonicalSearchStyleFilename } from "../search/search-style-sheet.converter";
-import { AppConfigService,StyleConfigEntry } from "../shared/app-config.service";
+import { AppConfigService, StyleConfigEntry } from "../shared/app-config.service";
 import { AppStateService } from "../shared/appstate.service";
 import { InfoMessageService } from "../shared/info.service";
-import { shortId4,sipHash64Hex } from "./hash";
+import { unicodePrefix } from "../shared/unicode-string";
+import { shortId4, sipHash64Hex } from "./hash";
 import { LayerPresetDefinition } from "./layer-preset.model";
 import { StyleValidationReportService } from "./style-validation-report.service";
 import {
-StyleSourceKind,
-StyleSourceRef,
-StyleValidationIssue,
-StyleValidationReport
+    StyleSourceKind,
+    StyleSourceRef,
+    StyleValidationIssue,
+    StyleValidationReport
 } from "./style-validation.model";
+import { styleActions, styleDiscoveryActions } from "./style.service.declarations";
 
 const STATIC_STYLE_URL_PREFIX = "/static-config/styles/";
 
@@ -67,7 +68,7 @@ interface WasmVector<T> {
 interface WasmLayerPreset {
     id: string;
     name: string;
-    values: WasmVector<{optionId: string; value: boolean}>;
+    values: WasmVector<{ optionId: string; value: boolean }>;
 }
 
 /** Feature-layer style surface after the native preset bindings have been generated. */
@@ -116,7 +117,7 @@ interface ImportedStyleStoreV2 {
  * It owns style parsing, lifecycle tracking, storage of local modifications,
  * grouping for the styles tree, and reapplication of visible styles.
  */
-@Injectable({providedIn: 'root'})
+@Injectable({ providedIn: 'root' })
 export class StyleService {
 
     readonly styleVisibilityState = this.stateService.registerState<Record<string, boolean>>({
@@ -125,21 +126,19 @@ export class StyleService {
         defaultValue: {}
     });
 
-
     readonly styleEditorTargetState = this.stateService.registerState<string | null>({
         name: 'styleEditorTarget',
         defaultValue: null,
         schema: z.string().nullable()
     });
 
-    get styleVisibility() {return this.styleVisibilityState.getValue();}
+    get styleVisibility() { return this.styleVisibilityState.getValue(); }
 
-    set styleVisibility(val: Record<string, boolean>) {this.styleVisibilityState.next(val);}
+    set styleVisibility(val: Record<string, boolean>) { this.styleVisibilityState.next(val); }
 
-    get styleEditorTargetId() {return this.styleEditorTargetState.getValue();}
+    get styleEditorTargetId() { return this.styleEditorTargetState.getValue(); }
 
-    set styleEditorTargetId(val: string | null) {this.styleEditorTargetState.next(val);}
-
+    set styleEditorTargetId(val: string | null) { this.styleEditorTargetState.next(val); }
 
     /** Returns whether the style is visible in the persisted style tree. */
     getStyleVisibility(styleId: string, fallback: boolean = true): boolean {
@@ -149,19 +148,17 @@ export class StyleService {
         return fallback;
     }
 
-
     /** Updates the persisted visibility flag for one style. */
     setStyleVisibility(styleId: string, val: boolean) {
-        this.styleVisibilityState.next({...this.styleVisibility, [styleId]: val});
+        this.styleVisibilityState.next({ ...this.styleVisibility, [styleId]: val });
     }
-
 
     /** Removes stale visibility when a locally imported style identity is deleted. */
     removeStyleVisibility(styleId: string) {
         if (!Object.prototype.hasOwnProperty.call(this.styleVisibility, styleId)) {
             return;
         }
-        const next = {...this.styleVisibility};
+        const next = { ...this.styleVisibility };
         delete next[styleId];
         this.styleVisibility = next;
     }
@@ -180,14 +177,14 @@ export class StyleService {
     styleRemovedForId: Subject<string> = new Subject<string>();
     styleAddedForId: Subject<string> = new Subject<string>();
 
-    styleGroups: BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]> = new BehaviorSubject<(ErdblickStyleGroup|ErdblickStyle)[]>([]);
+    styleGroups: BehaviorSubject<(ErdblickStyleGroup | ErdblickStyle)[]> = new BehaviorSubject<(ErdblickStyleGroup | ErdblickStyle)[]>([]);
     private readonly builtinStyleBaselines = new Map<string, BuiltinStyleBaseline>();
 
     constructor(private httpClient: HttpClient,
-                private stateService: AppStateService,
-                private infoMessageService: InfoMessageService,
-                private configService: AppConfigService,
-                private styleValidationReportService: StyleValidationReportService = new StyleValidationReportService()) {
+        private stateService: AppStateService,
+        private infoMessageService: InfoMessageService,
+        private configService: AppConfigService,
+        private styleValidationReportService: StyleValidationReportService = new StyleValidationReportService()) {
         this.stateService.ready.pipe(filter(state => state)).subscribe((state) => {
             this.reapplyAllStyles();
         });
@@ -274,7 +271,7 @@ export class StyleService {
 
     /** Normalizes a configured style URL against the config path. */
     private normalizeConfiguredStyleUrl(entry: StyleConfigEntry): StyleConfigEntry {
-        const normalized: StyleConfigEntry = {...entry};
+        const normalized: StyleConfigEntry = { ...entry };
         if (!normalized.url.startsWith("http")
             && !normalized.url.startsWith("bundle")
             && !normalized.url.startsWith("/")) {
@@ -479,7 +476,7 @@ export class StyleService {
     /** Reloads one builtin style from its configured URL and reapplies it. */
     async syncStyleYamlData(styleId: string) {
         if (!this.styles.has(styleId)) {
-           return;
+            return;
         }
         const style = this.styles.get(styleId)!;
         if (!style.url) {
@@ -487,7 +484,7 @@ export class StyleService {
         }
 
         try {
-            const result= await this.fetchStylesYamlSources([{id: style.id, url: style.url}]);
+            const result = await this.fetchStylesYamlSources([{ id: style.id, url: style.url }]);
             if (!result.has(style.url)) {
                 return;
             }
@@ -538,7 +535,7 @@ export class StyleService {
         }
 
         try {
-            await firstValueFrom(this.httpClient.put(style.url, style.source, {responseType: "text"}));
+            await firstValueFrom(this.httpClient.put(style.url, style.source, { responseType: "text" }));
         } catch (error) {
             console.error(`Failed to save style ${styleId} to ${style.url}.`, error);
             return false;
@@ -551,7 +548,7 @@ export class StyleService {
             sourceKind: style.additional ? "additional" : "base",
             sourceHash
         };
-        this.builtinStyleBaselines.set(style.url, {id: style.id, source: style.source});
+        this.builtinStyleBaselines.set(style.url, { id: style.id, source: style.source });
         this.styleHashes.set(style.url, {
             id: style.id,
             sha256: sourceHash,
@@ -568,7 +565,7 @@ export class StyleService {
     /** Imports a YAML file, registers it as an imported style, and reapplies it. */
     async importStyleYamlFile(file: File): Promise<boolean> {
         const fileReader = new FileReader();
-        const loadFilePromise = new Promise<string|ArrayBuffer|null>((resolve, reject) => {
+        const loadFilePromise = new Promise<string | ArrayBuffer | null>((resolve, reject) => {
             fileReader.onload = () => resolve(fileReader.result);
             fileReader.onerror = (error) => reject(error);
             fileReader.readAsText(file);
@@ -623,7 +620,7 @@ export class StyleService {
         for (const url of this.styleUrls) {
             if (url.id === styleId) {
                 const builtinUrl = url.url;
-                this.fetchStylesYamlSources([{id: styleId, url: builtinUrl} as any]).then(map => {
+                this.fetchStylesYamlSources([{ id: styleId, url: builtinUrl } as any]).then(map => {
                     const source = map.get(builtinUrl!);
                     if (source) {
                         const restoredId = this.initializeStyle(source, builtinUrl!, styleId, false, false, url.additional === true);
@@ -642,7 +639,7 @@ export class StyleService {
     }
 
     /** Replaces the source of an existing style and updates its lifecycle bookkeeping. */
-    setStyleSource(styleId: string, styleSource: string, modified: boolean = true): string|undefined {
+    setStyleSource(styleId: string, styleSource: string, modified: boolean = true): string | undefined {
         if (!this.styles.has(styleId)) {
             return styleId;
         }
@@ -713,7 +710,7 @@ export class StyleService {
     getUpdatedModifiedStyles(): UpdatedModifiedStyleEntry[] {
         return [...this.styleHashes.entries()]
             .filter(([, state]) => state.isUpdated && state.isModified)
-            .map(([url, state]) => ({id: state.id, url}));
+            .map(([url, state]) => ({ id: state.id, url }));
     }
 
     /** Persists modified builtin styles to local storage. */
@@ -798,7 +795,7 @@ export class StyleService {
     /** Triggers a browser download for YAML source text. */
     private downloadYamlSource(source: string, filename: string): boolean {
         try {
-            const blob = new Blob([source], {type: 'application/x-yaml;charset=utf-8'});
+            const blob = new Blob([source], { type: 'application/x-yaml;charset=utf-8' });
             const url = window.URL.createObjectURL(blob);
             if (!url) {
                 return false;
@@ -904,7 +901,7 @@ export class StyleService {
                                 for (let valueIndex = 0; valueIndex < wasmPreset.values.size(); ++valueIndex) {
                                     const value = wasmPreset.values.get(valueIndex);
                                     if (value) {
-                                        values.push({optionId: String(value.optionId), value: value.value});
+                                        values.push({ optionId: String(value.optionId), value: value.value });
                                     }
                                 }
                             } finally {
@@ -1008,7 +1005,7 @@ export class StyleService {
         const wasmStyle = featureLayerStyle as any;
         if (typeof wasmStyle.validationReport !== 'function') {
             const styleName = typeof wasmStyle.name === 'function' ? wasmStyle.name() : sourceRef.styleName;
-            return this.createSuccessReport(styleString, {...sourceRef, styleName}, styleName);
+            return this.createSuccessReport(styleString, { ...sourceRef, styleName }, styleName);
         }
         const rawReport = wasmStyle.validationReport() as Partial<StyleValidationReport>;
         const styleName = typeof wasmStyle.name === 'function' ? wasmStyle.name() : sourceRef.styleName;
@@ -1030,7 +1027,7 @@ export class StyleService {
         const failedWholeStyleSheet = rawReport?.failedWholeStyleSheet === true;
         const loadable = rawReport?.loadable ?? !failedWholeStyleSheet;
         return {
-            source: {...sourceRef},
+            source: { ...sourceRef },
             valid: rawReport?.valid ?? !hasError,
             loadable,
             loadedRuleCount: Math.max(0, Number(rawReport?.loadedRuleCount ?? 0)),
@@ -1052,7 +1049,7 @@ export class StyleService {
             severity: issue.severity ?? 'error',
             phase: issue.phase ?? 'schema',
             impact: issue.impact ?? 'stylesheet-failed',
-            source: {...(issue.source ?? {}), ...sourceRef},
+            source: { ...(issue.source ?? {}), ...sourceRef },
             message: issue.message ?? 'Style validation failed.',
             detail: issue.detail,
             ruleIndex: issue.ruleIndex,
@@ -1218,7 +1215,7 @@ export class StyleService {
     }
 
     /** Rebuilds the grouped styles tree shown in the styles dialog. */
-    computeStyleGroups(): (ErdblickStyle|ErdblickStyleGroup)[] {
+    computeStyleGroups(): (ErdblickStyle | ErdblickStyleGroup)[] {
         const groups = new Map<string, ErdblickStyleGroup>();
         const ungrouped: Array<ErdblickStyle> = [];
 
@@ -1315,7 +1312,7 @@ export class StyleService {
     }
 
     /** Toggles one style's visibility and optionally reapplies it immediately. */
-    toggleStyle(styleId: string, enabled: boolean|undefined = undefined, delayRepaint: boolean = false) {
+    toggleStyle(styleId: string, enabled: boolean | undefined = undefined, delayRepaint: boolean = false) {
         if (!this.styles.has(styleId)) {
             return;
         }
@@ -1410,7 +1407,6 @@ export class StyleService {
         return matchedByUrl;
     }
 
-
     registerActions(actions: AppActionService): void {
         actions.registerAction(styleActions.getStyle, input => this.getStyle(input));
         actions.registerAction(styleActions.validateStyle, input => this.validateStyle(input));
@@ -1423,45 +1419,45 @@ export class StyleService {
         function* values() {
             for (const style of styles) {
                 if ((input.styleId && style.id !== input.styleId) || (input.layerId && !style.featureLayerStyle?.hasLayerAffinity(input.layerId))) continue;
-                yield {id: style.id, kind: style.category, visible: style.visible, imported: style.imported, modified: style.modified};
+                yield { id: style.id, kind: style.category, visible: style.visible, imported: style.imported, modified: style.modified };
             }
         }
         return catalogPage(values(), input);
     }
-
 
     /** Returns bounded source text from the style owner, not server filesystem metadata. */
     getStyle(input: ActionInput<typeof styleActions.getStyle>): ActionOutput<typeof styleActions.getStyle> {
         const style = this.styles.get(input.styleId);
         if (!style) rejectAction('The style ID is unavailable. Use viewer_list_styles and copy an item id exactly; layer IDs and display names are not style IDs.');
         if (new TextEncoder().encode(style.source).length > 180000) rejectAction("Style source exceeds the response budget");
-        return {styleId: style.id, source: style.source, imported: style.imported, modified: style.modified, visible: style.visible};
+        return { styleId: style.id, source: style.source, imported: style.imported, modified: style.modified, visible: style.visible };
     }
-
 
     /** Copies only bounded structured parser issues; installing the style remains a separate operation. */
     validateStyle(input: ActionInput<typeof styleActions.validateStyle>): ActionOutput<typeof styleActions.validateStyle> {
         const report = this.validateStyleSource(input.source, this.createEditorSourceRef("mcp-draft", input.source));
         const candidates = function* () {
-            for (const issue of report.issues) yield {severity: issue.severity, message: unicodePrefix(issue.message, 4096), phase: issue.phase,
-                rulePath: issue.rulePath, property: issue.property, line: issue.location?.line, column: issue.location?.column};
+            for (const issue of report.issues) yield {
+                severity: issue.severity, message: unicodePrefix(issue.message, 4096), phase: issue.phase,
+                rulePath: issue.rulePath, property: issue.property, line: issue.location?.line, column: issue.location?.column
+            };
         };
         const issues = boundedCollection(candidates(), 100, 64000);
-        return {valid: report.valid, loadable: report.loadable, runtimeVerified: false,
+        return {
+            valid: report.valid, loadable: report.loadable, runtimeVerified: false,
             guidance: "Options belong to this stylesheet only: declare copied option filters here or remove them. Verify data fields with mapget_extract_features. After applying, check viewer_get_diagnostics sections:[errors] and the rendered view; valid syntax does not prove visible labels or geometry.",
-            issues: issues.items, complete: issues.complete, reason: issues.reason};
+            issues: issues.items, complete: issues.complete, reason: issues.reason
+        };
     }
-
 
     /** Rejects an invalid candidate with repair details before any style installation. */
     requireValidStyle(source: string): void {
-        const report = this.validateStyle({source});
+        const report = this.validateStyle({ source });
         if (report.valid) return;
         const errors = report.issues.filter(issue => issue.severity === "error").slice(0, 4);
         const details = errors.length ? ` Candidate errors: ${unicodePrefix(JSON.stringify(errors), 3500)}` : " Use viewer_validate_style on the candidate for details.";
         rejectAction(`Style validation failed; no changes were applied.${details}`, "invalid_arguments", "style_validation_failed");
     }
-
 
     /** Edits normal browser-local styles only; no server write capability is implied by viewer-control. */
     editStyle(input: ActionInput<typeof styleActions.editStyle>): ActionOutput<typeof styleActions.editStyle> {
@@ -1478,7 +1474,7 @@ export class StyleService {
             this.requireValidStyle(source);
             const styleId = changed ? this.setStyleSource(style!.id, source) : style!.id;
             if (!styleId) rejectAction("The style operation failed");
-            return {status: "applied", styleId, changed, editCount: input.edits!.length};
+            return { status: "applied", styleId, changed, editCount: input.edits!.length };
         }
         if (writesSource) this.requireValidStyle(input.source!);
         let styleId = style?.id;
@@ -1499,9 +1495,8 @@ export class StyleService {
                 break;
         }
         if (!styleId) rejectAction("The style operation failed");
-        return {status: "applied", styleId};
+        return { status: "applied", styleId };
     }
-
 
     /** Builds a bounded candidate without mutating the style; ambiguous or stale matches fail atomically. */
     patchStyleSource(source: string, edits: NonNullable<ActionInput<typeof styleActions.editStyle>["edits"]>): string {
@@ -1513,6 +1508,13 @@ export class StyleService {
             if (new TextEncoder().encode(source).length > 180000) rejectAction("Patched style exceeds the source budget; no changes applied", "invalid_arguments");
         }
         return source;
+    }
+
+    /** Removes visibility choices only after a complete style catalog has been installed. */
+    pruneVisibility(presentStyles: ReadonlyMap<string, ErdblickStyle>): void {
+        const next = { ...this.styleVisibility };
+        for (const id of Object.keys(next)) if (!presentStyles.has(id)) delete next[id];
+        this.styleVisibility = next;
     }
 
 }

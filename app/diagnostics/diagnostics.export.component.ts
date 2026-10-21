@@ -1,8 +1,9 @@
-import { Component,OnDestroy,ViewChild } from '@angular/core';
+import { Component, OnDestroy, ViewChild } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { AppDialogComponent } from '../shared/app-dialog.component';
+import { DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService,DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID } from '../shared/appstate.service';
+import { AppStateService } from "../shared/appstate.service";
 import { DialogStackService } from '../shared/dialog-stack.service';
 import { DiagnosticsFacadeService } from './diagnostics.facade.service';
 import type { DiagnosticsExportOptions } from './diagnostics.model';
@@ -64,19 +65,19 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
     private readonly subscriptions: Subscription[] = [];
 
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
-                public readonly stateService: AppStateService,
-                private readonly dialogStack: DialogStackService,
+        public readonly stateService: AppStateService,
+        private readonly dialogStack: DialogStackService,
         public readonly layout: AppLayoutService) {
         const options = this.diagnostics.diagnosticsExportOptions;
         this.exportOptions = {
             ...options,
-            logFilter: {...options.logFilter}
+            logFilter: { ...options.logFilter }
         };
         this.subscriptions.push(
             this.diagnostics.diagnosticsExportOptionsState.subscribe(options => {
                 this.exportOptions = {
                     ...options,
-                    logFilter: {...options.logFilter}
+                    logFilter: { ...options.logFilter }
                 };
             })
         );
@@ -109,7 +110,7 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
     updateOptions() {
         this.diagnostics.diagnosticsExportOptions = {
             ...this.exportOptions,
-            logFilter: {...this.exportOptions.logFilter}
+            logFilter: { ...this.exportOptions.logFilter }
         };
     }
 

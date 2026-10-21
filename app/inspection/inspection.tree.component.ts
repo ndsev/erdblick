@@ -1,18 +1,18 @@
 import {
-AfterViewInit,
-ChangeDetectionStrategy,
-ChangeDetectorRef,
-Component,
-OnDestroy,
-SecurityContext,
-ViewChild,
-effect,
-input,
-output
+    AfterViewInit,
+    ChangeDetectionStrategy,
+    ChangeDetectorRef,
+    Component,
+    OnDestroy,
+    SecurityContext,
+    ViewChild,
+    effect,
+    input,
+    output
 } from "@angular/core";
 import { toObservable } from "@angular/core/rxjs-interop";
 import { DomSanitizer } from "@angular/platform-browser";
-import { MenuItem,TreeNode,TreeTableNode } from "primeng/api";
+import { MenuItem, TreeNode, TreeTableNode } from "primeng/api";
 import { Menu } from "primeng/menu";
 import { Popover } from "primeng/popover";
 import { TreeTable } from "primeng/treetable";
@@ -21,21 +21,22 @@ import { coreLib } from "../integrations/wasm";
 import { parseMapPartitionKey } from "../mapdata/partition.model";
 import { FeatureSearchService } from "../search/feature.search.service";
 import { JumpTargetService } from "../search/jump.service";
-import { AppStateService,SelectedSourceData,type InspectionTreeExpansionState } from "../shared/appstate.service";
+import { AppStateService } from "../shared/appstate.service";
 import { ClipboardService } from "../shared/clipboard.service";
 import type { FeatureSearchMapLayerRef } from "../shared/feature-search-state";
 import { InfoMessageService } from "../shared/info.service";
 import {
-isFeatureInspectionSubTarget,
-parseFeatureInspectionTarget,
-stripFeatureInspectionTarget
+    isFeatureInspectionSubTarget,
+    parseFeatureInspectionTarget,
+    stripFeatureInspectionTarget
 } from "../shared/tile-feature-id";
 import {
-inspectionHtmlPresentation,
-type InspectionHtmlPresentation
+    inspectionHtmlPresentation,
+    type InspectionHtmlPresentation
 } from "./inspection-html.presentation";
 import { inspectionSearchNumberLiteral } from "./inspection-search.util";
 import { InspectionSelectionService } from "./inspection-selection.service";
+import { SelectedSourceData, type InspectionTreeExpansionState } from "./inspection-state.model";
 import { InspectionStateService } from "./inspection-state.service";
 import { expandPathToFirstHighlightedRow } from "./inspection-tree-highlight";
 import { inspectionValueBubbleClasses } from "./inspection-value-bubble.presentation";
@@ -464,13 +465,13 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     geoJsonMenuItems: MenuItem[] = [];
 
     constructor(private cdr: ChangeDetectorRef,
-                private clipboardService: ClipboardService,
-                public mapService: InspectionSelectionService,
-                private jumpService: JumpTargetService,
-                public stateService: AppStateService,
-                private messageService: InfoMessageService,
-                private featureSearchService: FeatureSearchService,
-                private sanitizer: DomSanitizer,
+        private clipboardService: ClipboardService,
+        public mapService: InspectionSelectionService,
+        private jumpService: JumpTargetService,
+        public stateService: AppStateService,
+        private messageService: InfoMessageService,
+        private featureSearchService: FeatureSearchService,
+        private sanitizer: DomSanitizer,
         public readonly inspectionState: InspectionStateService) {
         effect(() => {
             const columns = this.columns();
@@ -734,7 +735,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Clears the filter input and restores the original tree. */
     clearFilter() {
         this.filterString = "";
-        this.table.filterGlobal("" , 'contains');
+        this.table.filterGlobal("", 'contains');
         this.data = this.treeData();
         this.applyInitialExpansion(this.data);
         this.emitFilterChange("");
@@ -1209,7 +1210,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         }
         if (hasChildren && node) {
             if (this.inspectionMenuItems.length) {
-                this.inspectionMenuItems.push({separator: true});
+                this.inspectionMenuItems.push({ separator: true });
             }
             this.inspectionMenuItems.push(
                 {
@@ -1226,7 +1227,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         const mapTileKey = typeof rowData?.["mapTileKey"] === "string" ? rowData["mapTileKey"] : "";
         if (inspectionTarget && mapTileKey) {
             if (this.inspectionMenuItems.length) {
-                this.inspectionMenuItems.push({separator: true});
+                this.inspectionMenuItems.push({ separator: true });
             }
             const targetLabel = parseFeatureInspectionTarget(inspectionTarget)
                 .scope === "relation"
@@ -1245,7 +1246,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                     if (ownedByPanel) {
                         this.inspectionState.toggleInspectionFeatureHighlight(this.panelId(), mapTileKey, inspectionTarget);
                     } else {
-                        this.inspectionState.setSelection([{mapTileKey, featureId: inspectionTarget}]);
+                        this.inspectionState.setSelection([{ mapTileKey, featureId: inspectionTarget }]);
                     }
                 }
             });
@@ -1286,7 +1287,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Builds a feature-root equality search from one scalar inspection row. */
     private keyValueSearchRequestForRow(
         rowData: any
-    ): {query: string; selectedMapLayers: FeatureSearchMapLayerRef[]} | undefined {
+    ): { query: string; selectedMapLayers: FeatureSearchMapLayerRef[] } | undefined {
         const path = typeof rowData?.["geoJsonPath"] === "string" ? rowData["geoJsonPath"].trim() : "";
         if (!path) {
             return undefined;
@@ -1369,7 +1370,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         try {
             const [mapId, layerId] = parseMapPartitionKey(coreLib, mapTileKey);
             if (mapId && layerId) {
-                return {mapId, layerId};
+                return { mapId, layerId };
             }
         } catch (_error) {
             return undefined;
@@ -1466,7 +1467,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.mapService.setHoveredFeatures([]);
             return;
         }
-        this.mapService.setHoveredFeatures([{mapTileKey, featureId: hoverId}], true);
+        this.mapService.setHoveredFeatures([{ mapTileKey, featureId: hoverId }], true);
     }
 
     /** Highlights a referenced feature locally when present and permits the authored remote fallback otherwise. */
@@ -1475,7 +1476,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         const featureId = rowData?.["value"];
         const valid = typeof mapTileKey === "string" && typeof featureId === "string";
         this.mapService.setHoveredFeatures(valid && mapTileKey && featureId
-            ? [{mapTileKey, featureId}]
+            ? [{ mapTileKey, featureId }]
             : [], true);
     }
 
@@ -1762,7 +1763,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (!data) {
             return;
         }
-        const blob = new Blob([data], {type: 'application/geo+json'});
+        const blob = new Blob([data], { type: 'application/geo+json' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
@@ -1780,7 +1781,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (!data) {
             return;
         }
-        const blob = new Blob([data], {type: 'application/geo+json'});
+        const blob = new Blob([data], { type: 'application/geo+json' });
         const url = URL.createObjectURL(blob);
         window.open(url, '_blank');
         setTimeout(() => URL.revokeObjectURL(url), 10_000);

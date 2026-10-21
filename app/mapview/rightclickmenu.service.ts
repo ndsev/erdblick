@@ -1,23 +1,20 @@
 import { Injectable } from "@angular/core";
 import { MenuItem } from "primeng/api";
-import { BehaviorSubject,Subject } from "rxjs";
+import { BehaviorSubject, Subject } from "rxjs";
 import { DiagnosticsFacadeService } from "../diagnostics/diagnostics.facade.service";
 import { PerformanceDiagnosticsScope } from "../diagnostics/diagnostics.model";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
+import { SelectedSourceData, type TileFeatureId } from "../inspection/inspection-state.model";
 import { InspectionStateService } from "../inspection/inspection-state.service";
-import { Color,HeightReference,Rectangle } from "../integrations/geo";
+import { Color, HeightReference, Rectangle } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
 import { parseMapPartitionKey } from "../mapdata/partition.model";
 import {
-ExternalViewerLocation,
-ExternalViewerService
+    ExternalViewerLocation,
+    ExternalViewerService
 } from "../search/external-viewer.service";
 import { FeatureSearchService } from "../search/feature.search.service";
-import {
-AppStateService,
-SelectedSourceData,
-type TileFeatureId
-} from "../shared/appstate.service";
+import { AppStateService } from "../shared/appstate.service";
 import type { FeatureSearchMapLayerRef } from "../shared/feature-search-state";
 import { InfoMessageService } from "../shared/info.service";
 import type { RenderNavigationTarget } from "./render-view.model";
@@ -58,13 +55,13 @@ export interface TileDiagnosticsMenuOption {
 
 /** Transient first-person action offered by the context menu for one render view. */
 export type FirstPersonViewMenuContext =
-    | {viewIndex: number; active: true}
-    | {viewIndex: number; active: false; target: RenderNavigationTarget};
+    | { viewIndex: number; active: true }
+    | { viewIndex: number; active: false; target: RenderNavigationTarget };
 
 /** View-scoped first-person request emitted when a context-menu action is selected. */
 export type FirstPersonViewMenuRequest =
-    | {viewIndex: number; action: "enter"; target: RenderNavigationTarget}
-    | {viewIndex: number; action: "exit"};
+    | { viewIndex: number; action: "enter"; target: RenderNavigationTarget }
+    | { viewIndex: number; action: "exit" };
 
 /** One flat context-menu row retaining its topmost concrete tile hit. */
 interface PickedFeatureMenuRow {
@@ -82,8 +79,8 @@ export class RightClickMenuService {
 
     menuItems: BehaviorSubject<MenuItem[]> = new BehaviorSubject<MenuItem[]>([]);
     preferredTileIdForSourceData: number | null = null;
-    lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null> =
-        new BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null>(null);
+    lastInspectedTileSourceDataOption: BehaviorSubject<{ tileId: number, mapId: string, layerId: string } | null> =
+        new BehaviorSubject<{ tileId: number, mapId: string, layerId: string } | null>(null);
     closeContextMenus: Subject<void> = new Subject<void>();
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
     tileOutline: Subject<TileOutlinePayload | null> = new Subject<TileOutlinePayload | null>();
@@ -91,7 +88,7 @@ export class RightClickMenuService {
     firstPersonViewRequests: Subject<FirstPersonViewMenuRequest> = new Subject<FirstPersonViewMenuRequest>();
     private tileDiagnosticsOptions: TileDiagnosticsMenuOption[] = [];
     private sourceDataDialogVisible = false;
-    private sourceDataShortcut: {tileId: number, mapId: string, layerId: string} | null = null;
+    private sourceDataShortcut: { tileId: number, mapId: string, layerId: string } | null = null;
     private featureSearchScope: FeatureSearchContextMenuScope | null = null;
     private externalViewerLocation: ExternalViewerLocation | null = null;
     private firstPersonViewContext: FirstPersonViewMenuContext | null = null;
@@ -99,11 +96,11 @@ export class RightClickMenuService {
 
     /** Seeds the default menu and keeps the “inspect last layer” shortcut synchronized with context. */
     constructor(private stateService: AppStateService,
-                private featureSearchService: FeatureSearchService,
-                private infoMessageService: InfoMessageService,
-                private diagnostics: DiagnosticsFacadeService,
-                private externalViewerService: ExternalViewerService,
-                private inspectionSelection: InspectionSelectionService,
+        private featureSearchService: FeatureSearchService,
+        private infoMessageService: InfoMessageService,
+        private diagnostics: DiagnosticsFacadeService,
+        private externalViewerService: ExternalViewerService,
+        private inspectionSelection: InspectionSelectionService,
         public readonly inspectionState: InspectionStateService) {
         this.rebuildMenuItems();
         this.tileIdsForSourceData.subscribe(tileIds => {
@@ -245,23 +242,23 @@ export class RightClickMenuService {
             }
             items.push(...this.pickedFeatureRows.map((row, index) =>
                 this.pickedFeatureMenuItem(row, index)));
-            items.push({separator: true});
+            items.push({ separator: true });
         }
         items.push(...this.sourceDataMenuItems());
         if (this.firstPersonViewContext) {
-            items.push({separator: true}, this.firstPersonViewMenuItem(this.firstPersonViewContext));
+            items.push({ separator: true }, this.firstPersonViewMenuItem(this.firstPersonViewContext));
         }
         if (this.externalViewerLocation && this.externalViewerService.providers.length) {
-            items.push({separator: true}, this.externalViewerMenuItem(this.externalViewerLocation));
+            items.push({ separator: true }, this.externalViewerMenuItem(this.externalViewerLocation));
         }
         if (this.tileDiagnosticsOptions.length) {
-            items.push({separator: true});
+            items.push({ separator: true });
             for (const option of this.tileDiagnosticsOptions) {
                 items.push(this.tileDiagnosticsMenuItem(option));
             }
         }
         if (this.featureSearchScope) {
-            items.push({separator: true}, this.featureSearchMenuItem(this.featureSearchScope));
+            items.push({ separator: true }, this.featureSearchMenuItem(this.featureSearchScope));
         }
         this.menuItems.next(items);
     }
@@ -349,7 +346,7 @@ export class RightClickMenuService {
     }
 
     /** Builds a shortcut that reuses the last inspected source-data layer for the current tile. */
-    private buildLastInspectedSourceDataMenuItem(sourceDataParams: {tileId: number, mapId: string, layerId: string}): MenuItem {
+    private buildLastInspectedSourceDataMenuItem(sourceDataParams: { tileId: number, mapId: string, layerId: string }): MenuItem {
         return {
             label: 'Inspect Source Data with Last Layer',
             icon: 'pi pi-database',

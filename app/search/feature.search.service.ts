@@ -1,93 +1,113 @@
-import type {ActionInput, ActionOutput} from "../actions/app-action";
-import {AppActionService} from "../actions/app-action.service";
-import {ControlValue, ControlReadContext, boundedCollection, applied, rejectAction} from "../actions/app-action";
-import {searchActions, searchControls, searchSettingsSchema} from "./feature.search.service.declarations";
-import {unicodePrefix} from "../shared/unicode-string";
-import {featureSearchDefinitionExport} from "./feature-search-export.util";
-import {deepEquals} from "../shared/app-state";
-import {MapViewStateService} from "../mapview/map-view-state.service";
 import { Injectable } from "@angular/core";
-import { BehaviorSubject,Subject,Subscription,take } from "rxjs";
+import { BehaviorSubject, Subject, Subscription, take } from "rxjs";
 import { filter } from "rxjs/operators";
 import { z } from "zod";
+import type { ActionInput, ActionOutput } from "../actions/app-action";
+import {
+    AppActionCandidate,
+    applied,
+    boundedCollection,
+    ControlReadContext,
+    ControlValue,
+    rejectAction
+} from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
 import { InspectionStateService } from "../inspection/inspection-state.service";
 import { GeoMath } from "../integrations/geo";
-import { coreLib,uint8ArrayFromWasm,uint8ArrayToWasm } from "../integrations/wasm";
+import { coreLib, uint8ArrayFromWasm, uint8ArrayToWasm } from "../integrations/wasm";
 import {
-FeatureSearchResolvedDefinition,
-featureSearchResultFields
+    FeatureSearchResolvedDefinition,
+    featureSearchResultFields
 } from "../mapdata/feature-search-runtime-state.model";
-import { FeatureSearchSchemaService,FeatureSearchScopeAnalysis } from "../mapdata/feature-search-schema.service";
+import { FeatureSearchSchemaService, FeatureSearchScopeAnalysis } from "../mapdata/feature-search-schema.service";
 import {
-filterSubscriptionCoverageEqual,
-type FilterSubscriptionCoverage
+    filterSubscriptionCoverageEqual,
+    type FilterSubscriptionCoverage
 } from "../mapdata/filter-subscription.model";
 import type { FilterTileState } from "../mapdata/filter-tile-state.model";
 import { MapInfoService } from "../mapdata/map-info.service";
 import {
-FeatureSearchAttributeScopeCandidate,
-SearchResultTileEntry,
-SearchResultTilePayload
+    FeatureSearchAttributeScopeCandidate,
+    SearchResultTileEntry,
+    SearchResultTilePayload
 } from "../mapdata/map-runtime.model";
 import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
 import type { MapgetLayer } from "../mapdata/mapget-layer.model";
 import {
-partitionKey,
-tilePartition,
-type PartitionId
+    partitionKey,
+    tilePartition,
+    type PartitionId
 } from "../mapdata/partition.model";
 import {
-StyledMapgetLayer,
-type StyledMapgetLayerEvent
+    StyledMapgetLayer,
+    type StyledMapgetLayerEvent
 } from "../mapdata/styled-mapget-layer.model";
 import type { MapTileStreamFilterStatusPayload } from "../mapdata/tilestream";
+import { MapViewStateService } from "../mapview/map-view-state.service";
 import { MapViewService } from "../mapview/map-view.service";
+import {
+    FEATURE_SEARCH_DIALOG_LAYOUT_ID,
+    FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID,
+    SEARCH_DOCK_TAB_ID
+} from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
-import { DEFAULT_FEATURE_SEARCH_GROUPING,FEATURE_SEARCH_DIALOG_LAYOUT_ID,FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID,normalizeFeatureSearchGrouping,SEARCH_DOCK_TAB_ID } from "../shared/app-state.model";
+import { deepEquals } from "../shared/app-state";
 import { AppStateService } from "../shared/appstate.service";
 import {
-createFeatureSearchStateEntry,
-DEFAULT_FEATURE_SEARCH_TILE_LEVELS,
-DEFAULT_FEATURE_SEARCH_VIEW_INDICES,
-defaultFeatureSearchViewIndicesForMapLayers,
-FeatureSearchMapLayerRef,
-FeatureSearchRenderStrategy,
-FeatureSearchScope,
-FeatureSearchStateEntry,
-FeatureSearchStatePatch,
-FeatureSearchStateSchema,
-normalizeFeatureSearchFeatureTypes,
-normalizeFeatureSearchState,
-serializeFeatureSearchState
+    createFeatureSearchStateEntry,
+    DEFAULT_FEATURE_SEARCH_GROUPING,
+    DEFAULT_FEATURE_SEARCH_TILE_LEVELS,
+    DEFAULT_FEATURE_SEARCH_VIEW_INDICES,
+    defaultFeatureSearchViewIndicesForMapLayers,
+    FeatureSearchMapLayerRef,
+    FeatureSearchRenderStrategy,
+    FeatureSearchScope,
+    FeatureSearchStateEntry,
+    FeatureSearchStatePatch,
+    FeatureSearchStateSchema,
+    normalizeFeatureSearchFeatureTypes,
+    normalizeFeatureSearchGrouping,
+    normalizeFeatureSearchState,
+    serializeFeatureSearchState
 } from "../shared/feature-search-state";
 import { FrameBudgetLoop } from "../shared/frame-budget-loop";
 import { MAX_STYLE_LOD } from "../shared/lod-policy";
 import { formatFeatureInspectionTarget } from "../shared/tile-feature-id";
-import { featureSearchDefinitionFromImportPayload } from "./feature-search-export.util";
+import { unicodePrefix } from "../shared/unicode-string";
 import {
-compileFeatureSearchStyle,
-type CompiledFeatureSearchStyle
+    featureSearchDefinitionExport,
+    featureSearchDefinitionFromImportPayload
+} from "./feature-search-export.util";
+import {
+    compileFeatureSearchStyle,
+    type CompiledFeatureSearchStyle
 } from "./feature-search-style";
+import {
+    searchActions,
+    searchControls,
+    searchInputActions,
+    searchSettingsSchema
+} from "./feature.search.service.declarations";
 import type {
-SearchCompletionRequestMessage,
-SearchCompletionResultMessage,
-SearchCompletionWorkerOptions
+    SearchCompletionRequestMessage,
+    SearchCompletionResultMessage,
+    SearchCompletionWorkerOptions
 } from "./search-completion.worker.protocol";
 import {
-SearchResultDensityIndex,
-SearchResultPoint,
-SearchResultPointBucket
+    SearchResultDensityIndex,
+    SearchResultPoint,
+    SearchResultPointBucket
 } from "./search-result-density.model";
 import {
-CompletionCandidate,
-DiagnosticsMessage,
-SearchResultFieldValueSummary,
-SearchTraceValueSummary,
-SearchValueHistogramBucket,
-SearchValueKindCounts,
-SearchValueNumericSummary,
-SearchValueSummariesState,
-SearchValueSummary
+    CompletionCandidate,
+    DiagnosticsMessage,
+    SearchResultFieldValueSummary,
+    SearchTraceValueSummary,
+    SearchValueHistogramBucket,
+    SearchValueKindCounts,
+    SearchValueNumericSummary,
+    SearchValueSummariesState,
+    SearchValueSummary
 } from "./search.model";
 
 export interface FeatureSearchResultEntry {
@@ -263,7 +283,7 @@ export function featureSearchActionPayloadFromCompletion(
     candidate: CompletionCandidate | null | undefined
 ): FeatureSearchActionPayload | undefined {
     const selectedMapLayers = uniqueFeatureSearchMapLayers(candidate?.originLayers ?? []);
-    return selectedMapLayers.length ? {selectedMapLayers} : undefined;
+    return selectedMapLayers.length ? { selectedMapLayers } : undefined;
 }
 
 /** Extracts selected map/layers from a persisted or transient feature-search action payload. */
@@ -280,7 +300,7 @@ export function featureSearchSelectedMapLayersFromPayload(payload: unknown): Fea
             : null;
         const mapId = typeof raw?.["mapId"] === "string" ? raw["mapId"] : "";
         const layerId = typeof raw?.["layerId"] === "string" ? raw["layerId"] : "";
-        return mapId && layerId ? [{mapId, layerId}] : [];
+        return mapId && layerId ? [{ mapId, layerId }] : [];
     }));
     return result.length ? result : undefined;
 }
@@ -297,7 +317,7 @@ export function featureSearchSelectedViewIndicesFromPayload(payload: unknown): n
     const result: number[] = [];
     for (const item of selectedViewIndices) {
         const viewIndex = Number(item);
-        if (!Number.isInteger(viewIndex) || viewIndex < 0 || viewIndex >= DEFAULT_FEATURE_SEARCH_VIEW_INDICES.length
+        if (!Number.isInteger(viewIndex) || viewIndex < 0 || viewIndex >= 32
             || seen.has(viewIndex)) {
             continue;
         }
@@ -329,7 +349,7 @@ function uniqueFeatureSearchMapLayers(refs: FeatureSearchMapLayerRef[]): Feature
             continue;
         }
         seen.add(key);
-        result.push({mapId, layerId});
+        result.push({ mapId, layerId });
     }
     return result;
 }
@@ -361,7 +381,7 @@ export type FeatureSearchRunOptions = Partial<Pick<
     "scope" | "selectedMapLayers" | "selectedViewIndices" | "selectedMapLayersManual" | "selectedFeatureTypes" | "autoUpdate" | "selectedTileLevels"
 >>;
 
-@Injectable({providedIn: 'root'})
+@Injectable({ providedIn: 'root' })
 /**
  * Coordinates feature search, query completion, result indexing, and search-marker overlays.
  *
@@ -378,8 +398,7 @@ export class FeatureSearchService {
         snapshotPersist: false
     });
 
-
-    readonly featureSearchState = this.stateService.registerState<Array<Omit<FeatureSearchStateEntry, "selectedViewIndices"> & {selectedViewIds: string[]}>>({
+    readonly featureSearchState = this.stateService.registerState<Array<Omit<FeatureSearchStateEntry, "selectedViewIndices"> & { selectedViewIds: string[] }>>({
         name: 'featureSearchState',
         defaultValue: [],
         schema: FeatureSearchStateSchema,
@@ -388,9 +407,9 @@ export class FeatureSearchService {
         snapshotPersist: false
     });
 
-    get featureSearchGrouping() {return this.featureSearchGroupingState.getValue();}
+    get featureSearchGrouping() { return this.featureSearchGroupingState.getValue(); }
 
-    set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
+    set featureSearchGrouping(val: number[]) { this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val)); }
 
     get featureSearches(): FeatureSearchStateEntry[] { return this.featureSearchState.value.map(entry => this.presentSearch(entry)); }
 
@@ -400,26 +419,26 @@ export class FeatureSearchService {
 
     /** UI indices are converted once; persisted runtime ownership follows logical views. */
     private storeSearch(entry: FeatureSearchStateEntry) {
-        const {selectedViewIndices, ...fields} = entry;
-        return {...fields, selectedViewIds: selectedViewIndices.flatMap(index => {
-            const id = this.viewSettings.viewIds[index];
-            return id === undefined ? [] : [id];
-        })};
+        const { selectedViewIndices, ...fields } = entry;
+        return {
+            ...fields, selectedViewIds: selectedViewIndices.flatMap(index => {
+                const id = this.viewSettings.viewIds[index];
+                return id === undefined ? [] : [id];
+            })
+        };
     }
 
-    private presentSearch(entry: Omit<FeatureSearchStateEntry, "selectedViewIndices"> & {selectedViewIds: string[]}): FeatureSearchStateEntry {
-        const {selectedViewIds, ...fields} = entry;
-        return {...fields, selectedViewIndices: selectedViewIds.map(id => this.viewSettings.viewIds.indexOf(id)).filter(index => index >= 0)};
+    private presentSearch(entry: Omit<FeatureSearchStateEntry, "selectedViewIndices"> & { selectedViewIds: string[] }): FeatureSearchStateEntry {
+        const { selectedViewIds, ...fields } = entry;
+        return { ...fields, selectedViewIndices: selectedViewIds.map(id => this.viewSettings.viewIds.indexOf(id)).filter(index => index >= 0) };
     }
-
 
     /** Adds a persisted feature-search definition. Runtime results remain service-owned. */
-    addFeatureSearch(value: {query: string} & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
+    addFeatureSearch(value: { query: string } & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
         const entry = createFeatureSearchStateEntry(value);
         this.featureSearches = [...this.featureSearches, entry];
         return entry;
     }
-
 
     /** Patches one persisted feature-search definition. */
     patchFeatureSearch(id: string, patch: FeatureSearchStatePatch): FeatureSearchStateEntry | undefined {
@@ -441,7 +460,6 @@ export class FeatureSearchService {
         }
         return updated;
     }
-
 
     /** Removes one persisted feature-search definition. */
     removeFeatureSearch(id: string): void {
@@ -480,7 +498,7 @@ export class FeatureSearchService {
     private searchPresentationRevision = 0;
 
     readonly sessionsChanged = new BehaviorSubject<FeatureSearchSession[]>([]);
-    readonly progress: BehaviorSubject<FeatureSearchSession|null> = new BehaviorSubject<FeatureSearchSession|null>(null);
+    readonly progress: BehaviorSubject<FeatureSearchSession | null> = new BehaviorSubject<FeatureSearchSession | null>(null);
     readonly exportDialogRequest = new BehaviorSubject<FeatureSearchExportDialogRequest | null>(null);
     diagnosticsMessageLimit: number = 25;
 
@@ -519,10 +537,10 @@ export class FeatureSearchService {
      * Initializes marker styling and reconciles persisted subset searches.
      */
     constructor(private mapInfo: MapInfoService,
-                private searchSchema: FeatureSearchSchemaService,
-                private tileStream: MapTileStreamService,
-                private viewState: MapViewService,
-                private stateService: AppStateService,
+        private searchSchema: FeatureSearchSchemaService,
+        private tileStream: MapTileStreamService,
+        private viewState: MapViewService,
+        private stateService: AppStateService,
         public readonly layout: AppLayoutService,
         public readonly inspectionState: InspectionStateService,
         public readonly viewSettings: MapViewStateService) {
@@ -531,16 +549,18 @@ export class FeatureSearchService {
                 const sourceId = viewSettings.viewIdAt(sourceIndex);
                 const added = viewSettings.viewIds.slice(previous, count);
                 this.featureSearchState.next(this.featureSearchState.value.map(entry => entry.selectedViewIds.includes(sourceId)
-                    ? {...entry, selectedViewIds: [...entry.selectedViewIds, ...added]} : entry));
+                    ? { ...entry, selectedViewIds: [...entry.selectedViewIds, ...added] } : entry));
             },
-            import: (previous, ids) => this.featureSearchState.next(this.featureSearchState.value.map(entry => ({...entry,
-                selectedViewIds: entry.selectedViewIds.flatMap(id => ids.includes(id) ? [id]
-                    : ids[previous.indexOf(id)] ? [ids[previous.indexOf(id)]] : [])
+            import: (_previous, ids) => this.featureSearchState.next(this.featureSearchState.value.map(entry => ({
+                ...entry,
+                selectedViewIds: entry.selectedViewIds.filter(id => ids.includes(id))
             }))),
             retain: indices => {
                 const ids = indices.map(index => viewSettings.viewIdAt(index));
-                this.featureSearchState.next(this.featureSearchState.value.map(entry => ({...entry,
-                    selectedViewIds: entry.selectedViewIds.filter(id => ids.includes(id))})));
+                this.featureSearchState.next(this.featureSearchState.value.map(entry => ({
+                    ...entry,
+                    selectedViewIds: entry.selectedViewIds.filter(id => ids.includes(id))
+                })));
             }
         });
     }
@@ -836,7 +856,7 @@ export class FeatureSearchService {
             }
             this.resetSessionSearch(session, definition);
             this.updateSessionColor(session, normalizedColor);
-            this.startSessionSearch(session, definition, {forceGenerationIds: [session.id]});
+            this.startSessionSearch(session, definition, { forceGenerationIds: [session.id] });
             return;
         }
 
@@ -920,7 +940,7 @@ export class FeatureSearchService {
                     if (!this.mapInfo.maps.getMapLayerVisibility(viewIndex, mapId, layer.id)) {
                         continue;
                     }
-                    selected.set(JSON.stringify([mapId, layer.id]), {mapId, layerId: layer.id});
+                    selected.set(JSON.stringify([mapId, layer.id]), { mapId, layerId: layer.id });
                     break;
                 }
             }
@@ -949,7 +969,7 @@ export class FeatureSearchService {
                 if (!this.mapInfo.maps.getMapLayerVisibility(viewIndex, mapId, layer.id)) {
                     continue;
                 }
-                selected.set(JSON.stringify([mapId, layer.id]), {mapId, layerId: layer.id});
+                selected.set(JSON.stringify([mapId, layer.id]), { mapId, layerId: layer.id });
             }
         }
         return Array.from(selected.values())
@@ -972,12 +992,19 @@ export class FeatureSearchService {
     /** Starts a feature search from the compact payload stored on search actions/history entries. */
     runFromActionPayload(query: string, payload?: unknown): FeatureSearchSession {
         const selectedMapLayers = featureSearchSelectedMapLayersFromPayload(payload);
-        const selectedViewIndices = featureSearchSelectedViewIndicesFromPayload(payload);
+        const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : undefined;
+        const ids = record?.["selectedViewIds"];
+        if (ids !== undefined && (!Array.isArray(ids) || ids.some(id => typeof id !== "string" || !this.viewSettings.viewIds.includes(id)))) {
+            rejectAction("The saved search refers to a map view that is no longer available");
+        }
+        const selectedViewIndices = Array.isArray(ids)
+            ? ids.map(id => this.viewSettings.indexOfView(id))
+            : featureSearchSelectedViewIndicesFromPayload(payload);
         const selectedMapLayersManual = featureSearchMapLayersManualFromPayload(payload);
         return this.run(query, {
-            ...(selectedMapLayers ? {selectedMapLayers} : {}),
-            ...(selectedViewIndices ? {selectedViewIndices} : {}),
-            ...(selectedMapLayersManual !== undefined ? {selectedMapLayersManual} : {})
+            ...(selectedMapLayers ? { selectedMapLayers } : {}),
+            ...(selectedViewIndices ? { selectedViewIndices } : {}),
+            ...(selectedMapLayersManual !== undefined ? { selectedMapLayersManual } : {})
         });
     }
 
@@ -993,8 +1020,8 @@ export class FeatureSearchService {
             ?? this.activeFeatureSearchViewIndices(selectedMapLayers);
         const entry = this.addFeatureSearch({
             query,
-            ...(options.scope ? {scope: options.scope} : {}),
-            ...(options.autoUpdate === undefined ? {} : {autoUpdate: options.autoUpdate}),
+            ...(options.scope ? { scope: options.scope } : {}),
+            ...(options.autoUpdate === undefined ? {} : { autoUpdate: options.autoUpdate }),
             pinColor: this.nextDefaultSearchColor(),
             selectedMapLayers,
             selectedMapLayersManual: options.selectedMapLayersManual ?? false,
@@ -1014,7 +1041,7 @@ export class FeatureSearchService {
     /** Imports feature-search JSON as a fresh runnable search session. */
     importSearchJsonPayload(payload: unknown): FeatureSearchSession {
         const imported = featureSearchDefinitionFromImportPayload(payload).definition;
-        const selectedMapLayers = imported.selectedMapLayers.map(ref => ({...ref}));
+        const selectedMapLayers = imported.selectedMapLayers.map(ref => ({ ...ref }));
         const entry = this.addFeatureSearch({
             query: imported.query,
             scope: imported.scope,
@@ -1030,7 +1057,7 @@ export class FeatureSearchService {
             selectedTileLevels: [...imported.selectedTileLevels],
             selectedViewIndices: [...imported.selectedViewIndices],
             searchStyleRules: this.cloneJsonCompatible(imported.searchStyleRules),
-            renderStrategy: {...imported.renderStrategy}
+            renderStrategy: { ...imported.renderStrategy }
         });
         this.placeNewSearchSurface(entry.id);
         let session = this.getInternalSession(entry.id);
@@ -1048,7 +1075,7 @@ export class FeatureSearchService {
             return;
         }
         this.pendingForcedGenerationIds.add(session.id);
-        const patched = this.patchFeatureSearch(sessionId, {query, paused: false});
+        const patched = this.patchFeatureSearch(sessionId, { query, paused: false });
         if (patched) {
             return;
         }
@@ -1058,7 +1085,7 @@ export class FeatureSearchService {
             paused: false
         };
         this.resetSessionSearch(session, nextDefinition);
-        this.startSessionSearch(session, nextDefinition, {forceGenerationIds: [session.id]});
+        this.startSessionSearch(session, nextDefinition, { forceGenerationIds: [session.id] });
     }
 
     /** Requests one differential refresh over the currently visible map area. */
@@ -1078,7 +1105,7 @@ export class FeatureSearchService {
             forceGenerationIds: [session.id],
             updateCoverageIds: [session.id]
         });
-        this.patchFeatureSearch(sessionId, {paused: false});
+        this.patchFeatureSearch(sessionId, { paused: false });
     }
 
     /** Toggles whether viewport changes automatically update this search's tile coverage. */
@@ -1087,7 +1114,7 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.patchFeatureSearch(sessionId, {autoUpdate})) {
+        if (!this.patchFeatureSearch(sessionId, { autoUpdate })) {
             session.definition = {
                 ...session.definition,
                 autoUpdate
@@ -1147,7 +1174,7 @@ export class FeatureSearchService {
         if (!session || !session.definition.enabled) {
             return;
         }
-        if (!this.patchFeatureSearch(sessionId, {paused: true})) {
+        if (!this.patchFeatureSearch(sessionId, { paused: true })) {
             this.applySearchPause(session);
         }
     }
@@ -1158,7 +1185,7 @@ export class FeatureSearchService {
         if (!session || !session.definition.enabled) {
             return;
         }
-        if (!this.patchFeatureSearch(sessionId, {paused: false})) {
+        if (!this.patchFeatureSearch(sessionId, { paused: false })) {
             this.applySearchResume(session);
         }
     }
@@ -1180,7 +1207,7 @@ export class FeatureSearchService {
             autoUpdate: false,
             paused: true
         };
-        if (!this.patchFeatureSearch(sessionId, {autoUpdate: false, paused: true})) {
+        if (!this.patchFeatureSearch(sessionId, { autoUpdate: false, paused: true })) {
             this.progress.next(session);
         }
         this.syncSearchRequestsToMapService();
@@ -1192,7 +1219,7 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.patchFeatureSearch(sessionId, {pinColor: color})) {
+        if (!this.patchFeatureSearch(sessionId, { pinColor: color })) {
             this.updateSessionColor(session, color);
         }
     }
@@ -1203,8 +1230,8 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.patchFeatureSearch(sessionId, {bookmarked})) {
-            session.definition = {...session.definition, bookmarked};
+        if (!this.patchFeatureSearch(sessionId, { bookmarked })) {
+            session.definition = { ...session.definition, bookmarked };
             this.progress.next(session);
         }
     }
@@ -1237,11 +1264,11 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.patchFeatureSearch(sessionId, {enabled, paused: enabled ? session.definition.paused : false})) {
-            const definition = {...session.definition, enabled, paused: enabled ? session.definition.paused : false};
+        if (!this.patchFeatureSearch(sessionId, { enabled, paused: enabled ? session.definition.paused : false })) {
+            const definition = { ...session.definition, enabled, paused: enabled ? session.definition.paused : false };
             if (enabled) {
                 this.resetSessionSearch(session, definition);
-                this.startSessionSearch(session, definition, {forceGenerationIds: [session.id]});
+                this.startSessionSearch(session, definition, { forceGenerationIds: [session.id] });
             } else {
                 this.applySearchDisabled(session, definition);
             }
@@ -1263,8 +1290,8 @@ export class FeatureSearchService {
             selectedMapLayersManual: true,
             selectedFeatureTypes
         })) {
-            session.definition = {...session.definition, selectedMapLayers, selectedMapLayersManual: true, selectedFeatureTypes};
-            this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
+            session.definition = { ...session.definition, selectedMapLayers, selectedMapLayersManual: true, selectedFeatureTypes };
+            this.syncSearchRequestsToMapService({ forceGenerationIds: [session.id] });
             this.progress.next(session);
         }
     }
@@ -1275,9 +1302,9 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.patchFeatureSearch(sessionId, {selectedTileLevels})) {
-            session.definition = {...session.definition, selectedTileLevels};
-            this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
+        if (!this.patchFeatureSearch(sessionId, { selectedTileLevels })) {
+            session.definition = { ...session.definition, selectedTileLevels };
+            this.syncSearchRequestsToMapService({ forceGenerationIds: [session.id] });
             this.progress.next(session);
         }
     }
@@ -1292,9 +1319,9 @@ export class FeatureSearchService {
         if (JSON.stringify(session.definition.selectedFeatureTypes) === JSON.stringify(normalizedTypes)) {
             return;
         }
-        if (!this.patchFeatureSearch(sessionId, {selectedFeatureTypes: normalizedTypes})) {
-            session.definition = {...session.definition, selectedFeatureTypes: normalizedTypes};
-            this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
+        if (!this.patchFeatureSearch(sessionId, { selectedFeatureTypes: normalizedTypes })) {
+            session.definition = { ...session.definition, selectedFeatureTypes: normalizedTypes };
+            this.syncSearchRequestsToMapService({ forceGenerationIds: [session.id] });
             this.progress.next(session);
         }
     }
@@ -1326,8 +1353,8 @@ export class FeatureSearchService {
         if (!session) {
             return;
         }
-        if (!this.patchFeatureSearch(sessionId, {selectedViewIndices})) {
-            session.definition = {...session.definition, selectedViewIndices};
+        if (!this.patchFeatureSearch(sessionId, { selectedViewIndices })) {
+            session.definition = { ...session.definition, selectedViewIndices };
             this.bumpSearchResultLayersVersion();
             this.syncSearchRequestsToMapService();
             this.progress.next(session);
@@ -1368,13 +1395,13 @@ export class FeatureSearchService {
             paused: false,
             showResultsOnMap: definition.showResultsOnMap,
             pinColor: definition.pinColor,
-            selectedMapLayers: definition.selectedMapLayers.map(ref => ({...ref})),
+            selectedMapLayers: definition.selectedMapLayers.map(ref => ({ ...ref })),
             selectedMapLayersManual: definition.selectedMapLayersManual ?? false,
             selectedFeatureTypes: [...definition.selectedFeatureTypes],
             selectedTileLevels: [...definition.selectedTileLevels],
             selectedViewIndices: [...definition.selectedViewIndices],
             searchStyleRules: this.cloneJsonCompatible(definition.searchStyleRules),
-            renderStrategy: {...definition.renderStrategy}
+            renderStrategy: { ...definition.renderStrategy }
         });
         const layoutId = FeatureSearchService.layoutIdForSearch(entry.id);
         if (this.isSessionDocked(session.id)) {
@@ -1406,8 +1433,8 @@ export class FeatureSearchService {
         const left = Math.min(Math.max(0, sourceLayout.position.left + offset), Math.max(0, window.innerWidth - width));
         const top = Math.min(Math.max(0, sourceLayout.position.top + offset), Math.max(0, window.innerHeight - height));
         this.layout.upsertDialogLayout(cloneLayoutId, {
-            position: {left, top},
-            size: {...sourceLayout.size},
+            position: { left, top },
+            size: { ...sourceLayout.size },
             open: false,
             docked: false,
             dockTab: SEARCH_DOCK_TAB_ID
@@ -1449,8 +1476,8 @@ export class FeatureSearchService {
         ));
         this.layout.upsertDialogLayout(layoutId, {
             ...(current ?? {
-                position: {left: 0, top: 0},
-                size: {width, height},
+                position: { left: 0, top: 0 },
+                size: { width, height },
                 open: false,
                 docked: false,
                 dockTab: SEARCH_DOCK_TAB_ID
@@ -1459,7 +1486,7 @@ export class FeatureSearchService {
                 left: Math.max(0, Math.round((window.innerWidth - width) / 2)),
                 top: Math.max(0, Math.round((window.innerHeight - height) / 2))
             },
-            size: {width, height}
+            size: { width, height }
         });
     }
 
@@ -1738,13 +1765,15 @@ export class FeatureSearchService {
                         )) {
                         presentation.coverage = {
                             partitions: coverage.partitions.map(
-                                partition => ({...partition})
+                                partition => ({ ...partition })
                             ),
                             ...(coverage.priorityPartitions
-                                ? {priorityPartitions:
-                                    coverage.priorityPartitions.map(
-                                        partition => ({...partition})
-                                    )}
+                                ? {
+                                    priorityPartitions:
+                                        coverage.priorityPartitions.map(
+                                            partition => ({ ...partition })
+                                        )
+                                }
                                 : {})
                         };
                         presentation.coverageOrder = new Map(
@@ -1932,7 +1961,7 @@ export class FeatureSearchService {
                 partition.id as number
             ])
         );
-        return {partitions, priorityPartitions: []};
+        return { partitions, priorityPartitions: [] };
     }
 
     /** Resolve selected-view discovery tiles without treating them as object identities. */
@@ -1943,7 +1972,7 @@ export class FeatureSearchService {
         const layer = presentation.mapgetLayer;
         const level = layer.tileAssociationLevel;
         if (level === null) {
-            return {partitions: []};
+            return { partitions: [] };
         }
         const discoveryTileIds: number[] = [];
         const seen = new Set<number>();
@@ -2036,7 +2065,7 @@ export class FeatureSearchService {
                 }
             });
         }
-        return presentation.objectCoverage ?? {partitions: []};
+        return presentation.objectCoverage ?? { partitions: [] };
     }
 
     private applySearchCoverageSnapshot(searchId: string): void {
@@ -2130,7 +2159,7 @@ export class FeatureSearchService {
     private startSessionSearch(
         session: FeatureSearchSession,
         definition: FeatureSearchStateEntry,
-        options: {forceGenerationIds?: Iterable<string>} = {}
+        options: { forceGenerationIds?: Iterable<string> } = {}
     ): void {
         session.definition = definition;
         this.resetServerSearchProgress(session, session.refresh);
@@ -2254,10 +2283,10 @@ export class FeatureSearchService {
             matchedFieldNames: analysis.matchedFieldNames,
             matchedEnumValues: analysis.matchedEnumValues,
             matchedFeatureTypes: analysis.matchedFeatureTypes,
-            ...(analysis.error ? {error: analysis.error} : {})
+            ...(analysis.error ? { error: analysis.error } : {})
         };
         this.progress.next(session);
-        this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
+        this.syncSearchRequestsToMapService({ forceGenerationIds: [session.id] });
     }
 
     /** Returns the schema-analysis identity used to guard resolved-definition reuse. */
@@ -2330,14 +2359,14 @@ export class FeatureSearchService {
         if (this.sameSelectedMapLayers(session.definition.selectedMapLayers, normalizedLayers)) {
             return false;
         }
-        if (this.patchFeatureSearch(session.id, {selectedMapLayers: normalizedLayers, selectedMapLayersManual: false})) {
+        if (this.patchFeatureSearch(session.id, { selectedMapLayers: normalizedLayers, selectedMapLayersManual: false })) {
             return true;
         }
 
-        const nextDefinition = {...session.definition, selectedMapLayers: normalizedLayers, selectedMapLayersManual: false};
+        const nextDefinition = { ...session.definition, selectedMapLayers: normalizedLayers, selectedMapLayersManual: false };
         this.resetSessionSearch(session, nextDefinition);
         this.progress.next(session);
-        this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
+        this.syncSearchRequestsToMapService({ forceGenerationIds: [session.id] });
         return true;
     }
 
@@ -2446,10 +2475,10 @@ export class FeatureSearchService {
 
         const resultFields = Array.from(resultFieldsByKey.values())
             .sort((lhs, rhs) => lhs.index - rhs.index || lhs.expression.localeCompare(rhs.expression))
-            .map(item => ({...item, summary: this.finalizeValueSummary(item.summary)}));
+            .map(item => ({ ...item, summary: this.finalizeValueSummary(item.summary) }));
         const traces = Array.from(tracesByName.values())
             .sort((lhs, rhs) => lhs.name.localeCompare(rhs.name))
-            .map(item => ({...item, summary: this.finalizeValueSummary(item.summary)}));
+            .map(item => ({ ...item, summary: this.finalizeValueSummary(item.summary) }));
         const hasValues = resultFields.length > 0 || traces.length > 0;
         finalSession.valueSummaries = {
             status: hasValues ? "ready" : (errors.length > 0 ? "error" : "empty"),
@@ -2458,7 +2487,7 @@ export class FeatureSearchService {
             totalTiles: contributions.length,
             resultFields,
             traces,
-            ...(errors.length > 0 ? {error: errors.slice(0, 3).join("\n")} : {})
+            ...(errors.length > 0 ? { error: errors.slice(0, 3).join("\n") } : {})
         };
         this.progress.next(finalSession);
     }
@@ -2677,7 +2706,7 @@ export class FeatureSearchService {
 
         if (source.numeric) {
             if (!target.numeric) {
-                target.numeric = {...source.numeric};
+                target.numeric = { ...source.numeric };
             } else {
                 target.numeric.count += source.numeric.count;
                 target.numeric.min = Math.min(target.numeric.min, source.numeric.min);
@@ -2694,7 +2723,7 @@ export class FeatureSearchService {
             histogramByValue.set(bucket.value, (histogramByValue.get(bucket.value) ?? 0) + bucket.count);
         }
         target.histogram = Array.from(histogramByValue.entries())
-            .map(([value, count]) => ({value, count}));
+            .map(([value, count]) => ({ value, count }));
     }
 
     /** Sorts and trims a merged summary for display. */
@@ -2883,7 +2912,7 @@ export class FeatureSearchService {
             nextCandidate.originLayers ?? []
         );
         return originLayers.length
-            ? {...currentCandidate, originLayers}
+            ? { ...currentCandidate, originLayers }
             : currentCandidate;
     }
 
@@ -2915,8 +2944,8 @@ export class FeatureSearchService {
         return {
             limit: this.completionCandidateLimit,
             timeoutMs: options.timeoutMs ?? 35,
-            ...(options.scope ? {scope: options.scope} : {}),
-            ...(options.selectedMapLayers !== undefined ? {selectedMapLayers: options.selectedMapLayers} : {})
+            ...(options.scope ? { scope: options.scope } : {}),
+            ...(options.selectedMapLayers !== undefined ? { selectedMapLayers: options.selectedMapLayers } : {})
         };
     }
 
@@ -3123,7 +3152,7 @@ export class FeatureSearchService {
                     ),
                     valueErrors: entry.valueErrors?.flatMap(error => {
                         const expressionIndex = task.projectedFieldIndices.indexOf(error.expressionIndex);
-                        return expressionIndex < 0 ? [] : [{...error, expressionIndex}];
+                        return expressionIndex < 0 ? [] : [{ ...error, expressionIndex }];
                     })
                 };
             });
@@ -3281,7 +3310,7 @@ export class FeatureSearchService {
             ? coreLib.getTilePosition(payload.sourceTileId)
             : null;
         for (const entry of payload.entries) {
-            const {mapId, layerId} = entry.mapTileKey === sourceTileKey
+            const { mapId, layerId } = entry.mapTileKey === sourceTileKey
                 ? sourceMapLayerIds
                 : this.parseMapLayerIds(entry.mapTileKey);
             const resultIndex = this.entryResultIndex(entry, results.length);
@@ -3318,9 +3347,9 @@ export class FeatureSearchService {
                 sourceLayerId: payload.sourceLayerId,
                 sourceTileId: payload.sourceTileId,
                 hoverFeatureId,
-                ...(this.hasFiniteIndex(entry.attributeIndex) ? {attributeIndex: Math.floor(entry.attributeIndex)} : {}),
-                ...(this.hasFiniteIndex(entry.validityIndex) ? {validityIndex: Math.floor(entry.validityIndex)} : {}),
-                ...(this.hasFiniteIndex(entry.validityCount) ? {validityCount: Math.floor(entry.validityCount)} : {})
+                ...(this.hasFiniteIndex(entry.attributeIndex) ? { attributeIndex: Math.floor(entry.attributeIndex) } : {}),
+                ...(this.hasFiniteIndex(entry.validityIndex) ? { validityIndex: Math.floor(entry.validityIndex) } : {}),
+                ...(this.hasFiniteIndex(entry.validityCount) ? { validityCount: Math.floor(entry.validityCount) } : {})
             });
         }
 
@@ -3378,7 +3407,7 @@ export class FeatureSearchService {
     }
 
     /** Removes UI-visible result data for one source tile that left the desired search area. */
-    private removeServerSearchResultTile(payload: {searchId: string; sourceTileKey: string}): void {
+    private removeServerSearchResultTile(payload: { searchId: string; sourceTileKey: string }): void {
         const session = this.getInternalSession(payload.searchId);
         if (!session || !session.searchResultTilesBySourceKey.delete(payload.sourceTileKey)) {
             return;
@@ -3777,13 +3806,13 @@ export class FeatureSearchService {
     /**
      * Extracts map and layer ids from a tile key, falling back to a plain split if parsing fails.
      */
-    private parseMapLayerIds(mapTileKey: string): {mapId: string; layerId: string} {
+    private parseMapLayerIds(mapTileKey: string): { mapId: string; layerId: string } {
         try {
             const [mapId, layerId] = coreLib.parseMapTileKey(mapTileKey);
-            return {mapId: String(mapId), layerId: String(layerId)};
+            return { mapId: String(mapId), layerId: String(layerId) };
         } catch (_error) {
             const [mapId = "", layerId = ""] = mapTileKey.split("/");
-            return {mapId, layerId};
+            return { mapId, layerId };
         }
     }
 
@@ -3895,7 +3924,7 @@ export class FeatureSearchService {
         resultKey: string,
         hoverFeatureId: string,
         entry: SearchResultTileEntry,
-        fallbackTileCenter: {x: number; y: number; z: number} | null
+        fallbackTileCenter: { x: number; y: number; z: number } | null
     ): SearchResultPoint | null {
         const cartographicRad = entry.position?.cartographicRad;
         const cartographic = entry.position?.cartographic;
@@ -3945,8 +3974,11 @@ export class FeatureSearchService {
                 ${mseconds ? `${mseconds}ms` : ''}`.trim() || "0ms";
     }
 
-
     registerActions(actions: AppActionService): void {
+        actions.registerAction(searchInputActions.searchInput, input => {
+            this.runFromActionPayload(input.query, input.payload);
+            return applied();
+        }, (query, history) => this.searchInputCandidates(query, history?.payload));
         actions.registerAction(searchActions.startSearch, input => this.startSearch(input));
         actions.registerAction(searchActions.controlSearch, input => this.controlSearch(input));
         actions.registerAction(searchActions.getSearch, input => this.getSearch(input));
@@ -3954,7 +3986,7 @@ export class FeatureSearchService {
         actions.registerAction(searchActions.getSearchResults, input => this.searchResults(input));
         actions.registerAction(searchActions.exportSearch, input => this.exportSearch(input));
         actions.registerControl(searchControls.searches, {
-            read: ({searchId}, context) => this.searchSummary(searchId, context), defaultTargets: () => [{}]
+            read: ({ searchId }, context) => this.searchSummary(searchId, context), defaultTargets: () => [{}]
         });
     }
 
@@ -3962,23 +3994,28 @@ export class FeatureSearchService {
     searchSummary(searchId: string | undefined, context: ControlReadContext): ControlValue<typeof searchControls.searches> {
         const definitions = this.featureSearchState.value;
         if (searchId && !definitions.some(definition => definition.id === searchId)) rejectAction("The search no longer exists");
-        const owner = this;
+        const sessionFor = (id: string) => this.getSession(id);
         function* values() {
             for (const definition of definitions) {
                 if (searchId && definition.id !== searchId) continue;
-                const runtime = owner.getSession(definition.id);
-                yield {searchId: definition.id, query: context.text(definition.query), pinColor: definition.pinColor,
+                const runtime = sessionFor(definition.id);
+                yield {
+                    searchId: definition.id, query: context.text(definition.query), pinColor: definition.pinColor,
                     enabled: definition.enabled, paused: runtime?.paused ?? definition.paused,
                     autoUpdate: definition.autoUpdate, showResultsOnMap: definition.showResultsOnMap,
-                    ...(runtime ? {runtime: {complete: runtime.complete && runtime.schemaAnalysis.status !== "pending",
-                        progressDone: runtime.progressDone, progressTotal: runtime.progressTotal, resultCount: runtime.searchResults.length,
-                        errorCount: runtime.errors.size + (runtime.schemaAnalysis.status === "error" &&
-                            (!runtime.schemaAnalysis.error || !runtime.errors.has(runtime.schemaAnalysis.error)) ? 1 : 0)}} : {})};
+                    ...(runtime ? {
+                        runtime: {
+                            complete: runtime.complete && runtime.schemaAnalysis.status !== "pending",
+                            progressDone: runtime.progressDone, progressTotal: runtime.progressTotal, resultCount: runtime.searchResults.length,
+                            errorCount: runtime.errors.size + (runtime.schemaAnalysis.status === "error" &&
+                                (!runtime.schemaAnalysis.error || !runtime.errors.has(runtime.schemaAnalysis.error)) ? 1 : 0)
+                        }
+                    } : {})
+                };
             }
         }
         return context.collect(values());
     }
-
 
     /** Resolves an existing session without implicitly restoring, starting or analyzing a search. */
     requireSearchSession(searchId: string): FeatureSearchSession {
@@ -3987,9 +4024,8 @@ export class FeatureSearchService {
         return session;
     }
 
-
     /** Validates all view/layer choices before publishing a search definition. */
-    checkSearchTargets(mapLayers: Array<{mapId: string; layerId: string}>, viewIds: string[]): void {
+    checkSearchTargets(mapLayers: Array<{ mapId: string; layerId: string }>, viewIds: string[]): void {
         for (const id of viewIds) this.viewState.requireViewIndex(id);
         for (const target of mapLayers) {
             const layer = this.mapInfo.requireLayer(target.mapId, target.layerId);
@@ -3997,16 +4033,16 @@ export class FeatureSearchService {
         }
     }
 
-
     /** Starts one visible ordinary search; configuration is complete before the first dispatch. */
     startSearch(input: ActionInput<typeof searchActions.startSearch>): ActionOutput<typeof searchActions.startSearch> {
         this.checkSearchTargets(input.mapLayers, input.viewIds);
-        const session = this.run(input.query, {scope: input.scope, selectedMapLayers: input.mapLayers,
+        const session = this.run(input.query, {
+            scope: input.scope, selectedMapLayers: input.mapLayers,
             selectedMapLayersManual: true, selectedViewIndices: input.viewIds.map(id => this.viewState.requireViewIndex(id)), autoUpdate: input.autoUpdate ?? false,
-            selectedTileLevels: input.tileLevels ?? []});
-        return {status: "applied", searchId: session.id};
+            selectedTileLevels: input.tileLevels ?? []
+        });
+        return { status: "applied", searchId: session.id };
     }
-
 
     /** Delegates lifecycle transitions to the search owner; Stop and Close intentionally differ. */
     controlSearch(input: ActionInput<typeof searchActions.controlSearch>): ActionOutput<typeof searchActions.controlSearch> {
@@ -4025,11 +4061,10 @@ export class FeatureSearchService {
         return applied();
     }
 
-
     /** Reads persisted settings, resolved query semantics and bounded errors without schema trees. */
     getSearch(input: ActionInput<typeof searchActions.getSearch>): ActionOutput<typeof searchActions.getSearch> {
         const session = this.requireSearchSession(input.searchId);
-        const {id: _id, query: _query, paused: _paused, selectedMapLayersManual: _manual, selectedViewIndices, ...settings} = featureSearchDefinitionExport(session.definition);
+        const { id: _id, query: _query, paused: _paused, selectedMapLayersManual: _manual, selectedViewIndices, ...settings } = featureSearchDefinitionExport(session.definition);
         let textOmitted = false;
         const analysis = session.schemaAnalysis;
         const boundedText = (value: string, limit: number) => {
@@ -4037,11 +4072,13 @@ export class FeatureSearchService {
             textOmitted ||= bounded !== value;
             return bounded;
         };
-        const schemaAnalysis = {status: analysis.status, concreteScope: analysis.concreteScope,
+        const schemaAnalysis = {
+            status: analysis.status, concreteScope: analysis.concreteScope,
             normalizedQuery: boundedText(analysis.normalizedQuery, 4096),
             rewriteSuppressed: analysis.rewriteSuppressed,
             rewriteSuppressionReason: boundedText(analysis.rewriteSuppressionReason, 1024),
-            ...(analysis.error ? {error: boundedText(analysis.error, 4096)} : {})};
+            ...(analysis.error ? { error: boundedText(analysis.error, 4096) } : {})
+        };
         const reportedErrors = new Set(session.errors);
         if (analysis.error) reportedErrors.add(analysis.error);
         if (analysis.status === "error" && !analysis.error) reportedErrors.add("Search schema analysis failed.");
@@ -4055,34 +4092,38 @@ export class FeatureSearchService {
         const errors = boundedCollection(candidates(), 100, 32000);
         const query = unicodePrefix(session.definition.query, 4096);
         textOmitted ||= query !== session.definition.query;
-        const parsedSettings = searchSettingsSchema.safeParse({...settings, selectedViewIds: selectedViewIndices.map(index => this.viewSettings.viewIdAt(index))});
+        const parsedSettings = searchSettingsSchema.safeParse({ ...settings, selectedViewIds: selectedViewIndices.map(index => this.viewSettings.viewIdAt(index)) });
         if (!parsedSettings.success) rejectAction("Search settings exceed the public contract; narrow them in the UI first");
         // No submitted backend requests during pending analysis is not an empty completed search.
         const searchComplete = session.complete && analysis.status !== "pending";
-        return {observedAt: new Date().toISOString(), settings: parsedSettings.data, schemaAnalysis,
+        return {
+            observedAt: new Date().toISOString(), settings: parsedSettings.data, schemaAnalysis,
             responseComplete: errors.complete && !textOmitted, searchComplete,
             reason: errors.reason ?? (textOmitted ? "text_limit" : undefined), status: {
                 searchId: session.id, query, runId: session.runId, refresh: session.refresh,
                 complete: searchComplete, paused: session.paused, resultCount: session.searchResults.length,
                 progressDone: session.progressDone, progressTotal: session.progressTotal, errors: errors.items
-            }};
+            }
+        };
     }
-
 
     /** Merges a validated patch into one search, retaining unrelated fields and sibling searches. */
     setSearch(input: ActionInput<typeof searchActions.setSearch>): ActionOutput<typeof searchActions.setSearch> {
         const session = this.requireSearchSession(input.searchId);
-        const current = this.getSearch({searchId: input.searchId}).settings;
-        const settings = searchSettingsSchema.parse({...current, ...input.settings,
-            renderStrategy: {...current.renderStrategy, ...input.settings.renderStrategy}});
+        const current = this.getSearch({ searchId: input.searchId }).settings;
+        const settings = searchSettingsSchema.parse({
+            ...current, ...input.settings,
+            renderStrategy: { ...current.renderStrategy, ...input.settings.renderStrategy }
+        });
         this.checkSearchTargets(settings.selectedMapLayers, settings.selectedViewIds);
         const changed = !deepEquals(current, settings);
-        const {selectedViewIds, ...patch} = settings;
-        if (changed) this.patchFeatureSearch(session.id, {...patch, selectedViewIndices: selectedViewIds.map(id => this.viewState.requireViewIndex(id)),
-            ...(input.settings.selectedMapLayers === undefined ? {} : {selectedMapLayersManual: true})});
+        const { selectedViewIds, ...patch } = settings;
+        if (changed) this.patchFeatureSearch(session.id, {
+            ...patch, selectedViewIndices: selectedViewIds.map(id => this.viewState.requireViewIndex(id)),
+            ...(input.settings.selectedMapLayers === undefined ? {} : { selectedMapLayersManual: true })
+        });
         return applied(changed);
     }
-
 
     /** Reads a bounded result slice; generation guards make repeated exports fail visibly after a rerun. */
     searchResults(input: ActionInput<typeof searchActions.getSearchResults>): ActionOutput<typeof searchActions.getSearchResults> {
@@ -4097,31 +4138,60 @@ export class FeatureSearchService {
                 const entry = session.searchResults[index];
                 const label = unicodePrefix(entry.label, 4096);
                 textOmitted ||= label !== entry.label;
-                yield {...entry, label};
+                yield { ...entry, label };
             }
         };
         const result = boundedCollection(source(), input.limit);
         const searchComplete = session.complete && session.schemaAnalysis.status !== "pending";
-        return {observedAt: new Date().toISOString(), searchId: session.id, runId: session.runId, refresh: session.refresh,
+        return {
+            observedAt: new Date().toISOString(), searchId: session.id, runId: session.runId, refresh: session.refresh,
             offset, total: session.searchResults.length, searchComplete, results: result.items,
-            complete: result.complete && searchComplete && !textOmitted, reason: result.reason ?? (textOmitted ? "text_limit" : searchComplete ? undefined : "loading")};
+            complete: result.complete && searchComplete && !textOmitted, reason: result.reason ?? (textOmitted ? "text_limit" : searchComplete ? undefined : "loading")
+        };
     }
-
 
     /** Exports only the selected bounded slice, avoiding full result-tree construction and clipboard side effects. */
     exportSearch(input: ActionInput<typeof searchActions.exportSearch>): ActionOutput<typeof searchActions.exportSearch> {
         const results = this.searchResults(input);
         const configuration = input.include === "results" ? undefined : {
-            ...this.getSearch({searchId: input.searchId}).settings, id: input.searchId,
+            ...this.getSearch({ searchId: input.searchId }).settings, id: input.searchId,
             query: this.requireSearchSession(input.searchId).definition.query, paused: this.requireSearchSession(input.searchId).paused
         };
-        const payload = {exportedAt: new Date().toISOString(), searchId: input.searchId, configuration,
-            results: input.include === "configuration" ? undefined : results};
+        const payload = {
+            exportedAt: new Date().toISOString(), searchId: input.searchId, configuration,
+            results: input.include === "configuration" ? undefined : results
+        };
         const content = JSON.stringify(payload);
         if (new TextEncoder().encode(content).length > 180000) rejectAction("Export exceeds the byte limit; request fewer results", "invalid_arguments");
-        return {observedAt: payload.exportedAt, mimeType: "application/json", content,
-            complete: input.include === "configuration" || results.complete, reason: input.include === "configuration" ? undefined : results.reason};
+        return {
+            observedAt: payload.exportedAt, mimeType: "application/json", content,
+            complete: input.include === "configuration" || results.complete, reason: input.include === "configuration" ? undefined : results.reason
+        };
     }
 
+    /** Captures explicit view scopes before a new history entry can outlive its current layout. */
+    actionPayloadForHistory(payload?: unknown): unknown {
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+            const { selectedViewIndices: _legacyIndices, ...fields } = payload as Record<string, unknown>;
+            const indices = featureSearchSelectedViewIndicesFromPayload(payload);
+            payload = fields["selectedViewIds"] !== undefined || indices === undefined ? fields
+                : { ...fields, selectedViewIds: indices.flatMap(index => this.viewSettings.viewIds[index] ? [this.viewSettings.viewIds[index]] : []) };
+        }
+        return payload;
+    }
+
+    /** The same search owner parses the omnibar expression and runs its selected completion scope. */
+    private searchInputCandidates(query: string, payload?: unknown): AppActionCandidate<ActionInput<typeof searchInputActions.searchInput>>[] {
+        // Old positional history is migrated on first resolution; new entries capture IDs when saved.
+        payload = this.actionPayloadForHistory(payload);
+        let error = "";
+        try { coreLib.validateSimfilQuery(query); }
+        catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
+        return [{
+            id: "features", icon: "pi-bolt", color: "blue", name: "Search Features and Attributes",
+            label: "Match features with a filter expression" + (error ? '<br><span class="search-option-warning">' + error + '</span>' : ""),
+            enabled: !error && !!query.trim(), input: { query, payload }, payload
+        }];
+    }
 
 }

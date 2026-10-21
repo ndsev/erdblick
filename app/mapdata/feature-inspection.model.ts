@@ -2,17 +2,21 @@ import type {
     TileFeatureLayer,
     TileLayerParser
 } from "../../build/libs/core/erdblick-core";
-import {TileDeliveryError} from "./tile-diagnostics";
-import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
-import {MapTileStreamClientTiles, MAP_TILE_STREAM_HEADER_SIZE,
-    MAP_TILE_STREAM_TYPE_INCOMING_RELATIONS, MAP_TILE_STREAM_TYPE_STATUS} from "./tilestream";
-import type {TileFeatureId} from "../shared/appstate.service";
-import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
+import type { TileFeatureId } from "../inspection/inspection-state.model";
+import { coreLib, uint8ArrayToWasm } from "../integrations/wasm";
+import { stripFeatureInspectionTarget } from "../shared/tile-feature-id";
 import {
     parsePartition,
     partitionKey,
     type PartitionId
 } from "./partition.model";
+import { TileDeliveryError } from "./tile-diagnostics";
+import {
+    MAP_TILE_STREAM_HEADER_SIZE,
+    MAP_TILE_STREAM_TYPE_INCOMING_RELATIONS,
+    MAP_TILE_STREAM_TYPE_STATUS,
+    MapTileStreamClientTiles
+} from "./tilestream";
 
 /** Completed incoming context; rows and associations were validated by the native feature model. */
 export interface IncomingInspectionResult {
@@ -128,7 +132,7 @@ export class InspectionFeatureTile {
         let failure: string | undefined;
         let bytes = 0;
         const abort = () => client.destroy();
-        signal.addEventListener("abort", abort, {once: true});
+        signal.addEventListener("abort", abort, { once: true });
         client.onFeatures = blob => {
             if (successful) throw new Error("Incoming snapshot arrived after terminal status.");
             bytes += blob.byteLength;
@@ -153,8 +157,8 @@ export class InspectionFeatureTile {
         try {
             await client.request([{
                 mapId: this.mapName, layerId: this.layerName, partitions: [this.partition],
-                roots: [{partition: this.partition, featureId: canonicalId}]
-            }], {channels: [{channelId: "incoming", scope: "relation", relation: {traversal: "incoming"}}]});
+                roots: [{ partition: this.partition, featureId: canonicalId }]
+            }], { channels: [{ channelId: "incoming", scope: "relation", relation: { traversal: "incoming" } }] });
             signal.throwIfAborted();
             if (failure || !successful || manifests.length !== 1)
                 throw new Error(failure ?? "Incomplete incoming inspection response.");
@@ -162,8 +166,10 @@ export class InspectionFeatureTile {
             const view = new coreLib.IncomingInspection(JSON.stringify(manifest), this.mapTileKey, canonicalId);
             try {
                 for (const snapshot of snapshots) snapshot.peek(layer => view.addSnapshot(layer));
-                return {model: view.inspectionModel(), target: snapshots.find(tile => tile.mapTileKey === this.mapTileKey), complete: manifest.complete,
-                    issues: manifest.issues, expiresAtMs: manifest.expiresAtMs};
+                return {
+                    model: view.inspectionModel(), target: snapshots.find(tile => tile.mapTileKey === this.mapTileKey), complete: manifest.complete,
+                    issues: manifest.issues, expiresAtMs: manifest.expiresAtMs
+                };
             } finally {
                 view.delete();
             }
@@ -190,7 +196,7 @@ export class FeatureWrapper implements TileFeatureId {
     constructor(
         readonly featureId: string,
         readonly featureTile: InspectionFeatureTile
-    ) {}
+    ) { }
 
     get mapTileKey(): string {
         return this.featureTile.mapTileKey;

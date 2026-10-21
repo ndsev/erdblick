@@ -19,3 +19,5 @@ export function clampTileSubsetRenderWorkerCount(
         )
     );
 }
+
+export const MAX_NUM_TILES_TO_LOAD = 512;

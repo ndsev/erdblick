@@ -1,8 +1,9 @@
-import { ChangeDetectorRef,Component,OnDestroy } from "@angular/core";
+import { ChangeDetectorRef, Component, OnDestroy } from "@angular/core";
 import { Subscription } from "rxjs";
 import { FeatureWrapper } from "../mapdata/feature-inspection.model";
-import { AppStateService,InspectionComparisonModel,InspectionPanelModel } from "../shared/appstate.service";
+import { AppStateService } from "../shared/appstate.service";
 import { InspectionSelectionService } from "./inspection-selection.service";
+import { InspectionComparisonModel, InspectionPanelModel } from "./inspection-state.model";
 import { InspectionStateService } from "./inspection-state.service";
 
 @Component({
@@ -27,8 +28,8 @@ export class InspectionDialogsComponent implements OnDestroy {
     private readonly subscriptions = new Subscription();
 
     constructor(private mapService: InspectionSelectionService,
-                private stateService: AppStateService,
-                private readonly cdr: ChangeDetectorRef,
+        private stateService: AppStateService,
+        private readonly cdr: ChangeDetectorRef,
         public readonly inspectionState: InspectionStateService) {
         this.subscriptions.add(this.mapService.selectionTopic.subscribe(panels => {
             this.undockedPanels = panels.filter(panel => panel.undocked);

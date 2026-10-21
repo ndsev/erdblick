@@ -1,34 +1,47 @@
 import { HttpClient } from "@angular/common/http";
 import { Injectable } from "@angular/core";
-import { BehaviorSubject,firstValueFrom,Subject } from "rxjs";
+import { BehaviorSubject, filter, firstValueFrom, Subject, take } from "rxjs";
 import type {
-FeatureLayerStyle,
-TileLayerParser
+    FeatureLayerStyle,
+    TileLayerParser
 } from "../../build/libs/core/erdblick-core";
-import { ActionInput,ActionOutput,catalogPage,ControlReadContext,ControlSelector,ControlValue,rejectAction } from "../actions/app-action";
-import { AppActionService } from "../actions/app-action.service";
 import {
-coreLib,
-uint8ArrayFromWasm,
-uint8ArrayToWasmOrThrow
+    ActionInput,
+    ActionOutput,
+    catalogPage,
+    ControlReadContext,
+    ControlSelector,
+    ControlValue,
+    rejectAction
+} from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
+import { InspectionStateService } from "../inspection/inspection-state.service";
+import {
+    coreLib,
+    uint8ArrayFromWasm,
+    uint8ArrayToWasmOrThrow
 } from "../integrations/wasm";
+import { TileGridMode, VIEW_SYNC_LAYERS } from "../mapview/map-view-state.model";
 import { MapViewStateService } from "../mapview/map-view-state.service";
-import { AppStateService,TileGridMode,VIEW_SYNC_LAYERS } from "../shared/appstate.service";
+import { AppStateService } from "../shared/appstate.service";
 import { InfoMessageService } from "../shared/info.service";
 import { unicodePrefix } from "../shared/unicode-string";
 import type { LayerPresetRef } from "../styledata/layer-preset.model";
 import { MapPresetService } from "../styledata/map-preset.service";
 import { StyleService } from "../styledata/style.service";
-import { mapActions,mapControls } from "./map-info.service.declarations";
+import { mapActions, mapControls } from "./map-info.service.declarations";
 import { MapLayerStateService } from "./map-layer-state.service";
 import {
-dataSourceCatalogStatus,
-dataSourceProgressPercent,
-isDataSourceCatalogEntryReady,
-layerPresetInferenceKey,layerPresetNode,layerStyleOptions,MapInfoItem,
-MapLayerTree,
-sortDataSourceCatalogEntries,
-StyleOptionNode
+    dataSourceCatalogStatus,
+    dataSourceProgressPercent,
+    isDataSourceCatalogEntryReady,
+    layerPresetInferenceKey,
+    layerPresetNode,
+    layerStyleOptions,
+    MapInfoItem,
+    MapLayerTree,
+    sortDataSourceCatalogEntries,
+    StyleOptionNode
 } from "./map.tree.model";
 import { MapgetLayer } from "./mapget-layer.model";
 
@@ -47,11 +60,10 @@ export interface StyleOptionChange {
     viewIndex: number;
 }
 
-
 /**
  * Owns datasource metadata, the map/layer tree, shared parser metadata, legal info, and layer-tree mutations.
  */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class MapInfoService {
     public readonly legalInformationPerMap = new Map<string, Set<string>>();
     public readonly legalInformationUpdated = new Subject<boolean>();
@@ -91,11 +103,13 @@ export class MapInfoService {
         private readonly mapPresetService: MapPresetService,
         private readonly messageService: InfoMessageService,
         public readonly layerState: MapLayerStateService,
-        public readonly viewSettings: MapViewStateService
+        public readonly viewSettings: MapViewStateService,
+        private readonly inspectionState: InspectionStateService
     ) {
         this.maps$ = new BehaviorSubject<MapLayerTree>(
-            new MapLayerTree([], this.stateService, this.styleService, this.mapPresetService, true, this.viewSettings, this.layerState)
+            new MapLayerTree([], this.stateService, this.styleService, this.mapPresetService, this.viewSettings, this.layerState)
         );
+        this.stateService.ready.pipe(filter(ready => ready), take(1)).subscribe(() => this.pruneCatalogState());
         this.stateService.stateApplied.subscribe(() => {
             this.configureTreeParameters();
             this.layerStateChanged.next("external-state");
@@ -292,7 +306,7 @@ export class MapInfoService {
                 if (!isDataSourceCatalogEntryReady(source)) {
                     return source;
                 }
-                const metadata = {...source};
+                const metadata = { ...source };
                 for (const field of ["status", "statusMessage", "progress", "configIndex"]) {
                     delete metadata[field];
                 }
@@ -301,7 +315,7 @@ export class MapInfoService {
                 nextMetadata.set(signature, retained);
                 // HTTP decoding creates fresh objects. Preserve unchanged layer
                 // identities so scene reconciliation does not retire their tiles.
-                return {...source, layers: retained.layers};
+                return { ...source, layers: retained.layers };
             });
             this.sourceCatalogRevisionValue = this.parseSourceCatalogRevision(
                 response.headers.get("X-Mapget-Sources-Revision")
@@ -386,10 +400,12 @@ export class MapInfoService {
     }
 
     /** Reports constructor recovery independently of whether mapget's transport is connected. */
-    getSourceRecoveryState(): {retrying: boolean; failed: boolean; message: string} {
+    getSourceRecoveryState(): { retrying: boolean; failed: boolean; message: string } {
         const failures = this.sourceCatalogEntries.filter(entry => dataSourceCatalogStatus(entry) === "failed");
-        return {retrying: failures.some(entry => entry.retrying === true), failed: failures.length > 0,
-            message: failures.map(entry => `${entry.mapId}: ${entry.statusMessage || "Datasource unavailable."}`).join("\n")};
+        return {
+            retrying: failures.some(entry => entry.retrying === true), failed: failures.length > 0,
+            message: failures.map(entry => `${entry.mapId}: ${entry.statusMessage || "Datasource unavailable."}`).join("\n")
+        };
     }
 
     /** Returns true when a lightweight update announces readiness but the local entry still lacks full metadata. */
@@ -401,7 +417,7 @@ export class MapInfoService {
             return true;
         }
         const nextStatus = typeof update.status === "string"
-            ? dataSourceCatalogStatus({status: update.status})
+            ? dataSourceCatalogStatus({ status: update.status })
             : dataSourceCatalogStatus(entry);
         const hasLayerMetadata = !!entry.layers && Object.keys(entry.layers).length > 0;
         return nextStatus === "ready" && (!isDataSourceCatalogEntryReady(entry) || !hasLayerMetadata);
@@ -425,11 +441,11 @@ export class MapInfoService {
             maps,
             this.stateService,
             this.styleService,
-            this.mapPresetService,
-            this.canPruneStateForCurrentCatalog(), this.viewSettings, this.layerState
+            this.mapPresetService, this.viewSettings, this.layerState
         );
         this.maps.destroy();
         this.maps$.next(nextTree);
+        this.pruneCatalogState();
         this.reapplySyncOptionsForAllViews();
     }
 
@@ -510,7 +526,7 @@ export class MapInfoService {
             ...source,
             layers: Object.fromEntries(
                 Object.entries(source.layers ?? {}).map(([layerId, layer]) => {
-                    const parserLayer = {...layer};
+                    const parserLayer = { ...layer };
                     delete parserLayer["featureModelSchema"];
                     return [layerId, parserLayer];
                 })
@@ -646,7 +662,7 @@ export class MapInfoService {
         for (const layer of this.maps.allFeatureLayers()) {
             const syncedOptions = this.maps.syncLayers(viewIndex, layer.mapId, layer.id, false);
             for (const syncedOption of syncedOptions) {
-                changes.push({optionNode: syncedOption, viewIndex});
+                changes.push({ optionNode: syncedOption, viewIndex });
             }
         }
         let viewConfigChanged = false;
@@ -717,16 +733,16 @@ export class MapInfoService {
         if (ref && !preset) return false;
         const options = layerStyleOptions(layer);
         this.commitPresetEdit(() => {
-        const changed: StyleOptionNode[] = [];
-        for (const value of preset?.values ?? []) {
-            const option = options.find(candidate => candidate.styleId === preset!.styleId && candidate.id === value.optionId);
-            if (option && option.value[viewIndex] !== value.value) {
-                option.value[viewIndex] = value.value;
-                changed.push(option);
+            const changed: StyleOptionNode[] = [];
+            for (const value of preset?.values ?? []) {
+                const option = options.find(candidate => candidate.styleId === preset!.styleId && candidate.id === value.optionId);
+                if (option && option.value[viewIndex] !== value.value) {
+                    option.value[viewIndex] = value.value;
+                    changed.push(option);
+                }
             }
-        }
-        this.maps.setLayerPresetSelection(viewIndex, mapId, layerId, ref);
-        this.applyPresetChanges(changed, viewIndex, [{mapId, layerId}]);
+            this.maps.setLayerPresetSelection(viewIndex, mapId, layerId, ref);
+            this.applyPresetChanges(changed, viewIndex, [{ mapId, layerId }]);
         });
         return true;
     }
@@ -746,20 +762,20 @@ export class MapInfoService {
         const components = preset ? this.maps.resolveMapPresetComponents(map, preset) : undefined;
         if (!preset || !components || (this.isSyncOptionsForViewEnabled(viewIndex) && this.maps.mapPresetHasSyncConflict(map, preset))) return false;
         this.commitPresetEdit(() => {
-        const changed: StyleOptionNode[] = [];
-        for (const component of components) {
-            const options = layerStyleOptions(component.layer);
-            for (const value of component.preset.values) {
-                const option = options.find(candidate => candidate.styleId === component.preset.styleId && candidate.id === value.optionId);
-                if (option && option.value[viewIndex] !== value.value) {
-                    option.value[viewIndex] = value.value;
-                    changed.push(option);
+            const changed: StyleOptionNode[] = [];
+            for (const component of components) {
+                const options = layerStyleOptions(component.layer);
+                for (const value of component.preset.values) {
+                    const option = options.find(candidate => candidate.styleId === component.preset.styleId && candidate.id === value.optionId);
+                    if (option && option.value[viewIndex] !== value.value) {
+                        option.value[viewIndex] = value.value;
+                        changed.push(option);
+                    }
                 }
+                this.maps.setLayerPresetSelection(viewIndex, mapId, component.layer.id, component.preset.ref);
             }
-            this.maps.setLayerPresetSelection(viewIndex, mapId, component.layer.id, component.preset.ref);
-        }
-        this.maps.setMapPresetSelection(viewIndex, mapId, preset.id);
-        this.applyPresetChanges(changed, viewIndex, components.map(component => ({mapId, layerId: component.layer.id})));
+            this.maps.setMapPresetSelection(viewIndex, mapId, preset.id);
+            this.applyPresetChanges(changed, viewIndex, components.map(component => ({ mapId, layerId: component.layer.id })));
         });
         return true;
     }
@@ -785,7 +801,7 @@ export class MapInfoService {
     applyPresetChanges(
         optionNodes: StyleOptionNode[],
         viewIndex: number,
-        sourceLayers: ReadonlyArray<{mapId: string; layerId: string}>
+        sourceLayers: ReadonlyArray<{ mapId: string; layerId: string }>
     ): void {
         const directNodes = optionNodes.filter(optionNode => optionNode.value.length > viewIndex);
         this.applyStyleOptionTransaction(
@@ -802,12 +818,12 @@ export class MapInfoService {
         sourceLayers: Set<string>,
         inferPresets: boolean
     ): void {
-        const changes: StyleOptionChange[] = directNodes.map(optionNode => ({optionNode, viewIndex}));
+        const changes: StyleOptionChange[] = directNodes.map(optionNode => ({ optionNode, viewIndex }));
         if (this.isSyncOptionsForViewEnabled(viewIndex)) {
             for (const sourceLayer of sourceLayers) {
                 const [mapId, layerId] = sourceLayer.split("\u0000");
                 const syncedOptions = this.maps.syncLayers(viewIndex, mapId, layerId, false);
-                changes.push(...syncedOptions.map(optionNode => ({optionNode, viewIndex})));
+                changes.push(...syncedOptions.map(optionNode => ({ optionNode, viewIndex })));
             }
         }
         let viewConfigChanged = false;
@@ -896,9 +912,9 @@ export class MapInfoService {
     }
 
     /** Returns every map that could expose source-data for a tile id at the matching level. */
-    findSourceDataMapsForTileId(tileId: number): Array<{id: string, name: string}> {
+    findSourceDataMapsForTileId(tileId: number): Array<{ id: string, name: string }> {
         const level = coreLib.getTileLevel(tileId);
-        const result: Array<{id: string, name: string}> = [];
+        const result: Array<{ id: string, name: string }> = [];
         for (const mapInfo of this.maps.maps.values()) {
             for (const layerInfo of mapInfo.layers.values()) {
                 if (layerInfo.type != "SourceData") {
@@ -907,7 +923,7 @@ export class MapInfoService {
                 if (layerInfo.info.zoomLevels.length && !layerInfo.info.zoomLevels.includes(level)) {
                     continue;
                 }
-                result.push({id: mapInfo.id, name: mapInfo.id});
+                result.push({ id: mapInfo.id, name: mapInfo.id });
                 break;
             }
         }
@@ -940,9 +956,8 @@ export class MapInfoService {
         if (!match) {
             return layerId;
         }
-        return isMetadata ? match[2] :`${match[1]}`.replace('-', '.');
+        return isMetadata ? match[2] : `${match[1]}`.replace('-', '.');
     }
-
 
     registerActions(actions: AppActionService): void {
         actions.registerAction(mapActions.listMaps, input => this.listMaps(input));
@@ -951,7 +966,7 @@ export class MapInfoService {
         actions.registerAction(mapActions.listPresets, input => this.listPresets(input));
         actions.registerControl(mapControls.layers, {
             read: (target, context) => this.layerSummary(target, context),
-            defaultTargets: () => this.viewSettings.viewIds.map(viewId => ({viewId}))
+            defaultTargets: () => this.viewSettings.viewIds.map(viewId => ({ viewId }))
         });
         // Layer visibility/level assignment also needs renderer auto-level policy;
         // MapViewService binds that control alongside its ordinary layer operations.
@@ -1003,7 +1018,7 @@ export class MapInfoService {
         const index = this.controlViewIndex(target.viewId);
         const config = this.requireLayer(target.mapId, target.layerId).viewConfig[index];
         if (!config) rejectAction("The requested feature layer is unavailable");
-        return {...config};
+        return { ...config };
     }
 
     layerSummary(target: ControlSelector<typeof mapControls.layers>, context: ControlReadContext): ControlValue<typeof mapControls.layers> {
@@ -1015,7 +1030,7 @@ export class MapInfoService {
             for (const map of maps) for (const layer of target.layerId ? [map.layers.get(target.layerId)!] : map.layers.values()) {
                 const config = layer.viewConfig[index];
                 if (!config || (!target.mapId && !config.visible)) continue;
-                yield {mapId: map.id, layerId: layer.id, ...config};
+                yield { mapId: map.id, layerId: layer.id, ...config };
             }
         }
         return context.collect(layers());
@@ -1040,8 +1055,8 @@ export class MapInfoService {
 
     listMaps(input: ActionInput<typeof mapActions.listMaps>): ActionOutput<typeof mapActions.listMaps> {
         const maps = this.maps.maps.values();
-        const owner = this;
-        function* values() { for (const map of maps) yield {id: map.id, available: owner.isMapReady(map.id)}; }
+        const available = (mapId: string) => this.isMapReady(mapId);
+        function* values() { for (const map of maps) yield { id: map.id, available: available(map.id) }; }
         return catalogPage(values(), input);
     }
 
@@ -1050,14 +1065,16 @@ export class MapInfoService {
         const index = input.viewId === undefined ? undefined : this.controlViewIndex(input.viewId);
         const maps = input.mapId ? [this.requireMap(input.mapId)] : this.maps.maps.values();
         const layer = input.layerId ? this.requireLayer(input.mapId!, input.layerId) : undefined;
-        const owner = this;
+        const available = (mapId: string) => this.isMapReady(mapId);
         function* values() {
             for (const map of maps) for (const child of layer ? [layer] : map.layers.values()) {
                 if (input.layerType !== "all" && child.type !== input.layerType) continue;
-                yield {id: child.id, mapId: map.id, kind: child.type as "Features" | "SourceData",
-                    available: owner.isMapReady(map.id), ...(index === undefined ? {} : {visible: child.viewConfig[index]?.visible ?? false}),
+                yield {
+                    id: child.id, mapId: map.id, kind: child.type as "Features" | "SourceData",
+                    available: available(map.id), ...(index === undefined ? {} : { visible: child.viewConfig[index]?.visible ?? false }),
                     zoomLevels: child.info.zoomLevels, featureTypes: child.info.featureTypes.map(type => type.name),
-                    schemaFeatureTypes: child.info.schemaFeatureTypes ?? [], partitionKind: child.info.partitionKind ?? "tile" as const};
+                    schemaFeatureTypes: child.info.schemaFeatureTypes ?? [], partitionKind: child.info.partitionKind ?? "tile" as const
+                };
             }
         }
         return catalogPage(values(), input);
@@ -1069,11 +1086,15 @@ export class MapInfoService {
         function* values() {
             for (const option of layerStyleOptions(layer)) {
                 if (option.info.internal || (input.styleId && input.styleId !== option.styleId)) continue;
-                yield {id: option.id, name: option.info.label, kind: option.type, styleId: option.styleId,
+                yield {
+                    id: option.id, name: option.info.label, kind: option.type, styleId: option.styleId,
                     mapId: layer.mapId, layerId: layer.id, value: option.value[index], defaultValue: option.info.defaultValue,
                     description: unicodePrefix(option.info.description, 4096),
-                    writeTarget: {control: "view.styleOption" as const, viewId: input.viewId,
-                        mapId: layer.mapId, layerId: layer.id, styleId: option.styleId, optionId: option.id}};
+                    writeTarget: {
+                        control: "view.styleOption" as const, viewId: input.viewId,
+                        mapId: layer.mapId, layerId: layer.id, styleId: option.styleId, optionId: option.id
+                    }
+                };
             }
         }
         return catalogPage(values(), input);
@@ -1083,19 +1104,33 @@ export class MapInfoService {
         const map = this.requireMap(input.mapId);
         const layer = input.layerId ? this.requireLayer(input.mapId, input.layerId) : undefined;
         const index = input.viewId === undefined ? undefined : this.controlViewIndex(input.viewId);
-        const owner = this;
+        const syncOptions = index !== undefined && this.isSyncOptionsForViewEnabled(index);
+        const tree = this.maps;
         function* values() {
             if (layer) {
                 for (const preset of layerPresetNode(layer)?.presets ?? []) {
-                    if (!input.styleId || input.styleId === preset.styleId) yield {id: preset.id, name: preset.name,
-                        kind: "layer" as const, mapId: map.id, layerId: layer.id, styleId: preset.styleId, available: true};
+                    if (!input.styleId || input.styleId === preset.styleId) yield {
+                        id: preset.id, name: preset.name,
+                        kind: "layer" as const, mapId: map.id, layerId: layer.id, styleId: preset.styleId, available: true
+                    };
                 }
-            } else for (const preset of map.mapPresets) yield {id: preset.id, name: preset.name, kind: "map" as const,
-                mapId: map.id, available: index === undefined || !owner.isSyncOptionsForViewEnabled(index) || !owner.maps.mapPresetHasSyncConflict(map, preset)};
+            } else for (const preset of map.mapPresets) yield {
+                id: preset.id, name: preset.name, kind: "map" as const,
+                mapId: map.id, available: !syncOptions || !tree.mapPresetHasSyncConflict(map, preset)
+            };
         }
         return catalogPage(values(), input);
     }
 
-
+    /** Complete catalog cleanup is one system edit across independent domain owners. */
+    pruneCatalogState(): void {
+        if (!this.stateService.ready.value || !this.maps.maps.size || !this.canPruneStateForCurrentCatalog()) return;
+        this.stateService.withSystemStateMutation(() => {
+            this.layerState.pruneCatalog(this.maps.maps, this.styleService.styles);
+            this.styleService.pruneVisibility(this.styleService.styles);
+            this.inspectionState.pruneCatalog(this.maps.maps);
+            this.viewSettings.pruneRetiredViews();
+        });
+    }
 
 }

@@ -1,19 +1,15 @@
-import {testPersistence, stateOwners} from '../../test/state-owners';
+import { testPersistence, stateOwners } from '../../test/state-owners';
 import "@angular/compiler";
-import {ChangeDetectorRef, Renderer2} from "@angular/core";
-import {BehaviorSubject} from "rxjs";
-import {describe, expect, it, vi} from "vitest";
+import { ChangeDetectorRef, Renderer2 } from "@angular/core";
+import { BehaviorSubject } from "rxjs";
+import { describe, expect, it, vi } from "vitest";
 
-import {FeatureWrapper} from "../mapdata/feature-inspection.model";
-import {
-    AppStateService,
-    InspectionComparisonModel,
-    InspectionPanelModel,
-    TileFeatureId
-} from "../shared/appstate.service";
-import {InspectionSelectionService} from "./inspection-selection.service";
-import {InspectionContainerComponent} from "./inspection.container.component";
-import {InspectionDialogsComponent} from "./inspection.dialogs.component";
+import { FeatureWrapper } from "../mapdata/feature-inspection.model";
+import { AppStateService } from "../shared/appstate.service";
+import { InspectionComparisonModel, InspectionPanelModel, TileFeatureId } from "./inspection-state.model";
+import { InspectionSelectionService } from "./inspection-selection.service";
+import { InspectionContainerComponent } from "./inspection.container.component";
+import { InspectionDialogsComponent } from "./inspection.dialogs.component";
 
 const loadingPanel = (
     undocked: boolean
@@ -52,7 +48,7 @@ describe("inspection host render notifications", () => {
             stateService,
             mapService,
             {} as Renderer2,
-            cdr, stateOwners(stateService).layout, stateOwners(stateService).inspectionState
+            cdr, stateService as never, stateService as never
         );
         vi.mocked(cdr.markForCheck).mockClear();
 
@@ -67,10 +63,10 @@ describe("inspection host render notifications", () => {
     it("marks floating inspection and comparison hosts dirty on subject emissions", () => {
         const selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
         const inspectionComparisonState = new BehaviorSubject<InspectionComparisonModel | null>(null);
-        const mapService = {selectionTopic} as unknown as InspectionSelectionService;
-        const stateService = {inspectionComparisonState} as unknown as AppStateService;
+        const mapService = { selectionTopic } as unknown as InspectionSelectionService;
+        const stateService = { inspectionComparisonState } as unknown as AppStateService;
         const cdr = changeDetector();
-        const component = new InspectionDialogsComponent(mapService, stateService, cdr, stateOwners(stateService).inspectionState);
+        const component = new InspectionDialogsComponent(mapService, stateService, cdr, stateService as never);
         vi.mocked(cdr.markForCheck).mockClear();
 
         selectionTopic.next([loadingPanel(true)]);
@@ -80,7 +76,7 @@ describe("inspection host render notifications", () => {
         expect(cdr.markForCheck).toHaveBeenCalledOnce();
 
         inspectionComparisonState.next({
-            base: {panelId: 7, mapId: "Map", label: "Feature 7", featureIds: []},
+            base: { panelId: 7, mapId: "Map", label: "Feature 7", featureIds: [] },
             others: []
         });
         expect(component.comparison?.base.panelId).toBe(7);

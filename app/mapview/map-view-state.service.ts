@@ -1,38 +1,72 @@
-import {AppActionService} from "../actions/app-action.service";
-import {ControlValue, rejectAction} from "../actions/app-action";
-import {viewSettingsControls, viewIdSchema} from "./map-view-state.service.declarations";
+
+import { ControlValue, rejectAction } from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
+import { viewIdSchema, viewSettingsControls } from "./map-view-state.service.declarations";
 
 import { Injectable } from "@angular/core";
 import { Params } from "@angular/router";
 import { z } from "zod";
-import { Cartographic,GeoMath } from "../integrations/geo";
+import { roundCoordinateStateValue } from "../coords/coordinates-state.model";
+import { Cartographic, GeoMath } from "../integrations/geo";
 import {
-BackgroundLayerConfig,
-clampBackgroundOpacity,
-DEFAULT_BACKGROUND_LAYER_ID,
-DEFAULT_BACKGROUND_OPACITY
+    BackgroundLayerConfig,
+    clampBackgroundOpacity,
+    DEFAULT_BACKGROUND_LAYER_ID,
+    DEFAULT_BACKGROUND_OPACITY
 } from "../shared/app-config.service";
 import { Boolish, MapViewState } from "../shared/app-state";
-import { BackgroundLayerViewState,CameraViewState,clampFeatureZoomClearanceMeters,clampMapZoomStep,clampTileGridOpacity,cloneStateValue,DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS,DEFAULT_MAP_ZOOM_STEP,DEFAULT_TILE_GRID_COLOR,DEFAULT_TILE_GRID_LEVEL,DEFAULT_TILE_GRID_OPACITY,normalizeTileGridColor,roundCoordinateStateValue,TileGridMode,VIEW_SYNC_LAYERS,VIEW_SYNC_MOVEMENT,VIEW_SYNC_POSITION,VIEW_SYNC_PROJECTION,ViewSyncOptionDescriptor } from "../shared/app-state.model";
+import { cloneStateValue } from "../shared/app-state.model";
 import { AppStateService } from "../shared/appstate.service";
+import {
+    BackgroundLayerViewState,
+    CameraViewState,
+    clampFeatureZoomClearanceMeters,
+    clampMapZoomStep,
+    clampTileGridOpacity,
+    DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS,
+    DEFAULT_MAP_ZOOM_STEP,
+    DEFAULT_TILE_GRID_COLOR,
+    DEFAULT_TILE_GRID_LEVEL,
+    DEFAULT_TILE_GRID_OPACITY,
+    normalizeTileGridColor,
+    TileGridMode,
+    VIEW_SYNC_LAYERS,
+    VIEW_SYNC_MOVEMENT,
+    VIEW_SYNC_POSITION,
+    VIEW_SYNC_PROJECTION,
+    ViewSyncOptionDescriptor
+} from "./map-view-state.model";
 
 /** Stable logical map identity; runtime renderers get a new generation when restored. */
 export type ViewId = string;
 
-export {viewIdSchema} from "./map-view-state.service.declarations";
-const viewIdsSchema = z.array(viewIdSchema).min(1).max(32)
+export { viewIdSchema } from "./map-view-state.service.declarations";
+export const viewCountSchema = z.coerce.number().int().min(1).max(32);
+export const viewIdsSchema = z.array(viewIdSchema).min(1).max(32)
     .refine(ids => new Set(ids).size === ids.length, "View IDs must be unique.");
 
+/** Other owners participate in membership edits while keeping their own state and invariants. */
+interface ViewMembershipOwner {
+    seed(previousCount: number, nextCount: number, sourceIndex: number): void;
+    retain(indices: readonly number[]): void;
+    import?(previous: readonly ViewId[], ids: readonly ViewId[]): void;
+}
+
 /** Owns durable view identities, committed cameras, projection and synchronized view preferences. */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class MapViewStateService {
     readonly viewIdsState = this.persistence.registerState<ViewId[]>({
-        name: "viewIds", defaultValue: [crypto.randomUUID()],
-        schema: z.array(viewIdSchema), fromStorage: value => viewIdsSchema.parse(value),
-        normalize: value => viewIdsSchema.parse(value), urlParamName: "vid"
+        name: "viewIds",
+        defaultValue: [crypto.randomUUID()],
+        schema: z.array(viewIdSchema),
+        fromStorage: value => viewIdsSchema.parse(value),
+        normalize: value => viewIdsSchema.parse(value),
+        urlParamName: "vid"
     });
 
-    get viewIds(): readonly ViewId[] { return this.viewIdsState.value; }
+    get viewIds(): readonly ViewId[] {
+        return this.viewIdsState.value;
+    }
 
     /** Resolves presentation order to durable identity only at the UI/renderer boundary. */
     viewIdAt(index: number): ViewId {
@@ -50,61 +84,68 @@ export class MapViewStateService {
 
     /** Resolves one identity mapping for every legacy positional importer. */
     prepareImportedViews(count: unknown, rawIds: unknown, replaceAbsent: boolean): ViewId[] {
-        const effectiveCount = z.coerce.number().int().min(1).max(32).parse(count);
+        const effectiveCount = viewCountSchema.parse(count);
         if (rawIds !== undefined) {
             const ids = viewIdsSchema.parse(rawIds);
             if (ids.length !== effectiveCount) throw new Error("View ID count does not match the number of views.");
             return ids;
         }
-        return Array.from({length: effectiveCount}, (_, index) =>
+        return Array.from({ length: effectiveCount }, (_, index) =>
             !replaceAbsent && this.viewIds[index] ? this.viewIds[index] : crypto.randomUUID());
     }
 
     /** A changed config-owned count keeps existing saved identities and adds only the new views. */
     resizeStoredViews(rawIds: unknown, count: unknown): ViewId[] {
         const ids = viewIdsSchema.parse(rawIds);
-        const effectiveCount = z.coerce.number().int().min(1).max(32).parse(count);
-        return Array.from({length: effectiveCount}, (_, index) => ids[index] ?? crypto.randomUUID());
+        const effectiveCount = viewCountSchema.parse(count);
+        return Array.from({ length: effectiveCount }, (_, index) => ids[index] ?? crypto.randomUUID());
     }
 
-    /** Installs import identities before decoding per-view values. It does not copy old view contents. */
+    /** Installs import membership atomically, retaining live identities and omitted positional values. */
     importViews(ids: readonly ViewId[], inheritPositions = true): void {
-        viewIdsSchema.parse(ids);
-        if (inheritPositions) {
-            const previous = this.viewIds;
-            for (const state of this.mapViewStates) state.rekey(previous, ids);
-            for (const owner of this.membershipOwners) owner.import?.(previous, ids);
-        }
-        this.viewIdsState.next([...ids]);
-        if (!ids.includes(this.focusedViewIdState.value)) this.focusedViewIdState.next(ids[0]);
+        this.persistence.transaction(() => {
+            viewIdsSchema.parse(ids);
+            if (inheritPositions) {
+                const previous = this.viewIds;
+                for (const state of this.mapViewStates) state.rekey(previous, ids);
+                for (const owner of this.membershipOwners) owner.import?.(previous, ids);
+            }
+            this.viewIdsState.next([...ids]);
+            if (!ids.includes(this.focusedViewIdState.value)) this.focusedViewIdState.next(ids[0]);
+        });
     }
 
-    private readonly membershipOwners = new Set<{
-        seed(previousCount: number, nextCount: number, sourceIndex: number): void;
-        retain(indices: readonly number[]): void;
-        import?(previous: readonly ViewId[], ids: readonly ViewId[]): void;
-    }>();
+    private readonly membershipOwners = new Set<ViewMembershipOwner>();
 
     /** Registers another owner's view-indexed values without a circular DI dependency. */
-    registerMembershipOwner(owner: {seed(previousCount: number, nextCount: number, sourceIndex: number): void; retain(indices: readonly number[]): void; import?(previous: readonly ViewId[], ids: readonly ViewId[]): void}): () => void {
+    registerMembershipOwner(owner: ViewMembershipOwner): () => void {
         this.membershipOwners.add(owner);
         return () => this.membershipOwners.delete(owner);
     }
 
     /** Only actual per-view values participate; positional splitter proportions belong to layout. */
     private get mapViewStates(): Array<MapViewState<unknown>> {
-        return [this.cameraViewDataState, this.mode2dState, this.backgroundState, this.viewTileBordersState,
-            this.viewTileGridModeState, this.viewTileGridLevelState, this.viewTileGridAutoLevelState,
-            this.viewTileGridColorState, this.viewTileGridOpacityState] as Array<MapViewState<unknown>>;
+        return [
+            this.cameraViewDataState,
+            this.mode2dState,
+            this.backgroundState,
+            this.viewTileBordersState,
+            this.viewTileGridModeState,
+            this.viewTileGridLevelState,
+            this.viewTileGridAutoLevelState,
+            this.viewTileGridColorState,
+            this.viewTileGridOpacityState
+        ] as Array<MapViewState<unknown>>;
     }
 
-    constructor(private readonly persistence: AppStateService) {}
-
+    constructor(private readonly persistence: AppStateService) { }
 
     /** The deployed numeric key is a projection of membership, never another source of truth. */
     readonly numViewsState = this.persistence.registerProjection<number>({
-        name: "numberOfViews", defaultValue: 1,
-        schema: z.coerce.number().int().min(1).max(32), urlParamName: "n"
+        name: "numberOfViews",
+        defaultValue: 1,
+        schema: viewCountSchema,
+        urlParamName: "n"
     }, {
         sourceState: this.viewIdsState,
         read: () => this.viewIds.length,
@@ -114,10 +155,13 @@ export class MapViewStateService {
 
     /** Focus follows a logical view through reorder; its storage/URL codec stays numeric. */
     readonly focusedViewIdState = this.persistence.registerState<ViewId>({
-        name: "focus", defaultValue: this.viewIds[0], schema: z.coerce.number().int().nonnegative(),
+        name: "focus",
+        defaultValue: this.viewIds[0],
+        schema: z.coerce.number().int().nonnegative(),
         toStorage: id => Math.max(0, this.viewIds.indexOf(id)),
         fromStorage: index => this.viewIds[Number(index)] ?? this.viewIds[0],
-        urlParamName: "f", urlIncludeInVisualizationOnly: false
+        urlParamName: "f",
+        urlIncludeInVisualizationOnly: false
     });
     readonly focusedViewChanges = this.persistence.observe(() => this.focusedView);
 
@@ -134,12 +178,11 @@ export class MapViewStateService {
         urlIncludeInVisualizationOnly: false
     });
 
-
     readonly cameraViewDataState = this.persistence.registerMapViewState<CameraViewState>({
         name: 'cameraView',
         defaultValue: {
-            destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
-            orientation: {heading: 0, pitch: -Math.PI / 2, roll: 0},
+            destination: { lon: 22.837473, lat: 38.490817, alt: 16000000 },
+            orientation: { heading: 0, pitch: -Math.PI / 2, roll: 0 },
             position: [0, 0, 0]
         },
         schema: z.object({
@@ -185,7 +228,6 @@ export class MapViewStateService {
         urlFormEncode: true
     }, () => this.viewIds);
 
-
     readonly mode2dState = this.persistence.registerMapViewState<boolean>({
         name: 'mode2d',
         defaultValue: false,
@@ -194,7 +236,6 @@ export class MapViewStateService {
         urlIncludeInVisualizationOnly: false
     }, () => this.viewIds);
 
-
     readonly mapZoomStepState = this.persistence.registerState<number>({
         name: 'mapZoomStep',
         defaultValue: DEFAULT_MAP_ZOOM_STEP,
@@ -202,14 +243,12 @@ export class MapViewStateService {
         fromStorage: value => clampMapZoomStep(Number(value))
     });
 
-
     readonly featureZoomClearanceMetersState = this.persistence.registerState<number>({
         name: 'featureZoomClearanceMeters',
         defaultValue: DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS,
         schema: z.coerce.number(),
         fromStorage: value => clampFeatureZoomClearanceMeters(Number(value))
     });
-
 
     readonly backgroundState = this.persistence.registerMapViewState<BackgroundLayerViewState>({
         name: 'background',
@@ -223,11 +262,10 @@ export class MapViewStateService {
             const parts = String(payload).split('~');
             const layerId = parts[0] ? decodeURIComponent(parts[0]) : null;
             const opacity = parts[1] === undefined ? currentValue.opacity : clampBackgroundOpacity(Number(parts[1]));
-            return {layerId, opacity};
+            return { layerId, opacity };
         },
         urlParamName: 'bg'
     }, () => this.viewIds);
-
 
     readonly viewTileBordersState = this.persistence.registerMapViewState<boolean>({
         name: "tileBorders",
@@ -236,14 +274,12 @@ export class MapViewStateService {
         urlParamName: 'tb'
     }, () => this.viewIds);
 
-
     readonly viewTileGridModeState = this.persistence.registerMapViewState<TileGridMode>({
         name: "tileGridMode",
         defaultValue: "nds",
         schema: z.enum(["xyz", "nds"]),
         urlParamName: 'tgm'
     }, () => this.viewIds);
-
 
     readonly viewTileGridLevelState = this.persistence.registerMapViewState<number>({
         name: "tileGridLevel",
@@ -252,14 +288,12 @@ export class MapViewStateService {
         urlParamName: "tgl"
     }, () => this.viewIds);
 
-
     readonly viewTileGridAutoLevelState = this.persistence.registerMapViewState<boolean>({
         name: "tileGridAutoLevel",
         defaultValue: false,
         schema: Boolish,
         urlParamName: "tga"
     }, () => this.viewIds);
-
 
     readonly viewTileGridColorState = this.persistence.registerMapViewState<string>({
         name: "tileGridColor",
@@ -270,7 +304,6 @@ export class MapViewStateService {
         urlParamName: "tgc"
     }, () => this.viewIds);
 
-
     readonly viewTileGridOpacityState = this.persistence.registerMapViewState<number>({
         name: "tileGridOpacity",
         defaultValue: DEFAULT_TILE_GRID_OPACITY,
@@ -280,33 +313,52 @@ export class MapViewStateService {
         urlParamName: "tgo"
     }, () => this.viewIds);
 
-
     /** Immutable view-sync option descriptors consumed by the split-view UI. */
     readonly syncOptions: readonly ViewSyncOptionDescriptor[] = [
-        {name: "Position", code: VIEW_SYNC_POSITION, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
-        {name: "Movement", code: VIEW_SYNC_MOVEMENT, icon: "drag_pan", tooltip: "Sync camera movement delta across views"},
-        {name: "Projection", code: VIEW_SYNC_PROJECTION, icon: "3d_rotation", tooltip: "Sync projection mode across views"},
-        {name: "Layers", code: VIEW_SYNC_LAYERS, icon: "layers", tooltip: "Sync layer activation/style/background settings across views"},
+        {
+            name: "Position",
+            code: VIEW_SYNC_POSITION,
+            icon: "location_on",
+            tooltip: "Sync camera position/orientation across views"
+        },
+        {
+            name: "Movement",
+            code: VIEW_SYNC_MOVEMENT,
+            icon: "drag_pan",
+            tooltip: "Sync camera movement delta across views"
+        },
+        {
+            name: "Projection",
+            code: VIEW_SYNC_PROJECTION,
+            icon: "3d_rotation",
+            tooltip: "Sync projection mode across views"
+        },
+        {
+            name: "Layers",
+            code: VIEW_SYNC_LAYERS,
+            icon: "layers",
+            tooltip: "Sync layer activation/style/background settings across views"
+        },
     ];
-
 
     /** Copies synchronized view properties from the focused view to the others. */
     syncViews(): void {
-        if (this.numViews < 2) {
-            return;
-        }
-        if (this.viewSync.includes(VIEW_SYNC_POSITION)) {
-            const camState = this.cameraViewDataState.getValue(this.focusedView);
-            this.setView(this.focusedView,
-                Cartographic.fromDegrees(camState.destination.lon, camState.destination.lat, camState.destination.alt),
-                camState.orientation,
-                camState.position);
-        }
-        if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
-            this.setProjectionMode(this.focusedView, this.mode2dState.getValue(this.focusedView));
-        }
+        this.persistence.transaction(() => {
+            if (this.numViews < 2) {
+                return;
+            }
+            if (this.viewSync.includes(VIEW_SYNC_POSITION)) {
+                const camState = this.cameraViewDataState.getValue(this.focusedView);
+                this.setView(this.focusedView,
+                    Cartographic.fromDegrees(camState.destination.lon, camState.destination.lat, camState.destination.alt),
+                    camState.orientation,
+                    camState.position);
+            }
+            if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
+                this.setProjectionMode(this.focusedView, this.mode2dState.getValue(this.focusedView));
+            }
+        });
     }
-
 
     /** Seeds every new view from the explicitly selected source, or the preceding last view. */
     private seedAdditionalViews(previousViewCount: number, nextViewCount: number, sourceIndex = previousViewCount - 1): void {
@@ -315,7 +367,6 @@ export class MapViewStateService {
         }
         for (const owner of this.membershipOwners) owner.seed(previousViewCount, nextViewCount, sourceIndex);
     }
-
 
     /** Compacts surviving views after their renderers have stopped publishing state. */
     retainViews(indices: readonly number[], cameras: ReadonlyMap<number, CameraViewState>): void {
@@ -332,23 +383,24 @@ export class MapViewStateService {
         });
     }
 
-
     // -----------------
     // Public API below
     // -----------------
 
-    get numViews(): number { return this.viewIds.length; }
+    get numViews(): number {
+        return this.viewIds.length;
+    }
 
     set numViews(count: number) {
         count = z.number().int().min(1).max(32).parse(count);
         const previous = this.numViews;
         if (count === previous) return;
         if (count < previous) {
-            this.retainViews(Array.from({length: count}, (_, index) => index), new Map());
+            this.retainViews(Array.from({ length: count }, (_, index) => index), new Map());
             return;
         }
         this.persistence.transaction(() => {
-            this.viewIdsState.next([...this.viewIds, ...Array.from({length: count - previous}, () => crypto.randomUUID())]);
+            this.viewIdsState.next([...this.viewIds, ...Array.from({ length: count - previous }, () => crypto.randomUUID())]);
             this.seedAdditionalViews(previous, count);
         });
     }
@@ -366,9 +418,13 @@ export class MapViewStateService {
         return id;
     }
 
-    get mapZoomStep() {return this.mapZoomStepState.getValue();}
+    get mapZoomStep() {
+        return this.mapZoomStepState.getValue();
+    }
 
-    set mapZoomStep(val: number) {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));}
+    set mapZoomStep(val: number) {
+        this.mapZoomStepState.next(clampMapZoomStep(Number(val)));
+    }
 
     get featureZoomClearanceMeters() {
         return this.featureZoomClearanceMetersState.getValue();
@@ -380,11 +436,17 @@ export class MapViewStateService {
         );
     }
 
-    get focusedView(): number { return Math.max(0, this.viewIds.indexOf(this.focusedViewIdState.value)); }
+    get focusedView(): number {
+        return Math.max(0, this.viewIds.indexOf(this.focusedViewIdState.value));
+    }
 
-    set focusedView(index: number) { this.focusedViewIdState.next(this.viewIdAt(index)); }
+    set focusedView(index: number) {
+        this.focusedViewIdState.next(this.viewIdAt(index));
+    }
 
-    get viewSync() {return this.viewSyncState.getValue();}
+    get viewSync() {
+        return this.viewSyncState.getValue();
+    }
 
     set viewSync(val: string[]) {
         const previous = new Set(this.viewSyncState.getValue());
@@ -406,7 +468,6 @@ export class MapViewStateService {
         this.viewSyncState.next(sanitized);
     }
 
-
     /** Returns the persisted background-layer state for the given view. */
     getBackgroundState(viewIndex: number): BackgroundLayerViewState {
         const value = this.backgroundState.getValue(viewIndex);
@@ -416,11 +477,10 @@ export class MapViewStateService {
         };
     }
 
-
     /** Returns the effective background-layer state after missing ids are mapped to the configured default. */
     resolveBackgroundState(viewIndex: number,
-                           availableLayers: readonly BackgroundLayerConfig[],
-                           defaultBackgroundLayerId: string | null): BackgroundLayerViewState {
+        availableLayers: readonly BackgroundLayerConfig[],
+        defaultBackgroundLayerId: string | null): BackgroundLayerViewState {
         const rawState = this.getBackgroundState(viewIndex);
         if (rawState.layerId === null) {
             return rawState;
@@ -447,7 +507,6 @@ export class MapViewStateService {
         };
     }
 
-
     /** Writes the selected background-layer id and opacity for one view. */
     setBackgroundState(viewIndex: number, layerId: string | null, opacity: number): void {
         this.backgroundState.next(viewIndex, {
@@ -456,25 +515,21 @@ export class MapViewStateService {
         });
     }
 
-
     /** Returns the configured background opacity for the given view. */
     getBackgroundOpacity(viewIndex: number): number {
         return this.getBackgroundState(viewIndex).opacity;
     }
-
 
     /** Returns the persisted orientation for the given view. */
     getCameraOrientation(viewIndex: number) {
         return this.cameraViewDataState.getValue(viewIndex).orientation;
     }
 
-
     /** Returns the persisted camera destination for the given view. */
     getCameraPosition(viewIndex: number) {
         const destination = this.cameraViewDataState.getValue(viewIndex).destination;
         return Cartographic.fromDegrees(destination.lon, destination.lat, destination.alt);
     }
-
 
     /** Internal helper that writes a complete camera pose without extra synchronization policy. */
     private _setView(
@@ -501,7 +556,6 @@ export class MapViewStateService {
         this.cameraViewDataState.next(viewIndex, view);
     }
 
-
     /** Persists a camera pose and applies the configured cross-view synchronization policy. */
     setView(
         viewIndex: number,
@@ -509,67 +563,69 @@ export class MapViewStateService {
         orientation?: { heading: number, pitch: number, roll: number },
         position: readonly [number, number, number] = [0, 0, 0]
     ) {
-        const syncPosition = this.viewSync.includes(VIEW_SYNC_POSITION);
-        const syncMovement = this.viewSync.includes(VIEW_SYNC_MOVEMENT);
+        this.persistence.transaction(() => {
+            const syncPosition = this.viewSync.includes(VIEW_SYNC_POSITION);
+            const syncMovement = this.viewSync.includes(VIEW_SYNC_MOVEMENT);
 
-        if (syncPosition || syncMovement) {
-            // Unfocused view is trying to update itself when the views are synchronized
-            if (viewIndex !== this.focusedView) {
-                return;
-            }
-
-            if (syncPosition) {
-                for (let i = 0; i < this.numViews; i++) {
-                    this._setView(i, destination, orientation, position);
+            if (syncPosition || syncMovement) {
+                // Unfocused view is trying to update itself when the views are synchronized
+                if (viewIndex !== this.focusedView) {
+                    return;
                 }
-                return;
-            }
 
-            if (syncMovement) {
-                const previous = this.cameraViewDataState.getValue(viewIndex).destination;
-                const destLon = GeoMath.toDegrees(destination.longitude);
-                const destLat = GeoMath.toDegrees(destination.latitude);
-                const deltaLon = destLon - previous.lon;
-                const deltaLat = destLat - previous.lat;
-
-                this._setView(viewIndex, destination, orientation, position);
-
-                for (let i = 0; i < this.numViews; i++) {
-                    if (i === viewIndex) {
-                        continue;
+                if (syncPosition) {
+                    for (let i = 0; i < this.numViews; i++) {
+                        this._setView(i, destination, orientation, position);
                     }
-                    const target = this.cameraViewDataState.getValue(i);
-                    const newDestination = Cartographic.fromDegrees(
-                        target.destination.lon + deltaLon,
-                        target.destination.lat + deltaLat,
-                        target.destination.alt
-                    );
-                    this._setView(i, newDestination, undefined, target.position);
+                    return;
                 }
-                return;
+
+                if (syncMovement) {
+                    const previous = this.cameraViewDataState.getValue(viewIndex).destination;
+                    const destLon = GeoMath.toDegrees(destination.longitude);
+                    const destLat = GeoMath.toDegrees(destination.latitude);
+                    const deltaLon = destLon - previous.lon;
+                    const deltaLat = destLat - previous.lat;
+
+                    this._setView(viewIndex, destination, orientation, position);
+
+                    for (let i = 0; i < this.numViews; i++) {
+                        if (i === viewIndex) {
+                            continue;
+                        }
+                        const target = this.cameraViewDataState.getValue(i);
+                        const newDestination = Cartographic.fromDegrees(
+                            target.destination.lon + deltaLon,
+                            target.destination.lat + deltaLat,
+                            target.destination.alt
+                        );
+                        this._setView(i, newDestination, undefined, target.position);
+                    }
+                    return;
+                }
             }
-        }
 
-        this._setView(viewIndex, destination, orientation, position);
+            this._setView(viewIndex, destination, orientation, position);
+        });
     }
-
 
     /** Switches one view between 2D and 3D projection mode. */
     setProjectionMode(viewIndex: number, is2DMode: boolean) {
-        if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
-            // Unfocused view is trying to update itself when the views are synchronized
-            if (viewIndex !== this.focusedView) {
+        this.persistence.transaction(() => {
+            if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
+                // Unfocused view is trying to update itself when the views are synchronized
+                if (viewIndex !== this.focusedView) {
+                    return;
+                }
+
+                for (let i = 0; i < this.numViews; i++) {
+                    this.mode2dState.next(i, is2DMode);
+                }
                 return;
             }
-
-            for (let i = 0; i < this.numViews; i++) {
-                this.mode2dState.next(i, is2DMode);
-            }
-            return;
-        }
-        this.mode2dState.next(viewIndex, is2DMode);
+            this.mode2dState.next(viewIndex, is2DMode);
+        });
     }
-
 
     /** Migrates legacy `osm` URL/storage payloads into the generic background-layer state once on startup. */
     migrateLegacyOsmState(params: Params): void {
@@ -598,7 +654,6 @@ export class MapViewStateService {
         });
     }
 
-
     /** Parses the JSON-encoded local-storage payload used by the removed `osm` state slot. */
     private parseLegacyOsmStorage(rawPayload: string): BackgroundLayerViewState[] {
         try {
@@ -612,7 +667,6 @@ export class MapViewStateService {
         }
     }
 
-
     /** Parses the compact CSV URL form used by the removed `osm` query parameter. */
     private parseLegacyOsmUrl(rawPayload: string): BackgroundLayerViewState[] {
         if (!rawPayload.length) {
@@ -620,7 +674,6 @@ export class MapViewStateService {
         }
         return rawPayload.split(',').map(token => this.parseLegacyOsmToken(token));
     }
-
 
     /** Converts one legacy `enabled~opacity` token into the new background-layer state shape. */
     private parseLegacyOsmToken(rawToken: string): BackgroundLayerViewState {
@@ -633,32 +686,32 @@ export class MapViewStateService {
         };
     }
 
-
     /** Applies the selection emitted by the view-sync toggle UI and mirrors it into state. */
     updateSelectedSyncOptions(selectedCodes: string[]) {
-        const previousSelection = new Set(this.viewSync);
-        let nextSelection = Array.from(new Set(selectedCodes));
-        const hasMovement = nextSelection.includes(VIEW_SYNC_MOVEMENT);
-        const hasPosition = nextSelection.includes(VIEW_SYNC_POSITION);
+        this.persistence.transaction(() => {
+            const previousSelection = new Set(this.viewSync);
+            let nextSelection = Array.from(new Set(selectedCodes));
+            const hasMovement = nextSelection.includes(VIEW_SYNC_MOVEMENT);
+            const hasPosition = nextSelection.includes(VIEW_SYNC_POSITION);
 
-        if (hasMovement && hasPosition) {
-            let valueToRemove = VIEW_SYNC_POSITION;
-            if (!previousSelection.has(VIEW_SYNC_POSITION) && previousSelection.has(VIEW_SYNC_MOVEMENT)) {
-                valueToRemove = VIEW_SYNC_MOVEMENT;
-            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT) && previousSelection.has(VIEW_SYNC_POSITION)) {
-                valueToRemove = VIEW_SYNC_POSITION;
-            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT)) {
-                valueToRemove = VIEW_SYNC_POSITION;
-            } else if (!previousSelection.has(VIEW_SYNC_POSITION)) {
-                valueToRemove = VIEW_SYNC_MOVEMENT;
+            if (hasMovement && hasPosition) {
+                let valueToRemove = VIEW_SYNC_POSITION;
+                if (!previousSelection.has(VIEW_SYNC_POSITION) && previousSelection.has(VIEW_SYNC_MOVEMENT)) {
+                    valueToRemove = VIEW_SYNC_MOVEMENT;
+                } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT) && previousSelection.has(VIEW_SYNC_POSITION)) {
+                    valueToRemove = VIEW_SYNC_POSITION;
+                } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT)) {
+                    valueToRemove = VIEW_SYNC_POSITION;
+                } else if (!previousSelection.has(VIEW_SYNC_POSITION)) {
+                    valueToRemove = VIEW_SYNC_MOVEMENT;
+                }
+                nextSelection = nextSelection.filter(code => code !== valueToRemove);
             }
-            nextSelection = nextSelection.filter(code => code !== valueToRemove);
-        }
 
-        this.viewSync = nextSelection;
-        this.syncViews();
+            this.viewSync = nextSelection;
+            this.syncViews();
+        });
     }
-
 
     registerActions(actions: AppActionService): void {
         actions.registerControl(viewSettingsControls.focus, {
@@ -673,7 +726,7 @@ export class MapViewStateService {
             }
         });
         actions.registerControl(viewSettingsControls.navigation, {
-            read: () => ({zoomStep: this.mapZoomStep, featureZoomClearance: this.featureZoomClearanceMeters}),
+            read: () => ({ zoomStep: this.mapZoomStep, featureZoomClearance: this.featureZoomClearanceMeters }),
             write: (_selector, value) => this.setNavigationPreferences(value)
         });
     }
@@ -685,5 +738,11 @@ export class MapViewStateService {
         });
     }
 
+    /** Removes retired dictionary entries without changing live membership or presentation order. */
+    pruneRetiredViews(): void {
+        this.persistence.transaction(() => {
+            for (const state of this.mapViewStates) state.retain(this.viewIds);
+        });
+    }
 
 }

@@ -1,8 +1,8 @@
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
-import type {AppConfigService, ExternalViewerConfig} from "../shared/app-config.service";
-import type {AppStateService} from "../shared/appstate.service";
-import {ExternalViewerService} from "./external-viewer.service";
+import { describe, expect, it, vi } from "vitest";
+import type { AppConfigService, ExternalViewerConfig } from "../shared/app-config.service";
+import type { AppStateService } from "../shared/appstate.service";
+import { ExternalViewerService } from "./external-viewer.service";
 
 const PROVIDERS: ExternalViewerConfig[] = [
     {
@@ -36,18 +36,17 @@ function createService() {
         cameraViewDataState: {
             getValue: vi.fn((viewIndex: number) => ({
                 destination: viewIndex === 1
-                    ? {lon: 11.5, lat: 48.1, alt: 1000}
-                    : {lon: -3.2, lat: 52.4, alt: 900}
+                    ? { lon: 11.5, lat: 48.1, alt: 1000 }
+                    : { lon: -3.2, lat: 52.4, alt: 900 }
             }))
         }
     };
     const configService = {
-        snapshot: {externalViewers: PROVIDERS}
+        snapshot: { externalViewers: PROVIDERS }
     };
     return {
         service: new ExternalViewerService(
-            state as unknown as AppStateService,
-            configService as unknown as AppConfigService, state as unknown as AppStateService as never, Object.assign(state as unknown as AppStateService, {viewIdAt: (index: number) => String(index)}) as never
+            configService as unknown as AppConfigService, state as unknown as AppStateService as never, Object.assign(state as unknown as AppStateService, { viewIdAt: (index: number) => String(index) }) as never
         ),
         state
     };
@@ -55,8 +54,8 @@ function createService() {
 
 describe("ExternalViewerService", () => {
     it("builds the documented provider URLs without changing coordinate signs", () => {
-        const {service} = createService();
-        const location = {lat: -33.865143, lon: 179.9999};
+        const { service } = createService();
+        const location = { lat: -33.865143, lon: 179.9999 };
 
         const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
 
@@ -71,11 +70,11 @@ describe("ExternalViewerService", () => {
     });
 
     it("resolves explicit input before the enabled marker", () => {
-        const {service, state} = createService();
+        const { service, state } = createService();
         state.marker = true;
         state.markedPosition = [8.4, 49.0, 125];
 
-        expect(service.resolveLocation({lon: 7.1, lat: 50.2})).toEqual({
+        expect(service.resolveLocation({ lon: 7.1, lat: 50.2 })).toEqual({
             lon: 7.1,
             lat: 50.2,
             source: "input"
@@ -83,30 +82,30 @@ describe("ExternalViewerService", () => {
     });
 
     it("uses a valid enabled marker before the focused viewport", () => {
-        const {service, state} = createService();
+        const { service, state } = createService();
         state.marker = true;
         state.markedPosition = [8.4, 49.0];
         state.focusedView = 1;
 
-        expect(service.resolveLocation()).toEqual({lon: 8.4, lat: 49.0, source: "marker"});
+        expect(service.resolveLocation()).toEqual({ lon: 8.4, lat: 49.0, source: "marker" });
         expect(state.cameraViewDataState.getValue).not.toHaveBeenCalled();
     });
 
     it("uses the focused viewport when the marker is disabled or invalid", () => {
-        const {service, state} = createService();
+        const { service, state } = createService();
         state.focusedView = 1;
         state.marker = true;
         state.markedPosition = [181, 20];
 
-        expect(service.resolveLocation()).toEqual({lon: 11.5, lat: 48.1, source: "viewport"});
+        expect(service.resolveLocation()).toEqual({ lon: 11.5, lat: 48.1, source: "viewport" });
         expect(state.cameraViewDataState.getValue).toHaveBeenCalledWith(1);
     });
 
     it("opens the provider synchronously in a noopener tab", () => {
-        const {service} = createService();
+        const { service } = createService();
         const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
 
-        service.open(service.providers[0], {lat: 1, lon: 2});
+        service.open(service.providers[0], { lat: 1, lon: 2 });
 
         expect(openSpy).toHaveBeenCalledWith(
             "https://www.google.com/maps/search/?api=1&query=1,2",

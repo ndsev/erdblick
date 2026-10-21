@@ -1,11 +1,11 @@
-import { Injectable,OnDestroy } from "@angular/core";
-import { BehaviorSubject,Subscription } from "rxjs";
+import { Injectable, OnDestroy } from "@angular/core";
+import { BehaviorSubject, Subscription } from "rxjs";
 import { AppConfigService } from "../shared/app-config.service";
 import { Boolish } from "../shared/app-state";
 import { AppStateService } from "../shared/appstate.service";
 import { InfoMessageService } from "../shared/info.service";
 
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 /** Enforces the local coordinate-readout preference and its optional legal gate. */
 export class CoordinatesPolicyService implements OnDestroy {
 
@@ -16,7 +16,6 @@ export class CoordinatesPolicyService implements OnDestroy {
         snapshotPersist: false,
         configDefault: true
     });
-
 
     readonly coordinatesLegalTermsAcceptedState = this.stateService.registerState<boolean>({
         name: "coordinatesLegalTermsAccepted",
@@ -34,7 +33,7 @@ export class CoordinatesPolicyService implements OnDestroy {
         private readonly configService: AppConfigService,
         private readonly stateService: AppStateService,
         private readonly messageService: InfoMessageService
-    ) {}
+    ) { }
 
     /** Applies the legal gate after configuration and local AppState hydration are complete. */
     initialize(): void {

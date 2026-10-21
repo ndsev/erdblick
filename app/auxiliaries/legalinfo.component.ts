@@ -1,7 +1,8 @@
 import { Component } from "@angular/core";
 import { MapInfoService } from "../mapdata/map-info.service";
+import { LEGAL_INFO_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService,LEGAL_INFO_DIALOG_LAYOUT_ID } from "../shared/appstate.service";
+import { AppStateService } from "../shared/appstate.service";
 
 @Component({
     selector: 'legal-dialog',
@@ -36,7 +37,7 @@ export class LegalInfoDialogComponent {
     public aggregatedLegalInfo: { mapName: string, entry: string }[] = [];
 
     constructor(private mapService: MapInfoService,
-                public stateService: AppStateService,
+        public stateService: AppStateService,
         public readonly layout: AppLayoutService) {
         this.mapService.legalInformationUpdated.subscribe(_ => {
             this.aggregatedLegalInfo = [];

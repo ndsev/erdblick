@@ -1,7 +1,8 @@
-import { Component,ViewChild } from '@angular/core';
+import { Component, ViewChild } from '@angular/core';
 import { AppDialogComponent } from '../shared/app-dialog.component';
+import { KEYBOARD_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService,KEYBOARD_DIALOG_LAYOUT_ID } from '../shared/appstate.service';
+import { AppStateService } from "../shared/appstate.service";
 import { DialogStackService } from '../shared/dialog-stack.service';
 
 @Component({
@@ -101,8 +102,8 @@ export class KeyboardComponent {
     @ViewChild('keyboardDialog') keyboardDialog?: AppDialogComponent;
 
     constructor(public stateService: AppStateService,
-                private dialogStack: DialogStackService,
-        public readonly layout: AppLayoutService) {}
+        private dialogStack: DialogStackService,
+        public readonly layout: AppLayoutService) { }
 
     get dialogVisible(): boolean {
         return this.layout.isDialogOpen(this.dialogLayoutId);

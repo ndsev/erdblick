@@ -1,8 +1,9 @@
-import { Component,ElementRef,HostListener,ViewChild } from '@angular/core';
+import { Component, ElementRef, HostListener, ViewChild } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { AppDialogComponent } from '../shared/app-dialog.component';
+import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
-import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID,AppStateService } from '../shared/appstate.service';
+import { AppStateService } from "../shared/appstate.service";
 import { DialogStackService } from '../shared/dialog-stack.service';
 import { EditorService } from '../shared/editor.service';
 
@@ -80,9 +81,9 @@ export class AdvancedPreferencesComponent {
     private saveSubscription: Subscription = new Subscription();
 
     constructor(public readonly stateService: AppStateService,
-                private readonly editorService: EditorService,
-                private readonly dialogStack: DialogStackService,
-        public readonly layout: AppLayoutService) {}
+        private readonly editorService: EditorService,
+        private readonly dialogStack: DialogStackService,
+        public readonly layout: AppLayoutService) { }
 
     get dialogVisible(): boolean {
         return this.layout.isDialogOpen(this.dialogLayoutId);
@@ -192,7 +193,7 @@ export class AdvancedPreferencesComponent {
     /** Downloads the current snapshot editor contents as JSON. */
     exportSnapshot() {
         const source = this.editorService.getSessionSource(this.advancedPreferencesEditorSessionId);
-        const blob = new Blob([source], {type: 'application/json;charset=utf-8'});
+        const blob = new Blob([source], { type: 'application/json;charset=utf-8' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         link.download = `mv_state_${this.snapshotTimestamp()}.json`;

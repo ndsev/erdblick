@@ -1,20 +1,20 @@
-import {deepEquals} from "../shared/app-state";
 import { KeyValue } from "@angular/common";
-import { ChangeDetectorRef,Component,Input,OnDestroy } from "@angular/core";
-import { combineLatest,Subscription } from "rxjs";
+import { ChangeDetectorRef, Component, Input, OnDestroy } from "@angular/core";
+import { Subscription } from "rxjs";
 import { GeoMath } from "../integrations/geo";
 import { MapViewStateService } from "../mapview/map-view-state.service";
 import { MapViewService } from "../mapview/map-view.service";
+import { deepEquals } from "../shared/app-state";
 import { AppStateService } from "../shared/appstate.service";
 import { ClipboardService } from "../shared/clipboard.service";
 import { subscribeCoordinateFrames } from "./coordinate-frame-stream";
 import { CoordinatesService } from "./coordinates.service";
 import {
-NDS_COORDINATES_OPTION,
-ndsCoordinatesFromWgs84,
-normalizeCoordinatePanelOptionName,
-packedTileIdFromWgs84,
-packedTileIdOptionName
+    NDS_COORDINATES_OPTION,
+    ndsCoordinatesFromWgs84,
+    normalizeCoordinatePanelOptionName,
+    packedTileIdFromWgs84,
+    packedTileIdOptionName
 } from "./nds-coordinate.util";
 
 interface PanelOption {
@@ -93,27 +93,27 @@ export class CoordinatesPanelComponent implements OnDestroy {
     longitude: number | undefined = undefined;
     latitude: number | undefined = undefined;
     isMarkerEnabled: boolean = false;
-    markerPosition: {x: number, y: number} | null = null;
+    markerPosition: { x: number, y: number } | null = null;
     ndsCoordinates: Array<number> | undefined = undefined;
     auxiliaryCoordinates: Map<string, Array<number>> = new Map<string, Array<number>>();
     packedTileIds: Map<string, number> = new Map<string, number>();
     auxiliaryTileIds: Map<string, number> = new Map<string, number>();
     markerButtonIcon: string = "location_off";
     markerButtonTooltip: string = "Enable marker placement";
-    displayOptions: Array<PanelOption> = [{name: "WGS84"}, {name: NDS_COORDINATES_OPTION}];
-    selectedOptions: Array<PanelOption> = [{name: "WGS84"}];
+    displayOptions: Array<PanelOption> = [{ name: "WGS84" }, { name: NDS_COORDINATES_OPTION }];
+    selectedOptions: Array<PanelOption> = [{ name: "WGS84" }];
     readonly ndsCoordinatesOption = NDS_COORDINATES_OPTION;
     private subscriptions: Subscription[] = [];
 
     constructor(public mapService: MapViewService,
-                public coordinatesService: CoordinatesService,
-                public clipboardService: ClipboardService,
-                public stateService: AppStateService,
-                private changeDetector: ChangeDetectorRef,
+        public coordinatesService: CoordinatesService,
+        public clipboardService: ClipboardService,
+        public stateService: AppStateService,
+        private changeDetector: ChangeDetectorRef,
         public readonly coordinates: CoordinatesService,
         public readonly viewSettings: MapViewStateService) {
         for (let level = 0; level <= 15; level++) {
-            this.displayOptions.push({name: packedTileIdOptionName(level)});
+            this.displayOptions.push({ name: packedTileIdOptionName(level) });
         }
         this.subscriptions.push(this.stateService.observe(() => [this.coordinates.markerState.value, this.coordinates.markedPositionState.value] as const, deepEquals).subscribe(([markerEnabled, markedPosition]) => {
             this.isMarkerEnabled = markerEnabled;
@@ -121,7 +121,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
                 this.longitude = markedPosition[0];
                 this.latitude = markedPosition[1];
                 if (this.isMarkerEnabled) {
-                    this.markerPosition = {x: this.longitude, y: this.latitude};
+                    this.markerPosition = { x: this.longitude, y: this.latitude };
                     this.markerButtonIcon = "wrong_location";
                     this.markerButtonTooltip = "Reset marker";
                 }
@@ -147,16 +147,16 @@ export class CoordinatesPanelComponent implements OnDestroy {
         this.subscriptions.push(subscribeCoordinateFrames(
             this.coordinatesService.mouseMoveCoordinates,
             coordinates => {
-            // Deck publishes outside Angular. Check only this HUD after applying the coalesced
-            // sample; entering the zone would check every open dialog on every pointer frame.
-            if (!this.markerPosition && coordinates) {
-                this.longitude = GeoMath.toDegrees(coordinates.longitude);
-                this.latitude = GeoMath.toDegrees(coordinates.latitude);
-                this.updateValues();
-            }
-            this.restoreSelectedOptions();
-            this.changeDetector.detectChanges();
-        }));
+                // Deck publishes outside Angular. Check only this HUD after applying the coalesced
+                // sample; entering the zone would check every open dialog on every pointer frame.
+                if (!this.markerPosition && coordinates) {
+                    this.longitude = GeoMath.toDegrees(coordinates.longitude);
+                    this.latitude = GeoMath.toDegrees(coordinates.latitude);
+                    this.updateValues();
+                }
+                this.restoreSelectedOptions();
+                this.changeDetector.detectChanges();
+            }));
     }
 
     /** Releases subscriptions to marker, coordinate, and option state streams. */
@@ -169,7 +169,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
         for (const option of this.coordinates.enabledCoordsTileIds) {
             const normalizedOption = normalizeCoordinatePanelOptionName(option);
             if (!this.isSelectedOption(normalizedOption) && this.displayOptions.some(val => val.name == normalizedOption)) {
-                this.selectedOptions.push({name: normalizedOption});
+                this.selectedOptions.push({ name: normalizedOption });
             }
         }
     }
@@ -198,7 +198,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
                         }, new Map<string, Array<number>>());
                 for (const key of this.auxiliaryCoordinates.keys()) {
                     if (!this.displayOptions.some(val => val.name == key)) {
-                        this.displayOptions.push({name: `${key}`});
+                        this.displayOptions.push({ name: `${key}` });
                     }
                 }
             }
@@ -206,20 +206,20 @@ export class CoordinatesPanelComponent implements OnDestroy {
         if (this.coordinatesService.auxiliaryTileIdsFun) {
             if (this.longitude !== undefined && this.latitude !== undefined) {
                 for (let level = 0; level <= 15; level++) {
-                const levelData: Map<string, number> =
-                    this.coordinatesService.auxiliaryTileIdsFun(this.longitude, this.latitude, level).reduce(
-                        (map: Map<string, number>, [key, value]: [string, bigint | number]) => {
-                            map.set(key, Number(value));
-                            return map;
-                        }, new Map<string, number>());
+                    const levelData: Map<string, number> =
+                        this.coordinatesService.auxiliaryTileIdsFun(this.longitude, this.latitude, level).reduce(
+                            (map: Map<string, number>, [key, value]: [string, bigint | number]) => {
+                                map.set(key, Number(value));
+                                return map;
+                            }, new Map<string, number>());
 
-                levelData.forEach((value, key) => {
-                    this.auxiliaryTileIds.set(`${key} (level ${level})`, value);
-                });
+                    levelData.forEach((value, key) => {
+                        this.auxiliaryTileIds.set(`${key} (level ${level})`, value);
+                    });
                 }
                 for (const key of this.auxiliaryTileIds.keys()) {
                     if (!this.displayOptions.some(val => val.name == key)) {
-                        this.displayOptions.push({name: key});
+                        this.displayOptions.push({ name: key });
                     }
                 }
             }
@@ -269,13 +269,13 @@ export class CoordinatesPanelComponent implements OnDestroy {
     updateSelectedOptions() {
         this.coordinates.enabledCoordsTileIds = this.selectedOptions.reduce(
             (array: Array<string>, option) => {
-            array.push(option.name);
-            return array;
-        }, new Array<string>());
+                array.push(option.name);
+                return array;
+            }, new Array<string>());
     }
 
     /** Sorts tile-id display entries by extracted level number. */
-    compareLevels(a: KeyValue<string, number> , b: KeyValue<string, number>): number {
+    compareLevels(a: KeyValue<string, number>, b: KeyValue<string, number>): number {
         const aLevel = parseInt(a.key.match(/\d+/)?.[0] ?? '0', 10);
         const bLevel = parseInt(b.key.match(/\d+/)?.[0] ?? '0', 10);
 
@@ -283,7 +283,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
     }
 
     /** Centers the focused map view on the current marker position. */
-    focusOnMarker(markerPosition:  {x: number, y: number}) {
+    focusOnMarker(markerPosition: { x: number, y: number }) {
         const focusedViewIndex = this.viewSettings.focusedView;
         this.mapService.moveToWgs84PositionTopic.next({
             targetView: focusedViewIndex,

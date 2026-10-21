@@ -1,10 +1,10 @@
 import { Cartographic } from "./integrations/geo";
-import { coreLib,ErdblickCore_ } from "./integrations/wasm";
+import { coreLib, ErdblickCore_ } from "./integrations/wasm";
 import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
 import {
-TileSubsetLayerRenderService,
-type DeckPresentationDebugSnapshot,
-type TileSubsetLayerRenderDebugSnapshot
+    TileSubsetLayerRenderService,
+    type DeckPresentationDebugSnapshot,
+    type TileSubsetLayerRenderDebugSnapshot
 } from "./mapview/deck/tile-subset-layer-render.service";
 import { MapViewStateService } from "./mapview/map-view-state.service";
 import { AppStateService } from "./shared/appstate.service";
@@ -65,7 +65,7 @@ export class ErdblickDebugApi {
             destination.height
         ];
         const orientation = this.viewSettings.getCameraOrientation(viewIndex);
-        return JSON.stringify({position, orientation});
+        return JSON.stringify({ position, orientation });
     }
 
     /** Expose the initialized core module for deliberate low-level investigations. */
@@ -108,10 +108,10 @@ export class ErdblickDebugApi {
         keyFilter = ""
     ): Promise<Record<string, unknown>> {
         const [wrapper] = await this.tileStream.loadFeatures([
-            {mapTileKey, featureId}
+            { mapTileKey, featureId }
         ]);
         if (!wrapper) {
-            return {error: `Feature ${featureId} was not found in ${mapTileKey}.`};
+            return { error: `Feature ${featureId} was not found in ${mapTileKey}.` };
         }
         return wrapper.peek(feature => {
             const root = feature.inspectionModel();
@@ -140,7 +140,7 @@ export class ErdblickDebugApi {
             if (Array.isArray(root)) {
                 root.forEach((node: unknown) => walk(node, []));
             }
-            return {mapTileKey, featureId, hitCount: hits.length, hits};
-        }) ?? {error: `Feature ${featureId} could not be parsed.`};
+            return { mapTileKey, featureId, hitCount: hits.length, hits };
+        }) ?? { error: `Feature ${featureId} could not be parsed.` };
     }
 }

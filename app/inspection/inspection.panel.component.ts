@@ -1,22 +1,22 @@
-import { Component,effect,input,output,ViewChild } from "@angular/core";
+import { Component, effect, input, output, ViewChild } from "@angular/core";
 import { Popover } from "primeng/popover";
 import { coreLib } from "../integrations/wasm";
 import { FeatureWrapper } from "../mapdata/feature-inspection.model";
 import { MapInfoService } from "../mapdata/map-info.service";
 import {
-parseMapPartitionKey,
-partitionKeySuffix
+    parseMapPartitionKey,
+    partitionKeySuffix
 } from "../mapdata/partition.model";
 import { AppPanelComponent } from "../shared/app-panel.component";
-import type { AppSurfaceHeaderAction,AppSurfaceHeaderActionCommandEvent } from "../shared/app-surface-header.component";
-import {
-AppStateService,
-InspectionComparisonOption,
-InspectionPanelModel
-} from "../shared/appstate.service";
+import type {
+    AppSurfaceHeaderAction,
+    AppSurfaceHeaderActionCommandEvent
+} from "../shared/app-surface-header.component";
+import { AppStateService } from "../shared/appstate.service";
 import { displayFeatureId } from "../shared/tile-feature-id";
 import { FeaturePanelComponent } from "./feature.panel.component";
 import { InspectionSelectionService } from "./inspection-selection.service";
+import { InspectionComparisonOption, InspectionPanelModel } from "./inspection-state.model";
 import { InspectionStateService } from "./inspection-state.service";
 import { SourceDataPanelComponent } from "./sourcedata.panel.component";
 
@@ -151,14 +151,14 @@ export class InspectionPanelComponent {
     selectedLayerItem?: SourceLayerMenuItem;
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
-    protected readonly sourceLayerDropdownOverlayOptions = {autoZIndex: true, baseZIndex: 30000};
+    protected readonly sourceLayerDropdownOverlayOptions = { autoZIndex: true, baseZIndex: 30000 };
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
     dockedPanelCount = input<number>(0);
     filterText = input<string | undefined>();
     filterTextChange = output<string>();
     ejectedPanel = output<InspectionPanelModel<FeatureWrapper>>();
-    panelDragRequest = output<{panel: InspectionPanelModel<FeatureWrapper>, event: PointerEvent}>();
+    panelDragRequest = output<{ panel: InspectionPanelModel<FeatureWrapper>, event: PointerEvent }>();
     accordionValue: string | null = '0';
     readonly accordionTransitionOptions = '320ms cubic-bezier(0.22, 1, 0.36, 1)';
 
@@ -170,8 +170,8 @@ export class InspectionPanelComponent {
     protected readonly measurePreferredPanelHeightEm = () => this.getPanelContentAdapter()?.measurePreferredHeightEm();
 
     constructor(private mapService: MapInfoService,
-                private inspectionSelection: InspectionSelectionService,
-                public stateService: AppStateService,
+        private inspectionSelection: InspectionSelectionService,
+        public stateService: AppStateService,
         public readonly inspectionState: InspectionStateService) {
         effect(() => {
             this.title = "";
@@ -204,7 +204,7 @@ export class InspectionPanelComponent {
                                 ),
                                 disabled: item.id === layerId,
                                 command: () => {
-                                    let sourceData = {...selection};
+                                    let sourceData = { ...selection };
                                     sourceData.mapTileKey = coreLib.createMapTileKey(
                                         "SourceData",
                                         mapId,
@@ -382,7 +382,7 @@ export class InspectionPanelComponent {
         if (this.isInteractiveTarget(target)) {
             return;
         }
-        this.panelDragRequest.emit({panel: this.panel(), event});
+        this.panelDragRequest.emit({ panel: this.panel(), event });
     }
 
     /** Checks whether an event target should keep its own pointer behavior. */

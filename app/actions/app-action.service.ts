@@ -1,15 +1,23 @@
-import {Injectable} from "@angular/core";
-import {z} from "zod";
-import {AppStateService} from "../shared/appstate.service";
-import {deepCopy, deepEquals} from "../shared/app-state";
-import {ViewerActionFailure} from "./viewer-action-relay.contract";
+import { Injectable } from "@angular/core";
+import { z } from "zod";
+import { deepCopy, deepEquals } from "../shared/app-state";
+import { AppStateService } from "../shared/appstate.service";
 import {
-    AppAction, AppControl, ControlReadContext, jsonByteLength, rejectAction,
-    VIEWER_ACTION_RESULT_BYTES, VIEWER_ACTION_TARGET_LIMIT
+    ActionCandidateHistory,
+    AppAction,
+    AppActionCandidate,
+    AppControl,
+    ControlReadContext,
+    jsonByteLength,
+    RegisteredActionCandidate,
+    rejectAction,
+    VIEWER_ACTION_RESULT_BYTES,
+    VIEWER_ACTION_TARGET_LIMIT
 } from "./app-action";
-import {controlActions, describeControls} from "./app-action.service.declarations";
+import { controlActions, describeControls } from "./app-action.service.declarations";
+import { ViewerActionFailure } from "./viewer-action-relay.contract";
 
-type ControlTarget = {control: string; [key: string]: unknown};
+type ControlTarget = { control: string;[key: string]: unknown };
 interface RegisteredControl {
     declaration: AppControl;
     read(selector: Record<string, unknown>, context: ControlReadContext): unknown;
@@ -21,9 +29,9 @@ interface RegisteredControl {
  * Explicit boundary dispatch, schema checks and response bounds. Owners register
  * ordinary methods; this service neither discovers stored values nor owns domains.
  */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class AppActionService {
-    private readonly actions = new Map<string, {declaration: AppAction; execute: (input: unknown, signal?: AbortSignal) => unknown}>();
+    private readonly actions = new Map<string, { declaration: AppAction; execute: (input: unknown, signal?: AbortSignal) => unknown; candidates?: (query: string, history?: ActionCandidateHistory) => AppActionCandidate[] }>();
     private readonly controls = new Map<string, RegisteredControl>();
     private sealed = false;
 
@@ -35,11 +43,26 @@ export class AppActionService {
 
     registerAction<Input extends z.ZodType, Output extends z.ZodType>(
         declaration: AppAction<Input, Output>,
-        execute: (input: z.infer<Input>, signal?: AbortSignal) => z.infer<Output> | Promise<z.infer<Output>>
+        execute: (input: z.infer<Input>, signal?: AbortSignal) => z.infer<Output> | Promise<z.infer<Output>>,
+        candidates?: (query: string, history?: ActionCandidateHistory) => AppActionCandidate<z.infer<Input>>[]
     ): void {
         if (this.sealed) throw new Error(`Action registration is closed: ${declaration.name}`);
         if (this.actions.has(declaration.name)) throw new Error(`Duplicate action: ${declaration.name}`);
-        this.actions.set(declaration.name, {declaration, execute: execute as (input: unknown, signal?: AbortSignal) => unknown});
+        this.actions.set(declaration.name, { declaration, execute: execute as (input: unknown, signal?: AbortSignal) => unknown, candidates });
+    }
+
+    /** Queries live owner choices without running an action or loading network data. */
+    getCandidates(query: string, history?: ActionCandidateHistory): RegisteredActionCandidate[] {
+        const candidates: RegisteredActionCandidate[] = [];
+        const ids = new Set<string>();
+        for (const { declaration, candidates: provide } of this.actions.values()) {
+            for (const candidate of provide?.(query, history) ?? []) {
+                if (!candidate.id || ids.has(candidate.id)) throw new Error(`Duplicate or empty action candidate ID: ${candidate.id}`);
+                ids.add(candidate.id);
+                candidates.push({ ...candidate, action: declaration.name });
+            }
+        }
+        return candidates;
     }
 
     registerControl<Selector extends z.ZodObject, Value extends z.ZodType>(
@@ -52,7 +75,7 @@ export class AppActionService {
         if (this.sealed) throw new Error(`Control registration is closed: ${declaration.name}`);
         if (this.controls.has(declaration.name)) throw new Error(`Duplicate control: ${declaration.name}`);
         if (declaration.writable !== !!binding.write) throw new Error(`Control write binding does not match its declaration: ${declaration.name}`);
-        this.controls.set(declaration.name, {declaration, ...binding} as RegisteredControl);
+        this.controls.set(declaration.name, { declaration, ...binding } as RegisteredControl);
     }
 
     /** Explicit startup composition must bind the exact declarations exported by the build. */
@@ -80,7 +103,11 @@ export class AppActionService {
         const validate = (result: unknown) => {
             const checked = action.declaration.outputSchema.safeParse(result);
             if (!checked.success || jsonByteLength(checked.data) > VIEWER_ACTION_RESULT_BYTES) {
-                throw new ViewerActionFailure({code: "internal_error", message: "Owner returned a result outside its contract", outcome: action.declaration.mutation ? "unknown" : "not_applied"});
+                throw new ViewerActionFailure({
+                    code: "internal_error",
+                    message: "Owner returned a result outside its contract",
+                    outcome: action.declaration.mutation ? "unknown" : "not_applied"
+                });
             }
             return checked.data;
         };
@@ -89,45 +116,61 @@ export class AppActionService {
     }
 
     private describe(input: z.infer<typeof controlActions.describeControls.inputSchema>) {
-        return {observedAt: new Date().toISOString(), controls: describeControls().filter(control =>
-            (!input.controls || input.controls.includes(control.name)) && (!input.prefix || control.name.startsWith(input.prefix))),
-        complete: true, omissions: []};
+        return {
+            observedAt: new Date().toISOString(),
+            controls: describeControls().filter(control =>
+                (!input.controls || input.controls.includes(control.name)) && (!input.prefix || control.name.startsWith(input.prefix))),
+            complete: true,
+            omissions: []
+        };
     }
 
     private read(input: z.infer<typeof controlActions.getControls.inputSchema>): z.infer<typeof controlActions.getControls.outputSchema> {
         const defaults = () => [...this.controls.values()].flatMap(binding =>
-            (binding.defaultTargets?.() ?? []).map(selector => ({control: binding.declaration.name, ...selector})));
+            (binding.defaultTargets?.() ?? []).map(selector => ({ control: binding.declaration.name, ...selector })));
         const requested = (input.targets ?? defaults()) as ControlTarget[];
         const targets = requested.slice(0, VIEWER_ACTION_TARGET_LIMIT);
         const values: z.infer<typeof controlActions.getControls.outputSchema>["values"] = [];
         const omissions: z.infer<typeof controlActions.getControls.outputSchema>["omissions"] = [];
         let budget = VIEWER_ACTION_RESULT_BYTES - 48 * 1024;
-        if (requested.length > targets.length) omissions.push({target: requested[targets.length], reason: "item_limit", omittedCount: requested.length - targets.length});
+        if (requested.length > targets.length) omissions.push({
+            target: requested[targets.length],
+            reason: "item_limit",
+            omittedCount: requested.length - targets.length
+        });
         for (const target of targets) {
-            if (budget < 1024) { omissions.push({target, reason: "byte_limit"}); continue; }
-            const {binding, selector} = this.resolve(target);
+            if (budget < 1024) { omissions.push({ target, reason: "byte_limit" }); continue; }
+            const { binding, selector } = this.resolve(target);
             const context = new ControlReadContext(budget);
             let entry: z.infer<typeof controlActions.getControls.outputSchema>["values"][number];
             try {
                 const parsed = binding.declaration.valueSchema.safeParse(binding.read(selector, context));
-                entry = parsed.success ? {target, value: parsed.data} : {target, unavailable: "value_out_of_contract"};
+                entry = parsed.success ? { target, value: parsed.data } : { target, unavailable: "value_out_of_contract" };
             } catch (error) {
                 if (!(error instanceof ViewerActionFailure) || error.detail.code !== "not_available") throw error;
                 const reason = error.detail.reason;
-                entry = {target, unavailable: reason === "view_unavailable" || reason === "first_person" ? reason : "target_unavailable"};
+                entry = {
+                    target,
+                    unavailable: reason === "view_unavailable" || reason === "first_person" ? reason : "target_unavailable"
+                };
             }
             const bytes = jsonByteLength(entry);
-            if (bytes > budget) { omissions.push({target, reason: "byte_limit"}); continue; }
+            if (bytes > budget) { omissions.push({ target, reason: "byte_limit" }); continue; }
             budget -= bytes;
             values.push(entry);
-            if (context.reason) omissions.push({target, reason: context.reason});
+            if (context.reason) omissions.push({ target, reason: context.reason });
         }
-        return {observedAt: new Date().toISOString(), values, complete: omissions.length === 0 && values.every(value => !("unavailable" in value)), omissions};
+        return {
+            observedAt: new Date().toISOString(),
+            values,
+            complete: omissions.length === 0 && values.every(value => !("unavailable" in value)),
+            omissions
+        };
     }
 
     private write(input: z.infer<typeof controlActions.setControl.inputSchema>) {
         const target = input.target as ControlTarget;
-        const {binding, selector} = this.resolve(target);
+        const { binding, selector } = this.resolve(target);
         if (!binding.write) rejectAction("This control is read-only", "invalid_arguments");
         const context = new ControlReadContext(VIEWER_ACTION_RESULT_BYTES);
         const before = deepCopy(binding.read(selector, context));
@@ -135,15 +178,21 @@ export class AppActionService {
         // methods also use transactions for their ordinary application workflows.
         this.persistence.transaction(() => binding.write!(selector, binding.declaration.valueSchema.parse(input.value)));
         const value = binding.read(selector, context);
-        return {status: "applied" as const, target, value, changed: !deepEquals(before, value), readiness: {status: "unknown" as const}};
+        return {
+            status: "applied" as const,
+            target,
+            value,
+            changed: !deepEquals(before, value),
+            readiness: { status: "unknown" as const }
+        };
     }
 
     private resolve(target: ControlTarget) {
         const binding = this.controls.get(target.control);
         if (!binding) rejectAction("Unsupported control", "invalid_arguments");
-        const {control: _name, ...rawSelector} = target;
+        const { control: _name, ...rawSelector } = target;
         const parsed = binding.declaration.selectorSchema.safeParse(rawSelector);
         if (!parsed.success) rejectAction("Selector does not match the control schema", "invalid_arguments");
-        return {binding, selector: parsed.data as Record<string, unknown>};
+        return { binding, selector: parsed.data as Record<string, unknown> };
     }
 }

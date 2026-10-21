@@ -1,20 +1,30 @@
-import {MapViewService} from "../mapview/map-view.service";
 import { Injectable } from "@angular/core";
 import { HighlightMode } from "build/libs/core/erdblick-core";
-import { BehaviorSubject,Subject } from "rxjs";
+import { BehaviorSubject, Subject } from "rxjs";
+import { ActionInput, AppActionCandidate, applied, rejectAction } from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
 import { CoordinatesService } from "../coords/coordinates.service";
-import { parsePackedTileId } from "../coords/nds-coordinate.util";
+import {
+    packedTileIdFromMortonString,
+    packedTileIdFromParsedNdsCoordinates,
+    parseMortonCoordinateString,
+    parseNdsCoordinateString,
+    parsePackedTileId,
+    parsePackedTileId as parsePackedTileIdValue
+} from "../coords/nds-coordinate.util";
+import { parseWgs84CoordinateString } from "../coords/wgs84-coordinate.util";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
+import { SelectedSourceData, TileFeatureId } from "../inspection/inspection-state.model";
 import { InspectionStateService } from "../inspection/inspection-state.service";
-import { Cartographic,Rectangle } from "../integrations/geo";
+import { Cartographic, GeoMath, Rectangle } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
 import { MapInfoService } from "../mapdata/map-info.service";
 import { MapViewStateService } from "../mapview/map-view-state.service";
+import { MapViewService } from "../mapview/map-view.service";
 import { RightClickMenuService } from "../mapview/rightclickmenu.service";
 import { AppConfigService } from "../shared/app-config.service";
-import { AppStateService,SelectedSourceData,TileFeatureId } from "../shared/appstate.service";
 import { InfoMessageService } from "../shared/info.service";
-import { FeatureSearchService } from "./feature.search.service";
+import { jumpActions } from "./jump.service.declarations";
 
 export const FEATURE_SEARCH_TARGET_ID = "features";
 
@@ -41,12 +51,12 @@ export type SearchJumpResult = number[] | Rectangle | SearchJump;
 /** Normalizes plugin and built-in jump results while preserving point markers for legacy array targets. */
 export function normalizeSearchJumpResult(result: SearchJumpResult): SearchJump {
     if (Array.isArray(result)) {
-        return {target: result, markerPosition: result};
+        return { target: result, markerPosition: result };
     }
     if ("target" in result) {
         return result;
     }
-    return {target: result};
+    return { target: result };
 }
 
 /**
@@ -65,8 +75,8 @@ export interface SearchTarget {
     acceptsEmptyInput?: boolean;
     saveToHistory?: (value: string) => boolean;
     payload?: unknown;
-    jump?: (value: string, payload?: unknown) => SearchJumpResult | undefined;
-    execute?: (value: string, payload?: unknown) => void;
+    jump?: (value: string, payload?: unknown) => SearchJumpResult | undefined | Promise<SearchJumpResult | undefined>;
+    execute?: (value: string, payload?: unknown) => void | Promise<void>;
     validate: (value: string) => boolean;
 }
 
@@ -76,12 +86,26 @@ export interface SearchTarget {
 interface FeatureJumpAction {
     id: string;
     name: string;
-    error: string|null;
-    idParts: Array<{key: string, value: string|number}>;
+    error: string | null;
+    idParts: Array<{ key: string, value: string | number }>;
     maps: Array<string>;
 }
 
-@Injectable({providedIn: 'root'})
+interface ParsedCoordinateJump extends SearchJump {
+    label: string;
+    markerPosition: number[];
+    x?: number;
+    y?: number;
+    level?: number;
+}
+
+interface ParsedNdsCoordinateLabel {
+    x: number;
+    y: number;
+    level?: number;
+}
+
+@Injectable({ providedIn: 'root' })
 /**
  * Builds and executes the action list shown by the global search panel.
  *
@@ -92,7 +116,7 @@ export class JumpTargetService {
 
     markedPosition: Subject<Array<number>> = new Subject<Array<number>>();
     targetValueSubject = new BehaviorSubject<string>("");
-    jumpTargets = new BehaviorSubject<Array<SearchTarget>>([]);
+    readonly targetsChanged = new Subject<void>();
     extJumpTargets: Array<SearchTarget> = [];
     searchIsFocused: boolean = false;
 
@@ -101,18 +125,16 @@ export class JumpTargetService {
     // the setSelectedMap promise resolver is used by the dialog to communicate the
     // user's choice.
     mapSelectionSubject = new Subject<Array<string>>();
-    setSelectedMap: ((choice: string|null)=>void)|null = null;
+    setSelectedMap: ((choice: string | null) => void) | null = null;
 
     /**
      * Loads optional jump-target plugins and wires the reactive channels used by the search UI.
      */
     constructor(private mapService: MapInfoService,
-                private inspectionSelection: InspectionSelectionService,
-                private messageService: InfoMessageService,
-                private menuService: RightClickMenuService,
-                private stateService: AppStateService,
-                private searchService: FeatureSearchService,
-                private configService: AppConfigService,
+        private inspectionSelection: InspectionSelectionService,
+        private messageService: InfoMessageService,
+        private menuService: RightClickMenuService,
+        private configService: AppConfigService,
         public readonly coordinates: CoordinatesService,
         public readonly inspectionState: InspectionStateService,
         public readonly viewSettings: MapViewStateService,
@@ -176,37 +198,6 @@ export class JumpTargetService {
         return jumpTargets;
     }
 
-    /**
-     * Returns the dynamic action that runs a simfil query across the currently loaded tiles.
-     */
-    getFeatureMatchTarget(searchString: string = this.targetValueSubject.getValue()): SearchTarget {
-        let simfilError = '';
-        try {
-            coreLib.validateSimfilQuery(searchString);
-        } catch (e: any) {
-            const parsingError = e.message.split(': ');
-            simfilError = parsingError.length > 1 ? parsingError.slice(1).join(": ") : parsingError[0];
-        }
-        let label = "Match features with a filter expression";
-        if (simfilError) {
-            label += `<br><span class="search-option-warning">${simfilError}</span>`;
-        }
-        return {
-            id: FEATURE_SEARCH_TARGET_ID,
-            icon: "pi-bolt",
-            color: "blue",
-            name: "Search Features and Attributes",
-            label: label,
-            enabled: false,
-            execute: (value: string, payload?: unknown) => {
-                this.searchService.runFromActionPayload(value, payload);
-            },
-            validate: (_: string) => {
-                return !simfilError;
-            }
-        }
-    }
-
     /** Accepts only valid signed NDS.Live packed tile ids without embedded whitespace. */
     validatePackedTileId(value: string) {
         return parsePackedTileId(value) !== undefined;
@@ -221,7 +212,7 @@ export class JumpTargetService {
         let label = "packedTileId = ? | (mapId = ?) | (sourceLayerId = ?)";
         let valid = true;
 
-        const matchSourceDataElements = (value: string): [number, string, string]|null => {
+        const matchSourceDataElements = (value: string): [number, string, string] | null => {
             const regex = /^\s*(-?\d+)(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?\s*$/;
             const match = value.match(regex);
             let tileId: number;
@@ -347,7 +338,7 @@ export class JumpTargetService {
     /**
      * Recomputes the active search targets whenever the query string or plugin state changes.
      */
-    getJumpTargetsForValue(value: string): Array<SearchTarget> {
+    featureTargetsForValue(value: string): Array<SearchTarget> {
         let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(value) as Array<FeatureJumpAction>;
         let featureJumpTargetsConverted: Array<SearchTarget> = [];
         if (featureJumpTargets) {
@@ -363,25 +354,18 @@ export class JumpTargetService {
                     name: `Jump to ${fjt.name}`,
                     label: label,
                     enabled: !fjt.error,
-                    execute: (_: string) => {
-                        this.highlightByJumpTarget(fjt, null, coreLib.HighlightMode.SELECTION_HIGHLIGHT,
-                            this.viewSettings.focusedView).then();
-                    },
+                    execute: (_: string) => this.highlightByJumpTarget(fjt, null, coreLib.HighlightMode.SELECTION_HIGHLIGHT,
+                        this.viewSettings.focusedView),
                     validate: (_: string) => { return !fjt.error; },
                 }
             });
         }
 
-        return [
-            this.getFeatureMatchTarget(value),
-            this.getInspectTileSourceDataTarget(value),
-            ...featureJumpTargetsConverted,
-            ...this.extJumpTargets
-        ];
+        return featureJumpTargetsConverted;
     }
 
     update() {
-        this.jumpTargets.next(this.getJumpTargetsForValue(this.targetValueSubject.getValue()));
+        this.targetsChanged.next();
     }
 
     /**
@@ -426,15 +410,17 @@ export class JumpTargetService {
         if (!mapId || !targetIsCurrent()) return;
 
         // Locate the feature.
-        let resolveMe = {requests: [{
-            typeId: action.name,
-            mapId: mapId,
-            featureId: action.idParts.map((kv) => [kv.key, kv.value]).flat()
-        }]};
+        let resolveMe = {
+            requests: [{
+                typeId: action.name,
+                mapId: mapId,
+                featureId: action.idParts.map((kv) => [kv.key, kv.value]).flat()
+            }]
+        };
         let response = await fetch("locate", {
             body: JSON.stringify(resolveMe),
             method: "POST"
-        }).catch((err)=>console.error(`Error during /locate call: ${err}`));
+        }).catch((err) => console.error(`Error during /locate call: ${err}`));
         if (!response) {
             return;
         }
@@ -468,4 +454,342 @@ export class JumpTargetService {
             });
         }
     }
+
+    /** Builds static search targets for the current input value. */
+    coordinateTargetsForValue(inputValue: string) {
+        const targetsArray: Array<SearchTarget> = [];
+        const value = inputValue.trim();
+
+        /////////// Jump to packed tile id
+        let label = "packedTileId = ?";
+        const packedTileIdValid = this.validatePackedTileId(value);
+        if (packedTileIdValid) {
+            label = `packedTileId = ${value}`;
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
+            id: "j:packed-tile-id",
+            icon: "pi-table",
+            color: "green",
+            name: "PackedTileId",
+            label: label,
+            enabled: packedTileIdValid,
+            jump: (value: string) => { return this.parsePackedTileId(value) },
+            validate: (value: string) => { return this.validatePackedTileId(value) }
+        });
+
+        /////////// Jump to NDS x-y
+        label = "x = ? | y = ? | (level = ?)";
+        const ndsXyValid = this.validateNdsCoordinates(value, true);
+        if (ndsXyValid) {
+            label = this.parseNdsCoordinates(value, true)!.label;
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
+            id: "j:nds-x-y",
+            icon: "pi-map-marker",
+            color: "green",
+            name: "NDS X-Y Coordinates",
+            label: label,
+            enabled: ndsXyValid,
+            jump: (value: string) => this.parseNdsCoordinates(value, true),
+            validate: (value: string) => { return this.validateNdsCoordinates(value, true) }
+        });
+
+        /////////// Jump to NDS y-x
+        label = "y = ? | x = ? | (level = ?)";
+        const ndsYxValid = this.validateNdsCoordinates(value, false);
+        if (ndsYxValid) {
+            label = this.parseNdsCoordinates(value, false)!.label;
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
+            id: "j:nds-y-x",
+            icon: "pi-map-marker",
+            color: "green",
+            name: "NDS Y-X Coordinates",
+            label: label,
+            enabled: ndsYxValid,
+            jump: (value: string) => this.parseNdsCoordinates(value, false),
+            validate: (value: string) => { return this.validateNdsCoordinates(value, false) }
+        });
+
+        /////////// Jump to Morton code
+        label = "mortonCode = ? | (level = ?)";
+        const mortonValid = this.validateMortonCoordinates(value);
+        if (mortonValid) {
+            label = this.parseMortonCoordinates(value)!.label;
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
+            id: "j:morton-code",
+            icon: "pi-map-marker",
+            color: "green",
+            name: "Morton Code Coordinates",
+            label: label,
+            enabled: mortonValid,
+            jump: (value: string) => this.parseMortonCoordinates(value),
+            validate: (value: string) => { return this.validateMortonCoordinates(value) }
+        });
+
+        /////////// Jump to lon-lat
+        label = "lon = ? | lat = ? | (level = ?)"
+        const lonLatValid = this.validateWGS84(value, true);
+        if (lonLatValid) {
+            label = this.parseWgs84Coordinates(value, true)!.label;
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
+            id: "j:wgs84-lon-lat",
+            icon: "pi-map-marker",
+            color: "green",
+            name: "WGS84 Lon-Lat Coordinates",
+            label: label,
+            enabled: lonLatValid,
+            jump: (value: string) => this.parseWgs84Coordinates(value, true),
+            validate: (value: string) => { return this.validateWGS84(value, true) }
+        });
+
+        /////////// Jump to lat-lon
+        label = "lat = ? | lon = ? | (level = ?)"
+        const latLonValid = this.validateWGS84(value, false);
+        if (latLonValid) {
+            label = this.parseWgs84Coordinates(value, false)!.label;
+        } else {
+            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+        }
+        targetsArray.push({
+            id: "j:wgs84-lat-lon",
+            icon: "pi-map-marker",
+            color: "green",
+            name: "WGS84 Lat-Lon Coordinates",
+            label: label,
+            enabled: latLonValid,
+            jump: (value: string) => this.parseWgs84Coordinates(value, false),
+            validate: (value: string) => { return this.validateWGS84(value, false) }
+        });
+
+        return targetsArray;
+    }
+
+    /** Resolves an already parsed WGS84 location into an exact point or native tile rectangle. */
+    parseWgs84Coordinates(value: string, isLonLat: boolean): ParsedCoordinateJump | undefined {
+        const parsed = parseWgs84CoordinateString(value, isLonLat);
+        if (!parsed) return undefined;
+        const { lat, lon, level } = parsed;
+        const label = isLonLat ? `lon = ${lon} | lat = ${lat}` : `lat = ${lat} | lon = ${lon}`;
+        return {
+            target: level ? Rectangle.fromDegrees(...coreLib.getTileBox(coreLib.getTileIdFromPosition(lon, lat, level))) : [lat, lon, 0],
+            label: label + (level ? ` | level = ${level}` : ''),
+            markerPosition: [lat, lon]
+        };
+    }
+
+    /** Converts a signed NDS.Live packed tile id into a WGS84 rectangle for camera jumps. */
+    parsePackedTileId(value: string): Rectangle | undefined {
+        if (!value) {
+            this.messageService.showError("No value provided!");
+            return;
+        }
+        try {
+            const packedTileId = parsePackedTileIdValue(value);
+            if (!packedTileId) {
+                throw new Error("TileId is not a valid PackedTileId.");
+            }
+            return Rectangle.fromDegrees(...coreLib.getTileBox(packedTileId.value));
+        } catch (e) {
+            this.messageService.showError("Possibly malformed PackedTileId: " + (e as Error).message.toString());
+        }
+        return undefined;
+    }
+
+    /** Parses NDS coordinate pairs into either a point jump or a tile-extent jump when a level is present. */
+    parseNdsCoordinates(value: string, isXyOrder: boolean): ParsedCoordinateJump | undefined {
+        const parsed = parseNdsCoordinateString(value, isXyOrder);
+        if (!parsed) {
+            return undefined;
+        }
+        const label = this.ndsCoordinateLabel(parsed, isXyOrder);
+        if (parsed.level !== undefined) {
+            const tileId = packedTileIdFromParsedNdsCoordinates(parsed);
+            if (tileId === undefined) {
+                return undefined;
+            }
+            return {
+                target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
+                label,
+                markerPosition: [parsed.lat, parsed.lon],
+                x: parsed.x,
+                y: parsed.y,
+                level: parsed.level
+            };
+        }
+        return {
+            target: [parsed.lat, parsed.lon, 0],
+            label,
+            markerPosition: [parsed.lat, parsed.lon],
+            x: parsed.x,
+            y: parsed.y
+        };
+    }
+
+    /** Parses a Morton code into either a point jump or a tile-extent jump when a level is present. */
+    parseMortonCoordinates(value: string): ParsedCoordinateJump | undefined {
+        const parsed = parseMortonCoordinateString(value);
+        if (!parsed) {
+            return undefined;
+        }
+        const label = this.mortonCoordinateLabel(parsed);
+        if (parsed.level !== undefined) {
+            const tileId = packedTileIdFromMortonString(value);
+            if (tileId === undefined) {
+                return undefined;
+            }
+            return {
+                target: Rectangle.fromDegrees(...coreLib.getTileBox(tileId)),
+                label,
+                markerPosition: [parsed.lat, parsed.lon],
+                x: parsed.x,
+                y: parsed.y,
+                level: parsed.level
+            };
+        }
+        return {
+            target: [parsed.lat, parsed.lon, 0],
+            label,
+            markerPosition: [parsed.lat, parsed.lon],
+            x: parsed.x,
+            y: parsed.y
+        };
+    }
+
+    /** Builds the search-action label for parsed NDS coordinate input. */
+    private ndsCoordinateLabel(parsed: ParsedNdsCoordinateLabel, isXyOrder: boolean): string {
+        const ordered = isXyOrder
+            ? `x = ${parsed.x} | y = ${parsed.y}`
+            : `y = ${parsed.y} | x = ${parsed.x}`;
+        return parsed.level === undefined ? ordered : `${ordered} | level = ${parsed.level}`;
+    }
+
+    /** Builds the search-action label for parsed Morton-code input. */
+    private mortonCoordinateLabel(parsed: ParsedNdsCoordinateLabel): string {
+        const base = `x = ${parsed.x} | y = ${parsed.y}`;
+        return parsed.level === undefined ? base : `${base} | level = ${parsed.level}`;
+    }
+
+    /**
+     * Dispatches the parsed jump target either as a camera move or a rectangle fit request.
+     */
+    jumpToLocation(result: SearchJumpResult | undefined, label?: string | null) {
+        if (result === undefined) {
+            this.messageService.showError("Could not parse coordinates from the input.");
+            return;
+        }
+        const jump = normalizeSearchJumpResult(result);
+        const coordinates = jump.target;
+        const targetViewIndex = this.viewSettings.focusedView;
+        if (Array.isArray(coordinates)) {
+            let lat = coordinates[0];
+            let lon = coordinates[1];
+            const cameraView = this.viewSettings.cameraViewDataState.getValue(targetViewIndex);
+            let alt = coordinates[2] ? coordinates[2] : cameraView.destination.alt;
+
+            this.views.moveToWgs84PositionTopic.next({
+                x: lon,
+                y: lat,
+                z: alt,
+                targetView: targetViewIndex
+            });
+            if (label) {
+                this.views.showLocationLabelTopic.next({
+                    targetView: targetViewIndex,
+                    x: lon,
+                    y: lat,
+                    label
+                });
+            }
+        } else {
+            this.views.moveToRectangleTopic.next({
+                targetView: targetViewIndex,
+                rectangle: {
+                    west: GeoMath.toDegrees(coordinates.west),
+                    south: GeoMath.toDegrees(coordinates.south),
+                    east: GeoMath.toDegrees(coordinates.east),
+                    north: GeoMath.toDegrees(coordinates.north),
+                }
+            });
+        }
+        if (jump.markerPosition) {
+            this.markedPosition.next(jump.markerPosition);
+        }
+    }
+
+    /**
+     * Validates coordinate inputs by parsing them and checking geographic bounds.
+     */
+    validateWGS84(value: string, isLonLat: boolean = false) {
+        return parseWgs84CoordinateString(value, isLonLat) !== undefined;
+    }
+
+    /** Validates integer NDS coordinate input accepted by the built-in NDS jump targets. */
+    validateNdsCoordinates(value: string, isXyOrder: boolean) {
+        return this.parseNdsCoordinates(value, isXyOrder) !== undefined;
+    }
+
+    /** Validates Morton-code input accepted by the built-in Morton jump target. */
+    validateMortonCoordinates(value: string) {
+        return this.parseMortonCoordinates(value) !== undefined;
+    }
+
+    /** Explicit registrations share argument validation and execution with remote actions. */
+    registerActions(actions: AppActionService): void {
+        actions.registerAction(jumpActions.sourceData, async input => {
+            await this.executeTarget(this.getInspectTileSourceDataTarget(input.text), input.text);
+            return applied();
+        }, query => this.initialized ? [this.candidate(this.getInspectTileSourceDataTarget(query), query, { text: query })] : []);
+        actions.registerAction(jumpActions.feature, async input => {
+            const target = this.featureTargetsForValue(input.text).find(target => target.id === input.targetId);
+            if (!target) rejectAction("The feature jump is no longer available");
+            await this.executeTarget(target, input.text);
+            return applied();
+        }, query => this.initialized ? this.featureTargetsForValue(query).map(target =>
+            this.candidate(target, query, { targetId: target.id, text: query })) : []);
+        actions.registerAction(jumpActions.plugin, async input => {
+            const target = this.extJumpTargets.find(target => target.id === input.targetId);
+            if (!target) rejectAction("The jump provider is no longer available");
+            await this.executeTarget(target, input.text, input.payload);
+            return applied();
+        }, (query, history) => this.extJumpTargets.map(target => this.candidate(target, query,
+            { targetId: target.id, text: query, payload: history?.id === target.id ? history.payload : target.payload })));
+        actions.registerAction(jumpActions.coordinates, async input => {
+            const target = this.coordinateTargetsForValue(input.text).find(target => target.id === input.targetId)!;
+            await this.executeTarget(target, input.text);
+            return applied();
+        }, query => this.initialized ? this.coordinateTargetsForValue(query).map(target => this.candidate(target, query,
+            { targetId: target.id as ActionInput<typeof jumpActions.coordinates>["targetId"], text: query })) : []);
+    }
+
+    /** Adapts the supported plugin presentation contract; no callback escapes into the UI registry. */
+    private candidate<Input>(target: SearchTarget, query: string, input: Input): AppActionCandidate<Input> {
+        return {
+            id: target.id, name: target.name, label: target.label, icon: target.icon,
+            iconType: target.iconType, color: target.color, enabled: target.validate(query),
+            acceptsEmptyInput: target.acceptsEmptyInput, saveToHistory: target.saveToHistory?.(query),
+            payload: target.payload, input
+        };
+    }
+
+    /** Revalidates a current parser/provider immediately before its ordinary behavior runs. */
+    private async executeTarget(target: SearchTarget, query: string, payload?: unknown): Promise<void> {
+        if (!target.validate(query) || (!query.trim() && !target.acceptsEmptyInput)) rejectAction("Search action is not valid for this input", "invalid_arguments");
+        if (target.jump) this.jumpToLocation(await target.jump(query, payload));
+        else if (target.execute) await target.execute(query, payload);
+        else rejectAction("Search action has no handler");
+    }
+
 }

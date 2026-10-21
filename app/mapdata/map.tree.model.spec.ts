@@ -1,6 +1,6 @@
 import "@angular/compiler";
-import {describe, expect, it, vi} from 'vitest';
-import {BehaviorSubject} from "rxjs";
+import { describe, expect, it, vi } from 'vitest';
+import { BehaviorSubject } from "rxjs";
 import {
     bestMatchingLayerPreset,
     dataSourceCatalogStatus,
@@ -19,14 +19,14 @@ import {
     StyleOptionNode,
     sortDataSourceCatalogEntries
 } from './map.tree.model';
-import type {AppStateService} from "../shared/appstate.service";
+import type { AppStateService } from "../shared/appstate.service";
 import type {
     ErdblickStyle,
     FeatureStyleOptionWithStringType,
     StyleService
 } from "../styledata/style.service";
-import type {MapPresetService} from "../styledata/map-preset.service";
-import type {ResolvedLayerPreset} from "../styledata/map-preset.service";
+import type { MapPresetService } from "../styledata/map-preset.service";
+import type { ResolvedLayerPreset } from "../styledata/map-preset.service";
 
 function source(mapId: string, configIndex?: number, status?: string): MapInfoItem {
     return {
@@ -36,10 +36,10 @@ function source(mapId: string, configIndex?: number, status?: string): MapInfoIt
         maxParallelJobs: 0,
         sourceId: mapId,
         stringPoolId: mapId,
-        protocolVersion: {major: 1, minor: 0, patch: 0},
+        protocolVersion: { major: 1, minor: 0, patch: 0 },
         addOn: false,
-        ...(configIndex === undefined ? {} : {configIndex}),
-        ...(status === undefined ? {} : {status})
+        ...(configIndex === undefined ? {} : { configIndex }),
+        ...(status === undefined ? {} : { status })
     };
 }
 
@@ -52,7 +52,7 @@ function featureLayer(layerId: string): LayerInfoItem {
         canWrite: false,
         coverage: [],
         featureTypes: [],
-        version: {major: 1, minor: 0, patch: 0},
+        version: { major: 1, minor: 0, patch: 0 },
         zoomLevels: [13]
     };
 }
@@ -116,10 +116,10 @@ function filterTreeFixture() {
     mapNode.visible = [true, false];
     roads.expanded = false;
     roads.viewConfig = [
-        {autoLevel: true, level: 13, visible: true},
-        {autoLevel: false, level: 12, visible: false}
+        { autoLevel: true, level: 13, visible: true },
+        { autoLevel: false, level: 12, visible: false }
     ];
-    return {nodes: [group], group, mapNode, roads};
+    return { nodes: [group], group, mapNode, roads };
 }
 
 /** Flattens stable presentation keys in rendered tree order. */
@@ -155,9 +155,9 @@ describe('datasource catalog tree helpers', () => {
     });
 
     it('normalizes datasource progress values for display', () => {
-        expect(dataSourceProgressPercent({...source('fraction'), progress: 0.42})).toBe(42);
-        expect(dataSourceProgressPercent({...source('percent'), progress: 73})).toBe(73);
-        expect(dataSourceProgressPercent({...source('missing'), progress: null})).toBeNull();
+        expect(dataSourceProgressPercent({ ...source('fraction'), progress: 0.42 })).toBe(42);
+        expect(dataSourceProgressPercent({ ...source('percent'), progress: 73 })).toBe(73);
+        expect(dataSourceProgressPercent({ ...source('missing'), progress: null })).toBeNull();
     });
 });
 
@@ -243,10 +243,11 @@ describe("style option groups", () => {
         const ready = new BehaviorSubject(true);
         const numViewsState = new BehaviorSubject(1);
         const stateService = {
+            withSystemStateMutation: (edit: () => void) => edit(),
             ready,
             numViewsState,
-            mapLayerConfig: vi.fn(() => [{autoLevel: true, level: 13, visible: true}]),
-            styleOptionValues: vi.fn((_mapId, _layerId, _styleId, _optionId, _type, defaultValue) => [defaultValue]),
+            materializeLayerDefaults: vi.fn(() => [{ autoLevel: true, level: 13, visible: true }]),
+            materializeStyleOptionDefaults: vi.fn((_mapId, _layerId, _styleId, _optionId, _type, defaultValue) => [defaultValue]),
             getLayerPresetSelection: vi.fn(() => null),
             setLayerPresetSelection: vi.fn(),
             getMapPresetSelection: vi.fn(() => null),
@@ -268,16 +269,16 @@ describe("style option groups", () => {
             options,
             presets: [],
             visible: true,
-            featureLayerStyle: {hasLayerAffinity: () => true}
+            featureLayerStyle: { hasLayerAffinity: () => true }
         }) as unknown as ErdblickStyle;
         const styles = new Map<string, ErdblickStyle>([
             ["customer/roads", style("customer/roads", "roads", [option("hidden", true), option("a"), option("b")])],
             ["customer/signs", style("customer/signs", "signs", [option("c")])]
         ]);
-        const styleService = {styles, styleGroups};
+        const styleService = { styles, styleGroups };
         const map = source("Map");
         map.layers = {
-            Preview: {...featureLayer("Preview"), defaultVisible: false},
+            Preview: { ...featureLayer("Preview"), defaultVisible: false },
             Roads: {
                 layerId: "Roads",
                 type: "Feature",
@@ -285,7 +286,7 @@ describe("style option groups", () => {
                 canWrite: false,
                 coverage: [],
                 featureTypes: [],
-                version: {major: 1, minor: 0, patch: 0},
+                version: { major: 1, minor: 0, patch: 0 },
                 zoomLevels: [13]
             }
         };
@@ -294,11 +295,10 @@ describe("style option groups", () => {
             [map],
             stateService as unknown as AppStateService,
             styleService as unknown as StyleService,
-            emptyPresetService(),
-            false, Object.assign(stateService as unknown as AppStateService, {viewIdAt: (index: number) => String(index)}) as never, stateService as unknown as AppStateService as never
+            emptyPresetService(), Object.assign(stateService as unknown as AppStateService, { viewIdAt: (index: number) => String(index) }) as never, stateService as unknown as AppStateService as never
         );
         const layer = tree.maps.get("Map")?.layers.get("Roads");
-        expect(stateService.mapLayerConfig).toHaveBeenCalledWith("Map", "Preview", false, 13);
+        expect(stateService.materializeLayerDefaults).toHaveBeenCalledWith("Map", "Preview", false, 13);
         expect(tree.maps.get("Map")?.layers.get("Preview")?.viewConfig[0].visible).toBe(true);
         const children = layer ? layerStyleOptions(layer) : [];
 
@@ -314,11 +314,11 @@ describe("style option groups", () => {
         tree.setNodeExpanded(layer!.key, false);
         expect(layer?.expanded).toBe(false);
 
-        const styleOptionReadsBeforeDestroy = stateService.styleOptionValues.mock.calls.length;
+        const styleOptionReadsBeforeDestroy = stateService.materializeStyleOptionDefaults.mock.calls.length;
         tree.destroy();
         styleGroups.next([]);
         numViewsState.next(2);
-        expect(stateService.styleOptionValues).toHaveBeenCalledTimes(styleOptionReadsBeforeDestroy);
+        expect(stateService.materializeStyleOptionDefaults).toHaveBeenCalledTimes(styleOptionReadsBeforeDestroy);
     });
 });
 
@@ -332,19 +332,19 @@ describe("layer presets in the map tree", () => {
         optionB.value = [false];
         const preset = (
             id: string,
-            values: Array<{optionId: string; value: boolean}>
+            values: Array<{ optionId: string; value: boolean }>
         ): ResolvedLayerPreset => ({
             id,
             name: id,
             styleId: "Style",
-            ref: {styleId: "Style", presetId: id},
+            ref: { styleId: "Style", presetId: id },
             key: id,
             values
         });
-        const broad = preset("broad", [{optionId: "a", value: true}]);
+        const broad = preset("broad", [{ optionId: "a", value: true }]);
         const exact = preset("exact", [
-            {optionId: "a", value: true},
-            {optionId: "b", value: false}
+            { optionId: "a", value: true },
+            { optionId: "b", value: false }
         ]);
         const duplicate = preset("duplicate", [...exact.values]);
 
@@ -360,15 +360,16 @@ describe("layer presets in the map tree", () => {
     function presetTreeFixture(ownedValues = [false, false]) {
         const ready = new BehaviorSubject(true);
         const numViewsState = new BehaviorSubject(2);
-        const selections: Array<Record<string, Record<string, {styleId: string; presetId: string}>>> = [{}, {}];
+        const selections: Array<Record<string, Record<string, { styleId: string; presetId: string }>>> = [{}, {}];
         const stateService = {
+            withSystemStateMutation: (edit: () => void) => edit(),
             ready,
             numViewsState,
-            mapLayerConfig: vi.fn(() => [
-                {autoLevel: true, level: 13, visible: true},
-                {autoLevel: true, level: 13, visible: true}
+            materializeLayerDefaults: vi.fn(() => [
+                { autoLevel: true, level: 13, visible: true },
+                { autoLevel: true, level: 13, visible: true }
             ]),
-            styleOptionValues: vi.fn((_mapId, _layerId, _styleId, optionId) =>
+            materializeStyleOptionDefaults: vi.fn((_mapId, _layerId, _styleId, optionId) =>
                 optionId === "owned" ? ownedValues : [false, false]),
             getLayerPresetSelection: vi.fn((viewIndex: number, mapId: string, layerId: string) =>
                 selections[viewIndex][mapId]?.[layerId] ?? null),
@@ -376,16 +377,16 @@ describe("layer presets in the map tree", () => {
                 viewIndex: number,
                 mapId: string,
                 layerId: string,
-                ref: {styleId: string; presetId: string} | null
+                ref: { styleId: string; presetId: string } | null
             ) => {
-                const mapSelections = {...(selections[viewIndex][mapId] ?? {})};
+                const mapSelections = { ...(selections[viewIndex][mapId] ?? {}) };
                 if (ref) {
                     mapSelections[layerId] = ref;
-                    selections[viewIndex] = {...selections[viewIndex], [mapId]: mapSelections};
+                    selections[viewIndex] = { ...selections[viewIndex], [mapId]: mapSelections };
                 } else {
                     delete mapSelections[layerId];
                     selections[viewIndex] = Object.keys(mapSelections).length
-                        ? {...selections[viewIndex], [mapId]: mapSelections}
+                        ? { ...selections[viewIndex], [mapId]: mapSelections }
                         : {};
                 }
             }),
@@ -404,10 +405,10 @@ describe("layer presets in the map tree", () => {
             presets: [{
                 id: "focused",
                 name: "Focused view",
-                values: [{optionId: "owned", value: true}]
+                values: [{ optionId: "owned", value: true }]
             }],
             visible: true,
-            featureLayerStyle: {hasLayerAffinity: (layerId: string) => layerId === "Example"}
+            featureLayerStyle: { hasLayerAffinity: (layerId: string) => layerId === "Example" }
         } as unknown as ErdblickStyle;
         const styleService = {
             styles: new Map([["Example/Style", style]]),
@@ -417,9 +418,9 @@ describe("layer presets in the map tree", () => {
             id: "focused",
             name: "Focused view",
             styleId: "Example/Style",
-            ref: {styleId: "Example/Style", presetId: "focused"},
+            ref: { styleId: "Example/Style", presetId: "focused" },
             key: JSON.stringify(["Example/Style", "focused"]),
-            values: [{optionId: "owned", value: true}]
+            values: [{ optionId: "owned", value: true }]
         };
         const presetService = {
             presets: [],
@@ -436,18 +437,17 @@ describe("layer presets in the map tree", () => {
                 )?.value[viewIndex] === value.value))
         };
         const map = source("Map");
-        map.layers = {Example: featureLayer("Example")};
+        map.layers = { Example: featureLayer("Example") };
         const tree = new MapLayerTree(
             [map],
             stateService as unknown as AppStateService,
             styleService as unknown as StyleService,
-            presetService as unknown as MapPresetService,
-            false, Object.assign(stateService as unknown as AppStateService, {viewIdAt: (index: number) => String(index)}) as never, stateService as unknown as AppStateService as never);
-        return {tree, stateService};
+            presetService as unknown as MapPresetService, Object.assign(stateService as unknown as AppStateService, { viewIdAt: (index: number) => String(index) }) as never, stateService as unknown as AppStateService as never);
+        return { tree, stateService };
     }
 
     it("places the preset row first and projects owned options independently per view", () => {
-        const {tree} = presetTreeFixture();
+        const { tree } = presetTreeFixture();
         const layer = tree.getFeatureLayer("Map", "Example")!;
         const presetNode = layerPresetNode(layer)!;
 
@@ -478,14 +478,14 @@ describe("layer presets in the map tree", () => {
         tree.setLayerPresetExpanded(0, "Map", "Example", true);
         expect(filterMapTreeNodes(tree.nodes, "", 0)[0].children?.[0].children
             ?.map(child => child.id)).toEqual([
-            "layer-preset",
-            "owned",
-            "unowned"
-        ]);
+                "layer-preset",
+                "owned",
+                "unowned"
+            ]);
     });
 
     it("infers a unique preset from clean hydrated option defaults", () => {
-        const {tree, stateService} = presetTreeFixture([true, false]);
+        const { tree, stateService } = presetTreeFixture([true, false]);
         const presetNode = layerPresetNode(tree.getFeatureLayer("Map", "Example")!)!;
 
         expect(presetNode.selectedPresetKeys).toEqual([presetNode.presets[0].key, ""]);
@@ -494,14 +494,14 @@ describe("layer presets in the map tree", () => {
     });
 
     it("keeps an empty preset node for reconciliation but omits it from presentation", () => {
-        const {tree} = presetTreeFixture();
+        const { tree } = presetTreeFixture();
         const layer = tree.getFeatureLayer("Map", "Example")!;
         const presetNode = layerPresetNode(layer)!;
         presetNode.presets.splice(0);
         presetNode.selectOptions.splice(
             0,
             presetNode.selectOptions.length,
-            {label: "Custom options", value: ""}
+            { label: "Custom options", value: "" }
         );
 
         const projected = filterMapTreeNodes(tree.nodes, "", 0)[0].children?.[0];
@@ -511,7 +511,7 @@ describe("layer presets in the map tree", () => {
     });
 
     it("finds preset names and temporarily projects a matching collapsed owned option", () => {
-        const {tree} = presetTreeFixture();
+        const { tree } = presetTreeFixture();
         const presetNode = layerPresetNode(tree.getFeatureLayer("Map", "Example")!)!;
         tree.setLayerPresetSelection(0, "Map", "Example", presetNode.presets[0].ref);
 
@@ -525,7 +525,7 @@ describe("layer presets in the map tree", () => {
     });
 
     it("infers only affected layer/view identities and preserves custom values", () => {
-        const {tree, stateService} = presetTreeFixture();
+        const { tree, stateService } = presetTreeFixture();
         const layer = tree.getFeatureLayer("Map", "Example")!;
         const presetNode = layerPresetNode(layer)!;
         const owned = layerStyleOptions(layer).find(option => option.id === "owned")!;
@@ -554,22 +554,22 @@ describe("layer presets in the map tree", () => {
 
 describe("map presets in the map tree", () => {
     it("offers present components without hiding unrelated map layers", () => {
-        const ref = {styleId: "Example/Style", presetId: "focused"};
+        const ref = { styleId: "Example/Style", presetId: "focused" };
         const resolvedPreset = {
             id: "focused",
             name: "Focused",
             styleId: ref.styleId,
             ref,
             key: JSON.stringify([ref.styleId, ref.presetId]),
-            values: [{optionId: "owned", value: true}]
+            values: [{ optionId: "owned", value: true }]
         };
         const mapPreset = {
             id: "overview",
             name: "Overview",
             enabled: true,
             layerPresets: [
-                {layerId: "Example", styleId: ref.styleId, presetId: ref.presetId},
-                {layerId: "Missing", styleId: ref.styleId, presetId: ref.presetId}
+                { layerId: "Example", styleId: ref.styleId, presetId: ref.presetId },
+                { layerId: "Missing", styleId: ref.styleId, presetId: ref.presetId }
             ]
         };
         const duplicatePreset = {
@@ -582,13 +582,14 @@ describe("map presets in the map tree", () => {
             ...mapPreset,
             id: "broken",
             name: "Broken",
-            layerPresets: [{layerId: "Unrelated", styleId: ref.styleId, presetId: ref.presetId}]
+            layerPresets: [{ layerId: "Unrelated", styleId: ref.styleId, presetId: ref.presetId }]
         };
         const stateService = {
+            withSystemStateMutation: (edit: () => void) => edit(),
             ready: new BehaviorSubject(true),
             numViewsState: new BehaviorSubject(1),
-            mapLayerConfig: vi.fn(() => [{autoLevel: true, level: 13, visible: true}]),
-            styleOptionValues: vi.fn(() => [true]),
+            materializeLayerDefaults: vi.fn(() => [{ autoLevel: true, level: 13, visible: true }]),
+            materializeStyleOptionDefaults: vi.fn(() => [true]),
             getLayerPresetSelection: vi.fn(() => null),
             setLayerPresetSelection: vi.fn(),
             getMapPresetSelection: vi.fn(() => null),
@@ -599,9 +600,9 @@ describe("map presets in the map tree", () => {
             id: ref.styleId,
             shortId: "style",
             options: [styleOption("owned", "Owned")],
-            presets: [{id: "focused", name: "Focused", values: resolvedPreset.values}],
+            presets: [{ id: "focused", name: "Focused", values: resolvedPreset.values }],
             visible: true,
-            featureLayerStyle: {hasLayerAffinity: (layerId: string) => layerId === "Example"}
+            featureLayerStyle: { hasLayerAffinity: (layerId: string) => layerId === "Example" }
         } as unknown as ErdblickStyle;
         const styleService = {
             styles: new Map([[style.id, style]]),
@@ -631,14 +632,13 @@ describe("map presets in the map tree", () => {
             [map],
             stateService as unknown as AppStateService,
             styleService as unknown as StyleService,
-            presetService as unknown as MapPresetService,
-            false, Object.assign(stateService as unknown as AppStateService, {viewIdAt: (index: number) => String(index)}) as never, stateService as unknown as AppStateService as never);
+            presetService as unknown as MapPresetService, Object.assign(stateService as unknown as AppStateService, { viewIdAt: (index: number) => String(index) }) as never, stateService as unknown as AppStateService as never);
         const mapNode = tree.maps.get("Map")!;
         const renderedMap = filterMapTreeNodes(tree.nodes, "", 0)[0];
 
         expect(mapNode.mapPresetOptions).toEqual([
-            {label: "Custom options", value: ""},
-            {label: "Overview", value: "overview"}
+            { label: "Custom options", value: "" },
+            { label: "Overview", value: "overview" }
         ]);
         expect(mapNode.selectedMapPresetIds).toEqual(["overview"]);
         expect(stateService.setLayerPresetSelection).toHaveBeenCalledWith(

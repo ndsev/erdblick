@@ -1,38 +1,39 @@
 import {
-ChangeDetectorRef,
-Component,
-effect,
-input,
-OnDestroy,
-output,
-ViewChild
+    ChangeDetectorRef,
+    Component,
+    effect,
+    input,
+    OnDestroy,
+    output,
+    ViewChild
 } from "@angular/core";
 import { SourceDataAddressFormat } from "build/libs/core/erdblick-core";
 import { TreeTableNode } from "primeng/api";
 import { TileSourceDataLayer } from "../../build/libs/core/erdblick-core";
-import { coreLib,uint8ArrayToWasm } from "../integrations/wasm";
+import { coreLib, uint8ArrayToWasm } from "../integrations/wasm";
 import { FeatureWrapper } from "../mapdata/feature-inspection.model";
 import { MapInfoService } from "../mapdata/map-info.service";
 import {
-MapTileStreamService,
-RetainedTileExpiryOwner
+    MapTileStreamService,
+    RetainedTileExpiryOwner
 } from "../mapdata/map-tile-stream.service";
 import {
-parseMapPartitionKey,
-partitionJson,
-partitionKey,
-partitionKeySuffix
+    parseMapPartitionKey,
+    partitionJson,
+    partitionKey,
+    partitionKeySuffix
 } from "../mapdata/partition.model";
 import { TileDeliveryError } from "../mapdata/tile-diagnostics";
 import {
-MapTileStreamClientTiles,
+    MapTileStreamClientTiles,
 } from "../mapdata/tilestream";
-import { AppStateService,InspectionPanelModel } from "../shared/appstate.service";
+import { AppStateService } from "../shared/appstate.service";
+import { InspectionPanelModel } from "./inspection-state.model";
 import { InspectionStateService } from "./inspection-state.service";
-import { Column,InspectionTreeComponent } from "./inspection.tree.component";
+import { Column, InspectionTreeComponent } from "./inspection.tree.component";
 import {
-expandSingleChildSourceDataPaths,
-sourceDataTreePresentation
+    expandSingleChildSourceDataPaths,
+    sourceDataTreePresentation
 } from "./sourcedata-tree.presentation";
 
 interface LoadedSourceDataLayer {
@@ -89,8 +90,8 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
 
     treeData: TreeTableNode[] = [];
     columns: Column[] = [
-        { key: "key",     header: "Key",     width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
-        { key: "value",   header: "Value",   width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
+        { key: "key", header: "Key", width: '0*', transform: (colKey, rowData) => rowData[colKey] },
+        { key: "value", header: "Value", width: '0*', transform: (colKey, rowData) => rowData[colKey] },
         {
             key: "displayAddress",
             header: "Address",
@@ -118,9 +119,9 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
     private valueEpoch = 0;
 
     constructor(private mapService: MapInfoService,
-                public stateService: AppStateService,
-                private tileStream: MapTileStreamService,
-                private readonly cdr: ChangeDetectorRef,
+        public stateService: AppStateService,
+        private tileStream: MapTileStreamService,
+        private readonly cdr: ChangeDetectorRef,
         public readonly inspectionState: InspectionStateService) {
         effect(() => {
             const sourceData = this.panel().sourceData;
@@ -228,7 +229,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
     }
 
     /** Fetches and parses one source-data layer through the bounded POST /tiles endpoint. */
-    async loadSourceDataLayer(mapTileKey: string) : Promise<LoadedSourceDataLayer> {
+    async loadSourceDataLayer(mapTileKey: string): Promise<LoadedSourceDataLayer> {
         const [mapId, layerId, partition] = parseMapPartitionKey(
             coreLib,
             mapTileKey
@@ -256,13 +257,13 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         transport.withSourceDataCallback((payload) => {
             const metadata = uint8ArrayToWasm((wasmBlob) =>
                 transport.parser.readTileLayerMetadata(wasmBlob),
-            payload) as unknown as {
-                error?: string;
-                mapName?: string;
-                warnings?: string[];
-                conversionTimestampMs?: number;
-                ttlMs?: number;
-            };
+                payload) as unknown as {
+                    error?: string;
+                    mapName?: string;
+                    warnings?: string[];
+                    conversionTimestampMs?: number;
+                    ttlMs?: number;
+                };
             for (const warning of metadata.warnings ?? []) console.warn(`Tile warning (${mapTileKey}): ${warning}`);
             const timestamp = Number(metadata.conversionTimestampMs);
             const ttl = Number(metadata.ttlMs);
@@ -309,7 +310,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             throw new Error(`Error while loading layer: ${error}`);
         }
 
-        return {layer: loadedLayer, expiresAtMs};
+        return { layer: loadedLayer, expiresAtMs };
     }
 
     /** Builds a user-facing empty-state message for a partition without source data. */
@@ -423,7 +424,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
                 }
 
                 node.data.styleClass = "highlight";
-                parents.forEach((parent: TreeTableNode) =>{
+                parents.forEach((parent: TreeTableNode) => {
                     parent.expanded = true;
                 });
             }

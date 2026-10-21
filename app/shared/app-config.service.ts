@@ -1,17 +1,17 @@
-import {AppActionService} from "../actions/app-action.service";
-import {ActionInput, ActionOutput, catalogPage} from "../actions/app-action";
-import {configActions} from "./app-config.service.declarations";
 import { HttpClient } from "@angular/common/http";
 import { Injectable } from "@angular/core";
 import * as jsyaml from "js-yaml";
-import { BehaviorSubject,firstValueFrom,Observable } from "rxjs";
+import { BehaviorSubject, firstValueFrom, Observable } from "rxjs";
 import { z } from "zod";
+import { ActionInput, ActionOutput, catalogPage } from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
 import {
-MapPresetDefinition,
-MapPresetIssue,
-parseMapPresetDefinitions
+    MapPresetDefinition,
+    MapPresetIssue,
+    parseMapPresetDefinitions
 } from "../styledata/map-preset.model";
-import { Versions } from "./app-state.model";
+import { configActions } from "./app-config.service.declarations";
+
 import { AppStateService } from "./appstate.service";
 
 /** Background layer id used when neither URL nor stored state selects a layer. */
@@ -435,7 +435,7 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     locationSearch: DEFAULT_LOCATION_SEARCH_CONFIG,
     externalViewers: [],
     mapPresets: [],
-    mapPresetConfig: {...DEFAULT_SERVER_CONFIG_STATUS.mapPresets},
+    mapPresetConfig: { ...DEFAULT_SERVER_CONFIG_STATUS.mapPresets },
     coordinates: {
         enabledByDefault: true,
         legalTermsUrl: null,
@@ -544,7 +544,7 @@ function mergeMeaningfulObjectValues(
     base: Record<string, unknown>,
     override: Record<string, unknown>
 ): Record<string, unknown> {
-    const merged: Record<string, unknown> = {...base};
+    const merged: Record<string, unknown> = { ...base };
     for (const [key, value] of Object.entries(override)) {
         if (!isMeaningfulValue(value)) {
             continue;
@@ -555,7 +555,7 @@ function mergeMeaningfulObjectValues(
 }
 
 /** Loads and normalizes `config.json` once, then exposes it as a shared application service. */
-@Injectable({providedIn: 'root'})
+@Injectable({ providedIn: 'root' })
 export class AppConfigService {
 
     readonly distributionVersions = this.persistence.registerState<Versions[]>({
@@ -563,7 +563,6 @@ export class AppConfigService {
         defaultValue: [],
         schema: z.array(z.record(z.string(), z.string()))
     });
-
 
     readonly erdblickVersion = this.persistence.registerState<string>({
         name: 'erdblickVersion',
@@ -690,7 +689,7 @@ export class AppConfigService {
     /** Loads the bundled static application configuration. */
     private async loadStaticConfig(): Promise<RawAppConfig> {
         try {
-            const rawConfig = await firstValueFrom(this.httpClient.get("/static-config/config.json", {responseType: "json"}));
+            const rawConfig = await firstValueFrom(this.httpClient.get("/static-config/config.json", { responseType: "json" }));
             return this.parseRawConfig(rawConfig, "/static-config/config.json");
         } catch (error) {
             console.error("[AppConfigService] Failed to load /static-config/config.json", error);
@@ -705,7 +704,7 @@ export class AppConfigService {
     }> {
         const serverConfig: AppServerConfigStatus = {
             ...DEFAULT_SERVER_CONFIG_STATUS,
-            mapPresets: {...DEFAULT_SERVER_CONFIG_STATUS.mapPresets, issues: []}
+            mapPresets: { ...DEFAULT_SERVER_CONFIG_STATUS.mapPresets, issues: [] }
         };
         let erdblickConfig: Partial<RawAppConfig> = {};
 
@@ -716,7 +715,7 @@ export class AppConfigService {
                 })
             );
             if (response.status !== 200) {
-                return {serverConfig, erdblickConfig};
+                return { serverConfig, erdblickConfig };
             }
 
             serverConfig.available = true;
@@ -763,7 +762,7 @@ export class AppConfigService {
                         ? capabilities["issues"]
                             .filter((issue): issue is string => typeof issue === "string")
                             .slice(0, 20)
-                            .map(message => ({message}))
+                            .map(message => ({ message }))
                         : []
                 };
             }
@@ -792,7 +791,7 @@ export class AppConfigService {
             console.warn("[AppConfigService] Failed to load /config; continuing with static config.json", error);
         }
 
-        return {serverConfig, erdblickConfig};
+        return { serverConfig, erdblickConfig };
     }
 
     /** Parses raw configuration text into an object. */
@@ -805,7 +804,7 @@ export class AppConfigService {
             return {};
         }
         if (mapPresetsPresent && !Array.isArray(parsed.data.mapPresets)) {
-            return {...parsed.data, mapPresets: [], _mapPresetsInvalid: true};
+            return { ...parsed.data, mapPresets: [], _mapPresetsInvalid: true };
         }
         return parsed.data;
     }
@@ -818,11 +817,11 @@ export class AppConfigService {
     ): RawAppConfig {
         const merged: RawAppConfig = {
             ...staticConfig,
-            extensionModules: {...(staticConfig.extensionModules ?? {})},
+            extensionModules: { ...(staticConfig.extensionModules ?? {}) },
             styles: staticConfig.styles ? [...staticConfig.styles] : undefined,
             additionalStyles: staticConfig.additionalStyles ? [...staticConfig.additionalStyles] : undefined,
             surveys: staticConfig.surveys ? [...staticConfig.surveys] : undefined,
-            state: staticConfig.state ? {...staticConfig.state} : staticConfig.state ?? null,
+            state: staticConfig.state ? { ...staticConfig.state } : staticConfig.state ?? null,
             backgroundLayers: staticConfig.backgroundLayers ? [...staticConfig.backgroundLayers] : undefined,
             externalViewers: staticConfig.externalViewers ? [...staticConfig.externalViewers] : undefined,
             mapPresets: staticConfig.mapPresets ? [...staticConfig.mapPresets] : undefined,
@@ -906,7 +905,7 @@ export class AppConfigService {
             merged["coordinates-legal-terms"] = serverErdblickConfig["coordinates-legal-terms"].trim();
         }
 
-        const mergedModules: ExtensionModulesConfig = {...(merged.extensionModules ?? {})};
+        const mergedModules: ExtensionModulesConfig = { ...(merged.extensionModules ?? {}) };
         if (serverErdblickConfig.extensionModules && isPlainObject(serverErdblickConfig.extensionModules)) {
             for (const key of ["jumpTargets", "distribVersions"] as const) {
                 const value = serverErdblickConfig.extensionModules[key];
@@ -938,12 +937,12 @@ export class AppConfigService {
         const mapPresetsConfigured = rawConfig.mapPresets !== undefined;
         const parsedMapPresets = parseMapPresetDefinitions(rawConfig.mapPresets ?? []);
         const localPresetIssues = rawConfig._mapPresetsInvalid
-            ? [{message: "mapPresets must be a list with at most 200 entries."}, ...parsedMapPresets.issues]
+            ? [{ message: "mapPresets must be a list with at most 200 entries." }, ...parsedMapPresets.issues]
             : parsedMapPresets.issues;
         const normalizedState = this.normalizeState(rawConfig.state) ?? {};
         // Catalog definitions stopped being AppState in 2026.5. Ignore stale config/storage input.
         delete normalizedState["mapPresets"];
-        const state = {...normalizedState, coordinatesEnabled: enabledByDefault};
+        const state = { ...normalizedState, coordinatesEnabled: enabledByDefault };
         const serverPresetStatus = serverConfig.mapPresets;
         const mapPresetConfig: MapPresetConfigStatus = {
             configured: mapPresetsConfigured,
@@ -991,7 +990,7 @@ export class AppConfigService {
             },
             serverConfig: {
                 ...serverConfig,
-                mapPresets: {...serverConfig.mapPresets, issues: [...serverConfig.mapPresets.issues]}
+                mapPresets: { ...serverConfig.mapPresets, issues: [...serverConfig.mapPresets.issues] }
             }
         };
     }
@@ -1003,7 +1002,7 @@ export class AppConfigService {
             return config;
         }
         try {
-            const source = await firstValueFrom(this.httpClient.get(url, {responseType: "text"}));
+            const source = await firstValueFrom(this.httpClient.get(url, { responseType: "text" }));
             const parsed = COORDINATES_LEGAL_TERMS_SCHEMA.safeParse(jsyaml.load(source));
             if (!parsed.success) {
                 throw new Error("Expected a non-empty legal-terms string.");
@@ -1036,7 +1035,7 @@ export class AppConfigService {
         const normalized: StyleConfigEntry[] = [];
         for (const entry of styles) {
             const parsed = STYLE_CONFIG_ENTRY_SCHEMA.safeParse(
-                typeof entry === "string" ? {url: entry} : entry
+                typeof entry === "string" ? { url: entry } : entry
             );
             if (!parsed.success) {
                 continue;
@@ -1092,7 +1091,7 @@ export class AppConfigService {
         if (!isMeaningfulValue(state)) {
             return null;
         }
-        return {...state};
+        return { ...state };
     }
 
     /** Applies per-layer defaults so rendering code can avoid scattered `undefined` handling. */
@@ -1202,11 +1201,11 @@ export class AppConfigService {
                 name,
                 url,
                 headers: provider.headers ?? {},
-                ...(Object.keys(params).length > 0 ? {params} : {}),
-                ...(queryParam ? {queryParam} : {}),
-                ...(limitParam ? {limitParam} : {}),
-                ...(provider.attribution?.trim() ? {attribution: provider.attribution.trim()} : {}),
-                ...(adapter ? {adapter} : {}),
+                ...(Object.keys(params).length > 0 ? { params } : {}),
+                ...(queryParam ? { queryParam } : {}),
+                ...(limitParam ? { limitParam } : {}),
+                ...(provider.attribution?.trim() ? { attribution: provider.attribution.trim() } : {}),
+                ...(adapter ? { adapter } : {}),
                 enabled: provider.enabled ?? true
             });
         }
@@ -1372,14 +1371,19 @@ export class AppConfigService {
         return JSON.stringify(value);
     }
 
-
     registerActions(actions: AppActionService): void {
         actions.registerAction(configActions.listBackgrounds, input => this.listBackgrounds(input));
     }
 
     listBackgrounds(input: ActionInput<typeof configActions.listBackgrounds>): ActionOutput<typeof configActions.listBackgrounds> {
-        return catalogPage(this.getBackgroundLayers().map(layer => ({id: layer.id, name: layer.name, kind: layer.type})), input);
+        return catalogPage(this.getBackgroundLayers().map(layer => ({ id: layer.id, name: layer.name, kind: layer.type })), input);
     }
 
+}
 
+/** Version information shown in diagnostics and about dialogs. */
+export interface Versions {
+    name: string;
+    tag: string;
+    whatsnew?: string;
 }

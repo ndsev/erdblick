@@ -1,37 +1,36 @@
 import {
-ChangeDetectorRef,
-Component,
-effect,
-input,
-OnDestroy,
-QueryList,
-Renderer2,
-ViewChild,
-ViewChildren
+    ChangeDetectorRef,
+    Component,
+    effect,
+    input,
+    OnDestroy,
+    QueryList,
+    Renderer2,
+    ViewChild,
+    ViewChildren
 } from '@angular/core';
 import { MenuItem } from 'primeng/api';
 import { ContextMenu } from 'primeng/contextmenu';
 import { Subscription } from 'rxjs';
 import { FeatureWrapper } from '../mapdata/feature-inspection.model';
 import {
-MapTileStreamService,
-RetainedTileExpiryOwner
+    MapTileStreamService,
+    RetainedTileExpiryOwner
 } from '../mapdata/map-tile-stream.service';
 import { TileDeliveryError } from "../mapdata/tile-diagnostics";
 import { AppDialogComponent } from '../shared/app-dialog.component';
+import { DEFAULT_EM_HEIGHT, DEFAULT_EM_WIDTH } from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
-import {
-AppStateService,
-DEFAULT_EM_HEIGHT,
-DEFAULT_EM_WIDTH,
-InspectionComparisonEntry,
-InspectionComparisonModel,
-InspectionComparisonOption,
-InspectionPanelModel
-} from '../shared/appstate.service';
+import { AppStateService } from "../shared/appstate.service";
 import { DialogStackService } from '../shared/dialog-stack.service';
 import { FeaturePanelComponent } from './feature.panel.component';
 import { InspectionSelectionService } from './inspection-selection.service';
+import {
+    InspectionComparisonEntry,
+    InspectionComparisonModel,
+    InspectionComparisonOption,
+    InspectionPanelModel
+} from "./inspection-state.model";
 import { InspectionStateService } from "./inspection-state.service";
 
 /** View model for one comparison column in the side-by-side inspection dialog. */
@@ -50,7 +49,7 @@ interface ComparisonExpiryOwner extends RetainedTileExpiryOwner {
     tileId: string;
     epoch: number;
     revision: number;
-    featureIds: Array<{mapTileKey: string; featureId: string}>;
+    featureIds: Array<{ mapTileKey: string; featureId: string }>;
 }
 
 @Component({
@@ -168,11 +167,11 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         new Map<string, ComparisonExpiryOwner>();
 
     constructor(private tileStream: MapTileStreamService,
-                private inspectionSelection: InspectionSelectionService,
-                private stateService: AppStateService,
-                private dialogStack: DialogStackService,
-                private renderer: Renderer2,
-                private readonly cdr: ChangeDetectorRef,
+        private inspectionSelection: InspectionSelectionService,
+        private stateService: AppStateService,
+        private dialogStack: DialogStackService,
+        private renderer: Renderer2,
+        private readonly cdr: ChangeDetectorRef,
         public readonly inspectionState: InspectionStateService,
         public readonly layout: AppLayoutService) {
         effect(() => {

@@ -1,24 +1,9 @@
-import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
-import {of, BehaviorSubject} from 'rxjs';
+import "@angular/compiler";
+import { testPersistence } from "../../test/state-owners";
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { of, BehaviorSubject } from 'rxjs';
 
-import {StyleService} from './style.service';
-
-class AppStateServiceStub {
-    ready = new BehaviorSubject<boolean>(true);
-    private visibility = new Map<string, boolean>();
-
-    getStyleVisibility(styleId: string, fallback: boolean = true): boolean {
-        return this.visibility.has(styleId) ? this.visibility.get(styleId)! : fallback;
-    }
-
-    setStyleVisibility(styleId: string, visible: boolean): void {
-        this.visibility.set(styleId, visible);
-    }
-
-    removeStyleVisibility(styleId: string): void {
-        this.visibility.delete(styleId);
-    }
-}
+import { StyleService } from './style.service';
 
 class HttpClientStub {
     get = vi.fn();
@@ -31,31 +16,32 @@ class InfoMessageServiceStub {
 }
 
 class AppConfigServiceStub {
-    snapshot: any = {styles: []};
+    snapshot: any = { styles: [] };
 }
 
-const createService = (config: any = {styles: []}) => {
+const createService = (config: any = { styles: [] }) => {
     const httpClient = new HttpClientStub();
-    const stateService = new AppStateServiceStub();
+    const stateService = testPersistence();
+    stateService.ready.next(true);
     const infoService = new InfoMessageServiceStub();
     const configService = new AppConfigServiceStub();
     configService.snapshot = config;
     const service = new StyleService(httpClient as any, stateService as any, infoService as any, configService as any);
-    return {service, httpClient, stateService, infoService, configService};
+    return { service, httpClient, stateService, infoService, configService };
 };
 
 describe('StyleService', () => {
     it('keeps imported styles opt-in across presentation scenes without deleting them', () => {
-        const {service, stateService} = createService();
+        const { service, stateService } = createService();
         const parse = vi.spyOn(service as any, 'parseWasmStyle').mockReturnValue([
-            {name: () => 'Demo Road', defaultEnabled: () => true}, []
+            { name: () => 'Demo Road', defaultEnabled: () => true }, []
         ]);
         (service as any).initializeStyle('name: Demo Road', '', undefined, false, true);
-        stateService.removeStyleVisibility('Demo Road');
+        service.removeStyleVisibility('Demo Road');
         service.reconcilePresentationStyles();
         expect(service.styles.get('Demo Road')?.visible).toBe(false);
         expect(service.styles.has('Demo Road')).toBe(true);
-        stateService.setStyleVisibility('Demo Road', true);
+        service.setStyleVisibility('Demo Road', true);
         service.reconcilePresentationStyles();
         expect(service.styles.get('Demo Road')?.visible).toBe(true);
         parse.mockRestore();
@@ -72,10 +58,10 @@ describe('StyleService', () => {
     it('initializes builtin styles from config and YAML sources', async () => {
         const config = {
             styles: [
-                {id: 's1', url: 'base.yaml'},
+                { id: 's1', url: 'base.yaml' },
             ],
         };
-        const {service, httpClient, stateService} = createService(config);
+        const { service, httpClient, stateService } = createService(config);
 
         httpClient.get.mockImplementation((url: string, options: any) => {
             if (url === '/static-config/styles/base.yaml') {
@@ -95,25 +81,25 @@ describe('StyleService', () => {
         await service.initializeStyles();
 
         expect(parseSpy).toHaveBeenCalled();
-        expect(service.styleUrls).toEqual([{id: 's1', url: '/static-config/styles/base.yaml'}]);
+        expect(service.styleUrls).toEqual([{ id: 's1', url: '/static-config/styles/base.yaml' }]);
         expect(service.styles.size).toBe(1);
         const style = service.styles.get('TestStyle')!;
         expect(style.id).toBe('TestStyle');
         expect(style.imported).toBe(false);
-        expect(style.visible).toBe(stateService.getStyleVisibility('TestStyle', true));
+        expect(style.visible).toBe(service.getStyleVisibility('TestStyle', true));
         expect(service.builtinStylesCount).toBe(1);
         expect(reapplySpy).toHaveBeenCalledWith(['TestStyle']);
     });
 
     it('persists source-backed styles and adopts the saved source as the new baseline', async () => {
         const config = {
-            styles: [{url: 'base.yaml'}],
+            styles: [{ url: 'base.yaml' }],
             serverConfig: {
                 styleEditingEnabled: true,
                 styleEditingDirectory: '/workspace/config/styles'
             }
         };
-        const {service, httpClient} = createService(config);
+        const { service, httpClient } = createService(config);
         httpClient.get.mockReturnValue(of('name: TestStyle\nrules: []'));
         httpClient.put.mockReturnValue(of('Static file updated.'));
         vi.spyOn(service as any, 'parseWasmStyle').mockImplementation((
@@ -126,7 +112,7 @@ describe('StyleService', () => {
                 delete: vi.fn(),
             } as any, []];
         });
-        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
+        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => { });
 
         await service.initializeStyles();
         service.setStyleSource('TestStyle', 'name: TestStyle\nrules:\n  - geometry: [line]');
@@ -136,7 +122,7 @@ describe('StyleService', () => {
         expect(httpClient.put).toHaveBeenCalledWith(
             '/static-config/styles/base.yaml',
             'name: TestStyle\nrules:\n  - geometry: [line]',
-            {responseType: 'text'});
+            { responseType: 'text' });
         expect(service.styles.get('TestStyle')?.modified).toBe(false);
         expect(service.getBuiltinBaselineSource('TestStyle')).toBe(
             'name: TestStyle\nrules:\n  - geometry: [line]');
@@ -152,7 +138,7 @@ presets:
     values: [{optionId: show, value: true}]
 rules: [{geometry: [point]}]
 `;
-        const {service, httpClient} = createService({styles: [{url: 'base.yaml'}]});
+        const { service, httpClient } = createService({ styles: [{ url: 'base.yaml' }] });
         httpClient.get.mockReturnValue(of(source));
         vi.spyOn(service as any, 'parseWasmStyle').mockReturnValue([{
             name: () => 'TestStyle',
@@ -164,7 +150,7 @@ rules: [{geometry: [point]}]
         }], [{
             id: 'focused',
             name: 'Focused',
-            values: [{optionId: 'show', value: true}]
+            values: [{ optionId: 'show', value: true }]
         }]]);
 
         await service.initializeStyles();
@@ -172,17 +158,17 @@ rules: [{geometry: [point]}]
         expect(service.styles.get('TestStyle')?.presets).toEqual([{
             id: 'focused',
             name: 'Focused',
-            values: [{optionId: 'show', value: true}]
+            values: [{ optionId: 'show', value: true }]
         }]);
     });
 
     it('keeps root-relative configured style URLs unchanged', async () => {
         const config = {
             styles: [
-                {id: 'custom', url: '/custom-styles/customer.yaml'},
+                { id: 'custom', url: '/custom-styles/customer.yaml' },
             ],
         };
-        const {service, httpClient} = createService(config);
+        const { service, httpClient } = createService(config);
 
         httpClient.get.mockImplementation((url: string) => {
             if (url === '/custom-styles/customer.yaml') {
@@ -199,17 +185,17 @@ rules: [{geometry: [point]}]
 
         await service.initializeStyles();
 
-        expect(service.styleUrls).toEqual([{id: 'custom', url: '/custom-styles/customer.yaml'}]);
+        expect(service.styleUrls).toEqual([{ id: 'custom', url: '/custom-styles/customer.yaml' }]);
         expect(service.styles.get('CustomerStyle')?.url).toBe('/custom-styles/customer.yaml');
     });
 
     it('keeps an additional style active when it collides with a base style', async () => {
         const baseSource = 'name: SharedStyle\nrules:\n  - base';
         const additionalSource = 'name: SharedStyle\nrules:\n  - additional';
-        const {service, httpClient} = createService({
+        const { service, httpClient } = createService({
             styles: [
-                {id: 'base', url: 'base.yaml'},
-                {id: 'additional', url: '/custom-styles/shared.yaml', additional: true},
+                { id: 'base', url: 'base.yaml' },
+                { id: 'additional', url: '/custom-styles/shared.yaml', additional: true },
             ],
         });
 
@@ -254,10 +240,10 @@ rules: [{geometry: [point]}]
         const additionalSource = 'name: SharedStyle\nrules:\n  - additional';
         const modifiedAdditionalSource = 'name: SharedStyle\nrules:\n  - modified-additional';
         const additionalUrl = '/custom-styles/shared.yaml';
-        const {service, httpClient} = createService({
+        const { service, httpClient } = createService({
             styles: [
-                {id: 'base', url: 'base.yaml'},
-                {id: 'additional', url: additionalUrl, additional: true},
+                { id: 'base', url: 'base.yaml' },
+                { id: 'additional', url: additionalUrl, additional: true },
             ],
         });
 
@@ -278,7 +264,7 @@ rules: [{geometry: [point]}]
                 delete: vi.fn(),
             } as any, []];
         });
-        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
+        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => { });
 
         await service.initializeStyles();
 
@@ -303,9 +289,9 @@ rules: [{geometry: [point]}]
     });
 
     it('handles missing styles configuration without throwing and without populating styles', async () => {
-        const {service} = createService({});
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const { service } = createService({});
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
 
         await service.initializeStyles();
 
@@ -316,7 +302,7 @@ rules: [{geometry: [point]}]
     });
 
     it('persists and reloads imported styles via localStorage', () => {
-        const {service} = createService();
+        const { service } = createService();
 
         const featureLayerStyleStub = {
             name: () => 'ImportedStyle',
@@ -355,10 +341,10 @@ rules: [{geometry: [point]}]
     });
 
     it('registers category-search YAML directly in the ordinary imported collection', () => {
-        const {service, stateService} = createService();
+        const { service, stateService } = createService();
         const source = 'name: Team/Search\ncategory: search\nversion: 2\nrules:\n  - geometry: [line]';
         vi.spyOn(service, 'validateStyleSource').mockReturnValue({
-            source: {styleName: 'Team/Search', sourceKind: 'imported'},
+            source: { styleName: 'Team/Search', sourceKind: 'imported' },
             valid: true,
             loadable: true,
             loadedRuleCount: 1,
@@ -370,22 +356,22 @@ rules: [{geometry: [point]}]
             service.styles.set('Team/Search', {
                 id: 'Team/Search', imported: true, category: 'search', source,
                 visible: true, featureLayerStyle: {}, options: [], shortId: 'S',
-                modified: false, additional: false, url: '', sourceRef: {sourceKind: 'imported'}
+                modified: false, additional: false, url: '', sourceRef: { sourceKind: 'imported' }
             } as any);
             return 'Team/Search';
         });
-        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
+        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => { });
 
         expect(service.importStyleYamlSource(source, false)).toBe('Team/Search');
-        expect(service.styles.get('Team/Search')).toMatchObject({category: 'search', imported: true, visible: false});
-        expect(stateService.getStyleVisibility('Team/Search', true)).toBe(false);
-        expect(JSON.parse(localStorage.getItem('importedStyleData')!)).toEqual({schemaVersion: 2, sources: [source]});
+        expect(service.styles.get('Team/Search')).toMatchObject({ category: 'search', imported: true, visible: false });
+        expect(service.getStyleVisibility('Team/Search', true)).toBe(false);
+        expect(JSON.parse(localStorage.getItem('importedStyleData')!)).toEqual({ schemaVersion: 2, sources: [source] });
     });
 
     it('checks exact style names before configured URLs when resolving import collisions', () => {
-        const {service} = createService();
-        const byName = {id: 'Roads', imported: true, url: ''} as any;
-        const byUrl = {id: 'Configured', imported: false, url: 'bundle/styles/roads.yaml'} as any;
+        const { service } = createService();
+        const byName = { id: 'Roads', imported: true, url: '' } as any;
+        const byUrl = { id: 'Configured', imported: false, url: 'bundle/styles/roads.yaml' } as any;
         service.styles.set('Roads', byName);
         service.styles.set('Configured', byUrl);
 
@@ -395,11 +381,11 @@ rules: [{geometry: [point]}]
     });
 
     it('rolls back a new imported style when browser persistence fails', () => {
-        const {service, stateService, infoService} = createService();
+        const { service, stateService, infoService } = createService();
         const source = 'name: Team/Search\ncategory: search\nversion: 2\nrules:\n  - geometry: [line]';
-        const wasmStyle = {delete: vi.fn(), defaultEnabled: () => false};
+        const wasmStyle = { delete: vi.fn(), defaultEnabled: () => false };
         vi.spyOn(service, 'validateStyleSource').mockReturnValue({
-            source: {styleName: 'Team/Search', sourceKind: 'imported'},
+            source: { styleName: 'Team/Search', sourceKind: 'imported' },
             valid: true,
             loadable: true,
             loadedRuleCount: 1,
@@ -411,29 +397,29 @@ rules: [{geometry: [point]}]
             service.styles.set('Team/Search', {
                 id: 'Team/Search', imported: true, category: 'search', source,
                 visible: false, featureLayerStyle: wasmStyle, options: [], shortId: 'S',
-                modified: false, additional: false, url: '', sourceRef: {sourceKind: 'imported'}
+                modified: false, additional: false, url: '', sourceRef: { sourceKind: 'imported' }
             } as any);
             return 'Team/Search';
         });
         vi.spyOn(service, 'saveImportedStyles').mockImplementation(() => {
             throw new DOMException('Quota exceeded', 'QuotaExceededError');
         });
-        vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => { });
         const reapply = vi.spyOn(service, 'reapplyStyle');
 
         expect(service.importStyleYamlSource(source, false)).toBeUndefined();
         expect(service.styles.has('Team/Search')).toBe(false);
         expect(service.importedStylesCount).toBe(0);
-        expect(stateService.getStyleVisibility('Team/Search', true)).toBe(true);
+        expect(service.getStyleVisibility('Team/Search', true)).toBe(true);
         expect(wasmStyle.delete).toHaveBeenCalledOnce();
         expect(reapply).not.toHaveBeenCalled();
         expect(infoService.showError).toHaveBeenCalledWith(expect.stringContaining('No style was created'));
     });
 
     it('ignores the retired imported-style persistence envelope', () => {
-        const {service} = createService();
+        const { service } = createService();
         localStorage.setItem('importedStyleData', JSON.stringify([
-            ['Legacy', {source: 'name: Legacy'}]
+            ['Legacy', { source: 'name: Legacy' }]
         ]));
         const initialize = vi.spyOn(service as any, 'initializeStyle');
 
@@ -444,10 +430,10 @@ rules: [{geometry: [point]}]
     });
 
     it('imports a YAML file as an imported style and re-applies it', async () => {
-        const {service} = createService();
+        const { service } = createService();
 
         const fileContent = 'name: UploadedStyle';
-        const file = new File([fileContent], 'uploaded.yaml', {type: 'application/x-yaml'});
+        const file = new File([fileContent], 'uploaded.yaml', { type: 'application/x-yaml' });
 
         const originalFileReader = (globalThis as any).FileReader;
         class MockFileReader {
@@ -465,7 +451,7 @@ rules: [{geometry: [point]}]
 
         const initSpy = vi.spyOn(service as any, 'initializeStyle').mockReturnValue('UploadedStyle');
         vi.spyOn(service, 'validateStyleSource').mockReturnValue({
-            source: {styleName: 'UploadedStyle', sourceKind: 'imported'},
+            source: { styleName: 'UploadedStyle', sourceKind: 'imported' },
             valid: true,
             loadable: true,
             loadedRuleCount: 1,
@@ -488,7 +474,7 @@ rules: [{geometry: [point]}]
     });
 
     it('deletes a modified imported style with optional export and restores builtin if available', async () => {
-        const {service} = createService();
+        const { service } = createService();
 
         const removedIds: string[] = [];
         service.styleRemovedForId.subscribe(id => removedIds.push(id));
@@ -510,7 +496,7 @@ rules: [{geometry: [point]}]
             url: '',
         } as any);
         service.importedStylesCount = 1;
-        service.styleUrls = [{id: 'ImportStyle', url: '/static-config/styles/import.yaml'} as any];
+        service.styleUrls = [{ id: 'ImportStyle', url: '/static-config/styles/import.yaml' } as any];
         service.styleGroups.next(service.computeStyleGroups());
 
         const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -537,9 +523,9 @@ rules: [{geometry: [point]}]
     });
 
     it('saves and updates style hash statuses in localStorage', () => {
-        const {service} = createService();
+        const { service } = createService();
 
-        const hashes = (service as any).styleHashes as Map<string, {id: string, sha256: string, isModified: boolean, isUpdated: boolean}>;
+        const hashes = (service as any).styleHashes as Map<string, { id: string, sha256: string, isModified: boolean, isUpdated: boolean }>;
         hashes.set('/static-config/styles/s1.yaml', {
             id: 's1',
             sha256: 'abc',
@@ -557,7 +543,7 @@ rules: [{geometry: [point]}]
     });
 
     it('clears storage keys for imported and builtin styles', () => {
-        const {service} = createService();
+        const { service } = createService();
 
         localStorage.setItem('importedStyleData', 'x');
         localStorage.setItem('builtinStyleData', 'y');
@@ -570,7 +556,7 @@ rules: [{geometry: [point]}]
     });
 
     it('reloads a style by fetching YAML via its URL and reapplies it', async () => {
-        const {service} = createService();
+        const { service } = createService();
 
         service.styles.set('StyleOne', {
             id: 'StyleOne',
@@ -586,13 +572,13 @@ rules: [{geometry: [point]}]
 
         await service.syncStyleYamlData('StyleOne');
 
-        expect(fetchSpy).toHaveBeenCalledWith([{id: 'StyleOne', url: '/static-config/styles/style-one.yaml'}]);
+        expect(fetchSpy).toHaveBeenCalledWith([{ id: 'StyleOne', url: '/static-config/styles/style-one.yaml' }]);
         expect(initSpy).toHaveBeenCalledWith('name: ReloadedStyle', '/static-config/styles/style-one.yaml', 'StyleOne', false, false, false);
         expect(reapplySpy).toHaveBeenCalledWith('ReloadedStyle');
     });
 
     it('clears stored modified builtin entry when reloading a style', async () => {
-        const {service} = createService();
+        const { service } = createService();
 
         service.styles.set('StyleOne', {
             id: 'StyleOne',
@@ -619,7 +605,7 @@ rules: [{geometry: [point]}]
             } as any);
             return 'StyleOne';
         });
-        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
+        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => { });
 
         await service.syncStyleYamlData('StyleOne');
 
@@ -630,7 +616,7 @@ rules: [{geometry: [point]}]
     });
 
     it('reloads modified builtin styles by matching builtin URL, not insertion order', () => {
-        const {service} = createService();
+        const { service } = createService();
 
         service.styles.set('StyleA', {
             id: 'StyleA',
@@ -673,7 +659,7 @@ rules: [{geometry: [point]}]
     });
 
     it('persists visibility before delayed reapply so toggles do not bounce back', () => {
-        const {service, stateService} = createService();
+        const { service, stateService } = createService();
 
         service.styles.set('StyleOne', {
             id: 'StyleOne',
@@ -691,12 +677,12 @@ rules: [{geometry: [point]}]
 
         service.toggleStyle('StyleOne', false, true);
 
-        expect(stateService.getStyleVisibility('StyleOne', true)).toBe(false);
+        expect(service.getStyleVisibility('StyleOne', true)).toBe(false);
         expect(service.styles.get('StyleOne')?.visible).toBe(false);
     });
 
     it('keeps builtin baseline source when modified local override is loaded', async () => {
-        const {service, httpClient} = createService({styles: [{id: 'builtin', url: 'base.yaml'}]});
+        const { service, httpClient } = createService({ styles: [{ id: 'builtin', url: 'base.yaml' }] });
         localStorage.setItem('builtinStyleData', JSON.stringify([
             ['BuiltinStyle', {
                 id: 'BuiltinStyle',
@@ -730,8 +716,8 @@ rules: [{geometry: [point]}]
     });
 
     it('synchronizes lifecycle modified flag when style source is edited', () => {
-        const {service} = createService();
-        service.styleUrls = [{id: 'StyleOne', url: '/static-config/styles/style-one.yaml'} as any];
+        const { service } = createService();
+        service.styleUrls = [{ id: 'StyleOne', url: '/static-config/styles/style-one.yaml' } as any];
         service.styleHashes.set('/static-config/styles/style-one.yaml', {
             id: 'StyleOne',
             sha256: 'server',
@@ -758,7 +744,7 @@ rules: [{geometry: [point]}]
             } as any);
             return 'StyleOne';
         });
-        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
+        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => { });
 
         const newStyleId = service.setStyleSource('StyleOne', 'name: StyleOne\nrules: []', true);
 
@@ -767,8 +753,8 @@ rules: [{geometry: [point]}]
     });
 
     it('clears the retired visibility identity when an imported style is renamed', () => {
-        const {service, stateService} = createService();
-        stateService.setStyleVisibility('Old', true);
+        const { service, stateService } = createService();
+        service.setStyleVisibility('Old', true);
         service.styles.set('Old', {
             id: 'Old',
             url: '',
@@ -791,19 +777,19 @@ rules: [{geometry: [point]}]
             } as any);
             return 'New';
         });
-        vi.spyOn(service, 'saveImportedStyles').mockImplementation(() => {});
-        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
-        const removeVisibility = vi.spyOn(stateService, 'removeStyleVisibility');
+        vi.spyOn(service, 'saveImportedStyles').mockImplementation(() => { });
+        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => { });
+        const removeVisibility = vi.spyOn(service, 'removeStyleVisibility');
 
         expect(service.setStyleSource('Old', 'name: New')).toBe('New');
         expect(removeVisibility).toHaveBeenCalledWith('Old');
-        expect(stateService.getStyleVisibility('Old', false)).toBe(false);
+        expect(service.getStyleVisibility('Old', false)).toBe(false);
     });
 
     it('resets one modified builtin style to cached baseline and clears override state', () => {
-        const {service} = createService();
+        const { service } = createService();
         const builtinUrl = '/static-config/styles/style-one.yaml';
-        service.styleUrls = [{id: 'StyleOne', url: builtinUrl} as any];
+        service.styleUrls = [{ id: 'StyleOne', url: builtinUrl } as any];
         service.styles.set('StyleOne', {
             id: 'StyleOne',
             url: builtinUrl,
@@ -834,7 +820,7 @@ rules: [{geometry: [point]}]
             } as any);
             return 'StyleOne';
         });
-        const reapplySpy = vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
+        const reapplySpy = vi.spyOn(service, 'reapplyStyle').mockImplementation(() => { });
 
         const restoredStyleId = service.resetModifiedBuiltinStyle('StyleOne');
 

@@ -1,14 +1,14 @@
-import { Injectable,OnDestroy,Optional } from "@angular/core";
+import { Injectable, OnDestroy, Optional } from "@angular/core";
 import type { Params } from "@angular/router";
 import { addMetersToLngLat } from "@math.gl/web-mercator";
 import { InspectionStateService } from "../inspection/inspection-state.service";
+import type { CameraViewState } from "../mapview/map-view-state.model";
 import { MapViewStateService } from "../mapview/map-view-state.service";
 import { MapViewService } from "../mapview/map-view.service";
 import { featureSearchDefinitionFromImportPayload } from "../search/feature-search-export.util";
 import { FeatureSearchService } from "../search/feature.search.service";
 import { StyleService } from "../styledata/style.service";
 import { AppLayoutService } from "./app-layout.service";
-import type { CameraViewState } from "./appstate.service";
 import { AppStateService } from "./appstate.service";
 
 export const PRESENTATION_BRIDGE_PROTOCOL_VERSION = 2;
@@ -59,7 +59,7 @@ type PresentationApplyRequest = PresentationApplyStateRequest | PresentationAppl
 type PresentationBridgeError = "invalid-message" | "invalid-search" | "invalid-searches" | "invalid-state" | "state-application-failed";
 
 /** Applies native state snapshots requested by an explicitly embedded presentation parent. */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class PresentationStateBridgeService implements OnDestroy {
     private browserWindow?: Window;
     private parentOrigin?: string;
@@ -79,7 +79,7 @@ export class PresentationStateBridgeService implements OnDestroy {
         public readonly viewSettings: MapViewStateService,
         public readonly inspectionState: InspectionStateService,
         public readonly layout: AppLayoutService
-    ) {}
+    ) { }
 
     /** Enables the bridge for a framed document carrying the presentation opt-in. */
     initialize(browserWindow: Window = window): boolean {
@@ -93,11 +93,11 @@ export class PresentationStateBridgeService implements OnDestroy {
 
         this.browserWindow = browserWindow;
         browserWindow.addEventListener("message", this.handleMessage);
-        browserWindow.addEventListener("keydown", this.handleReviewShortcut, {capture: true});
+        browserWindow.addEventListener("keydown", this.handleReviewShortcut, { capture: true });
         browserWindow.parent.postMessage({
             type: PRESENTATION_BRIDGE_READY,
             version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
-            capabilities: {searches: !!this.searchService}
+            capabilities: { searches: !!this.searchService }
         }, "*");
         return true;
     }
@@ -105,7 +105,7 @@ export class PresentationStateBridgeService implements OnDestroy {
     /** Removes the global listener and drops work that has not started yet. */
     ngOnDestroy(): void {
         this.browserWindow?.removeEventListener("message", this.handleMessage);
-        this.browserWindow?.removeEventListener("keydown", this.handleReviewShortcut, {capture: true});
+        this.browserWindow?.removeEventListener("keydown", this.handleReviewShortcut, { capture: true });
         this.stopCameraFlight();
         this.searchViewportWait?.abort();
         this.browserWindow = undefined;
@@ -208,8 +208,10 @@ export class PresentationStateBridgeService implements OnDestroy {
                     return;
                 }
             }
-            request = {requestId, kind: "url", params, origin: event.origin, transitionMs, reset, searches,
-                fromCamera: this.transitionPose ? structuredClone(this.transitionPose) : undefined};
+            request = {
+                requestId, kind: "url", params, origin: event.origin, transitionMs, reset, searches,
+                fromCamera: this.transitionPose ? structuredClone(this.transitionPose) : undefined
+            };
         }
 
         this.parentOrigin ??= event.origin;
@@ -360,7 +362,7 @@ export class PresentationStateBridgeService implements OnDestroy {
         let start: number | undefined;
         const emit = (cameraViewData: CameraViewState) => {
             this.transitionPose = cameraViewData;
-            this.mapViewState.presentationCameraViewStateTopic.next({targetView: 0, cameraViewData});
+            this.mapViewState.presentationCameraViewStateTopic.next({ targetView: 0, cameraViewData });
         };
         const mix = (a: number, b: number, t: number) => a + (b - a) * t;
         const frame = (time: number) => {
@@ -376,8 +378,10 @@ export class PresentationStateBridgeService implements OnDestroy {
                     // Log altitude makes both globe-to-city and metre-scale changes legible.
                     alt: Math.exp(mix(Math.log(Math.max(1, from.destination.alt)), Math.log(Math.max(1, to.destination.alt)), t))
                 },
-                orientation: {heading: angle(from.orientation.heading, to.orientation.heading),
-                    pitch: mix(from.orientation.pitch, to.orientation.pitch, t), roll: angle(from.orientation.roll, to.orientation.roll)},
+                orientation: {
+                    heading: angle(from.orientation.heading, to.orientation.heading),
+                    pitch: mix(from.orientation.pitch, to.orientation.pitch, t), roll: angle(from.orientation.roll, to.orientation.roll)
+                },
                 position: [0, 1, 2].map(i => mix(from.position?.[i] ?? 0, to.position?.[i] ?? 0, t)) as [number, number, number]
             });
             this.flightFrame = progress < 1 ? host.requestAnimationFrame(frame) : undefined;
@@ -403,7 +407,7 @@ export class PresentationStateBridgeService implements OnDestroy {
             version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
             requestId,
             ok,
-            ...(error ? {error} : {})
+            ...(error ? { error } : {})
         }, origin);
     }
 }
@@ -449,15 +453,17 @@ function presentationCameraFlight(value: unknown): PresentationCameraFlight | nu
         const center = orbit["center"] as number[];
         const radius = orbit["radius"];
         const height = orbit["height"];
-        const waypoints = Array.from({length: 49}, (_, i) => {
+        const waypoints = Array.from({ length: 49 }, (_, i) => {
             const angle = i * Math.PI * 2 / 48;
             const [lon, lat, alt] = addMetersToLngLat(center,
                 [Math.sin(angle) * radius, Math.cos(angle) * radius, height]);
-            return {lon, lat, alt, heading: angle + Math.PI,
-                pitch: -Math.atan2(height, radius), roll: 0};
+            return {
+                lon, lat, alt, heading: angle + Math.PI,
+                pitch: -Math.atan2(height, radius), roll: 0
+            };
         });
-        const result = presentationCameraFlight({...raw, orbit: undefined, waypoints});
-        return result ? {...result, loop: true} : null;
+        const result = presentationCameraFlight({ ...raw, orbit: undefined, waypoints });
+        return result ? { ...result, loop: true } : null;
     }
     if (!Number.isFinite(raw["durationMs"])
         || Number(raw["durationMs"]) < 1_000

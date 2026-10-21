@@ -1,19 +1,25 @@
-import {rejectAction} from "./app-action";
-import { Injectable,NgZone,OnDestroy } from "@angular/core";
-import { BehaviorSubject,Subscription } from "rxjs";
+import { Injectable, NgZone, OnDestroy } from "@angular/core";
+import { BehaviorSubject, Subscription } from "rxjs";
 import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
 import { AppStateService } from "../shared/appstate.service";
 import { unicodePrefix } from "../shared/unicode-string";
+import { rejectAction } from "./app-action";
 import { AppActionService } from "./app-action.service";
 import { VIEWER_ACTION_CATALOG_ID } from "./generated/catalog-id";
 import {
-ViewerActionFailure,
-viewerActionServerMessageSchema,viewerMcpInfoSchema,
-type ViewerActionError,type ViewerActionServerMessage,type ViewerMcpInfo
+    ViewerActionFailure,
+    viewerActionServerMessageSchema,
+    viewerMcpInfoSchema,
+    type ViewerActionError,
+    type ViewerActionServerMessage,
+    type ViewerMcpInfo
 } from "./viewer-action-relay.contract";
 import {
-VIEWER_ACTION_INVOCATION_BYTES,VIEWER_ACTION_RESULT_BYTES,viewerActions,
-type ViewerActionName,type ViewerActionOutput
+    VIEWER_ACTION_INVOCATION_BYTES,
+    VIEWER_ACTION_RESULT_BYTES,
+    viewerActions,
+    type ViewerActionName,
+    type ViewerActionOutput
 } from "./viewer-action.contract";
 import { ViewerUiService } from "./viewer-ui.service";
 
@@ -38,11 +44,11 @@ interface PendingViewerAction {
 }
 
 /** Binds the explicit action allowlist to existing owners; it stores no replica of application state. */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class ViewerActionService implements OnDestroy {
     private readonly encoder = new TextEncoder();
     readonly activity$ = new BehaviorSubject<readonly ViewerActionActivity[]>([]);
-    readonly availability$ = new BehaviorSubject({enabled: false, ready: false, message: "MCP is not enabled"});
+    readonly availability$ = new BehaviorSubject({ enabled: false, ready: false, message: "MCP is not enabled" });
     private readonly subscriptions = new Subscription();
     private readonly pending = new Map<string, PendingViewerAction>();
     private readonly completedCalls = new Set<string>();
@@ -50,7 +56,7 @@ export class ViewerActionService implements OnDestroy {
     private clientId: string | null = null;
     private registered = false;
     private initialized = false;
-    private info: ViewerMcpInfo = {enabled: false};
+    private info: ViewerMcpInfo = { enabled: false };
     private sessionLabel = "erdblick";
 
     get connectionInfo(): ViewerMcpInfo { return this.info; }
@@ -63,7 +69,7 @@ export class ViewerActionService implements OnDestroy {
         private readonly zone: NgZone,
         private readonly stream: MapTileStreamService,
         private readonly ui: ViewerUiService
-    ) {}
+    ) { }
 
     /** Starts the optional control adapter after ordinary app/stream initialization, without delaying the map. */
     initialize(): void {
@@ -80,7 +86,7 @@ export class ViewerActionService implements OnDestroy {
             this.clientId = clientId;
             this.register();
         }));
-        this.subscriptions.add(this.stream.actionControlReceived.subscribe(({payload, receivedAt}) => this.receive(payload, receivedAt)));
+        this.subscriptions.add(this.stream.actionControlReceived.subscribe(({ payload, receivedAt }) => this.receive(payload, receivedAt)));
         void this.zone.runOutsideAngular(async () => {
             // Catalog/schema startup may occupy the main thread while this small response
             // is already in flight. Use the action transport's discovery budget, not 5 seconds.
@@ -175,7 +181,7 @@ export class ViewerActionService implements OnDestroy {
             this.availability(catalogChanged ? "MCP action catalog changed; reload the viewer" : `MCP controls unavailable: ${message.error.code}`);
         } else if (message.type === "mapget.actions.cancel") {
             const call = this.pending.get(message.callId);
-            if (call) this.finish(call, undefined, {code: "cancelled", message: "Action cancelled", outcome: "not_applied"});
+            if (call) this.finish(call, undefined, { code: "cancelled", message: "Action cancelled", outcome: "not_applied" });
         } else {
             this.invoke(message, receivedAt);
         }
@@ -197,20 +203,20 @@ export class ViewerActionService implements OnDestroy {
     }
 
     /** Admits bounded calls without a mutation queue; every admitted call owns its cancellation/deadline. */
-    private invoke(message: Extract<ViewerActionServerMessage, {type: "mapget.actions.invoke"}>, receivedAt: number,
+    private invoke(message: Extract<ViewerActionServerMessage, { type: "mapget.actions.invoke" }>, receivedAt: number,
         localComplete?: PendingViewerAction["localComplete"], signal?: AbortSignal): void {
         if ((!localComplete && !this.clientId) || this.pending.has(message.callId) || this.completedCalls.has(message.callId)) return;
         let error: ViewerActionError | undefined;
         const known = Object.hasOwn(viewerActions, message.action);
         const name = message.action as ViewerActionName;
-        if (!localComplete && !this.registered) error = {code: "not_available", message: "Viewer action registration is unavailable", outcome: "not_applied"};
-        else if (!known) error = {code: "unsupported_action", message: "Unsupported viewer action", outcome: "not_applied"};
+        if (!localComplete && !this.registered) error = { code: "not_available", message: "Viewer action registration is unavailable", outcome: "not_applied" };
+        else if (!known) error = { code: "unsupported_action", message: "Unsupported viewer action", outcome: "not_applied" };
         else if (this.pending.size >= 4 || (viewerActions[name].mutation && [...this.pending.values()].some(call => call.mutation))) {
-            error = {code: "busy", message: "Viewer action capacity is busy", outcome: "not_applied"};
+            error = { code: "busy", message: "Viewer action capacity is busy", outcome: "not_applied" };
         }
         if (error) {
             if (localComplete) localComplete(undefined, error);
-            else this.stream.sendActionControl(this.clientId!, {type: "mapget.actions.result", version: 1, callId: message.callId, error});
+            else this.stream.sendActionControl(this.clientId!, { type: "mapget.actions.result", version: 1, callId: message.callId, error });
             return;
         }
         const deadline = receivedAt + message.timeoutMs;
@@ -220,12 +226,12 @@ export class ViewerActionService implements OnDestroy {
             timer: setTimeout(() => this.finish(call, undefined, {
                 code: "timeout", message: "Action deadline expired", outcome: "not_applied"
             }), Math.max(0, deadline - performance.now())),
-            activity: {action: name, status: "running"}
+            activity: { action: name, status: "running" }
         };
         this.pending.set(call.callId, call);
         if (signal) {
-            const cancel = () => this.finish(call, undefined, {code: "cancelled", message: "Action cancelled", outcome: "not_applied"});
-            signal.addEventListener("abort", cancel, {once: true});
+            const cancel = () => this.finish(call, undefined, { code: "cancelled", message: "Action cancelled", outcome: "not_applied" });
+            signal.addEventListener("abort", cancel, { once: true });
             call.removeAbortListener = () => signal.removeEventListener("abort", cancel);
             if (signal.aborted) { cancel(); return; }
         }
@@ -233,7 +239,7 @@ export class ViewerActionService implements OnDestroy {
         queueMicrotask(() => {
             if (!this.pending.has(call.callId)) return;
             if (call.controller.signal.aborted || performance.now() >= call.deadline) {
-                this.finish(call, undefined, {code: "timeout", message: "Action expired before execution", outcome: "not_applied"});
+                this.finish(call, undefined, { code: "timeout", message: "Action expired before execution", outcome: "not_applied" });
                 return;
             }
             try {
@@ -256,7 +262,7 @@ export class ViewerActionService implements OnDestroy {
                 throw new Error("Viewer result exceeds the wire budget");
             }
             if (performance.now() >= call.deadline) {
-                this.finish(call, undefined, {code: "timeout", message: "Action completed after its deadline", outcome: call.mutation ? "applied" : "not_applied"});
+                this.finish(call, undefined, { code: "timeout", message: "Action completed after its deadline", outcome: call.mutation ? "applied" : "not_applied" });
             } else this.finish(call, validated);
         } catch (error) { this.failCall(call, error); }
     }
@@ -264,7 +270,7 @@ export class ViewerActionService implements OnDestroy {
     /** Retains unknown-outcome semantics for failures after a domain owner may have applied effects. */
     private failCall(call: PendingViewerAction, error: unknown): void {
         this.finish(call, undefined, error instanceof ViewerActionFailure ? error.detail
-            : {code: "internal_error", message: "Viewer action failed", outcome: call.mutation ? "unknown" : "not_applied"});
+            : { code: "internal_error", message: "Viewer action failed", outcome: call.mutation ? "unknown" : "not_applied" });
     }
 
     /** Completes once, releases the admission slot on every path, and never replies through a replacement socket. */
@@ -278,7 +284,7 @@ export class ViewerActionService implements OnDestroy {
         if (this.completedCalls.size > 256) this.completedCalls.delete(this.completedCalls.values().next().value!);
         if (call.localComplete) call.localComplete(result, error);
         else if (send && call.clientId && this.clientId === call.clientId) this.stream.sendActionControl(call.clientId, {
-            type: "mapget.actions.result", version: 1, callId: call.callId, ...(error ? {error} : {result})
+            type: "mapget.actions.result", version: 1, callId: call.callId, ...(error ? { error } : { result })
         });
         call.activity.status = error?.code ?? (call.mutation ? "applied" : "completed");
         this.zone.run(() => this.activity$.next([...this.activity$.value]));
@@ -286,13 +292,13 @@ export class ViewerActionService implements OnDestroy {
 
     /** Notifies Angular only for control availability changes, not streamed tile/camera frames. */
     private availability(message: string): void {
-        this.zone.run(() => this.availability$.next({enabled: this.info.enabled, ready: this.registered, message}));
+        this.zone.run(() => this.availability$.next({ enabled: this.info.enabled, ready: this.registered, message }));
     }
 
     /** Domain methods are registered by owners; the relay only selects the Angular execution boundary. */
     execute(name: string, argumentsValue: unknown, signal?: AbortSignal): ViewerActionOutput<ViewerActionName> | Promise<ViewerActionOutput<ViewerActionName>> {
         const declaration = viewerActions[name as ViewerActionName];
-        if (!declaration) throw new ViewerActionFailure({code: "unsupported_action", message: "Unsupported viewer action", outcome: "not_applied"});
+        if (!declaration) throw new ViewerActionFailure({ code: "unsupported_action", message: "Unsupported viewer action", outcome: "not_applied" });
         const invoke = () => this.actions.execute(name, argumentsValue, signal) as ViewerActionOutput<ViewerActionName> | Promise<ViewerActionOutput<ViewerActionName>>;
         return declaration.mutation ? this.zone.run(invoke) : this.zone.runOutsideAngular(invoke);
     }

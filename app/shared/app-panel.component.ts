@@ -1,23 +1,24 @@
-import { NgClass,NgStyle,NgTemplateOutlet } from '@angular/common';
+import { NgClass, NgStyle, NgTemplateOutlet } from '@angular/common';
 import {
-AfterViewInit,
-Component,
-ContentChild,
-ElementRef,
-EventEmitter,
-HostBinding,
-Input,
-OnChanges,
-OnDestroy,
-Output,
-SimpleChanges,
-TemplateRef,
-ViewChild
+    AfterViewInit,
+    Component,
+    ContentChild,
+    ElementRef,
+    EventEmitter,
+    HostBinding,
+    Input,
+    OnChanges,
+    OnDestroy,
+    Output,
+    SimpleChanges,
+    TemplateRef,
+    ViewChild
 } from '@angular/core';
 import { AccordionModule } from 'primeng/accordion';
 import { ViewerUiService } from '../actions/viewer-ui.service';
+import { DEFAULT_DOCKED_EM_HEIGHT } from "./app-layout.model";
 import { AppLayoutService } from "./app-layout.service";
-import { AppStateService,DEFAULT_DOCKED_EM_HEIGHT } from './appstate.service';
+import { AppStateService } from "./appstate.service";
 
 export type AppPanelResizeMode = 'none' | 'vertical' | 'fill' | 'auto';
 
@@ -94,9 +95,9 @@ interface AppPanelResizeSession {
 })
 /** Generic docked surface wrapper backed by a single PrimeNG accordion item. */
 export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
-    @ContentChild('header', {descendants: true, read: TemplateRef}) projectedHeaderTemplate?: TemplateRef<unknown>;
-    @ContentChild('content', {descendants: true, read: TemplateRef}) projectedContentTemplate?: TemplateRef<unknown>;
-    @ContentChild('footer', {descendants: true, read: TemplateRef}) projectedFooterTemplate?: TemplateRef<unknown>;
+    @ContentChild('header', { descendants: true, read: TemplateRef }) projectedHeaderTemplate?: TemplateRef<unknown>;
+    @ContentChild('content', { descendants: true, read: TemplateRef }) projectedContentTemplate?: TemplateRef<unknown>;
+    @ContentChild('footer', { descendants: true, read: TemplateRef }) projectedFooterTemplate?: TemplateRef<unknown>;
 
     @Input() header = '';
     @Input() collapsed = false;
@@ -104,9 +105,9 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
 
     @Input() layoutId?: string;
     @Input() persistLayout = false;
-    @Input() style: {[key: string]: any} = {};
+    @Input() style: { [key: string]: any } = {};
     @Input() styleClass = '';
-    @Input() contentStyle: {[key: string]: any} = {};
+    @Input() contentStyle: { [key: string]: any } = {};
     @Input() contentStyleClass = '';
     @Input() resizeMode: AppPanelResizeMode = 'auto';
     @Input() dockedPanelCount = 1;
@@ -134,7 +135,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
     private unregisterResizeTarget?: () => void;
 
     constructor(private readonly stateService: AppStateService, private readonly viewerUi: ViewerUiService,
-        public readonly layout: AppLayoutService) {}
+        public readonly layout: AppLayoutService) { }
 
     /** Applies persisted panel state and input changes to the accordion value and dock body size. */
     ngOnChanges(changes: SimpleChanges): void {
@@ -162,8 +163,10 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         this.scheduleBodySizeChange();
         const content = this.contentRef?.nativeElement;
         if (content) this.unregisterResizeTarget = this.viewerUi.registerResizeTarget(content, {
-            describe: () => ({kind: "panel", dimensions: this.contentResizable ? ["heightPx"] : [], busy: !!this.resizeSession,
-                ...(this.layoutId ? {layoutId: this.layoutId} : {})}),
+            describe: () => ({
+                kind: "panel", dimensions: this.contentResizable ? ["heightPx"] : [], busy: !!this.resizeSession,
+                ...(this.layoutId ? { layoutId: this.layoutId } : {})
+            }),
             resize: size => {
                 if ("panelSizes" in size || size.heightPx === undefined) return;
                 this.applyBodyLayout(size.heightPx, size.heightPx > this.defaultBodyHeightPx() + 1);
@@ -256,7 +259,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         }
         this.collapsed = nextCollapsed;
         if (this.persistLayout && this.layoutId) {
-            this.layout.setPanelLayout(this.layoutId, {panelCollapsed: nextCollapsed});
+            this.layout.setPanelLayout(this.layoutId, { panelCollapsed: nextCollapsed });
         }
         this.collapsedChange.emit(nextCollapsed);
         if (nextCollapsed) {

@@ -1,18 +1,47 @@
-import {AppActionService} from "../actions/app-action.service";
-import {ControlValue, applied, rejectAction} from "../actions/app-action";
-import {inspectionStateActions, inspectionStateControls} from "./inspection-state.service.declarations";
 import { Injectable } from "@angular/core";
 import { z } from "zod";
+import { ActionInput, AppActionCandidate, ControlValue, applied, rejectAction } from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
+import { coreLib } from "../integrations/wasm";
 import type { FeatureWrapper } from "../mapdata/feature-inspection.model";
+import type { MapTreeNode } from "../mapdata/map.tree.model";
+import { parseMapPartitionKey } from "../mapdata/partition.model";
+import {
+    AppDialogLayout,
+    AppDialogPosition,
+    DEFAULT_DOCKED_EM_HEIGHT,
+    DEFAULT_EM_HEIGHT,
+    DEFAULT_EM_WIDTH,
+    INSPECTION_DOCK_TAB_ID
+} from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
 import { Boolish } from "../shared/app-state";
-import { AppDialogLayout,AppDialogPosition,DEFAULT_DOCKED_EM_HEIGHT,DEFAULT_DRILL_PICK_RADIUS,DEFAULT_EM_HEIGHT,DEFAULT_EM_WIDTH,DEFAULT_HIGHLIGHT_COLORS,DEFAULT_HOVER_LABEL_FIELDS,HoverLabelFieldConfig,INSPECTION_DOCK_TAB_ID,InspectionComparisonEntry,InspectionComparisonModel,InspectionComparisonOption,InspectionDialogLayout,InspectionPanelModel,InspectionTreeExpansionSnapshot,InspectionTreeExpansionState,MAX_COMPARE_PANELS,MAX_DRILL_PICK_RADIUS,MAX_SIMULTANEOUS_INSPECTIONS,MIN_DRILL_PICK_RADIUS,SelectedSourceData,TileFeatureId } from "../shared/app-state.model";
 import { AppStateService } from "../shared/appstate.service";
 import { InfoMessageService } from "../shared/info.service";
 import { stripFeatureInspectionTarget } from "../shared/tile-feature-id";
+import {
+    DEFAULT_DRILL_PICK_RADIUS,
+    DEFAULT_HIGHLIGHT_COLORS,
+    DEFAULT_HOVER_LABEL_FIELDS,
+    HoverLabelFieldConfig,
+    InspectionComparisonEntry,
+    InspectionComparisonModel,
+    InspectionComparisonOption,
+    InspectionDialogLayout,
+    InspectionPanelModel,
+    InspectionTreeExpansionSnapshot,
+    InspectionTreeExpansionState,
+    MAX_COMPARE_PANELS,
+    MAX_DRILL_PICK_RADIUS,
+    MAX_SIMULTANEOUS_INSPECTIONS,
+    MIN_DRILL_PICK_RADIUS,
+    SelectedSourceData,
+    TileFeatureId
+} from "./inspection-state.model";
+import { inspectionStateActions, inspectionStateControls } from "./inspection-state.service.declarations";
 
 /** Owns persisted panel identities, focus, comparison and inspection presentation invariants. */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class InspectionStateService {
     constructor(private readonly persistence: AppStateService,
         private readonly layout: AppLayoutService,
@@ -35,7 +64,6 @@ export class InspectionStateService {
         return [DEFAULT_EM_WIDTH, DEFAULT_EM_HEIGHT];
     }
 
-
     // 2~0f~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
     // 1~0~sourcedata:map:layer:tile~address~...features...~size
     // 0~1~...
@@ -48,7 +76,7 @@ export class InspectionStateService {
         },
         defaultValue: [],
         schema: z.array(z.string()),
-        toStorage: (value: InspectionPanelModel<TileFeatureId>[])=> {
+        toStorage: (value: InspectionPanelModel<TileFeatureId>[]) => {
             return value.map(state => {
                 let s = `${state.id}~${state.locked ? 1 : 0}${state.focused ? 'f' : ''}~`;
                 if (state.sourceData) {
@@ -119,13 +147,11 @@ export class InspectionStateService {
         urlIncludeInVisualizationOnly: false
     });
 
-
     readonly inspectionsLimitState = this.persistence.registerState<number>({
         name: 'inspectionsLimitState',
         defaultValue: Math.floor(MAX_SIMULTANEOUS_INSPECTIONS / 2),
         schema: z.coerce.number().int().min(1).max(MAX_SIMULTANEOUS_INSPECTIONS)
     });
-
 
     readonly drillPickRadiusState = this.persistence.registerState<number>({
         name: 'drillPickRadius',
@@ -133,20 +159,17 @@ export class InspectionStateService {
         schema: z.coerce.number().int().min(MIN_DRILL_PICK_RADIUS).max(MAX_DRILL_PICK_RADIUS)
     });
 
-
     readonly inspectionTreeExpandByDefaultState = this.persistence.registerState<boolean>({
         name: 'inspectionTreeExpandByDefault',
         defaultValue: false,
         schema: Boolish
     });
 
-
     readonly sourceDataInspectionDefaultColumnsState = this.persistence.registerState<string[]>({
         name: 'sourceDataInspectionDefaultColumns',
         defaultValue: [],
         schema: z.array(z.enum(["displayAddress", "schemaType"]))
     });
-
 
     readonly inspectionTreeHiddenColumnsState = this.persistence.registerState<Record<string, string[]>>({
         name: 'inspectionTreeHiddenColumns',
@@ -155,13 +178,11 @@ export class InspectionStateService {
         snapshotPersist: false
     });
 
-
     readonly inspectionValueVaryColorsState = this.persistence.registerState<boolean>({
         name: 'inspectionValueVaryColors',
         defaultValue: true,
         schema: Boolish
     });
-
 
     readonly inspectionValueVaryOutlinesState = this.persistence.registerState<boolean>({
         name: 'inspectionValueVaryOutlines',
@@ -169,13 +190,11 @@ export class InspectionStateService {
         schema: Boolish
     });
 
-
     readonly inspectionValueVaryStripingState = this.persistence.registerState<boolean>({
         name: 'inspectionValueVaryStriping',
         defaultValue: false,
         schema: Boolish
     });
-
 
     readonly hoverLabelsEnabledState = this.persistence.registerState<boolean>({
         name: 'hoverLabelsEnabled',
@@ -183,17 +202,15 @@ export class InspectionStateService {
         schema: Boolish
     });
 
-
     readonly hoverLabelFieldsState = this.persistence.registerState<HoverLabelFieldConfig[]>({
         name: 'hoverLabelFields',
-        defaultValue: DEFAULT_HOVER_LABEL_FIELDS.map(field => ({...field})),
+        defaultValue: DEFAULT_HOVER_LABEL_FIELDS.map(field => ({ ...field })),
         schema: z.array(z.object({
             expression: z.string(),
             customExpression: Boolish,
             displayKey: z.string().optional()
         }))
     });
-
 
     readonly inspectionComparisonState = this.persistence.registerState<InspectionComparisonModel | null>({
         name: 'inspectionComparisonState',
@@ -223,9 +240,9 @@ export class InspectionStateService {
         ])
     });
 
-    get selection() {return this.selectionState.getValue();}
+    get selection() { return this.selectionState.getValue(); }
 
-    set selection(val: InspectionPanelModel<TileFeatureId>[]) {this.selectionState.next(val);}
+    set selection(val: InspectionPanelModel<TileFeatureId>[]) { this.selectionState.next(val); }
 
     get focusedInspectionPanelId() {
         return this.selectionState.getValue().find(panel => panel.focused)?.id;
@@ -235,7 +252,7 @@ export class InspectionStateService {
         this.setFocusedInspectionPanel(val);
     }
 
-    get inspectionsLimit() {return this.inspectionsLimitState.getValue();}
+    get inspectionsLimit() { return this.inspectionsLimitState.getValue(); }
 
     set inspectionsLimit(val: number) {
         const numeric = Number(val);
@@ -246,7 +263,7 @@ export class InspectionStateService {
         this.inspectionsLimitState.next(normalized);
     }
 
-    get drillPickRadius() {return this.drillPickRadiusState.getValue();}
+    get drillPickRadius() { return this.drillPickRadiusState.getValue(); }
 
     set drillPickRadius(val: number) {
         const numeric = Number(val);
@@ -257,13 +274,13 @@ export class InspectionStateService {
         this.drillPickRadiusState.next(normalized);
     }
 
-    get inspectionComparison() {return this.inspectionComparisonState.getValue();}
+    get inspectionComparison() { return this.inspectionComparisonState.getValue(); }
 
-    set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
+    set inspectionComparison(val: InspectionComparisonModel | null) { this.inspectionComparisonState.next(val); }
 
-    get inspectionTreeExpandByDefault() {return this.inspectionTreeExpandByDefaultState.getValue();}
+    get inspectionTreeExpandByDefault() { return this.inspectionTreeExpandByDefaultState.getValue(); }
 
-    set inspectionTreeExpandByDefault(val: boolean) {this.inspectionTreeExpandByDefaultState.next(!!val);}
+    set inspectionTreeExpandByDefault(val: boolean) { this.inspectionTreeExpandByDefaultState.next(!!val); }
 
     get sourceDataInspectionDefaultColumns() {
         return this.sourceDataInspectionDefaultColumnsState.getValue();
@@ -275,28 +292,27 @@ export class InspectionStateService {
             [...new Set(val.filter(column => allowed.has(column)))]);
     }
 
-    get inspectionValueVaryColors() {return this.inspectionValueVaryColorsState.getValue();}
+    get inspectionValueVaryColors() { return this.inspectionValueVaryColorsState.getValue(); }
 
-    set inspectionValueVaryColors(val: boolean) {this.inspectionValueVaryColorsState.next(!!val);}
+    set inspectionValueVaryColors(val: boolean) { this.inspectionValueVaryColorsState.next(!!val); }
 
-    get inspectionValueVaryOutlines() {return this.inspectionValueVaryOutlinesState.getValue();}
+    get inspectionValueVaryOutlines() { return this.inspectionValueVaryOutlinesState.getValue(); }
 
-    set inspectionValueVaryOutlines(val: boolean) {this.inspectionValueVaryOutlinesState.next(!!val);}
+    set inspectionValueVaryOutlines(val: boolean) { this.inspectionValueVaryOutlinesState.next(!!val); }
 
-    get inspectionValueVaryStriping() {return this.inspectionValueVaryStripingState.getValue();}
+    get inspectionValueVaryStriping() { return this.inspectionValueVaryStripingState.getValue(); }
 
-    set inspectionValueVaryStriping(val: boolean) {this.inspectionValueVaryStripingState.next(!!val);}
+    set inspectionValueVaryStriping(val: boolean) { this.inspectionValueVaryStripingState.next(!!val); }
 
-    get hoverLabelsEnabled() {return this.hoverLabelsEnabledState.getValue();}
+    get hoverLabelsEnabled() { return this.hoverLabelsEnabledState.getValue(); }
 
-    set hoverLabelsEnabled(val: boolean) {this.hoverLabelsEnabledState.next(!!val);}
+    set hoverLabelsEnabled(val: boolean) { this.hoverLabelsEnabledState.next(!!val); }
 
-    get hoverLabelFields() {return this.hoverLabelFieldsState.getValue();}
+    get hoverLabelFields() { return this.hoverLabelFieldsState.getValue(); }
 
     set hoverLabelFields(val: HoverLabelFieldConfig[]) {
-        this.hoverLabelFieldsState.next(val.map(field => ({...field})));
+        this.hoverLabelFieldsState.next(val.map(field => ({ ...field })));
     }
-
 
     /** Updates the current selection, reusing or creating inspection panels as needed. */
     setSelection(
@@ -486,7 +502,6 @@ export class InspectionStateService {
         return;
     }
 
-
     /** Toggles one inspection panel between base-feature and attribute/validity-highlight pseudo-feature ids. */
     toggleInspectionFeatureHighlight(panelId: number, mapTileKey: string, targetFeatureId: string): void {
         const allPanels = structuredClone(this.selectionState.getValue());
@@ -527,7 +542,6 @@ export class InspectionStateService {
         this.sanitizeInspectionComparisonForSelection(nextPanels);
     }
 
-
     /** Persists the size of one inspection panel. */
     setInspectionPanelSize(id: number, size: [number, number]) {
         const allPanels = structuredClone(this.selectionState.getValue());
@@ -539,7 +553,6 @@ export class InspectionStateService {
         this.selectionState.next(allPanels);
     }
 
-
     /** Updates the locked state of one inspection panel. */
     setInspectionPanelLockedState(id: number, isLocked: boolean) {
         const allPanels = structuredClone(this.selectionState.getValue());
@@ -550,7 +563,6 @@ export class InspectionStateService {
         allPanels[index].locked = isLocked;
         this.selectionState.next(allPanels);
     }
-
 
     /** Persists whether one inspection panel is undocked. */
     setInspectionPanelUndockedState(id: number, undocked: boolean) {
@@ -572,7 +584,6 @@ export class InspectionStateService {
         this.selectionState.next(allPanels);
         this.setFocusedInspectionPanel(id);
     }
-
 
     /** Marks one inspection panel as the active target for inspection-level shortcuts. */
     setFocusedInspectionPanel(id: number | undefined): void {
@@ -599,25 +610,21 @@ export class InspectionStateService {
         }
     }
 
-
     /** Returns whether the supplied inspection panel is the active shortcut target. */
     isInspectionPanelFocused(id: number): boolean {
         return this.focusedInspectionPanelId === id;
     }
-
 
     /** Stores row and header-button expansion state for the current in-memory inspection panel instance. */
     setInspectionTreeExpansionState(panelId: number, state: InspectionTreeExpansionState): void {
         this.inspectionTreeExpansionStates.set(panelId, this.cloneInspectionTreeExpansionState(state));
     }
 
-
     /** Returns a defensive copy of the last known expansion state for one inspection panel. */
     getInspectionTreeExpansionState(panelId: number): InspectionTreeExpansionState | undefined {
         const state = this.inspectionTreeExpansionStates.get(panelId);
         return state ? this.cloneInspectionTreeExpansionState(state) : undefined;
     }
-
 
     /** Persists the optional columns hidden by the user in one inspection panel. */
     setInspectionTreeHiddenColumns(panelId: number, hiddenColumns: Iterable<string>): void {
@@ -628,13 +635,11 @@ export class InspectionStateService {
         });
     }
 
-
     /** Returns a panel's persisted hidden columns, or undefined when defaults still apply. */
     getInspectionTreeHiddenColumns(panelId: number): string[] | undefined {
         const hiddenColumns = this.inspectionTreeHiddenColumnsState.getValue()[panelId];
         return hiddenColumns ? [...hiddenColumns] : undefined;
     }
-
 
     /** Clones an optional inspection-tree expansion snapshot. */
     private cloneInspectionTreeExpansionSnapshot(
@@ -642,7 +647,6 @@ export class InspectionStateService {
     ): InspectionTreeExpansionSnapshot | undefined {
         return snapshot ? new Map(snapshot) : undefined;
     }
-
 
     /** Clones transient inspection-tree expansion state so component instances cannot share mutable maps. */
     private cloneInspectionTreeExpansionState(state: InspectionTreeExpansionState): InspectionTreeExpansionState {
@@ -662,7 +666,6 @@ export class InspectionStateService {
         return clone;
     }
 
-
     /** Returns the floating layout record for one inspection panel, if present. */
     getInspectionDialogLayout(panelId: number): InspectionDialogLayout | undefined {
         const layout = this.layout.getDialogLayout(this.inspectionLayoutId(panelId));
@@ -671,7 +674,6 @@ export class InspectionStateService {
         }
         return undefined;
     }
-
 
     /** Returns or creates the floating layout record for one inspection panel. */
     ensureInspectionDialogLayout(
@@ -688,13 +690,12 @@ export class InspectionStateService {
         const created: InspectionDialogLayout = {
             panelId,
             slot: preferredSlot,
-            position: {...fallback.position},
-            size: {...fallback.size}
+            position: { ...fallback.position },
+            size: { ...fallback.size }
         };
         this.layout.upsertDialogLayout(layoutId, created);
         return created;
     }
-
 
     /** Updates the stored floating position for one inspection panel. */
     setInspectionDialogPosition(panelId: number, position: AppDialogPosition, preferredIndex?: number): void {
@@ -705,7 +706,7 @@ export class InspectionStateService {
         if (current) {
             this.layout.upsertDialogLayout(this.inspectionLayoutId(panelId), {
                 ...current,
-                position: {left: position.left, top: position.top}
+                position: { left: position.left, top: position.top }
             });
             return;
         }
@@ -714,14 +715,13 @@ export class InspectionStateService {
         this.layout.upsertDialogLayout(this.inspectionLayoutId(panelId), {
             panelId,
             slot,
-            position: {left: position.left, top: position.top},
+            position: { left: position.left, top: position.top },
             size: existing?.size ?? {
                 width: Math.round(this.defaultInspectionPanelSize[0] * this.layout.baseFontSize),
                 height: Math.round(this.defaultInspectionPanelSize[1] * this.layout.baseFontSize)
             }
         });
     }
-
 
     /** Removes persisted inspection-dialog layouts for panels that no longer exist. */
     pruneInspectionDialogLayout(activePanelIds: number[]) {
@@ -746,7 +746,6 @@ export class InspectionStateService {
         }
     }
 
-
     /** Removes transient inspection-tree expansion states for panels that no longer exist. */
     private pruneInspectionTreeExpansionStates(activePanelIds: number[]): void {
         const activeIds = new Set(activePanelIds);
@@ -756,7 +755,6 @@ export class InspectionStateService {
             }
         }
     }
-
 
     /** Removes persisted column overrides for inspection panels that no longer exist. */
     private pruneInspectionTreeHiddenColumns(activePanelIds: number[]): void {
@@ -769,18 +767,15 @@ export class InspectionStateService {
         }
     }
 
-
     /** Opens the inspection comparison dialog with the supplied model. */
     openInspectionComparison(model: InspectionComparisonModel): void {
         this.inspectionComparisonState.next(model);
     }
 
-
     /** Closes the inspection comparison dialog. */
     closeInspectionComparison(): void {
         this.inspectionComparisonState.next(null);
     }
-
 
     /** Reorders docked inspection panels according to the supplied display order. */
     reorderInspectionPanels(dockedDisplayOrder: number[]) {
@@ -812,7 +807,6 @@ export class InspectionStateService {
         }
     }
 
-
     /** Sets the accent color stored for one inspection panel. */
     setInspectionPanelColor(id: number, color: string) {
         const allPanels = structuredClone(this.selectionState.getValue());
@@ -824,7 +818,6 @@ export class InspectionStateService {
         this.selectionState.next(allPanels);
     }
 
-
     /** Drops all unlocked inspection panels, preserving only pinned selections. */
     unsetUnlockedSelections() {
         const nextSelection = this.selectionState.getValue().filter(panel =>
@@ -833,7 +826,6 @@ export class InspectionStateService {
         this.selectionState.next(nextSelection);
         this.sanitizeInspectionComparisonForSelection(nextSelection);
     }
-
 
     /** Removes one inspection panel and any associated persisted layout state. */
     unsetPanel(id: number) {
@@ -846,7 +838,6 @@ export class InspectionStateService {
         this.selectionState.next(allPanels);
         this.sanitizeInspectionComparisonForSelection(allPanels);
     }
-
 
     /** Finds the first regular inspection panel containing any of the requested feature identities. */
     private findPanelIdContainingFeatureSelection(
@@ -863,7 +854,6 @@ export class InspectionStateService {
             )
         )?.id;
     }
-
 
     /** Keeps the focused inspection panel id aligned with the current selection set. */
     private sanitizeFocusedInspectionPanel(panels: InspectionPanelModel<TileFeatureId>[]): void {
@@ -886,7 +876,6 @@ export class InspectionStateService {
         }
     }
 
-
     /** Returns whether two inspection-panel orderings are identical by panel id. */
     private panelOrderEquals(a: InspectionPanelModel<TileFeatureId>[], b: InspectionPanelModel<TileFeatureId>[]): boolean {
         if (a.length !== b.length) {
@@ -900,12 +889,10 @@ export class InspectionStateService {
         return true;
     }
 
-
     /** Builds the persisted layout id used for one floating inspection dialog. */
     private inspectionLayoutId(panelId: number): string {
         return `inspection:${panelId}`;
     }
-
 
     /** Drops stale comparison state when the current selection no longer supports it. */
     sanitizeInspectionComparisonForSelection(panels: InspectionPanelModel<TileFeatureId>[]): void {
@@ -925,7 +912,6 @@ export class InspectionStateService {
         this.inspectionComparisonState.next(nextModel);
     }
 
-
     /** Removes ineligible panels from a comparison model and drops empty results. */
     private sanitizeInspectionComparisonModel(model: InspectionComparisonModel, eligiblePanelIds: Set<number>): InspectionComparisonModel | null {
         const entries = [model.base, ...model.others];
@@ -942,7 +928,6 @@ export class InspectionStateService {
         };
     }
 
-
     /** Builds comparison candidates from the currently selected feature panels. */
     buildCompareOptions(panels: InspectionPanelModel<FeatureWrapper>[], excludePanelId?: number): InspectionComparisonOption[] {
         return panels
@@ -954,18 +939,15 @@ export class InspectionStateService {
             }));
     }
 
-
     /** Narrows inspection panels to those that represent actual feature selections. */
     private isFeaturePanel(panel: InspectionPanelModel<FeatureWrapper> | undefined): panel is InspectionPanelModel<FeatureWrapper> {
         return !!panel && panel.features.length > 0 && panel.sourceData === undefined;
     }
 
-
     /** Formats the user-facing label used for comparison entries. */
     private formatFeatureLabel(features: FeatureWrapper[]): string {
         return features.map(feature => `${feature.featureTile.mapName}.${feature.featureId}`).join(', ');
     }
-
 
     /** Builds one comparison entry from an existing feature inspection panel. */
     private createComparisonEntryFromPanel(panel: InspectionPanelModel<FeatureWrapper>): InspectionComparisonEntry {
@@ -979,7 +961,6 @@ export class InspectionStateService {
             }))
         };
     }
-
 
     /** Creates the comparison-dialog model for the selected set of feature panels. */
     createComparisonModel(basePanelId: number, otherPanelIds: number[], panels: InspectionPanelModel<FeatureWrapper>[]): InspectionComparisonModel | null {
@@ -1005,28 +986,29 @@ export class InspectionStateService {
         };
     }
 
-
     registerActions(actions: AppActionService): void {
         actions.registerAction(inspectionStateActions.closeInspection, input => {
             this.closeInspection(input.panelId, input.lifetime);
             return applied();
-        });
+        }, query => this.closeInspectionCandidates(query));
         actions.registerControl(inspectionStateControls.preferences, {
-            read: () => ({limit: this.inspectionsLimit, drillPickRadius: this.drillPickRadius,
+            read: () => ({
+                limit: this.inspectionsLimit, drillPickRadius: this.drillPickRadius,
                 expandByDefault: this.inspectionTreeExpandByDefault, varyColors: this.inspectionValueVaryColors,
-                varyOutlines: this.inspectionValueVaryOutlines, varyStriping: this.inspectionValueVaryStriping}),
+                varyOutlines: this.inspectionValueVaryOutlines, varyStriping: this.inspectionValueVaryStriping
+            }),
             write: (_selector, value) => this.setInspectionPreferences(value)
         });
         actions.registerControl(inspectionStateControls.hover, {
-            read: () => ({enabled: this.hoverLabelsEnabled, fields: this.hoverLabelFields}),
+            read: () => ({ enabled: this.hoverLabelsEnabled, fields: this.hoverLabelFields }),
             write: (_selector, value) => this.persistence.transaction(() => {
                 this.hoverLabelsEnabled = value.enabled;
                 this.hoverLabelFields = value.fields;
             })
         });
         actions.registerControl(inspectionStateControls.panel, {
-            read: ({panelId}) => this.panelPresentation(panelId),
-            write: ({panelId}, value) => this.setPanelPresentation(panelId, value)
+            read: ({ panelId }) => this.panelPresentation(panelId),
+            write: ({ panelId }, value) => this.setPanelPresentation(panelId, value)
         });
     }
 
@@ -1057,7 +1039,7 @@ export class InspectionStateService {
     panelPresentation(panelId: number): ControlValue<typeof inspectionStateControls.panel> {
         const panel = this.selection.find(panel => panel.id === panelId);
         if (!panel) rejectAction("The inspection no longer exists");
-        return {locked: panel.locked, undocked: panel.undocked, focused: this.focusedInspectionPanelId === panelId, color: panel.color};
+        return { locked: panel.locked, undocked: panel.undocked, focused: this.focusedInspectionPanelId === panelId, color: panel.color };
     }
 
     setPanelPresentation(panelId: number, value: ControlValue<typeof inspectionStateControls.panel>): void {
@@ -1071,5 +1053,130 @@ export class InspectionStateService {
         });
     }
 
+    /** Recognizable live panels supply the same guarded arguments accepted by MCP. */
+    private closeInspectionCandidates(query: string): AppActionCandidate<ActionInput<typeof inspectionStateActions.closeInspection>>[] {
+        return this.selection.flatMap(panel => {
+            const title = panel.sourceData?.mapTileKey ?? panel.features.map(feature => feature.featureId).join(", ");
+            const name = "Close " + (title || "inspection " + (panel.id + 1));
+            if (!name.toLowerCase().includes(query.trim().toLowerCase())) return [];
+            const lifetime = this.panelLifetime(panel.id);
+            if (lifetime === undefined) return [];
+            return [{
+                id: "close-inspection:" + panel.id + ":" + lifetime, name,
+                label: "Inspection " + (panel.id + 1) + (panel.locked ? " · locked" : ""),
+                icon: "pi-times", color: "red", enabled: true, acceptsEmptyInput: true, saveToHistory: false,
+                input: { panelId: panel.id, lifetime }
+            }];
+        });
+    }
+
+    /** Retains selections while a datasource is absent/initializing; ready layer lists can retire deleted references. */
+    pruneCatalog(presentMaps: ReadonlyMap<string, MapTreeNode>): void {
+        this.persistence.transaction(() => {
+            const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
+            const presentSelectionLayerIds = new Set<string>(); // includes SourceData layers
+            const presentMapIds = new Set<string>();
+            const mapsWithKnownFeatureLayers = new Set<string>();
+            const mapsWithKnownSelectionLayers = new Set<string>();
+            for (const [mapId, mapNode] of presentMaps.entries()) {
+                presentMapIds.add(mapId);
+                // Use feature layers (exclude SourceData) via children
+                for (const layer of mapNode.children) {
+                    presentLayerIds.add(`${mapId}/${layer.id}`);
+                }
+                if (mapNode.children.length > 0) {
+                    mapsWithKnownFeatureLayers.add(mapId);
+                }
+                // Selection pruning must keep SourceData inspections too.
+                for (const layerId of mapNode.layers.keys()) {
+                    presentSelectionLayerIds.add(`${mapId}/${layerId}`);
+                }
+                if (mapNode.layers.size > 0) {
+                    mapsWithKnownSelectionLayers.add(mapId);
+                }
+            }
+
+            // Keep unresolved selections until the catalog can distinguish missing layers from pending maps.
+            const panels = this.selectionState.getValue();
+            const nextPanels: InspectionPanelModel<TileFeatureId>[] = [];
+            let selectionChanged = false;
+
+            const parseKey = (tileKey: string): { mapId: string; mapLayerId: string } | undefined => {
+                let parsed: [string, string, unknown];
+                try {
+                    parsed = parseMapPartitionKey(coreLib, tileKey);
+                } catch {
+                    return undefined;
+                }
+                const [mapId, layerId] = parsed;
+                return { mapId, mapLayerId: `${mapId}/${layerId}` };
+            };
+
+            const keepFeatureSelection = (tileKey: string): boolean => {
+                const parsed = parseKey(tileKey);
+                if (!parsed) {
+                    return false;
+                }
+                if (presentLayerIds.has(parsed.mapLayerId)) {
+                    return true;
+                }
+                // Nonblocking datasource startup can transiently publish a map before its layers.
+                return !presentMapIds.has(parsed.mapId) || !mapsWithKnownFeatureLayers.has(parsed.mapId);
+            };
+
+            const keepSourceDataSelection = (tileKey: string): boolean => {
+                const parsed = parseKey(tileKey);
+                if (!parsed) {
+                    return false;
+                }
+                if (presentSelectionLayerIds.has(parsed.mapLayerId)) {
+                    return true;
+                }
+                return !presentMapIds.has(parsed.mapId) || !mapsWithKnownSelectionLayers.has(parsed.mapId);
+            };
+
+            for (const panel of panels) {
+                const updated: InspectionPanelModel<TileFeatureId> = {
+                    id: panel.id,
+                    features: [],
+                    locked: panel.locked,
+                    size: panel.size,
+                    sourceData: panel.sourceData ? { ...panel.sourceData } : undefined,
+                    color: panel.color,
+                    undocked: panel.undocked,
+                    focused: panel.focused
+                };
+
+                // Filter features
+                for (const feat of panel.features) {
+                    if (keepFeatureSelection(feat.mapTileKey)) {
+                        updated.features.push(feat);
+                    }
+                }
+
+                // Validate sourceData if present
+                if (updated.sourceData && !keepSourceDataSelection(updated.sourceData.mapTileKey)) {
+                    delete updated.sourceData;
+                }
+
+                if (updated.features.length !== panel.features.length ||
+                    (panel.sourceData !== undefined && updated.sourceData === undefined)) {
+                    selectionChanged = true;
+                }
+
+                if (updated.features.length || updated.sourceData) {
+                    nextPanels.push(updated);
+                } else {
+                    selectionChanged = true;
+                }
+            }
+
+            if (selectionChanged || nextPanels.length !== panels.length) {
+                this.selectionState.next(nextPanels);
+            }
+            this.sanitizeInspectionComparisonForSelection(nextPanels);
+
+        });
+    }
 
 }

@@ -1,19 +1,19 @@
-import { HttpClient,HttpHeaders,HttpParams } from "@angular/common/http";
+import { HttpClient, HttpHeaders, HttpParams } from "@angular/common/http";
 import { Injectable } from "@angular/core";
-import { catchError,forkJoin,map,Observable,of,timeout } from "rxjs";
+import { catchError, forkJoin, map, Observable, of, timeout } from "rxjs";
 import { z } from "zod";
-import { clampLocationSearchResultLimit,DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,MAX_LOCATION_SEARCH_RESULT_LIMIT } from "../shared/app-state.model";
+
 import { AppStateService } from "../shared/appstate.service";
 
 import type { LocationArea } from "../mapview/render-view.model";
 import {
-AppConfigService,
-LocationSearchAdapterConfig,
-LocationSearchFieldSelector,
-LocationSearchProviderConfig
+    AppConfigService,
+    LocationSearchAdapterConfig,
+    LocationSearchFieldSelector,
+    LocationSearchProviderConfig
 } from "../shared/app-config.service";
 import { SearchTarget } from "./jump.service";
-import { locationExtent,locationGeometryExtent,locationPoint,locationPolygons } from "./location-geometry";
+import { locationExtent, locationGeometryExtent, locationPoint, locationPolygons } from "./location-geometry";
 
 export type LocationPoint = [number, number];
 export type LocationAabb = [LocationPoint, LocationPoint];
@@ -29,7 +29,7 @@ export interface LocationSearchMatch {
     lonLat?: LocationPoint;
     aabb?: LocationAabb;
     geometryAvailable?: boolean;
-    attribution?: {name: string; url?: string; licenseUrl?: string};
+    attribution?: { name: string; url?: string; licenseUrl?: string };
     source?: string;
     countryCode?: string;
     population?: number;
@@ -75,14 +75,14 @@ export function normalizeLocationSearchPayload(raw: unknown): LocationSearchMatc
     const normalized: LocationSearchMatch = {
         id: value.id.trim(),
         name: value.name.trim(),
-        ...(point ? {lonLat: point} : {}),
-        ...(aabb ? {aabb} : {}),
+        ...(point ? { lonLat: point } : {}),
+        ...(aabb ? { aabb } : {}),
         providerId: value.providerId.trim(),
         providerName: value.providerName.trim()
     };
     if (typeof value.geometryAvailable === "boolean") normalized.geometryAvailable = value.geometryAvailable;
     if (value.attribution && typeof value.attribution.name === "string") {
-        normalized.attribution = {name: value.attribution.name.slice(0, 200)};
+        normalized.attribution = { name: value.attribution.name.slice(0, 200) };
         for (const key of ["url", "licenseUrl"] as const) {
             const url = value.attribution[key];
             if (typeof url === "string" && /^https?:\/\//i.test(url) && url.length <= 2048) normalized.attribution[key] = url;
@@ -272,7 +272,7 @@ function arrayNumbers(value: unknown): number[] | null {
     return result.every(entry => entry !== undefined) ? result as number[] : null;
 }
 
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class LocationSearchService {
 
     readonly locationSearchResultLimitState = this.persistence.registerState<number>({
@@ -283,9 +283,9 @@ export class LocationSearchService {
         fromStorage: (payload: any): number => clampLocationSearchResultLimit(payload)
     });
 
-    get locationSearchResultLimit() {return this.locationSearchResultLimitState.getValue();}
+    get locationSearchResultLimit() { return this.locationSearchResultLimitState.getValue(); }
 
-    set locationSearchResultLimit(val: number) {this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val));}
+    set locationSearchResultLimit(val: number) { this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val)); }
 
     constructor(
         private readonly httpClient: HttpClient,
@@ -356,8 +356,8 @@ export class LocationSearchService {
         const id = actionId.startsWith(prefix) ? actionId.slice(prefix.length) : undefined;
         if (!id || !/^wof:[1-9]\d*$/.test(id)) {
             // Legacy GeoNames payloads and external adapters keep their point contract.
-            return of(match?.lonLat ? {point: match.lonLat, label: match.name}
-                : {error: "This saved location is unavailable. Search for the place again."});
+            return of(match?.lonLat ? { point: match.lonLat, label: match.name }
+                : { error: "This saved location is unavailable. Search for the place again." });
         }
         if (match?.geometryAvailable === false) return of(this.navigationFromMatch(match));
         const provider = this.configuredMapgetLocationProvider();
@@ -369,7 +369,7 @@ export class LocationSearchService {
             }
         }
         params = params.set("id", id);
-        return this.httpClient.get<unknown>(provider.url, {params, headers: new HttpHeaders(provider.headers ?? {})}).pipe(
+        return this.httpClient.get<unknown>(provider.url, { params, headers: new HttpHeaders(provider.headers ?? {}) }).pipe(
             timeout(LOCATION_DETAIL_TIMEOUT_MS),
             map(response => {
                 const raw = Array.isArray(response) && response.length === 1 ? response[0] : undefined;
@@ -380,7 +380,7 @@ export class LocationSearchService {
                 const polygons = locationPolygons(raw.geometry);
                 const fresh = normalizeLocationSearchPayload({
                     ...raw, providerId: provider.id, providerName: provider.name,
-                    ...(polygons ? {geometryAvailable: true} : {})
+                    ...(polygons ? { geometryAvailable: true } : {})
                 }) ?? match;
                 return this.navigationFromMatch(fresh, polygons,
                     !polygons && (raw.geometry !== undefined || raw.geometryAvailable === true)
@@ -394,16 +394,18 @@ export class LocationSearchService {
     private navigationFromMatch(
         match?: LocationSearchMatch, polygons?: LocationArea["polygons"], reason?: string
     ): ResolvedLocationNavigation {
-        if (!match) return {error: reason ?? "This location has no usable position or extent."};
+        if (!match) return { error: reason ?? "This location has no usable position or extent." };
         const extent = locationExtent(match.aabb);
         const rectangle = polygons ? locationGeometryExtent(polygons, extent) : extent;
         if (rectangle) return {
-            area: {rectangle, ...(polygons ? {polygons} : {}), label: match.name, representativePoint: match.lonLat},
-            ...(reason ? {notice: `${reason} Showing its bounding extent.`} : {})
+            area: { rectangle, ...(polygons ? { polygons } : {}), label: match.name, representativePoint: match.lonLat },
+            ...(reason ? { notice: `${reason} Showing its bounding extent.` } : {})
         };
-        if (match.lonLat) return {point: match.lonLat, label: match.name,
-            ...(reason ? {notice: `${reason} Showing its representative point.`} : {})};
-        return {error: "This location has no usable position or extent."};
+        if (match.lonLat) return {
+            point: match.lonLat, label: match.name,
+            ...(reason ? { notice: `${reason} Showing its representative point.` } : {})
+        };
+        return { error: "This location has no usable position or extent." };
     }
 
     /** Returns the transient map label for an executable location payload. */
@@ -436,7 +438,7 @@ export class LocationSearchService {
             .set(provider.limitParam || "limit", String(limit));
         const headers = new HttpHeaders(provider.headers ?? {});
 
-        return this.httpClient.get<unknown>(provider.url, {params, headers}).pipe(
+        return this.httpClient.get<unknown>(provider.url, { params, headers }).pipe(
             map(payload => this.normalizeProviderResponse(provider, payload))
         );
     }
@@ -557,4 +559,17 @@ export class LocationSearchService {
             + (credit?.url ? ` | <a href="${escapeHtml(credit.url)}" target="_blank" rel="noopener noreferrer">Source</a>` : "")
             + (credit?.licenseUrl ? ` | <a href="${escapeHtml(credit.licenseUrl)}" target="_blank" rel="noopener noreferrer">License</a>` : "");
     }
+}
+
+export const DEFAULT_LOCATION_SEARCH_RESULT_LIMIT = 10;
+
+export const MAX_LOCATION_SEARCH_RESULT_LIMIT = 50;
+
+/** Clamps location-search hit limits from persisted state and preferences UI. */
+export function clampLocationSearchResultLimit(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
+    }
+    return Math.min(MAX_LOCATION_SEARCH_RESULT_LIMIT, Math.max(1, Math.trunc(numeric)));
 }

@@ -1,13 +1,18 @@
-import {NgZone} from "@angular/core";
-import {AppActionService} from "../actions/app-action.service";
-import {ActionInput, ActionOutput, applied, rejectAction} from "../actions/app-action";
-import {ViewerActionFailure} from "../actions/viewer-action-relay.contract";
-import {navigationActions} from "./location-navigation.service.declarations";
-import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
-import {InspectionSelectionService} from "../inspection/inspection-selection.service";
-import {coreLib} from "../integrations/wasm";
-import { Injectable,OnDestroy } from "@angular/core";
-import { merge,skip,Subscription } from "rxjs";
+import { Injectable, NgZone, OnDestroy } from "@angular/core";
+import { merge, skip, Subscription } from "rxjs";
+import {
+    ActionCandidateHistory,
+    ActionInput,
+    ActionOutput,
+    AppActionCandidate,
+    applied,
+    rejectAction
+} from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
+import { ViewerActionFailure } from "../actions/viewer-action-relay.contract";
+import { InspectionSelectionService } from "../inspection/inspection-selection.service";
+import { coreLib } from "../integrations/wasm";
+import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
 import { MapViewStateService } from "../mapview/map-view-state.service";
 import { MapViewService } from "../mapview/map-view.service";
 import { ViewLayerDiagnosticsService } from "../mapview/view-layer-diagnostics.service";
@@ -15,10 +20,16 @@ import { deepEquals } from "../shared/app-state";
 import { AppStateService } from "../shared/appstate.service";
 import { InfoMessageService } from "../shared/info.service";
 import { JumpTargetService } from "./jump.service";
-import { LocationSearchService,type ResolvedLocationNavigation } from "./location.search.service";
+import { locationActions, navigationActions } from "./location-navigation.service.declarations";
+import {
+    LocationSearchMatch,
+    LocationSearchService,
+    normalizeLocationSearchPayload,
+    type ResolvedLocationNavigation
+} from "./location.search.service";
 
 /** Owns one selected location lookup until its single camera commit; later user actions win. */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class LocationNavigationService implements OnDestroy {
     private pending?: Subscription;
     private readonly boundaryFeedback: Subscription;
@@ -67,15 +78,14 @@ export class LocationNavigationService implements OnDestroy {
         this.views.clearLocationHighlightTopic.next(targetView);
         const pending = new Subscription();
         this.pending = pending;
-        const layoutRevision = this.views.viewLayoutRevision;
         const pose = renderer.getLiveCameraState();
         const cancel = () => this.cancel();
-        const stillCurrent = () => !pending.closed && this.views.viewLayoutRevision === layoutRevision
-            && !!target && this.views.resolveCapturedView(target) === renderer && this.viewSettings.focusedView === targetView
+        const stillCurrent = () => !pending.closed && !!target && this.views.resolveCapturedView(target) === renderer
+            && this.viewSettings.focusedViewIdState.value === target.viewId
             && !renderer.isCameraInteractionActive() && deepEquals(renderer.getLiveCameraState(), pose);
         pending.add(renderer.rendererInvalidated.subscribe(cancel));
-        pending.add(this.viewSettings.focusedViewChanges.pipe(skip(1)).subscribe(cancel));
-        pending.add(this.viewSettings.viewIdsState.pipe(skip(1)).subscribe(cancel));
+        pending.add(this.viewSettings.focusedViewIdState.pipe(skip(1)).subscribe(id => { if (id !== target!.viewId) cancel(); }));
+        pending.add(this.viewSettings.viewIdsState.pipe(skip(1)).subscribe(() => { if (!stillCurrent()) cancel(); }));
         pending.add(this.viewSettings.viewSyncState.pipe(skip(1)).subscribe(cancel));
         pending.add(this.state.stateApplied.subscribe(cancel));
         pending.add(this.diagnostics.cameraInteracting$.subscribe(active => { if (active) cancel(); }));
@@ -91,7 +101,7 @@ export class LocationNavigationService implements OnDestroy {
                 if (result.area && (rect.width < 1 || rect.height < 1)) return;
                 // Our own camera publication must not look like a competing navigation.
                 cancel();
-                this.commit(result, targetView);
+                this.commit(result, this.viewSettings.indexOfView(target!.viewId));
             };
             commit();
             if (!pending.closed) {
@@ -111,19 +121,25 @@ export class LocationNavigationService implements OnDestroy {
     /** Publishes a location result after all asynchronous ownership checks have completed. */
     private commit(result: ResolvedLocationNavigation, targetView: number): void {
         if (result.error) { this.messages.showError(result.error); return; }
-        if (result.area) this.views.moveToLocationAreaTopic.next({targetView, area: result.area});
+        if (result.area) this.views.moveToLocationAreaTopic.next({ targetView, area: result.area });
         else if (result.point) {
             const [x, y] = result.point;
-            this.views.moveToWgs84PositionTopic.next({targetView, x, y,
-                z: this.viewSettings.cameraViewDataState.getValue(targetView).destination.alt});
-            if (result.label) this.views.showLocationLabelTopic.next({targetView, x, y, label: result.label});
+            this.views.moveToWgs84PositionTopic.next({
+                targetView, x, y,
+                z: this.viewSettings.cameraViewDataState.getValue(targetView).destination.alt
+            });
+            if (result.label) this.views.showLocationLabelTopic.next({ targetView, x, y, label: result.label });
             this.jumps.markedPosition.next([y, x, 0]);
         }
         if (result.notice) this.messages.showInfo(result.notice);
     }
 
-
     registerActions(actions: AppActionService): void {
+        actions.registerAction(locationActions.navigateLocation, input => {
+            if (!this.locations.isLocationTargetId(input.actionId)) rejectAction("Invalid location identity", "invalid_arguments");
+            this.navigate(input.actionId, input.payload);
+            return applied();
+        }, (query, history) => this.locationCandidates(query, history));
         actions.registerAction(navigationActions.navigate, (input, signal) => this.navigateToTarget(input, signal));
     }
 
@@ -137,8 +153,8 @@ export class LocationNavigationService implements OnDestroy {
         const renderers = targets.map(target => this.views.resolveCapturedView(target)!);
         this.views.navigationStarted.next();
         const controller = new AbortController();
-        const abort = () => controller.abort(new ViewerActionFailure({code: "cancelled", message: "Navigation was interrupted", outcome: "not_applied"}));
-        signal?.addEventListener("abort", abort, {once: true});
+        const abort = () => controller.abort(new ViewerActionFailure({ code: "cancelled", message: "Navigation was interrupted", outcome: "not_applied" }));
+        signal?.addEventListener("abort", abort, { once: true });
         if (signal?.aborted) abort();
         const guards = new Subscription();
         const poses = renderers.map(view => view.getLiveCameraState());
@@ -162,13 +178,13 @@ export class LocationNavigationService implements OnDestroy {
             if (features && loaded?.length !== features.length) rejectAction("Some requested features could not be loaded");
             const position = loaded ? this.inspections.featureSetZoomTarget(loaded) : undefined;
             if (loaded && !position) rejectAction("Some requested features have no usable geometry extent");
-            let bounds: {west: number; south: number; east: number; north: number} | undefined;
+            let bounds: { west: number; south: number; east: number; north: number } | undefined;
             if ("bounds" in target) bounds = target.bounds;
             if ("mapTileKey" in target) {
                 const parsed = this.stream.parseMapPartitionKeySafe(target.mapTileKey);
                 if (!parsed || parsed[2].kind !== "tile") rejectAction("Tile fitting requires a tile partition", "invalid_arguments");
                 const box = coreLib.getTileBox(parsed[2].id);
-                bounds = {west: box[0], south: box[1], east: box[2], north: box[3]};
+                bounds = { west: box[0], south: box[1], east: box[2], north: box[3] };
             }
             if (bounds && (bounds.west >= bounds.east || bounds.south >= bounds.north)) rejectAction("Bounds must have positive extent and not cross the antimeridian", "invalid_arguments");
             guards.unsubscribe();
@@ -177,8 +193,8 @@ export class LocationNavigationService implements OnDestroy {
                 const index = this.views.requireViewIndex(input.viewId);
                 this.state.transaction(() => {
                     this.viewSettings.focusedView = index;
-                    if (position) this.views.moveToWgs84PositionTopic.next({targetView: index, ...position});
-                    else this.views.moveToRectangleTopic.next({targetView: index, rectangle: bounds!});
+                    if (position) this.views.moveToWgs84PositionTopic.next({ targetView: index, ...position });
+                    else this.views.moveToRectangleTopic.next({ targetView: index, rectangle: bounds! });
                 });
                 return applied();
             });
@@ -188,5 +204,34 @@ export class LocationNavigationService implements OnDestroy {
         }
     }
 
+    private suggestionQuery = "";
+    private suggestions: LocationSearchMatch[] = [];
+
+    /** The UI owns debounce/cancellation; the location owner retains only the current result set. */
+    updateSuggestions(query: string, matches: LocationSearchMatch[]): void {
+        this.suggestionQuery = query;
+        this.suggestions = matches;
+    }
+
+    private locationCandidates(query: string, history?: ActionCandidateHistory): AppActionCandidate<ActionInput<typeof locationActions.navigateLocation>>[] {
+        const saved = normalizeLocationSearchPayload(history?.payload);
+        const matches = saved ? [saved] : query.trim() === this.suggestionQuery ? this.suggestions : [];
+        const candidates: AppActionCandidate<ActionInput<typeof locationActions.navigateLocation>>[] = matches.map(match => {
+            const target = this.locations.createSearchTarget(match);
+            return {
+                id: target.id, name: target.name, label: target.label, icon: target.icon,
+                iconType: target.iconType, color: target.color, enabled: true, payload: match,
+                input: { actionId: target.id, payload: match }
+            };
+        });
+        if (history && !candidates.some(candidate => candidate.id === history.id) && this.locations.isLocationTargetId(history.id)) {
+            candidates.push({
+                id: history.id, name: "Saved location", label: "Resolve saved location in the focused map", icon: "location_city",
+                iconType: "material", color: "green", enabled: true, payload: history.payload,
+                input: { actionId: history.id, payload: history.payload }
+            });
+        }
+        return candidates;
+    }
 
 }

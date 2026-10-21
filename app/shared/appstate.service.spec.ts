@@ -1,6 +1,6 @@
 import "@angular/compiler";
-import {stateOwners} from '../../test/state-owners';
-import {RenderPreferencesService} from "../mapview/render-preferences.service";
+import { stateOwners } from '../../test/state-owners';
+import { RenderPreferencesService } from "../mapview/render-preferences.service";
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { Subject } from 'rxjs';
 
@@ -8,12 +8,9 @@ import type { Event, Router } from '@angular/router';
 import { NavigationEnd, NavigationStart } from '@angular/router';
 import { Cartographic } from '../integrations/geo';
 
-import {
-    AppStateService,
-    VIEW_SYNC_MOVEMENT,
-    VIEW_SYNC_POSITION
-} from './appstate.service';
-import {MapTreeNode} from "../mapdata/map.tree.model";
+import { AppStateService } from "./appstate.service";
+import { VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION } from "../mapview/map-view-state.model";
+import { MapTreeNode } from "../mapdata/map.tree.model";
 
 // @ts-expect-error this is a mock router
 interface RouterStub extends Partial<Router> {
@@ -66,7 +63,7 @@ const layerInfo = (layerId: string, type = "Feature") => ({
     canWrite: false,
     coverage: [],
     featureTypes: [],
-    version: {major: 1, minor: 0, patch: 0},
+    version: { major: 1, minor: 0, patch: 0 },
     zoomLevels: [],
 });
 
@@ -151,10 +148,10 @@ describe('AppStateService', () => {
             appliedMarkerValues.push(stateOwners(service).coordinates.markerState.getValue());
         });
 
-        await service.replaceUrlState({v2: '1', m: '1'});
+        await service.replaceUrlState({ v2: '1', m: '1' });
 
         expect(routerStub.navigate).toHaveBeenCalledWith([], {
-            queryParams: {v2: '1', m: '1'},
+            queryParams: { v2: '1', m: '1' },
             queryParamsHandling: 'replace',
             replaceUrl: true,
         });
@@ -171,7 +168,7 @@ describe('AppStateService', () => {
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
-        await expect(service.replaceUrlState({v2: '1'})).rejects.toThrow('before AppStateService is ready');
+        await expect(service.replaceUrlState({ v2: '1' })).rejects.toThrow('before AppStateService is ready');
         expect(routerStub.navigate).not.toHaveBeenCalled();
 
         service.ngOnDestroy();
@@ -195,7 +192,7 @@ describe('AppStateService', () => {
             undocked: false,
         }];
 
-        stateOwners(service).layerState.prune(new Map([
+        stateOwners(service).inspectionState.pruneCatalog(new Map([
             ["Very-Large-Map", new MapTreeNode({
                 mapId: "Very-Large-Map",
                 sourceId: "Very-Large-Map",
@@ -203,14 +200,13 @@ describe('AppStateService', () => {
                 maxParallelJobs: 1,
                 addOn: false,
                 extraJsonAttachment: {},
-                layers: {Road: layerInfo("Road")},
+                layers: { Road: layerInfo("Road") },
             } as any)]
-        ]), new Map());
+        ]));
 
         expect(stateOwners(service).inspectionState.selection).toHaveLength(1);
         expect(stateOwners(service).inspectionState.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:22100770000d");
     });
-
 
     it('keeps selected features while datasource layers are still initializing', () => {
         const routerStub = createRouterStub();
@@ -229,7 +225,7 @@ describe('AppStateService', () => {
             undocked: false,
         }];
 
-        stateOwners(service).layerState.prune(new Map([
+        stateOwners(service).inspectionState.pruneCatalog(new Map([
             ["Very-Large-Map", new MapTreeNode({
                 mapId: "Very-Large-Map",
                 sourceId: "Very-Large-Map",
@@ -240,7 +236,7 @@ describe('AppStateService', () => {
                 extraJsonAttachment: {},
                 layers: {},
             } as any)]
-        ]), new Map());
+        ]));
 
         expect(stateOwners(service).inspectionState.selection).toHaveLength(1);
         expect(stateOwners(service).inspectionState.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:545554858");
@@ -264,7 +260,7 @@ describe('AppStateService', () => {
             undocked: false,
         }];
 
-        stateOwners(service).layerState.prune(new Map([
+        stateOwners(service).inspectionState.pruneCatalog(new Map([
             ["Very-Large-Map", new MapTreeNode({
                 mapId: "Very-Large-Map",
                 sourceId: "Very-Large-Map",
@@ -272,9 +268,9 @@ describe('AppStateService', () => {
                 maxParallelJobs: 1,
                 addOn: false,
                 extraJsonAttachment: {},
-                layers: {Road: layerInfo("Road")},
+                layers: { Road: layerInfo("Road") },
             } as any)]
-        ]), new Map());
+        ]));
 
         expect(stateOwners(service).inspectionState.selection).toHaveLength(1);
         expect(stateOwners(service).inspectionState.selection[0].focused).toBe(true);
@@ -301,7 +297,7 @@ describe('AppStateService', () => {
             undocked: false,
         }];
 
-        stateOwners(service).layerState.prune(new Map([
+        stateOwners(service).inspectionState.pruneCatalog(new Map([
             ["Provider/Sample Munich", new MapTreeNode({
                 mapId: "Provider/Sample Munich",
                 sourceId: "Provider/Sample Munich",
@@ -309,9 +305,9 @@ describe('AppStateService', () => {
                 maxParallelJobs: 1,
                 addOn: false,
                 extraJsonAttachment: {},
-                layers: {Landmark: layerInfo("Landmark")},
+                layers: { Landmark: layerInfo("Landmark") },
             } as any)]
-        ]), new Map());
+        ]));
 
         expect(stateOwners(service).inspectionState.selection).toHaveLength(1);
         expect(stateOwners(service).inspectionState.selection[0].focused).toBe(true);
@@ -687,9 +683,9 @@ describe('AppStateService', () => {
             '5~1f~Features:map:layer:tile~feature-1~30:20~abc123~0'
         ]));
         localStorage.setItem('featureSearchState', JSON.stringify([
-            {id: 'feature-search-1', query: '**.speed > 80'}
+            { id: 'feature-search-1', query: '**.speed > 80' }
         ]));
-        const routerStub = createRouterStub({sel: '', s: '[]'});
+        const routerStub = createRouterStub({ sel: '', s: '[]' });
         const infoServiceStub = {
             showError: vi.fn(),
             showSuccess: vi.fn(),
@@ -716,8 +712,8 @@ describe('AppStateService', () => {
     it('explicitly restores persisted dialogs and panels without waiting for NavigationEnd', async () => {
         localStorage.setItem('dialogLayouts', JSON.stringify({
             'preferences-dialog': {
-                position: {left: 10, top: 20},
-                size: {width: 400, height: 300},
+                position: { left: 10, top: 20 },
+                size: { width: 400, height: 300 },
                 open: true
             }
         }));
@@ -727,7 +723,7 @@ describe('AppStateService', () => {
             '7~1f~Features:map:layer:tile~feature-7~30:20~abcdef~0'
         ]));
         localStorage.setItem('featureSearchState', JSON.stringify([
-            {id: 'feature-search-7', query: '**.speed > 80'}
+            { id: 'feature-search-7', query: '**.speed > 80' }
         ]));
         const routerStub = createRouterStub();
         const infoServiceStub = {
@@ -772,7 +768,7 @@ describe('AppStateService', () => {
         stateOwners(service).viewSettings.numViews = 2;
 
         service.initializePersistence();
-        stateOwners(service).searchService.addFeatureSearch({query: '**.speed > 80'});
+        stateOwners(service).searchService.addFeatureSearch({ query: '**.speed > 80' });
         await flushMicrotasks();
 
         const stored = JSON.parse(localStorage.getItem('featureSearchState') ?? '[]');
@@ -811,11 +807,15 @@ describe('AppStateService', () => {
         let restored: AppStateService | undefined;
         try {
             stateOwners(service).layerState.layerNames = ['Map/Lane'];
-            stateOwners(service).layerState.setMapLayerConfig('Map', 'Lane', [{visible: true, level: 13, autoLevel: false}]);
-            stateOwners(service).viewSettings.cameraViewDataState.next(0, {destination: {lon: 11, lat: 48, alt: 900},
-                orientation: {heading: 0, pitch: -0.75, roll: 0}, position: [0, 0, 0]});
-            stateOwners(service).inspectionState.selection = [{id: 0, features: [{mapTileKey: 'Features:Map:Lane:545379780', featureId: 'Lane.1'}],
-                locked: true, size: [30, 20], color: '#fff314', undocked: false}];
+            stateOwners(service).layerState.setMapLayerConfig('Map', 'Lane', [{ visible: true, level: 13, autoLevel: false }]);
+            stateOwners(service).viewSettings.cameraViewDataState.next(0, {
+                destination: { lon: 11, lat: 48, alt: 900 },
+                orientation: { heading: 0, pitch: -0.75, roll: 0 }, position: [0, 0, 0]
+            });
+            stateOwners(service).inspectionState.selection = [{
+                id: 0, features: [{ mapTileKey: 'Features:Map:Lane:545379780', featureId: 'Lane.1' }],
+                locked: true, size: [30, 20], color: '#fff314', undocked: false
+            }];
             const previous = window.location.href;
             const link = new URL(service.shareableUrl());
             expect(window.location.href).toBe(previous);
@@ -898,7 +898,7 @@ describe('AppStateService', () => {
 
         const config = stateOwners(service).layerState.materializeLayerDefaults('Classic-2.5.2-Sample', 'NDS.Classic-BMD');
         expect(config).toEqual([
-            {autoLevel: true, visible: false, level: 13},
+            { autoLevel: true, visible: false, level: 13 },
         ]);
         expect(stateOwners(service).layerState.layerNamesState.getValue()).toEqual([
             'MapA/Lane',
@@ -1211,8 +1211,8 @@ describe('AppStateService', () => {
         stateOwners(service).layerState.layerNamesState.next(['m1/layerA']);
         for (const index of [0, 1]) {
             stateOwners(service).viewSettings.cameraViewDataState.next(index, {
-                destination: {lon: 11 + index, lat: 48 + index, alt: 1000 + index},
-                orientation: {heading: index, pitch: -0.5, roll: 0},
+                destination: { lon: 11 + index, lat: 48 + index, alt: 1000 + index },
+                orientation: { heading: index, pitch: -0.5, roll: 0 },
                 position: [index, index + 1, index + 2]
             });
             stateOwners(service).viewSettings.mode2dState.next(index, index === 0);
@@ -1228,19 +1228,19 @@ describe('AppStateService', () => {
             stateOwners(service).viewSettings.viewTileGridColorState.next(index, index === 0 ? '123abc' : 'abcdef');
             stateOwners(service).viewSettings.viewTileGridOpacityState.next(index, 30 + index);
             stateOwners(service).layerState.setMapPresetSelection(index, 'm1', `map-preset-${index}`);
-            stateOwners(service).layerState.setLayerPresetSelection(index, 'm1', 'layerA', {styleId: 'overlay', presetId: `preset-${index}`});
+            stateOwners(service).layerState.setLayerPresetSelection(index, 'm1', 'layerA', { styleId: 'overlay', presetId: `preset-${index}` });
         }
         stateOwners(service).layerState.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.2, 0.8]);
         const searches = [[0], [1], [0, 1]].map(selectedViewIndices =>
-            stateOwners(service).searchService.addFeatureSearch({query: 'Way', selectedViewIndices}));
+            stateOwners(service).searchService.addFeatureSearch({ query: 'Way', selectedViewIndices }));
         stateOwners(service).inspectionState.setSelection([feature('Way.1')]);
         const selection = stateOwners(service).inspectionState.selectionState.getValue();
         const survivor = 1 - removed;
         const slots = [stateOwners(service).viewSettings.cameraViewDataState, stateOwners(service).viewSettings.mode2dState, stateOwners(service).layerState.layerSyncOptionsState,
-            stateOwners(service).viewSettings.backgroundState, stateOwners(service).layerState.layerVisibilityState, stateOwners(service).layerState.layerZoomLevelState,
-            stateOwners(service).layerState.layerAutoZoomLevelState, stateOwners(service).viewSettings.viewTileBordersState, stateOwners(service).viewSettings.viewTileGridModeState,
-            stateOwners(service).viewSettings.viewTileGridLevelState, stateOwners(service).viewSettings.viewTileGridAutoLevelState, stateOwners(service).viewSettings.viewTileGridColorState,
-            stateOwners(service).viewSettings.viewTileGridOpacityState, stateOwners(service).layerState.layerPresetSelectionState, stateOwners(service).layerState.mapPresetSelectionState];
+        stateOwners(service).viewSettings.backgroundState, stateOwners(service).layerState.layerVisibilityState, stateOwners(service).layerState.layerZoomLevelState,
+        stateOwners(service).layerState.layerAutoZoomLevelState, stateOwners(service).viewSettings.viewTileBordersState, stateOwners(service).viewSettings.viewTileGridModeState,
+        stateOwners(service).viewSettings.viewTileGridLevelState, stateOwners(service).viewSettings.viewTileGridAutoLevelState, stateOwners(service).viewSettings.viewTileGridColorState,
+        stateOwners(service).viewSettings.viewTileGridOpacityState, stateOwners(service).layerState.layerPresetSelectionState, stateOwners(service).layerState.mapPresetSelectionState];
         const expected = slots.map(slot => slot.getValue(survivor));
         stateOwners(service).viewSettings.focusedView = removed;
         stateOwners(service).viewSettings.viewSync = [VIEW_SYNC_POSITION];
@@ -1274,10 +1274,10 @@ describe('AppStateService', () => {
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).viewSettings.numViewsState.next(3);
-        const camera = {...stateOwners(service).viewSettings.cameraViewDataState.getValue(2), position: [1, 2, 3] as [number, number, number]};
+        const camera = { ...stateOwners(service).viewSettings.cameraViewDataState.getValue(2), position: [1, 2, 3] as [number, number, number] };
         const defaultBackground = stateOwners(service).viewSettings.backgroundState.getValue(2);
         stateOwners(service).viewSettings.retainViews([0, 2], new Map([[2, camera]]));
-        expect(Array.from({length: stateOwners(service).viewSettings.numViews}, (_, index) => stateOwners(service).viewSettings.backgroundState.getValue(index))).toEqual([defaultBackground, defaultBackground]);
+        expect(Array.from({ length: stateOwners(service).viewSettings.numViews }, (_, index) => stateOwners(service).viewSettings.backgroundState.getValue(index))).toEqual([defaultBackground, defaultBackground]);
         expect(stateOwners(service).viewSettings.cameraViewDataState.getValue(1)).toEqual(camera);
         expect(stateOwners(service).viewSettings.cameraViewDataState.getValue(0).position).not.toEqual(camera.position);
         service.ngOnDestroy();
@@ -1380,13 +1380,13 @@ describe('AppStateService', () => {
     });
 
     it('retires browser-owned map-preset definitions and ignores legacy config state', () => {
-        localStorage.setItem('mapPresets', JSON.stringify([{id: 'legacy'}]));
+        localStorage.setItem('mapPresets', JSON.stringify([{ id: 'legacy' }]));
         localStorage.setItem('erdblickConfigDefaultStateMeta', JSON.stringify({
             version: 1,
             sourceHash: 'old',
             entries: {
-                mapPresets: {owner: 'user', valueHash: 'old'},
-                unrelated: {owner: 'user', valueHash: 'keep'}
+                mapPresets: { owner: 'user', valueHash: 'old' },
+                unrelated: { owner: 'user', valueHash: 'keep' }
             }
         }));
         const routerStub = createRouterStub();
@@ -1394,7 +1394,7 @@ describe('AppStateService', () => {
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
-        const errors = service.seedConfigDefaultState({mapPresets: [{id: 'legacy'}]}, 'map-preset-config');
+        const errors = service.seedConfigDefaultState({ mapPresets: [{ id: 'legacy' }] }, 'map-preset-config');
 
         expect(errors).toEqual([]);
         expect(localStorage.getItem('mapPresets')).toBeNull();
@@ -1619,7 +1619,7 @@ describe('AppStateService', () => {
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
         stateOwners(service).viewSettings.numViews = 2;
         stateOwners(service).viewSettings.focusedView = 0;
-        const orientation = {heading: 0.25, pitch: -0.5, roll: 0};
+        const orientation = { heading: 0.25, pitch: -0.5, roll: 0 };
 
         stateOwners(service).viewSettings.setView(
             0,
@@ -2589,13 +2589,17 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
-        expect(service.seedConfigDefaultState({connectionRetryInitialDelayMs: 7000,
-            connectionRetryMaxDelayMs: 90000}, "connection-config")).toEqual([]);
+        expect(service.seedConfigDefaultState({
+            connectionRetryInitialDelayMs: 7000,
+            connectionRetryMaxDelayMs: 90000
+        }, "connection-config")).toEqual([]);
         expect(stateOwners(service).connectionPreferences.connectionRetryPolicy.initialDelayMs).toBe(7000);
-        stateOwners(service).connectionPreferences.setConnectionRetryPolicy({...stateOwners(service).connectionPreferences.connectionRetryPolicy, enabled: false, backoffMultiplier: 3});
-        expect(service.exportSnapshot()).toMatchObject({connectionRetryEnabled: 0,
-            connectionRetryInitialDelayMs: 7000, connectionRetryBackoffMultiplier: 3});
-        expect(() => stateOwners(service).connectionPreferences.setConnectionRetryPolicy({...stateOwners(service).connectionPreferences.connectionRetryPolicy, maxDelayMs: 0})).toThrow();
+        stateOwners(service).connectionPreferences.setConnectionRetryPolicy({ ...stateOwners(service).connectionPreferences.connectionRetryPolicy, enabled: false, backoffMultiplier: 3 });
+        expect(service.exportSnapshot()).toMatchObject({
+            connectionRetryEnabled: 0,
+            connectionRetryInitialDelayMs: 7000, connectionRetryBackoffMultiplier: 3
+        });
+        expect(() => stateOwners(service).connectionPreferences.setConnectionRetryPolicy({ ...stateOwners(service).connectionPreferences.connectionRetryPolicy, maxDelayMs: 0 })).toThrow();
         expect(stateOwners(service).connectionPreferences.connectionRetryPolicy.maxDelayMs).toBe(90000);
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -2606,19 +2610,23 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
-        expect(service.seedConfigDefaultState({pointCloudDetailPixels: 4,
-            pointCloudGpuMemoryMiB: 128}, 'point-cloud-config')).toEqual([]);
+        expect(service.seedConfigDefaultState({
+            pointCloudDetailPixels: 4,
+            pointCloudGpuMemoryMiB: 128
+        }, 'point-cloud-config')).toEqual([]);
         expect(serviceRenderPreferences.pointCloudPolicy.detailPixels).toBe(4);
-        serviceRenderPreferences.setPointCloudPolicy({...serviceRenderPreferences.pointCloudPolicy, enabled: false, workingMemoryMiB: 256});
+        serviceRenderPreferences.setPointCloudPolicy({ ...serviceRenderPreferences.pointCloudPolicy, enabled: false, workingMemoryMiB: 256 });
         const snapshot = service.exportSnapshot();
-        expect(snapshot).toMatchObject({pointCloudDownsamplingEnabled: 0,
-            pointCloudDetailPixels: 4, pointCloudWorkingMemoryMiB: 256, pointCloudGpuMemoryMiB: 128});
+        expect(snapshot).toMatchObject({
+            pointCloudDownsamplingEnabled: 0,
+            pointCloudDetailPixels: 4, pointCloudWorkingMemoryMiB: 256, pointCloudGpuMemoryMiB: 128
+        });
         expect(serviceRenderPreferences.pointCloudDetailPixelsState.isUrlState()).toBe(false);
-        expect(() => serviceRenderPreferences.setPointCloudPolicy({...serviceRenderPreferences.pointCloudPolicy, gpuMemoryMiB: 0})).toThrow();
+        expect(() => serviceRenderPreferences.setPointCloudPolicy({ ...serviceRenderPreferences.pointCloudPolicy, gpuMemoryMiB: 0 })).toThrow();
         expect(serviceRenderPreferences.pointCloudPolicy.gpuMemoryMiB).toBe(128);
-        expect(service.importSnapshot({pointCloudDetailPixels: 8})).toEqual([]);
+        expect(service.importSnapshot({ pointCloudDetailPixels: 8 })).toEqual([]);
         expect(serviceRenderPreferences.pointCloudPolicy.detailPixels).toBe(8);
-        expect(service.importSnapshot({pointCloudWorkingMemoryMiB: -1}).length).toBeGreaterThan(0);
+        expect(service.importSnapshot({ pointCloudWorkingMemoryMiB: -1 }).length).toBeGreaterThan(0);
         expect(serviceRenderPreferences.pointCloudPolicy.workingMemoryMiB).toBe(256);
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -2691,8 +2699,8 @@ describe('AppStateService', () => {
         const errors = service.importSnapshot({
             dialogLayouts: {
                 "advanced-preferences-dialog": {
-                    position: {left: 10, top: 20},
-                    size: {width: 400, height: 300},
+                    position: { left: 10, top: 20 },
+                    size: { width: 400, height: 300 },
                     open: true
                 }
             }
@@ -2716,13 +2724,13 @@ describe('AppStateService', () => {
             styleEditorTarget: 'generic',
             dialogLayouts: {
                 "styles-dialog": {
-                    position: {left: 10, top: 20},
-                    size: {width: 500, height: 400},
+                    position: { left: 10, top: 20 },
+                    size: { width: 500, height: 400 },
                     open: true
                 },
                 "style-editor-dialog": {
-                    position: {left: 30, top: 40},
-                    size: {width: 600, height: 500},
+                    position: { left: 30, top: 40 },
+                    size: { width: 600, height: 500 },
                     open: true
                 }
             }
@@ -2787,7 +2795,7 @@ describe('AppStateService', () => {
         await flushMicrotasks();
         stateOwners(service).layout.mapsOpenState.next(true);
         stateOwners(service).layerState.stylesState.replacePositional(new Map([['old/Lane/style/topology', [true]]]));
-        await service.replaceUrlState({v2: '1', n: '1', lon: '11.66', lat: '48.25', alt: '128000', map: 'Very-Large-Map', l: 'Road:0', v: '1'}, true);
+        await service.replaceUrlState({ v2: '1', n: '1', lon: '11.66', lat: '48.25', alt: '128000', map: 'Very-Large-Map', l: 'Road:0', v: '1' }, true);
         expect(stateOwners(service).layout.mapsOpenState.getValue()).toBe(false);
         expect(stateOwners(service).layerState.stylesState.positionalValues().has('old/Lane/style/topology')).toBe(false);
         expect(stateOwners(service).layerState.layerNamesState.getValue()).toEqual(['Very-Large-Map/Road']);
@@ -2803,7 +2811,7 @@ describe('AppStateService', () => {
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
-        expect(() => service.replaceSnapshotState({marker: true}))
+        expect(() => service.replaceSnapshotState({ marker: true }))
             .toThrow('before AppStateService is ready');
 
         service.ngOnDestroy();
@@ -3021,10 +3029,10 @@ describe('AppStateService', () => {
             const router = createRouterStub();
             const registry = new AppStateService(router as unknown as Router, infoServiceStub());
             const owners = stateOwners(registry);
-            expect(registry.seedConfigDefaultState({numberOfViews: count}, `config-${count}`)).toEqual([]);
+            expect(registry.seedConfigDefaultState({ numberOfViews: count }, `config-${count}`)).toEqual([]);
             router.events.next(new NavigationEnd(1, '/', '/'));
             await flushMicrotasks();
-            return {registry, owners, router};
+            return { registry, owners, router };
         }
         const first = await launch(1);
         if (userOwned) {
@@ -3049,7 +3057,7 @@ describe('AppStateService', () => {
         const registry = new AppStateService(router as unknown as Router, infoServiceStub());
         const owners = stateOwners(registry);
         const ids = owners.viewSettings.viewIds;
-        expect(registry.seedConfigDefaultState({marker: true}, 'marker-only')).toEqual([]);
+        expect(registry.seedConfigDefaultState({ marker: true }, 'marker-only')).toEqual([]);
         expect(owners.viewSettings.viewIds).toBe(ids);
         const meta = JSON.parse(localStorage.getItem('erdblickConfigDefaultStateMeta')!);
         for (const key of ['viewIds', 'numberOfViews', 'focus']) expect(meta.entries[key]).toBeUndefined();
@@ -3069,7 +3077,7 @@ describe('AppStateService', () => {
         const before = registry.exportSnapshot();
         const url = window.location.href;
         vi.mocked(router.navigate).mockClear();
-        await expect(registry.replaceUrlState({v2: '1', n: '2', vid, m: '0'}, true)).rejects.toThrow();
+        await expect(registry.replaceUrlState({ v2: '1', n: '2', vid, m: '0' }, true)).rejects.toThrow();
         expect(registry.exportSnapshot()).toEqual(before);
         expect(window.location.href).toBe(url);
         expect(router.navigate).not.toHaveBeenCalled();
@@ -3106,7 +3114,7 @@ describe('AppStateService', () => {
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
-        const errors = service.seedConfigDefaultState({coordinatesEnabled: false}, "coordinates-cfg");
+        const errors = service.seedConfigDefaultState({ coordinatesEnabled: false }, "coordinates-cfg");
         expect(errors).toEqual([]);
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -3127,7 +3135,7 @@ describe('AppStateService', () => {
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
-        service.seedConfigDefaultState({marker: true}, "cfg-hash-2");
+        service.seedConfigDefaultState({ marker: true }, "cfg-hash-2");
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -3156,7 +3164,7 @@ describe('AppStateService', () => {
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
-        service.seedConfigDefaultState({marker: true}, "cfg-hash-3");
+        service.seedConfigDefaultState({ marker: true }, "cfg-hash-3");
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -3185,7 +3193,7 @@ describe('AppStateService', () => {
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
-        service.seedConfigDefaultState({marker: true}, "cfg-hash-4");
+        service.seedConfigDefaultState({ marker: true }, "cfg-hash-4");
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -3208,13 +3216,13 @@ describe('AppStateService', () => {
             }
         }));
 
-        const routerStub = createRouterStub({m: '1'});
+        const routerStub = createRouterStub({ m: '1' });
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
-        service.seedConfigDefaultState({marker: false}, "cfg-hash-5");
+        service.seedConfigDefaultState({ marker: false }, "cfg-hash-5");
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -3225,14 +3233,14 @@ describe('AppStateService', () => {
     });
 
     it('returns validation errors for invalid config default snapshots and leaves defaults unchanged', async () => {
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
-        const errors = service.seedConfigDefaultState({marker: ["bad"]}, "cfg-hash-6");
+        const errors = service.seedConfigDefaultState({ marker: ["bad"] }, "cfg-hash-6");
         expect(errors.length).toBeGreaterThan(0);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));

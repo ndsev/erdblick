@@ -1,36 +1,35 @@
-import {describe, it, expect, vi} from 'vitest';
-import {CoordinatesService} from './coordinates.service';
+import "@angular/compiler";
+import { testPersistence } from "../../test/state-owners";
+import { describe, it, expect, vi } from 'vitest';
+import { CoordinatesService } from './coordinates.service';
 
 class AppConfigServiceStub {
     getExtensionModuleId = vi.fn().mockReturnValue(null);
 }
 
-class AppStateServiceStub {
-    setMarkerPosition = vi.fn();
-}
-
 const createService = () => {
-    const stateService = new AppStateServiceStub();
+    const stateService = testPersistence();
     const configService = new AppConfigServiceStub();
     const service = new CoordinatesService(stateService as any, configService as any);
-    return {service, stateService, configService};
+    return { service, stateService, configService };
 };
 
 describe('CoordinatesService', () => {
-    it('forwards mouse click coordinates to AppStateService, skipping the initial null', () => {
-        const {service, stateService} = createService();
+    it('stores mouse click coordinates on its owner, skipping the initial null', () => {
+        const { service } = createService();
+        const setMarkerPosition = vi.spyOn(service, "setMarkerPosition");
 
-        expect(stateService.setMarkerPosition).not.toHaveBeenCalled();
+        expect(setMarkerPosition).not.toHaveBeenCalled();
 
-        const position = {longitude: 1, latitude: 2, height: 3} as any;
+        const position = { longitude: 1, latitude: 2, height: 3 } as any;
         service.mouseClickCoordinates.next(position);
 
-        expect(stateService.setMarkerPosition).toHaveBeenCalledTimes(1);
-        expect(stateService.setMarkerPosition).toHaveBeenCalledWith(position);
+        expect(setMarkerPosition).toHaveBeenCalledTimes(1);
+        expect(setMarkerPosition).toHaveBeenCalledWith(position);
     });
 
     it('loads the auxiliary plugin when a jump-target extension module is configured', async () => {
-        const {service, configService} = createService();
+        const { service, configService } = createService();
         const loaderSpy = vi.spyOn(CoordinatesService.prototype as any, 'loadJumpTargetsModule').mockResolvedValue({
             getAuxCoordinates: () => null,
             getAuxTileIds: () => null,

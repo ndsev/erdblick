@@ -1,6 +1,6 @@
-import type {Viewport} from "../../build/libs/core/erdblick-core";
-import {coreLib} from "../integrations/wasm";
-import {tileGridMaxLevel, type TileGridMode} from "../shared/appstate.service";
+import type { Viewport } from "../../build/libs/core/erdblick-core";
+import { coreLib } from "../integrations/wasm";
+import { tileGridMaxLevel, type TileGridMode } from "./map-view-state.model";
 
 const TILE_GRID_MAX_LEVEL = 22;
 const AUTO_TILE_GRID_MAX_VISIBLE_CELLS = 64;

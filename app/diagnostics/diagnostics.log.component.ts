@@ -1,8 +1,9 @@
-import { Component,OnDestroy,ViewChild } from '@angular/core';
-import { BehaviorSubject,combineLatest,map,Subscription } from 'rxjs';
+import { Component, OnDestroy, ViewChild } from '@angular/core';
+import { BehaviorSubject, combineLatest, map, Subscription } from 'rxjs';
 import { AppDialogComponent } from '../shared/app-dialog.component';
+import { DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService,DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID } from '../shared/appstate.service';
+import { AppStateService } from "../shared/appstate.service";
 import { DialogStackService } from '../shared/dialog-stack.service';
 import { DiagnosticsFacadeService } from './diagnostics.facade.service';
 import type { DiagnosticsLogFilter } from './diagnostics.model';
@@ -104,13 +105,13 @@ import type { DiagnosticsLogFilter } from './diagnostics.model';
 export class DiagnosticsLogDialogComponent implements OnDestroy {
     readonly layoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
     @ViewChild('dialog') dialog?: AppDialogComponent;
-    readonly dialogStyle: {[key: string]: string} = {
+    readonly dialogStyle: { [key: string]: string } = {
         height: '75vh'
     };
     sortOrder: 'asc' | 'desc' = 'desc';
-    readonly sortOrderOptions: Array<{label: string; value: 'desc' | 'asc'}> = [
-        {label: 'Newest first', value: 'desc'},
-        {label: 'Newest last', value: 'asc'}
+    readonly sortOrderOptions: Array<{ label: string; value: 'desc' | 'asc' }> = [
+        { label: 'Newest first', value: 'desc' },
+        { label: 'Newest last', value: 'asc' }
     ];
     private readonly sortOrder$ = new BehaviorSubject<'asc' | 'desc'>(this.sortOrder);
     readonly filteredLogs$ = combineLatest([
@@ -133,12 +134,12 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
     private readonly subscriptions: Subscription[] = [];
 
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
-                public readonly stateService: AppStateService,
-                private readonly dialogStack: DialogStackService,
+        public readonly stateService: AppStateService,
+        private readonly dialogStack: DialogStackService,
         public readonly layout: AppLayoutService) {
         this.subscriptions.push(
             this.diagnostics.diagnosticsLogFilterState.subscribe(filter => {
-                this.logFilter = {...filter};
+                this.logFilter = { ...filter };
             })
         );
     }
@@ -164,7 +165,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
 
     /** Persists the log-level filter toggles. */
     updateFilter() {
-        this.diagnostics.diagnosticsLogFilter = {...this.logFilter};
+        this.diagnostics.diagnosticsLogFilter = { ...this.logFilter };
     }
 
     /** Updates the sort order used by the reactive filtered-log stream. */
@@ -174,13 +175,13 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
     }
 
     /** Stable row key for PrimeNG table rendering. */
-    trackByLogRow = (index: number, entry: {at: number; level: string; message: string}): string => {
+    trackByLogRow = (index: number, entry: { at: number; level: string; message: string }): string => {
         return `${entry.at}:${entry.level}:${entry.message}:${index}`;
     };
 
     /** Convenience action that leaves only error logs enabled. */
     setErrorsOnly() {
-        this.diagnostics.diagnosticsLogFilter = {info: false, warn: false, error: true};
+        this.diagnostics.diagnosticsLogFilter = { info: false, warn: false, error: true };
     }
 
     /** Opens the export dialog preconfigured to export only the visible logs. */
@@ -189,12 +190,12 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
             includeProgress: false,
             includePerformance: false,
             includeLogs: true,
-            logFilter: {...this.logFilter}
+            logFilter: { ...this.logFilter }
         });
     }
 
     /** Restores all log levels in the filter. */
     unsetAllFilter() {
-        this.diagnostics.diagnosticsLogFilter = {info: true, warn: true, error: true};
+        this.diagnostics.diagnosticsLogFilter = { info: true, warn: true, error: true };
     }
 }

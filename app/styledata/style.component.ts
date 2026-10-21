@@ -1,9 +1,17 @@
 import { KeyValue } from "@angular/common";
-import { ChangeDetectorRef,Component,ElementRef,HostListener,NgZone,OnDestroy,ViewChild } from "@angular/core";
+import {
+    ChangeDetectorRef,
+    Component,
+    ElementRef,
+    HostListener,
+    NgZone,
+    OnDestroy,
+    ViewChild
+} from "@angular/core";
 import { yaml } from "@codemirror/lang-yaml";
-import { defaultHighlightStyle,syntaxHighlighting } from "@codemirror/language";
+import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { MergeView } from "@codemirror/merge";
-import { Compartment,EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView } from "@codemirror/view";
 import { basicSetup } from "codemirror";
@@ -13,36 +21,36 @@ import { Menu } from "primeng/menu";
 import { Subscription } from "rxjs";
 import { filter } from "rxjs/operators";
 import { MapInfoService } from "../mapdata/map-info.service";
-import { layerPresetNode,removeGroupPrefix } from "../mapdata/map.tree.model";
-import { MapViewService,ViewRecalculationReason } from "../mapview/map-view.service";
+import { layerPresetNode, removeGroupPrefix } from "../mapdata/map.tree.model";
+import { MapViewService, ViewRecalculationReason } from "../mapview/map-view.service";
 import {
-FeatureSearchStyleRuleDraft,
-SearchStyleRuleDraftCodec
+    FeatureSearchStyleRuleDraft,
+    SearchStyleRuleDraftCodec
 } from "../search/search-style-rule-editor.model";
 import {
-projectStyleSourceToQuick,
-QuickStyleProjection,
-QuickStyleWarning,
-updateStyleSourceFromQuick,
-updateStyleSourceMetadata
+    projectStyleSourceToQuick,
+    QuickStyleProjection,
+    QuickStyleWarning,
+    updateStyleSourceFromQuick,
+    updateStyleSourceMetadata
 } from "../search/search-style-sheet.converter";
 import { AppDialogComponent } from "../shared/app-dialog.component";
-import { AppLayoutService } from "../shared/app-layout.service";
 import {
-AppStateService,
-STYLE_EDITOR_DIALOG_LAYOUT_ID,
-STYLE_PRESET_EDITOR_DIALOG_LAYOUT_ID,
-STYLES_DIALOG_LAYOUT_ID
-} from "../shared/appstate.service";
+    STYLE_EDITOR_DIALOG_LAYOUT_ID,
+    STYLE_PRESET_EDITOR_DIALOG_LAYOUT_ID,
+    STYLES_DIALOG_LAYOUT_ID
+} from "../shared/app-layout.model";
+import { AppLayoutService } from "../shared/app-layout.service";
+import { AppStateService } from "../shared/appstate.service";
 import { DialogStackService } from "../shared/dialog-stack.service";
 import { EditorService } from "../shared/editor.service";
 import { InfoMessageService } from "../shared/info.service";
-import { MapPresetDefinition,MapPresetIssue } from "./map-preset.model";
+import { MapPresetDefinition, MapPresetIssue } from "./map-preset.model";
 import { MapPresetService } from "./map-preset.service";
 import { StyleEditorRequestService } from "./style-editor-request.service";
 import { StyleValidationReportService } from "./style-validation-report.service";
-import { StyleValidationIssue,StyleValidationReport } from "./style-validation.model";
-import { ErdblickStyle,ErdblickStyleGroup,StyleService,UpdatedModifiedStyleEntry } from "./style.service";
+import { StyleValidationIssue, StyleValidationReport } from "./style-validation.model";
+import { ErdblickStyle, ErdblickStyleGroup, StyleService, UpdatedModifiedStyleEntry } from "./style.service";
 
 interface QuickPresetOption {
     key: string;
@@ -51,7 +59,6 @@ interface QuickPresetOption {
     styleId: string;
     presetId: string;
 }
-
 
 @Component({
     selector: 'style-panel',
@@ -666,7 +673,7 @@ export class StyleComponent implements OnDestroy {
     quickLayerAffinityIds: string[] = [];
     quickCustomLayerAffinity = "";
     quickReplacingCustomAffinity = false;
-    quickLayerOptions: Array<{label: string; value: string}> = [];
+    quickLayerOptions: Array<{ label: string; value: string }> = [];
     quickProjectionStale = false;
     quickProjectionError = "";
     private quickProjection?: QuickStyleProjection;
@@ -723,17 +730,17 @@ export class StyleComponent implements OnDestroy {
     // Group visibility is derived from leaf styles; bind directly to node.visible.
 
     constructor(public mapService: MapViewService,
-                private messageService: InfoMessageService,
-                public styleService: StyleService,
-                public styleValidationReportService: StyleValidationReportService,
-                public stateService: AppStateService,
-                public editorService: EditorService,
-                public presetService: MapPresetService,
-                private readonly mapInfoService: MapInfoService,
-                private dialogStack: DialogStackService,
-                private ngZone: NgZone,
-                private changeDetector: ChangeDetectorRef,
-                styleEditorRequestService: StyleEditorRequestService,
+        private messageService: InfoMessageService,
+        public styleService: StyleService,
+        public styleValidationReportService: StyleValidationReportService,
+        public stateService: AppStateService,
+        public editorService: EditorService,
+        public presetService: MapPresetService,
+        private readonly mapInfoService: MapInfoService,
+        private dialogStack: DialogStackService,
+        private ngZone: NgZone,
+        private changeDetector: ChangeDetectorRef,
+        styleEditorRequestService: StyleEditorRequestService,
         public readonly layout: AppLayoutService) {
         this.stateService.ready.pipe(filter(state => state)).subscribe(_ => {
             this.refreshUpdatedStylesDialogVisibility();
@@ -1049,7 +1056,7 @@ export class StyleComponent implements OnDestroy {
     }
 
     /** Persists visibility changes for one style and optionally triggers a redraw. */
-    applyStyleConfig(styleId: string, redraw: boolean=true) {
+    applyStyleConfig(styleId: string, redraw: boolean = true) {
         const style = this.styleService.styles.get(styleId);
         if (style === undefined || style === null) {
             return;
@@ -1076,7 +1083,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Exports one style as YAML. */
     exportStyle(styleId: string) {
-        if(!this.styleService.exportStyleYamlFile(styleId)) {
+        if (!this.styleService.exportStyleYamlFile(styleId)) {
             this.messageService.showError(`Error occurred while trying to export style: ${styleId}`);
         }
     }
@@ -1469,7 +1476,7 @@ export class StyleComponent implements OnDestroy {
     /** Patches the root YAML name immediately, preserving every unrelated AST node. */
     protected onQuickStyleNameChange(name: string): void {
         this.quickStyleName = name ?? "";
-        this.updateQuickMetadata({name: this.quickStyleName});
+        this.updateQuickMetadata({ name: this.quickStyleName });
     }
 
     /** Replaces Any/custom affinity with a deterministic set of exact layer IDs. */
@@ -1477,8 +1484,8 @@ export class StyleComponent implements OnDestroy {
         const selected = [...(layerIds ?? [])];
         this.updateQuickMetadata({
             layerAffinity: selected.length
-                ? {kind: "exact", layerIds: selected}
-                : {kind: "any"}
+                ? { kind: "exact", layerIds: selected }
+                : { kind: "any" }
         });
     }
 
@@ -1490,7 +1497,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Explicitly deletes the root layer expression. */
     protected setQuickAffinityAny(): void {
-        this.updateQuickMetadata({layerAffinity: {kind: "any"}});
+        this.updateQuickMetadata({ layerAffinity: { kind: "any" } });
     }
 
     /** Applies one metadata patch through the same guarded Advanced-source session. */
@@ -1531,12 +1538,12 @@ export class StyleComponent implements OnDestroy {
         }
         this.quickLayerOptions = [...ids]
             .sort((left, right) => left.localeCompare(right))
-            .map(value => ({label: value, value}));
+            .map(value => ({ label: value, value }));
     }
 
     /** Opens the style-definition documentation in a new browser tab. */
     openStyleHelp() {
-        window.open( "https://github.com/ndsev/erdblick?tab=readme-ov-file#style-definitions", "_blank");
+        window.open("https://github.com/ndsev/erdblick?tab=readme-ov-file#style-definitions", "_blank");
     }
 
     /** Keeps PrimeNG keyvalue iteration in insertion order. */
@@ -1563,7 +1570,7 @@ export class StyleComponent implements OnDestroy {
     }
 
     /** Narrows a tree node to a style-group node. */
-    private checkIsStyleGroup (e: any): e is ErdblickStyleGroup {
+    private checkIsStyleGroup(e: any): e is ErdblickStyleGroup {
         return e.type === "Group";
     }
 
@@ -1947,7 +1954,7 @@ export class StyleComponent implements OnDestroy {
         this.styleCompareView = new MergeView({
             parent: host,
             gutter: true,
-            ...(this.styleCompareReadOnly ? {} : {revertControls: "b-to-a" as const}),
+            ...(this.styleCompareReadOnly ? {} : { revertControls: "b-to-a" as const }),
             a: {
                 doc: this.styleCompareLeftSource,
                 extensions: leftEditorExtensions
@@ -2011,13 +2018,13 @@ export class StyleComponent implements OnDestroy {
                 });
             }
         });
-        this.compareModeObserver.observe(root, {attributes: true, attributeFilter: ['class']});
+        this.compareModeObserver.observe(root, { attributes: true, attributeFilter: ['class'] });
     }
 
     /** Returns the CodeMirror theme extension matching the current app theme. */
     private currentCodeMirrorTheme() {
         const isDark = document.documentElement.classList.contains(this.DARK_MODE_CLASS);
-        const lightTheme = EditorView.theme({}, {dark: false});
+        const lightTheme = EditorView.theme({}, { dark: false });
         return isDark ? oneDark : [lightTheme, syntaxHighlighting(defaultHighlightStyle)];
     }
 }

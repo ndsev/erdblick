@@ -1,7 +1,8 @@
 import { Component } from '@angular/core';
 import { AppConfigService } from "../shared/app-config.service";
+import { ABOUT_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
-import { ABOUT_DIALOG_LAYOUT_ID,AppStateService } from '../shared/appstate.service';
+import { AppStateService } from "../shared/appstate.service";
 
 @Component({
     selector: 'about-dialog',
@@ -57,7 +58,7 @@ export class AboutComponent {
 
     constructor(public stateService: AppStateService,
         public readonly configService: AppConfigService,
-        public readonly layout: AppLayoutService) {}
+        public readonly layout: AppLayoutService) { }
 
     get dialogVisible(): boolean {
         return this.layout.isDialogOpen(this.dialogLayoutId);

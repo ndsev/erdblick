@@ -1,31 +1,31 @@
-import {deepEquals} from "../shared/app-state";
 import {
-AfterViewInit,
-ChangeDetectorRef,
-Component,
-ElementRef,
-input,
-InputSignal,
-NgZone,
-OnDestroy,
-OnInit,
-ViewChild
+    AfterViewInit,
+    ChangeDetectorRef,
+    Component,
+    ElementRef,
+    input,
+    InputSignal,
+    NgZone,
+    OnDestroy,
+    OnInit,
+    ViewChild
 } from "@angular/core";
 import { MenuItem } from "primeng/api";
 import { ContextMenu } from "primeng/contextmenu";
-import { combineLatest,Subscription } from "rxjs";
+import { combineLatest, Subscription } from "rxjs";
 import { filter } from "rxjs/operators";
 import { CoordinatesService } from "../coords/coordinates.service";
 import { environment } from "../environments/environment";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
+import { type TileFeatureId } from "../inspection/inspection-state.model";
 import { InspectionStateService } from "../inspection/inspection-state.service";
 import { inspectionValueBubbleClasses } from "../inspection/inspection-value-bubble.presentation";
 import { coreLib } from "../integrations/wasm";
 import { CacheResetService } from "../mapdata/cache-reset.service";
 import {
-HoverDetailService,
-type HoverDetailField,
-type HoverFeatureDetails
+    HoverDetailService,
+    type HoverDetailField,
+    type HoverFeatureDetails
 } from "../mapdata/hover-detail.service";
 import { MapInfoService } from "../mapdata/map-info.service";
 import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
@@ -33,42 +33,40 @@ import { FeatureSearchService } from "../search/feature.search.service";
 import { JumpTargetService } from "../search/jump.service";
 import { AppConfigService } from "../shared/app-config.service";
 import { AppModeService } from "../shared/app-mode.service";
-import {
-AppStateService,
-type TileFeatureId
-} from "../shared/appstate.service";
+import { deepEquals } from "../shared/app-state";
+import { AppStateService } from "../shared/appstate.service";
 import { KeyboardService } from "../shared/keyboard.service";
 import {
-StyleValidationReportService
+    StyleValidationReportService
 } from "../styledata/style-validation-report.service";
 import { StyleService } from "../styledata/style.service";
 import { DeckMapView2D } from "./deck/deck-view2d";
 import { DeckMapView3D } from "./deck/deck-view3d";
 import {
-TileSubsetLayerRenderService
+    TileSubsetLayerRenderService
 } from "./deck/tile-subset-layer-render.service";
 import { MapViewStateService } from "./map-view-state.service";
-import { MapViewService,ViewRecalculationReason } from "./map-view.service";
+import { MapViewService, ViewRecalculationReason } from "./map-view.service";
 import { RenderPreferencesService } from "./render-preferences.service";
 import {
-IRenderView,
-MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT,
-RenderNavigationTarget
+    IRenderView,
+    MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT,
+    RenderNavigationTarget
 } from "./render-view.model";
 import {
-FirstPersonViewMenuRequest,
-RightClickMenuService,
-SourceDataDropdownOption,
-TileDiagnosticsMenuOption
+    FirstPersonViewMenuRequest,
+    RightClickMenuService,
+    SourceDataDropdownOption,
+    TileDiagnosticsMenuOption
 } from "./rightclickmenu.service";
 import {
-ViewLayerDiagnosticsService
+    ViewLayerDiagnosticsService
 } from "./view-layer-diagnostics.service";
 import { ViewLayerController } from "./view-layer.controller";
 
 interface PreparedContextMenuPosition {
-    screenPos: {x: number; y: number};
-    cartographic: {lon: number; lat: number; alt: number};
+    screenPos: { x: number; y: number };
+    cartographic: { lon: number; lat: number; alt: number };
     navigationTarget?: RenderNavigationTarget;
     featureIds: TileFeatureId[];
 }
@@ -209,9 +207,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private deckAntialiasingEnabled = true;
     private semanticCompositingEnabled = true;
     private contextMenuVisible = false;
-    private pendingContextMenuOpenEvent: {clientX: number; clientY: number; pageX: number; pageY: number} | null = null;
+    private pendingContextMenuOpenEvent: { clientX: number; clientY: number; pageX: number; pageY: number } | null = null;
     private pendingContextMenuOpenTimeout?: ReturnType<typeof setTimeout>;
-    private rightPressStart: {x: number; y: number} | null = null;
+    private rightPressStart: { x: number; y: number } | null = null;
     private rightPressMoved = false;
     private viewerPointerDownCapture?: (event: PointerEvent) => void;
     private viewerPointerMoveCapture?: (event: PointerEvent) => void;
@@ -237,25 +235,25 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * map, search, config, and input services the renderer depends on.
      */
     constructor(public mapService: MapInfoService,
-                public mapViewState: MapViewService,
-                public tileStream: MapTileStreamService,
-                public inspectionSelection: InspectionSelectionService,
-                public featureSearchService: FeatureSearchService,
-                public stateService: AppStateService,
-                public jumpService: JumpTargetService,
-                public keyboardService: KeyboardService,
-                public menuService: RightClickMenuService,
-                public coordinatesService: CoordinatesService,
-                public appModeService: AppModeService,
-                public configService: AppConfigService,
-                private styleService: StyleService,
-                private subsetRenderService: TileSubsetLayerRenderService,
-                private cacheResetService: CacheResetService,
-                private hoverDetails: HoverDetailService,
-                private viewLayerDiagnostics: ViewLayerDiagnosticsService,
-                private styleValidationReports: StyleValidationReportService,
-                private cdr: ChangeDetectorRef,
-                private ngZone: NgZone,
+        public mapViewState: MapViewService,
+        public tileStream: MapTileStreamService,
+        public inspectionSelection: InspectionSelectionService,
+        public featureSearchService: FeatureSearchService,
+        public stateService: AppStateService,
+        public jumpService: JumpTargetService,
+        public keyboardService: KeyboardService,
+        public menuService: RightClickMenuService,
+        public coordinatesService: CoordinatesService,
+        public appModeService: AppModeService,
+        public configService: AppConfigService,
+        private styleService: StyleService,
+        private subsetRenderService: TileSubsetLayerRenderService,
+        private cacheResetService: CacheResetService,
+        private hoverDetails: HoverDetailService,
+        private viewLayerDiagnostics: ViewLayerDiagnosticsService,
+        private styleValidationReports: StyleValidationReportService,
+        private cdr: ChangeDetectorRef,
+        private ngZone: NgZone,
         public readonly renderPreferences: RenderPreferencesService,
         public readonly viewSettings: MapViewStateService,
         public readonly inspectionState: InspectionStateService
@@ -298,7 +296,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.layerController?.refreshMap(mapId);
             });
         this.subscriptions.push(
-            this.mapViewState.beforeViewRemoval.subscribe(({cameras}) => {
+            this.mapViewState.beforeViewRemoval.subscribe(({ cameras }) => {
                 if (this.mapView) {
                     cameras.set(this.viewIndex(), this.mapView.prepareForViewRemoval());
                 }
@@ -672,7 +670,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             if (event.button !== 2) {
                 return;
             }
-            this.rightPressStart = {x: event.clientX, y: event.clientY};
+            this.rightPressStart = { x: event.clientX, y: event.clientY };
             this.rightPressMoved = false;
         };
         this.viewerPointerMoveCapture = (event: PointerEvent) => {
@@ -761,7 +759,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /** Prepares source-data context and opens the PrimeNG context menu at the supplied screen position. */
-    private openContextMenu(menu: ContextMenu, event: {clientX: number; clientY: number; pageX: number; pageY: number}) {
+    private openContextMenu(menu: ContextMenu, event: { clientX: number; clientY: number; pageX: number; pageY: number }) {
         this.menuService.closeAllContextMenus();
         const screenPos = this.contextMenuScreenPosition(event);
         const featureIds = screenPos && this.mapView
@@ -785,7 +783,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
         this.prepareFirstPersonViewContextMenu(contextPosition);
         this.menuService.setExternalViewerLocation(contextPosition
-            ? {lon: contextPosition.cartographic.lon, lat: contextPosition.cartographic.lat}
+            ? { lon: contextPosition.cartographic.lon, lat: contextPosition.cartographic.lat }
             : null);
         try {
             this.prepareFeatureSearchContextMenu();
@@ -797,7 +795,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /** Converts a context-menu client position to CSS pixels relative to the render canvas. */
-    private contextMenuScreenPosition(event: {clientX: number; clientY: number}): {x: number; y: number} | null {
+    private contextMenuScreenPosition(event: { clientX: number; clientY: number }): { x: number; y: number } | null {
         if (!this.mapView) {
             return null;
         }
@@ -811,7 +809,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     /** Resolves the WGS84 position represented by a context-menu canvas position. */
     private contextMenuPosition(
-        screenPos: {x: number; y: number},
+        screenPos: { x: number; y: number },
         featureIds: TileFeatureId[]
     ): PreparedContextMenuPosition | null {
         if (!this.mapView) {
@@ -825,7 +823,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 alt: navigationTarget.position[2]
             }
             : this.mapView.pickCartographic(screenPos);
-        return cartographic ? {screenPos, cartographic, navigationTarget, featureIds} : null;
+        return cartographic ? { screenPos, cartographic, navigationTarget, featureIds } : null;
     }
 
     /** Applies a view-scoped ephemeral first-person request without persisting it in app state. */
@@ -860,7 +858,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
         const viewIndex = this.viewIndex();
         if (this.mapView.isFirstPersonViewActive()) {
-            this.menuService.setFirstPersonViewContext({viewIndex, active: true});
+            this.menuService.setFirstPersonViewContext({ viewIndex, active: true });
         } else if (!this.is2DMode && contextPosition?.navigationTarget) {
             this.menuService.setFirstPersonViewContext({
                 viewIndex,
@@ -873,7 +871,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /** Copies the event coordinates we need because the original pointer event may no longer be usable later. */
-    private copyContextMenuEvent(event: MouseEvent | PointerEvent): {clientX: number; clientY: number; pageX: number; pageY: number} {
+    private copyContextMenuEvent(event: MouseEvent | PointerEvent): { clientX: number; clientY: number; pageX: number; pageY: number } {
         return {
             clientX: event.clientX,
             clientY: event.clientY,
@@ -883,12 +881,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /** Creates the minimal event-like object PrimeNG needs to position a context menu. */
-    private contextMenuShowEvent(event: {pageX: number; pageY: number}): {pageX: number; pageY: number; preventDefault: () => void; stopPropagation: () => void} {
+    private contextMenuShowEvent(event: { pageX: number; pageY: number }): { pageX: number; pageY: number; preventDefault: () => void; stopPropagation: () => void } {
         return {
             pageX: event.pageX,
             pageY: event.pageY,
-            preventDefault: () => {},
-            stopPropagation: () => {}
+            preventDefault: () => { },
+            stopPropagation: () => { }
         };
     }
 
@@ -908,9 +906,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.menuService.setTileDiagnosticsOptions([]);
             return;
         }
-        const {featureIds, cartographic} = contextPosition;
+        const { featureIds, cartographic } = contextPosition;
 
-        const tileIds = Array.from({length: MapViewComponent.SOURCE_DATA_TILE_LEVEL_COUNT}, (_, level) => {
+        const tileIds = Array.from({ length: MapViewComponent.SOURCE_DATA_TILE_LEVEL_COUNT }, (_, level) => {
             const tileId = coreLib.getTileIdFromPosition(cartographic.lon, cartographic.lat, level);
             return {
                 id: tileId,
@@ -953,7 +951,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
             if (this.layerController?.occupancyForTile(
                 tileId,
-                [{mapId: layer.mapId, layerId: layer.id}]
+                [{ mapId: layer.mapId, layerId: layer.id }]
             ) !== "non-empty") {
                 continue;
             }
@@ -961,13 +959,13 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             const tileIdString = tileId.toString();
             const group = groupsByTileId.get(tileIdString);
             if (group) {
-                group.layers.push({mapId: layer.mapId, layerId: layer.id});
+                group.layers.push({ mapId: layer.mapId, layerId: layer.id });
                 continue;
             }
             groupsByTileId.set(tileIdString, {
                 tileId: tileIdString,
                 level,
-                layers: [{mapId: layer.mapId, layerId: layer.id}]
+                layers: [{ mapId: layer.mapId, layerId: layer.id }]
             });
         }
 

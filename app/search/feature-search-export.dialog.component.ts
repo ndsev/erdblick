@@ -1,20 +1,21 @@
-import { Component,OnDestroy,ViewChild } from "@angular/core";
+import { Component, OnDestroy, ViewChild } from "@angular/core";
 import { Subscription } from "rxjs";
 import { AppDialogComponent } from "../shared/app-dialog.component";
+import { FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService,FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID } from "../shared/appstate.service";
+import { AppStateService } from "../shared/appstate.service";
 import { DialogStackService } from "../shared/dialog-stack.service";
 import type { FeatureSearchMapLayerRef } from "../shared/feature-search-state";
 import { InfoMessageService } from "../shared/info.service";
 import {
-featureSearchExportFilename,
-featureSearchExportPayload,
-featureSearchJsonReplacer,
-featureSearchMapLayerKey,
-featureSearchMapLayerLabel,
-type FeatureSearchExportSelection
+    featureSearchExportFilename,
+    featureSearchExportPayload,
+    featureSearchJsonReplacer,
+    featureSearchMapLayerKey,
+    featureSearchMapLayerLabel,
+    type FeatureSearchExportSelection
 } from "./feature-search-export.util";
-import { FeatureSearchExportDialogRequest,FeatureSearchService } from "./feature.search.service";
+import { FeatureSearchExportDialogRequest, FeatureSearchService } from "./feature.search.service";
 
 interface FeatureSearchExportOptions extends FeatureSearchExportSelection {
     closeAfterExport: boolean;
@@ -89,9 +90,9 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
     private readonly subscription: Subscription;
 
     constructor(public readonly searchService: FeatureSearchService,
-                public readonly stateService: AppStateService,
-                private readonly dialogStack: DialogStackService,
-                private readonly infoMessageService: InfoMessageService,
+        public readonly stateService: AppStateService,
+        private readonly dialogStack: DialogStackService,
+        private readonly infoMessageService: InfoMessageService,
         public readonly layout: AppLayoutService) {
         this.subscription = this.searchService.exportDialogRequest.subscribe(request => {
             this.request = request;
@@ -189,14 +190,14 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
     }
 
     private activeMapLayers(): FeatureSearchMapLayerRef[] {
-        return this.mapLayerOptions.map(({mapId, layerId}) => ({mapId, layerId}));
+        return this.mapLayerOptions.map(({ mapId, layerId }) => ({ mapId, layerId }));
     }
 
     private exportedMapLayers(): FeatureSearchMapLayerRef[] {
         const selectedKeys = new Set(this.selectedMapLayerKeys);
         return this.mapLayerOptions
             .filter(option => selectedKeys.has(option.value))
-            .map(({mapId, layerId}) => ({mapId, layerId}));
+            .map(({ mapId, layerId }) => ({ mapId, layerId }));
     }
 
     private defaultExportOptions(): FeatureSearchExportOptions {
@@ -209,7 +210,7 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
 
     private downloadJsonFile(filename: string, payload: unknown): void {
         const source = JSON.stringify(payload, featureSearchJsonReplacer, 2) ?? "null";
-        const blob = new Blob([source], {type: "application/json;charset=utf-8"});
+        const blob = new Blob([source], { type: "application/json;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;

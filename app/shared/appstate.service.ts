@@ -1,34 +1,49 @@
-import { Injectable,OnDestroy } from "@angular/core";
-import { NavigationEnd,NavigationStart,Params,Router } from "@angular/router";
-import { BehaviorSubject,distinctUntilChanged,map,Observable,skip,Subject,Subscription,take } from "rxjs";
+import { Injectable, OnDestroy } from "@angular/core";
+import { NavigationEnd, NavigationStart, Params, Router } from "@angular/router";
+import { BehaviorSubject, distinctUntilChanged, Observable, skip, Subject, Subscription, take } from "rxjs";
 import { filter } from "rxjs/operators";
-import { coreLib } from "../integrations/wasm";
-import { AppState,AppStateOptions,AppStateProjection,deepCopy,deepEquals,MapViewState,StyleState } from "./app-state";
-import { ConfigDefaultStateMeta,ConfigDefaultStateMetaEntry,hashStateValue,SnapshotImportLimits,SnapshotNormalizationResult } from "./app-state.model";
-import { InfoMessageService } from "./info.service";
 import {
-firstParamValue
-} from "./url-state-codec";
-export * from "./app-state.model";
+    AppState,
+    AppStateOptions,
+    AppStateProjection,
+    deepCopy,
+    deepEquals,
+    MapViewState,
+    StyleState
+} from "./app-state";
+import {
+    ConfigDefaultStateMeta,
+    ConfigDefaultStateMetaEntry,
+    hashStateValue,
+    SnapshotImportLimits,
+    SnapshotNormalizationResult
+} from "./app-state.model";
+import { InfoMessageService } from "./info.service";
 
-/** A domain-owned projection of registered state into the shared URL grammar. */
+/** The persistence ownership attached to an edit when it is staged. */
 type MutationOrigin = "user" | "system" | "hydration" | "config";
 
+/**
+ * The application supplies its shared legacy URL/snapshot grammar. Preparation
+ * validates without mutation; application consumes coordinated owner values before
+ * independent positional codecs run. AppStateService does not know their domains.
+ */
 export interface AppUrlProjection {
     serialize(params: Record<string, string | string[]>): Record<string, string | string[]>;
-    hydrate(params: Params, identitiesPrepared?: boolean): void;
+    hydrate(params: Params): void;
     initialize(params: Params): void;
     prepareSnapshot(values: Record<string, unknown>, replaceMissing: boolean): Record<string, unknown>;
+    /** Applies coordinated owner values and returns the keys already consumed before generic codecs run. */
+    applySnapshot(values: Record<string, unknown>): ReadonlySet<string>;
     prepareUrl(params: Params, resetMissing: boolean): Params;
     prepareStoredViews(values: Map<string, string>, params: Params, configKeys: ReadonlySet<string>): void;
 }
 
-
-@Injectable({providedIn: 'root'})
 /**
  * Registers owner-created state and coordinates persistence, config ownership and
  * publication. Domain services supply URL projections and own all user operations.
  */
+@Injectable({ providedIn: 'root' })
 export class AppStateService implements OnDestroy {
 
     private transactionDepth = 0;
@@ -36,7 +51,7 @@ export class AppStateService implements OnDestroy {
     private announcingCommit = false;
     private readonly pendingInitialObservers = new Set<() => void>();
     private readonly deferredWrites: Array<() => void> = [];
-    private readonly pendingPublications = new Map<AppState<unknown>, {publish: () => void; origin: MutationOrigin}>();
+    private readonly pendingPublications = new Map<AppState<unknown>, { publish: () => void; origin: MutationOrigin }>();
     private readonly publishedOrigins = new Map<AppState<unknown>, MutationOrigin>();
     private readonly projectionSources = new Map<AppState<unknown>, AppState<unknown>>();
     private readonly commits = new BehaviorSubject(0);
@@ -45,10 +60,14 @@ export class AppStateService implements OnDestroy {
     private registrationSealed = false;
     readonly snapshotReplaced = new Subject<void>();
 
-    get registeredStates(): ReadonlyMap<string, AppState<unknown>> { return this.statePool; }
+    get registeredStates(): ReadonlyMap<string, AppState<unknown>> {
+        return this.statePool;
+    }
 
     /** Ends explicit startup registration; a forgotten lazy owner fails at its registration site. */
-    sealRegistration(): void { this.registrationSealed = true; }
+    sealRegistration(): void {
+        this.registrationSealed = true;
+    }
 
     /** Installs the application URL coordinator before config seeding or hydration. */
     registerUrlProjection(projection: AppUrlProjection): void {
@@ -57,10 +76,14 @@ export class AppStateService implements OnDestroy {
     }
 
     /** Requests a browser-history entry for the next durable navigation edit. */
-    requestHistoryEntry(): void { this._replaceUrl = false; }
+    requestHistoryEntry(): void {
+        this._replaceUrl = false;
+    }
 
     /** Cancels a previously requested history entry when an operation is a no-op. */
-    replaceHistoryEntry(): void { this._replaceUrl = true; }
+    replaceHistoryEntry(): void {
+        this._replaceUrl = true;
+    }
 
     /** StyleState retains the deployed multi-key storage format behind one registration. */
     registerStyleState(viewIds: () => readonly string[]): StyleState {
@@ -136,7 +159,7 @@ export class AppStateService implements OnDestroy {
             while (this.pendingPublications.size) {
                 const publications = [...this.pendingPublications.values()];
                 this.pendingPublications.clear();
-                publications.forEach(({publish, origin}) => this.withMutationOrigin(origin, publish));
+                publications.forEach(({ publish, origin }) => this.withMutationOrigin(origin, publish));
             }
         } finally {
             this.publishing = false;
@@ -155,7 +178,7 @@ export class AppStateService implements OnDestroy {
     }
 
     private readonly statePool = new Map<string, AppState<unknown>>();
-    
+
     readonly ready = new BehaviorSubject<boolean>(false);
     /** Emits synchronously after an externally supplied state replacement has completed. */
     readonly stateApplied = new Subject<void>();
@@ -194,7 +217,7 @@ export class AppStateService implements OnDestroy {
 
     /** Registers all persisted state slots and wires startup hydration/persistence flow. */
     constructor(private readonly router: Router,
-                private readonly infoMessageService: InfoMessageService) {
+        private readonly infoMessageService: InfoMessageService) {
         this.retireMapPresetDefinitionStorage();
         // Perform initial hydration after the initial NavigationEnd event arrives.
         this.router.events.pipe(filter(event => event instanceof NavigationEnd), take(1)).subscribe(() => {
@@ -228,14 +251,14 @@ export class AppStateService implements OnDestroy {
         if (this.isReady) {
             return;
         }
-        if (!coreLib || !this.registrationSealed) {
-            return;
+        if (!this.registrationSealed) {
+            throw new Error("State owners must be registered before persistence starts.");
         }
         this.setupStateSubscriptions();
         const queryParams = this.currentBrowserQueryParams();
         try { this.hydrateFromStorage(queryParams); }
         catch (error) { this.reportHydrationError("saved state", error); this.hydrateFromStorage({}); }
-        try { this.hydrateFromUrl(queryParams, true); }
+        try { this.hydrateFromUrl(queryParams); }
         catch (error) { this.reportHydrationError("share link", error); }
         this.urlProjection?.initialize(queryParams);
         this.isHydrating = false;
@@ -363,10 +386,12 @@ export class AppStateService implements OnDestroy {
             // A deliberate user edit in the same slot remains user-owned after
             // system normalization. Hydration cancels old pending writes separately.
             const origin = previous?.origin === "user" ? "user" : this.mutationOrigin();
-            this.pendingPublications.set(state as AppState<unknown>, {origin, publish: () => {
-                this.publishedOrigins.set(state as AppState<unknown>, origin);
-                state.publish();
-            }});
+            this.pendingPublications.set(state as AppState<unknown>, {
+                origin, publish: () => {
+                    this.publishedOrigins.set(state as AppState<unknown>, origin);
+                    state.publish();
+                }
+            });
             if (!this.transactionDepth) this.publishTransaction();
         };
     }
@@ -665,10 +690,10 @@ export class AppStateService implements OnDestroy {
     }
 
     /** Restores URL-backed state slots from the current route query params. */
-    private hydrateFromUrl(params: Params, identitiesPrepared = false): void {
+    private hydrateFromUrl(params: Params): void {
         this.withHydration(() => {
             if (!this.urlProjection) throw new Error("URL owners have not been registered.");
-            this.urlProjection.hydrate(params, identitiesPrepared);
+            this.urlProjection.hydrate(params);
         });
     }
 
@@ -683,13 +708,14 @@ export class AppStateService implements OnDestroy {
         }
     }
 
-    private reportHydrationError(source: string, error: unknown): void {
+    /** Reports a rejected persisted field while its owner restores other valid saved values. */
+    reportHydrationError(source: string, error: unknown): void {
         this.infoMessageService.showError(`Could not restore ${source}: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     /** Keeps one malformed persisted state entry from aborting startup hydration. */
     deserializeStateSafely(
-        state: {name: string; deserialize(raw: string | Params): void},
+        state: { name: string; deserialize(raw: string | Params): void },
         raw: string | Params
     ): void {
         try {
@@ -823,21 +849,22 @@ export class AppStateService implements OnDestroy {
         this.isSeedingConfigDefaults = true;
         try {
             this.transaction(() => {
-            for (const [key, value] of Object.entries(normalized)) {
-                const state = this.statePool.get(key);
-                if (!state || !state.isConfigDefaultState()) {
-                    continue;
+                const consumed = this.urlProjection?.applySnapshot(normalized);
+                for (const [key, value] of Object.entries(normalized)) {
+                    const state = this.statePool.get(key);
+                    if (!state || !state.isConfigDefaultState()) {
+                        continue;
+                    }
+                    if (!consumed?.has(key)) state.applySnapshotValue(value);
+                    // Identity preparation may supply dependent codec values. Only
+                    // explicitly configured keys acquire configuration ownership.
+                    if (Object.hasOwn(normalizedResult.normalized!, key)) appliedStateKeys.add(key);
                 }
-                state.applySnapshotValue(value);
-                // Identity preparation may supply dependent codec values. Only
-                // explicitly configured keys acquire configuration ownership.
-                if (Object.hasOwn(normalizedResult.normalized!, key)) appliedStateKeys.add(key);
-            }
 
-            if (Object.keys(styleOptionEntries).length) {
-                this.deserializeStateSafely(this.styleStorage, styleOptionEntries);
-                this.styleStorage.next(new Map(this.styleStorage.getValue()));
-            }
+                if (Object.keys(styleOptionEntries).length) {
+                    this.deserializeStateSafely(this.styleStorage, styleOptionEntries);
+                    this.styleStorage.next(new Map(this.styleStorage.getValue()));
+                }
             });
         } finally {
             this.isSeedingConfigDefaults = false;
@@ -896,8 +923,9 @@ export class AppStateService implements OnDestroy {
         replaceMissing: boolean
     ): void {
         normalized = this.urlProjection?.prepareSnapshot(normalized, replaceMissing) ?? normalized;
+        const consumed = this.urlProjection?.applySnapshot(normalized);
         for (const [key, state] of this.statePool.entries()) {
-            if (!state.isSnapshotState()) {
+            if (!state.isSnapshotState() || consumed?.has(key)) {
                 continue;
             }
             if (Object.prototype.hasOwnProperty.call(normalized, key)) {
@@ -934,15 +962,15 @@ export class AppStateService implements OnDestroy {
 
         const normalizedRoot = this.normalizeSnapshotNode(snapshot, '$', 0, limits, errors);
         if (errors.length) {
-            return {errors};
+            return { errors };
         }
         if (!normalizedRoot || Array.isArray(normalizedRoot) || typeof normalizedRoot !== 'object') {
-            return {errors: ['Snapshot payload must be a JSON object.']};
+            return { errors: ['Snapshot payload must be a JSON object.'] };
         }
         const normalized = normalizedRoot as Record<string, unknown>;
         const keys = Object.keys(normalized);
         if (keys.length > limits.maxTopLevelEntries) {
-            return {errors: ['Snapshot payload contains too many top-level entries.']};
+            return { errors: ['Snapshot payload contains too many top-level entries.'] };
         }
 
         for (const key of keys) {
@@ -966,7 +994,7 @@ export class AppStateService implements OnDestroy {
             }
         }
         if (errors.length) {
-            return {errors};
+            return { errors };
         }
 
         try { this.urlProjection?.prepareSnapshot(normalized, false); }
@@ -990,7 +1018,7 @@ export class AppStateService implements OnDestroy {
                 errors.push(`Invalid value for '${key}': ${error?.message ?? 'schema validation failed'}`);
             }
         }
-        return errors.length ? {errors} : {normalized, errors: []};
+        return errors.length ? { errors } : { normalized, errors: [] };
     }
 
     /** Returns whether a snapshot key is a compact style-option storage key. */
@@ -1053,7 +1081,7 @@ export class AppStateService implements OnDestroy {
             return;
         }
         try {
-            const meta = JSON.parse(rawMeta) as {entries?: Record<string, unknown>};
+            const meta = JSON.parse(rawMeta) as { entries?: Record<string, unknown> };
             if (!meta.entries || !Object.prototype.hasOwnProperty.call(meta.entries, "mapPresets")) {
                 return;
             }
@@ -1093,7 +1121,7 @@ export class AppStateService implements OnDestroy {
                 if ((owner !== "config" && owner !== "user") || typeof valueHash !== "string") {
                     continue;
                 }
-                entries[key] = {owner, valueHash};
+                entries[key] = { owner, valueHash };
             }
 
             return {
@@ -1113,7 +1141,7 @@ export class AppStateService implements OnDestroy {
 
     /** Assigns ownership metadata to a state entry. */
     private setMetaOwner(key: string, owner: "config" | "user", valueHash: string): void {
-        this.configDefaultStateMeta.entries[key] = {owner, valueHash};
+        this.configDefaultStateMeta.entries[key] = { owner, valueHash };
     }
 
     /**
@@ -1207,7 +1235,7 @@ export class AppStateService implements OnDestroy {
         localStorage.removeItem('searchHistory');
         localStorage.removeItem(this.STYLE_OPTIONS_STORAGE_KEY);
         localStorage.removeItem(this.CONFIG_DEFAULT_STATE_META_KEY);
-        const {origin, pathname} = window.location;
+        const { origin, pathname } = window.location;
         window.location.href = origin + pathname;
     }
 }

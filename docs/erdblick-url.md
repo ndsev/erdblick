@@ -5,7 +5,7 @@ Erdblick encodes shareable view state in the browser URL. That makes it easy to 
 <!-- mcp:
 title: "Viewer startup state precedence"
 keywords: ["URL", "local storage", "default", "startup", "reload", "state"]
-hint: "For the running tab, inspect viewer_get_app_state rather than reconstructing state from the URL alone. MCP state assignments use canonical runtime objects, not flattened URL encodings."
+hint: "For the running tab, inspect viewer_get_controls rather than reconstructing state from the URL alone. MCP state assignments use canonical runtime objects, not flattened URL encodings."
 -->
 ## Startup State Precedence
 
@@ -37,13 +37,20 @@ The URL is pruned automatically so stale maps, styles, panels, and view entries 
 
 Browser-imported stylesheet sources—including styles saved from Feature Search—are local to the browser profile and are not embedded in the URL. Sharing a viewer URL therefore does not transfer those YAML sources; export and import the style when it needs to move between profiles.
 
+A legacy URL without `vid` preserves the current or saved identity mapping and
+creates IDs only for new views. On a fresh profile, IDs are generated once for the
+effective view count. An explicit full replacement without IDs creates a new
+mapping. Partial URLs preserve omitted per-view values. Duplicate or malformed
+explicit IDs are rejected before the current state or URL is replaced.
+
 ## URL Parameters Reference
 
 The table below lists all query parameters used by erdblick when encoding or restoring UI state.
 
 | Parameter | Scope | Description |
 | --- | --- | --- |
-| `n` | Global | Number of active map views (1 for single view, 2 for split view). |
+| `n` | Global | Number of active map views (1–32). The ordinary split-view UI opens two. |
+| `vid` | Global | Ordered, comma-separated logical view IDs. Each ID has 1–64 ASCII letters, digits, underscores or hyphens; Object.prototype names are reserved. IDs must be unique and match `n`. |
 | `lon`, `lat`, `alt` | Per view | Camera destination (degrees and meters). Values are encoded per view; with multiple views they are stored as colon-separated lists. |
 | `h`, `p`, `r` | Per view | Camera orientation in radians (heading, pitch, roll), encoded in the same way as `lon`/`lat`/`alt`. |
 | `px`, `py`, `pz` | Per view | Optional local map-centre offset in metres accepted for backward-compatible/exact input. Active target navigation may transiently use a nonzero offset, but ordinary settled state is re-expressed as an equivalent ground-centred camera with zero offset. Legacy links that omit these fields also use zero. |

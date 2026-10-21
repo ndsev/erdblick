@@ -1,17 +1,17 @@
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
-import {addMetersToLngLat} from "@math.gl/web-mercator";
+import { describe, expect, it, vi } from "vitest";
+import { addMetersToLngLat } from "@math.gl/web-mercator";
 
 import type {
     NavigationAnchor
 } from "./navigation/feature-navigation.types";
-import {createDeckMapViewport} from "./navigation/web-mercator-feature-navigation";
-import {NavigationTargetOverlay, projectNavigationTarget} from "./deck-navigation-target";
-import {DeckMapView3D} from "./deck-view3d";
+import { createDeckMapViewport } from "./navigation/web-mercator-feature-navigation";
+import { NavigationTargetOverlay, projectNavigationTarget } from "./deck-navigation-target";
+import { DeckMapView3D } from "./deck-view3d";
 
 interface DeckViewTestInternals {
     deck: {
-        getCanvas: () => {style: CSSStyleDeclaration; getBoundingClientRect: () => DOMRect};
+        getCanvas: () => { style: CSSStyleDeclaration; getBoundingClientRect: () => DOMRect };
         redraw: (reason?: string) => void;
         setProps: (props: unknown) => void;
     } | null;
@@ -28,18 +28,18 @@ interface DeckViewTestInternals {
         bearing: number;
         maxPitch: number;
     };
-    lastCanvasCssSize?: {width: number; height: number};
-    clippedLayoutCanvasCssSize?: {width: number; height: number};
+    lastCanvasCssSize?: { width: number; height: number };
+    clippedLayoutCanvasCssSize?: { width: number; height: number };
     prepareForNavigation(): void;
 }
 
 interface MarkerTestInternals extends DeckViewTestInternals {
-    stateService: {
-        markerState: {getValue: () => boolean};
-        markedPositionState: {getValue: () => number[]};
+    coordinatesService: {
+        markerState: { getValue: () => boolean };
+        markedPositionState: { getValue: () => number[] };
     };
-    featureSearchService: {markerGraphics: () => string};
-    layerRegistry: {upsert: (...args: unknown[]) => void};
+    featureSearchService: { markerGraphics: () => string };
+    layerRegistry: { upsert: (...args: unknown[]) => void };
     updateLocationMarkerOverlay(): void;
 }
 
@@ -53,7 +53,7 @@ interface CameraPersistenceTestInternals {
         maxPitch: number;
         position: [number, number, number];
     };
-    stateService: {
+    viewSettings: {
         setView: (...args: unknown[]) => void;
     };
     pushViewStateToAppState(): void;
@@ -73,7 +73,7 @@ function createView(): DeckMapView3D {
         {} as never,
         {} as never,
         {} as never,
-        {} as never, {} as never, Object.assign({} as never, {viewIdAt: (index: number) => String(index)}) as never, {} as never as never,{} as never as never
+        {} as never, {} as never, Object.assign({} as never, { viewIdAt: (index: number) => String(index), viewIds: ["0", "1"] }) as never, {} as never as never, {} as never as never
     );
 }
 
@@ -99,9 +99,9 @@ function installDeckMock(
         redraw
     };
     internals.deckDevice = {
-        getDefaultCanvasContext: () => ({setDrawingBufferSize})
+        getDefaultCanvasContext: () => ({ setDrawingBufferSize })
     };
-    return {setProps, redraw, setDrawingBufferSize};
+    return { setProps, redraw, setDrawingBufferSize };
 }
 
 describe("Deck navigation target and layout", () => {
@@ -118,9 +118,9 @@ describe("Deck navigation target and layout", () => {
         const svg = container.querySelector("[data-testid='navigation-target-overlay']");
 
         expect(svg?.getAttribute("data-navigation-state")).toBe("clear");
-        overlay.update({position: [11, 48, 120]}, viewport, "hover");
+        overlay.update({ position: [11, 48, 120] }, viewport, "hover");
         expect(svg?.getAttribute("data-navigation-state")).toBe("hover");
-        overlay.update({position: [11, 48, 120]}, viewport, "active");
+        overlay.update({ position: [11, 48, 120] }, viewport, "active");
         expect(svg?.getAttribute("data-navigation-state")).toBe("active");
         overlay.clear();
         expect(svg?.getAttribute("data-navigation-state")).toBe("clear");
@@ -172,7 +172,7 @@ describe("Deck navigation target and layout", () => {
             pitch: 75,
             bearing: 35
         }, 1000, 700, false);
-        const projection = projectNavigationTarget({position: [11, 48, 120]}, viewport);
+        const projection = projectNavigationTarget({ position: [11, 48, 120] }, viewport);
         const radii = projection?.ring.map(position => Math.hypot(
             position[0] - projection.center[0],
             position[1] - projection.center[1]
@@ -193,7 +193,7 @@ describe("Deck navigation target and layout", () => {
             bearing: 35
         }, 1000, 700, false);
         const position = viewport.unproject([500, 350, -0.5]) as NavigationAnchor;
-        const projection = projectNavigationTarget({position}, viewport);
+        const projection = projectNavigationTarget({ position }, viewport);
 
         expect(viewport.getTargetInfo(position)?.isValid).toBe(true);
         expect(projection?.center[0]).toBeCloseTo(500, 3);
@@ -204,8 +204,8 @@ describe("Deck navigation target and layout", () => {
         const view = createView();
         const internals = view as unknown as MarkerTestInternals;
         installDeckMock(view, 1000, 700);
-        internals.stateService.markerState = {getValue: () => true};
-        internals.stateService.markedPositionState = {getValue: () => [11, 48, 120]};
+        internals.coordinatesService.markerState = { getValue: () => true };
+        internals.coordinatesService.markedPositionState = { getValue: () => [11, 48, 120] };
         internals.featureSearchService.markerGraphics = () => "marker.svg";
         const upsert = vi.spyOn(internals.layerRegistry, "upsert");
 
@@ -228,14 +228,14 @@ describe("Deck navigation target and layout", () => {
         const view = createView();
         const internals = view as unknown as CameraPersistenceTestInternals;
         const setView = vi.fn();
-        internals.stateService.setView = setView;
+        internals.viewSettings.setView = setView;
         const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame")
             .mockReturnValue(17);
 
         try {
             view.setViewFromState({
-                destination: {lon: 11, lat: 48, alt: 1250},
-                orientation: {heading: 0.25, pitch: -0.5, roll: 0},
+                destination: { lon: 11, lat: 48, alt: 1250 },
+                orientation: { heading: 0.25, pitch: -0.5, roll: 0 },
                 position: [1.5, -2.5, 325.25]
             });
             expect(internals.viewState.position).toEqual([1.5, -2.5, 325.25]);
@@ -252,7 +252,7 @@ describe("Deck navigation target and layout", () => {
     it("synchronizes the public Deck size and drawing buffer in one resize transaction", () => {
         const view = createView();
         const internals = view as unknown as DeckViewTestInternals;
-        const initialState = {...internals.viewState};
+        const initialState = { ...internals.viewState };
         const deck = installDeckMock(view, 640, 700);
         const resizeCallbacks: FrameRequestCallback[] = [];
         const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame")
@@ -262,12 +262,12 @@ describe("Deck navigation target and layout", () => {
             });
 
         try {
-            view.prepareForLayoutResize({width: 640, height: 700});
+            view.prepareForLayoutResize({ width: 640, height: 700 });
 
             expect(deck.setProps).toHaveBeenNthCalledWith(1, {
                 width: 640,
                 height: 700,
-                style: expect.objectContaining({width: "640px", height: "700px"})
+                style: expect.objectContaining({ width: "640px", height: "700px" })
             });
             expect(internals.viewState).toEqual(initialState);
             expect(deck.setDrawingBufferSize).toHaveBeenCalledWith(640, 700);
@@ -286,28 +286,28 @@ describe("Deck navigation target and layout", () => {
     it("centers explicit navigation in the visible area after the inspection dock clips the canvas", () => {
         const view = createView();
         const internals = view as unknown as DeckViewTestInternals;
-        internals.lastCanvasCssSize = {width: 1000, height: 700};
+        internals.lastCanvasCssSize = { width: 1000, height: 700 };
         const deck = installDeckMock(view, 1000, 700);
         const container = document.createElement("div");
         container.id = "canvas";
         Object.defineProperties(container, {
-            clientWidth: {value: 640},
-            clientHeight: {value: 700}
+            clientWidth: { value: 640 },
+            clientHeight: { value: 700 }
         });
         document.body.appendChild(container);
         const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame").mockReturnValue(17);
         try {
-            view.prepareForLayoutResize({width: 640, height: 700});
-            expect(internals.clippedLayoutCanvasCssSize).toEqual({width: 1000, height: 700});
+            view.prepareForLayoutResize({ width: 640, height: 700 });
+            expect(internals.clippedLayoutCanvasCssSize).toEqual({ width: 1000, height: 700 });
 
             internals.prepareForNavigation();
 
             expect(internals.clippedLayoutCanvasCssSize).toBeUndefined();
-            expect(internals.lastCanvasCssSize).toEqual({width: 640, height: 700});
+            expect(internals.lastCanvasCssSize).toEqual({ width: 640, height: 700 });
             expect(deck.setProps).toHaveBeenLastCalledWith({
                 width: 640,
                 height: 700,
-                style: expect.objectContaining({width: "640px", height: "700px"})
+                style: expect.objectContaining({ width: "640px", height: "700px" })
             });
             expect(deck.setDrawingBufferSize).toHaveBeenLastCalledWith(640, 700);
         } finally {
@@ -327,8 +327,8 @@ describe("Deck navigation target and layout", () => {
             bearing: 35,
             maxPitch: 85
         };
-        const initialState = {...internals.viewState};
-        internals.lastCanvasCssSize = {width: 1000, height: 700};
+        const initialState = { ...internals.viewState };
+        internals.lastCanvasCssSize = { width: 1000, height: 700 };
         const deck = installDeckMock(view, 1000, 700);
         const resizeCallbacks: FrameRequestCallback[] = [];
         const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame")
@@ -338,25 +338,25 @@ describe("Deck navigation target and layout", () => {
             });
 
         try {
-            view.prepareForLayoutResize({width: 640, height: 700});
+            view.prepareForLayoutResize({ width: 640, height: 700 });
 
             expect(internals.viewState).toEqual(initialState);
-            expect(internals.clippedLayoutCanvasCssSize).toEqual({width: 1000, height: 700});
+            expect(internals.clippedLayoutCanvasCssSize).toEqual({ width: 1000, height: 700 });
             expect(deck.setProps).toHaveBeenNthCalledWith(1, {
                 width: 1000,
                 height: 700,
-                style: expect.objectContaining({width: "1000px", height: "700px"})
+                style: expect.objectContaining({ width: "1000px", height: "700px" })
             });
             expect(deck.setDrawingBufferSize).toHaveBeenNthCalledWith(1, 1000, 700);
             expect(resizeCallbacks).toHaveLength(0);
 
-            view.prepareForLayoutResize({width: 1000, height: 700});
+            view.prepareForLayoutResize({ width: 1000, height: 700 });
             expect(internals.viewState).toEqual(initialState);
             expect(internals.clippedLayoutCanvasCssSize).toBeUndefined();
             expect(deck.setProps).toHaveBeenNthCalledWith(2, {
                 width: 1000,
                 height: 700,
-                style: expect.objectContaining({width: "1000px", height: "700px"})
+                style: expect.objectContaining({ width: "1000px", height: "700px" })
             });
             expect(resizeCallbacks).toHaveLength(1);
             resizeCallbacks[0]?.(0);

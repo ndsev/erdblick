@@ -1,10 +1,10 @@
-import {testPersistence, stateOwners} from '../../test/state-owners';
+import { testPersistence, stateOwners } from '../../test/state-owners';
 import '@angular/compiler';
-import {ElementRef} from '@angular/core';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {AppPanelComponent} from './app-panel.component';
-import {AppStateService} from './appstate.service';
-import {ViewerUiService} from '../actions/viewer-ui.service';
+import { ElementRef } from '@angular/core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AppPanelComponent } from './app-panel.component';
+import { AppStateService } from "./appstate.service";
+import { ViewerUiService } from '../actions/viewer-ui.service';
 
 interface AppPanelTestAccess {
     contentRef?: ElementRef<HTMLElement>;
@@ -57,7 +57,7 @@ describe('AppPanelComponent custom resizing', () => {
             baseFontSize: 16,
             setPanelLayout
         } as unknown as AppStateService;
-        component = new AppPanelComponent(stateService, new ViewerUiService({} as never, {} as never), stateOwners(stateService).layout);
+        component = new AppPanelComponent(stateService, new ViewerUiService({} as never, {} as never), stateService as never);
         component.layoutId = 'test-panel';
         component.persistLayout = true;
         component.resizeMode = 'vertical';
@@ -116,7 +116,7 @@ describe('AppPanelComponent custom resizing', () => {
         internals.finishContentResize(pointerEvent(handle, 7, 160));
         expect(setPanelLayout).toHaveBeenCalledTimes(1);
         expect(setPanelLayout).toHaveBeenCalledWith('test-panel', {
-            panelSize: {width: 480, height: 380},
+            panelSize: { width: 480, height: 380 },
             panelExpanded: true
         });
         expect(capturedPointer).toBeUndefined();
@@ -133,7 +133,7 @@ describe('AppPanelComponent custom resizing', () => {
         expect(internals.panelBodyHeightPx).toBe(160);
         internals.finishContentResize(pointerEvent(handle, 11, -2000));
         expect(setPanelLayout).toHaveBeenCalledWith('test-panel', {
-            panelSize: {width: 480, height: 160},
+            panelSize: { width: 480, height: 160 },
             panelExpanded: false
         });
     });

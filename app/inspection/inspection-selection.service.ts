@@ -1,36 +1,32 @@
-import type {ActionInput, ActionOutput} from "../actions/app-action";
-import {AppActionService} from "../actions/app-action.service";
-import {ControlReadContext, ControlValue, rejectAction} from "../actions/app-action";
-import {inspectionActions, inspectionControls} from "./inspection-selection.service.declarations";
-import {parsePartition, partitionKeySuffix} from "../mapdata/partition.model";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import { Injectable,NgZone } from "@angular/core";
+import { Injectable, NgZone } from "@angular/core";
 import { BehaviorSubject } from "rxjs";
 import { Feature } from "../../build/libs/core/erdblick-core";
+import type { ActionInput, ActionOutput } from "../actions/app-action";
+import { ControlReadContext, ControlValue, rejectAction } from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
 import { Cartesian3 } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
 import {
-featureSetsEqual,
-FeatureWrapper
+    featureSetsEqual,
+    FeatureWrapper
 } from "../mapdata/feature-inspection.model";
 import {
-MapTileStreamService,
-RetainedTileExpiryOwner
+    MapTileStreamService,
+    RetainedTileExpiryOwner
 } from "../mapdata/map-tile-stream.service";
+import { parsePartition, partitionKeySuffix } from "../mapdata/partition.model";
 import { TileDeliveryError } from "../mapdata/tile-diagnostics";
+import { MapViewStateService } from "../mapview/map-view-state.service";
 import { MapViewService } from "../mapview/map-view.service";
 import { deepEquals } from "../shared/app-state";
-import {
-AppStateService,
-InspectionPanelModel,
-SelectedSourceData,
-TileFeatureId
-} from "../shared/appstate.service";
+import { AppStateService } from "../shared/appstate.service";
 import { InfoMessageService } from "../shared/info.service";
 import { KeyboardService } from "../shared/keyboard.service";
 import {
-tileFeatureInteractionTargetsEqual
+    tileFeatureInteractionTargetsEqual
 } from "../shared/tile-feature-id";
+import { inspectionActions, inspectionControls } from "./inspection-selection.service.declarations";
+import { InspectionPanelModel, SelectedSourceData, TileFeatureId } from "./inspection-state.model";
 import { InspectionStateService } from "./inspection-state.service";
 
 interface Wgs84Point {
@@ -56,7 +52,7 @@ interface InspectionExpiryOwner extends RetainedTileExpiryOwner {
 /**
  * Owns selected and hovered feature interaction state, including focus/zoom navigation.
  */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class InspectionSelectionService {
     readonly selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
     readonly hoverIdsTopic = new BehaviorSubject<TileFeatureId[]>([]);
@@ -111,7 +107,7 @@ export class InspectionSelectionService {
                 const existing = existingPanels.get(selection.id);
                 if (existing && featureSetsEqual(selection.features, existing.features) && deepEquals(existing.sourceData, selection.sourceData)) {
                     pendingSelections.push(existing);
-                    pendingPanelUpdates.push({panel: existing, selection});
+                    pendingPanelUpdates.push({ panel: existing, selection });
                     continue;
                 }
 
@@ -122,7 +118,7 @@ export class InspectionSelectionService {
 
                 pendingSelections.push(this.runtimePanel(selection, [], true));
                 featureLoads.push(this.loadFeaturesOnce(selection.features)
-                    .then(features => ({selection, features}))
+                    .then(features => ({ selection, features }))
                     .catch(error => {
                         console.error(
                             `Failed to resolve inspection selection for panel ${selection.id}.`,
@@ -290,7 +286,7 @@ export class InspectionSelectionService {
         const featureIds = this.uniqueTileFeatureIds(tileFeatureIds);
         const foundFeatureCount = featureIds.length;
         if (!foundFeatureCount) {
-            return {foundFeatureCount: 0, inspectedFeatureCount: 0};
+            return { foundFeatureCount: 0, inspectedFeatureCount: 0 };
         }
 
         if (foundFeatureCount === 1) {
@@ -345,7 +341,7 @@ export class InspectionSelectionService {
                 "Decrease the selection or increase your max inspections limit to see more."
             );
         }
-        return {foundFeatureCount, inspectedFeatureCount};
+        return { foundFeatureCount, inspectedFeatureCount };
     }
 
     /** Deduplicates full map-tile/feature identities without changing traversal order. */
@@ -402,7 +398,7 @@ export class InspectionSelectionService {
 
     /** Reconciles one shared-heap handle per retained inspection tile value. */
     private reconcileInspectionExpiries(
-        values: Array<{panelId: number; feature: FeatureWrapper}>
+        values: Array<{ panelId: number; feature: FeatureWrapper }>
     ): void {
         const grouped = new Map<string, {
             panelId: number;
@@ -411,7 +407,7 @@ export class InspectionSelectionService {
             expiresAtMs: number | null;
             featureIds: TileFeatureId[];
         }>();
-        for (const {panelId, feature} of values) {
+        for (const { panelId, feature } of values) {
             const tile = feature.featureTile;
             const key = `${panelId}:${tile.mapTileKey}`;
             const rawExpiry = Number(tile.expiresAtMs);
@@ -433,7 +429,7 @@ export class InspectionSelectionService {
             group.featureIds.push(feature.key());
             if (expiresAtMs !== null &&
                 (group.expiresAtMs === null ||
-                 expiresAtMs < group.expiresAtMs)) {
+                    expiresAtMs < group.expiresAtMs)) {
                 group.expiresAtMs = expiresAtMs;
             }
         }
@@ -586,13 +582,13 @@ export class InspectionSelectionService {
      * Moves one or more views to a feature using Deck's WGS84 camera path.
      * Passing `undefined` targets every view that currently shows the feature tile.
      */
-    zoomToFeature(viewIndex: number|undefined, featureWrapper: FeatureWrapper) {
+    zoomToFeature(viewIndex: number | undefined, featureWrapper: FeatureWrapper) {
         const targetViews = this.targetViewsForFeatureZoom(viewIndex, featureWrapper.featureTile);
         if (!targetViews.length) {
             return;
         }
         const target = this.featureSetZoomTarget([featureWrapper]);
-        if (target) targetViews.forEach(vi => this.viewState.moveToWgs84PositionTopic.next({targetView: vi, ...target}));
+        if (target) targetViews.forEach(vi => this.viewState.moveToWgs84PositionTopic.next({ targetView: vi, ...target }));
     }
 
     /** Computes the ordinary fit target for a small explicit feature set before any camera/focus mutation. */
@@ -600,15 +596,15 @@ export class InspectionSelectionService {
         const spheres = features.flatMap(wrapper => wrapper.peek((feature: Feature) => {
             const center = feature.center() as Wgs84Point;
             return this.isFiniteWgs84Point(center)
-                ? [{center, radius: this.featureBoundingRadiusMeters(center, feature.boundingRadiusEndPoint())}] : [];
+                ? [{ center, radius: this.featureBoundingRadiusMeters(center, feature.boundingRadiusEndPoint()) }] : [];
         }) ?? []);
         if (!spheres.length || spheres.length !== features.length) return undefined;
         if (spheres.length === 1) {
-            const {center, radius} = spheres[0];
-            return {x: center.x, y: center.y, z: this.featureZoomAltitude(center.z, radius)};
+            const { center, radius } = spheres[0];
+            return { x: center.x, y: center.y, z: this.featureZoomAltitude(center.z, radius) };
         }
         const reference = spheres[0].center.x;
-        const center: Wgs84Point = {x: 0, y: 0, z: 0};
+        const center: Wgs84Point = { x: 0, y: 0, z: 0 };
         for (const sphere of spheres) {
             const delta = ((sphere.center.x - reference + 540) % 360) - 180;
             center.x += reference + delta;
@@ -618,11 +614,11 @@ export class InspectionSelectionService {
         center.x = ((center.x / spheres.length + 540) % 360) - 180;
         center.y /= spheres.length;
         const radius = Math.max(...spheres.map(sphere => this.featureBoundingRadiusMeters(center, sphere.center) + sphere.radius));
-        return {x: center.x, y: center.y, z: this.featureZoomAltitude(center.z, radius)};
+        return { x: center.x, y: center.y, z: this.featureZoomAltitude(center.z, radius) };
     }
 
     /** Resolves the view indices affected by a feature zoom request. */
-    private targetViewsForFeatureZoom(viewIndex: number|undefined, featureTile: FeatureWrapper["featureTile"]): number[] {
+    private targetViewsForFeatureZoom(viewIndex: number | undefined, featureTile: FeatureWrapper["featureTile"]): number[] {
         if (viewIndex !== undefined) {
             return viewIndex >= 0 && viewIndex < this.viewSettings.numViews ? [viewIndex] : [];
         }
@@ -698,7 +694,6 @@ export class InspectionSelectionService {
         this.messageService.showError(message);
     }
 
-
     registerActions(actions: AppActionService): void {
         actions.registerAction(inspectionActions.inspect, (input, signal) => this.inspect(input, signal));
         actions.registerAction(inspectionActions.openSourceData, input => this.openSourceData(input));
@@ -720,19 +715,24 @@ export class InspectionSelectionService {
                 function* features() {
                     for (const feature of panel.features) {
                         const identity = stream.parseMapPartitionKeySafe(feature.mapTileKey);
-                        yield identity ? {...feature, mapId: identity[0], layerId: identity[1], partition: identity[2]} : feature;
+                        yield identity ? { ...feature, mapId: identity[0], layerId: identity[1], partition: identity[2] } : feature;
                     }
                 }
-                yield {panelId: panel.id, lifetime: state.panelLifetime(panel.id)!, locked: panel.locked, undocked: panel.undocked,
+                yield {
+                    panelId: panel.id, lifetime: state.panelLifetime(panel.id)!, locked: panel.locked, undocked: panel.undocked,
                     loading: panel.sourceData ? null : runtime.has(panel.id) ? !!runtime.get(panel.id)!.loading : true,
                     features: context.collect(features(), 32 * 1024),
-                    ...(panel.sourceData ? {sourceData: {mapTileKey: panel.sourceData.mapTileKey,
-                        ...(panel.sourceData.address !== undefined ? {address: panel.sourceData.address.toString()} : {})}} : {})};
+                    ...(panel.sourceData ? {
+                        sourceData: {
+                            mapTileKey: panel.sourceData.mapTileKey,
+                            ...(panel.sourceData.address !== undefined ? { address: panel.sourceData.address.toString() } : {})
+                        }
+                    } : {})
+                };
             }
         }
         return context.collect(summaries());
     }
-
 
     /** Uses the native key factory for backend-returned source references; the panel owns address resolution. */
     openSourceData(input: ActionInput<typeof inspectionActions.openSourceData>): ActionOutput<typeof inspectionActions.openSourceData> {
@@ -746,11 +746,10 @@ export class InspectionSelectionService {
         if (!parsed || !mapTileKey.startsWith("SourceData:")) rejectAction("Expected a native SourceData key", "invalid_arguments");
         const address = "mapTileKey" in source ? source.address : source.reference.address;
         if (address !== undefined && BigInt(address) > 18446744073709551615n) rejectAction("Address exceeds uint64", "invalid_arguments");
-        const panelId = this.inspectionState.setSelection({mapTileKey, ...(address === undefined ? {} : {address: BigInt(address)})}, undefined, input.newPanel ?? false);
+        const panelId = this.inspectionState.setSelection({ mapTileKey, ...(address === undefined ? {} : { address: BigInt(address) }) }, undefined, input.newPanel ?? false);
         if (panelId === undefined) rejectAction("An inspection could not be opened");
-        return {status: "applied", panelId, mapTileKey};
+        return { status: "applied", panelId, mapTileKey };
     }
-
 
     /** Publishes inspection shells after locate only; the existing selection owner performs asynchronous feature loading. */
     async inspect(input: ActionInput<typeof inspectionActions.inspect>, signal?: AbortSignal): Promise<ActionOutput<typeof inspectionActions.inspect>> {
@@ -782,8 +781,10 @@ export class InspectionSelectionService {
             if (input.color !== undefined) panels.forEach(panel => this.inspectionState.setInspectionPanelColor(panel.id, input.color!));
             const represented = features.filter(feature => panels.some(panel => panel.features.some(candidate =>
                 candidate.mapTileKey === feature.mapTileKey && candidate.featureId === feature.featureId)));
-            result = {status: "applied", panelIds: panels.map(panel => panel.id), features: represented,
-                complete: represented.length === features.length, ...(represented.length < features.length ? {reason: "item_limit" as const} : {})};
+            result = {
+                status: "applied", panelIds: panels.map(panel => panel.id), features: represented,
+                complete: represented.length === features.length, ...(represented.length < features.length ? { reason: "item_limit" as const } : {})
+            };
         }));
         return result;
     }

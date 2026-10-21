@@ -1,37 +1,44 @@
-import {AppActionService} from "../actions/app-action.service";
-import {ActionInput, ActionOutput, ControlSelector, ControlValue, applied, rejectAction} from "../actions/app-action";
-import {mapViewActions, mapViewControls} from "./map-view.service.declarations";
-import {mapControls} from "../mapdata/map-info.service.declarations";
-import {AppConfigService} from "../shared/app-config.service";
-import {Cartographic} from "../integrations/geo";
-import {tileGridMaxLevel} from "../shared/app-state.model";
 import { Injectable } from "@angular/core";
-import { Subject,filter,firstValueFrom,fromEvent,merge,startWith } from "rxjs";
+import { Subject, filter, firstValueFrom, fromEvent, merge, startWith } from "rxjs";
 import type {
-FeatureLayerStyle,
-Viewport
+    FeatureLayerStyle,
+    Viewport
 } from "../../build/libs/core/erdblick-core";
+import {
+    ActionInput,
+    ActionOutput,
+    ControlSelector,
+    ControlValue,
+    applied,
+    rejectAction
+} from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
+import { Cartographic } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
 import { MapInfoService } from "../mapdata/map-info.service";
+import { mapControls } from "../mapdata/map-info.service.declarations";
+import { AppConfigService } from "../shared/app-config.service";
+import { AppStateService } from "../shared/appstate.service";
 import {
-AppStateService,
-CameraViewState,
-TileGridMode,
-VIEW_SYNC_LAYERS,
-VIEW_SYNC_MOVEMENT,
-VIEW_SYNC_POSITION
-} from "../shared/appstate.service";
-import {
-clampPresentationLod,
-clampStyleLod
+    clampPresentationLod,
+    clampStyleLod
 } from "../shared/lod-policy";
-import { MapViewStateService, ViewId } from "./map-view-state.service";
-import { RenderPreferencesService } from "./render-preferences.service";
-import { IRenderView,LocationArea,RenderRectangle,RenderViewCameraState } from "./render-view.model";
 import {
-autoTileGridLevel,
-coarsenedTileLevel,
-tileGridVisibleCellCount
+    CameraViewState,
+    TileGridMode,
+    VIEW_SYNC_LAYERS,
+    VIEW_SYNC_MOVEMENT,
+    VIEW_SYNC_POSITION,
+    tileGridMaxLevel
+} from "./map-view-state.model";
+import { MapViewStateService, ViewId } from "./map-view-state.service";
+import { mapViewActions, mapViewControls } from "./map-view.service.declarations";
+import { RenderPreferencesService } from "./render-preferences.service";
+import { IRenderView, LocationArea, RenderRectangle, RenderViewCameraState } from "./render-view.model";
+import {
+    autoTileGridLevel,
+    coarsenedTileLevel,
+    tileGridVisibleCellCount
 } from "./tile-grid-visibility";
 import { ViewVisualizationState } from "./view.visualization.model";
 
@@ -62,7 +69,7 @@ export interface LiveCameraViewStateUpdate {
 /**
  * Owns camera/view state and the unified per-view `ViewVisualizationState` instances.
  */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class MapViewService {
     private static readonly AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES = 64;
     private static readonly SEARCH_COVERAGE_TILE_LIMIT = 1 << 20;
@@ -72,7 +79,7 @@ export class MapViewService {
     readonly navigationStarted = new Subject<void>();
     readonly moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number, z?: number }>();
     readonly moveToRectangleTopic = new Subject<{ targetView: number, rectangle: RenderRectangle }>();
-    readonly moveToLocationAreaTopic = new Subject<{targetView: number; area: LocationArea}>();
+    readonly moveToLocationAreaTopic = new Subject<{ targetView: number; area: LocationArea }>();
     readonly clearLocationHighlightTopic = new Subject<number>();
     readonly locationBoundaryUnavailableTopic = new Subject<void>();
     readonly showLocationLabelTopic = new Subject<{ targetView: number, x: number, y: number, label: string }>();
@@ -93,7 +100,7 @@ export class MapViewService {
     }>();
     private removingView = false;
     private readonly retainedCameras = new Map<ViewId, RenderViewCameraState>();
-    private readonly renderViews = new Map<ViewId, {view: IRenderView; generation: number}>();
+    private readonly renderViews = new Map<ViewId, { view: IRenderView; generation: number }>();
     private nextRendererGeneration = 0;
     private layoutRevision = 0;
 
@@ -131,7 +138,7 @@ export class MapViewService {
     /** Registers a renderer reference, not a second camera-state store; teardown is generation-safe. */
     registerRenderView(view: IRenderView): () => void {
         this.viewSettings.indexOfView(view.viewId);
-        const registration = {view, generation: ++this.nextRendererGeneration};
+        const registration = { view, generation: ++this.nextRendererGeneration };
         this.renderViews.set(view.viewId, registration);
         this.viewStateChanged.next(ViewRecalculationReason.RenderViewReady);
         return () => {
@@ -140,14 +147,14 @@ export class MapViewService {
     }
 
     /** Captures logical identity and one renderer lifetime for asynchronous operations. */
-    captureView(view: number | ViewId): {viewId: ViewId; generation: number} | undefined {
+    captureView(view: number | ViewId): { viewId: ViewId; generation: number } | undefined {
         const id = typeof view === "number" ? this.viewSettings.viewIds[view] : view;
         const registration = id === undefined ? undefined : this.renderViews.get(id);
-        return registration?.view.isAvailable() ? {viewId: id!, generation: registration.generation} : undefined;
+        return registration?.view.isAvailable() ? { viewId: id!, generation: registration.generation } : undefined;
     }
 
     /** Removed/restored IDs never validate a token from an earlier renderer generation. */
-    resolveCapturedView(target: {viewId: ViewId; generation: number}): IRenderView | undefined {
+    resolveCapturedView(target: { viewId: ViewId; generation: number }): IRenderView | undefined {
         const registration = this.renderViews.get(target.viewId);
         return registration?.generation === target.generation && this.viewSettings.viewIds.includes(target.viewId)
             && registration.view.isAvailable() ? registration.view : undefined;
@@ -191,7 +198,7 @@ export class MapViewService {
         if (this.removingView || count <= 1 || !Number.isInteger(viewIndex) || viewIndex < 0 || viewIndex >= count) {
             return;
         }
-        const retainedIndices = Array.from({length: count}, (_, index) => index)
+        const retainedIndices = Array.from({ length: count }, (_, index) => index)
             .filter(index => index !== viewIndex);
         this.retainViews(retainedIndices);
     }
@@ -207,7 +214,7 @@ export class MapViewService {
         try {
             // Include an unconsumed handoff if another close happens during setup.
             const cameras = new Map([...this.retainedCameras].map(([id, camera]) => [this.viewSettings.indexOfView(id), camera]));
-            this.beforeViewRemoval.next({retainedIndices, cameras});
+            this.beforeViewRemoval.next({ retainedIndices, cameras });
             this.retainedCameras.clear();
             retainedIndices.forEach((index, target) => {
                 const camera = cameras.get(index);
@@ -226,7 +233,8 @@ export class MapViewService {
 
     /** Consumes a camera handoff only after the replacement renderer is ready. */
     takeRetainedCamera(viewIndex: number): RenderViewCameraState | undefined {
-        const id = this.viewSettings.viewIdAt(viewIndex);
+        const id = this.viewSettings.viewIds[viewIndex];
+        if (id === undefined) return undefined;
         const camera = this.retainedCameras.get(id);
         this.retainedCameras.delete(id);
         return camera;
@@ -260,8 +268,8 @@ export class MapViewService {
             const targetState = this.viewSettings.cameraViewDataState.getValue(targetView);
             const cameraViewData: CameraViewState = syncPosition
                 ? {
-                    destination: {...sourceState.destination},
-                    orientation: {...sourceState.orientation},
+                    destination: { ...sourceState.destination },
+                    orientation: { ...sourceState.orientation },
                     position: [...(sourceState.position ?? [0, 0, 0])]
                 }
                 : {
@@ -270,10 +278,10 @@ export class MapViewService {
                         lat: targetState.destination.lat + latitudeDelta,
                         alt: targetState.destination.alt
                     },
-                    orientation: {...targetState.orientation},
+                    orientation: { ...targetState.orientation },
                     position: [...(targetState.position ?? [0, 0, 0])]
                 };
-            this.liveCameraViewStateTopic.next({sourceView, targetView, cameraViewData});
+            this.liveCameraViewStateTopic.next({ sourceView, targetView, cameraViewData });
         }
     }
 
@@ -318,8 +326,8 @@ export class MapViewService {
                 tileLimit,
                 this.visibleFeatureLevelsInView(viewIndex),
                 state.canonicalCameraAltitudeMeters ??
-                    this.viewSettings.cameraViewDataState
-                        .getValue(viewIndex).destination.alt
+                this.viewSettings.cameraViewDataState
+                    .getValue(viewIndex).destination.alt
             );
         });
     }
@@ -735,21 +743,20 @@ export class MapViewService {
         return clampedLevel;
     }
 
-
     registerActions(actions: AppActionService): void {
         actions.registerAction(mapViewActions.manageView, input => this.manageView(input));
-        actions.registerControl(mapViewControls.views, {read: () => this.viewSummary(), defaultTargets: () => [{}]});
+        actions.registerControl(mapViewControls.views, { read: () => this.viewSummary(), defaultTargets: () => [{}] });
         actions.registerControl(mapViewControls.camera, {
-            read: ({viewId}) => this.readCamera(viewId), write: ({viewId}, value) => this.assignCamera(viewId, value),
-            defaultTargets: () => this.viewSettings.viewIds.map(viewId => ({viewId}))
+            read: ({ viewId }) => this.readCamera(viewId), write: ({ viewId }, value) => this.assignCamera(viewId, value),
+            defaultTargets: () => this.viewSettings.viewIds.map(viewId => ({ viewId }))
         });
         actions.registerControl(mapViewControls.projection, {
-            read: ({viewId}) => this.viewSettings.mode2dState.getValue(this.requireViewIndex(viewId)) ? "2d" : "3d",
-            write: ({viewId}, value) => this.assignProjection(viewId, value)
+            read: ({ viewId }) => this.viewSettings.mode2dState.getValue(this.requireViewIndex(viewId)) ? "2d" : "3d",
+            write: ({ viewId }, value) => this.assignProjection(viewId, value)
         });
         actions.registerControl(mapViewControls.background, {
-            read: ({viewId}) => this.viewSettings.getBackgroundState(this.requireViewIndex(viewId)),
-            write: ({viewId}, value) => {
+            read: ({ viewId }) => this.viewSettings.getBackgroundState(this.requireViewIndex(viewId)),
+            write: ({ viewId }, value) => {
                 const index = this.requireViewIndex(viewId);
                 if (value.layerId && !this.config.getBackgroundLayers().some(layer => layer.id === value.layerId)) rejectAction("Unknown background", "invalid_arguments");
                 this.stateService.transaction(() => {
@@ -759,7 +766,7 @@ export class MapViewService {
             }
         });
         actions.registerControl(mapViewControls.grid, {
-            read: ({viewId}) => this.gridSettings(viewId), write: ({viewId}, value) => this.assignGrid(viewId, value)
+            read: ({ viewId }) => this.gridSettings(viewId), write: ({ viewId }, value) => this.assignGrid(viewId, value)
         });
         actions.registerControl(mapControls.layer, {
             read: target => this.mapInfo.layerConfiguration(target),
@@ -775,12 +782,16 @@ export class MapViewService {
     }
 
     viewSummary(): ControlValue<typeof mapViewControls.views> {
-        return {focusedViewId: this.viewSettings.focusedViewIdState.value, sync: [...this.viewSettings.viewSync],
+        return {
+            focusedViewId: this.viewSettings.focusedViewIdState.value, sync: [...this.viewSettings.viewSync],
             views: this.viewSettings.viewIds.map(viewId => {
                 const renderer = this.renderViewFor(viewId);
-                return {viewId, projection: this.viewSettings.mode2dState.getValue(viewId) ? "2d" : "3d",
-                    navigationMode: !renderer ? "unavailable" : renderer.isFirstPersonViewActive() ? "first_person" : "map"};
-            })};
+                return {
+                    viewId, projection: this.viewSettings.mode2dState.getValue(viewId) ? "2d" : "3d",
+                    navigationMode: !renderer ? "unavailable" : renderer.isFirstPersonViewActive() ? "first_person" : "map"
+                };
+            })
+        };
     }
 
     manageView(input: ActionInput<typeof mapViewActions.manageView>): ActionOutput<typeof mapViewActions.manageView> {
@@ -846,9 +857,11 @@ export class MapViewService {
 
     gridSettings(viewId: string): ControlValue<typeof mapViewControls.grid> {
         const index = this.requireViewIndex(viewId);
-        return {visible: this.mapInfo.maps.getViewTileBorderState(index), mode: this.mapInfo.maps.getViewTileGridMode(index),
+        return {
+            visible: this.mapInfo.maps.getViewTileBorderState(index), mode: this.mapInfo.maps.getViewTileGridMode(index),
             level: this.mapInfo.maps.getViewTileGridLevel(index), autoLevel: this.mapInfo.maps.getViewTileGridAutoLevel(index),
-            color: this.mapInfo.maps.getViewTileGridColor(index), opacity: this.mapInfo.maps.getViewTileGridOpacity(index)};
+            color: this.mapInfo.maps.getViewTileGridColor(index), opacity: this.mapInfo.maps.getViewTileGridOpacity(index)
+        };
     }
 
     assignGrid(viewId: string, value: ControlValue<typeof mapViewControls.grid>): void {
@@ -873,6 +886,5 @@ export class MapViewService {
             this.setMapLayerVisibility(index, target.mapId, target.layerId, value.visible);
         });
     }
-
 
 }

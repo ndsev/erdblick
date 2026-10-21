@@ -1,7 +1,7 @@
-import {distinctUntilChanged, map, Observable, OperatorFunction, Subject} from "rxjs";
-import {z, ZodTypeAny} from "zod";
-import type {Params} from "@angular/router";
-import {environment} from "../environments/environment";
+import type { Params } from "@angular/router";
+import { distinctUntilChanged, map, Observable, OperatorFunction, Subject } from "rxjs";
+import { z, ZodTypeAny } from "zod";
+import { environment } from "../environments/environment";
 
 /** Converts an app-state value into the representation stored in URL or local storage. */
 export type AppStateToStorageFun<T> = (value: T) => unknown;
@@ -46,8 +46,11 @@ export const Boolish = z.union([
     z.number().refine(value => value === 0 || value === 1).transform(value => value === 1),
 ]);
 
-// TODO: Do we actually need this?
-/** Removes optional/default/lazy wrappers so scalar checks can inspect the underlying schema. */
+/**
+ * Optional/default/nullable/lazy wrappers retain the primitive's compact URL encoding.
+ * Inspect the underlying schema when coercing text; the original schema still validates
+ * the resulting value and supplies optional/default behavior.
+ */
 function unwrapScalar(schema: z.ZodTypeAny): z.ZodTypeAny {
     // unwrap until it stabilizes
     while (true) {
@@ -186,18 +189,12 @@ function isArrayOfPrimitiveArrays(schema: z.ZodTypeAny): schema is z.ZodArray<z.
     return isScalar(inner);
 }
 
-/**
- * Use colon ":" to join of CSV groups
- * */
 /** Joins arrays-of-arrays into the colon-delimited compact URL representation. */
 function joinColonCSV(groups: unknown[][]): string {
     return groups.map(g => joinCSV(g)).join(':');
 }
 
-/**
- * Split by colon ":" into CSV groups; empty segment => empty array
- * */
-/** Splits the colon-delimited compact URL representation of arrays-of-arrays. */
+/** Splits colon-delimited CSV groups, preserving empty segments as empty arrays. */
 function splitColonCSV(val: string): string[][] {
     if (!val) {
         return [];
@@ -302,17 +299,13 @@ export function deepCopy<V>(value: V): V {
 }
 
 /**
- * Generic state container with optional URL/storage serialization hooks.
+ * One persisted application state slot with schema validation and URL/storage codecs.
  *
  * URL encoding strategy is schema-aware:
  * - scalar arrays -> CSV (with optional run-length tokens),
  * - nested primitive arrays -> colon-separated CSV groups,
  * - form-encoded object arrays -> per-field CSV columns,
  * - everything else -> JSON.
- */
-/**
- * Represents one persisted application state slot with schema validation and URL/storage
- * serialization helpers.
  */
 export class AppState<T> extends Observable<T> {
     private currentValue: T;
@@ -369,7 +362,9 @@ export class AppState<T> extends Observable<T> {
         return this.projection ? this.projection.read() : this.currentValue;
     }
 
-    get value(): T { return this.getValue(); }
+    get value(): T {
+        return this.getValue();
+    }
 
     /** Publishes immediately for a single edit, or at the enclosing transaction boundary. */
     next(value: T): void {
@@ -729,7 +724,7 @@ export class MapViewState<T> {
 
     next(view: number | string, value: T): void {
         const id = this.resolve(view);
-        this.appState.next({...this.appState.value, [id]: value});
+        this.appState.next({ ...this.appState.value, [id]: value });
     }
 
     subscribe(view: number | string, callback: (value: T) => void) {
@@ -762,7 +757,9 @@ export class MapViewState<T> {
         this.appState.next(Object.fromEntries(Object.entries(this.appState.value).filter(([id]) => ids.includes(id))));
     }
 
-    length(): number { return this.viewIds().length; }
+    length(): number {
+        return this.viewIds().length;
+    }
 }
 
 /** Compacts booleans to `1`/`0` for shorter URL output, recursively. */
@@ -779,8 +776,12 @@ function compactBooleans(value: unknown): unknown {
     return value;
 }
 
+/** One scalar value supported by the style option editor and persistence codecs. */
+export type StyleOptionValue = string | number | boolean;
+
 /**
- * Style Option State Encoding:
+ * Stores style options by map/layer/style key and logical view identity.
+ * The deployed URL format projects those values into positional arrays:
  *
  *    Style option values are encoded per style sheet, per referenced layer index
  *    and per view. One URL parameter stores all option bodies for one style key:
@@ -799,9 +800,6 @@ function compactBooleans(value: unknown): unknown {
  *    5,7:6,8        - option B values (`view0`, `view1`) for layer indices `0` and `2`.
  *
  */
-/** Specialized app-state slot for style option values keyed by map/layer/style metadata. */
-export type StyleOptionValue = string | number | boolean;
-
 export class StyleState extends AppState<Map<string, Record<string, StyleOptionValue>>> {
     layerNamesState: AppState<string[]>;
 
@@ -826,7 +824,7 @@ export class StyleState extends AppState<Map<string, Record<string, StyleOptionV
 
     /** Positional projection used only at compatibility boundaries. */
     positionalValues(): Map<string, StyleOptionValue[]> {
-        return new Map([...this.value].map(([key, values]) => [key, this.viewIds().map(id => values[id]) ]));
+        return new Map([...this.value].map(([key, values]) => [key, this.viewIds().map(id => values[id])]));
     }
 
     replacePositional(values: ReadonlyMap<string, readonly StyleOptionValue[]>): void {
@@ -852,7 +850,9 @@ export class StyleState extends AppState<Map<string, Record<string, StyleOptionV
         ])));
     }
 
-    override toSnapshotValue(): unknown { return Object.fromEntries(this.positionalValues()); }
+    override toSnapshotValue(): unknown {
+        return Object.fromEntries(this.positionalValues());
+    }
 
     override validateSnapshotValue(value: unknown): Map<string, Record<string, StyleOptionValue>> {
         const parsed = z.record(z.string(), z.array(z.union([z.string(), z.number(), z.boolean()]))).parse(value);
@@ -875,7 +875,7 @@ export class StyleState extends AppState<Map<string, Record<string, StyleOptionV
         //     'showOptionB': {'MapA/LayerX': [0, 0], 'MapB/LayerX': [1, 1]}
         //   }
         // }
-        const grouped = new Map<string, Map<string, Map<string, (string|number|boolean)[]>>>();
+        const grouped = new Map<string, Map<string, Map<string, (string | number | boolean)[]>>>();
 
         for (const [fullKey, values] of this.positionalValues()) {
             const fullKeyParts = fullKey.split("/");
@@ -993,7 +993,7 @@ export class StyleState extends AppState<Map<string, Record<string, StyleOptionV
                     const optionBody = optionValueSegments[oi] ?? '';
                     const perView = optionBody.split(':'); // per-view strings
                     const effectivePerView = perView.length === 1 && numViews > 1
-                        ? Array.from({length: numViews}, () => perView[0])
+                        ? Array.from({ length: numViews }, () => perView[0])
                         : perView;
 
                     for (let view = 0; view < numViews; view++) {
@@ -1089,7 +1089,7 @@ export class StyleState extends AppState<Map<string, Record<string, StyleOptionV
     }
 
     /** Coerces a raw URL/storage style-option value to the declared option type. */
-    public coerceOptionValue(value: any, optionType: string): string|number|boolean {
+    public coerceOptionValue(value: any, optionType: string): string | number | boolean {
         const t = (optionType || '').toLowerCase();
         if (t === 'bool' || t === 'boolean') {
             if (typeof value === 'boolean') return value;

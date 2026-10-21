@@ -1,22 +1,26 @@
-import {AppActionService} from "../actions/app-action.service";
-import {ControlValue, rejectAction} from "../actions/app-action";
-import {renderControls} from "./render-preferences.service.declarations";
+import { ControlValue } from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
+import { renderControls } from "./render-preferences.service.declarations";
 
-import {Injectable} from "@angular/core";
-import {z} from "zod";
-import {AppStateService} from "../shared/appstate.service";
-import {Boolish} from "../shared/app-state";
-import {PointCloudPolicy, DEFAULT_POINT_CLOUD_POLICY, pointCloudPolicySchema, pointCloudDetailSchema,
-    pointCloudWorkingMemorySchema, pointCloudGpuMemorySchema} from "../shared/point-cloud-policy";
-import {clampLod3TileThreshold, DEFAULT_LOD3_TILE_THRESHOLD} from "../shared/lod-policy";
-import {clampTileSubsetRenderWorkerCount} from "../shared/tile-render-policy";
-import {MAX_NUM_TILES_TO_LOAD} from "../shared/appstate.service";
+import { Injectable } from "@angular/core";
+import { z } from "zod";
+import { Boolish } from "../shared/app-state";
+import { AppStateService } from "../shared/appstate.service";
+import { clampLod3TileThreshold, DEFAULT_LOD3_TILE_THRESHOLD } from "../shared/lod-policy";
+import {
+    DEFAULT_POINT_CLOUD_POLICY,
+    pointCloudDetailSchema,
+    pointCloudGpuMemorySchema,
+    PointCloudPolicy,
+    pointCloudPolicySchema,
+    pointCloudWorkingMemorySchema
+} from "../shared/point-cloud-policy";
+import { clampTileSubsetRenderWorkerCount, MAX_NUM_TILES_TO_LOAD } from "../shared/tile-render-policy";
 
 /** Owns rendering preferences and validates coordinated resource-budget edits. */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class RenderPreferencesService {
-    constructor(private readonly persistence: AppStateService) {}
-
+    constructor(private readonly persistence: AppStateService) { }
 
     readonly deckAntialiasingEnabledState = this.persistence.registerState<boolean>({
         name: 'deckAntialiasingEnabled',
@@ -24,20 +28,17 @@ export class RenderPreferencesService {
         schema: Boolish
     });
 
-
     readonly semanticCompositingEnabledState = this.persistence.registerState<boolean>({
         name: 'semanticCompositingEnabled',
         defaultValue: true,
         schema: Boolish
     });
 
-
     readonly contactShadingEnabledState = this.persistence.registerState<boolean>({
         name: 'contactShadingEnabled',
         defaultValue: true,
         schema: Boolish
     });
-
 
     readonly lod3TileThresholdState = this.persistence.registerState<number>({
         name: 'lod3TileThreshold',
@@ -46,7 +47,6 @@ export class RenderPreferencesService {
         toStorage: value => clampLod3TileThreshold(value, DEFAULT_LOD3_TILE_THRESHOLD),
         fromStorage: value => clampLod3TileThreshold(value, DEFAULT_LOD3_TILE_THRESHOLD)
     });
-
 
     readonly tileSubsetRenderWorkerCountState = this.persistence.registerState<number>({
         name: 'tileSubsetRenderWorkerCount',
@@ -75,7 +75,6 @@ export class RenderPreferencesService {
         schema: pointCloudGpuMemorySchema
     });
 
-
     /** Read the same validated policy for Preferences, rendering and worker admission. */
     get pointCloudPolicy(): PointCloudPolicy {
         return {
@@ -85,7 +84,6 @@ export class RenderPreferencesService {
             gpuMemoryMiB: this.pointCloudGpuMemoryMiBState.getValue()
         };
     }
-
 
     /** Validate the whole preference edit before changing any persisted field. */
     setPointCloudPolicy(policy: PointCloudPolicy): void {
@@ -103,7 +101,6 @@ export class RenderPreferencesService {
         (left, right) => left.enabled === right.enabled && left.detailPixels === right.detailPixels &&
             left.workingMemoryMiB === right.workingMemoryMiB && left.gpuMemoryMiB === right.gpuMemoryMiB);
 
-
     readonly tilesLoadLimitState = this.persistence.registerState<number>({
         name: 'tilesLoadLimit',
         defaultValue: MAX_NUM_TILES_TO_LOAD,
@@ -111,19 +108,19 @@ export class RenderPreferencesService {
         urlParamName: 'tll'
     });
 
-    get deckAntialiasingEnabled() {return this.deckAntialiasingEnabledState.getValue();}
+    get deckAntialiasingEnabled() { return this.deckAntialiasingEnabledState.getValue(); }
 
-    set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
+    set deckAntialiasingEnabled(val: boolean) { this.deckAntialiasingEnabledState.next(!!val); }
 
-    get semanticCompositingEnabled() {return this.semanticCompositingEnabledState.getValue();}
+    get semanticCompositingEnabled() { return this.semanticCompositingEnabledState.getValue(); }
 
-    set semanticCompositingEnabled(val: boolean) {this.semanticCompositingEnabledState.next(!!val);}
+    set semanticCompositingEnabled(val: boolean) { this.semanticCompositingEnabledState.next(!!val); }
 
-    get contactShadingEnabled() {return this.contactShadingEnabledState.getValue();}
+    get contactShadingEnabled() { return this.contactShadingEnabledState.getValue(); }
 
-    set contactShadingEnabled(val: boolean) {this.contactShadingEnabledState.next(!!val);}
+    set contactShadingEnabled(val: boolean) { this.contactShadingEnabledState.next(!!val); }
 
-    get lod3TileThreshold() {return this.lod3TileThresholdState.getValue();}
+    get lod3TileThreshold() { return this.lod3TileThresholdState.getValue(); }
 
     set lod3TileThreshold(val: number) {
         this.lod3TileThresholdState.next(clampLod3TileThreshold(val, DEFAULT_LOD3_TILE_THRESHOLD));
@@ -139,10 +136,9 @@ export class RenderPreferencesService {
         );
     }
 
-    get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}
+    get tilesLoadLimit() { return this.tilesLoadLimitState.getValue(); }
 
-    set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);}
-
+    set tilesLoadLimit(val: number) { this.tilesLoadLimitState.next(val); }
 
     /** The public rendering control is a typed view of this owner's preferences. */
     registerActions(actions: AppActionService): void {
@@ -153,8 +149,10 @@ export class RenderPreferencesService {
     }
 
     get renderingPreferences(): ControlValue<typeof renderControls.rendering> {
-        return {antialiasing: this.deckAntialiasingEnabled, semanticCompositing: this.semanticCompositingEnabled,
-            contactShading: this.contactShadingEnabled, tileLimit: this.tilesLoadLimit, renderWorkers: this.tileSubsetRenderWorkerCount};
+        return {
+            antialiasing: this.deckAntialiasingEnabled, semanticCompositing: this.semanticCompositingEnabled,
+            contactShading: this.contactShadingEnabled, tileLimit: this.tilesLoadLimit, renderWorkers: this.tileSubsetRenderWorkerCount
+        };
     }
 
     setRenderingPreferences(value: ControlValue<typeof renderControls.rendering>): void {
@@ -166,6 +164,5 @@ export class RenderPreferencesService {
             this.tileSubsetRenderWorkerCount = value.renderWorkers;
         });
     }
-
 
 }

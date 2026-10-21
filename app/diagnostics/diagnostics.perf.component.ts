@@ -1,26 +1,27 @@
-import { Component,OnDestroy,ViewChild } from '@angular/core';
+import { Component, OnDestroy, ViewChild } from '@angular/core';
 import { TreeTableNode } from 'primeng/api';
 import { Subscription } from 'rxjs';
 import {
-SubsetDiagnosticsTile,
-ViewLayerDiagnosticsService
+    SubsetDiagnosticsTile,
+    ViewLayerDiagnosticsService
 } from '../mapview/view-layer-diagnostics.service';
 import { AppDialogComponent } from '../shared/app-dialog.component';
+import { DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService,DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from '../shared/appstate.service';
+import { AppStateService } from "../shared/appstate.service";
 import { DialogStackService } from '../shared/dialog-stack.service';
 import {
-CONVERSION_AGE_UNIT,
-COUNT_KEY_PATTERN,
-DISPLAY_DECIMALS,
-LOAD_CONVERT_ROOT_BADGE_PATTERN,
-RENDER_ROOT_BADGE_PATTERN,
-ROOT_BADGE_LOAD_DT,
-ROOT_BADGE_RENDER_DT,
-UNIT_SUFFIXES
+    CONVERSION_AGE_UNIT,
+    COUNT_KEY_PATTERN,
+    DISPLAY_DECIMALS,
+    LOAD_CONVERT_ROOT_BADGE_PATTERN,
+    RENDER_ROOT_BADGE_PATTERN,
+    ROOT_BADGE_LOAD_DT,
+    ROOT_BADGE_RENDER_DT,
+    UNIT_SUFFIXES
 } from './diagnostics.constants';
 import { DiagnosticsFacadeService } from './diagnostics.facade.service';
-import { PerformanceDiagnosticsScope,PerfStat } from './diagnostics.model';
+import { PerformanceDiagnosticsScope, PerfStat } from './diagnostics.model';
 import { buildAggregatedPerfStats } from './diagnostics.perf-aggregation';
 
 interface LayerOption {
@@ -222,7 +223,7 @@ interface PerfTileScopeCounts {
 export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     readonly layoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
     @ViewChild('dialog') dialog?: AppDialogComponent;
-    readonly dialogStyle: {[key: string]: string} = {
+    readonly dialogStyle: { [key: string]: string } = {
         height: '75vh'
     };
     availableMapLayers: LayerOption[] = [];
@@ -238,9 +239,9 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     private appliedPerformanceScopeRequestId: number | null = null;
 
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
-                public readonly stateService: AppStateService,
-                private readonly dialogStack: DialogStackService,
-                private readonly viewDiagnostics: ViewLayerDiagnosticsService,
+        public readonly stateService: AppStateService,
+        private readonly dialogStack: DialogStackService,
+        private readonly viewDiagnostics: ViewLayerDiagnosticsService,
         public readonly layout: AppLayoutService) {
         this.subscriptions.push(
             this.diagnostics.perfStats$.subscribe(() => {
@@ -428,7 +429,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
         const nextTileIds = Array.from(tileIdSet)
             .sort((left, right) => this.compareTileIdStrings(left, right))
-            .map(tileId => ({label: tileId, tileId}));
+            .map(tileId => ({ label: tileId, tileId }));
 
         const hasSameOptions = this.isSameTileIdList(nextTileIds, this.availableTileIds);
         if (!hasSameOptions) {
@@ -557,8 +558,8 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
     /** Computes tile-scope counts used by the root badges and their tooltips. */
     private computeTileScopeCounts(scopedTiles: SubsetDiagnosticsTile[],
-                                   nonEmptyTiles: SubsetDiagnosticsTile[],
-                                   consideredSourceTiles: SubsetDiagnosticsTile[]): PerfTileScopeCounts {
+        nonEmptyTiles: SubsetDiagnosticsTile[],
+        consideredSourceTiles: SubsetDiagnosticsTile[]): PerfTileScopeCounts {
         const consideredTilesByRoot = new Map<string, number>();
         let consideredTiles = 0;
 

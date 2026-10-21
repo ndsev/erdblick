@@ -1,20 +1,24 @@
-import { Component,OnDestroy,Renderer2,ViewChild,effect,input } from "@angular/core";
+import { Component, OnDestroy, Renderer2, ViewChild, effect, input } from "@angular/core";
 import { Popover } from "primeng/popover";
 import { coreLib } from "../integrations/wasm";
 import { FeatureWrapper } from "../mapdata/feature-inspection.model";
 import { MapInfoService } from "../mapdata/map-info.service";
 import {
-parseMapPartitionKey,
-partitionKeySuffix
+    parseMapPartitionKey,
+    partitionKeySuffix
 } from "../mapdata/partition.model";
 import { AppDialogComponent } from "../shared/app-dialog.component";
 import { AppLayoutService } from "../shared/app-layout.service";
-import type { AppSurfaceHeaderAction,AppSurfaceHeaderActionCommandEvent } from "../shared/app-surface-header.component";
-import { AppStateService,InspectionComparisonOption,InspectionPanelModel } from "../shared/appstate.service";
+import type {
+    AppSurfaceHeaderAction,
+    AppSurfaceHeaderActionCommandEvent
+} from "../shared/app-surface-header.component";
+import { AppStateService } from "../shared/appstate.service";
 import { DialogStackService } from "../shared/dialog-stack.service";
 import { displayFeatureId } from "../shared/tile-feature-id";
 import { FeaturePanelComponent } from "./feature.panel.component";
 import { InspectionSelectionService } from "./inspection-selection.service";
+import { InspectionComparisonOption, InspectionPanelModel } from "./inspection-state.model";
 import { InspectionStateService } from "./inspection-state.service";
 import { SourceDataPanelComponent } from "./sourcedata.panel.component";
 
@@ -130,7 +134,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
     isMetadata: boolean = false;
-    protected readonly sourceLayerDropdownOverlayOptions = {autoZIndex: true, baseZIndex: 30000};
+    protected readonly sourceLayerDropdownOverlayOptions = { autoZIndex: true, baseZIndex: 30000 };
 
     @ViewChild('dialog') dialog?: AppDialogComponent;
     @ViewChild('comparePopover') comparePopover!: Popover;
@@ -141,10 +145,10 @@ export class InspectionPanelDialogComponent implements OnDestroy {
 
     /** Wires dialog state to the active inspection panel and floating-dialog helpers. */
     constructor(private mapService: MapInfoService,
-                private inspectionSelection: InspectionSelectionService,
-                public stateService: AppStateService,
-                private renderer: Renderer2,
-                private dialogStack: DialogStackService,
+        private inspectionSelection: InspectionSelectionService,
+        public stateService: AppStateService,
+        private renderer: Renderer2,
+        private dialogStack: DialogStackService,
         public readonly inspectionState: InspectionStateService,
         public readonly layout: AppLayoutService) {
         effect(() => {
@@ -395,7 +399,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
                 if (!container) {
                     const baseFontSize = this.layout.baseFontSize;
                     return {
-                        position: {left: 0, top: 0},
+                        position: { left: 0, top: 0 },
                         size: {
                             width: Math.round(panel.size[0] * baseFontSize),
                             height: Math.round(panel.size[1] * baseFontSize)
@@ -404,8 +408,8 @@ export class InspectionPanelDialogComponent implements OnDestroy {
                 }
                 const rect = container.getBoundingClientRect();
                 return {
-                    position: {left: Math.round(rect.left), top: Math.round(rect.top)},
-                    size: {width: Math.round(rect.width), height: Math.round(rect.height)}
+                    position: { left: Math.round(rect.left), top: Math.round(rect.top) },
+                    size: { width: Math.round(rect.width), height: Math.round(rect.height) }
                 };
             }
         );

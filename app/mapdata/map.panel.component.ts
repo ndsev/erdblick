@@ -1,63 +1,63 @@
-import {deepEquals} from "../shared/app-state";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import { Component,ViewChild } from "@angular/core";
-import { MenuItem,TreeNode } from "primeng/api";
+import { Component, ViewChild } from "@angular/core";
+import { MenuItem, TreeNode } from "primeng/api";
 import { Menu } from "primeng/menu";
 import { Popover } from "primeng/popover";
 import {
-BehaviorSubject,
-combineLatest,
-distinctUntilChanged,
-filter,
-map,
-Observable,
-of,
-startWith,
-Subscription,
-switchMap,
-timer
+    BehaviorSubject,
+    combineLatest,
+    distinctUntilChanged,
+    filter,
+    map,
+    Observable,
+    of,
+    startWith,
+    Subscription,
+    switchMap,
+    timer
 } from "rxjs";
+import { SelectedSourceData } from "../inspection/inspection-state.model";
 import { InspectionStateService } from "../inspection/inspection-state.service";
-import { GeoMath,Rectangle } from "../integrations/geo";
+import { GeoMath, Rectangle } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
+import {
+    DEFAULT_TILE_GRID_COLOR,
+    DEFAULT_TILE_GRID_OPACITY,
+    tileGridMaxLevel,
+    TileGridMode
+} from "../mapview/map-view-state.model";
+import { MapViewStateService } from "../mapview/map-view-state.service";
 import { MapViewService } from "../mapview/map-view.service";
 import { FeatureSearchService } from "../search/feature.search.service";
 import {
-AppConfigService,
-BackgroundLayerConfig,
-WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP
+    AppConfigService,
+    BackgroundLayerConfig,
+    WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP
 } from "../shared/app-config.service";
 import { AppDialogComponent } from "../shared/app-dialog.component";
 import { AppLayoutService } from "../shared/app-layout.service";
 import { AppModeService } from "../shared/app-mode.service";
-import {
-AppStateService,
-DEFAULT_TILE_GRID_COLOR,
-DEFAULT_TILE_GRID_OPACITY,
-SelectedSourceData,
-tileGridMaxLevel,
-TileGridMode
-} from "../shared/appstate.service";
+import { deepEquals } from "../shared/app-state";
+import { AppStateService } from "../shared/appstate.service";
 import { DialogStackService } from "../shared/dialog-stack.service";
 import type { FeatureSearchMapLayerRef } from "../shared/feature-search-state";
 import { InfoMessageService } from "../shared/info.service";
 import { KeyboardService } from "../shared/keyboard.service";
 import {
-MapPresetService
+    MapPresetService
 } from "../styledata/map-preset.service";
 import { StyleEditorRequestService } from "../styledata/style-editor-request.service";
 import { StyleService } from "../styledata/style.service";
 import { MapInfoService } from "./map-info.service";
 import { MapLayerStateService } from "./map-layer-state.service";
 import {
-CoverageRectItem,
-dataSourceCatalogStatus,
-filterMapTreeNodes,
-LayerPresetNode,
-MapInfoItem,
-MapTreeViewNode,
-removeGroupPrefix,
-StyleOptionNode
+    CoverageRectItem,
+    dataSourceCatalogStatus,
+    filterMapTreeNodes,
+    LayerPresetNode,
+    MapInfoItem,
+    MapTreeViewNode,
+    removeGroupPrefix,
+    StyleOptionNode
 } from "./map.tree.model";
 
 /** One rendered select option in the per-view background-layer dropdown. */
@@ -642,10 +642,10 @@ export class MapPanelComponent {
             startWith("visibility")
         )
     ]).pipe(
-        map(([mapTree, filterText, _styleGroups, {numViews}]) => ({
+        map(([mapTree, filterText, _styleGroups, { numViews }]) => ({
             size: mapTree.size,
             nodesByView: Array.from(
-                {length: numViews},
+                { length: numViews },
                 (_, viewIndex) => filterMapTreeNodes(mapTree.nodes, filterText, viewIndex))
         }))
     );
@@ -680,17 +680,17 @@ export class MapPanelComponent {
 
     /** Subscribes the panel UI to map, app-state, and dialog-stack updates. */
     constructor(public mapService: MapInfoService,
-                private readonly viewState: MapViewService,
-                public appModeService: AppModeService,
-                public stateService: AppStateService,
-                public keyboardService: KeyboardService,
-                private readonly configService: AppConfigService,
-                private readonly dialogStack: DialogStackService,
-                private readonly featureSearchService: FeatureSearchService,
-                private readonly infoMessageService: InfoMessageService,
-                private readonly styleEditorRequestService: StyleEditorRequestService,
-                private readonly mapPresetService: MapPresetService,
-                private readonly styleService: StyleService,
+        private readonly viewState: MapViewService,
+        public appModeService: AppModeService,
+        public stateService: AppStateService,
+        public keyboardService: KeyboardService,
+        private readonly configService: AppConfigService,
+        private readonly dialogStack: DialogStackService,
+        private readonly featureSearchService: FeatureSearchService,
+        private readonly infoMessageService: InfoMessageService,
+        private readonly styleEditorRequestService: StyleEditorRequestService,
+        private readonly mapPresetService: MapPresetService,
+        private readonly styleService: StyleService,
         public readonly layerState: MapLayerStateService,
         public readonly layout: AppLayoutService,
         public readonly inspectionState: InspectionStateService,
@@ -712,22 +712,22 @@ export class MapPanelComponent {
                     );
                 }
                 const numViews = this.viewSettings.numViews;
-                this.tileBordersEnabled = Array.from({length: numViews}, (_, index) =>
+                this.tileBordersEnabled = Array.from({ length: numViews }, (_, index) =>
                     this.mapService.maps.getViewTileBorderState(index));
-                this.tileGridModes = Array.from({length: numViews}, (_, index) =>
+                this.tileGridModes = Array.from({ length: numViews }, (_, index) =>
                     this.mapService.maps.getViewTileGridMode(index));
                 this.refreshTileGridControls();
             })
         );
 
         this.subscriptions.push(
-            this.viewState.beforeViewRemoval.subscribe(({retainedIndices}) => {
+            this.viewState.beforeViewRemoval.subscribe(({ retainedIndices }) => {
                 this.lastEnabledBackgroundLayerIds = retainedIndices.map(index =>
                     this.lastEnabledBackgroundLayerIds[index]);
             }),
             this.viewSettings.numViewsState.subscribe(numViews => {
                 const previousViewIndices = new Set(this.viewIndices);
-                this.viewIndices = Array.from({length: numViews}, (_, i) => i);
+                this.viewIndices = Array.from({ length: numViews }, (_, i) => i);
                 const validViewIndices = new Set(this.viewIndices);
                 this.mapAccordionValue = this.mapAccordionValue.filter(index => validViewIndices.has(index));
                 for (const viewIndex of this.viewIndices) {
@@ -759,7 +759,7 @@ export class MapPanelComponent {
         this.subscriptions.push(
             this.layerState.layerSyncOptionsState.appState.subscribe(_ => {
                 const numViews = this.viewSettings.numViews;
-                this.syncedOptions = Array.from({length: numViews}, (_, viewIndex) =>
+                this.syncedOptions = Array.from({ length: numViews }, (_, viewIndex) =>
                     this.viewState.isSyncOptionsForViewEnabled(viewIndex));
             })
         );
@@ -779,7 +779,7 @@ export class MapPanelComponent {
         this.subscriptions.push(
             this.viewSettings.viewTileBordersState.appState.subscribe(_ => {
                 const numViews = this.viewSettings.numViews;
-                this.tileBordersEnabled = Array.from({length: numViews}, (_, index) =>
+                this.tileBordersEnabled = Array.from({ length: numViews }, (_, index) =>
                     this.viewSettings.viewTileBordersState.getValue(index));
             })
         );
@@ -787,7 +787,7 @@ export class MapPanelComponent {
         this.subscriptions.push(
             this.viewSettings.viewTileGridModeState.appState.subscribe(_ => {
                 const numViews = this.viewSettings.numViews;
-                this.tileGridModes = Array.from({length: numViews}, (_, index) =>
+                this.tileGridModes = Array.from({ length: numViews }, (_, index) =>
                     this.viewSettings.viewTileGridModeState.getValue(index));
                 this.refreshTileGridControls();
             })
@@ -843,11 +843,11 @@ export class MapPanelComponent {
     /** Refreshes independent tile-grid controls from their per-view AppState values. */
     private refreshTileGridControls(): void {
         const numViews = this.viewSettings.numViews;
-        this.tileGridAutoLevels = Array.from({length: numViews}, (_, index) =>
+        this.tileGridAutoLevels = Array.from({ length: numViews }, (_, index) =>
             this.mapService.maps.getViewTileGridAutoLevel(index));
-        this.tileGridColors = Array.from({length: numViews}, (_, index) =>
+        this.tileGridColors = Array.from({ length: numViews }, (_, index) =>
             this.mapService.maps.getViewTileGridColor(index));
-        this.tileGridOpacities = Array.from({length: numViews}, (_, index) =>
+        this.tileGridOpacities = Array.from({ length: numViews }, (_, index) =>
             this.mapService.maps.getViewTileGridOpacity(index));
     }
 
@@ -857,13 +857,13 @@ export class MapPanelComponent {
         const backgroundLayers = this.configService.getBackgroundLayers();
         const defaultBackgroundLayerId = this.configService.getDefaultBackgroundLayerId();
 
-        this.backgroundLayerIds = Array.from({length: numViews}, (_, index) =>
+        this.backgroundLayerIds = Array.from({ length: numViews }, (_, index) =>
             this.viewSettings.resolveBackgroundState(index, backgroundLayers, defaultBackgroundLayerId).layerId);
-        this.backgroundOpacityValue = Array.from({length: numViews}, (_, index) =>
+        this.backgroundOpacityValue = Array.from({ length: numViews }, (_, index) =>
             this.viewSettings.getBackgroundOpacity(index));
-        this.backgroundOptions = Array.from({length: numViews}, (_, index) =>
+        this.backgroundOptions = Array.from({ length: numViews }, (_, index) =>
             this.createBackgroundOptions(index, backgroundLayers));
-        this.backgroundDetails = Array.from({length: numViews}, (_, index) =>
+        this.backgroundDetails = Array.from({ length: numViews }, (_, index) =>
             this.backgroundDetailText(index, backgroundLayers));
         this.backgroundLayerIds.forEach((layerId, index) => {
             if (layerId !== null) {
@@ -940,7 +940,7 @@ export class MapPanelComponent {
                     }
                 }
             },
-            {separator: true},
+            { separator: true },
             {
                 label: this.featureSearchMenuLabel(mapId, layerId, selectedMapLayers.length),
                 icon: 'pi pi-search',
@@ -961,7 +961,7 @@ export class MapPanelComponent {
             if (!mapMatches || (layerId && layer.id !== layerId)) {
                 continue;
             }
-            result.push({mapId: layer.mapId, layerId: layer.id});
+            result.push({ mapId: layer.mapId, layerId: layer.id });
         }
         return result;
     }
@@ -1433,7 +1433,7 @@ export class MapPanelComponent {
         const nextState = !this.viewState.isSyncOptionsForViewEnabled(viewIndex);
         this.viewState.setSyncOptionsForView(viewIndex, nextState);
         const numViews = this.viewSettings.numViews;
-        this.syncedOptions = Array.from({length: numViews}, (_, index) =>
+        this.syncedOptions = Array.from({ length: numViews }, (_, index) =>
             this.viewState.isSyncOptionsForViewEnabled(index));
     }
 

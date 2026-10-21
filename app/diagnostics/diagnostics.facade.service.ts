@@ -1,30 +1,34 @@
-import type {ActionInput, ActionOutput} from "../actions/app-action";
-import {AppActionService} from "../actions/app-action.service";
-import {boundedCollection, rejectAction} from "../actions/app-action";
-import {diagnosticActions} from "./diagnostics.facade.service.declarations";
-import {unicodePrefix} from "../shared/unicode-string";
-import {MapInfoService} from "../mapdata/map-info.service";
-import {FeatureSearchService} from "../search/feature.search.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import { Injectable,NgZone,OnDestroy } from "@angular/core";
+import { Injectable, NgZone, OnDestroy } from "@angular/core";
 import { BehaviorSubject } from "rxjs";
 import { z } from "zod";
+import type { ActionInput, ActionOutput } from "../actions/app-action";
+import { boundedCollection, rejectAction } from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
+import { MapInfoService } from "../mapdata/map-info.service";
 import { MapTileStreamService } from '../mapdata/map-tile-stream.service';
 import { TileSubsetLayerRenderService } from '../mapview/deck/tile-subset-layer-render.service';
+import { MapViewStateService } from "../mapview/map-view-state.service";
 import { ViewLayerDiagnosticsService } from '../mapview/view-layer-diagnostics.service';
+import { FeatureSearchService } from "../search/feature.search.service";
 import { AppConfigService } from "../shared/app-config.service";
+import {
+    DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
+    DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
+    DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
+} from "../shared/app-layout.model";
 import { AppLayoutService } from "../shared/app-layout.service";
 import { Boolish } from "../shared/app-state";
-import { DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../shared/app-state.model";
 import { AppStateService } from "../shared/appstate.service";
+import { unicodePrefix } from "../shared/unicode-string";
 import { StyleValidationReportService } from '../styledata/style-validation-report.service';
 import { DiagnosticsDatasource } from './diagnostics.datasource';
-import type { DiagnosticsExportOptions,DiagnosticsLogFilter } from "./diagnostics.model";
+import { diagnosticActions } from "./diagnostics.facade.service.declarations";
+import type { DiagnosticsExportOptions, DiagnosticsLogFilter } from "./diagnostics.model";
 import {
-DiagnosticsExportBundle,
-LogEntry,
-PerformanceDiagnosticsScope,
-TileSizeDistribution
+    DiagnosticsExportBundle,
+    LogEntry,
+    PerformanceDiagnosticsScope,
+    TileSizeDistribution
 } from './diagnostics.model';
 
 interface MapgetStatusDataResponse {
@@ -38,7 +42,7 @@ interface MapgetStatusDataResponse {
     tilesWebsocket?: unknown;
 }
 
-@Injectable({providedIn: 'root'})
+@Injectable({ providedIn: 'root' })
 /**
  * High-level diagnostics service used by the UI.
  *
@@ -59,7 +63,6 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
             error: Boolish
         })
     });
-
 
     readonly diagnosticsExportOptionsState = this.stateService.registerState<DiagnosticsExportOptions>({
         name: 'diagnosticsExportOptions',
@@ -85,18 +88,18 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         })
     });
 
-    get diagnosticsLogFilter() {return this.diagnosticsLogFilterState.getValue();}
+    get diagnosticsLogFilter() { return this.diagnosticsLogFilterState.getValue(); }
 
     set diagnosticsLogFilter(val: DiagnosticsLogFilter) {
-        this.diagnosticsLogFilterState.next({...val});
+        this.diagnosticsLogFilterState.next({ ...val });
     }
 
-    get diagnosticsExportOptions() {return this.diagnosticsExportOptionsState.getValue();}
+    get diagnosticsExportOptions() { return this.diagnosticsExportOptionsState.getValue(); }
 
     set diagnosticsExportOptions(val: DiagnosticsExportOptions) {
         this.diagnosticsExportOptionsState.next({
             ...val,
-            logFilter: {...val.logFilter}
+            logFilter: { ...val.logFilter }
         });
     }
 
@@ -104,11 +107,11 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     private nextPerformanceScopeRequestId = 1;
 
     constructor(mapService: MapTileStreamService,
-                renderService: TileSubsetLayerRenderService,
-                viewDiagnostics: ViewLayerDiagnosticsService,
-                private readonly stateService: AppStateService,
-                styleValidationReportService: StyleValidationReportService,
-                ngZone: NgZone,
+        renderService: TileSubsetLayerRenderService,
+        viewDiagnostics: ViewLayerDiagnosticsService,
+        private readonly stateService: AppStateService,
+        styleValidationReportService: StyleValidationReportService,
+        ngZone: NgZone,
         public override readonly layout: AppLayoutService,
         public readonly configService: AppConfigService,
         private readonly maps: MapInfoService,
@@ -133,7 +136,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         this.refreshLogs();
         this.layout.openDialog(DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID);
         if (errorsOnly) {
-            this.diagnosticsLogFilter = {info: false, warn: false, error: true};
+            this.diagnosticsLogFilter = { info: false, warn: false, error: true };
         }
     }
 
@@ -145,7 +148,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         this.diagnosticsExportOptions = {
             ...base,
             ...options,
-            logFilter: {...(options?.logFilter ?? base.logFilter)}
+            logFilter: { ...(options?.logFilter ?? base.logFilter) }
         };
         this.layout.openDialog(DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID);
     }
@@ -189,7 +192,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     async downloadExportBundle(options: DiagnosticsExportOptions, filename: string = 'diagnostics-export.json'): Promise<void> {
         const bundle = this.createExportBundle(options);
         await this.enrichBundleWithMapgetStatus(bundle);
-        const blob = new Blob([JSON.stringify(bundle, null, 2)], {type: 'application/json'});
+        const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
@@ -216,7 +219,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         const statusQuery = '/status-data?includeTileSizeDistribution=1&includeCachedFeatureTreeBytes=0';
 
         try {
-            const response = await fetch(statusQuery, {cache: 'no-store'});
+            const response = await fetch(statusQuery, { cache: 'no-store' });
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText || 'Failed to fetch /status-data'}`);
             }
@@ -266,11 +269,9 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         super.ngOnDestroy();
     }
 
-
     registerActions(actions: AppActionService): void {
         actions.registerAction(diagnosticActions.getDiagnostics, input => this.getDiagnostics(input));
     }
-
 
     /** Samples fixed-size counters and existing caches only, never the per-tile diagnostics/export path. */
     getDiagnostics(input: ActionInput<typeof diagnosticActions.getDiagnostics>): ActionOutput<typeof diagnosticActions.getDiagnostics> {
@@ -283,7 +284,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         const metrics: ActionOutput<typeof diagnosticActions.getDiagnostics>["metrics"] = [];
         const unavailable: string[] = [];
         const add = (section: string, values: Record<string, number | boolean | null>, cached = false) => {
-            for (const [name, value] of Object.entries(values)) metrics.push({section, name, value: typeof value === "number" && !Number.isFinite(value) ? null : value, scope: "tab", cached});
+            for (const [name, value] of Object.entries(values)) metrics.push({ section, name, value: typeof value === "number" && !Number.isFinite(value) ? null : value, scope: "tab", cached });
         };
         if (sections.includes("transport")) add("transport", {
             connected: this.mapService.isTileStreamConnected(), paused: this.mapService.tilePipelinePaused,
@@ -291,25 +292,29 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
             ...this.mapService.getTileStreamTransportCompressionStats()
         });
         if (sections.includes("workers")) {
-            const {latestNativeMs, ...browserWorkers} = this.renderService.queueSummary();
-            add("workers", {...browserWorkers, latestWasmMs: latestNativeMs});
+            const { latestNativeMs, ...browserWorkers } = this.renderService.queueSummary();
+            add("workers", { ...browserWorkers, latestWasmMs: latestNativeMs });
         }
         if (sections.includes("loading")) {
             if (viewIndex !== undefined || input.mapId) unavailable.push("Scoped loading counters are unavailable without a tile scan; tab-wide cached counters are returned.");
             const snapshot = this.snapshot$.value;
-            add("loading", {expected: snapshot.tiles.expected, loaded: snapshot.tiles.loaded, errors: snapshot.tiles.errors,
+            add("loading", {
+                expected: snapshot.tiles.expected, loaded: snapshot.tiles.loaded, errors: snapshot.tiles.errors,
                 rendered: snapshot.progress.rendered.done, renderTotal: snapshot.progress.rendered.total,
-                sampleAgeMs: Math.max(0, Date.now() - snapshot.at)}, true);
+                sampleAgeMs: Math.max(0, Date.now() - snapshot.at)
+            }, true);
         }
         if (sections.includes("gpu")) {
-            metrics.push({section: "gpu", name: "frameIntervalP90Ms", value: this.renderService.currentFrameTimeMs(viewIndex) || null,
-                scope: viewIndex === undefined ? "tab" : "view", ...(viewIndex === undefined ? {} : {viewId: input.viewId})});
+            metrics.push({
+                section: "gpu", name: "frameIntervalP90Ms", value: this.renderService.currentFrameTimeMs(viewIndex) || null,
+                scope: viewIndex === undefined ? "tab" : "view", ...(viewIndex === undefined ? {} : { viewId: input.viewId })
+            });
             if (viewIndex !== undefined || input.mapId) unavailable.push("Scoped GPU allocation is unavailable; no scene readback or scan was performed.");
             else {
                 let found = false;
                 for (const stat of this.perfStats$.value) {
                     if (stat.scope === "view" && stat.path[1] === "GPU Scene" && metrics.length < 100) {
-                        add("gpu", {[stat.key]: stat.average ?? stat.peak}, true);
+                        add("gpu", { [stat.key]: stat.average ?? stat.peak }, true);
                         found = true;
                     }
                 }
@@ -334,16 +339,18 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
             for (const session of this.searches.getSessions()) {
                 if (viewIndex !== undefined && !session.definition.selectedViewIndices.includes(viewIndex)) continue;
                 if (input.mapId && !session.definition.selectedMapLayers.some(layer => layer.mapId === input.mapId && (!input.layerId || layer.layerId === input.layerId))) continue;
-                for (const error of session.errors) yield {source: session.id, message: unicodePrefix(error, 4096)};
+                for (const error of session.errors) yield { source: session.id, message: unicodePrefix(error, 4096) };
             }
         }.bind(this);
         const errors = boundedCollection(sections.includes("errors") ? errorItems() : [], input.limit, 64000);
         if (sections.includes("errors") && viewIndex !== undefined) unavailable.push("Style errors have no per-view attribution; map/layer-filtered style issues and view-filtered search errors are returned.");
-        return {observedAt: new Date().toISOString(), executionContext: "browser",
+        return {
+            observedAt: new Date().toISOString(), executionContext: "browser",
             interpretation: "All metrics describe this browser tab. Workers execute browser WASM rendering, not native backend jobs. " +
                 "Frame intervals measure observed rendering cadence, not GPU execution time, and can include idle periods. " +
                 "This snapshot alone cannot identify a panning bottleneck. Backend queues, CPU and memory were not sampled.",
-            metrics, errors: errors.items, unavailable, complete: errors.complete, reason: errors.reason};
+            metrics, errors: errors.items, unavailable, complete: errors.complete, reason: errors.reason
+        };
     }
 
 }

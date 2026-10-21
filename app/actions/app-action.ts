@@ -1,14 +1,41 @@
-import {z} from "zod";
-import {boundedUnicodeString, unicodePrefix} from "../shared/unicode-string.js";
-import {ViewerActionError, ViewerActionFailure} from "./viewer-action-relay.contract.js";
+import { z } from "zod";
+import { boundedUnicodeString, unicodePrefix } from "../shared/unicode-string.js";
+import { ViewerActionError, ViewerActionFailure } from "./viewer-action-relay.contract.js";
 
 /** Explicit action metadata. Registration never exposes an owner's other methods. */
 export interface AppAction<Input extends z.ZodType = z.ZodType, Output extends z.ZodType = z.ZodType> {
     readonly name: string;
     readonly description: string;
     readonly mutation: boolean;
+    /** Omitted means public MCP and optional omnibar exposure. Local producers opt out explicitly. */
+    readonly exposure?: "omnibar";
     readonly inputSchema: Input;
     readonly outputSchema: Output;
+}
+
+/** A live omnibar choice carries validated action arguments and presentation only. */
+export interface AppActionCandidate<Input = unknown> {
+    id: string;
+    name: string;
+    label: string;
+    icon: string;
+    iconType?: "prime" | "material";
+    color: string;
+    enabled: boolean;
+    acceptsEmptyInput?: boolean;
+    saveToHistory?: boolean;
+    payload?: unknown;
+    input: Input;
+}
+
+/** History is resolved again by the owning producer; saved callbacks are never replayed. */
+export interface ActionCandidateHistory {
+    id: string;
+    payload?: unknown;
+}
+
+export interface RegisteredActionCandidate extends AppActionCandidate {
+    action: string;
 }
 
 /** A public typed reader/writer, separate from internal persisted AppState values. */
@@ -42,10 +69,10 @@ type GroupValue<Group> = Group extends Record<string, infer Value> ? Value : nev
  * Check before indexing: object spreads would silently hide duplicate wire names
  * from the build exporter, even though runtime registration later rejects them.
  */
-export function composeDeclarations<const Groups extends readonly Record<string, {readonly name: string}>[]>(
+export function composeDeclarations<const Groups extends readonly Record<string, { readonly name: string }>[]>(
     ...groups: Groups
-): {[Declaration in GroupValue<Groups[number]> as Declaration["name"]]: Declaration} {
-    const declarations = new Map<string, {readonly name: string}>();
+): { [Declaration in GroupValue<Groups[number]> as Declaration["name"]]: Declaration } {
+    const declarations = new Map<string, { readonly name: string }>();
     for (const group of groups) {
         for (const declaration of Object.values(group)) {
             if (declarations.has(declaration.name)) {
@@ -61,10 +88,10 @@ export function composeDeclarations<const Groups extends readonly Record<string,
 
 /** Stable boundary failures reveal no submitted values or private configuration. */
 export function rejectAction(message: string, code: ViewerActionError["code"] = "not_available", reason?: string): never {
-    throw new ViewerActionFailure({code, message, reason, outcome: "not_applied"});
+    throw new ViewerActionFailure({ code, message, reason, outcome: "not_applied" });
 }
 
-export function applied(changed = true) { return {status: "applied" as const, changed}; }
+export function applied(changed = true) { return { status: "applied" as const, changed }; }
 
 export function jsonByteLength(value: unknown): number {
     return new TextEncoder().encode(JSON.stringify(value)).length;
@@ -77,17 +104,17 @@ export function boundedCollection<T>(source: Iterable<T>, limit = 100, byteLimit
     const items: T[] = [];
     let bytes = 2;
     for (const item of source) {
-        if (items.length >= limit) return {items, complete: false, reason: "item_limit"};
+        if (items.length >= limit) return { items, complete: false, reason: "item_limit" };
         const size = jsonByteLength(item) + 1;
-        if (bytes + size > byteLimit) return {items, complete: false, reason: "byte_limit"};
+        if (bytes + size > byteLimit) return { items, complete: false, reason: "byte_limit" };
         items.push(item);
         bytes += size;
     }
-    return {items, complete: true};
+    return { items, complete: true };
 }
 
 /** Shared pagination for owner-specific discovery; the owner supplies only public metadata. */
-export function catalogPage<T>(source: Iterable<T>, input: {offset?: number; limit?: number}) {
+export function catalogPage<T>(source: Iterable<T>, input: { offset?: number; limit?: number }) {
     const offset = input.offset ?? 0;
     function* page() {
         let skipped = 0;
@@ -97,14 +124,16 @@ export function catalogPage<T>(source: Iterable<T>, input: {offset?: number; lim
         }
     }
     const result = boundedCollection(page(), input.limit);
-    return {observedAt: new Date().toISOString(), ...result,
-        ...(!result.complete && result.items.length ? {nextOffset: offset + result.items.length} : {})};
+    return {
+        observedAt: new Date().toISOString(), ...result,
+        ...(!result.complete && result.items.length ? { nextOffset: offset + result.items.length } : {})
+    };
 }
 
 /** One requested control's bounds and omission reason; no domain state is held here. */
 export class ControlReadContext {
     reason?: "item_limit" | "byte_limit" | "text_limit";
-    constructor(readonly byteLimit: number) {}
+    constructor(readonly byteLimit: number) { }
 
     collect<T>(source: Iterable<T>, byteLimit = this.byteLimit): T[] {
         const result = boundedCollection(source, 100, Math.min(byteLimit, this.byteLimit - 512));

@@ -1,55 +1,66 @@
-import { Component,OnDestroy,OnInit,ViewChild } from '@angular/core';
+import { Component, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { Subscription } from "rxjs";
 import { CoordinatesPolicyService } from "../coords/coordinates-policy.service";
 import { environment } from "../environments/environment";
+import {
+    DEFAULT_DRILL_PICK_RADIUS,
+    defaultHoverLabelFieldKey,
+    MAX_DRILL_PICK_RADIUS,
+    MAX_SIMULTANEOUS_INSPECTIONS,
+    MIN_DRILL_PICK_RADIUS,
+    type HoverLabelFieldConfig
+} from "../inspection/inspection-state.model";
 import { InspectionStateService } from "../inspection/inspection-state.service";
 import { ConnectionPreferencesService } from "../mapdata/connection-preferences.service";
 import { FeatureSearchSchemaService } from "../mapdata/feature-search-schema.service";
 import type {
-FeatureSearchStyleFieldCandidate
+    FeatureSearchStyleFieldCandidate
 } from "../mapdata/map-runtime.model";
 import {
-getTileSubsetLayerRenderAutoWorkerCount
+    getTileSubsetLayerRenderAutoWorkerCount
 } from "../mapview/deck/tile-subset-layer-render.service";
-import { MapViewStateService } from "../mapview/map-view-state.service";
-import { MapViewService,ViewRecalculationReason } from "../mapview/map-view.service";
-import { RenderPreferencesService } from "../mapview/render-preferences.service";
-import { LocationSearchService } from "../search/location.search.service";
-import { AppDialogComponent } from "../shared/app-dialog.component";
-import { AppLayoutService } from "../shared/app-layout.service";
 import {
-ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID,
-AppStateService,
-AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
-clampFeatureZoomClearanceMeters,
-clampLod3TileThreshold,
-clampMapZoomStep,
-clampTileSubsetRenderWorkerCount,
-DEFAULT_DRILL_PICK_RADIUS,
-DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS,
-DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,
-DEFAULT_LOD3_TILE_THRESHOLD,
-DEFAULT_MAP_ZOOM_STEP,
-defaultHoverLabelFieldKey,
-MAX_DRILL_PICK_RADIUS,
-MAX_FEATURE_ZOOM_CLEARANCE_METERS,
-MAX_LOCATION_SEARCH_RESULT_LIMIT,
-MAX_LOD3_TILE_THRESHOLD,
-MAX_MAP_ZOOM_STEP,
-MAX_NUM_TILES_TO_LOAD,
-MAX_SIMULTANEOUS_INSPECTIONS,
-MAX_TILE_SUBSET_RENDER_WORKER_COUNT,
-MIN_DRILL_PICK_RADIUS,
-MIN_FEATURE_ZOOM_CLEARANCE_METERS,
-MIN_LOD3_TILE_THRESHOLD,
-MIN_MAP_ZOOM_STEP,
-PREFERENCES_DIALOG_LAYOUT_ID,
-type HoverLabelFieldConfig
-} from "../shared/appstate.service";
+    clampFeatureZoomClearanceMeters,
+    clampMapZoomStep,
+    DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS,
+    DEFAULT_MAP_ZOOM_STEP,
+    MAX_FEATURE_ZOOM_CLEARANCE_METERS,
+    MAX_MAP_ZOOM_STEP,
+    MIN_FEATURE_ZOOM_CLEARANCE_METERS,
+    MIN_MAP_ZOOM_STEP
+} from "../mapview/map-view-state.model";
+import { MapViewStateService } from "../mapview/map-view-state.service";
+import { MapViewService, ViewRecalculationReason } from "../mapview/map-view.service";
+import { RenderPreferencesService } from "../mapview/render-preferences.service";
+import {
+    DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,
+    LocationSearchService,
+    MAX_LOCATION_SEARCH_RESULT_LIMIT
+} from "../search/location.search.service";
+import { AppDialogComponent } from "../shared/app-dialog.component";
+import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, PREFERENCES_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
+import { AppLayoutService } from "../shared/app-layout.service";
+import { AppStateService } from "../shared/appstate.service";
 import { connectionRetryPolicySchema } from "../shared/connection-retry-policy";
 import { DialogStackService } from "../shared/dialog-stack.service";
 import { InfoMessageService } from "../shared/info.service";
-import { DEFAULT_POINT_CLOUD_POLICY,PointCloudPolicy,pointCloudPolicySchema } from "../shared/point-cloud-policy";
+import {
+    clampLod3TileThreshold,
+    DEFAULT_LOD3_TILE_THRESHOLD,
+    MAX_LOD3_TILE_THRESHOLD,
+    MIN_LOD3_TILE_THRESHOLD
+} from "../shared/lod-policy";
+import {
+    DEFAULT_POINT_CLOUD_POLICY,
+    PointCloudPolicy,
+    pointCloudPolicySchema
+} from "../shared/point-cloud-policy";
+import {
+    AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
+    clampTileSubsetRenderWorkerCount,
+    MAX_NUM_TILES_TO_LOAD,
+    MAX_TILE_SUBSET_RENDER_WORKER_COUNT
+} from "../shared/tile-render-policy";
 import { StyleService } from "../styledata/style.service";
 
 @Component({
@@ -594,7 +605,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     locationSearchResultLimitInput: number | string = DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
     tilePullCompressionEnabledSetting: boolean = false;
     connectionRetryEnabled = true;
-    pointCloudPolicyDraft: PointCloudPolicy = {...DEFAULT_POINT_CLOUD_POLICY};
+    pointCloudPolicyDraft: PointCloudPolicy = { ...DEFAULT_POINT_CLOUD_POLICY };
     connectionInitialSeconds = 5;
     connectionBackoffMultiplier = 2;
     connectionMaximumSeconds = 60;
@@ -617,8 +628,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     mapZoomStepChanged: boolean = false;
     featureZoomClearanceMetersChanged: boolean = false;
     toggleOptions = [
-        {label: 'Off', value: false},
-        {label: 'On', value: true}
+        { label: 'Off', value: false },
+        { label: 'On', value: true }
     ];
     darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
     darkModeOptions = [
@@ -627,18 +638,18 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         { label: 'Auto', value: 'auto' }
     ];
     readonly inspectionValuePresentationOptions = [
-        {label: "Vary Value Colors", value: "colors"},
-        {label: "Vary Value Outlines", value: "outlines"},
-        {label: "Vary Background Striping", value: "striping"}
+        { label: "Vary Value Colors", value: "colors" },
+        { label: "Vary Value Outlines", value: "outlines" },
+        { label: "Vary Background Striping", value: "striping" }
     ];
     readonly sourceDataColumnOptions = [
-        {label: "Address", value: "displayAddress"},
-        {label: "Type", value: "schemaType"}
+        { label: "Address", value: "displayAddress" },
+        { label: "Type", value: "schemaType" }
     ];
     inspectionValuePresentationSelection: string[] = [];
     sourceDataColumnSelection: string[] = [];
     hoverLabelFields: HoverLabelFieldConfig[] = [];
-    hoverLabelFieldOptions: Array<{label: string; value: string}> = [{
+    hoverLabelFieldOptions: Array<{ label: string; value: string }> = [{
         label: "Feature ID",
         value: "id"
     }];
@@ -655,12 +666,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Subscribes dialog fields to persisted preference state and runtime services. */
     constructor(private messageService: InfoMessageService,
-                public mapService: MapViewService,
-                public styleService: StyleService,
-                public stateService: AppStateService,
-                public coordinatesPolicy: CoordinatesPolicyService,
-                private searchSchema: FeatureSearchSchemaService,
-                private dialogStack: DialogStackService,
+        public mapService: MapViewService,
+        public styleService: StyleService,
+        public stateService: AppStateService,
+        public coordinatesPolicy: CoordinatesPolicyService,
+        private searchSchema: FeatureSearchSchemaService,
+        private dialogStack: DialogStackService,
         public readonly renderPreferences: RenderPreferencesService,
         public readonly layout: AppLayoutService,
         public readonly inspectionState: InspectionStateService,
@@ -669,8 +680,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         public readonly viewSettings: MapViewStateService) {
         this.subscriptions.push(this.connectionPreferences.connectionRetryEnabledState.subscribe(value => this.connectionRetryEnabled = value));
         this.subscriptions.push(this.renderPreferences.pointCloudPolicyChanges.subscribe(() => {
-                this.pointCloudPolicyDraft = {...this.renderPreferences.pointCloudPolicy};
-            }));
+            this.pointCloudPolicyDraft = { ...this.renderPreferences.pointCloudPolicy };
+        }));
         this.subscriptions.push(this.connectionPreferences.connectionRetryInitialDelayMsState.subscribe(value => this.connectionInitialSeconds = value / 1000));
         this.subscriptions.push(this.connectionPreferences.connectionRetryBackoffMultiplierState.subscribe(value => this.connectionBackoffMultiplier = value));
         this.subscriptions.push(this.connectionPreferences.connectionRetryMaxDelayMsState.subscribe(value => this.connectionMaximumSeconds = value / 1000));
@@ -731,7 +742,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.sourceDataColumnSelection = [...columns];
         }));
         this.subscriptions.push(this.inspectionState.hoverLabelFieldsState.subscribe(fields => {
-            this.hoverLabelFields = fields.map(field => ({...field}));
+            this.hoverLabelFields = fields.map(field => ({ ...field }));
         }));
         this.syncInspectionValuePresentationSelection();
     }
@@ -845,7 +856,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             !selected.has(option.value))?.value ?? "";
         this.inspectionState.hoverLabelFields = [
             ...this.hoverLabelFields,
-            {expression, customExpression: false}
+            { expression, customExpression: false }
         ];
     }
 
@@ -859,7 +870,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     toggleHoverLabelExpressionMode(index: number): void {
         this.inspectionState.hoverLabelFields = this.hoverLabelFields.map(
             (field, fieldIndex) => fieldIndex === index
-                ? {...field, customExpression: !field.customExpression}
+                ? { ...field, customExpression: !field.customExpression }
                 : field);
     }
 
@@ -867,7 +878,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     setHoverLabelExpression(index: number, expression: string): void {
         this.inspectionState.hoverLabelFields = this.hoverLabelFields.map(
             (field, fieldIndex) => fieldIndex === index
-                ? {...field, expression: expression ?? ""}
+                ? { ...field, expression: expression ?? "" }
                 : field);
     }
 
@@ -875,7 +886,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     setHoverLabelDisplayKey(index: number, displayKey: string): void {
         this.inspectionState.hoverLabelFields = this.hoverLabelFields.map(
             (field, fieldIndex) => fieldIndex === index
-                ? {...field, displayKey: displayKey || undefined}
+                ? { ...field, displayKey: displayKey || undefined }
                 : field);
     }
 
@@ -908,8 +919,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         });
         paths.delete("id");
         this.hoverLabelFieldOptions = [
-            {label: "Feature ID", value: "id"},
-            ...[...paths].sort().map(path => ({label: path, value: path}))
+            { label: "Feature ID", value: "id" },
+            ...[...paths].sort().map(path => ({ label: path, value: path }))
         ];
     }
 

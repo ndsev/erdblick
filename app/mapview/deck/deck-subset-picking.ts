@@ -1,7 +1,6 @@
-import type {TileFeatureId} from "../../shared/appstate.service";
-import type {PresentationKind} from
-    "../../mapdata/styled-mapget-layer.model";
-import {SceneMode} from "../../integrations/geo";
+import type { TileFeatureId } from "../../inspection/inspection-state.model";
+import { SceneMode } from "../../integrations/geo";
+import type { PresentationKind } from "../../mapdata/styled-mapget-layer.model";
 import type {
     DeckGltfPickProxyStyleContribution
 } from "./deck-gltf-node.layer";
@@ -94,7 +93,7 @@ export function remapGltfPickContributions(
                         address: datum.featureAddress
                     });
                 }
-                return {...datum, featureAddress: address};
+                return { ...datum, featureAddress: address };
             })
         };
     });

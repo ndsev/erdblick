@@ -18,12 +18,12 @@ Purpose: freeze the renderer-agnostic contract from current call sites before in
 - `getCameraHeadingDegrees(): number`
 
 During an active split-view gesture, `DeckMapView` coalesces the newest camera
-pose to one preview per animation frame. `MapViewStateService` applies the
+pose to one preview per animation frame. `MapViewService` applies the
 selected position or movement synchronization policy and routes that preview
 directly to sibling Deck renderers. Preview consumers update only their
-controlled Deck camera; the settled gesture then commits one canonical
-`AppStateService` update that owns tile coverage, storage, URL state, and
-Angular-facing state notifications.
+controlled Deck camera. The settled gesture calls `MapViewStateService.setView`
+to commit synchronized cameras atomically. `MapViewService` derives tile coverage;
+`AppStateService` coordinates completed notifications, storage and URL persistence.
 
 ### Interaction and picking
 - `pickFeature(screenPos: {x: number; y: number}): unknown[]`
