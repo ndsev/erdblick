@@ -43,8 +43,8 @@ export class StateOwners {
         isTileStreamConnected: () => false
     } as never, {visualizationQueueLength: () => 0, currentFrameTimeMs: () => 0} as never,
     {currentSummary: () => ({})} as never, this.persistence,
-        new StyleValidationReportService(), {} as never, this.layout, this.configService);
-    readonly url = new AppUrlStateService(this.persistence, this.layerState, this.inspectionState, this.viewSettings);
+        new StyleValidationReportService(), {} as never, this.layout, this.configService, {} as never, this.searchService, this.viewSettings);
+    readonly url = new AppUrlStateService(this.persistence, this.layerState, this.inspectionState, this.viewSettings, this.styleService, this.searchService);
 
     constructor(readonly persistence: AppStateService,
                 readonly messages: InfoMessageService = {showError() {}, showWarning() {}} as unknown as InfoMessageService) {

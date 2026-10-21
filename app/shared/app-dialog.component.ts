@@ -13,7 +13,7 @@ TemplateRef,
 ViewChild
 } from '@angular/core';
 import { Dialog,DialogModule } from 'primeng/dialog';
-import { ViewerResizeSize } from '../actions/viewer-ui.contract';
+import { ViewerResizeSize } from '../actions/viewer-ui.service.declarations';
 import { ViewerUiService } from '../actions/viewer-ui.service';
 import {
 AppDialogBounds,

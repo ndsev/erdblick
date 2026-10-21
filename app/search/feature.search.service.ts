@@ -1,3 +1,9 @@
+import type {ActionInput, ActionOutput} from "../actions/app-action";
+import {AppActionService} from "../actions/app-action.service";
+import {ControlValue, ControlReadContext, boundedCollection, applied, rejectAction} from "../actions/app-action";
+import {searchActions, searchControls, searchSettingsSchema} from "./feature.search.service.declarations";
+import {unicodePrefix} from "../shared/unicode-string";
+import {featureSearchDefinitionExport} from "./feature-search-export.util";
 import {deepEquals} from "../shared/app-state";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import { Injectable } from "@angular/core";
@@ -3938,5 +3944,184 @@ export class FeatureSearchService {
                 ${seconds ? `${seconds}s ` : ''}
                 ${mseconds ? `${mseconds}ms` : ''}`.trim() || "0ms";
     }
+
+
+    registerActions(actions: AppActionService): void {
+        actions.registerAction(searchActions.startSearch, input => this.startSearch(input));
+        actions.registerAction(searchActions.controlSearch, input => this.controlSearch(input));
+        actions.registerAction(searchActions.getSearch, input => this.getSearch(input));
+        actions.registerAction(searchActions.setSearch, input => this.setSearch(input));
+        actions.registerAction(searchActions.getSearchResults, input => this.searchResults(input));
+        actions.registerAction(searchActions.exportSearch, input => this.exportSearch(input));
+        actions.registerControl(searchControls.searches, {
+            read: ({searchId}, context) => this.searchSummary(searchId, context), defaultTargets: () => [{}]
+        });
+    }
+
+    /** Bounded definition/progress read; no search is restored or started by discovery. */
+    searchSummary(searchId: string | undefined, context: ControlReadContext): ControlValue<typeof searchControls.searches> {
+        const definitions = this.featureSearchState.value;
+        if (searchId && !definitions.some(definition => definition.id === searchId)) rejectAction("The search no longer exists");
+        const owner = this;
+        function* values() {
+            for (const definition of definitions) {
+                if (searchId && definition.id !== searchId) continue;
+                const runtime = owner.getSession(definition.id);
+                yield {searchId: definition.id, query: context.text(definition.query), pinColor: definition.pinColor,
+                    enabled: definition.enabled, paused: runtime?.paused ?? definition.paused,
+                    autoUpdate: definition.autoUpdate, showResultsOnMap: definition.showResultsOnMap,
+                    ...(runtime ? {runtime: {complete: runtime.complete && runtime.schemaAnalysis.status !== "pending",
+                        progressDone: runtime.progressDone, progressTotal: runtime.progressTotal, resultCount: runtime.searchResults.length,
+                        errorCount: runtime.errors.size + (runtime.schemaAnalysis.status === "error" &&
+                            (!runtime.schemaAnalysis.error || !runtime.errors.has(runtime.schemaAnalysis.error)) ? 1 : 0)}} : {})};
+            }
+        }
+        return context.collect(values());
+    }
+
+
+    /** Resolves an existing session without implicitly restoring, starting or analyzing a search. */
+    requireSearchSession(searchId: string): FeatureSearchSession {
+        const session = this.getSession(searchId);
+        if (!session) rejectAction("The search has no active session");
+        return session;
+    }
+
+
+    /** Validates all view/layer choices before publishing a search definition. */
+    checkSearchTargets(mapLayers: Array<{mapId: string; layerId: string}>, viewIds: string[]): void {
+        for (const id of viewIds) this.viewState.requireViewIndex(id);
+        for (const target of mapLayers) {
+            const layer = this.mapInfo.requireLayer(target.mapId, target.layerId);
+            if (layer.type === "SourceData" || !this.mapInfo.isMapLayerReady(target.mapId, target.layerId)) rejectAction("Search layers must be ready feature layers");
+        }
+    }
+
+
+    /** Starts one visible ordinary search; configuration is complete before the first dispatch. */
+    startSearch(input: ActionInput<typeof searchActions.startSearch>): ActionOutput<typeof searchActions.startSearch> {
+        this.checkSearchTargets(input.mapLayers, input.viewIds);
+        const session = this.run(input.query, {scope: input.scope, selectedMapLayers: input.mapLayers,
+            selectedMapLayersManual: true, selectedViewIndices: input.viewIds.map(id => this.viewState.requireViewIndex(id)), autoUpdate: input.autoUpdate ?? false,
+            selectedTileLevels: input.tileLevels ?? []});
+        return {status: "applied", searchId: session.id};
+    }
+
+
+    /** Delegates lifecycle transitions to the search owner; Stop and Close intentionally differ. */
+    controlSearch(input: ActionInput<typeof searchActions.controlSearch>): ActionOutput<typeof searchActions.controlSearch> {
+        const session = this.requireSearchSession(input.searchId);
+        if ((input.operation === "rerun") !== (input.query !== undefined)) rejectAction("Only rerun accepts and requires query", "invalid_arguments");
+        if (input.operation !== "close" && !session.definition.enabled) rejectAction("Enable the search before controlling its runtime");
+        if ((input.operation === "pause" && session.paused) || (input.operation === "resume" && !session.paused)) return applied(false);
+        switch (input.operation) {
+            case "pause": this.pauseSearch(input.searchId); break;
+            case "resume": this.resumeSearch(input.searchId); break;
+            case "stop": this.stopSearch(input.searchId); break;
+            case "close": this.closeSearch(input.searchId); break;
+            case "rerun": this.rerunSearch(input.searchId, input.query!); break;
+            case "refresh": this.updateSearchInArea(input.searchId); break;
+        }
+        return applied();
+    }
+
+
+    /** Reads persisted settings, resolved query semantics and bounded errors without schema trees. */
+    getSearch(input: ActionInput<typeof searchActions.getSearch>): ActionOutput<typeof searchActions.getSearch> {
+        const session = this.requireSearchSession(input.searchId);
+        const {id: _id, query: _query, paused: _paused, selectedMapLayersManual: _manual, selectedViewIndices, ...settings} = featureSearchDefinitionExport(session.definition);
+        let textOmitted = false;
+        const analysis = session.schemaAnalysis;
+        const boundedText = (value: string, limit: number) => {
+            const bounded = unicodePrefix(value, limit);
+            textOmitted ||= bounded !== value;
+            return bounded;
+        };
+        const schemaAnalysis = {status: analysis.status, concreteScope: analysis.concreteScope,
+            normalizedQuery: boundedText(analysis.normalizedQuery, 4096),
+            rewriteSuppressed: analysis.rewriteSuppressed,
+            rewriteSuppressionReason: boundedText(analysis.rewriteSuppressionReason, 1024),
+            ...(analysis.error ? {error: boundedText(analysis.error, 4096)} : {})};
+        const reportedErrors = new Set(session.errors);
+        if (analysis.error) reportedErrors.add(analysis.error);
+        if (analysis.status === "error" && !analysis.error) reportedErrors.add("Search schema analysis failed.");
+        const candidates = function* () {
+            for (const error of reportedErrors) {
+                const message = unicodePrefix(error, 4096);
+                textOmitted ||= message !== error;
+                yield message;
+            }
+        };
+        const errors = boundedCollection(candidates(), 100, 32000);
+        const query = unicodePrefix(session.definition.query, 4096);
+        textOmitted ||= query !== session.definition.query;
+        const parsedSettings = searchSettingsSchema.safeParse({...settings, selectedViewIds: selectedViewIndices.map(index => this.viewSettings.viewIdAt(index))});
+        if (!parsedSettings.success) rejectAction("Search settings exceed the public contract; narrow them in the UI first");
+        // No submitted backend requests during pending analysis is not an empty completed search.
+        const searchComplete = session.complete && analysis.status !== "pending";
+        return {observedAt: new Date().toISOString(), settings: parsedSettings.data, schemaAnalysis,
+            responseComplete: errors.complete && !textOmitted, searchComplete,
+            reason: errors.reason ?? (textOmitted ? "text_limit" : undefined), status: {
+                searchId: session.id, query, runId: session.runId, refresh: session.refresh,
+                complete: searchComplete, paused: session.paused, resultCount: session.searchResults.length,
+                progressDone: session.progressDone, progressTotal: session.progressTotal, errors: errors.items
+            }};
+    }
+
+
+    /** Merges a validated patch into one search, retaining unrelated fields and sibling searches. */
+    setSearch(input: ActionInput<typeof searchActions.setSearch>): ActionOutput<typeof searchActions.setSearch> {
+        const session = this.requireSearchSession(input.searchId);
+        const current = this.getSearch({searchId: input.searchId}).settings;
+        const settings = searchSettingsSchema.parse({...current, ...input.settings,
+            renderStrategy: {...current.renderStrategy, ...input.settings.renderStrategy}});
+        this.checkSearchTargets(settings.selectedMapLayers, settings.selectedViewIds);
+        const changed = !deepEquals(current, settings);
+        const {selectedViewIds, ...patch} = settings;
+        if (changed) this.patchFeatureSearch(session.id, {...patch, selectedViewIndices: selectedViewIds.map(id => this.viewState.requireViewIndex(id)),
+            ...(input.settings.selectedMapLayers === undefined ? {} : {selectedMapLayersManual: true})});
+        return applied(changed);
+    }
+
+
+    /** Reads a bounded result slice; generation guards make repeated exports fail visibly after a rerun. */
+    searchResults(input: ActionInput<typeof searchActions.getSearchResults>): ActionOutput<typeof searchActions.getSearchResults> {
+        const session = this.requireSearchSession(input.searchId);
+        if ((input.runId !== undefined && input.runId !== session.runId) || (input.refresh !== undefined && input.refresh !== session.refresh)) {
+            rejectAction("The search results changed; read its status again", "not_available", "stale_search");
+        }
+        const offset = input.offset ?? 0;
+        let textOmitted = false;
+        const source = function* () {
+            for (let index = offset; index < session.searchResults.length; index++) {
+                const entry = session.searchResults[index];
+                const label = unicodePrefix(entry.label, 4096);
+                textOmitted ||= label !== entry.label;
+                yield {...entry, label};
+            }
+        };
+        const result = boundedCollection(source(), input.limit);
+        const searchComplete = session.complete && session.schemaAnalysis.status !== "pending";
+        return {observedAt: new Date().toISOString(), searchId: session.id, runId: session.runId, refresh: session.refresh,
+            offset, total: session.searchResults.length, searchComplete, results: result.items,
+            complete: result.complete && searchComplete && !textOmitted, reason: result.reason ?? (textOmitted ? "text_limit" : searchComplete ? undefined : "loading")};
+    }
+
+
+    /** Exports only the selected bounded slice, avoiding full result-tree construction and clipboard side effects. */
+    exportSearch(input: ActionInput<typeof searchActions.exportSearch>): ActionOutput<typeof searchActions.exportSearch> {
+        const results = this.searchResults(input);
+        const configuration = input.include === "results" ? undefined : {
+            ...this.getSearch({searchId: input.searchId}).settings, id: input.searchId,
+            query: this.requireSearchSession(input.searchId).definition.query, paused: this.requireSearchSession(input.searchId).paused
+        };
+        const payload = {exportedAt: new Date().toISOString(), searchId: input.searchId, configuration,
+            results: input.include === "configuration" ? undefined : results};
+        const content = JSON.stringify(payload);
+        if (new TextEncoder().encode(content).length > 180000) rejectAction("Export exceeds the byte limit; request fewer results", "invalid_arguments");
+        return {observedAt: payload.exportedAt, mimeType: "application/json", content,
+            complete: input.include === "configuration" || results.complete, reason: input.include === "configuration" ? undefined : results.reason};
+    }
+
 
 }

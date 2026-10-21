@@ -11,6 +11,8 @@ export type AppStateSerializedValue = string | null;
 
 /** A stored compatibility key derived from an owner's authoritative state. */
 export interface AppStateProjection<T> {
+    /** The compatibility key inherits persistence ownership from this authoritative slot. */
+    sourceState: AppState<any>;
     read(): T;
     write(value: T): void;
     changes: Observable<T>;

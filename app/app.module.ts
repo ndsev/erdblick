@@ -1,3 +1,9 @@
+import {AppActionService} from "./actions/app-action.service";
+import {viewerActions as declaredActions} from "./actions/viewer-action.contract";
+import {applicationControls} from "./actions/application-controls";
+import {MapViewService} from "./mapview/map-view.service";
+import {LocationNavigationService} from "./search/location-navigation.service";
+import {ViewerUiService} from "./actions/viewer-ui.service";
 import {ConnectionPreferencesService} from "./mapdata/connection-preferences.service";
 import {RenderPreferencesService} from "./mapview/render-preferences.service";
 import {InspectionStateService} from "./inspection/inspection-state.service";
@@ -196,7 +202,7 @@ export const initializeServices = () => {
     const featureSearch = inject(FeatureSearchService);
     const diagnostics = inject(DiagnosticsFacadeService);
     inject(LocationSearchService);
-    inject(AppUrlStateService);
+    const urlState = inject(AppUrlStateService);
     // Resolve every durable-state owner before config/storage/URL hydration begins.
     inject(AppLayoutService);
     inject(MapViewStateService);
@@ -205,6 +211,17 @@ export const initializeServices = () => {
     inject(RenderPreferencesService);
     inject(ConnectionPreferencesService);
     stateService.sealRegistration();
+
+    // Every public declaration must be bound by its actual owner before either MCP
+    // adapter advertises the build contract. Late registration is rejected.
+    const actions = inject(AppActionService);
+    for (const owner of [
+        configService, styleService, inspectionSelection, featureSearch, diagnostics, coordService, urlState,
+        inject(MapViewService), inject(MapViewStateService), inject(MapInfoService),
+        inject(InspectionStateService), inject(RenderPreferencesService), inject(ConnectionPreferencesService),
+        inject(LocationNavigationService), inject(ViewerUiService)
+    ]) owner.registerActions(actions);
+    actions.sealRegistration(Object.values(declaredActions), Object.values(applicationControls));
 
     return (async () => {
         updateGlobalSpinner('Loading app config');

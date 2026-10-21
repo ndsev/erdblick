@@ -1,14 +1,14 @@
 import "@angular/compiler";
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import {ViewerUiService} from "./viewer-ui.service";
-import {viewerUiActions} from "./viewer-ui.contract";
+import {viewerUiActions} from "./viewer-ui.service.declarations";
 
 describe("bounded viewer UI actions", () => {
     let ui: ViewerUiService;
     let root: HTMLDivElement;
 
     beforeEach(() => {
-        ui = new ViewerUiService();
+        ui = new ViewerUiService({} as never, {} as never);
         root = document.createElement("div");
         root.dataset['testid'] = "fixture";
         document.body.append(root);

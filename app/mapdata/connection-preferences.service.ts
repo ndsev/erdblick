@@ -1,3 +1,7 @@
+import {AppActionService} from "../actions/app-action.service";
+import {ControlValue, rejectAction} from "../actions/app-action";
+import {connectionControls} from "./connection-preferences.service.declarations";
+
 import { Injectable } from "@angular/core";
 import { Boolish, deepEquals } from "../shared/app-state";
 import { AppStateService } from "../shared/appstate.service";
@@ -78,4 +82,14 @@ export class ConnectionPreferencesService {
     get tilePullCompressionEnabled() {return this.tilePullCompressionEnabledState.getValue();}
 
     set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);}
+
+
+    registerActions(actions: AppActionService): void {
+        actions.registerControl(connectionControls.compression, {
+            read: () => ({tilePullCompression: this.tilePullCompressionEnabled}),
+            write: (_selector, value) => { this.tilePullCompressionEnabled = value.tilePullCompression; }
+        });
+    }
+
+
 }

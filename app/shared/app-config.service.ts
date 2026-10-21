@@ -1,3 +1,6 @@
+import {AppActionService} from "../actions/app-action.service";
+import {ActionInput, ActionOutput, catalogPage} from "../actions/app-action";
+import {configActions} from "./app-config.service.declarations";
 import { HttpClient } from "@angular/common/http";
 import { Injectable } from "@angular/core";
 import * as jsyaml from "js-yaml";
@@ -1368,4 +1371,15 @@ export class AppConfigService {
         }
         return JSON.stringify(value);
     }
+
+
+    registerActions(actions: AppActionService): void {
+        actions.registerAction(configActions.listBackgrounds, input => this.listBackgrounds(input));
+    }
+
+    listBackgrounds(input: ActionInput<typeof configActions.listBackgrounds>): ActionOutput<typeof configActions.listBackgrounds> {
+        return catalogPage(this.getBackgroundLayers().map(layer => ({id: layer.id, name: layer.name, kind: layer.type})), input);
+    }
+
+
 }

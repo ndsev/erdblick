@@ -61,11 +61,11 @@ export class DiagnosticsDatasource implements OnDestroy {
 
     /** Subscribe to low-frequency diagnostics sources while keeping timers outside Angular. */
     constructor(
-        private readonly mapService: MapTileStreamService,
-        private readonly renderService: TileSubsetLayerRenderService,
+        protected readonly mapService: MapTileStreamService,
+        protected readonly renderService: TileSubsetLayerRenderService,
         private readonly viewDiagnostics: ViewLayerDiagnosticsService,
         private readonly appStateService: AppStateService,
-        private readonly styleValidationReportService:
+        protected readonly styleValidationReportService:
             StyleValidationReportService,
         private readonly ngZone: NgZone,
         public readonly layout: AppLayoutService

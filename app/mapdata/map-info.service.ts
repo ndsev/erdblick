@@ -5,6 +5,8 @@ import type {
 FeatureLayerStyle,
 TileLayerParser
 } from "../../build/libs/core/erdblick-core";
+import { ActionInput,ActionOutput,catalogPage,ControlReadContext,ControlSelector,ControlValue,rejectAction } from "../actions/app-action";
+import { AppActionService } from "../actions/app-action.service";
 import {
 coreLib,
 uint8ArrayFromWasm,
@@ -13,18 +15,17 @@ uint8ArrayToWasmOrThrow
 import { MapViewStateService } from "../mapview/map-view-state.service";
 import { AppStateService,TileGridMode,VIEW_SYNC_LAYERS } from "../shared/appstate.service";
 import { InfoMessageService } from "../shared/info.service";
+import { unicodePrefix } from "../shared/unicode-string";
 import type { LayerPresetRef } from "../styledata/layer-preset.model";
 import { MapPresetService } from "../styledata/map-preset.service";
 import { StyleService } from "../styledata/style.service";
+import { mapActions,mapControls } from "./map-info.service.declarations";
 import { MapLayerStateService } from "./map-layer-state.service";
 import {
 dataSourceCatalogStatus,
 dataSourceProgressPercent,
 isDataSourceCatalogEntryReady,
-layerPresetInferenceKey,
-layerPresetNode,
-layerStyleOptions,
-MapInfoItem,
+layerPresetInferenceKey,layerPresetNode,layerStyleOptions,MapInfoItem,
 MapLayerTree,
 sortDataSourceCatalogEntries,
 StyleOptionNode
@@ -926,5 +927,160 @@ export class MapInfoService {
         }
         return isMetadata ? match[2] :`${match[1]}`.replace('-', '.');
     }
+
+
+    registerActions(actions: AppActionService): void {
+        actions.registerAction(mapActions.listMaps, input => this.listMaps(input));
+        actions.registerAction(mapActions.listLayers, input => this.listLayers(input));
+        actions.registerAction(mapActions.listStyleOptions, input => this.listStyleOptions(input));
+        actions.registerAction(mapActions.listPresets, input => this.listPresets(input));
+        actions.registerControl(mapControls.layers, {
+            read: (target, context) => this.layerSummary(target, context),
+            defaultTargets: () => this.viewSettings.viewIds.slice(0, 14).map(viewId => ({viewId}))
+        });
+        // Layer visibility/level assignment also needs renderer auto-level policy;
+        // MapViewService binds that control alongside its ordinary layer operations.
+        actions.registerControl(mapControls.styleOption, {
+            read: target => this.requirePublicOption(target).value[this.controlViewIndex(target.viewId)],
+            write: (target, value) => this.assignStyleOption(target, value)
+        });
+        actions.registerControl(mapControls.layerPreset, {
+            read: target => {
+                this.requireLayer(target.mapId, target.layerId);
+                return this.layerState.getLayerPresetSelection(this.controlViewIndex(target.viewId), target.mapId, target.layerId);
+            },
+            write: (target, value) => {
+                this.requireLayer(target.mapId, target.layerId);
+                if (!this.applyLayerPreset(this.controlViewIndex(target.viewId), target.mapId, target.layerId, value)) rejectAction("The layer preset is unavailable");
+            }
+        });
+        actions.registerControl(mapControls.mapPreset, {
+            read: target => {
+                this.requireMap(target.mapId);
+                return this.layerState.getMapPresetSelection(this.controlViewIndex(target.viewId), target.mapId);
+            },
+            write: (target, value) => {
+                this.requireMap(target.mapId);
+                if (!this.applyMapPreset(this.controlViewIndex(target.viewId), target.mapId, value)) rejectAction("The map preset is unavailable or conflicts with synchronized options");
+            }
+        });
+    }
+
+    private controlViewIndex(viewId: string): number {
+        const index = this.viewSettings.viewIds.indexOf(viewId);
+        if (index < 0) rejectAction("The requested view is unavailable", "not_available", "view_unavailable");
+        return index;
+    }
+
+    requireMap(mapId: string) {
+        const map = this.maps.maps.get(mapId);
+        if (!map) rejectAction("The requested map is unavailable");
+        return map;
+    }
+
+    requireLayer(mapId: string, layerId: string) {
+        const layer = this.requireMap(mapId).layers.get(layerId);
+        if (!layer) rejectAction("The requested layer is unavailable");
+        return layer;
+    }
+
+    layerConfiguration(target: ControlSelector<typeof mapControls.layer>): ControlValue<typeof mapControls.layer> {
+        const index = this.controlViewIndex(target.viewId);
+        const config = this.requireLayer(target.mapId, target.layerId).viewConfig[index];
+        if (!config) rejectAction("The requested feature layer is unavailable");
+        return {...config};
+    }
+
+    layerSummary(target: ControlSelector<typeof mapControls.layers>, context: ControlReadContext): ControlValue<typeof mapControls.layers> {
+        const index = this.controlViewIndex(target.viewId);
+        if (target.layerId && !target.mapId) rejectAction("layerId requires mapId", "invalid_arguments");
+        const maps = target.mapId ? [this.requireMap(target.mapId)] : this.maps.maps.values();
+        if (target.layerId) this.requireLayer(target.mapId!, target.layerId);
+        function* layers() {
+            for (const map of maps) for (const layer of target.layerId ? [map.layers.get(target.layerId)!] : map.layers.values()) {
+                const config = layer.viewConfig[index];
+                if (!config || (!target.mapId && !config.visible)) continue;
+                yield {mapId: map.id, layerId: layer.id, ...config};
+            }
+        }
+        return context.collect(layers());
+    }
+
+    private requirePublicOption(target: ControlSelector<typeof mapControls.styleOption>) {
+        const option = layerStyleOptions(this.requireLayer(target.mapId, target.layerId)).find(option =>
+            option.styleId === target.styleId && option.id === target.optionId && !option.info.internal);
+        if (!option) rejectAction("The requested style option is unavailable");
+        return option;
+    }
+
+    assignStyleOption(target: ControlSelector<typeof mapControls.styleOption>, value: ControlValue<typeof mapControls.styleOption>): void {
+        const index = this.controlViewIndex(target.viewId);
+        const option = this.requirePublicOption(target);
+        if (typeof value !== typeof option.info.defaultValue) rejectAction("Value does not match the style option type", "invalid_arguments");
+        this.stateService.transaction(() => {
+            option.value = option.value.map((previous, viewIndex) => viewIndex === index ? value : previous);
+            this.applyStyleOptionChange(option, index);
+        });
+    }
+
+    listMaps(input: ActionInput<typeof mapActions.listMaps>): ActionOutput<typeof mapActions.listMaps> {
+        const maps = this.maps.maps.values();
+        const owner = this;
+        function* values() { for (const map of maps) yield {id: map.id, available: owner.isMapReady(map.id)}; }
+        return catalogPage(values(), input);
+    }
+
+    listLayers(input: ActionInput<typeof mapActions.listLayers>): ActionOutput<typeof mapActions.listLayers> {
+        if (input.layerId && !input.mapId) rejectAction("layerId requires mapId", "invalid_arguments");
+        const index = input.viewId === undefined ? undefined : this.controlViewIndex(input.viewId);
+        const maps = input.mapId ? [this.requireMap(input.mapId)] : this.maps.maps.values();
+        const layer = input.layerId ? this.requireLayer(input.mapId!, input.layerId) : undefined;
+        const owner = this;
+        function* values() {
+            for (const map of maps) for (const child of layer ? [layer] : map.layers.values()) {
+                if (input.layerType !== "all" && child.type !== input.layerType) continue;
+                yield {id: child.id, mapId: map.id, kind: child.type as "Features" | "SourceData",
+                    available: owner.isMapReady(map.id), ...(index === undefined ? {} : {visible: child.viewConfig[index]?.visible ?? false}),
+                    zoomLevels: child.info.zoomLevels, featureTypes: child.info.featureTypes.map(type => type.name),
+                    schemaFeatureTypes: child.info.schemaFeatureTypes ?? [], partitionKind: child.info.partitionKind ?? "tile" as const};
+            }
+        }
+        return catalogPage(values(), input);
+    }
+
+    listStyleOptions(input: ActionInput<typeof mapActions.listStyleOptions>): ActionOutput<typeof mapActions.listStyleOptions> {
+        const layer = this.requireLayer(input.mapId, input.layerId);
+        const index = this.controlViewIndex(input.viewId);
+        function* values() {
+            for (const option of layerStyleOptions(layer)) {
+                if (option.info.internal || (input.styleId && input.styleId !== option.styleId)) continue;
+                yield {id: option.id, name: option.info.label, kind: option.type, styleId: option.styleId,
+                    mapId: layer.mapId, layerId: layer.id, value: option.value[index], defaultValue: option.info.defaultValue,
+                    description: unicodePrefix(option.info.description, 4096),
+                    writeTarget: {control: "view.styleOption" as const, viewId: input.viewId,
+                        mapId: layer.mapId, layerId: layer.id, styleId: option.styleId, optionId: option.id}};
+            }
+        }
+        return catalogPage(values(), input);
+    }
+
+    listPresets(input: ActionInput<typeof mapActions.listPresets>): ActionOutput<typeof mapActions.listPresets> {
+        const map = this.requireMap(input.mapId);
+        const layer = input.layerId ? this.requireLayer(input.mapId, input.layerId) : undefined;
+        const index = input.viewId === undefined ? undefined : this.controlViewIndex(input.viewId);
+        const owner = this;
+        function* values() {
+            if (layer) {
+                for (const preset of layerPresetNode(layer)?.presets ?? []) {
+                    if (!input.styleId || input.styleId === preset.styleId) yield {id: preset.id, name: preset.name,
+                        kind: "layer" as const, mapId: map.id, layerId: layer.id, styleId: preset.styleId, available: true};
+                }
+            } else for (const preset of map.mapPresets) yield {id: preset.id, name: preset.name, kind: "map" as const,
+                mapId: map.id, available: index === undefined || !owner.isSyncOptionsForViewEnabled(index) || !owner.maps.mapPresetHasSyncConflict(map, preset)};
+        }
+        return catalogPage(values(), input);
+    }
+
+
 
 }

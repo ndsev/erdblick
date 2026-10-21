@@ -1,6 +1,6 @@
 import type { TileLayerParser } from "../../build/libs/core/erdblick-core";
 import { VIEWER_ACTION_CONTROL_FRAME_TYPE,viewerClientIdSchema } from "../actions/viewer-action-relay.contract";
-import { VIEWER_ACTION_INVOCATION_BYTES,VIEWER_ACTION_RESULT_BYTES } from "../actions/viewer-action.contract";
+import { VIEWER_ACTION_INVOCATION_BYTES,VIEWER_ACTION_RESULT_BYTES } from "../actions/app-action";
 import { coreLib,uint8ArrayToWasm } from "../integrations/wasm";
 import { FrameBudgetLoop } from "../shared/frame-budget-loop";
 

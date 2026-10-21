@@ -1,3 +1,11 @@
+import {NgZone} from "@angular/core";
+import {AppActionService} from "../actions/app-action.service";
+import {ActionInput, ActionOutput, applied, rejectAction} from "../actions/app-action";
+import {ViewerActionFailure} from "../actions/viewer-action-relay.contract";
+import {navigationActions} from "./location-navigation.service.declarations";
+import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import {InspectionSelectionService} from "../inspection/inspection-selection.service";
+import {coreLib} from "../integrations/wasm";
 import { Injectable,OnDestroy } from "@angular/core";
 import { merge,skip,Subscription } from "rxjs";
 import { MapViewStateService } from "../mapview/map-view-state.service";
@@ -23,7 +31,10 @@ export class LocationNavigationService implements OnDestroy {
         private readonly diagnostics: ViewLayerDiagnosticsService,
         private readonly jumps: JumpTargetService,
         private readonly messages: InfoMessageService,
-        public readonly viewSettings: MapViewStateService
+        public readonly viewSettings: MapViewStateService,
+        private readonly stream: MapTileStreamService,
+        private readonly inspections: InspectionSelectionService,
+        private readonly zone: NgZone
     ) {
         this.boundaryFeedback = views.locationBoundaryUnavailableTopic.subscribe(() =>
             messages.showInfo("The location boundary could not be displayed. Showing its bounding extent."));
@@ -110,4 +121,72 @@ export class LocationNavigationService implements OnDestroy {
         }
         if (result.notice) this.messages.showInfo(result.notice);
     }
+
+
+    registerActions(actions: AppActionService): void {
+        actions.registerAction(navigationActions.navigate, (input, signal) => this.navigateToTarget(input, signal));
+    }
+
+    /** Captures renderer lifetimes before locate/load; reorder resolves current presentation indices at commit. */
+    async navigateToTarget(input: ActionInput<typeof navigationActions.navigate>, signal?: AbortSignal): Promise<ActionOutput<typeof navigationActions.navigate>> {
+        this.views.requireViewIndex(input.viewId);
+        const sync = this.viewSettings.viewSync.includes("pos") || this.viewSettings.viewSync.includes("mov");
+        const ids = sync ? [...this.viewSettings.viewIds] : [input.viewId];
+        this.views.requireIdleMapCameras(ids);
+        const targets = ids.map(id => this.views.captureView(id)!);
+        const renderers = targets.map(target => this.views.resolveCapturedView(target)!);
+        this.views.navigationStarted.next();
+        const controller = new AbortController();
+        const abort = () => controller.abort(new ViewerActionFailure({code: "cancelled", message: "Navigation was interrupted", outcome: "not_applied"}));
+        signal?.addEventListener("abort", abort, {once: true});
+        if (signal?.aborted) abort();
+        const guards = new Subscription();
+        const poses = renderers.map(view => view.getLiveCameraState());
+        const syncBefore = this.viewSettings.viewSync;
+        const stillCurrent = () => targets.every((target, index) => this.views.resolveCapturedView(target) === renderers[index]);
+        guards.add(this.views.navigationStarted.subscribe(abort));
+        guards.add(this.state.stateApplied.subscribe(abort));
+        guards.add(this.diagnostics.cameraInteracting$.subscribe(active => { if (active && renderers.some(view => view.isCameraInteractionActive())) abort(); }));
+        guards.add(this.state.observe(() => this.viewSettings.viewIds).subscribe(() => { if (!stillCurrent()) abort(); }));
+        guards.add(this.viewSettings.cameraViewDataState.appState.subscribe(() => {
+            if (!stillCurrent() || renderers.some((view, index) => !deepEquals(view.getLiveCameraState(), poses[index]))) abort();
+        }));
+        guards.add(this.viewSettings.viewSyncState.subscribe(value => { if (!deepEquals(value, syncBefore)) abort(); }));
+        for (const view of renderers) guards.add(view.rendererInvalidated.subscribe(abort));
+        try {
+            const target = input.target;
+            const features = "features" in target ? await this.stream.resolveFeatureIdentities(target.features, controller.signal) : undefined;
+            const loaded = features ? await this.stream.loadFeatures(features, controller.signal) : undefined;
+            controller.signal.throwIfAborted();
+            if (!stillCurrent()) rejectAction("The target view was replaced", "cancelled");
+            if (features && loaded?.length !== features.length) rejectAction("Some requested features could not be loaded");
+            const position = loaded ? this.inspections.featureSetZoomTarget(loaded) : undefined;
+            if (loaded && !position) rejectAction("Some requested features have no usable geometry extent");
+            let bounds: {west: number; south: number; east: number; north: number} | undefined;
+            if ("bounds" in target) bounds = target.bounds;
+            if ("mapTileKey" in target) {
+                const parsed = this.stream.parseMapPartitionKeySafe(target.mapTileKey);
+                if (!parsed || parsed[2].kind !== "tile") rejectAction("Tile fitting requires a tile partition", "invalid_arguments");
+                const box = coreLib.getTileBox(parsed[2].id);
+                bounds = {west: box[0], south: box[1], east: box[2], north: box[3]};
+            }
+            if (bounds && (bounds.west >= bounds.east || bounds.south >= bounds.north)) rejectAction("Bounds must have positive extent and not cross the antimeridian", "invalid_arguments");
+            guards.unsubscribe();
+            return this.zone.run(() => {
+                controller.signal.throwIfAborted();
+                const index = this.views.requireViewIndex(input.viewId);
+                this.state.transaction(() => {
+                    this.viewSettings.focusedView = index;
+                    if (position) this.views.moveToWgs84PositionTopic.next({targetView: index, ...position});
+                    else this.views.moveToRectangleTopic.next({targetView: index, rectangle: bounds!});
+                });
+                return applied();
+            });
+        } finally {
+            guards.unsubscribe();
+            signal?.removeEventListener("abort", abort);
+        }
+    }
+
+
 }

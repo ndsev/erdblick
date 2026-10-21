@@ -1,3 +1,6 @@
+import {AppActionService} from "../actions/app-action.service";
+import {ControlValue, applied, rejectAction} from "../actions/app-action";
+import {inspectionStateActions, inspectionStateControls} from "./inspection-state.service.declarations";
 import { Injectable } from "@angular/core";
 import { z } from "zod";
 import type { FeatureWrapper } from "../mapdata/feature-inspection.model";
@@ -16,6 +19,8 @@ export class InspectionStateService {
         private readonly infoMessageService: InfoMessageService) {
         this.selectionState.subscribe(panels => {
             const ids = panels.map(panel => panel.id);
+            for (const id of [...this.panelLifetimes.keys()]) if (!ids.includes(id)) this.panelLifetimes.delete(id);
+            for (const id of ids) if (!this.panelLifetimes.has(id)) this.panelLifetimes.set(id, ++this.nextPanelLifetime);
             this.pruneInspectionDialogLayout(ids);
             this.pruneInspectionTreeExpansionStates(ids);
             this.pruneInspectionTreeHiddenColumns(ids);
@@ -984,4 +989,71 @@ export class InspectionStateService {
             others
         };
     }
+
+
+    registerActions(actions: AppActionService): void {
+        actions.registerAction(inspectionStateActions.closeInspection, input => {
+            this.closeInspection(input.panelId, input.lifetime);
+            return applied();
+        });
+        actions.registerControl(inspectionStateControls.preferences, {
+            read: () => ({limit: this.inspectionsLimit, drillPickRadius: this.drillPickRadius,
+                expandByDefault: this.inspectionTreeExpandByDefault, varyColors: this.inspectionValueVaryColors,
+                varyOutlines: this.inspectionValueVaryOutlines, varyStriping: this.inspectionValueVaryStriping}),
+            write: (_selector, value) => this.setInspectionPreferences(value)
+        });
+        actions.registerControl(inspectionStateControls.hover, {
+            read: () => ({enabled: this.hoverLabelsEnabled, fields: this.hoverLabelFields}),
+            write: (_selector, value) => this.persistence.transaction(() => {
+                this.hoverLabelsEnabled = value.enabled;
+                this.hoverLabelFields = value.fields;
+            })
+        });
+        actions.registerControl(inspectionStateControls.panel, {
+            read: ({panelId}) => this.panelPresentation(panelId),
+            write: ({panelId}, value) => this.setPanelPresentation(panelId, value)
+        });
+    }
+
+    private nextPanelLifetime = 0;
+    private readonly panelLifetimes = new Map<number, number>();
+
+    panelLifetime(panelId: number): number | undefined { return this.panelLifetimes.get(panelId); }
+
+    /** Captured omnibar choices must not close a later panel that reused the numeric ID. */
+    closeInspection(panelId: number, lifetime?: number): void {
+        if (!this.selection.some(panel => panel.id === panelId) ||
+            (lifetime !== undefined && lifetime !== this.panelLifetime(panelId))) rejectAction("The inspection no longer exists");
+        this.persistence.transaction(() => this.unsetPanel(panelId));
+    }
+
+    setInspectionPreferences(value: ControlValue<typeof inspectionStateControls.preferences>): void {
+        this.persistence.transaction(() => {
+            this.inspectionsLimit = value.limit;
+            this.drillPickRadius = value.drillPickRadius;
+            this.inspectionTreeExpandByDefault = value.expandByDefault;
+            this.inspectionValueVaryColors = value.varyColors;
+            this.inspectionValueVaryOutlines = value.varyOutlines;
+            this.inspectionValueVaryStriping = value.varyStriping;
+        });
+    }
+
+    panelPresentation(panelId: number): ControlValue<typeof inspectionStateControls.panel> {
+        const panel = this.selection.find(panel => panel.id === panelId);
+        if (!panel) rejectAction("The inspection no longer exists");
+        return {locked: panel.locked, undocked: panel.undocked, focused: this.focusedInspectionPanelId === panelId, color: panel.color};
+    }
+
+    setPanelPresentation(panelId: number, value: ControlValue<typeof inspectionStateControls.panel>): void {
+        this.panelPresentation(panelId);
+        if (!value.undocked && !value.locked) rejectAction("Docked inspections are locked", "invalid_arguments");
+        this.persistence.transaction(() => {
+            this.setInspectionPanelUndockedState(panelId, value.undocked);
+            this.setInspectionPanelLockedState(panelId, value.locked);
+            this.setInspectionPanelColor(panelId, value.color);
+            if (value.focused || this.focusedInspectionPanelId === panelId) this.setFocusedInspectionPanel(value.focused ? panelId : undefined);
+        });
+    }
+
+
 }

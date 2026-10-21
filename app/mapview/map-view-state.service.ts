@@ -1,3 +1,7 @@
+import {AppActionService} from "../actions/app-action.service";
+import {ControlValue, rejectAction} from "../actions/app-action";
+import {viewSettingsControls, viewIdSchema} from "./map-view-state.service.declarations";
+
 import { Injectable } from "@angular/core";
 import { Params } from "@angular/router";
 import { z } from "zod";
@@ -15,9 +19,7 @@ import { AppStateService } from "../shared/appstate.service";
 /** Stable logical map identity; runtime renderers get a new generation when restored. */
 export type ViewId = string;
 
-/** Object prototype names are reserved because IDs also address plain persisted records. */
-export const viewIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)
-    .refine(id => !Object.hasOwn(Object.prototype, id), "This view ID is reserved.");
+export {viewIdSchema} from "./map-view-state.service.declarations";
 const viewIdsSchema = z.array(viewIdSchema).min(1).max(32)
     .refine(ids => new Set(ids).size === ids.length, "View IDs must be unique.");
 
@@ -97,6 +99,7 @@ export class MapViewStateService {
         name: "numberOfViews", defaultValue: 1,
         schema: z.coerce.number().int().min(1).max(32), urlParamName: "n"
     }, {
+        sourceState: this.viewIdsState,
         read: () => this.viewIds.length,
         write: count => this.numViews = count,
         changes: this.persistence.observe(() => this.viewIds.length)
@@ -635,4 +638,32 @@ export class MapViewStateService {
         this.viewSync = nextSelection;
         this.syncViews();
     }
+
+
+    registerActions(actions: AppActionService): void {
+        actions.registerControl(viewSettingsControls.focus, {
+            read: () => this.focusedViewIdState.value,
+            write: (_selector, id) => { this.focusedView = this.indexOfView(id); }
+        });
+        actions.registerControl(viewSettingsControls.sync, {
+            read: () => [...this.viewSync] as ControlValue<typeof viewSettingsControls.sync>,
+            write: (_selector, value) => {
+                if (value.includes("pos") && value.includes("mov")) rejectAction("Position and movement sync are mutually exclusive", "invalid_arguments");
+                this.updateSelectedSyncOptions(value);
+            }
+        });
+        actions.registerControl(viewSettingsControls.navigation, {
+            read: () => ({zoomStep: this.mapZoomStep, featureZoomClearance: this.featureZoomClearanceMeters}),
+            write: (_selector, value) => this.setNavigationPreferences(value)
+        });
+    }
+
+    setNavigationPreferences(value: ControlValue<typeof viewSettingsControls.navigation>): void {
+        this.persistence.transaction(() => {
+            this.mapZoomStep = value.zoomStep;
+            this.featureZoomClearanceMeters = value.featureZoomClearance;
+        });
+    }
+
+
 }

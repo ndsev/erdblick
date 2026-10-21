@@ -1,3 +1,7 @@
+import {AppActionService} from "../actions/app-action.service";
+import {ControlValue, rejectAction} from "../actions/app-action";
+import {renderControls} from "./render-preferences.service.declarations";
+
 import {Injectable} from "@angular/core";
 import {z} from "zod";
 import {AppStateService} from "../shared/appstate.service";
@@ -138,4 +142,30 @@ export class RenderPreferencesService {
     get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}
 
     set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);}
+
+
+    /** The public rendering control is a typed view of this owner's preferences. */
+    registerActions(actions: AppActionService): void {
+        actions.registerControl(renderControls.rendering, {
+            read: () => this.renderingPreferences,
+            write: (_selector, value) => this.setRenderingPreferences(value)
+        });
+    }
+
+    get renderingPreferences(): ControlValue<typeof renderControls.rendering> {
+        return {antialiasing: this.deckAntialiasingEnabled, semanticCompositing: this.semanticCompositingEnabled,
+            contactShading: this.contactShadingEnabled, tileLimit: this.tilesLoadLimit, renderWorkers: this.tileSubsetRenderWorkerCount};
+    }
+
+    setRenderingPreferences(value: ControlValue<typeof renderControls.rendering>): void {
+        this.persistence.transaction(() => {
+            this.deckAntialiasingEnabled = value.antialiasing;
+            this.semanticCompositingEnabled = value.semanticCompositing;
+            this.contactShadingEnabled = value.contactShading;
+            this.tilesLoadLimit = value.tileLimit;
+            this.tileSubsetRenderWorkerCount = value.renderWorkers;
+        });
+    }
+
+
 }

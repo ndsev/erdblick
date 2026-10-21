@@ -1,3 +1,7 @@
+import {AppActionService} from "../actions/app-action.service";
+import {ActionInput, ActionOutput, boundedCollection, catalogPage, rejectAction} from "../actions/app-action";
+import {styleActions, styleDiscoveryActions} from "./style.service.declarations";
+import {unicodePrefix} from "../shared/unicode-string";
 import { HttpClient } from "@angular/common/http";
 import { Injectable } from "@angular/core";
 import { BehaviorSubject,catchError,firstValueFrom,forkJoin,map,of,Subject } from "rxjs";
@@ -1405,4 +1409,110 @@ export class StyleService {
         );
         return matchedByUrl;
     }
+
+
+    registerActions(actions: AppActionService): void {
+        actions.registerAction(styleActions.getStyle, input => this.getStyle(input));
+        actions.registerAction(styleActions.validateStyle, input => this.validateStyle(input));
+        actions.registerAction(styleActions.editStyle, input => this.editStyle(input));
+        actions.registerAction(styleDiscoveryActions.listStyles, input => this.listStyles(input));
+    }
+
+    listStyles(input: ActionInput<typeof styleDiscoveryActions.listStyles>): ActionOutput<typeof styleDiscoveryActions.listStyles> {
+        const styles = this.styles.values();
+        function* values() {
+            for (const style of styles) {
+                if ((input.styleId && style.id !== input.styleId) || (input.layerId && !style.featureLayerStyle?.hasLayerAffinity(input.layerId))) continue;
+                yield {id: style.id, kind: style.category, visible: style.visible, imported: style.imported, modified: style.modified};
+            }
+        }
+        return catalogPage(values(), input);
+    }
+
+
+    /** Returns bounded source text from the style owner, not server filesystem metadata. */
+    getStyle(input: ActionInput<typeof styleActions.getStyle>): ActionOutput<typeof styleActions.getStyle> {
+        const style = this.styles.get(input.styleId);
+        if (!style) rejectAction('The style ID is unavailable. Use viewer_list_styles and copy an item id exactly; layer IDs and display names are not style IDs.');
+        if (new TextEncoder().encode(style.source).length > 180000) rejectAction("Style source exceeds the response budget");
+        return {styleId: style.id, source: style.source, imported: style.imported, modified: style.modified, visible: style.visible};
+    }
+
+
+    /** Copies only bounded structured parser issues; installing the style remains a separate operation. */
+    validateStyle(input: ActionInput<typeof styleActions.validateStyle>): ActionOutput<typeof styleActions.validateStyle> {
+        const report = this.validateStyleSource(input.source, this.createEditorSourceRef("mcp-draft", input.source));
+        const candidates = function* () {
+            for (const issue of report.issues) yield {severity: issue.severity, message: unicodePrefix(issue.message, 4096), phase: issue.phase,
+                rulePath: issue.rulePath, property: issue.property, line: issue.location?.line, column: issue.location?.column};
+        };
+        const issues = boundedCollection(candidates(), 100, 64000);
+        return {valid: report.valid, loadable: report.loadable, runtimeVerified: false,
+            guidance: "Options belong to this stylesheet only: declare copied option filters here or remove them. Verify data fields with mapget_extract_features. After applying, check viewer_get_diagnostics sections:[errors] and the rendered view; valid syntax does not prove visible labels or geometry.",
+            issues: issues.items, complete: issues.complete, reason: issues.reason};
+    }
+
+
+    /** Rejects an invalid candidate with repair details before any style installation. */
+    requireValidStyle(source: string): void {
+        const report = this.validateStyle({source});
+        if (report.valid) return;
+        const errors = report.issues.filter(issue => issue.severity === "error").slice(0, 4);
+        const details = errors.length ? ` Candidate errors: ${unicodePrefix(JSON.stringify(errors), 3500)}` : " Use viewer_validate_style on the candidate for details.";
+        rejectAction(`Style validation failed; no changes were applied.${details}`, "invalid_arguments", "style_validation_failed");
+    }
+
+
+    /** Edits normal browser-local styles only; no server write capability is implied by viewer-control. */
+    editStyle(input: ActionInput<typeof styleActions.editStyle>): ActionOutput<typeof styleActions.editStyle> {
+        const writesSource = input.operation === "create" || input.operation === "update";
+        if (writesSource !== (input.source !== undefined)) rejectAction("Create/update require source; other operations do not accept source", "invalid_arguments");
+        if ((input.operation === "patch") !== (input.edits !== undefined)) rejectAction("Patch requires edits; other operations do not accept edits", "invalid_arguments");
+        if (input.visible !== undefined && input.operation !== "create" && input.operation !== "visibility") rejectAction("Only create/visibility accepts visible", "invalid_arguments");
+        if (input.operation === "create" && input.styleId !== undefined) rejectAction("New style identity comes from its YAML", "invalid_arguments");
+        const style = input.styleId ? this.styles.get(input.styleId) : undefined;
+        if (input.operation !== "create" && !style) rejectAction('The style ID is unavailable. Use viewer_list_styles and copy an item id exactly; layer IDs and display names are not style IDs.');
+        if (input.operation === "patch") {
+            const source = this.patchStyleSource(style!.source, input.edits!);
+            const changed = source !== style!.source;
+            this.requireValidStyle(source);
+            const styleId = changed ? this.setStyleSource(style!.id, source) : style!.id;
+            if (!styleId) rejectAction("The style operation failed");
+            return {status: "applied", styleId, changed, editCount: input.edits!.length};
+        }
+        if (writesSource) this.requireValidStyle(input.source!);
+        let styleId = style?.id;
+        switch (input.operation) {
+            case "create": styleId = this.importStyleYamlSource(input.source!, input.visible); break;
+            case "update": styleId = this.setStyleSource(style!.id, input.source!); break;
+            case "reset":
+                if (style!.imported) rejectAction("Only builtin overrides can be reset", "invalid_arguments");
+                styleId = this.resetModifiedBuiltinStyle(style!.id);
+                break;
+            case "delete":
+                if (!style!.imported) rejectAction("Builtin styles cannot be deleted", "invalid_arguments");
+                this.deleteStyle(style!.id, true);
+                break;
+            case "visibility":
+                if (input.visible === undefined) rejectAction("Visibility requires a boolean", "invalid_arguments");
+                this.toggleStyle(style!.id, input.visible, true);
+                break;
+        }
+        if (!styleId) rejectAction("The style operation failed");
+        return {status: "applied", styleId};
+    }
+
+
+    /** Builds a bounded candidate without mutating the style; ambiguous or stale matches fail atomically. */
+    patchStyleSource(source: string, edits: NonNullable<ActionInput<typeof styleActions.editStyle>["edits"]>): string {
+        for (const [index, edit] of edits.entries()) {
+            const start = source.indexOf(edit.find);
+            if (start < 0) rejectAction(`Edit ${index + 1} has no exact match. Read viewer_get_style again and copy the target text. No changes applied.`, "invalid_arguments");
+            if (source.indexOf(edit.find, start + 1) >= 0) rejectAction(`Edit ${index + 1} matches more than once. Include surrounding rule text to identify one occurrence. No changes applied.`, "invalid_arguments");
+            source = source.slice(0, start) + edit.replace + source.slice(start + edit.find.length);
+            if (new TextEncoder().encode(source).length > 180000) rejectAction("Patched style exceeds the source budget; no changes applied", "invalid_arguments");
+        }
+        return source;
+    }
+
 }

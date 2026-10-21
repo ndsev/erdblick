@@ -1,11 +1,15 @@
 import {describe, expect, it} from "vitest";
 import fixtures from "../../test/viewer-actions/fixtures.json";
 import {
-    canonicalViewerContractJson, describeAppStateChannels, viewerActionCatalog, viewerActions,
+    canonicalViewerContractJson, viewerActionCatalog, viewerActions,
     type ViewerActionName
 } from "./viewer-action.contract";
 import {viewerActionClientMessageSchema, viewerActionServerMessageSchema, viewerMcpInfoSchema} from "./viewer-action-relay.contract";
-import {appStateChannels, cameraViewStateSchema} from "../shared/app-state-channel.contract";
+import {applicationControls} from "./application-controls";
+import {describeControls} from "./app-action.service.declarations";
+import {composeDeclarations} from "./app-action";
+import {mapViewControls} from "../mapview/map-view.service.declarations";
+const cameraViewStateSchema = mapViewControls.camera.valueSchema;
 
 describe("viewer action shared contract fixtures", () => {
     for (const fixture of fixtures.actions) {
@@ -34,9 +38,16 @@ describe("viewer action shared contract fixtures", () => {
         });
     }
 
+    it("rejects duplicate owner declarations before manifest composition", () => {
+        const projection = mapViewControls.projection;
+        expect(() => composeDeclarations({first: projection}, {second: projection})).toThrow("Duplicate declaration: view.projection");
+        const action = viewerActions.viewer_get_controls;
+        expect(() => composeDeclarations({first: action, second: action})).toThrow("Duplicate declaration: viewer_get_controls");
+    });
+
     it("bounds target work before any application access", () => {
-        expect(viewerActions.viewer_get_app_state.inputSchema.safeParse({
-            targets: Array.from({length: 33}, () => ({channel: "app.searches"}))
+        expect(viewerActions.viewer_get_controls.inputSchema.safeParse({
+            targets: Array.from({length: 33}, () => ({control: "app.searches"}))
         }).success).toBe(false);
     });
 
@@ -61,10 +72,10 @@ describe("viewer action shared contract fixtures", () => {
             properties: {position: {type: "array", items: {type: "number"}, minItems: 3, maxItems: 3}},
             required: ["destination", "orientation"]
         };
-        const setter = catalog.actions.find(action => action.name === "viewer_set_app_state");
+        const setter = catalog.actions.find(action => action.name === "viewer_set_control");
         for (const schema of [setter!.inputSchema, setter!.outputSchema]) {
-            const assignments = schema['allOf'] as Array<{if: {properties: {target: {properties: {channel: {const: string}}}}}; then: unknown}>;
-            expect(assignments.find(item => item.if.properties.target.properties.channel.const === "view.camera")?.then)
+            const assignments = schema['allOf'] as Array<{if: {properties: {target: {properties: {control: {const: string}}}}}; then: unknown}>;
+            expect(assignments.find(item => item.if.properties.target.properties.control.const === "view.camera")?.then)
                 .toMatchObject({properties: {value: cameraSchema}});
         }
         expect(catalog.channels.find(channel => channel.name === "view.camera")?.valueSchema).toMatchObject(cameraSchema);
@@ -73,16 +84,17 @@ describe("viewer action shared contract fixtures", () => {
     });
 
     it("does not accept a runtime value for the wrong channel", () => {
-        expect(viewerActions.viewer_get_app_state.outputSchema.safeParse({
-            observedAt: "2026-09-29T00:00:00Z", viewLayoutRevision: 0,
-            values: [{target: {channel: "view.camera", viewIndex: 0}, value: []}], complete: true, omissions: []
+        expect(viewerActions.viewer_get_controls.outputSchema.safeParse({
+            observedAt: "2026-09-29T00:00:00Z",
+            values: [{target: {control: "view.camera", viewId: "view-0"}, value: []}], complete: true, omissions: []
         }).success).toBe(false);
-        const input = viewerActions.viewer_set_app_state.inputSchema;
-        const target = {channel: "view.projection", viewIndex: 0};
-        expect(input.safeParse({target, value: "2d", viewLayoutRevision: 0}).success).toBe(true);
-        expect(input.safeParse({target, value: [], viewLayoutRevision: 0}).success).toBe(false);
-        expect(input.safeParse({target, value: "2d"}).success).toBe(false);
-        expect(input.safeParse({target, viewLayoutRevision: 0}).success).toBe(false);
+        const input = viewerActions.viewer_set_control.inputSchema;
+        const target = {control: "view.projection", viewId: "view-0"};
+        expect(input.safeParse({target, value: "2d"}).success).toBe(true);
+        expect(input.safeParse({target, value: []}).success).toBe(false);
+        expect(input.safeParse({target: {control: "view.projection", viewIndex: 0}, value: "2d"}).success).toBe(false);
+        expect(input.safeParse({target: {control: "view.projection", viewId: "constructor"}, value: "2d"}).success).toBe(false);
+        expect(input.safeParse({target}).success).toBe(false);
     });
 
     it("publishes only explicit actions/channels with consistent permissions", () => {
@@ -92,10 +104,10 @@ describe("viewer action shared contract fixtures", () => {
         expect(new Set(catalog.channels.map(channel => channel.name)).size).toBe(catalog.channels.length);
         expect(catalog.actions.every(action => action.permission === (action.mutation ? "viewer-control" : "viewer-read"))).toBe(true);
         expect(catalog.channels.filter(channel => channel.writable).map(channel => channel.name))
-            .toEqual(Object.entries(appStateChannels).filter(([, channel]) => channel.writable).map(([name]) => name));
-        expect(catalog.actions).toHaveLength(27);
-        expect(catalog.channels).toHaveLength(20);
-        expect(catalog.actions.some(action => action.name === "viewer_list_sessions")).toBe(false);
+            .toEqual(Object.entries(applicationControls).filter(([, channel]) => channel.writable).map(([name]) => name));
+        expect(catalog.actions).toHaveLength(32);
+        expect(catalog.channels).toHaveLength(21);
+        expect(catalog.actions.some(action => String(action.name) === "viewer_list_sessions")).toBe(false);
     });
 
     it("exports deterministic self-contained Draft-07 schemas without format-only validators", () => {
@@ -108,7 +120,7 @@ describe("viewer action shared contract fixtures", () => {
             expect(action.inputSchema["$schema"]).toBe("http://json-schema.org/draft-07/schema#");
             expect(action.inputSchema["additionalProperties"]).toBe(false);
         }
-        const channels = describeAppStateChannels();
+        const channels = describeControls();
         expect(channels.find(channel => channel.name === "view.camera")?.valueSchema["type"]).toBe("object");
     });
 

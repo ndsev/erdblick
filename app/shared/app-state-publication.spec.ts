@@ -1,5 +1,5 @@
 import '@angular/compiler';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {Subject} from 'rxjs';
 import {Router} from '@angular/router';
 import {z} from 'zod';
@@ -155,5 +155,64 @@ describe('subscriptions during edits', () => {
         left.next(1);
         expect(left.value).toBe(1);
         expect(values).toEqual([0, 1]);
+    });
+});
+
+
+describe('persistence ownership of reactive writes', () => {
+    it('retains system origin through a queued batch without hiding nested user edits', () => {
+        const {registry, left, right} = setup();
+        const user = registry.registerState({name: 'user', defaultValue: 0, schema: z.number()});
+        const projected = registry.registerProjection({name: 'projected', defaultValue: 0, schema: z.number()}, {
+            sourceState: right, read: () => right.value, write: value => right.next(value), changes: registry.observe(() => right.value)
+        });
+        registry['setupStateSubscriptions']();
+        registry['isReady'] = true;
+        registry['scheduleFlush'] = vi.fn();
+        registry.observe(() => left.value).subscribe(value => {
+            if (value === 1) {
+                registry.withSystemStateMutation(() => right.next(2));
+                registry.transaction(() => user.next(3));
+            }
+        });
+        left.next(1);
+        expect(projected.value).toBe(2);
+        expect([...registry['pendingUserOwnershipStates']].sort()).toEqual(['left', 'user']);
+        expect([...registry['pendingStorageSyncStates']].map(state => state.name).sort()).toEqual(['left', 'projected', 'right', 'user']);
+    });
+
+    it('keeps hydration and config writes suppressed when their scopes end before the outer commit', () => {
+        const {registry, left, right} = setup();
+        registry['setupStateSubscriptions']();
+        registry['isReady'] = true;
+        registry['scheduleFlush'] = vi.fn();
+        registry.transaction(() => {
+            registry['withHydration'](() => left.next(1));
+            registry['isSeedingConfigDefaults'] = true;
+            try { right.next(2); } finally { registry['isSeedingConfigDefaults'] = false; }
+        });
+        expect([...registry['pendingUserOwnershipStates']]).toEqual([]);
+        expect([...registry['pendingStorageSyncStates']]).toEqual([]);
+    });
+
+    it('seeds reentrant configuration values and metadata together without claiming user ownership', () => {
+        localStorage.clear();
+        const {registry, left, right} = setup();
+        registry.registerState({name: 'layerNames', defaultValue: [], schema: z.array(z.string())});
+        registry.registerStyleState(() => ['view-0']);
+        registry['setupStateSubscriptions']();
+        registry['isReady'] = true;
+        registry['scheduleFlush'] = vi.fn();
+        registry.observe(() => left.value).subscribe(value => {
+            if (value === 1) expect(registry.seedConfigDefaultState({right: 7}, 'config-2')).toEqual([]);
+        });
+        left.next(1);
+        expect(right.value).toBe(7);
+        expect([...registry['pendingUserOwnershipStates']]).toEqual(['left']);
+        expect(registry['configDefaultStateMeta'].entries['right'].owner).toBe('config');
+        expect(registry['configDefaultValueHashes'].get('right')).toBe(registry['stateValueHashForMeta'](right as never));
+        expect([...registry['pendingStorageSyncStates']].map(state => state.name)).toEqual(['left']);
+        registry.ngOnDestroy();
+        localStorage.clear();
     });
 });

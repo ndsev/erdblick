@@ -1,3 +1,8 @@
+import type {ActionInput, ActionOutput} from "../actions/app-action";
+import {AppActionService} from "../actions/app-action.service";
+import {ControlReadContext, ControlValue, rejectAction} from "../actions/app-action";
+import {inspectionActions, inspectionControls} from "./inspection-selection.service.declarations";
+import {parsePartition, partitionKeySuffix} from "../mapdata/partition.model";
 import {MapViewStateService} from "../mapview/map-view-state.service";
 import { Injectable,NgZone } from "@angular/core";
 import { BehaviorSubject } from "rxjs";
@@ -692,4 +697,92 @@ export class InspectionSelectionService {
     private showErrorMessage(message: string) {
         this.messageService.showError(message);
     }
+
+
+    registerActions(actions: AppActionService): void {
+        actions.registerAction(inspectionActions.inspect, (input, signal) => this.inspect(input, signal));
+        actions.registerAction(inspectionActions.openSourceData, input => this.openSourceData(input));
+        actions.registerControl(inspectionControls.selections, {
+            read: (selector, context) => this.inspectionSummary(selector.panelId, context), defaultTargets: () => [{}]
+        });
+    }
+
+    /** Inspection identities and loading flags, without loading features or traversing trees. */
+    inspectionSummary(panelId: number | undefined, context: ControlReadContext): ControlValue<typeof inspectionControls.selections> {
+        const panels = this.inspectionState.selection;
+        if (panelId !== undefined && !panels.some(panel => panel.id === panelId)) rejectAction("The inspection no longer exists");
+        const runtime = new Map(this.selectionTopic.value.map(panel => [panel.id, panel]));
+        const stream = this.tileStream;
+        function* summaries() {
+            for (const panel of panels) {
+                if (panelId !== undefined && panel.id !== panelId) continue;
+                function* features() {
+                    for (const feature of panel.features) {
+                        const identity = stream.parseMapPartitionKeySafe(feature.mapTileKey);
+                        yield identity ? {...feature, mapId: identity[0], layerId: identity[1], partition: identity[2]} : feature;
+                    }
+                }
+                yield {panelId: panel.id, locked: panel.locked, undocked: panel.undocked,
+                    loading: panel.sourceData ? null : runtime.has(panel.id) ? !!runtime.get(panel.id)!.loading : true,
+                    features: context.collect(features(), 32 * 1024),
+                    ...(panel.sourceData ? {sourceData: {mapTileKey: panel.sourceData.mapTileKey,
+                        ...(panel.sourceData.address !== undefined ? {address: panel.sourceData.address.toString()} : {})}} : {})};
+            }
+        }
+        return context.collect(summaries());
+    }
+
+
+    /** Uses the native key factory for backend-returned source references; the panel owns address resolution. */
+    openSourceData(input: ActionInput<typeof inspectionActions.openSourceData>): ActionOutput<typeof inspectionActions.openSourceData> {
+        const source = input.source;
+        if (!("mapTileKey" in source) && source.partition.kind === "object" && BigInt(source.partition.id) > 18446744073709551615n) {
+            rejectAction("Object partition exceeds uint64", "invalid_arguments");
+        }
+        const mapTileKey = "mapTileKey" in source ? source.mapTileKey : coreLib.createMapTileKey(
+            "SourceData", source.mapId, source.reference.layerId, partitionKeySuffix(parsePartition(source.partition)));
+        const parsed = this.tileStream.parseMapPartitionKeySafe(mapTileKey);
+        if (!parsed || !mapTileKey.startsWith("SourceData:")) rejectAction("Expected a native SourceData key", "invalid_arguments");
+        const address = "mapTileKey" in source ? source.address : source.reference.address;
+        if (address !== undefined && BigInt(address) > 18446744073709551615n) rejectAction("Address exceeds uint64", "invalid_arguments");
+        const panelId = this.inspectionState.setSelection({mapTileKey, ...(address === undefined ? {} : {address: BigInt(address)})}, undefined, input.newPanel ?? false);
+        if (panelId === undefined) rejectAction("An inspection could not be opened");
+        return {status: "applied", panelId, mapTileKey};
+    }
+
+
+    /** Publishes inspection shells after locate only; the existing selection owner performs asynchronous feature loading. */
+    async inspect(input: ActionInput<typeof inspectionActions.inspect>, signal?: AbortSignal): Promise<ActionOutput<typeof inspectionActions.inspect>> {
+        if (input.color !== undefined && !input.newPanel) rejectAction("color requires newPanel:true; use inspection.panel state to recolor an existing panel", "invalid_arguments");
+        if (input.panelId !== undefined && input.newPanel) rejectAction("panelId and newPanel are mutually exclusive", "invalid_arguments");
+        if (input.panelId !== undefined) {
+            const panel = this.inspectionState.selection.find(panel => panel.id === input.panelId);
+            if (!panel || panel.locked || panel.sourceData) rejectAction("An explicit target must be an existing unlocked feature panel");
+        }
+        // Selection setters can mutate the same array in place; reference equality is not a change guard.
+        let changed: boolean;
+        const guard = this.inspectionState.selectionState.subscribe(() => { changed = true; });
+        changed = false;
+        let features: TileFeatureId[];
+        try {
+            features = await this.tileStream.resolveFeatureIdentities(input.features, signal);
+            signal?.throwIfAborted();
+            if (changed) rejectAction("Inspections changed while locating the feature", "cancelled");
+        } finally { guard.unsubscribe(); }
+        return this.ngZone.run(() => {
+            let newPanelId: number | undefined;
+            if (input.panelId !== undefined || input.newPanel) {
+                newPanelId = this.inspectionState.setSelection(features, input.panelId, input.newPanel ?? false);
+            } else this.inspectFeatureIds(features, input.lock ?? false);
+            const panels = this.inspectionState.selection.filter(panel => !panel.sourceData && (!input.newPanel || panel.id === newPanelId) && panel.features.some(candidate =>
+                features.some(feature => candidate.mapTileKey === feature.mapTileKey && candidate.featureId === feature.featureId)));
+            if (input.lock) panels.forEach(panel => this.inspectionState.setInspectionPanelLockedState(panel.id, true));
+            if (input.color !== undefined) panels.forEach(panel => this.inspectionState.setInspectionPanelColor(panel.id, input.color!));
+            const represented = features.filter(feature => panels.some(panel => panel.features.some(candidate =>
+                candidate.mapTileKey === feature.mapTileKey && candidate.featureId === feature.featureId)));
+            return {status: "applied", panelIds: panels.map(panel => panel.id), features: represented,
+                complete: represented.length === features.length, ...(represented.length < features.length ? {reason: "item_limit" as const} : {})};
+        });
+    }
+
 }

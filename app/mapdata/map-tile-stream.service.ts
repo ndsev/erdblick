@@ -1,5 +1,8 @@
 import { Injectable,NgZone,OnDestroy } from "@angular/core";
-import { auditTime,BehaviorSubject,combineLatest,Subject,Subscription } from "rxjs";
+import { BehaviorSubject,Subject,Subscription } from "rxjs";
+import { z } from "zod";
+import { rejectAction } from "../actions/app-action";
+import { featureIdentitySchema } from "../inspection/inspection-selection.service.declarations";
 import {
 coreLib,
 uint8ArrayToWasmOrThrow
@@ -16,7 +19,7 @@ ConnectionRetryPolicy,
 recordConnectionFailure
 } from "../shared/connection-retry-policy";
 import { InfoMessageService } from "../shared/info.service";
-import { stripFeatureInspectionTarget } from "../shared/tile-feature-id";
+import { formatFeatureInspectionTarget,parseFeatureInspectionTarget,stripFeatureInspectionTarget } from "../shared/tile-feature-id";
 import { ConnectionPreferencesService } from "./connection-preferences.service";
 import {
 FeatureWrapper,
@@ -1737,4 +1740,37 @@ export class MapTileStreamService implements OnDestroy {
             this.messageService.showBackendProtocolError(message)
         );
     }
+
+
+
+    /** Resolves only explicitly requested identities; never guesses between ambiguous backend matches. */
+    async resolveFeatureIdentities(features: Array<z.infer<typeof featureIdentitySchema>>, signal?: AbortSignal): Promise<TileFeatureId[]> {
+        const result: TileFeatureId[] = [];
+        for (const feature of features) {
+            signal?.throwIfAborted();
+            let featureId = feature.featureId;
+            if (feature.attributeIndex !== undefined || feature.relationIndex !== undefined || feature.validityIndex !== undefined) {
+                if (feature.attributeIndex !== undefined && feature.relationIndex !== undefined) rejectAction("attributeIndex and relationIndex are mutually exclusive", "invalid_arguments");
+                if (feature.attributeIndex === undefined && feature.relationIndex === undefined) rejectAction("validityIndex requires attributeIndex or relationIndex", "invalid_arguments");
+                const target = parseFeatureInspectionTarget(featureId);
+                if (target.scope !== "feature") rejectAction("Use either a suffixed featureId or numeric inspection selectors, not both", "invalid_arguments");
+                featureId = formatFeatureInspectionTarget(feature.attributeIndex !== undefined
+                    ? {scope: "attribute", baseFeatureId: target.baseFeatureId, attributeIndex: feature.attributeIndex, validityIndex: feature.validityIndex}
+                    : {scope: "relation", baseFeatureId: target.baseFeatureId, relationIndex: feature.relationIndex!, validityIndex: feature.validityIndex});
+            }
+            if ("mapTileKey" in feature) {
+                if (!this.parseMapPartitionKeySafe(feature.mapTileKey) || !feature.mapTileKey.startsWith("Features:")) rejectAction("Invalid feature partition key", "invalid_arguments");
+                result.push({mapTileKey: feature.mapTileKey, featureId});
+            } else {
+                const matches = await this.locateFeature(feature.mapId, featureId, feature.layerId, signal);
+                signal?.throwIfAborted();
+                if (matches.length !== 1) rejectAction(matches.length ? "Feature identity is ambiguous; supply its partition" :
+                    "Feature was not found. For a relation target, discover its owning layer using mapget_list_sources/schemaFeatureTypes; featureTypes may be reference-only. Do not bypass this failure by copying the source feature's mapTileKey into a new inspection.");
+                const target = parseFeatureInspectionTarget(featureId);
+                result.push({...matches[0], featureId: formatFeatureInspectionTarget({...target, baseFeatureId: matches[0].featureId})});
+            }
+        }
+        return result.filter((feature, index) => result.findIndex(other => other.mapTileKey === feature.mapTileKey && other.featureId === feature.featureId) === index);
+    }
+
 }

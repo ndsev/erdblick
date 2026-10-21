@@ -1,7 +1,13 @@
+import type {ActionInput, ActionOutput} from "./app-action";
+import {AppActionService} from "./app-action.service";
+import {rejectAction} from "./app-action";
+import {captureActions, viewerUiActions, VIEWER_SCREENSHOT_MAX_BASE64} from "./viewer-ui.service.declarations";
+import {MapViewService} from "../mapview/map-view.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
 import {Injectable} from "@angular/core";
 import {unicodePrefix} from "../shared/unicode-string";
 import {ViewerActionFailure} from "./viewer-action-relay.contract";
-import {ViewerResizeCapabilities, ViewerResizeSize, ViewerUiElement, ViewerUiInput, ViewerUiOutput} from "./viewer-ui.contract";
+import {ViewerResizeCapabilities, ViewerResizeSize, ViewerUiElement, ViewerUiInput, ViewerUiOutput} from "./viewer-ui.service.declarations";
 
 /** Components retain layout state; this registration only connects a live DOM surface to its owner. */
 interface ResizeTarget {
@@ -264,4 +270,124 @@ export class ViewerUiService {
     private reject(message: string, code: "invalid_arguments" | "not_available" | "busy", reason?: string): never {
         throw new ViewerActionFailure({code, message, outcome: "not_applied", ...(reason ? {reason} : {})});
     }
+
+
+    constructor(private readonly views: MapViewService, private readonly viewSettings: MapViewStateService) {}
+    private capturingScreenshot = false;
+
+    registerActions(actions: AppActionService): void {
+        actions.registerAction(captureActions.screenshot, (input, signal) => this.screenshot(input, signal));
+        actions.registerAction(viewerUiActions.viewer_take_snapshot, input => this.snapshot(input));
+        actions.registerAction(viewerUiActions.viewer_get_element, input => this.getElement(input));
+        actions.registerAction(viewerUiActions.viewer_click, input => this.click(input));
+        actions.registerAction(viewerUiActions.viewer_fill, input => this.fill(input));
+        actions.registerAction(viewerUiActions.viewer_scroll, input => this.scroll(input));
+        actions.registerAction(viewerUiActions.viewer_resize, input => this.resize(input));
+    }
+
+
+    /** Captures only on demand; owns admission until DOM rasterization settles, even if the relay call was cancelled. */
+    async screenshot(input: ActionInput<typeof captureActions.screenshot>, signal?: AbortSignal): Promise<ActionOutput<typeof captureActions.screenshot>> {
+        if (this.capturingScreenshot) rejectAction("A screenshot is already being captured", "busy");
+        this.capturingScreenshot = true;
+        const revision = this.views.viewLayoutRevision;
+        const viewportWidth = document.documentElement.clientWidth;
+        const viewportHeight = document.documentElement.clientHeight;
+        const deadline = performance.now() + 15000;
+        const check = () => {
+            if (signal?.aborted) rejectAction("Screenshot cancelled", "cancelled");
+            if (performance.now() >= deadline) rejectAction("Screenshot capture exceeded its time budget", "timeout");
+            if (revision !== this.views.viewLayoutRevision) rejectAction("The view layout changed during capture", "not_available", "stale_view_layout");
+            if (document.documentElement.clientWidth !== viewportWidth || document.documentElement.clientHeight !== viewportHeight) {
+                rejectAction("The viewport resized during capture; retry", "not_available", "stale_view_layout");
+            }
+        };
+        try {
+            check();
+            if (!viewportWidth || !viewportHeight || viewportWidth > 32768 || viewportHeight > 32768
+                || viewportWidth * viewportHeight > 32 * 1024 * 1024) rejectAction("Viewport is unavailable or too large for capture");
+            // Lazy loaded: ordinary browsing pays no DOM-capture startup/runtime cost.
+            const {default: domToImage} = await import("dom-to-image-more");
+            check();
+            const scale = Math.min(1, (input.maxWidth ?? 1280) / viewportWidth, (input.maxHeight ?? 960) / viewportHeight);
+            const canvases = new Map<HTMLCanvasElement, string>();
+            for (let index = 0; index < this.viewSettings.numViews; ++index) {
+                const view = this.views.renderViewFor(index);
+                if (!view?.isAvailable()) rejectAction("A map renderer is not ready for capture");
+                const snapshot = view.captureCanvas(scale);
+                canvases.set(snapshot.canvas, snapshot.dataUrl);
+            }
+            const capturedAt = new Date().toISOString();
+            const warnings = new Set(["DOM-based capture: browser chrome, pointer and some CSS effects are not captured. This is not a render-ready fence."]);
+            let nodeCount = 0;
+            let canvas = await domToImage.toCanvas(document.body, {
+                width: viewportWidth, height: viewportHeight, scale, pixelRatio: 1, preserveScroll: true,
+                // Computed styles already resolve theme variables. Copying thousands of inherited PrimeNG
+                // tokens onto every node bloats the SVG and can take seconds; default-style probing also forces layout.
+                copyDefaultStyles: false, filterStyles: (_node, property) => !property.startsWith("--"),
+                bgcolor: getComputedStyle(document.body).backgroundColor, httpTimeout: 3000,
+                filter: node => {
+                    check();
+                    if (++nodeCount > 20000) rejectAction("Visible UI exceeds the screenshot node budget");
+                    if (node instanceof Element && getComputedStyle(node).display === "none") return false;
+                    // Cross-origin/interactive embedded documents cannot be reproduced safely by a DOM snapshot.
+                    if (node instanceof HTMLIFrameElement || node instanceof HTMLVideoElement) {
+                        warnings.add("Embedded frames/video are omitted from DOM capture.");
+                        return false;
+                    }
+                    return true;
+                },
+                adjustClonedNode: (original, clone, after) => {
+                    check();
+                    // Let the library fill resolved computed values, not retain inline var()/relative
+                    // styles whose theme definitions or containing block are absent in the standalone SVG.
+                    if (!after && clone instanceof Element) clone.removeAttribute("style");
+                    if (original instanceof HTMLCanvasElement && clone instanceof HTMLImageElement && canvases.has(original)) {
+                        clone.src = canvases.get(original)!;
+                    }
+                },
+                onclone: clone => {
+                    check();
+                    // Never serialize actual password values into the intermediate SVG.
+                    if (clone instanceof Element) for (const password of clone.querySelectorAll('input[type="password"]')) {
+                        const value = password.getAttribute("value") ?? "";
+                        password.setAttribute("value", "•".repeat(Math.min(value.length, 256)));
+                    }
+                },
+                onImageError: () => warnings.add("Some UI images or fonts could not be embedded; capture may be incomplete."),
+                logger: {warn: () => warnings.add("The DOM renderer reported a capture limitation."),
+                    error: () => warnings.add("The DOM renderer could not reproduce some UI content.")}
+            });
+            check();
+            // Keep existing relay bounds, not an unbounded screenshot escape hatch. Prefer readable text over very low JPEG quality.
+            for (let attempt = 0; attempt < 6; ++attempt) {
+                for (const quality of [0.9, 0.75]) {
+                    const url = canvas.toDataURL("image/jpeg", quality);
+                    if (!url.startsWith("data:image/jpeg;base64,")) rejectAction("Browser cannot encode the screenshot as JPEG");
+                    const data = url.slice("data:image/jpeg;base64,".length);
+                    if (data.length <= VIEWER_SCREENSHOT_MAX_BASE64) {
+                        if (canvas.width < viewportWidth || canvas.height < viewportHeight) warnings.add("Image downscaled to fit the requested dimensions and transport budget.");
+                        return {image: {mimeType: "image/jpeg", data}, metadata: {scope: "application-viewport", width: canvas.width,
+                            height: canvas.height, viewportWidth, viewportHeight, capturedAt,
+                            readiness: {status: "unknown"}, warnings: [...warnings]}};
+                    }
+                }
+                const smaller = document.createElement("canvas");
+                smaller.width = Math.max(1, Math.floor(canvas.width * 0.75));
+                smaller.height = Math.max(1, Math.floor(canvas.height * 0.75));
+                const context = smaller.getContext("2d");
+                if (!context) rejectAction("Screenshot canvas is unavailable");
+                context.drawImage(canvas, 0, 0, smaller.width, smaller.height);
+                canvas = smaller;
+                check();
+            }
+            rejectAction("Screenshot exceeds the response budget; request smaller dimensions");
+        } catch (error) {
+            if (error instanceof ViewerActionFailure) throw error;
+            rejectAction("Application screenshot failed; a canvas or UI resource may be inaccessible");
+        } finally {
+            this.capturingScreenshot = false;
+        }
+    }
+
 }

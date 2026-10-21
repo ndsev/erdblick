@@ -73,7 +73,7 @@ describe('logical view identity', () => {
     it('rejects old async targets after removing and restoring the same URL ID', () => {
         const {registry, owners} = setup();
         const views = new MapViewService(registry, {layerStateChanged: new Subject(), reapplySyncOptionsForAllViews() {}, maps: {maps: new Map()}} as never,
-            owners.renderPreferences, owners.viewSettings);
+            owners.renderPreferences, owners.viewSettings, owners.configService);
         owners.viewSettings.numViews = 2;
         const id = owners.viewSettings.viewIdAt(0);
         const old = {viewId: id, viewIndex: 0, isAvailable: () => true};
@@ -93,7 +93,7 @@ describe('logical view identity', () => {
         const {registry, owners, messages} = setup();
         owners.viewSettings.numViews = 2;
         const views = new MapViewService(registry, {layerStateChanged: new Subject(), reapplySyncOptionsForAllViews() {},
-            maps: {maps: new Map()}} as never, owners.renderPreferences, owners.viewSettings);
+            maps: {maps: new Map()}} as never, owners.renderPreferences, owners.viewSettings, owners.configService);
         const id = owners.viewSettings.viewIdAt(0);
         owners.viewSettings.viewIds.forEach(viewId => views.registerRenderView({viewId, isAvailable: () => true} as never));
         let finish!: (features: FeatureWrapper[]) => void;
@@ -120,7 +120,7 @@ describe('logical view identity', () => {
         owners.viewSettings.numViews = 3;
         owners.viewSettings.focusedView = 1;
         const views = new MapViewService(registry, {layerStateChanged: new Subject(), reapplySyncOptionsForAllViews() {},
-            maps: {maps: new Map()}} as never, owners.renderPreferences, owners.viewSettings);
+            maps: {maps: new Map()}} as never, owners.renderPreferences, owners.viewSettings, owners.configService);
         owners.viewSettings.viewIds.forEach(viewId => views.registerRenderView({viewId, isAvailable: () => true} as never));
         vi.spyOn(views, 'showsFeatureSearchTileInView').mockImplementation(index => matches && index !== 1);
         const wrapper = {featureTile: {tileId: 1, mapName: 'Map', layerName: 'Lane'}} as FeatureWrapper;

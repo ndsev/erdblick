@@ -1,3 +1,10 @@
+import {AppActionService} from "../actions/app-action.service";
+import {boundedCollection, rejectAction} from "../actions/app-action";
+import type {ViewerActionOutput} from "../actions/viewer-action.contract";
+import {urlActions} from "./app-url-state.service.declarations";
+import {StyleService} from "../styledata/style.service";
+import {FeatureSearchService} from "../search/feature.search.service";
+import {unicodePrefix} from "./unicode-string";
 import { Injectable } from "@angular/core";
 import { Params } from "@angular/router";
 import { InspectionStateService } from "../inspection/inspection-state.service";
@@ -74,7 +81,9 @@ export class AppUrlStateService {
     constructor(private readonly persistence: AppStateService,
         private readonly layerState: MapLayerStateService,
         private readonly inspectionState: InspectionStateService,
-        private readonly viewSettings: MapViewStateService) {
+        private readonly viewSettings: MapViewStateService,
+        private readonly styles: StyleService,
+        private readonly searches: FeatureSearchService) {
         persistence.registerUrlProjection(this);
     }
 
@@ -297,4 +306,32 @@ export class AppUrlStateService {
     private hasStyleOptionParams(params: Params): boolean {
         return Object.keys(params).some(key => this.layerState.stylesState.isStyleOptionUrlParamKey(key));
     }
+
+
+    registerActions(actions: AppActionService): void {
+        actions.registerAction(urlActions.getShareLink, () => this.getShareLink());
+    }
+
+
+    /** Exports the normal URL projection without browser navigation or credentials. */
+    getShareLink(): ViewerActionOutput<"viewer_get_share_link"> {
+        const url = this.persistence.shareableUrl();
+        if (new TextEncoder().encode(url).length > 48000) rejectAction("The share link exceeds the response budget; reduce URL-backed state first");
+        const hostname = new URL(url).hostname;
+        const styles = boundedCollection((function* (this: AppUrlStateService) {
+            for (const style of this.styles.styles.values()) {
+                if (style.visible && (style.imported || style.modified)) yield unicodePrefix(style.id, 4096);
+            }
+        }).call(this), 100, 64000);
+        const searches = boundedCollection((function* (this: AppUrlStateService) {
+            for (const search of this.searches.featureSearches) {
+                if (search.enabled && search.showResultsOnMap) yield unicodePrefix(search.id, 4096);
+            }
+        }).call(this), 100, 64000);
+        return {observedAt: new Date().toISOString(), url,
+            localOnly: hostname === "localhost" || hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(hostname),
+            localStyleIds: styles.items, localSearchIds: searches.items,
+            complete: styles.complete && searches.complete, reason: styles.reason ?? searches.reason};
+    }
+
 }

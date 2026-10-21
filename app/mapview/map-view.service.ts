@@ -1,3 +1,10 @@
+import {AppActionService} from "../actions/app-action.service";
+import {ActionInput, ActionOutput, ControlSelector, ControlValue, applied, rejectAction} from "../actions/app-action";
+import {mapViewActions, mapViewControls} from "./map-view.service.declarations";
+import {mapControls} from "../mapdata/map-info.service.declarations";
+import {AppConfigService} from "../shared/app-config.service";
+import {Cartographic} from "../integrations/geo";
+import {tileGridMaxLevel} from "../shared/app-state.model";
 import { Injectable } from "@angular/core";
 import { Subject,filter,firstValueFrom,fromEvent,merge,startWith } from "rxjs";
 import type {
@@ -96,7 +103,8 @@ export class MapViewService {
         private readonly stateService: AppStateService,
         private readonly mapInfo: MapInfoService,
         public readonly renderPreferences: RenderPreferencesService,
-        public readonly viewSettings: MapViewStateService
+        public readonly viewSettings: MapViewStateService,
+        private readonly config: AppConfigService
     ) {
         let previousIds: readonly string[] = [];
         this.stateService.observe(() => this.viewSettings.viewIds).subscribe(ids => {
@@ -726,4 +734,143 @@ export class MapViewService {
         }
         return clampedLevel;
     }
+
+
+    registerActions(actions: AppActionService): void {
+        actions.registerAction(mapViewActions.manageView, input => this.manageView(input));
+        actions.registerControl(mapViewControls.views, {read: () => this.viewSummary(), defaultTargets: () => [{}]});
+        actions.registerControl(mapViewControls.camera, {
+            read: ({viewId}) => this.readCamera(viewId), write: ({viewId}, value) => this.assignCamera(viewId, value),
+            defaultTargets: () => this.viewSettings.viewIds.slice(0, 14).map(viewId => ({viewId}))
+        });
+        actions.registerControl(mapViewControls.projection, {
+            read: ({viewId}) => this.viewSettings.mode2dState.getValue(this.requireViewIndex(viewId)) ? "2d" : "3d",
+            write: ({viewId}, value) => this.assignProjection(viewId, value)
+        });
+        actions.registerControl(mapViewControls.background, {
+            read: ({viewId}) => this.viewSettings.getBackgroundState(this.requireViewIndex(viewId)),
+            write: ({viewId}, value) => {
+                const index = this.requireViewIndex(viewId);
+                if (value.layerId && !this.config.getBackgroundLayers().some(layer => layer.id === value.layerId)) rejectAction("Unknown background", "invalid_arguments");
+                this.stateService.transaction(() => {
+                    this.viewSettings.setBackgroundState(index, value.layerId, value.opacity);
+                    this.syncBackgroundSettings(index);
+                });
+            }
+        });
+        actions.registerControl(mapViewControls.grid, {
+            read: ({viewId}) => this.gridSettings(viewId), write: ({viewId}, value) => this.assignGrid(viewId, value)
+        });
+        actions.registerControl(mapControls.layer, {
+            read: target => this.mapInfo.layerConfiguration(target),
+            write: (target, value) => this.assignLayer(target, value)
+        });
+    }
+
+    /** Resolve logical scope at the boundary; presentation indices stay internal. */
+    requireViewIndex(viewId: string): number {
+        const index = this.viewSettings.viewIds.indexOf(viewId);
+        if (index < 0) rejectAction("The requested view is unavailable", "not_available", "view_unavailable");
+        return index;
+    }
+
+    viewSummary(): ControlValue<typeof mapViewControls.views> {
+        return {focusedViewId: this.viewSettings.focusedViewIdState.value, sync: [...this.viewSettings.viewSync],
+            views: this.viewSettings.viewIds.map(viewId => {
+                const renderer = this.renderViewFor(viewId);
+                return {viewId, projection: this.viewSettings.mode2dState.getValue(viewId) ? "2d" : "3d",
+                    navigationMode: !renderer ? "unavailable" : renderer.isFirstPersonViewActive() ? "first_person" : "map"};
+            })};
+    }
+
+    manageView(input: ActionInput<typeof mapViewActions.manageView>): ActionOutput<typeof mapViewActions.manageView> {
+        const index = this.requireViewIndex(input.viewId);
+        if (input.operation === "remove") {
+            if (this.viewSettings.numViews === 1) rejectAction("Cannot remove the last view", "invalid_arguments");
+            this.removeView(index);
+        } else {
+            if (this.viewSettings.numViews >= 2) rejectAction("The comparison layout already has two views");
+            this.stateService.transaction(() => {
+                this.viewSettings.focusedView = index;
+                this.viewSettings.numViews += 1;
+            });
+        }
+        return applied();
+    }
+
+    readCamera(viewId: string): ControlValue<typeof mapViewControls.camera> {
+        this.requireViewIndex(viewId);
+        const renderer = this.renderViewFor(viewId);
+        if (!renderer) rejectAction("The renderer is unavailable", "not_available", "view_unavailable");
+        const camera = renderer.getLiveCameraState();
+        if (!camera) rejectAction("Map camera is unavailable in first-person mode", "not_available", "first_person");
+        return mapViewControls.camera.valueSchema.parse(camera);
+    }
+
+    /** Validate every synchronized renderer before focus or a durable camera can change. */
+    assignCamera(viewId: string, value: ControlValue<typeof mapViewControls.camera>): void {
+        const index = this.requireViewIndex(viewId);
+        const synchronized = this.viewSettings.viewSync.includes(VIEW_SYNC_POSITION) || this.viewSettings.viewSync.includes(VIEW_SYNC_MOVEMENT);
+        const affected = synchronized ? this.viewSettings.viewIds : [viewId];
+        this.requireIdleMapCameras(affected);
+        if (this.viewSettings.mode2dState.getValue(viewId) && (value.orientation.heading !== 0 ||
+            value.orientation.pitch !== -Math.PI / 2 || value.position?.some(component => component !== 0))) {
+            rejectAction("2D camera requires heading 0, top-down pitch and zero offset", "invalid_arguments");
+        }
+        this.stateService.transaction(() => {
+            this.viewSettings.focusedView = index;
+            this.viewSettings.setView(index, Cartographic.fromDegrees(value.destination.lon, value.destination.lat, value.destination.alt),
+                value.orientation, value.position ?? [0, 0, 0]);
+        });
+    }
+
+    requireIdleMapCameras(ids: readonly string[]): void {
+        for (const id of ids) {
+            const view = this.renderViewFor(id);
+            if (!view) rejectAction("A target renderer is unavailable", "not_available", "view_unavailable");
+            if (view.isFirstPersonViewActive()) rejectAction("Map navigation is unavailable in first-person mode", "not_available", "first_person");
+            if (view.isCameraInteractionActive()) rejectAction("A human camera gesture is active", "busy");
+        }
+    }
+
+    assignProjection(viewId: string, projection: "2d" | "3d"): void {
+        const index = this.requireViewIndex(viewId);
+        this.requireIdleMapCameras(this.viewSettings.viewSync.includes("proj") ? this.viewSettings.viewIds : [viewId]);
+        this.stateService.transaction(() => {
+            this.viewSettings.focusedView = index;
+            this.viewSettings.setProjectionMode(index, projection === "2d");
+        });
+    }
+
+    gridSettings(viewId: string): ControlValue<typeof mapViewControls.grid> {
+        const index = this.requireViewIndex(viewId);
+        return {visible: this.mapInfo.maps.getViewTileBorderState(index), mode: this.mapInfo.maps.getViewTileGridMode(index),
+            level: this.mapInfo.maps.getViewTileGridLevel(index), autoLevel: this.mapInfo.maps.getViewTileGridAutoLevel(index),
+            color: this.mapInfo.maps.getViewTileGridColor(index), opacity: this.mapInfo.maps.getViewTileGridOpacity(index)};
+    }
+
+    assignGrid(viewId: string, value: ControlValue<typeof mapViewControls.grid>): void {
+        const index = this.requireViewIndex(viewId);
+        if (value.level > tileGridMaxLevel(value.mode)) rejectAction("Grid level exceeds its coordinate system's range", "invalid_arguments");
+        this.stateService.transaction(() => {
+            this.setViewTileGridMode(index, value.mode);
+            this.setViewTileGridLevel(index, value.level);
+            this.setViewTileGridAutoLevel(index, value.autoLevel);
+            this.setViewTileGridColor(index, value.color);
+            this.setViewTileGridOpacity(index, value.opacity);
+            this.setViewTileBorderVisibility(index, value.visible);
+        });
+    }
+
+    assignLayer(target: ControlSelector<typeof mapControls.layer>, value: ControlValue<typeof mapControls.layer>): void {
+        const index = this.requireViewIndex(target.viewId);
+        this.mapInfo.layerConfiguration(target);
+        this.stateService.transaction(() => {
+            this.setMapLayerLevel(index, target.mapId, target.layerId, value.level);
+            this.setMapLayerAutoLevel(index, target.mapId, target.layerId, value.autoLevel);
+            this.setMapLayerVisibility(index, target.mapId, target.layerId, value.visible);
+        });
+    }
+
+
 }

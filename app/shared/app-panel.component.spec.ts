@@ -57,7 +57,7 @@ describe('AppPanelComponent custom resizing', () => {
             baseFontSize: 16,
             setPanelLayout
         } as unknown as AppStateService;
-        component = new AppPanelComponent(stateService, new ViewerUiService(), stateOwners(stateService).layout);
+        component = new AppPanelComponent(stateService, new ViewerUiService({} as never, {} as never), stateOwners(stateService).layout);
         component.layoutId = 'test-panel';
         component.persistLayout = true;
         component.resizeMode = 'vertical';

@@ -77,3 +77,32 @@ in `app-state-publication.spec.ts`, `app-state.spec.ts`, `appstate.service.spec.
 all application and specification TypeScript. Full-suite runtime adaptation,
 owner-registered actions/controls, browser verification and final production/lint
 gates remain work in progress at this checkpoint.
+
+## Owner action boundary checkpoint
+
+`AppActionService` registers explicit controls and actions against ordinary owner
+methods. The viewer relay now handles only registration, admission, cancellation,
+transport and Angular scheduling. It executes mutations inside Angular and reads
+outside Angular. Discovery is split into maps, layers, backgrounds, styles, style
+options and presets. Each domain schema lives beside its owner; the two composition
+modules check duplicate names before building lookups. Startup checks that every
+composed declaration has exactly one matching owner registration.
+
+Public control selectors use `target.control` and logical `viewId`. The native
+artifact retains its version-one `channels` envelope, but permissions are derived
+from each action's mutation flag. There are 32 exported actions and 21 controls;
+connection compression is exposed by its actual connection owner. The exporter is
+a pure build step and does not run a Node server.
+
+Pending state publications retain their user, system, hydration or configuration
+origin even when an outer batch outlives the scope that created them. Projected
+legacy keys use their source slot's origin. Reentrant configuration seeds defer
+both their values and ownership hashes to the same commit.
+
+The action boundary checkpoint passes 360 tests in five files through `npm test
+-- --watch=false` (action contract, actual owner/relay methods, publication,
+persistence and view identity). This includes build/runtime catalog completeness,
+wire value validation, shared fixtures, stale asynchronous navigation, rollback,
+reentrant observer ordering and configuration ownership. Omnibar integration,
+pure default readers, the remaining full-suite fixtures and final readability,
+lint and browser gates remain in progress.

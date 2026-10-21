@@ -1,3 +1,7 @@
+import {AppActionService} from "../actions/app-action.service";
+import {ControlValue, rejectAction} from "../actions/app-action";
+import {coordinateControls} from "./coordinates.service.declarations";
+
 import { Injectable } from "@angular/core";
 import { BehaviorSubject,skip } from "rxjs";
 import { z } from "zod";
@@ -115,4 +119,27 @@ export class CoordinatesService {
                 console.error(error);
         });
     }
+
+
+    registerActions(actions: AppActionService): void {
+        actions.registerControl(coordinateControls.marker, {
+            read: () => this.markerControlValue,
+            write: (_selector, value) => this.setMarker(value)
+        });
+    }
+
+    get markerControlValue(): ControlValue<typeof coordinateControls.marker> {
+        return {enabled: this.marker, position: this.markedPosition.length >= 2
+            ? {lon: this.markedPosition[0], lat: this.markedPosition[1], alt: this.markedPosition[2] ?? 0} : null};
+    }
+
+    /** Position and visibility are one marker edit for both UI and external controls. */
+    setMarker(value: ControlValue<typeof coordinateControls.marker>): void {
+        this.stateService.transaction(() => {
+            this.setMarkerPosition(value.position ? Cartographic.fromDegrees(value.position.lon, value.position.lat, value.position.alt) : null);
+            this.setMarkerState(value.enabled);
+        });
+    }
+
+
 }

@@ -12,6 +12,8 @@ firstParamValue
 export * from "./app-state.model";
 
 /** A domain-owned projection of registered state into the shared URL grammar. */
+type MutationOrigin = "user" | "system" | "hydration" | "config";
+
 export interface AppUrlProjection {
     serialize(params: Record<string, string | string[]>): Record<string, string | string[]>;
     hydrate(params: Params, identitiesPrepared?: boolean): void;
@@ -33,7 +35,9 @@ export class AppStateService implements OnDestroy {
     private announcingCommit = false;
     private readonly pendingInitialObservers = new Set<() => void>();
     private readonly deferredWrites: Array<() => void> = [];
-    private readonly pendingPublications = new Map<AppState<unknown>, () => void>();
+    private readonly pendingPublications = new Map<AppState<unknown>, {publish: () => void; origin: MutationOrigin}>();
+    private readonly publishedOrigins = new Map<AppState<unknown>, MutationOrigin>();
+    private readonly projectionSources = new Map<AppState<unknown>, AppState<unknown>>();
     private readonly commits = new BehaviorSubject(0);
     private readonly rollbackFrames: Array<Map<AppState<unknown>, unknown>> = [];
     private urlProjection?: AppUrlProjection;
@@ -131,7 +135,7 @@ export class AppStateService implements OnDestroy {
             while (this.pendingPublications.size) {
                 const publications = [...this.pendingPublications.values()];
                 this.pendingPublications.clear();
-                publications.forEach(publish => publish());
+                publications.forEach(({publish, origin}) => this.withMutationOrigin(origin, publish));
             }
         } finally {
             this.publishing = false;
@@ -317,7 +321,24 @@ export class AppStateService implements OnDestroy {
     /** Registers an old storage key projected from existing state, without a second writable value. */
     registerProjection<T>(options: AppStateOptions<T>, source: AppStateProjection<T>): AppState<T> {
         if (this.registrationSealed) throw new Error(`State registration is closed: ${options.name}`);
-        return new AppState<T>(this.statePool, options, source);
+        const state = new AppState<T>(this.statePool, options, source);
+        this.projectionSources.set(state as AppState<unknown>, source.sourceState);
+        return state;
+    }
+
+    private mutationOrigin(): MutationOrigin {
+        return this.isHydrating ? "hydration" : this.isSeedingConfigDefaults ? "config"
+            : this.isSystemStateMutation ? "system" : "user";
+    }
+
+    /** Publication keeps each write's origin even when a surrounding batch outlives its scope. */
+    private withMutationOrigin(origin: MutationOrigin, action: () => void): void {
+        const previous = [this.isHydrating, this.isSeedingConfigDefaults, this.isSystemStateMutation];
+        this.isHydrating = origin === "hydration";
+        this.isSeedingConfigDefaults = origin === "config";
+        this.isSystemStateMutation = origin === "system";
+        try { action(); }
+        finally { [this.isHydrating, this.isSeedingConfigDefaults, this.isSystemStateMutation] = previous; }
     }
 
     /** Attaches owner-created state to the same publication boundary as persistence. */
@@ -325,7 +346,8 @@ export class AppStateService implements OnDestroy {
         state.writeValue = value => {
             if (this.announcingCommit) {
                 const queued = deepCopy(value);
-                this.deferredWrites.push(() => state.next(queued));
+                const origin = this.mutationOrigin();
+                this.deferredWrites.push(() => this.withMutationOrigin(origin, () => state.next(queued)));
                 return;
             }
             if (deepEquals(state.value, value)) return;
@@ -333,7 +355,14 @@ export class AppStateService implements OnDestroy {
                 if (!frame.has(state as AppState<unknown>)) frame.set(state as AppState<unknown>, state.value);
             }
             state.stage(deepCopy(value));
-            this.pendingPublications.set(state as AppState<unknown>, () => state.publish());
+            const previous = this.pendingPublications.get(state as AppState<unknown>);
+            // A deliberate user edit in the same slot remains user-owned after
+            // system normalization. Hydration cancels old pending writes separately.
+            const origin = previous?.origin === "user" ? "user" : this.mutationOrigin();
+            this.pendingPublications.set(state as AppState<unknown>, {origin, publish: () => {
+                this.publishedOrigins.set(state as AppState<unknown>, origin);
+                state.publish();
+            }});
             if (!this.transactionDepth) this.publishTransaction();
         };
     }
@@ -358,7 +387,10 @@ export class AppStateService implements OnDestroy {
         // NOTE: Is this the best way to implement the internal subscription mechanism?
         for (const state of this.statePool.values()) {
             const subscription = (state as AppState<unknown>).pipe(skip(1)).subscribe(value => {
-                this.onStateChanged(state as AppState<unknown>);
+                const source = this.projectionSources.get(state as AppState<unknown>);
+                const origin = source ? this.publishedOrigins.get(source) : undefined;
+                if (origin) this.withMutationOrigin(origin, () => this.onStateChanged(state as AppState<unknown>));
+                else this.onStateChanged(state as AppState<unknown>);
             });
             this.stateSubscriptions.push(subscription);
         }
@@ -739,6 +771,18 @@ export class AppStateService implements OnDestroy {
 
     /** Seeds config-provided default snapshot values before storage and URL hydration. */
     seedConfigDefaultState(snapshot: unknown, sourceHash: string): string[] {
+        if (this.announcingCommit) {
+            // Validation is synchronous, but both values and their ownership
+            // metadata belong to the next commit. Computing hashes now would
+            // associate the previous values with the incoming configuration.
+            if (snapshot != null) {
+                const errors = this.normalizeSnapshot(snapshot, true).errors;
+                if (errors.length) return errors;
+            }
+            const queued = deepCopy(snapshot);
+            this.deferredWrites.push(() => { this.seedConfigDefaultState(queued, sourceHash); });
+            return [];
+        }
         if (snapshot === null || snapshot === undefined) {
             this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
             this.configDefaultStateMeta.sourceHash = sourceHash || "";

@@ -1,16 +1,17 @@
 {
   "actions": [
     {
-      "name": "catalog requires explicit kind",
-      "action": "viewer_get_catalog",
-      "arguments": {},
+      "name": "map discovery rejects unrelated selector",
+      "action": "viewer_list_maps",
+      "arguments": {
+        "kind": "maps"
+      },
       "valid": false
     },
     {
       "name": "map catalog supports bounded paging",
-      "action": "viewer_get_catalog",
+      "action": "viewer_list_maps",
       "arguments": {
-        "kind": "maps",
         "offset": 2,
         "limit": 10
       },
@@ -18,20 +19,19 @@
     },
     {
       "name": "catalog rejects oversized offset",
-      "action": "viewer_get_catalog",
+      "action": "viewer_list_layers",
       "arguments": {
-        "kind": "layers",
         "offset": 100001
       },
       "valid": false
     },
     {
-      "name": "layer visibility uses the writable singular channel",
-      "action": "viewer_set_app_state",
+      "name": "layer visibility uses the writable singular control",
+      "action": "viewer_set_control",
       "arguments": {
         "target": {
-          "channel": "view.layer",
-          "viewIndex": 0,
+          "control": "view.layer",
+          "viewId": "view-0",
           "mapId": "m",
           "layerId": "l"
         },
@@ -39,18 +39,17 @@
           "visible": false,
           "level": 13,
           "autoLevel": true
-        },
-        "viewLayoutRevision": 0
+        }
       },
       "valid": true
     },
     {
       "name": "layer collection stays read only",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "arguments": {
         "target": {
-          "channel": "view.layers",
-          "viewIndex": 0,
+          "control": "view.layers",
+          "viewId": "view-0",
           "mapId": "m",
           "layerId": "l"
         },
@@ -58,8 +57,7 @@
           "visible": false,
           "level": 13,
           "autoLevel": true
-        },
-        "viewLayoutRevision": 0
+        }
       },
       "valid": false
     },
@@ -200,13 +198,12 @@
       "action": "viewer_screenshot",
       "arguments": {
         "maxWidth": 1920,
-        "maxHeight": 128,
-        "viewLayoutRevision": 0
+        "maxHeight": 128
       },
       "valid": true
     },
     {
-      "name": "screenshot rejects unbounded size",
+      "name": "screenshot bounded dimensions",
       "action": "viewer_screenshot",
       "arguments": {
         "maxWidth": 1921
@@ -222,41 +219,38 @@
       "valid": false
     },
     {
-      "name": "projection value with layout guard",
-      "action": "viewer_set_app_state",
+      "name": "projection value with logical view identity",
+      "action": "viewer_set_control",
       "arguments": {
         "target": {
-          "channel": "view.projection",
-          "viewIndex": 0
+          "control": "view.projection",
+          "viewId": "view-0"
         },
-        "value": "2d",
-        "viewLayoutRevision": 0
+        "value": "2d"
       },
       "valid": true
     },
     {
-      "name": "projection rejects another channel value",
-      "action": "viewer_set_app_state",
+      "name": "projection rejects another control value",
+      "action": "viewer_set_control",
       "arguments": {
         "target": {
-          "channel": "view.projection",
-          "viewIndex": 0
+          "control": "view.projection",
+          "viewId": "view-0"
         },
         "value": {
           "layerId": null,
           "opacity": 50
-        },
-        "viewLayoutRevision": 0
+        }
       },
       "valid": false
     },
     {
-      "name": "projection requires layout guard",
-      "action": "viewer_set_app_state",
+      "name": "projection requires logical view identity",
+      "action": "viewer_set_control",
       "arguments": {
         "target": {
-          "channel": "view.projection",
-          "viewIndex": 0
+          "control": "view.projection"
         },
         "value": "2d"
       },
@@ -264,10 +258,10 @@
     },
     {
       "name": "preferences need no layout guard",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "arguments": {
         "target": {
-          "channel": "app.preferences.navigation"
+          "control": "app.preferences.navigation"
         },
         "value": {
           "zoomStep": 0.2,
@@ -277,11 +271,11 @@
       "valid": true
     },
     {
-      "name": "preferences reject another channel value",
-      "action": "viewer_set_app_state",
+      "name": "preferences reject another control value",
+      "action": "viewer_set_control",
       "arguments": {
         "target": {
-          "channel": "app.preferences.navigation"
+          "control": "app.preferences.navigation"
         },
         "value": "2d"
       },
@@ -289,19 +283,18 @@
     },
     {
       "name": "qualified layer preset",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "arguments": {
         "target": {
-          "channel": "view.layerPreset",
-          "viewIndex": 0,
+          "control": "view.layerPreset",
+          "viewId": "view-0",
           "mapId": "m",
           "layerId": "l"
         },
         "value": {
           "styleId": "s",
           "presetId": "p"
-        },
-        "viewLayoutRevision": 0
+        }
       },
       "valid": true
     },
@@ -395,37 +388,37 @@
     },
     {
       "name": "discovery prefix 128 astral code points",
-      "action": "viewer_describe_app_state",
+      "action": "viewer_describe_controls",
       "arguments": {
-        "prefix": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+        "prefix": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
       },
       "valid": true
     },
     {
       "name": "discovery prefix 129 astral code points",
-      "action": "viewer_describe_app_state",
+      "action": "viewer_describe_controls",
       "arguments": {
-        "prefix": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+        "prefix": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
       },
       "valid": false
     },
     {
       "name": "bounded default overview",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "arguments": {},
       "valid": true
     },
     {
       "name": "camera and hidden searches",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "arguments": {
         "targets": [
           {
-            "channel": "view.camera",
-            "viewIndex": 1
+            "control": "view.camera",
+            "viewId": "view-1"
           },
           {
-            "channel": "app.searches"
+            "control": "app.searches"
           }
         ]
       },
@@ -433,13 +426,13 @@
     },
     {
       "name": "narrow hidden layer",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "arguments": {
         "targets": [
           {
-            "channel": "view.layers",
-            "viewIndex": 0,
-            "mapId": "\u00cele 6",
+            "control": "view.layers",
+            "viewId": "view-0",
+            "mapId": "Île 6",
             "layerId": "Lane"
           }
         ]
@@ -448,7 +441,7 @@
     },
     {
       "name": "routing belongs to mapget",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "arguments": {
         "clientId": "b3e68f32-3b51-472d-8cab-14b597f7de91"
       },
@@ -456,11 +449,11 @@
     },
     {
       "name": "no raw state pool",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "arguments": {
         "targets": [
           {
-            "channel": "coordinatesLegalTermsAccepted"
+            "control": "coordinatesLegalTermsAccepted"
           }
         ]
       },
@@ -468,11 +461,11 @@
     },
     {
       "name": "no arbitrary target properties",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "arguments": {
         "targets": [
           {
-            "channel": "app.searches",
+            "control": "app.searches",
             "constructor": "Object"
           }
         ]
@@ -481,11 +474,11 @@
     },
     {
       "name": "view selector required",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "arguments": {
         "targets": [
           {
-            "channel": "view.camera"
+            "control": "view.camera"
           }
         ]
       },
@@ -493,7 +486,7 @@
     },
     {
       "name": "explicit zero targets",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "arguments": {
         "targets": []
       },
@@ -501,9 +494,9 @@
     },
     {
       "name": "narrow discovery",
-      "action": "viewer_describe_app_state",
+      "action": "viewer_describe_controls",
       "arguments": {
-        "channels": [
+        "controls": [
           "view.camera",
           "app.searches"
         ],
@@ -512,10 +505,10 @@
       "valid": true
     },
     {
-      "name": "unknown exact discovery channel",
-      "action": "viewer_describe_app_state",
+      "name": "unknown exact discovery control",
+      "action": "viewer_describe_controls",
       "arguments": {
-        "channels": [
+        "controls": [
           "__proto__"
         ]
       },
@@ -523,12 +516,11 @@
     },
     {
       "name": "camera assignment",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "arguments": {
-        "viewLayoutRevision": 2,
         "target": {
-          "channel": "view.camera",
-          "viewIndex": 0
+          "control": "view.camera",
+          "viewId": "view-0"
         },
         "value": {
           "destination": {
@@ -552,12 +544,11 @@
     },
     {
       "name": "camera offset is optional",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "arguments": {
-        "viewLayoutRevision": 2,
         "target": {
-          "channel": "view.camera",
-          "viewIndex": 0
+          "control": "view.camera",
+          "viewId": "view-0"
         },
         "value": {
           "destination": {
@@ -576,12 +567,11 @@
     },
     {
       "name": "camera offset preserves signed fractional components",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "arguments": {
-        "viewLayoutRevision": 2,
         "target": {
-          "channel": "view.camera",
-          "viewIndex": 0
+          "control": "view.camera",
+          "viewId": "view-0"
         },
         "value": {
           "destination": {
@@ -605,12 +595,11 @@
     },
     {
       "name": "empty camera offset rejected",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "arguments": {
-        "viewLayoutRevision": 2,
         "target": {
-          "channel": "view.camera",
-          "viewIndex": 0
+          "control": "view.camera",
+          "viewId": "view-0"
         },
         "value": {
           "destination": {
@@ -630,12 +619,11 @@
     },
     {
       "name": "short camera offset rejected",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "arguments": {
-        "viewLayoutRevision": 2,
         "target": {
-          "channel": "view.camera",
-          "viewIndex": 0
+          "control": "view.camera",
+          "viewId": "view-0"
         },
         "value": {
           "destination": {
@@ -658,12 +646,11 @@
     },
     {
       "name": "long camera offset rejected",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "arguments": {
-        "viewLayoutRevision": 2,
         "target": {
-          "channel": "view.camera",
-          "viewIndex": 0
+          "control": "view.camera",
+          "viewId": "view-0"
         },
         "value": {
           "destination": {
@@ -688,12 +675,11 @@
     },
     {
       "name": "camera offset does not coerce numeric strings",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "arguments": {
-        "viewLayoutRevision": 2,
         "target": {
-          "channel": "view.camera",
-          "viewIndex": 0
+          "control": "view.camera",
+          "viewId": "view-0"
         },
         "value": {
           "destination": {
@@ -716,12 +702,12 @@
       "valid": false
     },
     {
-      "name": "stale layout guard is mandatory",
-      "action": "viewer_set_app_state",
+      "name": "reserved view ID rejected",
+      "action": "viewer_set_control",
       "arguments": {
         "target": {
-          "channel": "view.camera",
-          "viewIndex": 0
+          "control": "view.camera",
+          "viewId": "__proto__"
         },
         "value": {
           "destination": {
@@ -740,24 +726,22 @@
     },
     {
       "name": "no whole app import",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "arguments": {
         "target": {
-          "channel": "app.views"
+          "control": "app.views"
         },
-        "value": {},
-        "viewLayoutRevision": 0
+        "value": {}
       },
       "valid": false
     },
     {
       "name": "roll is not silently ignored",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "arguments": {
-        "viewLayoutRevision": 0,
         "target": {
-          "channel": "view.camera",
-          "viewIndex": 0
+          "control": "view.camera",
+          "viewId": "view-0"
         },
         "value": {
           "destination": {
@@ -775,13 +759,12 @@
       "valid": false
     },
     {
-      "name": "no numeric coercion",
-      "action": "viewer_set_app_state",
+      "name": "view identity does not coerce numbers",
+      "action": "viewer_set_control",
       "arguments": {
-        "viewLayoutRevision": "0",
         "target": {
-          "channel": "view.camera",
-          "viewIndex": 0
+          "control": "view.camera",
+          "viewId": 0
         },
         "value": {
           "destination": {
@@ -803,7 +786,6 @@
       "action": "viewer_set_search",
       "arguments": {
         "searchId": "search-1",
-        "viewLayoutRevision": 0,
         "settings": {
           "searchStyleRules": [
             {
@@ -832,7 +814,6 @@
       "action": "viewer_set_search",
       "arguments": {
         "searchId": "search-1",
-        "viewLayoutRevision": 0,
         "settings": {
           "searchStyleRules": [
             {
@@ -861,7 +842,6 @@
       "action": "viewer_set_search",
       "arguments": {
         "searchId": "search-1",
-        "viewLayoutRevision": 0,
         "settings": {
           "searchStyleRules": [
             {
@@ -1007,6 +987,58 @@
         "edits": []
       },
       "valid": false
+    },
+    {
+      "name": "invalid view identity constructor",
+      "action": "viewer_get_controls",
+      "arguments": {
+        "targets": [
+          {
+            "control": "view.camera",
+            "viewId": "constructor"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid view identity toString",
+      "action": "viewer_get_controls",
+      "arguments": {
+        "targets": [
+          {
+            "control": "view.camera",
+            "viewId": "toString"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid view identity aaaaaaaaaaaaaaaaaaaa",
+      "action": "viewer_get_controls",
+      "arguments": {
+        "targets": [
+          {
+            "control": "view.camera",
+            "viewId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid view identity has space",
+      "action": "viewer_get_controls",
+      "arguments": {
+        "targets": [
+          {
+            "control": "view.camera",
+            "viewId": "has space"
+          }
+        ]
+      },
+      "valid": false
     }
   ],
   "relay": [
@@ -1021,7 +1053,7 @@
         "actions": [
           "viewer_get_app_state"
         ],
-        "label": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+        "label": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
       }
     },
     {
@@ -1035,7 +1067,7 @@
         "actions": [
           "viewer_get_app_state"
         ],
-        "label": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+        "label": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
       }
     },
     {
@@ -1046,7 +1078,7 @@
         "type": "mapget.actions.cancel",
         "version": 1,
         "callId": "call-1",
-        "reason": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+        "reason": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
       }
     },
     {
@@ -1057,7 +1089,7 @@
         "type": "mapget.actions.cancel",
         "version": 1,
         "callId": "call-1",
-        "reason": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+        "reason": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
       }
     },
     {
@@ -1071,7 +1103,7 @@
         "actions": [
           "viewer_get_app_state"
         ],
-        "label": "Erdblick \u00b7 Z\u00fcrich"
+        "label": "Erdblick · Zürich"
       }
     },
     {
@@ -1249,7 +1281,7 @@
         "enabled": true,
         "authentication": "oauth",
         "scopes": [
-          "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+          "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
         ],
         "endpoint": "https://maps.example.com/mcp"
       }
@@ -1261,7 +1293,7 @@
         "enabled": true,
         "authentication": "oauth",
         "scopes": [
-          "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+          "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
         ],
         "endpoint": "https://maps.example.com/mcp"
       }
@@ -1332,20 +1364,14 @@
   ],
   "results": [
     {
-      "name": "catalog page carries revision and continuation",
-      "action": "viewer_get_catalog",
+      "name": "map discovery carries continuation",
+      "action": "viewer_list_maps",
       "valid": true,
       "value": {
         "observedAt": "2026-10-07T00:00:00Z",
-        "viewLayoutRevision": 2,
-        "kind": "maps",
-        "relatedCatalogs": [],
         "items": [
           {
             "id": "m",
-            "name": "m",
-            "kind": "map",
-            "mapId": "m",
             "available": true
           }
         ],
@@ -1355,13 +1381,10 @@
       }
     },
     {
-      "name": "catalog cannot omit layout revision",
-      "action": "viewer_get_catalog",
+      "name": "discovery cannot omit observation time",
+      "action": "viewer_list_layers",
       "valid": false,
       "value": {
-        "observedAt": "2026-10-07T00:00:00Z",
-        "kind": "layers",
-        "relatedCatalogs": [],
         "items": [],
         "complete": true
       }
@@ -1446,7 +1469,6 @@
           "height": 720,
           "viewportWidth": 1920,
           "viewportHeight": 1080,
-          "viewLayoutRevision": 0,
           "capturedAt": "2026-10-05T00:00:00Z",
           "readiness": {
             "status": "unknown"
@@ -1466,7 +1488,6 @@
           "height": 720,
           "viewportWidth": 1920,
           "viewportHeight": 1080,
-          "viewLayoutRevision": 0,
           "capturedAt": "2026-10-05T00:00:00Z",
           "readiness": {
             "status": "unknown"
@@ -1476,25 +1497,20 @@
       }
     },
     {
-      "name": "assigned value must match channel",
-      "action": "viewer_set_app_state",
+      "name": "assigned value must match control",
+      "action": "viewer_set_control",
       "valid": false,
       "value": {
         "status": "applied",
         "target": {
-          "channel": "view.projection",
-          "viewIndex": 0
+          "control": "view.projection",
+          "viewId": "view-0"
         },
         "value": {
           "layerId": null,
           "opacity": 50
         },
         "changed": true,
-        "focusedView": 0,
-        "affectedViews": [
-          0
-        ],
-        "viewLayoutRevision": 0,
         "readiness": {
           "status": "unknown"
         }
@@ -1502,20 +1518,19 @@
     },
     {
       "name": "view sync token 32 astral code points",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "valid": true,
       "value": {
         "observedAt": "2026-09-30T00:00:00Z",
-        "viewLayoutRevision": 0,
         "values": [
           {
             "target": {
-              "channel": "app.views"
+              "control": "app.views"
             },
             "value": {
-              "focusedView": 0,
+              "focusedViewId": "view-0",
               "sync": [
-                "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+                "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
               ],
               "views": []
             }
@@ -1527,20 +1542,19 @@
     },
     {
       "name": "view sync token 33 astral code points",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "valid": false,
       "value": {
         "observedAt": "2026-09-30T00:00:00Z",
-        "viewLayoutRevision": 0,
         "values": [
           {
             "target": {
-              "channel": "app.views"
+              "control": "app.views"
             },
             "value": {
-              "focusedView": 0,
+              "focusedViewId": "view-0",
               "sync": [
-                "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+                "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
               ],
               "views": []
             }
@@ -1552,15 +1566,14 @@
     },
     {
       "name": "empty search collection is complete",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "valid": true,
       "value": {
         "observedAt": "2026-09-29T00:00:00Z",
-        "viewLayoutRevision": 0,
         "values": [
           {
             "target": {
-              "channel": "app.searches"
+              "control": "app.searches"
             },
             "value": []
           }
@@ -1571,16 +1584,15 @@
     },
     {
       "name": "unavailable camera is explicit",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "valid": true,
       "value": {
         "observedAt": "2026-09-29T00:00:00Z",
-        "viewLayoutRevision": 0,
         "values": [
           {
             "target": {
-              "channel": "view.camera",
-              "viewIndex": 0
+              "control": "view.camera",
+              "viewId": "view-0"
             },
             "unavailable": "first_person"
           }
@@ -1591,15 +1603,14 @@
     },
     {
       "name": "source-data loading is unknown",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "valid": true,
       "value": {
         "observedAt": "2026-09-29T00:00:00Z",
-        "viewLayoutRevision": 0,
         "values": [
           {
             "target": {
-              "channel": "app.selections"
+              "control": "app.selections"
             },
             "value": [
               {
@@ -1621,17 +1632,16 @@
       }
     },
     {
-      "name": "wrong channel value rejected",
-      "action": "viewer_get_app_state",
+      "name": "wrong control value rejected",
+      "action": "viewer_get_controls",
       "valid": false,
       "value": {
         "observedAt": "2026-09-29T00:00:00Z",
-        "viewLayoutRevision": 0,
         "values": [
           {
             "target": {
-              "channel": "view.camera",
-              "viewIndex": 0
+              "control": "view.camera",
+              "viewId": "view-0"
             },
             "value": []
           }
@@ -1642,13 +1652,13 @@
     },
     {
       "name": "applied is not rendered",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "valid": true,
       "value": {
         "status": "applied",
         "target": {
-          "channel": "view.camera",
-          "viewIndex": 0
+          "control": "view.camera",
+          "viewId": "view-0"
         },
         "value": {
           "destination": {
@@ -1663,12 +1673,6 @@
           }
         },
         "changed": true,
-        "focusedView": 0,
-        "affectedViews": [
-          0,
-          1
-        ],
-        "viewLayoutRevision": 2,
         "readiness": {
           "status": "unknown"
         }
@@ -1676,13 +1680,13 @@
     },
     {
       "name": "short camera offset result rejected",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "valid": false,
       "value": {
         "status": "applied",
         "target": {
-          "channel": "view.camera",
-          "viewIndex": 0
+          "control": "view.camera",
+          "viewId": "view-0"
         },
         "value": {
           "destination": {
@@ -1701,12 +1705,6 @@
           ]
         },
         "changed": true,
-        "focusedView": 0,
-        "affectedViews": [
-          0,
-          1
-        ],
-        "viewLayoutRevision": 2,
         "readiness": {
           "status": "unknown"
         }
@@ -1714,13 +1712,13 @@
     },
     {
       "name": "unrecognized readiness rejected",
-      "action": "viewer_set_app_state",
+      "action": "viewer_set_control",
       "valid": false,
       "value": {
         "status": "applied",
         "target": {
-          "channel": "view.camera",
-          "viewIndex": 0
+          "control": "view.camera",
+          "viewId": "view-0"
         },
         "value": {
           "destination": {
@@ -1735,11 +1733,6 @@
           }
         },
         "changed": true,
-        "focusedView": 0,
-        "affectedViews": [
-          0
-        ],
-        "viewLayoutRevision": 2,
         "readiness": {
           "status": "rendered"
         }
@@ -1747,15 +1740,14 @@
     },
     {
       "name": "search overview carries identity color",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "valid": true,
       "value": {
         "observedAt": "2026-10-08T00:00:00Z",
-        "viewLayoutRevision": 0,
         "values": [
           {
             "target": {
-              "channel": "app.searches"
+              "control": "app.searches"
             },
             "value": [
               {
@@ -1776,15 +1768,14 @@
     },
     {
       "name": "search identity color must be canonical hex",
-      "action": "viewer_get_app_state",
+      "action": "viewer_get_controls",
       "valid": false,
       "value": {
         "observedAt": "2026-10-08T00:00:00Z",
-        "viewLayoutRevision": 0,
         "values": [
           {
             "target": {
-              "channel": "app.searches"
+              "control": "app.searches"
             },
             "value": [
               {
@@ -1820,14 +1811,14 @@
       "value": {
         "2": "second",
         "10": "tenth",
-        "a": "Z\u00fcrich \u00b7 \u6771\u4eac",
+        "a": "Zürich · 東京",
         "float": -1.5707963267948966,
         "array": [
           2,
           1
         ]
       },
-      "json": "{\"10\":\"tenth\",\"2\":\"second\",\"a\":\"Z\u00fcrich \u00b7 \u6771\u4eac\",\"array\":[2,1],\"float\":-1.5707963267948966}"
+      "json": "{\"10\":\"tenth\",\"2\":\"second\",\"a\":\"Zürich · 東京\",\"array\":[2,1],\"float\":-1.5707963267948966}"
     }
   ]
 }
