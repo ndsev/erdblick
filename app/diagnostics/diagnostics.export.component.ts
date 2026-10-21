@@ -65,13 +65,13 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
                 public readonly stateService: AppStateService,
                 private readonly dialogStack: DialogStackService) {
-        const options = this.stateService.diagnosticsExportOptions;
+        const options = this.diagnostics.diagnosticsExportOptions;
         this.exportOptions = {
             ...options,
             logFilter: {...options.logFilter}
         };
         this.subscriptions.push(
-            this.stateService.diagnosticsExportOptionsState.subscribe(options => {
+            this.diagnostics.diagnosticsExportOptionsState.subscribe(options => {
                 this.exportOptions = {
                     ...options,
                     logFilter: {...options.logFilter}
@@ -105,7 +105,7 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
 
     /** Persists the current export-option toggles. */
     updateOptions() {
-        this.stateService.diagnosticsExportOptions = {
+        this.diagnostics.diagnosticsExportOptions = {
             ...this.exportOptions,
             logFilter: {...this.exportOptions.logFilter}
         };

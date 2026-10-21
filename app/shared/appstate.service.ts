@@ -1,4 +1,5 @@
-import {Injectable, OnDestroy} from "@angular/core";
+import {stateStore, type ViewerValues} from "./viewer-state";
+import {Injectable, OnDestroy, Signal} from "@angular/core";
 import {NavigationEnd, NavigationStart, Params, Router} from "@angular/router";
 import {BehaviorSubject, skip, Subject, Subscription, take} from "rxjs";
 import {filter} from "rxjs/operators";
@@ -492,6 +493,27 @@ function hashStateValue(value: unknown): string {
 export class AppStateService implements OnDestroy {
 
     private readonly statePool = new Map<string, AppState<unknown>>();
+    readonly values = stateStore(this.statePool);
+    readonly store = this.values.store;
+
+    /** Register a persisted codec against a typed, owner-authored SignalStore slice. */
+    register<S extends Exclude<keyof ViewerValues, "legacy">, K extends keyof ViewerValues[S]>(
+        options: AppStateOptions<ViewerValues[S][K]>, slice: S, key: K
+    ): AppState<ViewerValues[S][K]> {
+        if (this.isReady) throw new Error(`Late state registration: ${options.name}`);
+        const signals = this.store[slice] as Signal<ViewerValues[S]> & {
+            [P in keyof ViewerValues[S]]: Signal<ViewerValues[S][P]>
+        };
+        return new AppState(this.statePool, options, this.values.bind<ViewerValues[S][K]>(
+            state => state[slice][key],
+            (state, value) => ({[slice]: {...state[slice], [key]: value}}),
+            signals[key] as Signal<ViewerValues[S][K]>
+        ));
+    }
+
+    /** Prepare related owner writes and expose one coherent SignalStore commit. */
+    transaction<T>(operation: () => T): T { return this.values.transaction(operation); }
+
     private readonly mapViewStates: Array<MapViewState<unknown>> = [];
     private readonly inspectionTreeExpansionStates = new Map<number, InspectionTreeExpansionState>();
     readonly ready = new BehaviorSubject<boolean>(false);
@@ -1011,44 +1033,6 @@ export class AppStateService implements OnDestroy {
         snapshotPersist: false
     });
 
-    readonly diagnosticsLogFilterState = this.createState<DiagnosticsLogFilter>({
-        name: 'diagnosticsLogFilter',
-        defaultValue: {
-            info: true,
-            warn: true,
-            error: true
-        },
-        schema: z.object({
-            info: Boolish,
-            warn: Boolish,
-            error: Boolish
-        })
-    });
-
-    readonly diagnosticsExportOptionsState = this.createState<DiagnosticsExportOptions>({
-        name: 'diagnosticsExportOptions',
-        defaultValue: {
-            includeProgress: true,
-            includePerformance: true,
-            includeLogs: true,
-            logFilter: {
-                info: true,
-                warn: true,
-                error: true
-            }
-        },
-        schema: z.object({
-            includeProgress: Boolish,
-            includePerformance: Boolish,
-            includeLogs: Boolish,
-            logFilter: z.object({
-                info: Boolish,
-                warn: Boolish,
-                error: Boolish
-            })
-        })
-    });
-
     readonly featureSearchGroupingState = this.createState<number[]>({
         name: 'featureSearchGrouping',
         defaultValue: [...DEFAULT_FEATURE_SEARCH_GROUPING],
@@ -1374,6 +1358,7 @@ export class AppStateService implements OnDestroy {
 
     /** Cancels pending persistence work when the service is destroyed. */
     ngOnDestroy(): void {
+        this.values.destroy();
         this.stateSubscriptions.forEach(subscription => subscription.unsubscribe());
         if (this.urlSyncHandle !== null) {
             clearTimeout(this.urlSyncHandle);
@@ -2582,17 +2567,6 @@ export class AppStateService implements OnDestroy {
     set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
     get styleEditorTargetId() {return this.styleEditorTargetState.getValue();}
     set styleEditorTargetId(val: string | null) {this.styleEditorTargetState.next(val);};
-    get diagnosticsLogFilter() {return this.diagnosticsLogFilterState.getValue();}
-    set diagnosticsLogFilter(val: DiagnosticsLogFilter) {
-        this.diagnosticsLogFilterState.next({...val});
-    };
-    get diagnosticsExportOptions() {return this.diagnosticsExportOptionsState.getValue();}
-    set diagnosticsExportOptions(val: DiagnosticsExportOptions) {
-        this.diagnosticsExportOptionsState.next({
-            ...val,
-            logFilter: {...val.logFilter}
-        });
-    };
     get featureSearchGrouping() {return this.featureSearchGroupingState.getValue();}
     set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
     get featureSearches() {return this.featureSearchState.getValue();}
@@ -3004,7 +2978,7 @@ export class AppStateService implements OnDestroy {
             return;
         }
         allPanels[index].size = size;
-        this.onStateChanged(this.selectionState, true); // Do not retrigger the subscription - we only need to reflect the size in the url
+        this.selectionState.next(allPanels);
     }
 
     /** Updates the locked state of one inspection panel. */

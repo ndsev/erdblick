@@ -1,3 +1,4 @@
+import {diagnosticsLogFilter, diagnosticsExportOptions} from "./diagnostics.facade.service.state";
 import {Injectable, NgZone, OnDestroy} from '@angular/core';
 import {BehaviorSubject} from 'rxjs';
 import {
@@ -38,6 +39,20 @@ interface MapgetStatusDataResponse {
  * It extends the datasource with dialog-opening helpers and export bundling.
  */
 export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy {
+    readonly diagnosticsLogFilterState = this.stateService.register(diagnosticsLogFilter, "diagnostics", "logFilter");
+    readonly diagnosticsExportOptionsState = this.stateService.register(diagnosticsExportOptions, "diagnostics", "exportOptions");
+    readonly logFilter = this.diagnosticsLogFilterState.signal;
+    readonly exportOptions = this.diagnosticsExportOptionsState.signal;
+
+    get diagnosticsLogFilter(): DiagnosticsLogFilter { return this.logFilter(); }
+    set diagnosticsLogFilter(value: DiagnosticsLogFilter) {
+        this.diagnosticsLogFilterState.next({...value});
+    }
+    get diagnosticsExportOptions(): DiagnosticsExportOptions { return this.exportOptions(); }
+    set diagnosticsExportOptions(value: DiagnosticsExportOptions) {
+        this.diagnosticsExportOptionsState.next({...value, logFilter: {...value.logFilter}});
+    }
+
     readonly performanceScope$ = new BehaviorSubject<PerformanceDiagnosticsScope | null>(null);
     private nextPerformanceScopeRequestId = 1;
 
@@ -66,7 +81,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         this.refreshLogs();
         this.stateService.openDialog(DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID);
         if (errorsOnly) {
-            this.stateService.diagnosticsLogFilter = {info: false, warn: false, error: true};
+            this.diagnosticsLogFilter = {info: false, warn: false, error: true};
         }
     }
 
@@ -74,8 +89,8 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     openExportDialog(options?: Partial<DiagnosticsExportOptions>) {
         this.refreshPerfStats();
         this.refreshLogs();
-        const base = this.stateService.diagnosticsExportOptionsState.defaultValue;
-        this.stateService.diagnosticsExportOptions = {
+        const base = this.diagnosticsExportOptionsState.defaultValue;
+        this.diagnosticsExportOptions = {
             ...base,
             ...options,
             logFilter: {...(options?.logFilter ?? base.logFilter)}

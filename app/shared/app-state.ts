@@ -1,40 +1,12 @@
-import {BehaviorSubject, distinctUntilChanged, map, Observable, OperatorFunction} from "rxjs";
+import type {Signal} from "@angular/core";
+import {AppStateOptions, AppStateSerializedValue, AppStateToStorageFun, AppStateFromStorageFun, Boolish, deepCopy, deepEquals} from "./state-value";
+import {stateBinding, type StateBinding} from "./viewer-state";
+export {Boolish, deepCopy, deepEquals} from "./state-value";
+export type {AppStateOptions} from "./state-value";
+import {distinctUntilChanged, map, Observable, OperatorFunction} from "rxjs";
 import {z, ZodTypeAny} from "zod";
 import type {Params} from "@angular/router";
 import {environment} from "../environments/environment";
-
-/** Converts an app-state value into the representation stored in URL or local storage. */
-export type AppStateToStorageFun<T> = (value: T) => unknown;
-/** Restores an app-state value from persisted storage using the current value as context. */
-export type AppStateFromStorageFun<T> = (value: ZodTypeAny, currentValue: T) => T;
-export type AppStateSerializedValue = string | null;
-
-/** Describes one persisted application state slot. */
-export interface AppStateOptions<T> {
-    name: string;
-    defaultValue: T;
-    schema: ZodTypeAny;
-    toStorage?: AppStateToStorageFun<T>;
-    fromStorage?: AppStateFromStorageFun<T>;
-    urlParamName?: string;
-    urlFormEncode?: boolean;
-    urlIncludeInVisualizationOnly?: boolean;
-    snapshotPersist?: boolean;
-    configDefault?: boolean;
-}
-
-/**
- * Shared boolean schema for storage/URL parsing.
- * Accepts booleans and common scalar encodings (`1/0`, `true/false`).
- */
-export const Boolish = z.union([
-    z.boolean(),
-    z.string()
-        .transform(value => value.trim().toLowerCase())
-        .refine(value => ['true', 'false', '1', '0'].includes(value))
-        .transform(value => value === 'true' || value === '1'),
-    z.number().refine(value => value === 0 || value === 1).transform(value => value === 1),
-]);
 
 // TODO: Do we actually need this?
 /** Removes optional/default/lazy wrappers so scalar checks can inspect the underlying schema. */
@@ -197,94 +169,6 @@ function splitColonCSV(val: string): string[][] {
         .map(seg => (seg === '' ? [] : splitCSV(seg)));
 }
 
-/** Performs a structural equality check tailored to persisted state values. */
-export function deepEquals(a: unknown, b: unknown): boolean {
-    if (a === b) {
-        return true;
-    }
-
-    // Handle NaN comparisons explicitly
-    if (typeof a === 'number' && typeof b === 'number') {
-        return Number.isNaN(a) && Number.isNaN(b);
-    }
-
-    if (a === null || b === null) {
-        return false;
-    }
-
-    const typeA = typeof a;
-    const typeB = typeof b;
-    if (typeA !== typeB) {
-        return false;
-    }
-
-    if (Array.isArray(a) && Array.isArray(b)) {
-        if (a.length !== b.length) {
-            return false;
-        }
-        for (let i = 0; i < a.length; i++) {
-            if (!deepEquals(a[i], b[i])) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    if (typeA === 'object') {
-        // Treat Date objects explicitly
-        if (a instanceof Date && b instanceof Date) {
-            return a.getTime() === b.getTime();
-        }
-
-        if (Array.isArray(a) || Array.isArray(b)) {
-            return false;
-        }
-
-        const objA = a as Record<string, unknown>;
-        const objB = b as Record<string, unknown>;
-        const keysA = Object.keys(objA);
-        const keysB = Object.keys(objB);
-        if (keysA.length !== keysB.length) {
-            return false;
-        }
-        for (const key of keysA) {
-            if (!Object.prototype.hasOwnProperty.call(objB, key)) {
-                return false;
-            }
-            if (!deepEquals(objA[key], objB[key])) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    return false;
-}
-
-/** Produces a defensive deep copy for state snapshots and change detection. */
-function deepCopy<V>(value: V): V {
-    if (value === null || typeof value !== "object") {
-        return value;
-    }
-    if (value instanceof Date) {
-        return new Date(value.getTime()) as unknown as V;
-    }
-    if (value instanceof Map) {
-        return new Map([...value].map(([key, entry]) => [deepCopy(key), deepCopy(entry)])) as V;
-    }
-    if (value instanceof Set) {
-        return new Set([...value].map(entry => deepCopy(entry))) as V;
-    }
-    if (Array.isArray(value)) {
-        return value.map(item => deepCopy(item)) as unknown as V;
-    }
-    const result: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-        result[key] = deepCopy(entry);
-    }
-    return result as V;
-}
-
 /**
  * Generic state container with optional URL/storage serialization hooks.
  *
@@ -298,7 +182,17 @@ function deepCopy<V>(value: V): V {
  * Represents one persisted application state slot with schema validation and URL/storage
  * serialization helpers.
  */
-export class AppState<T> extends BehaviorSubject<T> {
+export class AppState<T> extends Observable<T> {
+    /** Native read-only signal. The Observable API is retained for existing RxJS consumers. */
+    readonly signal: Signal<T>;
+    private readonly binding: StateBinding<T>;
+
+    get value(): T { return this.getValue(); }
+    getValue(): T { return deepCopy(this.binding.read()); }
+    /** Copies only the selected portion, including prepared values inside a transaction. */
+    read<R>(select: (value: T) => R): R { return deepCopy(select(this.binding.read())); }
+    next(value: T): void { this.binding.write(value); }
+
     readonly name: string;
     readonly defaultValue: T;
 
@@ -313,8 +207,20 @@ export class AppState<T> extends BehaviorSubject<T> {
     protected readonly schema: ZodTypeAny;
 
     /** Registers the state slot in the shared pool and seeds it with the default value. */
-    constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>) {
-        super(deepCopy(options.defaultValue));
+    constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>, binding?: StateBinding<T>) {
+        const source = binding ?? stateBinding(pool, options.name, deepCopy(options.defaultValue));
+        super(subscriber => {
+            let previous = source.signal();
+            subscriber.next(previous);
+            return source.commits.subscribe(() => {
+                const value = source.signal();
+                if (Object.is(previous, value)) return;
+                previous = value;
+                subscriber.next(value);
+            });
+        });
+        this.binding = source;
+        this.signal = source.signal;
         this.name = options.name;
         this.defaultValue = deepCopy(options.defaultValue);
 
@@ -329,7 +235,7 @@ export class AppState<T> extends BehaviorSubject<T> {
         this.configDefault = options.configDefault ?? this.snapshotPersist;
 
         if (pool.has(options.name)) {
-            console.warn(`[AppState] Duplicate state name detected: ${options.name}. Overwriting previous instance.`);
+            throw new Error(`[AppState] Duplicate state name: ${options.name}`);
         }
         pool.set(options.name, this as unknown as AppState<unknown>);
     }
@@ -696,11 +602,7 @@ export class MapViewState<T> {
 
     /** Returns the value for one view, falling back to the first default entry. */
     getValue(viewIndex: number): T {
-        const arr = this.appState.getValue();
-        if (arr[viewIndex] !== undefined) {
-            return arr[viewIndex];
-        }
-        return deepCopy(this.defaultValue);
+        return this.appState.read(values => values[viewIndex] ?? this.defaultValue);
     }
 
     /** Returns the number of currently stored per-view entries. */
@@ -900,6 +802,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
 
             const layerNames = this.layerNamesState.getValue();
             const numViews = this.numViewsState.getValue();
+            const nextValues = deepCopy(this.getValue());
 
             for (const [key, value] of Object.entries(raw)) {
                 if (!this.isStyleOptionUrlParamKey(key)) {
@@ -946,7 +849,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
                             }
                             const mapLayerId = layerNames[layerIndex];
                             const storeKey = this.styleOptionKeyFromMapLayer(mapLayerId, shortStyleId, optionId);
-                            const valuesForStoreKey = this.value.get(storeKey) || [];
+                            const valuesForStoreKey = nextValues.get(storeKey) || [];
                             const rawVal = perLayer[li] ?? '';
 
                             // Ensure length up to current view
@@ -954,11 +857,12 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
                                 valuesForStoreKey.push(false);
                             }
                             valuesForStoreKey[view] = rawVal;
-                            this.value.set(storeKey, valuesForStoreKey);
+                            nextValues.set(storeKey, valuesForStoreKey);
                         }
                     }
                 }
             }
+            this.next(nextValues);
         } catch (error) {
             console.error(`[StyleState.deserialize]: Failed to deserialize style options from `, raw, error);
         }

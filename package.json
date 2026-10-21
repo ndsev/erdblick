@@ -48,6 +48,7 @@
     "@fontsource/inter": "^5.2.8",
     "@loaders.gl/textures": "file:vendor/loaders-gl/loaders.gl-textures-4.4.5-erdblick-no-texture-compressor.tgz",
     "@ndsev/ndslive-math": "^1.0.0",
+    "@ngrx/signals": "21.0.0",
     "@primeng/themes": "^21.0.4",
     "codemirror": "^6.0.2",
     "dom-to-image-more": "3.11.0",

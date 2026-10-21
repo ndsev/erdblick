@@ -1,3 +1,4 @@
+import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
 import {inject, NgModule, provideAppInitializer} from '@angular/core';
 import {BrowserModule} from '@angular/platform-browser';
 import {AppRoutingModule} from './app.routing.module';
@@ -185,6 +186,7 @@ export const initializeServices = () => {
     const viewerActions = inject(ViewerActionService);
     const webMcp = inject(WebMcpService);
     inject(FeatureSearchService);
+    inject(DiagnosticsFacadeService);
 
     return (async () => {
         updateGlobalSpinner('Loading app config');

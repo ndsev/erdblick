@@ -1150,7 +1150,7 @@ describe('AppStateService', () => {
         const searches = [[0], [1], [0, 1]].map(selectedViewIndices =>
             service.addFeatureSearch({query: 'Way', selectedViewIndices}));
         service.setSelection([feature('Way.1')]);
-        const selection = service.selectionState.getValue();
+        const selection = service.selectionState.signal();
         const survivor = 1 - removed;
         const slots = [service.cameraViewDataState, service.mode2dState, service.layerSyncOptionsState,
             service.backgroundState, service.layerVisibilityState, service.layerZoomLevelState,
@@ -1169,7 +1169,7 @@ describe('AppStateService', () => {
             expect(slot.appState.getValue()).toEqual([expected[index]]);
         });
         expect(service.styles.get('m1/layerA/overlay/opacity')).toEqual([survivor ? 0.8 : 0.2]);
-        expect(service.selectionState.getValue()).toBe(selection);
+        expect(service.selectionState.signal()).toBe(selection);
         expect(service.featureSearches).toEqual(searches.map(search => ({
             ...search, selectedViewIndices: search.selectedViewIndices.includes(survivor) ? [0] : []
         })));
