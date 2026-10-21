@@ -43,6 +43,8 @@ declare global {
             ) => Promise<Record<string, unknown>>;
             /** Application state used to drive the same selection path as picking and search. */
             stateService: ErdblickDebugApi['stateService'];
+            /** Dispatches a declared owner action through the same boundary as MCP and the omnibar. */
+            executeAction: ErdblickDebugApi['executeAction'];
             /**
              * Serialised camera setter used for synchronising camera positions
              * across views in tests.
