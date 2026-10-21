@@ -61,21 +61,36 @@ export class ViewerState {
     readonly store = new ViewerStore();
     private readonly injector = Injector.create({providers: []});
     private readonly committed = new Subject<void>();
+    private readonly publicationFinished = new Subject<void>();
+    /**
+     * Synchronous render/measurement boundary after codecs update their runtime consumers.
+     * The dock uses it to mount inspection loading models before measuring the new map width.
+     * It has no initial replay: hosts render their initial state during ordinary Angular setup.
+     */
+    readonly afterPublication = this.publicationFinished.asObservable();
     /** Read a prepared root only while coordinating a transaction; native readers stay narrow. */
     read<T>(fromDraft: (state: ViewerValues) => T, current: () => T): T {
         return this.draft ? fromDraft(this.draft) : current();
     }
 
-    private readonly preparations = new Map<() => void, (() => StateWriteOrigin | undefined) | undefined>();
+    private readonly preparations = new Map<
+        () => void,
+        (() => StateWriteOrigin | undefined) | undefined
+    >();
+
+    /** Let owners prune or prepare related values before any subscriber sees the patch. */
     beforeCommit(prepare: () => void, origin?: () => StateWriteOrigin | undefined): () => void {
         this.preparations.set(prepare, origin);
         return () => this.preparations.delete(prepare);
     }
 
     private originProvider: () => StateWriteOrigin = () => "user";
+
+    /** Persistence supplies the active user/config/hydration context when a write is staged. */
     setOriginProvider(provider: () => StateWriteOrigin): void {
         this.originProvider = provider;
     }
+
     private preparationOrigin: StateWriteOrigin | undefined;
     private draftOrigins: Map<object, StateWriteOrigin> | undefined;
     private pendingOrigins = new Map<object, StateWriteOrigin>();
@@ -90,7 +105,10 @@ export class ViewerState {
         () => {
             this.publishing = true;
             try {
+                // First update codec-backed bridges, then let synchronous layout consumers render.
+                // Both phases retain this revision; writes from either phase join the next patch.
                 this.committed.next();
+                this.publicationFinished.next();
             } finally {
                 this.publishing = false;
             }
@@ -105,12 +123,16 @@ export class ViewerState {
         {injector: this.injector}
     );
 
+    /** Carry each staged write's ownership context into the one authoritative SignalStore patch. */
     private publish(patch: Partial<ViewerValues>, origins: Map<object, StateWriteOrigin>): void {
         this.publishedOrigins = origins;
         patchState(this.store, patch);
     }
 
-    /** Nested domain preparation joins the transaction; an exception rolls back its writes. */
+    /**
+     * Batch an owner's semantic operation, such as synchronized cameras or selection plus dock state.
+     * Nested calls share the draft; an exception restores the caller's preceding draft and origins.
+     */
     transaction<T>(operation: () => T): T {
         const parent = this.draft;
         const parentBindings = this.originalBindings;
@@ -121,7 +143,7 @@ export class ViewerState {
         this.draft = initial;
         try {
             const result = operation();
-            if (!parent)
+            if (!parent) {
                 for (const [prepare, origin] of this.preparations) {
                     this.preparationOrigin = origin?.();
                     try {
@@ -130,6 +152,7 @@ export class ViewerState {
                         this.preparationOrigin = undefined;
                     }
                 }
+            }
             const next = this.draft;
             if (!parent) {
                 this.draft = undefined;
@@ -139,7 +162,9 @@ export class ViewerState {
                 const patch = Object.fromEntries(
                     Object.entries(next).filter(([key, value]) => {
                         const previous = initial[key as keyof ViewerValues];
-                        if (value === previous) return false;
+                        if (value === previous) {
+                            return false;
+                        }
                         // A reverted binding reuses its original value. Check only the small
                         // touched owner slice's field identities, never its layer/style contents.
                         if (
@@ -152,8 +177,9 @@ export class ViewerState {
                             if (
                                 fields.length === Object.keys(before).length &&
                                 fields.every((field) => after[field] === before[field])
-                            )
+                            ) {
                                 return false;
+                            }
                         }
                         return true;
                     })
@@ -162,7 +188,9 @@ export class ViewerState {
                     if (this.publishing) {
                         this.pendingPatch = {...this.pendingPatch, ...patch};
                         this.pendingOrigins = new Map([...this.pendingOrigins, ...origins]);
-                    } else this.publish(patch, origins);
+                    } else {
+                        this.publish(patch, origins);
+                    }
                 }
             }
             return result;
@@ -174,6 +202,11 @@ export class ViewerState {
         }
     }
 
+    /**
+     * Connect one owner field to its codec without caching its value.
+     * The narrow selector serves normal reads; the root reader is used only while editing a draft.
+     * A private token tracks that field's first value and write origin for rollback and net no-ops.
+     */
     bind<T>(
         read: (state: ViewerValues) => T,
         update: (state: ViewerValues, value: T) => Partial<ViewerValues>,
@@ -189,26 +222,39 @@ export class ViewerState {
                 const apply = () => {
                     const state = this.draft!;
                     const previous = read(state);
-                    if (deepEquals(previous, value)) return;
+                    if (deepEquals(previous, value)) {
+                        return;
+                    }
                     const originals = this.originalBindings!;
                     const alreadyTouched = originals.has(key);
-                    if (!alreadyTouched) originals.set(key, previous);
+                    if (!alreadyTouched) {
+                        originals.set(key, previous);
+                    }
                     const reverted = alreadyTouched && deepEquals(originals.get(key), value);
                     if (reverted) {
                         value = originals.get(key) as T;
                         this.draftOrigins!.delete(key);
-                    } else this.draftOrigins!.set(key, this.preparationOrigin ?? this.originProvider());
+                    } else {
+                        this.draftOrigins!.set(key, this.preparationOrigin ?? this.originProvider());
+                    }
                     this.draft = {...state, ...update(state, value)};
                 };
-                if (this.draft) apply();
-                else this.transaction(apply);
+                if (this.draft) {
+                    apply();
+                } else {
+                    this.transaction(apply);
+                }
             }
         };
     }
 
+    /** Stop both notification phases and discard writes queued by a consumer being torn down. */
     destroy(): void {
+        this.pendingPatch = undefined;
+        this.pendingOrigins.clear();
         this.watcher.destroy();
         this.committed.complete();
+        this.publicationFinished.complete();
         this.injector.destroy();
     }
 }

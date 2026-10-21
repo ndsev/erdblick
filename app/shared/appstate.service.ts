@@ -46,6 +46,8 @@ export class AppStateService implements OnDestroy {
     private readonly statePool = new Map<string, AppState<unknown>>();
     readonly values = new ViewerState();
     readonly store = this.values.store;
+    /** Runs after synchronous codec consumers, before any queued reentrant write is published. */
+    readonly afterStatePublication = this.values.afterPublication;
 
     /** Register a persisted codec against its owner's named SignalStore value. */
     register<S extends OwnerSlice, K extends keyof ViewerValues[S]>(
@@ -255,7 +257,6 @@ export class AppStateService implements OnDestroy {
         return this.persisted("styleOptions") as StyleState;
     }
 
-    /** Prepare related owner writes and expose one coherent SignalStore commit. */
     /** Owners prepare related invariants inside the same patch, including imported values. */
     beforeCommit(prepare: () => void, origin?: () => StateWriteOrigin | undefined): () => void {
         return this.values.beforeCommit(prepare, origin);
@@ -854,7 +855,6 @@ export class AppStateService implements OnDestroy {
 
                 if (Object.keys(styleOptionEntries).length) {
                     this.deserializeStateSafely(this.stylesState, styleOptionEntries);
-                    this.stylesState.next(new Map(this.stylesState.getValue()));
                 }
             });
         } finally {
@@ -923,7 +923,6 @@ export class AppStateService implements OnDestroy {
         }
         if (Object.keys(styleOptionEntries).length) {
             this.deserializeStateSafely(this.stylesState, styleOptionEntries);
-            this.stylesState.next(new Map(this.stylesState.getValue()));
         }
         this.importedSnapshot.next();
     }

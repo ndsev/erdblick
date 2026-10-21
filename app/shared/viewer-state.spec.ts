@@ -21,6 +21,46 @@ function fixture() {
 }
 
 describe("SignalStore publication", () => {
+    it("finishes codec consumers before layout observers and queues their reentrant writes", () => {
+        const {state, filter, options} = fixture();
+        const seen: Array<[string, boolean, boolean, boolean]> = [];
+        let runtimeFilter = true;
+        // Layout listeners may register before the codec-backed runtime bridge.
+        const first = state.afterPublication.subscribe(() => {
+            seen.push(["first", filter.signal().info, options.signal().includeLogs, runtimeFilter]);
+            if (!filter.signal().info && options.signal().includeLogs) {
+                options.next({...options.getValue(), includeLogs: false});
+            }
+        });
+        const second = state.afterPublication.subscribe(() => {
+            seen.push(["second", filter.signal().info, options.signal().includeLogs, runtimeFilter]);
+        });
+        const bridge = filter.subscribe(value => { runtimeFilter = value.info; });
+
+        filter.next({...filter.getValue(), info: false});
+
+        expect(seen).toEqual([
+            ["first", false, true, false], ["second", false, true, false],
+            ["first", false, false, false], ["second", false, false, false]
+        ]);
+        first.unsubscribe();
+        second.unsubscribe();
+        bridge.unsubscribe();
+        filter.next({...filter.getValue(), info: true});
+        expect(seen).toHaveLength(4);
+        state.destroy();
+    });
+
+    it("discards a queued publication when a layout observer destroys the state owner", () => {
+        const {state, filter, options} = fixture();
+        state.afterPublication.subscribe(() => {
+            options.next({...options.getValue(), includeLogs: false});
+            state.destroy();
+        });
+        filter.next({...filter.getValue(), info: false});
+        expect(options.signal().includeLogs).toBe(true);
+    });
+
     it("does not publish or replace identities for a net-zero transaction", () => {
         const {state, filter, options} = fixture();
         const before = state.store.diagnostics();

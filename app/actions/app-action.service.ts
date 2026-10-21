@@ -50,16 +50,24 @@ export class AppActionService {
             overview?: () => z.input<Selector>[];
         }
     ): void {
-        if (this.controlsSealed) throw new Error(`Late control registration: ${declaration.name}`);
-        if (this.controls.has(declaration.name)) throw new Error(`Duplicate control: ${declaration.name}`);
-        if (declaration.writable !== !!binding.write)
+        if (this.controlsSealed) {
+            throw new Error(`Late control registration: ${declaration.name}`);
+        }
+        if (this.controls.has(declaration.name)) {
+            throw new Error(`Duplicate control: ${declaration.name}`);
+        }
+        if (declaration.writable !== !!binding.write) {
             throw new Error(`Control write contract mismatch: ${declaration.name}`);
+        }
+        const write = binding.write;
         this.controls.set(declaration.name, {
             declaration,
             read: (selector, context) => binding.read(declaration.selectorSchema.parse(selector), context),
-            write: binding.write
-                ? (selector, value) =>
-                      binding.write!(declaration.selectorSchema.parse(selector), declaration.valueSchema.parse(value))
+            write: write
+                ? (selector, value) => write(
+                      declaration.selectorSchema.parse(selector),
+                      declaration.valueSchema.parse(value)
+                  )
                 : undefined,
             overview: binding.overview
         });
@@ -72,8 +80,12 @@ export class AppActionService {
             const omissions: {control: string; reason: "byte_limit" | "item_limit"}[] = [];
             let budget = 208 * 1024;
             for (const {declaration} of this.controls.values()) {
-                if (input.controls && !input.controls.includes(declaration.name)) continue;
-                if (input.prefix !== undefined && !declaration.name.startsWith(input.prefix)) continue;
+                if (input.controls && !input.controls.includes(declaration.name)) {
+                    continue;
+                }
+                if (input.prefix !== undefined && !declaration.name.startsWith(input.prefix)) {
+                    continue;
+                }
                 const metadata = {
                     ...declaration,
                     selectorSchema: z.toJSONSchema(declaration.selectorSchema, {
@@ -101,6 +113,7 @@ export class AppActionService {
         this.registerAction(declarations.setControl, (input) => this.writeControl(input.target, input.value));
     }
 
+    /** Read current owner values within the shared output budget, reporting every omitted target. */
     readControls(requested?: ControlTarget[]): ControlReadResult {
         const result: ControlReadResult = {
             observedAt: new Date().toISOString(),
@@ -125,7 +138,9 @@ export class AppActionService {
             }
             const {control: name, ...selector} = target;
             const binding = this.controls.get(name);
-            if (!binding) rejectAction("Unknown control", "invalid_arguments");
+            if (!binding) {
+                rejectAction("Unknown control", "invalid_arguments");
+            }
             const context = new ControlReadContext(budget - 512);
             let entry: ControlReadResult["values"][number];
             try {
@@ -135,15 +150,15 @@ export class AppActionService {
                     ? {target, value: validated.data}
                     : {target, unavailable: "value_out_of_contract"};
             } catch (error) {
-                if (!(error instanceof ViewerActionFailure) || error.detail.code !== "not_available") throw error;
+                if (!(error instanceof ViewerActionFailure) || error.detail.code !== "not_available") {
+                    throw error;
+                }
+                const reason = error.detail.reason;
                 entry = {
                     target,
-                    unavailable:
-                        error.detail.reason === "first_person"
-                            ? "first_person"
-                            : error.detail.reason === "view_unavailable"
-                              ? "view_unavailable"
-                              : "target_unavailable"
+                    unavailable: reason === "first_person" || reason === "view_unavailable"
+                        ? reason
+                        : "target_unavailable"
                 };
             }
             const bytes = new TextEncoder().encode(JSON.stringify(entry)).length;
@@ -153,17 +168,24 @@ export class AppActionService {
             }
             budget -= bytes;
             result.values.push(entry);
-            if (context.reason) result.omissions.push({target, reason: context.reason});
-            if ("unavailable" in entry) result.complete = false;
+            if (context.reason) {
+                result.omissions.push({target, reason: context.reason});
+            }
+            if ("unavailable" in entry) {
+                result.complete = false;
+            }
         }
         result.complete &&= result.omissions.length === 0 && targets.length <= 32;
         return result;
     }
 
+    /** Apply a validated owner setter and return its actual resulting value, including normalization. */
     writeControl(target: ControlTarget, value: unknown): ControlWriteResult {
         const {control: name, ...selector} = target;
         const binding = this.controls.get(name);
-        if (!binding?.write) rejectAction("Control is not writable", "invalid_arguments");
+        if (!binding?.write) {
+            rejectAction("Control is not writable", "invalid_arguments");
+        }
         // Validate the whole incoming assignment before any owner operation runs.
         const validated = binding.declaration.valueSchema.parse(value);
         const before = binding.read(selector, new ControlReadContext());
@@ -181,7 +203,9 @@ export class AppActionService {
     /** Seal startup registration only when every bound declaration is the exported owner object. */
     assertControlsComplete(declarations: readonly ControlDeclaration[]): void {
         const names = new Set(declarations.map((control) => control.name));
-        if (names.size !== declarations.length) throw new Error("Duplicate control in exported catalog");
+        if (names.size !== declarations.length) {
+            throw new Error("Duplicate control in exported catalog");
+        }
         if (
             names.size !== this.controls.size ||
             declarations.some((control) => this.controls.get(control.name)?.declaration !== control)
@@ -205,26 +229,36 @@ export class AppActionService {
         execute: (input: z.output<Input>, context: ActionContext) => z.input<Output> | Promise<z.input<Output>>,
         omnibar?: {suggest: (query: string) => ActionSuggestion<z.input<Input>>[]}
     ): void {
-        if (this.actionsSealed) throw new Error(`Late action registration: ${declaration.name}`);
-        if (this.actions.has(declaration.name)) throw new Error(`Duplicate action: ${declaration.name}`);
-        if (omnibar && this.omnibar.has(declaration.name))
+        if (this.actionsSealed) {
+            throw new Error(`Late action registration: ${declaration.name}`);
+        }
+        if (this.actions.has(declaration.name)) {
+            throw new Error(`Duplicate action: ${declaration.name}`);
+        }
+        if (omnibar && this.omnibar.has(declaration.name)) {
             throw new Error(`Duplicate omnibar producer: ${declaration.name}`);
+        }
         this.actions.set(declaration.name, {
             declaration,
             execute: (input, context) => {
-                if (context.signal?.aborted) rejectAction("Action cancelled", "cancelled");
+                if (context.signal?.aborted) {
+                    rejectAction("Action cancelled", "cancelled");
+                }
                 const parsed = declaration.inputSchema.safeParse(input);
-                if (!parsed.success) rejectAction("Arguments do not match the action schema", "invalid_arguments");
+                if (!parsed.success) {
+                    rejectAction("Arguments do not match the action schema", "invalid_arguments");
+                }
                 const result = execute(parsed.data, context);
                 return result instanceof Promise
                     ? result.then((value) => declaration.outputSchema.parse(value))
                     : declaration.outputSchema.parse(result);
             }
         });
-        if (omnibar)
+        if (omnibar) {
             this.registerOmnibar(declaration.name, (query) =>
                 omnibar.suggest(query).map((candidate) => this.candidate(declaration, candidate))
             );
+        }
     }
 
     /** Adapts query/provider candidates to the exact registered operation, including saved-history payloads. */
@@ -232,16 +266,18 @@ export class AppActionService {
         declaration: ActionDeclaration<Input, Output>,
         candidate: ActionSuggestion<z.input<Input>>
     ): SearchTarget {
-        if (this.actions.get(declaration.name)?.declaration !== declaration)
+        if (this.actions.get(declaration.name)?.declaration !== declaration) {
             throw new Error(`Unregistered candidate action: ${declaration.name}`);
+        }
         return {
             ...candidate,
             saveToHistory: candidate.saveToHistory ?? (() => false),
             validate: (query) => candidate.isCurrent() && candidate.validate(query),
             execute: async (query, payload) => {
                 // An open menu may outlive a view, inspection, or configured provider.
-                if (!candidate.isCurrent())
+                if (!candidate.isCurrent()) {
                     rejectAction("The suggested target is no longer available", "not_available");
+                }
                 const arguments_ =
                     typeof candidate.arguments === "function"
                         ? (candidate.arguments as (query: string, payload?: unknown) => z.input<Input>)(query, payload)
@@ -252,28 +288,43 @@ export class AppActionService {
         };
     }
 
-    private readonly omnibar = new Map<string, {order: number; targets: (query: string) => SearchTarget[]}>();
+    private readonly omnibar = new Map<
+        string,
+        {
+            order: number;
+            targets: (query: string) => SearchTarget[];
+        }
+    >();
     private readonly asyncOmnibar = new Map<string, (query: string) => Observable<SearchTarget[]>>();
 
     /** Candidate providers may change with configuration; cleanup removes only this registration. */
     registerOmnibar(name: string, targets: (query: string) => SearchTarget[], order = 0): () => void {
-        if (this.omnibar.has(name)) throw new Error(`Duplicate omnibar producer: ${name}`);
+        if (this.omnibar.has(name)) {
+            throw new Error(`Duplicate omnibar producer: ${name}`);
+        }
         const registration = {order, targets};
         this.omnibar.set(name, registration);
         return () => {
-            if (this.omnibar.get(name) === registration) this.omnibar.delete(name);
+            if (this.omnibar.get(name) === registration) {
+                this.omnibar.delete(name);
+            }
         };
     }
 
     /** Network providers supply candidates; each candidate still executes its registered owner action. */
     registerAsyncOmnibar(name: string, targets: (query: string) => Observable<SearchTarget[]>): () => void {
-        if (this.asyncOmnibar.has(name)) throw new Error(`Duplicate omnibar producer: ${name}`);
+        if (this.asyncOmnibar.has(name)) {
+            throw new Error(`Duplicate omnibar producer: ${name}`);
+        }
         this.asyncOmnibar.set(name, targets);
         return () => {
-            if (this.asyncOmnibar.get(name) === targets) this.asyncOmnibar.delete(name);
+            if (this.asyncOmnibar.get(name) === targets) {
+                this.asyncOmnibar.delete(name);
+            }
         };
     }
 
+    /** Collect local candidates in display order; execution still passes through the registered action. */
     omnibarTargets(query: string): SearchTarget[] {
         return [...this.omnibar.values()]
             .sort((a, b) => a.order - b.order)
@@ -289,10 +340,13 @@ export class AppActionService {
     /** Shared dispatch for MCP adapters and local omnibar actions; owner methods remain directly callable. */
     execute(name: string, input: unknown, context: ActionContext = {}): unknown {
         const action = this.actions.get(name);
-        if (!action) rejectAction(`Unknown action: ${name}`, "invalid_arguments");
+        if (!action) {
+            rejectAction(`Unknown action: ${name}`, "invalid_arguments");
+        }
         return action.execute(input, context);
     }
 
+    /** Check whether startup bound the named operation before an adapter exposes it. */
     has(name: string): boolean {
         return this.actions.has(name);
     }
@@ -300,7 +354,9 @@ export class AppActionService {
     /** Verify exact declarations, then reject late public/local action registration. Providers remain dynamic. */
     assertComplete(declarations: readonly ActionDeclaration[]): void {
         const expected = new Set(declarations.map((action) => action.name));
-        if (expected.size !== declarations.length) throw new Error("Duplicate action in exported catalog");
+        if (expected.size !== declarations.length) {
+            throw new Error("Duplicate action in exported catalog");
+        }
         const mismatched = declarations
             .filter((action) => this.actions.get(action.name)?.declaration !== action)
             .map((action) => action.name);

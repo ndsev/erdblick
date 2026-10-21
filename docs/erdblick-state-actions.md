@@ -122,6 +122,13 @@ Signal readers depend on the specific store member. Per-view readers use
 view order changes. One NgRx `watchState` observation fans out synchronous RxJS
 notifications; there is no whole-store watcher for each slot or subscriber.
 
+The dock has one additional synchronous render boundary: `afterStatePublication`
+runs after those codec consumers have updated the inspection loading models.
+The dock then mounts their content and measures the changed map width. Rendering
+inside a dock-value callback could mount an empty inspection model before its
+bridge receives the same patch. Writes from either notification phase remain
+queued until every observer has seen the current revision.
+
 ## Commit Complete Owner Operations
 
 Methods such as `setView`, `setProjectionMode`, `setMarkerControl` and preset

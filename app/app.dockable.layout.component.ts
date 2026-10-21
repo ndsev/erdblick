@@ -212,7 +212,10 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
             this.cdr.markForCheck()
         );
         this.observedDockOpen = this.layoutState.isDockOpen;
-        this.dockOpenSubscription = this.layoutState.dockOpenState.subscribe((nextDockOpen) => {
+        // detectChanges mounts runtime-backed inspection content and measures its width immediately.
+        // Wait until the selection bridge has published its loading shells for this same state patch.
+        this.dockOpenSubscription = this.stateService.afterStatePublication.subscribe(() => {
+            const nextDockOpen = this.layoutState.isDockOpen;
             if (nextDockOpen === this.observedDockOpen) {
                 return;
             }
