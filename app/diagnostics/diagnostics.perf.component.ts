@@ -1,3 +1,5 @@
+import {AppLayoutService} from "../shared/app-layout.service";
+import {inject} from "@angular/core";
 import {Component, OnDestroy, ViewChild} from '@angular/core';
 import {Subscription} from 'rxjs';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
@@ -219,6 +221,7 @@ interface PerfTileScopeCounts {
  * raw stats, and highlights unusually expensive timing rows.
  */
 export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
+    readonly layoutState = inject(AppLayoutService);
     readonly layoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
     @ViewChild('dialog') dialog?: AppDialogComponent;
     readonly dialogStyle: {[key: string]: string} = {
@@ -257,11 +260,11 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     }
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.layoutId);
+        return this.layoutState.isDialogOpen(this.layoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.layoutId, visible);
+        this.layoutState.setDialogOpen(this.layoutId, visible);
     }
 
     /** Releases subscriptions feeding the filter options and tree state. */

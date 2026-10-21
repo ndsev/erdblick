@@ -1,3 +1,5 @@
+import {z} from "zod";
+import {} from "../shared/app-state.model";
 import {Injectable} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {
@@ -123,6 +125,44 @@ interface ImportedStyleStoreV2 {
  */
 @Injectable({providedIn: 'root'})
 export class StyleService {
+
+
+    readonly styleVisibilityState = this.stateService.register({
+        name: 'styleVisiblity',
+        schema: z.record(z.string(), z.coerce.boolean()),
+        defaultValue: {}
+    }, "styles", "styleVisibility");
+
+    get styleVisibility() {return this.styleVisibilityState.getValue();}
+
+    set styleVisibility(val: Record<string, boolean>) {this.styleVisibilityState.next(val);}
+
+
+    /** Returns whether the style is visible in the persisted style tree. */
+    getStyleVisibility(styleId: string, fallback: boolean = true): boolean {
+        if (this.styleVisibility.hasOwnProperty(styleId)) {
+            return this.styleVisibility[styleId];
+        }
+        return fallback;
+    }
+
+
+    /** Updates the persisted visibility flag for one style. */
+    setStyleVisibility(styleId: string, val: boolean) {
+        this.styleVisibilityState.next({...this.styleVisibility, [styleId]: val});
+    }
+
+
+    /** Removes stale visibility when a locally imported style identity is deleted. */
+    removeStyleVisibility(styleId: string) {
+        if (!Object.prototype.hasOwnProperty.call(this.styleVisibility, styleId)) {
+            return;
+        }
+        const next = {...this.styleVisibility};
+        delete next[styleId];
+        this.styleVisibility = next;
+    }
+
     styleHashes: Map<string, StyleLifecycleState> = new Map();
     styleUrls: StyleConfigEntry[] = [];
     styles: Map<string, ErdblickStyle> = new Map<string, ErdblickStyle>();
@@ -198,7 +238,7 @@ export class StyleService {
             return undefined;
         }
         if (initialVisibility !== undefined) {
-            this.stateService.setStyleVisibility(importedStyleId, initialVisibility);
+            this.setStyleVisibility(importedStyleId, initialVisibility);
             this.styles.get(importedStyleId)!.visible = initialVisibility;
         }
         ++this.importedStylesCount;
@@ -206,7 +246,7 @@ export class StyleService {
             this.saveImportedStyles();
         } catch (error) {
             this.removeActiveStyleEntry(importedStyleId);
-            this.stateService.removeStyleVisibility(importedStyleId);
+            this.removeStyleVisibility(importedStyleId);
             this.importedStylesCount = Math.max(0, this.importedStylesCount - 1);
             console.error("Could not persist imported style.", error);
             this.infoMessageService.showError(
@@ -334,7 +374,7 @@ export class StyleService {
             this.removeActiveStyleEntry(knownStyleId);
         }
 
-        const isVisible = this.stateService.getStyleVisibility(knownStyleId ?? styleId, wasmStyle.defaultEnabled());
+        const isVisible = this.getStyleVisibility(knownStyleId ?? styleId, wasmStyle.defaultEnabled());
         const categoryReader = wasmStyle as Partial<Pick<FeatureLayerStyle, "category">>;
         const styleCategory = typeof categoryReader.category === "function"
             && categoryReader.category() === coreLib.StyleCategory.Search
@@ -362,7 +402,7 @@ export class StyleService {
 
         // Ensure that if the style was renamed, its visibility is retained.
         if (this.stateService.ready.getValue()) {
-            this.stateService.setStyleVisibility(styleId, isVisible);
+            this.setStyleVisibility(styleId, isVisible);
         }
 
         return styleId;
@@ -571,7 +611,7 @@ export class StyleService {
         }
 
         this.removeActiveStyleEntry(styleId);
-        this.stateService.removeStyleVisibility(styleId);
+        this.removeStyleVisibility(styleId);
         this.importedStylesCount = Math.max(0, this.importedStylesCount - 1);
         this.saveImportedStyles();
         this.styleGroups.next(this.computeStyleGroups());
@@ -609,7 +649,7 @@ export class StyleService {
             return undefined;
         }
         if (newStyleId !== styleId) {
-            this.stateService.removeStyleVisibility(styleId);
+            this.removeStyleVisibility(styleId);
         }
         this.synchronizeLifecycleForStyle(this.styles.get(newStyleId));
 
@@ -1141,8 +1181,8 @@ export class StyleService {
     reconcilePresentationStyles(): void {
         for (const style of this.styles.values()) {
             if (style.imported) {
-                this.stateService.setStyleVisibility(style.id,
-                    this.stateService.getStyleVisibility(style.id, false));
+                this.setStyleVisibility(style.id,
+                    this.getStyleVisibility(style.id, false));
             }
         }
         this.reapplyAllStyles();
@@ -1154,7 +1194,7 @@ export class StyleService {
             return;
         }
         const style = this.styles.get(styleId)!;
-        style.visible = this.stateService.getStyleVisibility(styleId, style.featureLayerStyle.defaultEnabled());
+        style.visible = this.getStyleVisibility(styleId, style.featureLayerStyle.defaultEnabled());
         this.styleGroups.next(this.computeStyleGroups());
         this.styleRemovedForId.next(styleId);
         if (style.visible) {
@@ -1278,7 +1318,7 @@ export class StyleService {
         }
         const style = this.styles.get(styleId)!;
         style.visible = enabled !== undefined ? enabled : !style.visible;
-        this.stateService.setStyleVisibility(styleId, style.visible);
+        this.setStyleVisibility(styleId, style.visible);
         if (delayRepaint) {
             this.reapplyStyle(styleId);
         }
@@ -1366,4 +1406,9 @@ export class StyleService {
         );
         return matchedByUrl;
     }
+}
+
+
+export interface StyleServiceValues {
+    styleVisibility: Record<string, boolean>;
 }

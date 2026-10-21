@@ -1,3 +1,9 @@
+import {AppLayoutService} from "./shared/app-layout.service";
+import {MapViewStateService} from "./mapview/map-view-state.service";
+import {MapLayerStateService} from "./mapdata/map-layer-state.service";
+import {InspectionStateService} from "./inspection/inspection-state.service";
+import {LocationSearchService} from "./search/location.search.service";
+import {StyleEditorRequestService} from "./styledata/style-editor-request.service";
 import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
 import {inject, NgModule, provideAppInitializer} from '@angular/core';
 import {BrowserModule} from '@angular/platform-browser';
@@ -187,6 +193,14 @@ export const initializeServices = () => {
     const webMcp = inject(WebMcpService);
     inject(FeatureSearchService);
     inject(DiagnosticsFacadeService);
+    // Complete owner registration before config, storage or URL hydration starts.
+    inject(MapViewStateService);
+    inject(MapLayerStateService);
+    inject(InspectionStateService);
+    inject(AppLayoutService);
+    inject(LocationSearchService);
+    inject(StyleEditorRequestService);
+    stateService.sealRegistration();
 
     return (async () => {
         updateGlobalSpinner('Loading app config');

@@ -1,6 +1,10 @@
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {MapLayerStateService} from "./map-layer-state.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {inject} from "@angular/core";
 import {Component, ViewChild} from "@angular/core";
 import {MapInfoService} from "./map-info.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewService} from "../mapview/map-view.service";
 import {
     AppStateService,
     DEFAULT_TILE_GRID_COLOR,
@@ -117,7 +121,7 @@ const MAP_FILTER_DELAY_MS = 300;
                         <p-accordion-header>
                             <div class="maps-header">
                                 <div class="maps-view-title">
-                                    @if (stateService.numViews > 1) {
+                                    @if (viewStateOwner.numViews > 1) {
                                         <p-tag severity="info" [rounded]="true">
                                             @if (index < 1) {
                                                 <div>
@@ -610,6 +614,9 @@ const MAP_FILTER_DELAY_MS = 300;
  * app-state updates for the active views, including tile-grid and background-layer controls.
  */
 export class MapPanelComponent {
+    readonly viewStateOwner = inject(MapViewStateService);
+    readonly layerState = inject(MapLayerStateService);
+    readonly inspectionState = inject(InspectionStateService);
     protected readonly wmsExperimentalTooltip = WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP;
 
     mapFilterText = "";
@@ -627,10 +634,10 @@ export class MapPanelComponent {
         this.mapService.maps$,
         this.appliedMapFilterTextChanges,
         this.styleService.styleGroups,
-        this.stateService.numViewsState,
+        this.viewStateOwner.numViewsState,
         this.mapPresetService.presets$,
-        this.stateService.layerPresetSelectionState.appState,
-        this.stateService.mapPresetSelectionState.appState,
+        this.layerState.layerPresetSelectionState.appState,
+        this.layerState.mapPresetSelectionState.appState,
         this.stylePresetProjectionChanges,
         this.mapService.layerStateChanged.pipe(
             filter(reason => reason === "visibility"),
@@ -675,7 +682,7 @@ export class MapPanelComponent {
 
     /** Subscribes the panel UI to map, app-state, and dialog-stack updates. */
     constructor(public mapService: MapInfoService,
-                private readonly viewState: MapViewStateService,
+                private readonly viewState: MapViewService,
                 public appModeService: AppModeService,
                 public stateService: AppStateService,
                 public keyboardService: KeyboardService,
@@ -702,7 +709,7 @@ export class MapPanelComponent {
                             }))
                     );
                 }
-                const numViews = this.stateService.numViews;
+                const numViews = this.viewStateOwner.numViews;
                 this.tileBordersEnabled = Array.from({length: numViews}, (_, index) =>
                     this.mapService.maps.getViewTileBorderState(index));
                 this.tileGridModes = Array.from({length: numViews}, (_, index) =>
@@ -716,7 +723,7 @@ export class MapPanelComponent {
                 this.lastEnabledBackgroundLayerIds = retainedIndices.map(index =>
                     this.lastEnabledBackgroundLayerIds[index]);
             }),
-            this.stateService.numViewsState.subscribe(numViews => {
+            this.viewStateOwner.numViewsState.subscribe(numViews => {
                 const previousViewIndices = new Set(this.viewIndices);
                 this.viewIndices = Array.from({length: numViews}, (_, i) => i);
                 const validViewIndices = new Set(this.viewIndices);
@@ -748,19 +755,19 @@ export class MapPanelComponent {
         );
 
         this.subscriptions.push(
-            this.stateService.layerSyncOptionsState.appState.subscribe(_ => {
-                const numViews = this.stateService.numViews;
+            this.layerState.layerSyncOptionsState.appState.subscribe(_ => {
+                const numViews = this.viewStateOwner.numViews;
                 this.syncedOptions = Array.from({length: numViews}, (_, viewIndex) =>
                     this.viewState.isSyncOptionsForViewEnabled(viewIndex));
             })
         );
 
         this.subscriptions.push(
-            this.stateService.backgroundState.appState.subscribe(_ => this.refreshBackgroundControls())
+            this.layerState.backgroundState.appState.subscribe(_ => this.refreshBackgroundControls())
         );
 
         this.subscriptions.push(
-            this.stateService.mode2dState.appState.subscribe(_ => this.refreshBackgroundControls())
+            this.viewStateOwner.mode2dState.appState.subscribe(_ => this.refreshBackgroundControls())
         );
 
         this.subscriptions.push(
@@ -768,37 +775,37 @@ export class MapPanelComponent {
         );
 
         this.subscriptions.push(
-            this.stateService.viewTileBordersState.appState.subscribe(_ => {
-                const numViews = this.stateService.numViews;
+            this.layerState.viewTileBordersState.appState.subscribe(_ => {
+                const numViews = this.viewStateOwner.numViews;
                 this.tileBordersEnabled = Array.from({length: numViews}, (_, index) =>
-                    this.stateService.viewTileBordersState.getValue(index));
+                    this.layerState.viewTileBordersState.getValue(index));
             })
         );
 
         this.subscriptions.push(
-            this.stateService.viewTileGridModeState.appState.subscribe(_ => {
-                const numViews = this.stateService.numViews;
+            this.layerState.viewTileGridModeState.appState.subscribe(_ => {
+                const numViews = this.viewStateOwner.numViews;
                 this.tileGridModes = Array.from({length: numViews}, (_, index) =>
-                    this.stateService.viewTileGridModeState.getValue(index));
+                    this.layerState.viewTileGridModeState.getValue(index));
                 this.refreshTileGridControls();
             })
         );
 
         this.subscriptions.push(
-            this.stateService.viewTileGridLevelState.appState.subscribe(_ => this.refreshTileGridControls())
+            this.layerState.viewTileGridLevelState.appState.subscribe(_ => this.refreshTileGridControls())
         );
         this.subscriptions.push(
-            this.stateService.viewTileGridAutoLevelState.appState.subscribe(_ => this.refreshTileGridControls())
+            this.layerState.viewTileGridAutoLevelState.appState.subscribe(_ => this.refreshTileGridControls())
         );
         this.subscriptions.push(
-            this.stateService.viewTileGridColorState.appState.subscribe(_ => this.refreshTileGridControls())
+            this.layerState.viewTileGridColorState.appState.subscribe(_ => this.refreshTileGridControls())
         );
         this.subscriptions.push(
-            this.stateService.viewTileGridOpacityState.appState.subscribe(_ => this.refreshTileGridControls())
+            this.layerState.viewTileGridOpacityState.appState.subscribe(_ => this.refreshTileGridControls())
         );
 
         this.subscriptions.push(
-            this.stateService.mapsOpenState.subscribe(isOpen => this.layerDialogVisible = isOpen)
+            this.layerState.mapsOpenState.subscribe(isOpen => this.layerDialogVisible = isOpen)
         );
     }
 
@@ -833,7 +840,7 @@ export class MapPanelComponent {
 
     /** Refreshes independent tile-grid controls from their per-view AppState values. */
     private refreshTileGridControls(): void {
-        const numViews = this.stateService.numViews;
+        const numViews = this.viewStateOwner.numViews;
         this.tileGridAutoLevels = Array.from({length: numViews}, (_, index) =>
             this.mapService.maps.getViewTileGridAutoLevel(index));
         this.tileGridColors = Array.from({length: numViews}, (_, index) =>
@@ -844,14 +851,14 @@ export class MapPanelComponent {
 
     /** Rebuilds the background dropdown contents and resolved per-view selection state. */
     private refreshBackgroundControls() {
-        const numViews = this.stateService.numViews;
+        const numViews = this.viewStateOwner.numViews;
         const backgroundLayers = this.configService.getBackgroundLayers();
         const defaultBackgroundLayerId = this.configService.getDefaultBackgroundLayerId();
 
         this.backgroundLayerIds = Array.from({length: numViews}, (_, index) =>
-            this.stateService.resolveBackgroundState(index, backgroundLayers, defaultBackgroundLayerId).layerId);
+            this.layerState.resolveBackgroundState(index, backgroundLayers, defaultBackgroundLayerId).layerId);
         this.backgroundOpacityValue = Array.from({length: numViews}, (_, index) =>
-            this.stateService.getBackgroundOpacity(index));
+            this.layerState.getBackgroundOpacity(index));
         this.backgroundOptions = Array.from({length: numViews}, (_, index) =>
             this.createBackgroundOptions(index, backgroundLayers));
         this.backgroundDetails = Array.from({length: numViews}, (_, index) =>
@@ -866,7 +873,7 @@ export class MapPanelComponent {
 
     /** Builds the background-layer dropdown options for one view, including 3D WMS gating. */
     private createBackgroundOptions(viewIndex: number, backgroundLayers: readonly BackgroundLayerConfig[]): BackgroundLayerOption[] {
-        const is2d = this.stateService.mode2dState.getValue(viewIndex);
+        const is2d = this.viewStateOwner.mode2dState.getValue(viewIndex);
         return backgroundLayers.map(layer => ({
             label: layer.name,
             value: layer.id,
@@ -885,7 +892,7 @@ export class MapPanelComponent {
         if (selectedLayer.type === "wms") {
             details.push(WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP);
         }
-        if (selectedLayer?.type === "wms" && !this.stateService.mode2dState.getValue(viewIndex)) {
+        if (selectedLayer?.type === "wms" && !this.viewStateOwner.mode2dState.getValue(viewIndex)) {
             details.push("WMS backgrounds are currently limited to 2D views.");
         }
         if (selectedLayer.attribution) {
@@ -1009,7 +1016,7 @@ export class MapPanelComponent {
                 targetRect = tileIdRect;
             }
         }
-        this.stateService.focusedView = viewIndex;
+        this.viewStateOwner.focusedView = viewIndex;
         this.viewState.moveToRectangleTopic.next(
             {
                 targetView: viewIndex,
@@ -1041,7 +1048,7 @@ export class MapPanelComponent {
         if (this.backgroundLayerIds[viewIndex] !== null) {
             this.lastEnabledBackgroundLayerIds[viewIndex] = this.backgroundLayerIds[viewIndex];
         }
-        this.stateService.setBackgroundState(viewIndex, this.backgroundLayerIds[viewIndex], this.backgroundOpacityValue[viewIndex]);
+        this.layerState.setBackgroundState(viewIndex, this.backgroundLayerIds[viewIndex], this.backgroundOpacityValue[viewIndex]);
         this.viewState.syncBackgroundSettings(viewIndex);
     }
 
@@ -1086,7 +1093,7 @@ export class MapPanelComponent {
         if (!option) {
             return;
         }
-        this.stateService.setSelection({
+        this.inspectionState.setSelection({
             mapTileKey: option.mapTileKey
         } as SelectedSourceData);
         popover.hide();
@@ -1407,8 +1414,8 @@ export class MapPanelComponent {
     /** Adds another synchronized map view up to the current supported limit. */
     addView() {
         // Limit the increment for now since we do not yet support more than 2 views
-        if (this.stateService.numViews < 2) {
-            this.stateService.numViews += 1;
+        if (this.viewStateOwner.numViews < 2) {
+            this.viewStateOwner.numViews += 1;
         }
     }
 
@@ -1423,7 +1430,7 @@ export class MapPanelComponent {
         event.stopPropagation();
         const nextState = !this.viewState.isSyncOptionsForViewEnabled(viewIndex);
         this.viewState.setSyncOptionsForView(viewIndex, nextState);
-        const numViews = this.stateService.numViews;
+        const numViews = this.viewStateOwner.numViews;
         this.syncedOptions = Array.from({length: numViews}, (_, index) =>
             this.viewState.isSyncOptionsForViewEnabled(index));
     }
@@ -1436,8 +1443,8 @@ export class MapPanelComponent {
     /** Keeps direct PrimeNG dialog closes, Escape, shortcuts, and the main-bar button in one state path. */
     protected setMapsPanelVisible(isVisible: boolean) {
         this.layerDialogVisible = isVisible;
-        if (this.stateService.mapsOpenState.getValue() !== isVisible) {
-            this.stateService.mapsOpenState.next(isVisible);
+        if (this.layerState.mapsOpenState.getValue() !== isVisible) {
+            this.layerState.mapsOpenState.next(isVisible);
         }
     }
 

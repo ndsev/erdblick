@@ -1,3 +1,5 @@
+import {AppLayoutService} from "../shared/app-layout.service";
+import {inject} from "@angular/core";
 import {Component, OnDestroy, ViewChild} from "@angular/core";
 import {Subscription} from "rxjs";
 import {FeatureSearchExportDialogRequest, FeatureSearchService} from "./feature.search.service";
@@ -77,6 +79,7 @@ interface FeatureSearchExportMapLayerOption extends FeatureSearchMapLayerRef {
 })
 /** Dialog that configures and launches feature-search JSON exports. */
 export class FeatureSearchExportDialogComponent implements OnDestroy {
+    readonly layoutState = inject(AppLayoutService);
     readonly layoutId = FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID;
     @ViewChild('dialog') dialog?: AppDialogComponent;
     exporting = false;
@@ -105,11 +108,11 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
     }
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.layoutId);
+        return this.layoutState.isDialogOpen(this.layoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.layoutId, visible);
+        this.layoutState.setDialogOpen(this.layoutId, visible);
         if (!visible) {
             this.searchService.clearExportDialogRequest();
         }

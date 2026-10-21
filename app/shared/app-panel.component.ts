@@ -1,3 +1,5 @@
+import {AppLayoutService} from "./app-layout.service";
+import {inject} from "@angular/core";
 import {NgClass, NgStyle, NgTemplateOutlet} from '@angular/common';
 import {
     AfterViewInit,
@@ -93,6 +95,7 @@ interface AppPanelResizeSession {
 })
 /** Generic docked surface wrapper backed by a single PrimeNG accordion item. */
 export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
+    readonly layoutState = inject(AppLayoutService);
     @ContentChild('header', {descendants: true, read: TemplateRef}) projectedHeaderTemplate?: TemplateRef<unknown>;
     @ContentChild('content', {descendants: true, read: TemplateRef}) projectedContentTemplate?: TemplateRef<unknown>;
     @ContentChild('footer', {descendants: true, read: TemplateRef}) projectedFooterTemplate?: TemplateRef<unknown>;
@@ -254,7 +257,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         }
         this.collapsed = nextCollapsed;
         if (this.persistLayout && this.layoutId) {
-            this.stateService.setPanelLayout(this.layoutId, {panelCollapsed: nextCollapsed});
+            this.layoutState.setPanelLayout(this.layoutId, {panelCollapsed: nextCollapsed});
         }
         this.collapsedChange.emit(nextCollapsed);
         if (nextCollapsed) {
@@ -272,7 +275,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
     /** Applies stored generic dock-panel layout when available. */
     private syncPanelLayout(): void {
         const layout = this.persistLayout && this.layoutId
-            ? this.stateService.getDialogLayout(this.layoutId)
+            ? this.layoutState.getDialogLayout(this.layoutId)
             : undefined;
         this.applyCollapsed(layout?.panelCollapsed ?? this.collapsed);
         const nextExpanded = layout?.panelExpanded ?? this.expanded;
@@ -396,7 +399,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
             return;
         }
         const width = this.currentBodyWidthPx();
-        this.stateService.setPanelLayout(this.layoutId, {
+        this.layoutState.setPanelLayout(this.layoutId, {
             panelSize: {
                 width,
                 height: Math.round(this.panelBodyHeightPx)
@@ -414,7 +417,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         if (Number.isFinite(containerWidth) && containerWidth! > 0) {
             return Math.round(containerWidth!);
         }
-        return Math.round(30 * this.stateService.baseFontSize);
+        return Math.round(30 * this.layoutState.baseFontSize);
     }
 
     private preferredBodyHeightPx(): number | undefined {
@@ -424,7 +427,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         if (!Number.isFinite(preferred) || preferred! <= 0) {
             return undefined;
         }
-        return preferred! * this.stateService.baseFontSize;
+        return preferred! * this.layoutState.baseFontSize;
     }
 
     private measuredContentHeightPx(): number | undefined {
@@ -437,7 +440,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
     }
 
     private defaultBodyHeightPx(): number {
-        return this.clampBodyHeightPx(this.defaultBodyHeightEm * this.stateService.baseFontSize);
+        return this.clampBodyHeightPx(this.defaultBodyHeightEm * this.layoutState.baseFontSize);
     }
 
     private seedBodyHeightPx(expanded = this.expanded): number {
@@ -450,14 +453,14 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
     }
 
     private minBodyHeightPx(): number {
-        return Math.max(1, this.minBodyHeightEm * this.stateService.baseFontSize);
+        return Math.max(1, this.minBodyHeightEm * this.layoutState.baseFontSize);
     }
 
     private maxBodyHeightPx(): number {
         if (Number.isFinite(this.maxBodyHeightEm) && this.maxBodyHeightEm! > 0) {
-            return Math.max(this.minBodyHeightPx(), this.maxBodyHeightEm! * this.stateService.baseFontSize);
+            return Math.max(this.minBodyHeightPx(), this.maxBodyHeightEm! * this.layoutState.baseFontSize);
         }
-        const viewportLimit = window.innerHeight - this.stateService.baseFontSize * 6;
+        const viewportLimit = window.innerHeight - this.layoutState.baseFontSize * 6;
         return Math.max(this.minBodyHeightPx(), viewportLimit);
     }
 

@@ -1,3 +1,4 @@
+import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
 import {describe, expect, it, vi} from "vitest";
 
 import type {DiagnosticsFacadeService} from "../diagnostics/diagnostics.facade.service";
@@ -22,7 +23,7 @@ function createRightClickMenuService() {
         inspectFeatureIds: vi.fn()
     };
     const service = new RightClickMenuService(
-        {} as AppStateService,
+        ({} as StateTestSystem) as never,
         {} as FeatureSearchService,
         {showInfo: vi.fn()} as unknown as InfoMessageService,
         {openPerformanceDialog: vi.fn()} as unknown as DiagnosticsFacadeService,

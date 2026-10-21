@@ -73,7 +73,7 @@ function createView(): DeckMapView3D {
         {} as never,
         {} as never,
         {} as never,
-        {} as never
+        {} as never, {captureView: () => ({id: "test-view", generation: 1}), indexOf: () => 0} as never, {} as never, {} as never
     );
 }
 

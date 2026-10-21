@@ -1,3 +1,6 @@
+import {AppLayoutService} from "../shared/app-layout.service";
+import {InspectionStateService} from "./inspection-state.service";
+import {inject} from "@angular/core";
 import {TileDeliveryError} from "../mapdata/tile-diagnostics";
 import {
     ChangeDetectorRef,
@@ -144,6 +147,8 @@ interface ComparisonExpiryOwner extends RetainedTileExpiryOwner {
 })
 /** Floating dialog that renders multiple inspection panels side by side for manual comparison. */
 export class InspectionComparisonDialogComponent implements OnDestroy {
+    readonly inspectionState = inject(InspectionStateService);
+    readonly layoutState = inject(AppLayoutService);
     comparison = input.required<InspectionComparisonModel>();
     readonly layoutId = 'inspection-comparison';
     visible = true;
@@ -202,7 +207,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     /** Closes the comparison dialog in shared app state. */
     onDialogHide() {
-        this.stateService.closeInspectionComparison();
+        this.inspectionState.closeInspectionComparison();
     }
 
     /** Ends the temporary tree freeze used while dragging the dialog around. */
@@ -245,17 +250,17 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
             ? model.base.panelId
             : normalized[0];
         const nextOtherPanelIds = normalized.filter(panelId => panelId !== nextBasePanelId);
-        const nextModel = this.stateService.createComparisonModel(
+        const nextModel = this.inspectionState.createComparisonModel(
             nextBasePanelId,
             nextOtherPanelIds,
             this.inspectionSelection.selectionTopic.getValue()
         );
         if (!nextModel) {
-            this.stateService.closeInspectionComparison();
+            this.inspectionState.closeInspectionComparison();
             return;
         }
         this.selectedCompareIds = [nextModel.base.panelId, ...nextModel.others.map(entry => entry.panelId)];
-        this.stateService.inspectionComparison = nextModel;
+        this.inspectionState.inspectionComparison = nextModel;
     }
 
     /** Drops one column from the comparison, closing the dialog if no entries remain. */
@@ -263,10 +268,10 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         const model = this.comparison();
         const remainingEntries = [model.base, ...model.others].filter(entry => entry.panelId !== panelId);
         if (!remainingEntries.length) {
-            this.stateService.closeInspectionComparison();
+            this.inspectionState.closeInspectionComparison();
             return;
         }
-        this.stateService.inspectionComparison = {
+        this.inspectionState.inspectionComparison = {
             base: remainingEntries[0],
             others: remainingEntries.slice(1)
         };
@@ -275,7 +280,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     /** Persists per-column selection colors back into the underlying inspection panels. */
     onSelectionColorChange(column: ComparisonColumn, color: string): void {
         column.selectionColor = color;
-        this.stateService.setInspectionPanelColor(column.entry.panelId, color);
+        this.inspectionState.setInspectionPanelColor(column.entry.panelId, color);
     }
 
     /** Opens the per-column context menu with actions bound to the clicked column. */
@@ -287,9 +292,9 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
 
     /** Rebuilds the selectable panel list from the current global inspection selection. */
     refreshCompareOptions() {
-        const options = this.stateService.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue());
+        const options = this.inspectionState.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue());
         this.compareOptions = options;
-        const model = this.stateService.inspectionComparison;
+        const model = this.inspectionState.inspectionComparison;
         if (!model) {
             return;
         }
@@ -303,21 +308,21 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         const normalizedPanelIds = modelPanelIds.filter(panelId => availablePanelIds.has(panelId));
 
         if (!normalizedPanelIds.length) {
-            this.stateService.closeInspectionComparison();
+            this.inspectionState.closeInspectionComparison();
             return;
         }
 
         if (!this.panelIdOrderEquals(modelPanelIds, normalizedPanelIds)) {
-            const nextModel = this.stateService.createComparisonModel(
+            const nextModel = this.inspectionState.createComparisonModel(
                 normalizedPanelIds[0],
                 normalizedPanelIds.slice(1),
                 this.inspectionSelection.selectionTopic.getValue()
             );
             if (!nextModel) {
-                this.stateService.closeInspectionComparison();
+                this.inspectionState.closeInspectionComparison();
                 return;
             }
-            this.stateService.inspectionComparison = nextModel;
+            this.inspectionState.inspectionComparison = nextModel;
             this.selectedCompareIds = [nextModel.base.panelId, ...nextModel.others.map(entry => entry.panelId)];
             return;
         }
@@ -332,7 +337,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         if (!container || !container.offsetHeight) {
             return;
         }
-        this.heightEm = container.offsetHeight / this.stateService.baseFontSize;
+        this.heightEm = container.offsetHeight / this.layoutState.baseFontSize;
     }
 
     private freezeTrees(): void {
@@ -519,7 +524,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         if (!grid || !column || !title) {
             return;
         }
-        const baseFontSize = this.stateService.baseFontSize;
+        const baseFontSize = this.layoutState.baseFontSize;
         if (!baseFontSize) {
             return;
         }

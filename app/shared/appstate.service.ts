@@ -1,10 +1,10 @@
-import {stateStore, type ViewerValues} from "./viewer-state";
-import {Injectable, OnDestroy, Signal} from "@angular/core";
+import {stateStore, type ViewerValues, type StateBinding} from "./viewer-state";
+import {computed, Injectable, OnDestroy, Signal} from "@angular/core";
 import {NavigationEnd, NavigationStart, Params, Router} from "@angular/router";
 import {BehaviorSubject, skip, Subject, Subscription, take} from "rxjs";
 import {filter} from "rxjs/operators";
 import {Cartographic, GeoMath} from "../integrations/geo";
-import {AppState, AppStateOptions, Boolish, MapViewState, StyleState} from "./app-state";
+import {AppState, AppStateOptions, Boolish, deepCopy, MapViewState, StyleState} from "./app-state";
 import {z} from "zod";
 import {
     PointCloudPolicy, DEFAULT_POINT_CLOUD_POLICY, pointCloudPolicySchema,
@@ -72,418 +72,10 @@ export {
     MIN_LOD3_TILE_THRESHOLD
 } from "./lod-policy";
 
-const COORDINATE_STATE_DECIMAL_PLACES = 8;
-const COORDINATE_STATE_PRECISION = 10 ** COORDINATE_STATE_DECIMAL_PLACES;
-const DEFAULT_FEATURE_SEARCH_GROUPING = [1];
-const FEATURE_SEARCH_GROUPING_OPTION_IDS = new Set([1, 2, 3, 4]);
+export * from "./app-state.model";
+import {COORDINATE_STATE_DECIMAL_PLACES, COORDINATE_STATE_PRECISION, DEFAULT_FEATURE_SEARCH_GROUPING, FEATURE_SEARCH_GROUPING_OPTION_IDS, MAX_SIMULTANEOUS_INSPECTIONS, DEFAULT_DRILL_PICK_RADIUS, MIN_DRILL_PICK_RADIUS, MAX_DRILL_PICK_RADIUS, MAX_COMPARE_PANELS, MAX_NUM_TILES_TO_LOAD, DEFAULT_LOCATION_SEARCH_RESULT_LIMIT, MAX_LOCATION_SEARCH_RESULT_LIMIT, DEFAULT_MAP_ZOOM_STEP, MIN_MAP_ZOOM_STEP, MAX_MAP_ZOOM_STEP, DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS, MIN_FEATURE_ZOOM_CLEARANCE_METERS, MAX_FEATURE_ZOOM_CLEARANCE_METERS, DEFAULT_TILE_GRID_LEVEL, DEFAULT_TILE_GRID_COLOR, DEFAULT_TILE_GRID_OPACITY, VIEW_SYNC_PROJECTION, VIEW_SYNC_POSITION, VIEW_SYNC_MOVEMENT, VIEW_SYNC_LAYERS, DEFAULT_EM_WIDTH, DEFAULT_EM_HEIGHT, DEFAULT_DOCKED_EM_HEIGHT, ABOUT_DIALOG_LAYOUT_ID, LEGAL_INFO_DIALOG_LAYOUT_ID, PREFERENCES_DIALOG_LAYOUT_ID, KEYBOARD_DIALOG_LAYOUT_ID, DATASOURCES_EDITOR_DIALOG_LAYOUT_ID, ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID, DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID, DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID, CACHE_RESET_DIALOG_LAYOUT_ID, STYLES_DIALOG_LAYOUT_ID, STYLE_EDITOR_DIALOG_LAYOUT_ID, STYLE_PRESET_EDITOR_DIALOG_LAYOUT_ID, FEATURE_SEARCH_DIALOG_LAYOUT_ID, FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID, SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID, INSPECTION_DOCK_TAB_ID, SEARCH_DOCK_TAB_ID, DEFAULT_HIGHLIGHT_COLORS, normalizeFeatureSearchGrouping, clampLocationSearchResultLimit, Versions, TileFeatureId, HoverLabelFieldConfig, defaultHoverLabelFieldKey, DEFAULT_HOVER_LABEL_FIELDS, SelectedSourceData, InspectionPanelModel, InspectionTreeExpansionSnapshot, InspectionTreeExpansionState, AppDialogPosition, AppDialogSize, AppDialogLayout, InspectionDialogLayout, InspectionComparisonEntry, InspectionComparisonModel, InspectionComparisonOption, CameraViewState, BackgroundLayerViewState, LayerViewConfig, StyleOptionStateUpdate, LayerPresetSelections, MapPresetSelections, LAYER_PRESET_REF_SCHEMA, STORED_LAYER_PRESET_REF_SCHEMA, ViewSyncOptionDescriptor, TileGridMode, tileGridMaxLevel, clampTileGridLevel, normalizeTileGridColor, clampTileGridOpacity, tileGridRgba, SnapshotImportLimits, SnapshotNormalizationResult, ConfigDefaultStateMetaEntry, ConfigDefaultStateMeta, isSourceOrMetaData, roundCoordinateStateValue, clampMapZoomStep, clampFeatureZoomClearanceMeters, cloneStateValue, stableSerializeStateValue, hashStateValue} from "./app-state.model";
 
-export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
-export const DEFAULT_DRILL_PICK_RADIUS = 3;
-export const MIN_DRILL_PICK_RADIUS = 1;
-export const MAX_DRILL_PICK_RADIUS = 10;
-export const MAX_COMPARE_PANELS = 4;
-export const MAX_NUM_TILES_TO_LOAD = 512;
-export const DEFAULT_LOCATION_SEARCH_RESULT_LIMIT = 10;
-export const MAX_LOCATION_SEARCH_RESULT_LIMIT = 50;
-export const DEFAULT_MAP_ZOOM_STEP = 0.5;
-export const MIN_MAP_ZOOM_STEP = 0.001;
-export const MAX_MAP_ZOOM_STEP = 1.0;
-export const DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS = 20;
-export const MIN_FEATURE_ZOOM_CLEARANCE_METERS = 0;
-export const MAX_FEATURE_ZOOM_CLEARANCE_METERS = 100;
-export const DEFAULT_TILE_GRID_LEVEL = 13;
-export const DEFAULT_TILE_GRID_COLOR = "f5f5f5";
-export const DEFAULT_TILE_GRID_OPACITY = 39;
-export const VIEW_SYNC_PROJECTION = "proj";
-export const VIEW_SYNC_POSITION = "pos";
-export const VIEW_SYNC_MOVEMENT = "mov";
-export const VIEW_SYNC_LAYERS = "lay";
-export const DEFAULT_EM_WIDTH = 30;
-export const DEFAULT_EM_HEIGHT = 40;
-export const DEFAULT_DOCKED_EM_HEIGHT = 20;
-export const ABOUT_DIALOG_LAYOUT_ID = 'about-dialog';
-export const LEGAL_INFO_DIALOG_LAYOUT_ID = 'legal-info-dialog';
-export const PREFERENCES_DIALOG_LAYOUT_ID = 'preferences-dialog';
-export const KEYBOARD_DIALOG_LAYOUT_ID = 'keyboard-dialog';
-export const DATASOURCES_EDITOR_DIALOG_LAYOUT_ID = 'datasources-editor-dialog';
-export const ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID = 'advanced-preferences-dialog';
-export const DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID = 'diagnostics-performance';
-export const DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID = 'diagnostics-log';
-export const DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID = 'diagnostics-export';
-export const CACHE_RESET_DIALOG_LAYOUT_ID = 'cache-reset-dialog';
-export const STYLES_DIALOG_LAYOUT_ID = 'styles-dialog';
-export const STYLE_EDITOR_DIALOG_LAYOUT_ID = 'style-editor-dialog';
-export const STYLE_PRESET_EDITOR_DIALOG_LAYOUT_ID = 'style-preset-editor-dialog';
-export const FEATURE_SEARCH_DIALOG_LAYOUT_ID = 'feature-search';
-export const FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID = 'feature-search-export';
-export const SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID = 'source-data-selection-dialog';
-export const INSPECTION_DOCK_TAB_ID = 'inspection';
-export const SEARCH_DOCK_TAB_ID = 'search';
-export const DEFAULT_HIGHLIGHT_COLORS = [
-    "#fff314",
-    "#4ad6d6",
-    "#8f52ff",
-    "#ff1212",
-    "#3474ff",
-    "#ff04d6",
-    "#ffa600",
-    "#b3ff99",
-    "#ccefff",
-    "#58cf08"
-]
-
-/** Normalizes feature search grouping values from persisted state. */
-function normalizeFeatureSearchGrouping(value: unknown): number[] {
-    if (!Array.isArray(value)) {
-        return [];
-    }
-
-    const result: number[] = [];
-    for (const item of value) {
-        const numeric = Number(item);
-        if (!Number.isInteger(numeric) || !FEATURE_SEARCH_GROUPING_OPTION_IDS.has(numeric) || result.includes(numeric)) {
-            continue;
-        }
-        result.push(numeric);
-    }
-    return result;
-}
-
-/** Clamps location-search hit limits from persisted state and preferences UI. */
-function clampLocationSearchResultLimit(value: unknown): number {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) {
-        return DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
-    }
-    return Math.min(MAX_LOCATION_SEARCH_RESULT_LIMIT, Math.max(1, Math.trunc(numeric)));
-}
-
-/** Version information shown in diagnostics and about dialogs. */
-export interface Versions {
-    name: string;
-    tag: string;
-    whatsnew?: string;
-}
-
-/** Canonical frontend selection identity for one feature inside one map tile. */
-export interface TileFeatureId {
-    featureId: string;
-    mapTileKey: string;
-}
-
-/** One ordered SIMFIL field shown in the map feature-hover popover. */
-export interface HoverLabelFieldConfig {
-    expression: string;
-    customExpression: boolean;
-    /** Optional short key shown next to the value; the expression leaf is used when absent. */
-    displayKey?: string;
-}
-
-/** Derives the concise key used for a hover field when no override was configured. */
-export function defaultHoverLabelFieldKey(expression: string): string {
-    const trimmed = expression.trim();
-    const leaf = trimmed.split(".").filter(segment => segment.length).at(-1);
-    return leaf ?? trimmed;
-}
-
-/** Initial hover overlay preserves the previous feature-id-only behavior. */
-export const DEFAULT_HOVER_LABEL_FIELDS: HoverLabelFieldConfig[] = [{
-    expression: "id",
-    customExpression: false
-}];
-
-/** Selection payload used for source-data/meta-data rows that are not regular features. */
-export interface SelectedSourceData {
-    mapTileKey: string;
-    address?: bigint;
-}
-
-/** Runtime model for one inspection panel, docked or floating. */
-export interface InspectionPanelModel<FeatureRepresentation> {
-    id: number;
-    features: FeatureRepresentation[];
-    locked: boolean;
-    focused?: boolean;
-    size: [number, number];
-    sourceData?: SelectedSourceData;
-    color: string;
-    undocked: boolean;
-    /** Runtime-only marker used while feature identities are resolving into inspectable wrappers. */
-    loading?: boolean;
-}
-
-/** Transient expansion state for one mounted inspection tree. */
-export type InspectionTreeExpansionSnapshot = Map<string, boolean | undefined>;
-
-/** Transient inspection-tree UI state kept while moving panels between docked and floating hosts. */
-export interface InspectionTreeExpansionState {
-    expandedNodes: InspectionTreeExpansionSnapshot;
-    fullExpansionActive: boolean;
-    expansionSnapshotBeforeFullExpand?: InspectionTreeExpansionSnapshot;
-    fullCollapseActive: boolean;
-    expansionSnapshotBeforeFullCollapse?: InspectionTreeExpansionSnapshot;
-}
-
-/** Persisted top-left dialog position in viewport pixels. */
-export interface AppDialogPosition {
-    left: number;
-    top: number;
-}
-
-/** Persisted dialog size in viewport pixels. */
-export interface AppDialogSize {
-    width: number;
-    height: number;
-}
-
-/** Generic persisted dialog layout record. */
-export interface AppDialogLayout {
-    position: AppDialogPosition;
-    size: AppDialogSize;
-    open?: boolean;
-    docked?: boolean;
-    dockTab?: string;
-    dockOrder?: number;
-    panelSize?: AppDialogSize;
-    panelCollapsed?: boolean;
-    panelExpanded?: boolean;
-}
-
-/** Persisted layout for floating inspection dialogs, including dock preference. */
-export interface InspectionDialogLayout extends AppDialogLayout {
-    panelId: number;
-    slot: number;
-}
-
-/** One selectable comparison candidate for the inspection comparison dialog. */
-export interface InspectionComparisonEntry {
-    panelId: number;
-    mapId: string;
-    label: string;
-    featureIds: TileFeatureId[];
-}
-
-/** Complete model for the inspection comparison dialog. */
-export interface InspectionComparisonModel {
-    base: InspectionComparisonEntry;
-    others: InspectionComparisonEntry[];
-}
-
-/** Command-style option that can populate an inspection comparison slot. */
-export interface InspectionComparisonOption {
-    label: string;
-    value: number;
-}
-
-/** Minimal persisted camera state shared between 2D and 3D views. */
-export interface CameraViewState {
-    destination: { lon: number, lat: number, alt: number };
-    orientation: { heading: number, pitch: number, roll: number };
-    /** Local map-centre offset in metres; omitted legacy values resolve to zero. */
-    position?: [x: number, y: number, z: number];
-}
-
-/** Persisted selected background-layer id plus per-view opacity. */
-export interface BackgroundLayerViewState {
-    layerId: string | null;
-    opacity: number;
-}
-
-/** Per-view configuration entry for one map/layer selection. */
-export interface LayerViewConfig {
-    autoLevel: boolean;
-    level: number;
-    visible: boolean;
-}
-
-/** One complete per-option value array written through the atomic style-state batch API. */
-export interface StyleOptionStateUpdate {
-    mapId: string;
-    layerId: string;
-    shortStyleId: string;
-    optionId: string;
-    values: Array<string | number | boolean>;
-}
-
-/** Qualified layer-preset selections for concrete map/layer pairs within one map view. */
-export type LayerPresetSelections = Record<string, Record<string, LayerPresetRef>>;
-
-/** Map-preset selections for concrete maps within one map view. */
-export type MapPresetSelections = Record<string, string>;
-
-const LAYER_PRESET_REF_SCHEMA = z.object({
-    styleId: z.string(),
-    presetId: z.string().min(1)
-}).strict();
-
-// A stored unqualified id from the former global preset implementation is retained
-// with an empty style id so the map tree can migrate it only when resolution is unique.
-const STORED_LAYER_PRESET_REF_SCHEMA = z.union([
-    LAYER_PRESET_REF_SCHEMA,
-    z.string().min(1).transform(presetId => ({styleId: "", presetId}))
-]);
-
-/** Enumerates view properties that can be synchronized across split views. */
-export interface ViewSyncOptionDescriptor {
-    name: string;
-    code: string;
-    icon: string;
-    tooltip: string;
-}
-
-/** Tile-grid overlay labeling mode used by the map panel and Deck overlay. */
-export type TileGridMode = "xyz" | "nds";
-
-/** Returns the highest meaningful grid level for the selected coordinate mode. */
-export function tileGridMaxLevel(mode: TileGridMode): number {
-    return mode === "nds" ? 15 : 22;
-}
-
-/** Clamps a configured grid level to the selected coordinate mode. */
-export function clampTileGridLevel(value: unknown, mode: TileGridMode): number {
-    const numeric = Number(value);
-    return Number.isFinite(numeric)
-        ? Math.max(0, Math.min(tileGridMaxLevel(mode), Math.round(numeric)))
-        : DEFAULT_TILE_GRID_LEVEL;
-}
-
-/** Normalizes a PrimeNG colour-picker value to six lowercase RGB digits. */
-export function normalizeTileGridColor(value: unknown): string {
-    const normalized = String(value).replace(/^#/, "").toLowerCase();
-    return /^[0-9a-f]{6}$/.test(normalized) ? normalized : DEFAULT_TILE_GRID_COLOR;
-}
-
-/** Clamps tile-grid opacity to an integer percentage. */
-export function clampTileGridOpacity(value: unknown): number {
-    const numeric = Number(value);
-    return Number.isFinite(numeric)
-        ? Math.max(0, Math.min(100, Math.round(numeric)))
-        : DEFAULT_TILE_GRID_OPACITY;
-}
-
-/** Converts persisted grid appearance values to the deck.gl RGBA tuple. */
-export function tileGridRgba(color: string, opacity: number): [number, number, number, number] {
-    const normalized = normalizeTileGridColor(color);
-    return [
-        Number.parseInt(normalized.slice(0, 2), 16),
-        Number.parseInt(normalized.slice(2, 4), 16),
-        Number.parseInt(normalized.slice(4, 6), 16),
-        Math.round(clampTileGridOpacity(opacity) * 255 / 100)
-    ];
-}
-
-/** Limits used while validating imported viewer snapshots. */
-interface SnapshotImportLimits {
-    maxFileSizeBytes: number;
-    maxTopLevelEntries: number;
-    maxNestingDepth: number;
-    maxCollectionEntries: number;
-    maxStringLength: number;
-}
-
-/** Result of snapshot normalization before schema validation is applied. */
-interface SnapshotNormalizationResult {
-    normalized?: Record<string, unknown>;
-    errors: string[];
-}
-
-interface ConfigDefaultStateMetaEntry {
-    owner: "config" | "user";
-    valueHash: string;
-}
-
-interface ConfigDefaultStateMeta {
-    version: 1;
-    sourceHash: string;
-    entries: Record<string, ConfigDefaultStateMetaEntry>;
-}
-
-/** Returns whether the layer id refers to source or meta-data rather than a feature layer. */
-function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
-    return mapLayerNameOrLayerId.includes('/SourceData-') ||
-        mapLayerNameOrLayerId.includes('/Metadata-');
-}
-
-/** Rounds persisted coordinates so URLs remain stable and reasonably short. */
-function roundCoordinateStateValue(value: number): number {
-    if (!Number.isFinite(value)) {
-        return value;
-    }
-    return Math.round(value * COORDINATE_STATE_PRECISION) / COORDINATE_STATE_PRECISION;
-}
-
-/** Clamps persisted zoom-step settings to the supported deck interaction range. */
-export function clampMapZoomStep(value: number): number {
-    if (!Number.isFinite(value)) {
-        return DEFAULT_MAP_ZOOM_STEP;
-    }
-    return Math.min(MAX_MAP_ZOOM_STEP, Math.max(MIN_MAP_ZOOM_STEP, value));
-}
-
-/** Clamps the persisted minimum feature-navigation camera distance. */
-export function clampFeatureZoomClearanceMeters(value: number): number {
-    if (!Number.isFinite(value)) {
-        return DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS;
-    }
-    return Math.min(
-        MAX_FEATURE_ZOOM_CLEARANCE_METERS,
-        Math.max(MIN_FEATURE_ZOOM_CLEARANCE_METERS, value)
-    );
-}
-
-/** Produces a detached clone suitable for app-state snapshots and comparisons. */
-function cloneStateValue<T>(value: T): T {
-    if (value === null || typeof value !== 'object') {
-        return value;
-    }
-    if (value instanceof Date) {
-        return new Date(value.getTime()) as unknown as T;
-    }
-    if (Array.isArray(value)) {
-        return value.map(entry => cloneStateValue(entry)) as unknown as T;
-    }
-    const result: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-        result[key] = cloneStateValue(entry);
-    }
-    return result as T;
-}
-
-/** Serializes state values with deterministic key ordering. */
-function stableSerializeStateValue(value: unknown): string {
-    if (value === null) {
-        return "null";
-    }
-    if (value === undefined) {
-        return "undefined";
-    }
-    if (typeof value === "string") {
-        return JSON.stringify(value);
-    }
-    if (typeof value === "number" || typeof value === "boolean") {
-        return JSON.stringify(value);
-    }
-    if (Array.isArray(value)) {
-        return `[${value.map(entry => stableSerializeStateValue(entry)).join(",")}]`;
-    }
-    if (value && typeof value === "object") {
-        const objectValue = value as Record<string, unknown>;
-        const keys = Object.keys(objectValue).sort();
-        return `{${keys.map(key => `${JSON.stringify(key)}:${stableSerializeStateValue(objectValue[key])}`).join(",")}}`;
-    }
-    return JSON.stringify(value);
-}
-
-/** Computes a stable hash for a state value. */
-function hashStateValue(value: unknown): string {
-    const serialized = stableSerializeStateValue(value);
-    let hash = 0x811c9dc5;
-    for (let i = 0; i < serialized.length; i++) {
-        hash ^= serialized.charCodeAt(i);
-        hash = (hash * 0x01000193) >>> 0;
-    }
-    return hash.toString(16).padStart(8, "0");
-}
+type OwnerSlice = Exclude<keyof ViewerValues, "legacy" | "viewIds" | "viewEntityMap">;
 
 @Injectable({providedIn: 'root'})
 /**
@@ -492,30 +84,168 @@ function hashStateValue(value: unknown): string {
  */
 export class AppStateService implements OnDestroy {
 
+    private registrationClosed = false;
+    get registeredStateNames(): readonly string[] { return [...this.statePool.keys()]; }
+    sealRegistration(): void { this.registrationClosed = true; }
+
     private readonly statePool = new Map<string, AppState<unknown>>();
     readonly values = stateStore(this.statePool);
     readonly store = this.values.store;
 
-    /** Register a persisted codec against a typed, owner-authored SignalStore slice. */
-    register<S extends Exclude<keyof ViewerValues, "legacy">, K extends keyof ViewerValues[S]>(
+    /** Register a persisted codec against its owner's named SignalStore value. */
+    register<S extends OwnerSlice, K extends keyof ViewerValues[S]>(
         options: AppStateOptions<ViewerValues[S][K]>, slice: S, key: K
     ): AppState<ViewerValues[S][K]> {
-        if (this.isReady) throw new Error(`Late state registration: ${options.name}`);
-        const signals = this.store[slice] as Signal<ViewerValues[S]> & {
-            [P in keyof ViewerValues[S]]: Signal<ViewerValues[S][P]>
-        };
-        return new AppState(this.statePool, options, this.values.bind<ViewerValues[S][K]>(
-            state => state[slice][key],
-            (state, value) => ({[slice]: {...state[slice], [key]: value}}),
-            signals[key] as Signal<ViewerValues[S][K]>
-        ));
+        if (this.registrationClosed || this.isReady) throw new Error(`Late state registration: ${options.name}`);
+        const binding = this.bind(slice, key);
+        binding.write(options.defaultValue);
+        return new AppState(this.statePool, options, binding);
     }
 
+    /** Register a codec supplied by an owner when its persisted shape differs from its stored shape. */
+    registerCodec<T>(options: AppStateOptions<T>, binding: StateBinding<T>): AppState<T> {
+        if (this.registrationClosed || this.isReady) throw new Error(`Late state registration: ${options.name}`);
+        return new AppState(this.statePool, options, binding);
+    }
+
+    registerView<S extends OwnerSlice, K extends keyof ViewerValues[S]>(
+        options: AppStateOptions<ViewerValues[S][K] extends Record<string, infer T> ? T : never>, slice: S, key: K
+    ): MapViewState<ViewerValues[S][K] extends Record<string, infer T> ? T : never> {
+        if (this.registrationClosed || this.isReady) throw new Error(`Late state registration: ${options.name}`);
+        type Value = ViewerValues[S][K] extends Record<string, infer T> ? T : never;
+        const records = this.bind(slice, key) as unknown as StateBinding<Record<string, Value>>;
+        const ids = () => this.values.read(state => state.viewIds, this.store.viewIds).map(String);
+        records.write(Object.fromEntries(ids().map(id => [id, options.defaultValue])));
+        // Legacy arrays are projected only for codecs and positional UI adapters.
+        // The record and its native per-ID selectors are the authoritative value.
+        const binding: StateBinding<Value[]> = {
+            signal: computed(() => this.store.viewIds().map(id => records.signal()[id] ?? options.defaultValue)),
+            commits: records.commits,
+            read: () => ids().map((id, index) => records.read()[id]
+                ?? records.read()[String(this.store.viewIds()[index])] ?? options.defaultValue),
+            write: values => records.write(Object.fromEntries(ids().map((id, index) =>
+                [id, values[index] ?? options.defaultValue])))
+        };
+        this.beforeCommit(() => {
+            if (this.values.read(state => state.viewIds, this.store.viewIds) === this.store.viewIds()) return;
+            const currentIds = ids();
+            const values = records.read();
+            const previousIds = this.store.viewIds().map(String);
+            if (currentIds.length === Object.keys(values).length && currentIds.every(id => id in values)) return;
+            const sourceId = previousIds.at(-1);
+            const source = sourceId ? values[sourceId] ?? options.defaultValue : options.defaultValue;
+            records.write(Object.fromEntries(currentIds.map((id, index) =>
+                [id, values[id] ?? deepCopy(values[previousIds[index]] ?? source)])));
+        });
+        const state = new MapViewState<Value>(this.statePool, options, binding, {
+            idAt: index => ids()[index],
+            read: id => records.read()[id]
+                ?? records.read()[String(this.store.viewIds()[ids().indexOf(id)])] ?? options.defaultValue,
+            write: (id, value) => {
+                if (!ids().includes(id)) throw new Error(`View ${id} is unavailable`);
+                records.write({...records.read(), [id]: value});
+            },
+            select: id => computed(() => {
+                const slots = this.store[slice] as unknown as Record<string, Record<string, Signal<Value>>>;
+                return slots[String(key)][id]?.() ?? options.defaultValue;
+            })
+        });
+        this.mapViewStates.push(state as MapViewState<unknown>);
+        return state;
+    }
+
+    registerStyles(): StyleState {
+        if (this.registrationClosed || this.isReady) throw new Error("Late state registration: styleOptions");
+        type Option = string | number | boolean;
+        const records = this.bind("layers", "options");
+        records.write(new Map());
+        const ids = () => this.values.read(state => state.viewIds, this.store.viewIds).map(String);
+        const project = (values: Map<string, Record<string, Option>>, order: readonly string[], fallback: readonly string[] = []) =>
+            new Map([...values].map(([key, byId]) => [key, order.map((id, index) => byId[id] ?? byId[fallback[index]])]));
+        const binding: StateBinding<Map<string, Option[]>> = {
+            signal: computed(() => project(records.signal(), this.store.viewIds().map(String))),
+            commits: records.commits,
+            read: () => project(records.read(), ids(), this.store.viewIds().map(String)),
+            write: values => records.write(new Map([...values].map(([key, array]) =>
+                [key, Object.fromEntries(ids().map((id, index) => [id, array[index]]))])))
+        };
+        this.beforeCommit(() => {
+            if (this.values.read(state => state.viewIds, this.store.viewIds) === this.store.viewIds()) return;
+            const order = ids();
+            const values = records.read();
+            const sourceId = this.store.viewIds().at(-1);
+            const next = new Map(values);
+            let changed = false;
+            for (const [key, byId] of values) {
+                if (Object.keys(byId).length === order.length && order.every(id => id in byId)) continue;
+                changed = true;
+                next.set(key, Object.fromEntries(order.map((id, index) => [id,
+                    byId[id] ?? byId[this.store.viewIds()[index]] ?? (sourceId ? byId[sourceId] : false)])));
+            }
+            if (changed) records.write(next);
+        });
+        return new StyleState(this.statePool, binding);
+    }
+
+    private bind<S extends OwnerSlice, K extends keyof ViewerValues[S]>(slice: S, key: K): StateBinding<ViewerValues[S][K]> {
+        return this.values.bind<ViewerValues[S][K]>(
+            state => state[slice][key],
+            (state, value) => ({[slice]: {...state[slice], [key]: value}}),
+            () => {
+                const signals = this.store[slice] as unknown as {[P in keyof ViewerValues[S]]: Signal<ViewerValues[S][P]>};
+                return (signals[key] as Signal<ViewerValues[S][K]>)();
+            }
+        );
+    }
+
+    /** URL codecs share positional dictionaries; these accessors never own domain behavior. */
+    private persisted<T>(name: string): AppState<T> {
+        const state = this.statePool.get(name);
+        if (!state) throw new Error(`State owner was not registered: ${name}`);
+        return state as AppState<T>;
+    }
+    private perView<T>(name: string): MapViewState<T> {
+        const state = this.mapViewStates.find(state => state.appState.name === name);
+        if (!state) throw new Error(`View-state owner was not registered: ${name}`);
+        return state as MapViewState<T>;
+    }
+
+    private readonly urlNormalizers: Array<(params: Params, resetMissing: boolean) => Params> = [];
+    registerUrlNormalizer(normalize: (params: Params, resetMissing: boolean) => Params): void {
+        this.urlNormalizers.push(normalize);
+    }
+    private prepareUrl(params: Params, resetMissing = false): Params {
+        return this.urlNormalizers.reduce((value, normalize) => normalize(value, resetMissing), params);
+    }
+
+    readonly importingUrl = new Subject<Params>();
+    readonly importedStartupUrl = new Subject<Params>();
+    readonly importedSnapshot = new Subject<void>();
+    pushNextUrl(): void { this._replaceUrl = false; }
+
+    private get numViewsState(): AppState<number> { return this.persisted("numberOfViews"); }
+    private get focusedViewState(): AppState<number> { return this.persisted("focus"); }
+    private get cameraViewDataState(): MapViewState<CameraViewState> { return this.perView("cameraView"); }
+    private get layerNamesState(): AppState<Array<string>> { return this.persisted("layerNames"); }
+    private get layerVisibilityState(): MapViewState<Array<boolean>> { return this.perView("visibility"); }
+    private get layerZoomLevelState(): MapViewState<Array<number>> { return this.perView("zoomLevel"); }
+    private get layerAutoZoomLevelState(): MapViewState<Array<boolean>> { return this.perView("autoZoomLevel"); }
+    private get stylesState(): StyleState { return this.persisted("styleOptions") as StyleState; }
+    private get selectionState(): AppState<InspectionPanelModel<TileFeatureId>[]> { return this.persisted("selected"); }
+    private get featureSearchState(): AppState<FeatureSearchStateEntry[]> { return this.persisted("featureSearchState"); }
+    private get styles() { return this.stylesState.getValue(); }
+    private get selection() { return this.selectionState.getValue(); }
+    private get numViews() { return this.numViewsState.getValue(); }
+    private get layerNames() { return this.layerNamesState.getValue(); }
+    private get focusedView() { return this.focusedViewState.getValue(); }
+
     /** Prepare related owner writes and expose one coherent SignalStore commit. */
+    /** Owners prepare related invariants inside the same patch, including imported values. */
+    beforeCommit(prepare: () => void): () => void { return this.values.beforeCommit(prepare); }
+
     transaction<T>(operation: () => T): T { return this.values.transaction(operation); }
 
     private readonly mapViewStates: Array<MapViewState<unknown>> = [];
-    private readonly inspectionTreeExpansionStates = new Map<number, InspectionTreeExpansionState>();
     readonly ready = new BehaviorSubject<boolean>(false);
     /** Emits synchronously after an externally supplied state replacement has completed. */
     readonly stateApplied = new Subject<void>();
@@ -527,7 +257,6 @@ export class AppStateService implements OnDestroy {
     private isHydrating = false;
     private isSeedingConfigDefaults = false;
     private isSystemStateMutation = false;
-    private hasAuthoritativeUrlLayerList = false;
     private isReady = false;
     private subscriptionsSetup = false;
     private pendingUrlSyncStates = new Set<AppState<any>>;
@@ -552,684 +281,6 @@ export class AppStateService implements OnDestroy {
     };
     private configDefaultValueHashes = new Map<string, string>();
     private currentConfigDefaultKeys = new Set<string>();
-
-    // Base UI metrics
-    /** Returns the configured base font size. */
-    get baseFontSize(): number {
-        return parseFloat(window.getComputedStyle(document.documentElement).fontSize);
-    }
-    /** Returns the default inspection panel size. */
-    get defaultInspectionPanelSize(): [number, number] {
-        return [DEFAULT_EM_WIDTH, DEFAULT_EM_HEIGHT];
-    }
-
-    readonly numViewsState = this.createState<number>({
-        name: "numberOfViews",
-        defaultValue: 1,
-        schema: z.coerce.number().positive(),
-        urlParamName: "n"
-    });
-
-    readonly locationSearchResultLimitState = this.createState<number>({
-        name: 'locationSearchResultLimit',
-        defaultValue: DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,
-        schema: z.coerce.number().int().min(1).max(MAX_LOCATION_SEARCH_RESULT_LIMIT),
-        toStorage: (value: number) => clampLocationSearchResultLimit(value),
-        fromStorage: (payload: any): number => clampLocationSearchResultLimit(payload)
-    });
-
-    readonly markerState = this.createState<boolean>({
-        name: 'marker',
-        defaultValue: false,
-        schema: Boolish,
-        urlParamName: 'm',
-        urlIncludeInVisualizationOnly: false
-    });
-
-    readonly markedPositionState = this.createState<number[]>({
-        name: 'markedPosition',
-        defaultValue: [],
-        schema: z.array(z.coerce.number()).max(3),
-        toStorage: (value: number[]) => value.map(v => roundCoordinateStateValue(v)),
-        fromStorage: (payload: any): number[] => (payload as number[]).map(v => roundCoordinateStateValue(v)),
-        urlParamName: 'mp',
-        urlIncludeInVisualizationOnly: false
-    });
-
-    // 2~0f~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
-    // 1~0~sourcedata:map:layer:tile~address~...features...~size
-    // 0~1~...
-    readonly selectionState = this.createState<InspectionPanelModel<TileFeatureId>[]>({
-        name: 'selected',
-        defaultValue: [],
-        schema: z.array(z.string()),
-        toStorage: (value: InspectionPanelModel<TileFeatureId>[])=> {
-            return value.map(state => {
-                let s = `${state.id}~${state.locked ? 1 : 0}${state.focused ? 'f' : ''}~`;
-                if (state.sourceData) {
-                    s += `${state.sourceData.mapTileKey}~${state.sourceData.address ?? ''}~`
-                }
-                s += `${state.features.map(id => `${id.mapTileKey}~${id.featureId}`).join('~')}~`;
-                // Remove # character from hex color
-                const color = state.color.startsWith('#') ? state.color.slice(1) : state.color;
-                s += `${state.size[0]}:${state.size[1]}~${color}~${state.undocked ? 1 : 0}`;
-                return s;
-            });
-        },
-        fromStorage: (payload: any): InspectionPanelModel<TileFeatureId>[] => {
-            const result: InspectionPanelModel<TileFeatureId>[] = []
-            if (!payload || !payload.length) {
-                return result;
-            }
-            for (const panelStateStr of payload) {
-                const parts: string[] = panelStateStr.split('~');
-                if (parts.length < 7) {
-                    continue;
-                }
-                const id = Number(parts.shift()!);
-                const panelFlags = parts.shift()!;
-                const lockState = panelFlags.startsWith("1");
-                const focused = panelFlags.includes("f");
-                const undocked = parts.pop()! === "1";
-                const colorToken = parts.pop()!;
-                const color = colorToken.length > 0 && !colorToken.startsWith('#') ? `#${colorToken}` : colorToken;
-                const sizeToken = parts.pop()!;
-                const sizeParts = sizeToken.split(':');
-                const size = sizeParts.length === 2 ? [Number(sizeParts[0]), Number(sizeParts[1])] : this.defaultInspectionPanelSize;
-
-                const newPanelState: InspectionPanelModel<TileFeatureId> = {
-                    id: id,
-                    features: [],
-                    locked: lockState || !undocked,
-                    focused: focused || undefined,
-                    size: size as [number, number],
-                    color: color,
-                    undocked: undocked
-                };
-
-                // Check if the first MapTileKey is for SourceData.
-                if (parts[0].startsWith("SourceData:")) {
-                    const mapTileKey = parts.shift()!;
-                    newPanelState.sourceData = {
-                        mapTileKey: mapTileKey,
-                        address: parts[0].length ? BigInt(parts[0]) : undefined
-                    };
-                    // Shift the address.
-                    parts.shift();
-                }
-
-                // The remaining strings are MapTileKey-FeatureId-pairs.
-                while (parts.length >= 2) {
-                    newPanelState.features.push({
-                        mapTileKey: parts.shift()!,
-                        featureId: parts.shift()!
-                    })
-                }
-
-                result.push(newPanelState);
-            }
-            return result;
-        },
-        urlParamName: 'sel',
-        urlIncludeInVisualizationOnly: false
-    });
-
-    readonly focusedViewState = this.createState<number>({
-        name: 'focus',
-        defaultValue: 0,
-        schema: z.coerce.number().nonnegative(),
-        urlParamName: 'f',
-        urlIncludeInVisualizationOnly: false
-    });
-
-    readonly viewSyncState = this.createState<string[]>({
-        name: 'viewSync',
-        defaultValue: [],
-        schema: z.array(z.union([
-            z.literal(VIEW_SYNC_PROJECTION),
-            z.literal(VIEW_SYNC_POSITION),
-            z.literal(VIEW_SYNC_MOVEMENT),
-            z.literal(VIEW_SYNC_LAYERS)
-        ])),
-        urlParamName: 'sync',
-        urlIncludeInVisualizationOnly: false
-    });
-
-    readonly cameraViewDataState = this.createMapViewState<CameraViewState>({
-        name: 'cameraView',
-        defaultValue: {
-            destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
-            orientation: {heading: 0, pitch: -Math.PI / 2, roll: 0},
-            position: [0, 0, 0]
-        },
-        schema: z.object({
-            lon: z.coerce.number().optional(),
-            lat: z.coerce.number().optional(),
-            alt: z.coerce.number().optional(),
-            h: z.coerce.number().optional(),
-            p: z.coerce.number().optional(),
-            r: z.coerce.number().optional(),
-            px: z.coerce.number().optional(),
-            py: z.coerce.number().optional(),
-            pz: z.coerce.number().optional()
-        }),
-        toStorage: (value: any) => ({
-            lon: roundCoordinateStateValue(value.destination.lon),
-            lat: roundCoordinateStateValue(value.destination.lat),
-            alt: roundCoordinateStateValue(value.destination.alt),
-            h: roundCoordinateStateValue(value.orientation.heading),
-            p: roundCoordinateStateValue(value.orientation.pitch),
-            r: roundCoordinateStateValue(value.orientation.roll),
-            px: roundCoordinateStateValue(value.position?.[0] ?? 0),
-            py: roundCoordinateStateValue(value.position?.[1] ?? 0),
-            pz: roundCoordinateStateValue(value.position?.[2] ?? 0)
-        }),
-        fromStorage: (payload: any, currentValue: CameraViewState) => ({
-            destination: {
-                lon: roundCoordinateStateValue(payload.lon ?? currentValue.destination.lon),
-                lat: roundCoordinateStateValue(payload.lat ?? currentValue.destination.lat),
-                alt: roundCoordinateStateValue(payload.alt ?? currentValue.destination.alt),
-            },
-            orientation: {
-                heading: roundCoordinateStateValue(payload.h ?? currentValue.orientation.heading),
-                pitch: roundCoordinateStateValue(payload.p ?? currentValue.orientation.pitch),
-                roll: roundCoordinateStateValue(payload.r ?? currentValue.orientation.roll),
-            },
-            // Older URLs, local-storage entries, and snapshots have no map-centre offset.
-            position: [
-                roundCoordinateStateValue(payload.px ?? 0),
-                roundCoordinateStateValue(payload.py ?? 0),
-                roundCoordinateStateValue(payload.pz ?? 0)
-            ]
-        }),
-        urlFormEncode: true
-    });
-
-    readonly mode2dState = this.createMapViewState<boolean>({
-        name: 'mode2d',
-        defaultValue: false,
-        schema: Boolish,
-        urlParamName: 'm2d',
-        urlIncludeInVisualizationOnly: false
-    });
-
-    readonly deckAntialiasingEnabledState = this.createState<boolean>({
-        name: 'deckAntialiasingEnabled',
-        defaultValue: true,
-        schema: Boolish
-    });
-
-    readonly semanticCompositingEnabledState = this.createState<boolean>({
-        name: 'semanticCompositingEnabled',
-        defaultValue: true,
-        schema: Boolish
-    });
-
-    readonly contactShadingEnabledState = this.createState<boolean>({
-        name: 'contactShadingEnabled',
-        defaultValue: true,
-        schema: Boolish
-    });
-
-    readonly lod3TileThresholdState = this.createState<number>({
-        name: 'lod3TileThreshold',
-        defaultValue: DEFAULT_LOD3_TILE_THRESHOLD,
-        schema: z.coerce.number().int(),
-        toStorage: value => clampLod3TileThreshold(value, DEFAULT_LOD3_TILE_THRESHOLD),
-        fromStorage: value => clampLod3TileThreshold(value, DEFAULT_LOD3_TILE_THRESHOLD)
-    });
-
-    readonly tileSubsetRenderWorkerCountState = this.createState<number>({
-        name: 'tileSubsetRenderWorkerCount',
-        defaultValue: 0,
-        schema: z.coerce.number().int(),
-        toStorage: value => clampTileSubsetRenderWorkerCount(value),
-        fromStorage: value => clampTileSubsetRenderWorkerCount(value)
-    });
-
-    readonly tilePullCompressionEnabledState = this.createState<boolean>({
-        name: 'tilePullCompressionEnabled',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    private invalidConnectionPolicy = "";
-    readonly pointCloudDownsamplingEnabledState = this.createState<boolean>({
-        name: 'pointCloudDownsamplingEnabled', defaultValue: DEFAULT_POINT_CLOUD_POLICY.enabled, schema: Boolish
-    });
-    readonly pointCloudDetailPixelsState = this.createState<number>({
-        name: 'pointCloudDetailPixels', defaultValue: DEFAULT_POINT_CLOUD_POLICY.detailPixels,
-        schema: pointCloudDetailSchema
-    });
-    readonly pointCloudWorkingMemoryMiBState = this.createState<number>({
-        name: 'pointCloudWorkingMemoryMiB', defaultValue: DEFAULT_POINT_CLOUD_POLICY.workingMemoryMiB,
-        schema: pointCloudWorkingMemorySchema
-    });
-    readonly pointCloudGpuMemoryMiBState = this.createState<number>({
-        name: 'pointCloudGpuMemoryMiB', defaultValue: DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB,
-        schema: pointCloudGpuMemorySchema
-    });
-
-    /** Read the same validated policy for Preferences, rendering and worker admission. */
-    get pointCloudPolicy(): PointCloudPolicy {
-        return {
-            enabled: this.pointCloudDownsamplingEnabledState.getValue(),
-            detailPixels: this.pointCloudDetailPixelsState.getValue(),
-            workingMemoryMiB: this.pointCloudWorkingMemoryMiBState.getValue(),
-            gpuMemoryMiB: this.pointCloudGpuMemoryMiBState.getValue()
-        };
-    }
-
-    /** Validate the whole preference edit before changing any persisted field. */
-    setPointCloudPolicy(policy: PointCloudPolicy): void {
-        const parsed = pointCloudPolicySchema.parse(policy);
-        this.pointCloudDownsamplingEnabledState.next(parsed.enabled);
-        this.pointCloudDetailPixelsState.next(parsed.detailPixels);
-        this.pointCloudWorkingMemoryMiBState.next(parsed.workingMemoryMiB);
-        this.pointCloudGpuMemoryMiBState.next(parsed.gpuMemoryMiB);
-    }
-
-    readonly connectionRetryEnabledState = this.createState<boolean>({
-        name: 'connectionRetryEnabled', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.enabled, schema: Boolish
-    });
-    readonly connectionRetryInitialDelayMsState = this.createState<number>({
-        name: 'connectionRetryInitialDelayMs', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.initialDelayMs,
-        schema: retryDelaySchema
-    });
-    readonly connectionRetryBackoffMultiplierState = this.createState<number>({
-        name: 'connectionRetryBackoffMultiplier', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.backoffMultiplier,
-        schema: retryMultiplierSchema
-    });
-    readonly connectionRetryMaxDelayMsState = this.createState<number>({
-        name: 'connectionRetryMaxDelayMs', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.maxDelayMs,
-        schema: retryDelaySchema
-    });
-
-    /** Combines validated slots; inconsistent imported bounds fall back without disabling an explicit opt-out. */
-    get connectionRetryPolicy(): ConnectionRetryPolicy {
-        const policy = {
-            enabled: this.connectionRetryEnabledState.getValue(),
-            initialDelayMs: this.connectionRetryInitialDelayMsState.getValue(),
-            backoffMultiplier: this.connectionRetryBackoffMultiplierState.getValue(),
-            maxDelayMs: this.connectionRetryMaxDelayMsState.getValue()
-        };
-        const result = connectionRetryPolicySchema.safeParse(policy);
-        const invalid = result.success ? "" : JSON.stringify(policy);
-        if (invalid && invalid !== this.invalidConnectionPolicy) {
-            console.warn("Ignoring inconsistent connection retry settings; using default timing.");
-        }
-        this.invalidConnectionPolicy = invalid;
-        return result.success ? result.data : {...DEFAULT_CONNECTION_RETRY_POLICY, enabled: policy.enabled};
-    }
-
-    /** Validate the complete preference edit before publishing any persisted values. */
-    setConnectionRetryPolicy(policy: ConnectionRetryPolicy): void {
-        const parsed = connectionRetryPolicySchema.parse(policy);
-        this.connectionRetryEnabledState.next(parsed.enabled);
-        this.connectionRetryInitialDelayMsState.next(parsed.initialDelayMs);
-        this.connectionRetryBackoffMultiplierState.next(parsed.backoffMultiplier);
-        this.connectionRetryMaxDelayMsState.next(parsed.maxDelayMs);
-    }
-
-    readonly mapZoomStepState = this.createState<number>({
-        name: 'mapZoomStep',
-        defaultValue: DEFAULT_MAP_ZOOM_STEP,
-        schema: z.coerce.number(),
-        fromStorage: value => clampMapZoomStep(Number(value))
-    });
-
-    readonly featureZoomClearanceMetersState = this.createState<number>({
-        name: 'featureZoomClearanceMeters',
-        defaultValue: DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS,
-        schema: z.coerce.number(),
-        fromStorage: value => clampFeatureZoomClearanceMeters(Number(value))
-    });
-
-    readonly layerSyncOptionsState = this.createMapViewState<boolean>({
-        name: 'layerSyncOptions',
-        defaultValue: false,
-        schema: Boolish,
-        urlIncludeInVisualizationOnly: false
-    });
-
-    readonly backgroundState = this.createMapViewState<BackgroundLayerViewState>({
-        name: 'background',
-        defaultValue: {
-            layerId: DEFAULT_BACKGROUND_LAYER_ID,
-            opacity: DEFAULT_BACKGROUND_OPACITY,
-        },
-        schema: z.string(),
-        toStorage: (value: BackgroundLayerViewState) => `${encodeURIComponent(value.layerId ?? '')}~${clampBackgroundOpacity(value.opacity)}`,
-        fromStorage: (payload: any, currentValue: BackgroundLayerViewState): BackgroundLayerViewState => {
-            const parts = String(payload).split('~');
-            const layerId = parts[0] ? decodeURIComponent(parts[0]) : null;
-            const opacity = parts[1] === undefined ? currentValue.opacity : clampBackgroundOpacity(Number(parts[1]));
-            return {layerId, opacity};
-        },
-        urlParamName: 'bg'
-    });
-
-    readonly layerNamesState = this.createState<Array<string>>({
-        name: "layerNames",
-        defaultValue: [],
-        schema: z.array(z.string()),
-        urlParamName: 'l'
-    });
-
-    readonly layerVisibilityState = this.createMapViewState<Array<boolean>>({
-        name: "visibility",
-        defaultValue: [],
-        schema: z.array(Boolish),
-        urlParamName: 'v'
-    });
-
-    readonly viewTileBordersState = this.createMapViewState<boolean>({
-        name: "tileBorders",
-        defaultValue: true,
-        schema: Boolish,
-        urlParamName: 'tb'
-    });
-
-    readonly viewTileGridModeState = this.createMapViewState<TileGridMode>({
-        name: "tileGridMode",
-        defaultValue: "nds",
-        schema: z.enum(["xyz", "nds"]),
-        urlParamName: 'tgm'
-    });
-
-    readonly viewTileGridLevelState = this.createMapViewState<number>({
-        name: "tileGridLevel",
-        defaultValue: DEFAULT_TILE_GRID_LEVEL,
-        schema: z.coerce.number().int().min(0).max(22),
-        urlParamName: "tgl"
-    });
-
-    readonly viewTileGridAutoLevelState = this.createMapViewState<boolean>({
-        name: "tileGridAutoLevel",
-        defaultValue: false,
-        schema: Boolish,
-        urlParamName: "tga"
-    });
-
-    readonly viewTileGridColorState = this.createMapViewState<string>({
-        name: "tileGridColor",
-        defaultValue: DEFAULT_TILE_GRID_COLOR,
-        schema: z.string(),
-        toStorage: (value: string) => normalizeTileGridColor(value),
-        fromStorage: (payload: unknown) => normalizeTileGridColor(payload),
-        urlParamName: "tgc"
-    });
-
-    readonly viewTileGridOpacityState = this.createMapViewState<number>({
-        name: "tileGridOpacity",
-        defaultValue: DEFAULT_TILE_GRID_OPACITY,
-        schema: z.coerce.number().min(0).max(100),
-        toStorage: (value: number) => clampTileGridOpacity(value),
-        fromStorage: (payload: unknown) => clampTileGridOpacity(payload),
-        urlParamName: "tgo"
-    });
-
-    readonly layerZoomLevelState = this.createMapViewState<Array<number>>({
-        name: "zoomLevel",
-        defaultValue: [],
-        schema: z.array(z.number().min(0).max(15)),
-        urlParamName: 'z'
-    });
-
-    readonly layerAutoZoomLevelState = this.createMapViewState<Array<boolean>>({
-        name: "autoZoomLevel",
-        defaultValue: [],
-        schema: z.array(Boolish),
-        urlParamName: 'az'
-    });
-
-    readonly stylesState = new StyleState(this.statePool);
-
-    readonly layerPresetSelectionState = this.createMapViewState<LayerPresetSelections>({
-        name: "stylePresetSelection",
-        defaultValue: {},
-        schema: z.record(z.string(), z.record(z.string(), STORED_LAYER_PRESET_REF_SCHEMA)),
-        snapshotPersist: false
-    });
-
-    readonly mapPresetSelectionState = this.createMapViewState<MapPresetSelections>({
-        name: "mapPresetSelection",
-        defaultValue: {},
-        schema: z.record(z.string(), z.string()),
-        snapshotPersist: false
-    });
-
-    readonly styleVisibilityState = this.createState<Record<string, boolean>>({
-        name: 'styleVisiblity',
-        schema: z.record(z.string(), z.coerce.boolean()),
-        defaultValue: {}
-    });
-
-    readonly tilesLoadLimitState = this.createState<number>({
-        name: 'tilesLoadLimit',
-        defaultValue: MAX_NUM_TILES_TO_LOAD,
-        schema: z.coerce.number().nonnegative(),
-        urlParamName: 'tll'
-    });
-
-    readonly enabledCoordsTileIdsState = this.createState<string[]>({
-        name: 'enabledCoordsTileIds',
-        defaultValue: ["WGS84"],
-        schema: z.array(z.string())
-    });
-
-    readonly coordinatesEnabledState = this.createState<boolean>({
-        name: "coordinatesEnabled",
-        defaultValue: true,
-        schema: Boolish,
-        snapshotPersist: false,
-        configDefault: true
-    });
-
-    readonly coordinatesLegalTermsAcceptedState = this.createState<boolean>({
-        name: "coordinatesLegalTermsAccepted",
-        defaultValue: false,
-        schema: Boolish,
-        snapshotPersist: false
-    });
-
-    readonly featureSearchGroupingState = this.createState<number[]>({
-        name: 'featureSearchGrouping',
-        defaultValue: [...DEFAULT_FEATURE_SEARCH_GROUPING],
-        schema: z.array(z.coerce.number()),
-        toStorage: (value: number[]) => normalizeFeatureSearchGrouping(value),
-        fromStorage: (payload: any): number[] => normalizeFeatureSearchGrouping(payload),
-        snapshotPersist: false
-    });
-
-    readonly featureSearchState = this.createState<FeatureSearchStateEntry[]>({
-        name: 'featureSearchState',
-        defaultValue: [],
-        schema: FeatureSearchStateSchema,
-        toStorage: (value: FeatureSearchStateEntry[]) => serializeFeatureSearchState(value),
-        fromStorage: (payload: any): FeatureSearchStateEntry[] => normalizeFeatureSearchState(payload),
-        snapshotPersist: false
-    });
-
-    readonly mapsOpenState = this.createState<boolean>({
-        name: 'mapsOpenState',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly styleEditorTargetState = this.createState<string | null>({
-        name: 'styleEditorTarget',
-        defaultValue: null,
-        schema: z.string().nullable()
-    });
-
-    readonly dockOpenState = this.createState<boolean>({
-        name: 'dockOpenState',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    /** Local layout preferences; deliberately absent from shareable map URLs. */
-    readonly dockWidthState = this.createState<number | null>({
-        name: 'dockWidth', defaultValue: null, schema: z.number().min(0).max(32768).nullable()
-    });
-    readonly viewPanelSizesState = this.createState<number[]>({
-        name: 'viewPanelSizes', defaultValue: [], schema: z.array(z.number().min(0).max(100)).max(2)
-    });
-
-    readonly dockActiveTabState = this.createState<string>({
-        name: 'dockActiveTabState',
-        defaultValue: INSPECTION_DOCK_TAB_ID,
-        schema: z.string()
-    });
-
-    readonly dockAutoCollapse = this.createState<boolean>({
-        name: 'dockAutoCollapse',
-        defaultValue: true,
-        schema: Boolish
-    });
-
-    readonly distributionVersions = this.createState<Versions[]>({
-        name: 'distributionVersions',
-        defaultValue: [],
-        schema: z.array(z.record(z.string(), z.string()))
-    });
-
-    readonly erdblickVersion = this.createState<string>({
-        name: 'erdblickVersion',
-        defaultValue: "",
-        schema: z.string()
-    });
-
-    readonly inspectionsLimitState = this.createState<number>({
-        name: 'inspectionsLimitState',
-        defaultValue: Math.floor(MAX_SIMULTANEOUS_INSPECTIONS / 2),
-        schema: z.coerce.number().int().min(1).max(MAX_SIMULTANEOUS_INSPECTIONS)
-    });
-
-    readonly drillPickRadiusState = this.createState<number>({
-        name: 'drillPickRadius',
-        defaultValue: DEFAULT_DRILL_PICK_RADIUS,
-        schema: z.coerce.number().int().min(MIN_DRILL_PICK_RADIUS).max(MAX_DRILL_PICK_RADIUS)
-    });
-
-    readonly inspectionTreeExpandByDefaultState = this.createState<boolean>({
-        name: 'inspectionTreeExpandByDefault',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly sourceDataInspectionDefaultColumnsState = this.createState<string[]>({
-        name: 'sourceDataInspectionDefaultColumns',
-        defaultValue: [],
-        schema: z.array(z.enum(["displayAddress", "schemaType"]))
-    });
-
-    readonly inspectionTreeHiddenColumnsState = this.createState<Record<string, string[]>>({
-        name: 'inspectionTreeHiddenColumns',
-        defaultValue: {},
-        schema: z.record(z.string(), z.array(z.string())),
-        snapshotPersist: false
-    });
-
-    readonly inspectionValueVaryColorsState = this.createState<boolean>({
-        name: 'inspectionValueVaryColors',
-        defaultValue: true,
-        schema: Boolish
-    });
-
-    readonly inspectionValueVaryOutlinesState = this.createState<boolean>({
-        name: 'inspectionValueVaryOutlines',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly inspectionValueVaryStripingState = this.createState<boolean>({
-        name: 'inspectionValueVaryStriping',
-        defaultValue: false,
-        schema: Boolish
-    });
-
-    readonly hoverLabelsEnabledState = this.createState<boolean>({
-        name: 'hoverLabelsEnabled',
-        defaultValue: true,
-        schema: Boolish
-    });
-
-    readonly hoverLabelFieldsState = this.createState<HoverLabelFieldConfig[]>({
-        name: 'hoverLabelFields',
-        defaultValue: DEFAULT_HOVER_LABEL_FIELDS.map(field => ({...field})),
-        schema: z.array(z.object({
-            expression: z.string(),
-            customExpression: Boolish,
-            displayKey: z.string().optional()
-        }))
-    });
-
-    readonly inspectionComparisonState = this.createState<InspectionComparisonModel | null>({
-        name: 'inspectionComparisonState',
-        defaultValue: null,
-        schema: z.union([
-            z.null(),
-            z.object({
-                base: z.object({
-                    panelId: z.coerce.number(),
-                    mapId: z.string().optional().default(''),
-                    label: z.string(),
-                    featureIds: z.array(z.object({
-                        featureId: z.string(),
-                        mapTileKey: z.string()
-                    }))
-                }),
-                others: z.array(z.object({
-                    panelId: z.coerce.number(),
-                    mapId: z.string().optional().default(''),
-                    label: z.string(),
-                    featureIds: z.array(z.object({
-                        featureId: z.string(),
-                        mapTileKey: z.string()
-                    }))
-                }))
-            })
-        ])
-    });
-
-    readonly dialogLayoutsState = this.createState<Record<string, AppDialogLayout | InspectionDialogLayout>>({
-        name: 'dialogLayouts',
-        defaultValue: {},
-        schema: z.record(z.string(), z.object({
-            position: z.object({
-                left: z.coerce.number(),
-                top: z.coerce.number()
-            }),
-            size: z.object({
-                width: z.coerce.number().positive(),
-                height: z.coerce.number().positive()
-            }),
-            open: Boolish.optional(),
-            panelId: z.coerce.number().optional(),
-            slot: z.coerce.number().optional(),
-            docked: Boolish.optional(),
-            dockTab: z.string().optional(),
-            dockOrder: z.coerce.number().optional(),
-            panelSize: z.object({
-                width: z.coerce.number().positive(),
-                height: z.coerce.number().positive()
-            }).optional(),
-            panelCollapsed: Boolish.optional(),
-            panelExpanded: Boolish.optional()
-        }))
-    });
-
-    private readonly pendingOpenDialogs = new Set<string>();
-
-    /** Immutable view-sync option descriptors consumed by the split-view UI. */
-    readonly syncOptions: readonly ViewSyncOptionDescriptor[] = [
-        {name: "Position", code: VIEW_SYNC_POSITION, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
-        {name: "Movement", code: VIEW_SYNC_MOVEMENT, icon: "drag_pan", tooltip: "Sync camera movement delta across views"},
-        {name: "Projection", code: VIEW_SYNC_PROJECTION, icon: "3d_rotation", tooltip: "Sync projection mode across views"},
-        {name: "Layers", code: VIEW_SYNC_LAYERS, icon: "layers", tooltip: "Sync layer activation/style/background settings across views"},
-    ];
 
     /** Registers all persisted state slots and wires startup hydration/persistence flow. */
     constructor(private readonly router: Router,
@@ -1256,17 +307,11 @@ export class AppStateService implements OnDestroy {
                 if (!this.isReady) {
                     return;
                 }
-                this.applyHydratedUrlState(this.currentBrowserQueryParams());
+                try { this.applyHydratedUrlState(this.currentBrowserQueryParams()); }
+                catch (error) { this.infoMessageService.showError(`Could not import view link: ${String(error)}`); }
             }
         });
 
-        this.selectionState.subscribe(panels => {
-            const panelIds = panels.map(panel => panel.id);
-            this.pruneInspectionDialogLayout(panelIds);
-            this.pruneInspectionTreeExpansionStates(panelIds);
-            this.pruneInspectionTreeHiddenColumns(panelIds);
-            this.sanitizeFocusedInspectionPanel(panels);
-        });
     }
 
     /** Hydrates persisted state once config defaults are known and marks the service ready. */
@@ -1277,11 +322,16 @@ export class AppStateService implements OnDestroy {
         if (!coreLib) {
             return;
         }
+        this.sealRegistration();
         this.setupStateSubscriptions();
         const queryParams = this.currentBrowserQueryParams();
         this.hydrateFromStorage();
-        this.hydrateFromUrl(queryParams);
-        this.migrateLegacyOsmState(queryParams);
+        try {
+            this.hydrateFromUrl(this.prepareUrl(queryParams));
+            this.importedStartupUrl.next(queryParams);
+        } catch (error) {
+            this.infoMessageService.showError(`Could not import view link: ${String(error)}`);
+        }
         this.isHydrating = false;
         // Keep inbound links stable during passive startup hydration.
         this.skipNextUrlSync = true;
@@ -1299,16 +349,18 @@ export class AppStateService implements OnDestroy {
             throw new Error("URL state cannot be replaced before AppStateService is ready.");
         }
 
+        const prepared = this.prepareUrl(params, resetMissing);
         this.cancelPendingStateSync();
         await this.router.navigate([], {
             queryParams: params,
             queryParamsHandling: "replace",
             replaceUrl: true
         });
-        if (resetMissing) {
-            this.withHydration(() => this.applyNormalizedSnapshot({}, true));
-        }
-        this.applyHydratedUrlState(params);
+        this.withHydration(() => {
+            if (resetMissing) this.applyNormalizedSnapshot({}, true);
+            this.hydrateFromUrl(prepared);
+        });
+        this.stateApplied.next();
     }
 
     /**
@@ -1335,25 +387,8 @@ export class AppStateService implements OnDestroy {
     }
 
     /** Flushes all state slots to storage and URL after a batch update. */
-    private syncAllStates() {
+    syncAllStates() {
         this.statePool.values().forEach(state => this.onStateChanged(state, true));
-    }
-
-    /** Copies synchronized view properties from the focused view to the others. */
-    syncViews(): void {
-        if (this.numViews < 2) {
-            return;
-        }
-        if (this.viewSync.includes(VIEW_SYNC_POSITION)) {
-            const camState = this.cameraViewDataState.getValue(this.focusedView);
-            this.setView(this.focusedView,
-                Cartographic.fromDegrees(camState.destination.lon, camState.destination.lat, camState.destination.alt),
-                camState.orientation,
-                camState.position);
-        }
-        if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
-            this.setProjectionMode(this.focusedView, this.mode2dState.getValue(this.focusedView));
-        }
     }
 
     /** Cancels pending persistence work when the service is destroyed. */
@@ -1371,90 +406,6 @@ export class AppStateService implements OnDestroy {
         const currentValue = this._replaceUrl;
         this._replaceUrl = true;
         return currentValue;
-    }
-
-    /** Creates an application state entry and registers it for persistence. */
-    private createState<T>(options: AppStateOptions<T>): AppState<T> {
-        return new AppState<T>(this.statePool, options);
-    }
-
-    /** Creates a state entry scoped to each map view. */
-    private createMapViewState<T>(options: AppStateOptions<T>): MapViewState<T> {
-        const state = new MapViewState<T>(this.statePool, options);
-        this.mapViewStates.push(state as MapViewState<unknown>);
-        return state;
-    }
-
-    /** Seeds newly created views with defaults copied from the first view. */
-    private seedAdditionalViews(previousViewCount: number, nextViewCount: number): void {
-        if (nextViewCount <= previousViewCount) {
-            return;
-        }
-
-        for (let targetViewIndex = previousViewCount; targetViewIndex < nextViewCount; targetViewIndex++) {
-            const sourceViewIndex = Math.max(0, targetViewIndex - 1);
-            for (const state of this.mapViewStates) {
-                state.next(targetViewIndex, cloneStateValue(state.getValue(sourceViewIndex)));
-            }
-        }
-
-        if (this.styles.size === 0) {
-            return;
-        }
-
-        const nextStyles = new Map<string, (string|number|boolean)[]>();
-        for (const [key, values] of this.styles.entries()) {
-            const nextValues = [...values];
-            for (let targetViewIndex = previousViewCount; targetViewIndex < nextViewCount; targetViewIndex++) {
-                const sourceViewIndex = Math.max(0, targetViewIndex - 1);
-                const sourceValue = nextValues[sourceViewIndex];
-                if (sourceValue === undefined) {
-                    continue;
-                }
-                nextValues[targetViewIndex] = cloneStateValue(sourceValue);
-            }
-            nextStyles.set(key, nextValues);
-        }
-        this.stylesState.next(nextStyles);
-    }
-
-    /** Compacts surviving views after their renderers have stopped publishing state. */
-    retainViews(viewIndices: readonly number[], cameras: ReadonlyMap<number, CameraViewState>): void {
-        // Read every slot before notifying synchronous subscribers. Preset selections
-        // belong here too, even though they are excluded from whole-app snapshots.
-        const states = this.mapViewStates.map(state => ({
-            state,
-            values: viewIndices.map(index => cloneStateValue(
-                state === this.cameraViewDataState
-                    ? cameras.get(index) ?? state.getValue(index)
-                    : state.getValue(index)
-            ))
-        }));
-        const styles = new Map<string, (string | number | boolean)[]>();
-        for (const [key, values] of this.styles) {
-            const retained: (string | number | boolean)[] = [];
-            viewIndices.forEach((index, target) => {
-                if (values[index] !== undefined) {
-                    retained[target] = values[index];
-                }
-            });
-            styles.set(key, retained);
-        }
-        const searches = this.featureSearchState.getValue().map(search => ({
-            ...search,
-            selectedViewIndices: search.selectedViewIndices
-                .map(index => viewIndices.indexOf(index))
-                .filter(index => index >= 0)
-        }));
-        const focusedView = Math.max(0, viewIndices.indexOf(this.focusedView));
-        for (const {state, values} of states) {
-            state.appState.next(values);
-        }
-        this.stylesState.next(styles);
-        this.featureSearchState.next(searches);
-        this.focusedViewState.next(focusedView);
-        // Count subscribers rebuild the tree and components from the compacted state.
-        this.numViewsState.next(viewIndices.length);
     }
 
     /** Subscribes to all persisted state slots so storage and URL remain in sync. */
@@ -1866,6 +817,7 @@ export class AppStateService implements OnDestroy {
     /** Restores URL-backed state slots from the current route query params. */
     private hydrateFromUrl(params: Params): void {
         this.withHydration(() => {
+            this.importingUrl.next(params);
             if (Object.keys(params).length === 0) {
                 return;
             }
@@ -1884,7 +836,7 @@ export class AppStateService implements OnDestroy {
     /** Applies one runtime URL state and notifies derived projections after hydration. */
     private applyHydratedUrlState(params: Params): void {
         this.cancelPendingStateSync();
-        this.hydrateFromUrl(params);
+        this.hydrateFromUrl(this.prepareUrl(params));
         this.stateApplied.next();
     }
 
@@ -1918,7 +870,7 @@ export class AppStateService implements OnDestroy {
     private hydrateFromUrlV2(params: Params): void {
         const mapParam = firstParamValue(params, "map");
         const layerParam = firstParamValue(params, "l");
-        this.hasAuthoritativeUrlLayerList = layerParam !== undefined;
+
         const decodedLayerNames = decodeLayerNamesV2(mapParam, layerParam);
         if (decodedLayerNames.length) {
             this.layerNamesState.next(decodedLayerNames);
@@ -2010,7 +962,7 @@ export class AppStateService implements OnDestroy {
         const previous = this.isHydrating;
         this.isHydrating = true;
         try {
-            callback();
+            this.transaction(callback);
         } finally {
             this.isHydrating = previous;
         }
@@ -2146,7 +1098,7 @@ export class AppStateService implements OnDestroy {
         if (normalizedResult.errors.length) {
             return normalizedResult.errors;
         }
-        this.applyNormalizedSnapshot(normalizedResult.normalized!, false);
+        this.transaction(() => this.applyNormalizedSnapshot(normalizedResult.normalized!, false));
         return [];
     }
 
@@ -2174,7 +1126,7 @@ export class AppStateService implements OnDestroy {
             this.deserializeStateSafely(this.stylesState, styleOptionEntries);
             this.stylesState.next(new Map(this.stylesState.getValue()));
         }
-        this.pendingOpenDialogs.clear();
+        this.importedSnapshot.next();
     }
 
     /** Normalizes legacy snapshot shapes before schema validation is applied. */
@@ -2387,11 +1339,11 @@ export class AppStateService implements OnDestroy {
     }
 
     /** Runs a state mutation without marking user-owned metadata. */
-    private withSystemStateMutation(action: () => void): void {
+    withSystemStateMutation(action: () => void): void {
         const previous = this.isSystemStateMutation;
         this.isSystemStateMutation = true;
         try {
-            action();
+            this.transaction(action);
         } finally {
             this.isSystemStateMutation = previous;
         }
@@ -2447,1393 +1399,7 @@ export class AppStateService implements OnDestroy {
             return undefined;
         }
         return value;
-    }
-
-    // -----------------
-    // Public API below
-    // -----------------
-
-    get numViews() {return this.numViewsState.getValue();}
-    set numViews(val: number) {
-        const previousViewCount = this.numViewsState.getValue();
-        if (val === previousViewCount) {
-            return;
-        }
-        this.seedAdditionalViews(previousViewCount, val);
-        this.numViewsState.next(val);
-    };
-    get deckAntialiasingEnabled() {return this.deckAntialiasingEnabledState.getValue();}
-    set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
-    get semanticCompositingEnabled() {return this.semanticCompositingEnabledState.getValue();}
-    set semanticCompositingEnabled(val: boolean) {this.semanticCompositingEnabledState.next(!!val);}
-    get contactShadingEnabled() {return this.contactShadingEnabledState.getValue();}
-    set contactShadingEnabled(val: boolean) {this.contactShadingEnabledState.next(!!val);}
-    get lod3TileThreshold() {return this.lod3TileThresholdState.getValue();}
-    set lod3TileThreshold(val: number) {
-        this.lod3TileThresholdState.next(clampLod3TileThreshold(val, DEFAULT_LOD3_TILE_THRESHOLD));
-    }
-    get tileSubsetRenderWorkerCount() {
-        return this.tileSubsetRenderWorkerCountState.getValue();
-    }
-    set tileSubsetRenderWorkerCount(val: number) {
-        this.tileSubsetRenderWorkerCountState.next(
-            clampTileSubsetRenderWorkerCount(val)
-        );
-    }
-    get tilePullCompressionEnabled() {return this.tilePullCompressionEnabledState.getValue();}
-    set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);};
-    get mapZoomStep() {return this.mapZoomStepState.getValue();}
-    set mapZoomStep(val: number) {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));};
-    get featureZoomClearanceMeters() {
-        return this.featureZoomClearanceMetersState.getValue();
-    }
-    set featureZoomClearanceMeters(val: number) {
-        this.featureZoomClearanceMetersState.next(
-            clampFeatureZoomClearanceMeters(Number(val))
-        );
-    }
-    get locationSearchResultLimit() {return this.locationSearchResultLimitState.getValue();}
-    set locationSearchResultLimit(val: number) {this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val));};
-    get marker() {return this.markerState.getValue();}
-    set marker(val: boolean) {this.markerState.next(val);};
-    get markedPosition() {return this.markedPositionState.getValue();}
-    set markedPosition(val: number[]) {this.markedPositionState.next(val.map(v => roundCoordinateStateValue(v)));};
-    get selection() {return this.selectionState.getValue();}
-    set selection(val: InspectionPanelModel<TileFeatureId>[]) {this.selectionState.next(val);};
-    get focusedView() {return this.focusedViewState.getValue();}
-    set focusedView(val: number) {this.focusedViewState.next(val);};
-    get focusedInspectionPanelId() {
-        return this.selectionState.getValue().find(panel => panel.focused)?.id;
-    }
-    set focusedInspectionPanelId(val: number | undefined) {
-        this.setFocusedInspectionPanel(val);
-    };
-    get layerNames() {return this.layerNamesState.getValue();}
-    set layerNames(val: Array<string>) {this.layerNamesState.next(val);};
-    get styles() {return this.stylesState.getValue();}
-    get styleVisibility() {return this.styleVisibilityState.getValue();}
-    set styleVisibility(val: Record<string, boolean>) {this.styleVisibilityState.next(val);};
-    get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}
-    set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);};
-    get inspectionsLimit() {return this.inspectionsLimitState.getValue();}
-    set inspectionsLimit(val: number) {
-        const numeric = Number(val);
-        if (!Number.isFinite(numeric)) {
-            return;
-        }
-        const normalized = Math.min(MAX_SIMULTANEOUS_INSPECTIONS, Math.max(1, Math.trunc(numeric)));
-        this.inspectionsLimitState.next(normalized);
-    };
-    get drillPickRadius() {return this.drillPickRadiusState.getValue();}
-    set drillPickRadius(val: number) {
-        const numeric = Number(val);
-        if (!Number.isFinite(numeric)) {
-            return;
-        }
-        const normalized = Math.min(MAX_DRILL_PICK_RADIUS, Math.max(MIN_DRILL_PICK_RADIUS, Math.trunc(numeric)));
-        this.drillPickRadiusState.next(normalized);
-    };
-    get inspectionComparison() {return this.inspectionComparisonState.getValue();}
-    set inspectionComparison(val: InspectionComparisonModel | null) {this.inspectionComparisonState.next(val);}
-    get inspectionTreeExpandByDefault() {return this.inspectionTreeExpandByDefaultState.getValue();}
-    set inspectionTreeExpandByDefault(val: boolean) {this.inspectionTreeExpandByDefaultState.next(!!val);}
-    get sourceDataInspectionDefaultColumns() {
-        return this.sourceDataInspectionDefaultColumnsState.getValue();
-    }
-    set sourceDataInspectionDefaultColumns(val: string[]) {
-        const allowed = new Set(["displayAddress", "schemaType"]);
-        this.sourceDataInspectionDefaultColumnsState.next(
-            [...new Set(val.filter(column => allowed.has(column)))]);
-    }
-    get inspectionValueVaryColors() {return this.inspectionValueVaryColorsState.getValue();}
-    set inspectionValueVaryColors(val: boolean) {this.inspectionValueVaryColorsState.next(!!val);}
-    get inspectionValueVaryOutlines() {return this.inspectionValueVaryOutlinesState.getValue();}
-    set inspectionValueVaryOutlines(val: boolean) {this.inspectionValueVaryOutlinesState.next(!!val);}
-    get inspectionValueVaryStriping() {return this.inspectionValueVaryStripingState.getValue();}
-    set inspectionValueVaryStriping(val: boolean) {this.inspectionValueVaryStripingState.next(!!val);}
-    get hoverLabelsEnabled() {return this.hoverLabelsEnabledState.getValue();}
-    set hoverLabelsEnabled(val: boolean) {this.hoverLabelsEnabledState.next(!!val);}
-    get hoverLabelFields() {return this.hoverLabelFieldsState.getValue();}
-    set hoverLabelFields(val: HoverLabelFieldConfig[]) {
-        this.hoverLabelFieldsState.next(val.map(field => ({...field})));
-    }
-    get isDockOpen() {return this.dockOpenState.getValue();}
-    set isDockOpen(val: boolean) {this.dockOpenState.next(val);};
-    get dockActiveTab() {return this.dockActiveTabState.getValue();}
-    set dockActiveTab(val: string) {this.dockActiveTabState.next(val || INSPECTION_DOCK_TAB_ID);};
-    get isDockAutoCollapsible() {return this.dockAutoCollapse.getValue();}
-    set isDockAutoCollapsible(val: boolean) {this.dockAutoCollapse.next(val);};
-    get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
-    set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);};
-    get styleEditorTargetId() {return this.styleEditorTargetState.getValue();}
-    set styleEditorTargetId(val: string | null) {this.styleEditorTargetState.next(val);};
-    get featureSearchGrouping() {return this.featureSearchGroupingState.getValue();}
-    set featureSearchGrouping(val: number[]) {this.featureSearchGroupingState.next(normalizeFeatureSearchGrouping(val));}
-    get featureSearches() {return this.featureSearchState.getValue();}
-    set featureSearches(val: FeatureSearchStateEntry[]) {this.featureSearchState.next(normalizeFeatureSearchState(val));}
-    get viewSync() {return this.viewSyncState.getValue();}
-    set viewSync(val: string[]) {
-        const previous = new Set(this.viewSyncState.getValue());
-        const uniqueValues = Array.from(new Set(val));
-        const hasMovement = uniqueValues.includes(VIEW_SYNC_MOVEMENT);
-        const hasPosition = uniqueValues.includes(VIEW_SYNC_POSITION);
-        let sanitized = uniqueValues;
-
-        if (hasMovement && hasPosition) {
-            if (!previous.has(VIEW_SYNC_MOVEMENT)) {
-                sanitized = uniqueValues.filter(value => value !== VIEW_SYNC_POSITION);
-            } else if (!previous.has(VIEW_SYNC_POSITION)) {
-                sanitized = uniqueValues.filter(value => value !== VIEW_SYNC_MOVEMENT);
-            } else {
-                sanitized = uniqueValues.filter(value => value !== VIEW_SYNC_POSITION);
-            }
-        }
-
-        this.viewSyncState.next(sanitized);
-    };
-
-    /** Returns whether layer visibility/options sync is enabled for the given view. */
-    getLayerSyncOption(viewIndex: number): boolean {
-        return this.layerSyncOptionsState.getValue(viewIndex);
-    }
-
-    /** Sets whether layer visibility/options sync is enabled for the given view. */
-    setLayerSyncOption(viewIndex: number, enabled: boolean): void {
-        this.layerSyncOptionsState.next(viewIndex, enabled);
-    }
-
-    /** Returns the persisted background-layer state for the given view. */
-    getBackgroundState(viewIndex: number): BackgroundLayerViewState {
-        const value = this.backgroundState.getValue(viewIndex);
-        return {
-            layerId: value.layerId,
-            opacity: clampBackgroundOpacity(value.opacity),
-        };
-    }
-
-    /** Returns the effective background-layer state after missing ids are mapped to the configured default. */
-    resolveBackgroundState(viewIndex: number,
-                           availableLayers: readonly BackgroundLayerConfig[],
-                           defaultBackgroundLayerId: string | null): BackgroundLayerViewState {
-        const rawState = this.getBackgroundState(viewIndex);
-        if (rawState.layerId === null) {
-            return rawState;
-        }
-
-        const availableLayerIds = new Set(availableLayers.map(layer => layer.id));
-        if (availableLayerIds.has(rawState.layerId)) {
-            return rawState;
-        }
-
-        const defaultLayer = defaultBackgroundLayerId
-            ? availableLayers.find(layer => layer.id === defaultBackgroundLayerId)
-            : undefined;
-        if (defaultLayer) {
-            return {
-                layerId: defaultLayer.id,
-                opacity: defaultLayer.defaultOpacity
-            };
-        }
-
-        return {
-            layerId: null,
-            opacity: rawState.opacity
-        };
-    }
-
-    /** Writes the selected background-layer id and opacity for one view. */
-    setBackgroundState(viewIndex: number, layerId: string | null, opacity: number): void {
-        this.backgroundState.next(viewIndex, {
-            layerId,
-            opacity: clampBackgroundOpacity(opacity),
-        });
-    }
-
-    /** Returns the configured background opacity for the given view. */
-    getBackgroundOpacity(viewIndex: number): number {
-        return this.getBackgroundState(viewIndex).opacity;
-    }
-
-    /** Returns the persisted orientation for the given view. */
-    getCameraOrientation(viewIndex: number) {
-        return this.cameraViewDataState.getValue(viewIndex).orientation;
-    }
-
-    /** Returns the persisted camera destination for the given view. */
-    getCameraPosition(viewIndex: number) {
-        const destination = this.cameraViewDataState.getValue(viewIndex).destination;
-        return Cartographic.fromDegrees(destination.lon, destination.lat, destination.alt);
-    }
-
-    /** Internal helper that writes a complete camera pose without extra synchronization policy. */
-    private _setView(
-        viewIndex: number,
-        destination: Cartographic,
-        orientation?: { heading: number, pitch: number, roll: number },
-        position: readonly [number, number, number] = [0, 0, 0]
-    ) {
-        // Fall back to the current orientation if none was passed.
-        orientation = orientation ?? this.cameraViewDataState.getValue(viewIndex).orientation;
-        const view: CameraViewState = {
-            destination: {
-                lon: roundCoordinateStateValue(GeoMath.toDegrees(destination.longitude)),
-                lat: roundCoordinateStateValue(GeoMath.toDegrees(destination.latitude)),
-                alt: roundCoordinateStateValue(destination.height),
-            },
-            orientation: {
-                heading: roundCoordinateStateValue(orientation.heading),
-                pitch: roundCoordinateStateValue(orientation.pitch),
-                roll: roundCoordinateStateValue(orientation.roll),
-            },
-            position: position.map(roundCoordinateStateValue) as [number, number, number]
-        };
-        this.cameraViewDataState.next(viewIndex, view);
-    }
-
-    /** Persists a camera pose and applies the configured cross-view synchronization policy. */
-    setView(
-        viewIndex: number,
-        destination: Cartographic,
-        orientation?: { heading: number, pitch: number, roll: number },
-        position: readonly [number, number, number] = [0, 0, 0]
-    ) {
-        const syncPosition = this.viewSync.includes(VIEW_SYNC_POSITION);
-        const syncMovement = this.viewSync.includes(VIEW_SYNC_MOVEMENT);
-
-        if (syncPosition || syncMovement) {
-            // Unfocused view is trying to update itself when the views are synchronized
-            if (viewIndex !== this.focusedView) {
-                return;
-            }
-
-            if (syncPosition) {
-                for (let i = 0; i < this.numViews; i++) {
-                    this._setView(i, destination, orientation, position);
-                }
-                return;
-            }
-
-            if (syncMovement) {
-                const previous = this.cameraViewDataState.getValue(viewIndex).destination;
-                const destLon = GeoMath.toDegrees(destination.longitude);
-                const destLat = GeoMath.toDegrees(destination.latitude);
-                const deltaLon = destLon - previous.lon;
-                const deltaLat = destLat - previous.lat;
-
-                this._setView(viewIndex, destination, orientation, position);
-
-                for (let i = 0; i < this.numViews; i++) {
-                    if (i === viewIndex) {
-                        continue;
-                    }
-                    const target = this.cameraViewDataState.getValue(i);
-                    const newDestination = Cartographic.fromDegrees(
-                        target.destination.lon + deltaLon,
-                        target.destination.lat + deltaLat,
-                        target.destination.alt
-                    );
-                    this._setView(i, newDestination, undefined, target.position);
-                }
-                return;
-            }
-        }
-
-        this._setView(viewIndex, destination, orientation, position);
-    }
-
-    /** Switches one view between 2D and 3D projection mode. */
-    setProjectionMode(viewIndex: number, is2DMode: boolean) {
-        if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
-            // Unfocused view is trying to update itself when the views are synchronized
-            if (viewIndex !== this.focusedView) {
-                return;
-            }
-
-            for (let i = 0; i < this.numViews; i++) {
-                this.mode2dState.next(i, is2DMode);
-            }
-            return;
-        }
-        this.mode2dState.next(viewIndex, is2DMode);
-    }
-
-    /** Updates the current selection, reusing or creating inspection panels as needed. */
-    setSelection(
-        newSelection: TileFeatureId[] | SelectedSourceData,
-        id?: number,
-        forceNewPanel: boolean = false,
-        createUndockedFeaturePanel: boolean = false
-    ) {
-        this._replaceUrl = false;
-        let allPanels = this.selectionState.getValue();
-        const originPanel = id !== undefined ? allPanels.find(panel => panel.id === id) : undefined;
-        const sourceDataSelection = !Array.isArray(newSelection) ? newSelection as SelectedSourceData : undefined;
-        const isSourceDataSelection = sourceDataSelection !== undefined;
-        let featureSelection = Array.isArray(newSelection) ? newSelection as TileFeatureId[] : [];
-        const duplicateFeaturePanelId = !isSourceDataSelection && featureSelection.length
-            ? this.findPanelIdContainingFeatureSelection(allPanels, featureSelection)
-            : undefined;
-        if (!isSourceDataSelection && id === undefined && featureSelection.length > 0 && !createUndockedFeaturePanel) {
-            this.isDockOpen = true;
-        }
-        const isFeaturePanel = (panel: InspectionPanelModel<TileFeatureId>) => panel.sourceData === undefined;
-        const isSourceDataPanel = (panel: InspectionPanelModel<TileFeatureId>) => panel.sourceData !== undefined;
-        const isClearSourceDataRequest =
-            originPanel !== undefined &&
-            sourceDataSelection === undefined &&
-            originPanel.sourceData !== undefined;
-
-        // Filter out features which are already selected. If there are none left, we don't need to do anything
-        // unless we are explicitly clearing a source data selection.
-        if (featureSelection.length && !forceNewPanel) {
-            featureSelection = featureSelection.filter(feature =>
-                !allPanels.some(panel =>
-                    isFeaturePanel(panel) &&
-                    panel.features.some(otherFeature =>
-                        feature.featureId === otherFeature.featureId && feature.mapTileKey === otherFeature.mapTileKey)));
-            if (!featureSelection.length && !isClearSourceDataRequest) {
-                const duplicatePanel = allPanels.find(panel => panel.id === duplicateFeaturePanelId);
-                if (duplicatePanel && !duplicatePanel.undocked && !createUndockedFeaturePanel) {
-                    this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
-                    this.isDockOpen = true;
-                }
-                this.setFocusedInspectionPanel(duplicateFeaturePanelId);
-                this._replaceUrl = true;
-                return;
-            }
-        }
-
-        // Decide whether to reuse an existing panel or create a new one.
-        let targetPanelId: number | undefined = undefined;
-        let mustCreateNewPanel = forceNewPanel;
-
-        // Explicit SourceData updates from a SourceData panel stay in that panel, even when locked.
-        if (!forceNewPanel && originPanel && isSourceDataSelection && isSourceDataPanel(originPanel)) {
-            targetPanelId = originPanel.id;
-        }
-
-        // Explicit feature updates from an unlocked feature panel stay in that panel.
-        if (!forceNewPanel &&
-            targetPanelId === undefined &&
-            originPanel &&
-            !isSourceDataSelection &&
-            isFeaturePanel(originPanel) &&
-            (isClearSourceDataRequest || !originPanel.locked)) {
-            targetPanelId = originPanel.id;
-        }
-
-        // Inspection strategy:
-        // Feature selection (default path): reuse the last unlocked feature panel and close all other unlocked feature panels.
-        // Docked search result clicks prefer an unlocked floating feature panel, keeping the Search dock tab visible.
-        // Otherwise: reuse unlocked docked panel of the same inspection type, then unlocked undocked dialog, else create new.
-        if (!mustCreateNewPanel && targetPanelId === undefined) {
-            const isDefaultFeatureSelectionRequest = !isSourceDataSelection && id === undefined;
-            if (isDefaultFeatureSelectionRequest) {
-                const requiresUndockedFeaturePanel = createUndockedFeaturePanel;
-                let lastUnlockedFeaturePanelId: number | undefined;
-                for (let index = allPanels.length - 1; index >= 0; index--) {
-                    const panel = allPanels[index];
-                    if (isFeaturePanel(panel) && !panel.locked &&
-                        (!requiresUndockedFeaturePanel || panel.undocked)) {
-                        lastUnlockedFeaturePanelId = panel.id;
-                        break;
-                    }
-                }
-                if (lastUnlockedFeaturePanelId !== undefined) {
-                    if (!requiresUndockedFeaturePanel) {
-                        allPanels = allPanels.filter(panel =>
-                            !isFeaturePanel(panel) ||
-                            panel.locked ||
-                            panel.id === lastUnlockedFeaturePanelId
-                        );
-                    }
-                    targetPanelId = lastUnlockedFeaturePanelId;
-                } else {
-                    mustCreateNewPanel = true;
-                }
-            } else {
-                const firstUnlockedDockedPanel = allPanels.find(panel =>
-                    !panel.undocked &&
-                    !panel.locked &&
-                    (isSourceDataSelection ? isSourceDataPanel(panel) : isFeaturePanel(panel))
-                );
-                if (firstUnlockedDockedPanel) {
-                    targetPanelId = firstUnlockedDockedPanel.id;
-                } else {
-                    const firstUnlockedUndockedPanel = allPanels.find(panel =>
-                        panel.undocked &&
-                        !panel.locked &&
-                        (isSourceDataSelection ? isSourceDataPanel(panel) : isFeaturePanel(panel))
-                    );
-                    if (firstUnlockedUndockedPanel) {
-                        targetPanelId = firstUnlockedUndockedPanel.id;
-                    } else {
-                        mustCreateNewPanel = true;
-                    }
-                }
-            }
-        }
-
-        if (mustCreateNewPanel) {
-            const limit = this.inspectionsLimit;
-            if (allPanels.length >= limit) {
-                this.infoMessageService.showWarning(`Maximum of ${limit} inspections reached. Close an existing inspection to add more.`);
-                this._replaceUrl = true;
-                return;
-            }
-            const newId = 1 + Math.max(-1, ...allPanels.map(panel => panel.id));
-            const newPanelUndocked = isSourceDataSelection || createUndockedFeaturePanel;
-            allPanels.push({
-                id: newId,
-                features: isSourceDataSelection ? [] : featureSelection,
-                sourceData: sourceDataSelection,
-                locked: false,
-                size: [DEFAULT_EM_WIDTH, newPanelUndocked ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT],
-                color: DEFAULT_HIGHLIGHT_COLORS[newId % DEFAULT_HIGHLIGHT_COLORS.length],
-                undocked: newPanelUndocked
-            });
-            this.selectionState.next(allPanels);
-            if (!newPanelUndocked) {
-                this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
-                this.isDockOpen = true;
-            }
-            this.setFocusedInspectionPanel(newId);
-            this.sanitizeInspectionComparisonForSelection(allPanels);
-            return newId;
-        }
-
-        if (targetPanelId !== undefined) {
-            const panelIndex = allPanels.findIndex(panel => panel.id === targetPanelId);
-            if (panelIndex === -1) {
-                this._replaceUrl = true;
-                return;
-            }
-            if (sourceDataSelection !== undefined) {
-                allPanels[panelIndex].features = [];
-                allPanels[panelIndex].sourceData = sourceDataSelection;
-            } else {
-                if (featureSelection.length) {
-                    allPanels[panelIndex].features = featureSelection;
-                }
-                allPanels[panelIndex].sourceData = undefined;
-            }
-            this.selectionState.next(allPanels);
-            if (!allPanels[panelIndex].undocked && !isSourceDataSelection) {
-                this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
-                this.isDockOpen = true;
-            }
-            this.setFocusedInspectionPanel(targetPanelId);
-            this.sanitizeInspectionComparisonForSelection(allPanels);
-            return targetPanelId;
-        }
-
-        return;
-    }
-
-    /** Toggles one inspection panel between base-feature and attribute/validity-highlight pseudo-feature ids. */
-    toggleInspectionFeatureHighlight(panelId: number, mapTileKey: string, targetFeatureId: string): void {
-        const allPanels = this.selectionState.getValue();
-        const panelIndex = allPanels.findIndex(panel => panel.id === panelId && panel.sourceData === undefined);
-        if (panelIndex === -1) {
-            return;
-        }
-
-        const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
-        const panel = allPanels[panelIndex];
-        let changed = false;
-        const nextFeatures = panel.features.map(feature => {
-            if (feature.mapTileKey !== mapTileKey ||
-                stripFeatureInspectionTarget(feature.featureId) !== targetBaseFeatureId) {
-                return feature;
-            }
-            changed = true;
-            return {
-                ...feature,
-                featureId: feature.featureId === targetFeatureId ? targetBaseFeatureId : targetFeatureId
-            };
-        });
-        if (!changed) {
-            return;
-        }
-
-        const nextPanels = allPanels.slice();
-        nextPanels[panelIndex] = {
-            ...panel,
-            features: nextFeatures
-        };
-        this.selectionState.next(nextPanels);
-        if (!panel.undocked) {
-            this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
-            this.isDockOpen = true;
-        }
-        this.setFocusedInspectionPanel(panelId);
-        this.sanitizeInspectionComparisonForSelection(nextPanels);
-    }
-
-    /** Persists the size of one inspection panel. */
-    setInspectionPanelSize(id: number, size: [number, number]) {
-        const allPanels = this.selectionState.getValue();
-        const index = allPanels.findIndex(panel => panel.id === id);
-        if (index === -1) {
-            return;
-        }
-        allPanels[index].size = size;
-        this.selectionState.next(allPanels);
-    }
-
-    /** Updates the locked state of one inspection panel. */
-    setInspectionPanelLockedState(id: number, isLocked: boolean) {
-        const allPanels = this.selectionState.getValue();
-        const index = allPanels.findIndex(panel => panel.id === id);
-        if (index === -1) {
-            return;
-        }
-        allPanels[index].locked = isLocked;
-        this.selectionState.next(allPanels);
-    }
-
-    /** Persists whether one inspection panel is undocked. */
-    setInspectionPanelUndockedState(id: number, undocked: boolean) {
-        const allPanels = this.selectionState.getValue();
-        const index = allPanels.findIndex(panel => panel.id === id);
-        if (index === -1) {
-            return;
-        }
-        allPanels[index].undocked = undocked;
-        allPanels[index].size = [
-            allPanels[index].size[0],
-            undocked ? DEFAULT_EM_HEIGHT : DEFAULT_DOCKED_EM_HEIGHT
-        ];
-        if (!undocked) {
-            allPanels[index].locked = true;
-            this.dockActiveTab = INSPECTION_DOCK_TAB_ID;
-            this.isDockOpen = true;
-        }
-        this.selectionState.next(allPanels);
-        this.setFocusedInspectionPanel(id);
-    }
-
-    /** Marks one inspection panel as the active target for inspection-level shortcuts. */
-    setFocusedInspectionPanel(id: number | undefined): void {
-        const allPanels = this.selectionState.getValue();
-        const fallbackId = allPanels.length ? allPanels[allPanels.length - 1].id : undefined;
-        const nextId = id !== undefined && allPanels.some(panel => panel.id === id)
-            ? id
-            : fallbackId;
-        let changed = false;
-        for (const panel of allPanels) {
-            const nextFocused = panel.id === nextId;
-            if ((panel.focused ?? false) === nextFocused) {
-                continue;
-            }
-            changed = true;
-            if (nextFocused) {
-                panel.focused = true;
-            } else {
-                delete panel.focused;
-            }
-        }
-        if (changed) {
-            this.selectionState.next(allPanels);
-        }
-    }
-
-    /** Returns whether the supplied inspection panel is the active shortcut target. */
-    isInspectionPanelFocused(id: number): boolean {
-        return this.focusedInspectionPanelId === id;
-    }
-
-    /** Stores row and header-button expansion state for the current in-memory inspection panel instance. */
-    setInspectionTreeExpansionState(panelId: number, state: InspectionTreeExpansionState): void {
-        this.inspectionTreeExpansionStates.set(panelId, this.cloneInspectionTreeExpansionState(state));
-    }
-
-    /** Returns a defensive copy of the last known expansion state for one inspection panel. */
-    getInspectionTreeExpansionState(panelId: number): InspectionTreeExpansionState | undefined {
-        const state = this.inspectionTreeExpansionStates.get(panelId);
-        return state ? this.cloneInspectionTreeExpansionState(state) : undefined;
-    }
-
-    /** Persists the optional columns hidden by the user in one inspection panel. */
-    setInspectionTreeHiddenColumns(panelId: number, hiddenColumns: Iterable<string>): void {
-        const states = this.inspectionTreeHiddenColumnsState.getValue();
-        this.inspectionTreeHiddenColumnsState.next({
-            ...states,
-            [panelId]: [...new Set(hiddenColumns)]
-        });
-    }
-
-    /** Returns a panel's persisted hidden columns, or undefined when defaults still apply. */
-    getInspectionTreeHiddenColumns(panelId: number): string[] | undefined {
-        const hiddenColumns = this.inspectionTreeHiddenColumnsState.getValue()[panelId];
-        return hiddenColumns ? [...hiddenColumns] : undefined;
-    }
-
-    /** Clones an optional inspection-tree expansion snapshot. */
-    private cloneInspectionTreeExpansionSnapshot(
-        snapshot?: InspectionTreeExpansionSnapshot
-    ): InspectionTreeExpansionSnapshot | undefined {
-        return snapshot ? new Map(snapshot) : undefined;
-    }
-
-    /** Clones transient inspection-tree expansion state so component instances cannot share mutable maps. */
-    private cloneInspectionTreeExpansionState(state: InspectionTreeExpansionState): InspectionTreeExpansionState {
-        const clone: InspectionTreeExpansionState = {
-            expandedNodes: new Map(state.expandedNodes),
-            fullExpansionActive: state.fullExpansionActive,
-            fullCollapseActive: state.fullCollapseActive
-        };
-        const expandSnapshot = this.cloneInspectionTreeExpansionSnapshot(state.expansionSnapshotBeforeFullExpand);
-        if (expandSnapshot) {
-            clone.expansionSnapshotBeforeFullExpand = expandSnapshot;
-        }
-        const collapseSnapshot = this.cloneInspectionTreeExpansionSnapshot(state.expansionSnapshotBeforeFullCollapse);
-        if (collapseSnapshot) {
-            clone.expansionSnapshotBeforeFullCollapse = collapseSnapshot;
-        }
-        return clone;
-    }
-
-    /** Returns the persisted layout for a dialog if one exists. */
-    getDialogLayout(id: string): AppDialogLayout | InspectionDialogLayout | undefined {
-        return this.dialogLayoutsState.getValue()[id];
-    }
-
-    /** Returns whether the persisted layout marks the dialog as open. */
-    getDialogLayoutOpen(id: string): boolean {
-        return this.getDialogLayout(id)?.open ?? false;
-    }
-
-    /** Returns whether a persisted dialog should currently be mounted and visible. */
-    isDialogOpen(id: string): boolean {
-        const layout = this.getDialogLayout(id);
-        if (layout) {
-            return layout.open ?? false;
-        }
-        return this.pendingOpenDialogs.has(id);
-    }
-
-    /** Marks a persisted dialog as open or closed, even before its first measured layout exists. */
-    setDialogOpen(id: string, open: boolean): void {
-        const current = this.getDialogLayout(id);
-        if (current) {
-            this.pendingOpenDialogs.delete(id);
-            this.setDialogLayoutOpen(id, open);
-            return;
-        }
-        if (open) {
-            this.pendingOpenDialogs.add(id);
-            return;
-        }
-        this.pendingOpenDialogs.delete(id);
-    }
-
-    /** Convenience helper that opens one persisted dialog. */
-    openDialog(id: string): void {
-        this.setDialogOpen(id, true);
-    }
-
-    /** Convenience helper that closes one persisted dialog. */
-    closeDialog(id: string): void {
-        this.setDialogOpen(id, false);
-    }
-
-    /** Returns whether a persisted surface is currently represented in the dock. */
-    isSurfaceDocked(id: string): boolean {
-        return this.getDialogLayout(id)?.docked ?? false;
-    }
-
-    /** Switches a generic surface between docked and floating representations. */
-    setSurfaceDocked(id: string, docked: boolean, dockTab: string = INSPECTION_DOCK_TAB_ID): void {
-        const current = this.getDialogLayout(id);
-        const fallbackSize = {
-            width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
-            height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
-        };
-        const nextDockOrder = current?.dockOrder ?? (docked ? this.nextSurfaceDockOrder(dockTab) : undefined);
-        this.upsertDialogLayout(id, {
-            position: current?.position ?? {left: 0, top: 0},
-            size: current?.size ?? fallbackSize,
-            open: current?.open ?? false,
-            docked,
-            dockTab,
-            ...(nextDockOrder !== undefined ? {dockOrder: nextDockOrder} : {})
-        });
-        if (docked) {
-            this.dockActiveTab = dockTab;
-            this.isDockOpen = true;
-        }
-    }
-
-    /** Toggles the docked representation for a generic surface. */
-    toggleSurfaceDocked(id: string, dockTab: string = INSPECTION_DOCK_TAB_ID): void {
-        this.setSurfaceDocked(id, !this.isSurfaceDocked(id), dockTab);
-    }
-
-    /** Persists generic docked-panel metadata without changing floating dialog geometry. */
-    setPanelLayout(id: string, layout: Partial<Pick<AppDialogLayout, 'panelSize' | 'panelCollapsed' | 'panelExpanded' | 'dockOrder'>>): void {
-        const current = this.getDialogLayout(id);
-        if (!current) {
-            this.upsertDialogLayout(id, {
-                position: {left: 0, top: 0},
-                size: {
-                    width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
-                    height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
-                },
-                ...layout
-            });
-            return;
-        }
-        this.upsertDialogLayout(id, {
-            ...current,
-            ...layout
-        });
-    }
-
-    /** Returns whether any generic surface is docked, optionally filtered by tab id. */
-    hasDockedSurface(tabId?: string): boolean {
-        return Object.values(this.dialogLayoutsState.getValue()).some(layout =>
-            (layout.docked ?? false) && (tabId === undefined || layout.dockTab === tabId)
-        );
-    }
-
-    /** Reorders generic docked surfaces within one dock tab. */
-    reorderDockedSurfaces(tabId: string, displayOrder: string[]): void {
-        const currentLayouts = this.dialogLayoutsState.getValue();
-        const dockedIds = Object.entries(currentLayouts)
-            .filter(([, layout]) => (layout.docked ?? false) && layout.dockTab === tabId)
-            .map(([id]) => id);
-        if (dockedIds.length < 2) {
-            return;
-        }
-        const dockedIdSet = new Set(dockedIds);
-        const normalizedOrder = displayOrder.filter(id => dockedIdSet.has(id));
-        for (const id of dockedIds) {
-            if (!normalizedOrder.includes(id)) {
-                normalizedOrder.push(id);
-            }
-        }
-        let changed = false;
-        const nextLayouts = {...currentLayouts};
-        normalizedOrder.forEach((id, index) => {
-            const layout = currentLayouts[id];
-            if (!layout || layout.dockOrder === index) {
-                return;
-            }
-            nextLayouts[id] = {
-                ...layout,
-                dockOrder: index
-            };
-            changed = true;
-        });
-        if (changed) {
-            this.dialogLayoutsState.next(nextLayouts);
-        }
-    }
-
-    /** Stores the next floating position for a generic surface. */
-    setDialogPosition(id: string, position: AppDialogPosition): void {
-        const current = this.getDialogLayout(id);
-        const fallbackSize = {
-            width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
-            height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
-        };
-        this.upsertDialogLayout(id, {
-            position,
-            size: current?.size ?? fallbackSize,
-            open: current?.open ?? false,
-            docked: current?.docked,
-            dockTab: current?.dockTab,
-            ...(current?.dockOrder !== undefined ? {dockOrder: current.dockOrder} : {})
-        });
-    }
-
-    /** Append a newly docked surface after existing siblings in the same tab. */
-    private nextSurfaceDockOrder(dockTab: string): number {
-        const orders = Object.values(this.dialogLayoutsState.getValue())
-            .filter(layout => (layout.docked ?? false) && layout.dockTab === dockTab)
-            .map(layout => layout.dockOrder)
-            .filter((order): order is number => typeof order === 'number' && Number.isFinite(order));
-        return orders.length ? Math.max(...orders) + 1 : 0;
-    }
-
-    /** Returns or creates the persisted layout record for a dialog. */
-    ensureDialogLayout(id: string, fallbackFactory: () => AppDialogLayout): AppDialogLayout | InspectionDialogLayout {
-        const existing = this.getDialogLayout(id);
-        if (existing) {
-            return existing;
-        }
-        const layout = fallbackFactory();
-        this.upsertDialogLayout(id, layout);
-        return layout;
-    }
-
-    /** Inserts or updates one persisted dialog layout record. */
-    upsertDialogLayout(id: string, layout: AppDialogLayout | InspectionDialogLayout): void {
-        const currentLayouts = this.dialogLayoutsState.getValue();
-        const existing = currentLayouts[id];
-        const nextLayout: AppDialogLayout | InspectionDialogLayout = existing ? {
-            ...existing,
-            ...layout,
-            position: {
-                ...existing.position,
-                ...layout.position
-            },
-            size: {
-                ...existing.size,
-                ...layout.size
-            }
-        } : {
-            ...layout,
-            position: {...layout.position},
-            size: {...layout.size}
-        };
-        this.dialogLayoutsState.next({
-            ...currentLayouts,
-            [id]: nextLayout
-        });
-        this.pendingOpenDialogs.delete(id);
-    }
-
-    /** Persists the open/closed state for an existing dialog layout. */
-    setDialogLayoutOpen(id: string, open: boolean): void {
-        const current = this.getDialogLayout(id);
-        if (!current) {
-            return;
-        }
-        if ((current.open ?? false) === open) {
-            return;
-        }
-        this.upsertDialogLayout(id, {
-            ...current,
-            open
-        });
-    }
-
-    /** Removes one persisted generic dialog layout and any pending open marker for it. */
-    removeDialogLayout(id: string): void {
-        const currentLayouts = this.dialogLayoutsState.getValue();
-        if (!(id in currentLayouts)) {
-            this.pendingOpenDialogs.delete(id);
-            return;
-        }
-        const nextLayouts = {...currentLayouts};
-        delete nextLayouts[id];
-        this.dialogLayoutsState.next(nextLayouts);
-        this.pendingOpenDialogs.delete(id);
-    }
-
-    /** Returns the floating layout record for one inspection panel, if present. */
-    getInspectionDialogLayout(panelId: number): InspectionDialogLayout | undefined {
-        const layout = this.getDialogLayout(this.inspectionLayoutId(panelId));
-        if (layout && 'panelId' in layout && 'slot' in layout) {
-            return layout as InspectionDialogLayout;
-        }
-        return undefined;
-    }
-
-    /** Returns or creates the floating layout record for one inspection panel. */
-    ensureInspectionDialogLayout(
-        panelId: number,
-        preferredSlot: number,
-        fallbackFactory: () => AppDialogLayout
-    ): InspectionDialogLayout {
-        const layoutId = this.inspectionLayoutId(panelId);
-        const existing = this.getInspectionDialogLayout(panelId);
-        if (existing) {
-            return existing;
-        }
-        const fallback = fallbackFactory();
-        const created: InspectionDialogLayout = {
-            panelId,
-            slot: preferredSlot,
-            position: {...fallback.position},
-            size: {...fallback.size}
-        };
-        this.upsertDialogLayout(layoutId, created);
-        return created;
-    }
-
-    /** Updates the stored floating position for one inspection panel. */
-    setInspectionDialogPosition(panelId: number, position: AppDialogPosition, preferredIndex?: number): void {
-        if (!this.selectionState.getValue().some(panel => panel.id === panelId)) {
-            return;
-        }
-        const current = this.getInspectionDialogLayout(panelId);
-        if (current) {
-            this.upsertDialogLayout(this.inspectionLayoutId(panelId), {
-                ...current,
-                position: {left: position.left, top: position.top}
-            });
-            return;
-        }
-        const slot = preferredIndex ?? panelId;
-        const existing = this.getDialogLayout(this.inspectionLayoutId(panelId));
-        this.upsertDialogLayout(this.inspectionLayoutId(panelId), {
-            panelId,
-            slot,
-            position: {left: position.left, top: position.top},
-            size: existing?.size ?? {
-                width: Math.round(this.defaultInspectionPanelSize[0] * this.baseFontSize),
-                height: Math.round(this.defaultInspectionPanelSize[1] * this.baseFontSize)
-            }
-        });
-    }
-
-    /** Removes persisted inspection-dialog layouts for panels that no longer exist. */
-    pruneInspectionDialogLayout(activePanelIds: number[]) {
-        const activeIds = new Set(activePanelIds.map(panelId => this.inspectionLayoutId(panelId)));
-        const currentLayouts = this.dialogLayoutsState.getValue();
-        const nextLayouts: Record<string, AppDialogLayout | InspectionDialogLayout> = {};
-        let changed = false;
-        for (const [id, layout] of Object.entries(currentLayouts)) {
-            if (id.startsWith('inspection:') && !activeIds.has(id)) {
-                changed = true;
-                continue;
-            }
-            nextLayouts[id] = layout;
-        }
-        if (changed) {
-            this.dialogLayoutsState.next(nextLayouts);
-        }
-        for (const id of Object.keys(currentLayouts)) {
-            if (!(id in nextLayouts)) {
-                this.pendingOpenDialogs.delete(id);
-            }
-        }
-    }
-
-    /** Removes transient inspection-tree expansion states for panels that no longer exist. */
-    private pruneInspectionTreeExpansionStates(activePanelIds: number[]): void {
-        const activeIds = new Set(activePanelIds);
-        for (const panelId of this.inspectionTreeExpansionStates.keys()) {
-            if (!activeIds.has(panelId)) {
-                this.inspectionTreeExpansionStates.delete(panelId);
-            }
-        }
-    }
-
-    /** Removes persisted column overrides for inspection panels that no longer exist. */
-    private pruneInspectionTreeHiddenColumns(activePanelIds: number[]): void {
-        const activeIds = new Set(activePanelIds.map(String));
-        const current = this.inspectionTreeHiddenColumnsState.getValue();
-        const retained = Object.fromEntries(
-            Object.entries(current).filter(([panelId]) => activeIds.has(panelId)));
-        if (Object.keys(retained).length !== Object.keys(current).length) {
-            this.inspectionTreeHiddenColumnsState.next(retained);
-        }
-    }
-
-    /** Opens the inspection comparison dialog with the supplied model. */
-    openInspectionComparison(model: InspectionComparisonModel): void {
-        this.inspectionComparisonState.next(model);
-    }
-
-    /** Closes the inspection comparison dialog. */
-    closeInspectionComparison(): void {
-        this.inspectionComparisonState.next(null);
-    }
-
-    /** Reorders docked inspection panels according to the supplied display order. */
-    reorderInspectionPanels(dockedDisplayOrder: number[]) {
-        const allPanels = this.selectionState.getValue();
-        const dockedPanels = allPanels.filter(panel => !panel.undocked);
-        if (dockedPanels.length < 2) {
-            return;
-        }
-        const dockedById = new Map(dockedPanels.map(panel => [panel.id, panel]));
-        const normalizedDisplayOrder = dockedDisplayOrder.filter(id => dockedById.has(id));
-        if (normalizedDisplayOrder.length !== dockedPanels.length) {
-            dockedPanels.forEach(panel => {
-                if (!normalizedDisplayOrder.includes(panel.id)) {
-                    normalizedDisplayOrder.push(panel.id);
-                }
-            });
-        }
-        const rawOrder = normalizedDisplayOrder.toReversed();
-        let dockedIndex = 0;
-        const nextPanels = allPanels.map(panel => {
-            if (panel.undocked) {
-                return panel;
-            }
-            const nextId = rawOrder[dockedIndex++];
-            return dockedById.get(nextId)!;
-        });
-        if (!this.panelOrderEquals(allPanels, nextPanels)) {
-            this.selectionState.next(nextPanels);
-        }
-    }
-
-    /** Sets the accent color stored for one inspection panel. */
-    setInspectionPanelColor(id: number, color: string) {
-        const allPanels = this.selectionState.getValue();
-        const index = allPanels.findIndex(panel => panel.id === id);
-        if (index === -1) {
-            return;
-        }
-        allPanels[index].color = color;
-        this.selectionState.next(allPanels);
-    }
-
-    /** Drops all unlocked inspection panels, preserving only pinned selections. */
-    unsetUnlockedSelections() {
-        const nextSelection = this.selectionState.getValue().filter(panel =>
-            panel.locked || panel.sourceData !== undefined
-        );
-        this.selectionState.next(nextSelection);
-        this.sanitizeInspectionComparisonForSelection(nextSelection);
-    }
-
-    /** Removes one inspection panel and any associated persisted layout state. */
-    unsetPanel(id: number) {
-        const allPanels = this.selectionState.getValue();
-        const index = allPanels.findIndex(panel => panel.id === id);
-        if (index === -1) {
-            return;
-        }
-        allPanels.splice(index, 1);
-        this.selectionState.next(allPanels);
-        this.sanitizeInspectionComparisonForSelection(allPanels);
-    }
-
-    /** Finds the first regular inspection panel containing any of the requested feature identities. */
-    private findPanelIdContainingFeatureSelection(
-        panels: InspectionPanelModel<TileFeatureId>[],
-        features: TileFeatureId[]
-    ): number | undefined {
-        return panels.find(panel =>
-            panel.sourceData === undefined &&
-            panel.features.some(existing =>
-                features.some(feature =>
-                    feature.featureId === existing.featureId &&
-                    feature.mapTileKey === existing.mapTileKey
-                )
-            )
-        )?.id;
-    }
-
-    /** Keeps the focused inspection panel id aligned with the current selection set. */
-    private sanitizeFocusedInspectionPanel(panels: InspectionPanelModel<TileFeatureId>[]): void {
-        let focusedSeen = false;
-        const fallbackId = panels.length ? panels[panels.length - 1].id : undefined;
-        for (const panel of panels) {
-            if (panel.focused && !focusedSeen) {
-                focusedSeen = true;
-                continue;
-            }
-            if (panel.focused) {
-                delete panel.focused;
-            }
-        }
-        if (!focusedSeen && fallbackId !== undefined) {
-            const fallbackPanel = panels.find(panel => panel.id === fallbackId);
-            if (fallbackPanel) {
-                fallbackPanel.focused = true;
-            }
-        }
-    }
-
-    /** Returns whether two inspection-panel orderings are identical by panel id. */
-    private panelOrderEquals(a: InspectionPanelModel<TileFeatureId>[], b: InspectionPanelModel<TileFeatureId>[]): boolean {
-        if (a.length !== b.length) {
-            return false;
-        }
-        for (let i = 0; i < a.length; i++) {
-            if (a[i].id !== b[i].id) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /** Builds the persisted layout id used for one floating inspection dialog. */
-    private inspectionLayoutId(panelId: number): string {
-        return `inspection:${panelId}`;
-    }
-
-    /** Enables or disables the explicit location marker overlay. */
-    setMarkerState(enabled: boolean) {
-        this.markerState.next(enabled);
-        if (!enabled) {
-            this.setMarkerPosition(null, false);
-        }
-    }
-
-    /** Updates the explicit location marker position, optionally delaying URL sync. */
-    setMarkerPosition(position: Cartographic | null, delayUpdate: boolean = false) {
-        if (position) {
-            const longitude = GeoMath.toDegrees(position.longitude);
-            const latitude = GeoMath.toDegrees(position.latitude);
-            this.markedPosition = [longitude, latitude, position.height];
-        } else {
-            this.markedPosition = [];
-        }
-        if (!delayUpdate) {
-            this._replaceUrl = false;
-        }
-    }
-
-    /** Returns per-view visibility and level configuration for one map/layer pair. */
-    mapLayerConfig(mapId: string, layerId: string, fallbackVisibility: boolean = true, fallbackLevel: number = 13): LayerViewConfig[] {
-        if (isSourceOrMetaData(layerId)) {
-            return [];
-        }
-        const mapLayerId = `${mapId}/${layerId}`;
-        const names = this.layerNames;
-        let layerIndex = names.findIndex(ml => ml === mapLayerId);
-        const missingFromAuthoritativeUrl = layerIndex === -1 && this.hasAuthoritativeUrlLayerList;
-        if (layerIndex === -1) {
-            layerIndex = names.length;
-            this.layerNamesState.next([...names, mapLayerId]);
-        }
-        const result = new Array<LayerViewConfig>();
-        const layerStateValue = <T>(state: MapViewState<Array<T>>, viewIndex: number, defaultValue: T) => {
-            const resultForView = state.getValue(viewIndex);
-            while (resultForView.length <= layerIndex) {
-                resultForView.push(defaultValue);
-            }
-            state.next(viewIndex, resultForView);
-            return resultForView[layerIndex];
-        }
-
-        for (let viewIndex = 0; viewIndex < this.numViewsState.getValue(); viewIndex++) {
-            result.push({
-                autoLevel: layerStateValue(this.layerAutoZoomLevelState, viewIndex, true),
-                visible: layerStateValue(
-                    this.layerVisibilityState,
-                    viewIndex,
-                    missingFromAuthoritativeUrl ? false : fallbackVisibility),
-                level: layerStateValue(this.layerZoomLevelState, viewIndex, fallbackLevel),
-            });
-        }
-        return result;
-    }
-
-    /** Writes per-view visibility and level configuration for one map/layer pair. */
-    setMapLayerConfig(mapId: string, layerId: string, viewConfig: LayerViewConfig[], fallbackLevel: number = 13) {
-        if (isSourceOrMetaData(layerId) || viewConfig.length < this.numViewsState.getValue()) {
-            return;
-        }
-        const mapLayerId = `${mapId}/${layerId}`;
-        const names = this.layerNames;
-        let layerIndex = names.findIndex(ml => ml === mapLayerId);
-        if (layerIndex === -1) {
-            layerIndex = names.length;
-            this.layerNamesState.next([...names, mapLayerId]);
-        }
-
-        const insertLayerState = <T>(state: MapViewState<T[]>, viewIndex: number, value: T, defaultValue: T) => {
-            const values = state.getValue(viewIndex);
-            while (values.length <= layerIndex) {
-                values.push(defaultValue);
-            }
-            values[layerIndex] = value;
-            state.next(viewIndex, values);
-        };
-
-        for (let viewIndex = 0; viewIndex < viewConfig.length; viewIndex++) {
-            insertLayerState(this.layerAutoZoomLevelState, viewIndex, viewConfig[viewIndex].autoLevel, true);
-            insertLayerState(this.layerVisibilityState, viewIndex, viewConfig[viewIndex].visible, false);
-            insertLayerState(this.layerZoomLevelState, viewIndex, viewConfig[viewIndex].level, fallbackLevel);
-        }
-    }
-
-    /** Returns or seeds the stored values for one style option across all views. */
-    styleOptionValues(
-        mapId: string,
-        layerId: string,
-        shortStyleId: string,
-        optionId: string,
-        optionType: string,
-        defaultValue: string|number|boolean
-    ): (string|number|boolean)[] {
-        const mapLayerId = `${mapId}/${layerId}`;
-        const layerIndex = this.layerNames.indexOf(mapLayerId);
-        if (layerIndex === -1) {
-            throw new Error(`[AppStateService] Unknown map layer '${mapLayerId}' when reading style option values`);
-        }
-
-        const key = this.stylesState.styleOptionKey(mapId, layerId, shortStyleId, optionId);
-        const views = this.numViewsState.getValue();
-
-        let values = this.styles.get(key);
-        if (!values) {
-            values = Array.from({length: views}, () => defaultValue);
-            this.styles.set(key, values);
-            return values.slice();
-        }
-
-        // Ensure array length matches the number of views
-        if (values.length < views) {
-            const pad = Array.from({length: views - values.length}, () => defaultValue);
-            values = values.concat(pad);
-            this.styles.set(key, values);
-        } else if (values.length > views) {
-            values = values.slice(0, views);
-            this.styles.set(key, values);
-        }
-
-        // Trigger a URL update, as we might have added style option values for some view(s).
-        this.stylesState.next(this.styles);
-        return values.map(v => this.stylesState.coerceOptionValue(v, optionType));
-    }
-
-    /**
-     * Set style option values for a specific map layer style combination.
-     * Note: This will NOT change the layerConfig array. Instead, if the
-     *  map layer does not exist in layerNames, an exception will be thrown.
-     */
-    setStyleOptionValues(mapId: string, layerId: string, shortStyleId: string, optionId: string, value: (string|number|boolean)[]) {
-        this.setStyleOptionValuesBatch([{
-            mapId,
-            layerId,
-            shortStyleId,
-            optionId,
-            values: value
-        }]);
-    }
-
-    /** Writes a complete collection of style-option arrays and emits style state exactly once. */
-    setStyleOptionValuesBatch(updates: StyleOptionStateUpdate[]): void {
-        if (!updates.length) {
-            return;
-        }
-        for (const update of updates) {
-            const mapLayerId = `${update.mapId}/${update.layerId}`;
-            if (!this.layerNames.includes(mapLayerId)) {
-                throw new Error(`[AppStateService] Unknown map layer '${mapLayerId}' when writing style option values`);
-            }
-        }
-
-        const views = this.numViewsState.getValue();
-        const nextStyles = new Map(this.styles);
-        for (const update of updates) {
-            const key = this.stylesState.styleOptionKey(
-                update.mapId,
-                update.layerId,
-                update.shortStyleId,
-                update.optionId);
-            let nextValues = [...update.values];
-            if (nextValues.length < views) {
-                const last = nextValues.length ? nextValues[nextValues.length - 1] : false;
-                nextValues = nextValues.concat(Array.from({length: views - nextValues.length}, () => last));
-            } else if (nextValues.length > views) {
-                nextValues = nextValues.slice(0, views);
-            }
-            nextStyles.set(key, nextValues);
-        }
-        this.stylesState.next(nextStyles);
-    }
-
-    /** Returns the locally selected qualified layer preset for one map/layer/view. */
-    getLayerPresetSelection(viewIndex: number, mapId: string, layerId: string): LayerPresetRef | null {
-        const ref = this.layerPresetSelectionState.getValue(viewIndex)[mapId]?.[layerId];
-        return ref ? {...ref} : null;
-    }
-
-    /** Stores or clears one map/layer/view layer-preset association without changing option values. */
-    setLayerPresetSelection(viewIndex: number, mapId: string, layerId: string, ref: LayerPresetRef | null): void {
-        const current = this.layerPresetSelectionState.getValue(viewIndex);
-        const currentRef = current[mapId]?.[layerId] ?? null;
-        if (currentRef?.styleId === ref?.styleId && currentRef?.presetId === ref?.presetId) {
-            return;
-        }
-
-        const next: LayerPresetSelections = {...current};
-        const mapSelections = {...(next[mapId] ?? {})};
-        if (ref) {
-            mapSelections[layerId] = {...ref};
-            next[mapId] = mapSelections;
-        } else {
-            delete mapSelections[layerId];
-            if (Object.keys(mapSelections).length) {
-                next[mapId] = mapSelections;
-            } else {
-                delete next[mapId];
-            }
-        }
-        this.layerPresetSelectionState.next(viewIndex, next);
-    }
-
-    /** Returns the selected map-level preset for one concrete map/view. */
-    getMapPresetSelection(viewIndex: number, mapId: string): string | null {
-        return this.mapPresetSelectionState.getValue(viewIndex)[mapId] ?? null;
-    }
-
-    /** Stores or clears a map-level preset association without changing option values. */
-    setMapPresetSelection(viewIndex: number, mapId: string, presetId: string | null): void {
-        const current = this.mapPresetSelectionState.getValue(viewIndex);
-        if ((current[mapId] ?? null) === presetId) {
-            return;
-        }
-        const next = {...current};
-        if (presetId) {
-            next[mapId] = presetId;
-        } else {
-            delete next[mapId];
-        }
-        this.mapPresetSelectionState.next(viewIndex, next);
-    }
-
-    /** Returns whether the style is visible in the persisted style tree. */
-    getStyleVisibility(styleId: string, fallback: boolean = true): boolean {
-        if (this.styleVisibility.hasOwnProperty(styleId)) {
-            return this.styleVisibility[styleId];
-        }
-        return fallback;
-    }
-
-    /** Updates the persisted visibility flag for one style. */
-    setStyleVisibility(styleId: string, val: boolean) {
-        this.styleVisibility[styleId] = val;
-        this.styleVisibilityState.next(this.styleVisibility);
-    }
-
-    /** Removes stale visibility when a locally imported style identity is deleted. */
-    removeStyleVisibility(styleId: string) {
-        if (!Object.prototype.hasOwnProperty.call(this.styleVisibility, styleId)) {
-            return;
-        }
-        const next = {...this.styleVisibility};
-        delete next[styleId];
-        this.styleVisibility = next;
-    }
-
-    /** Adds a persisted feature-search definition. Runtime results remain service-owned. */
-    addFeatureSearch(value: {query: string} & Partial<FeatureSearchStateEntry>): FeatureSearchStateEntry {
-        const entry = createFeatureSearchStateEntry(value);
-        this.featureSearchState.next([...this.featureSearches, entry]);
-        return entry;
-    }
-
-    /** Patches one persisted feature-search definition. */
-    patchFeatureSearch(id: string, patch: FeatureSearchStatePatch): FeatureSearchStateEntry | undefined {
-        let updated: FeatureSearchStateEntry | undefined;
-        const next = this.featureSearches.map(entry => {
-            if (entry.id !== id) {
-                return entry;
-            }
-            updated = createFeatureSearchStateEntry({
-                ...entry,
-                ...patch,
-                id: entry.id,
-                query: patch.query ?? entry.query
-            });
-            return updated;
-        });
-        if (updated) {
-            this.featureSearchState.next(next);
-        }
-        return updated;
-    }
-
-    /** Removes one persisted feature-search definition. */
-    removeFeatureSearch(id: string): void {
-        const next = this.featureSearches.filter(entry => entry.id !== id);
-        if (next.length !== this.featureSearches.length) {
-            this.featureSearchState.next(next);
-        }
-    }
+    };;;;;;;;;;;;;;;;;;;;
 
     /** Clears persisted app state from local storage and resets URL-backed state. */
     resetStorage() {
@@ -3847,395 +1413,5 @@ export class AppStateService implements OnDestroy {
         localStorage.removeItem(this.CONFIG_DEFAULT_STATE_META_KEY);
         const {origin, pathname} = window.location;
         window.location.href = origin + pathname;
-    }
-
-    /** Removes persisted map/layer/style references that no longer exist in the loaded data. */
-    prune(presentMaps: Map<string, MapTreeNode>, presentStyles: Map<string, ErdblickStyle>) {
-        this.withSystemStateMutation(() => {
-            // 1) Build sets of present maps, layers and styles
-            const presentLayerIds = new Set<string>(); // entries of form `${mapId}/${layerId}`
-            const presentSelectionLayerIds = new Set<string>(); // includes SourceData layers
-            const presentMapIds = new Set<string>();
-            const mapsWithKnownFeatureLayers = new Set<string>();
-            const mapsWithKnownSelectionLayers = new Set<string>();
-            for (const [mapId, mapNode] of presentMaps.entries()) {
-                presentMapIds.add(mapId);
-                // Use feature layers (exclude SourceData) via children
-                for (const layer of mapNode.children) {
-                    presentLayerIds.add(`${mapId}/${layer.id}`);
-                }
-                if (mapNode.children.length > 0) {
-                    mapsWithKnownFeatureLayers.add(mapId);
-                }
-                // Selection pruning must keep SourceData inspections too.
-                for (const layerId of mapNode.layers.keys()) {
-                    presentSelectionLayerIds.add(`${mapId}/${layerId}`);
-                }
-                if (mapNode.layers.size > 0) {
-                    mapsWithKnownSelectionLayers.add(mapId);
-                }
-            }
-
-            const presentStyleIds = new Set<string>([...presentStyles.keys()]); // full style ids
-            const presentShortStyleIds = new Set<string>([...presentStyles.values()].map(s => s.shortId));
-
-        // 2) Prune layerNames and per-view layer arrays (visibility, zoom levels)
-        const oldLayerNames = this.layerNames;
-        if (oldLayerNames.length) {
-            const keepIndices: number[] = [];
-            const nextLayerNames: string[] = [];
-            for (let i = 0; i < oldLayerNames.length; i++) {
-                const name = oldLayerNames[i];
-                if (presentLayerIds.has(name)) {
-                    keepIndices.push(i);
-                    nextLayerNames.push(name);
-                }
-            }
-
-            if (keepIndices.length !== oldLayerNames.length) {
-                // Update layer names
-                this.layerNames = nextLayerNames;
-
-                // Helper to filter layer-indexed arrays by keepIndices with fallback
-                const filterLayerArray = <T>(arr: T[], fallback: T): T[] =>
-                    keepIndices.map(idx => (idx < arr.length ? arr[idx] : fallback));
-
-                const views = this.numViews;
-                for (let v = 0; v < views; v++) {
-                    const vis = this.layerVisibilityState.getValue(v);
-                    const levels = this.layerZoomLevelState.getValue(v);
-                    const autoLevels = this.layerAutoZoomLevelState.getValue(v);
-                    this.layerVisibilityState.next(v, filterLayerArray<boolean>(vis ?? [], false));
-                    this.layerZoomLevelState.next(v, filterLayerArray<number>(levels ?? [], 13));
-                    this.layerAutoZoomLevelState.next(v, filterLayerArray<boolean>(autoLevels ?? [], true));
-                }
-            }
-        }
-
-        // 3) Prune style option values that reference pruned layers or non-present styles
-        //    and 4) prune style visibility for non-present styles
-        // Prune style visibility
-        const styleVis = {...this.styleVisibility};
-        let styleVisChanged = false;
-        for (const key of Object.keys(styleVis)) {
-            if (!presentStyleIds.has(key)) {
-                delete styleVis[key];
-                styleVisChanged = true;
-            }
-        }
-        if (styleVisChanged) {
-            this.styleVisibility = styleVis;
-        }
-
-        // Prune style option values
-        const stylesMap = this.styles; // Map<string, (string|number|boolean)[]>
-        let stylesChanged = false;
-        for (const key of Array.from(stylesMap.keys())) {
-            // Key format: `${mapId}/${layerId}/${shortStyleId}/${optionId}`
-            const parts = key.split('/');
-            if (parts.length < 4) {
-                stylesMap.delete(key);
-                stylesChanged = true;
-                continue;
-            }
-            const shortStyleId = parts[parts.length - 2];
-            const mapLayerId = parts.slice(0, -2).join('/');
-            if (!presentLayerIds.has(mapLayerId) || !presentShortStyleIds.has(shortStyleId)) {
-                stylesMap.delete(key);
-                stylesChanged = true;
-            }
-        }
-
-        // 5) Prune extra views in MapViewStates and in StyleState values
-        const views = this.numViews;
-        const pruneViews = <T>(state: MapViewState<T>) => {
-            const arr = state.appState.getValue();
-            if (arr.length > views) {
-                state.appState.next(arr.slice(0, views));
-            }
-        };
-        pruneViews(this.mode2dState);
-        pruneViews(this.backgroundState);
-        pruneViews(this.viewTileBordersState);
-        pruneViews(this.viewTileGridModeState);
-        pruneViews(this.viewTileGridLevelState);
-        pruneViews(this.viewTileGridAutoLevelState);
-        pruneViews(this.viewTileGridColorState);
-        pruneViews(this.viewTileGridOpacityState);
-        pruneViews(this.cameraViewDataState);
-        pruneViews(this.layerVisibilityState);
-        pruneViews(this.layerZoomLevelState);
-        pruneViews(this.layerAutoZoomLevelState);
-
-        // Also prune view-dimension from style option arrays
-        for (const [k, vals] of stylesMap.entries()) {
-            if (vals.length > views) {
-                stylesMap.set(k, vals.slice(0, views));
-                stylesChanged = true;
-            }
-        }
-        if (stylesChanged) {
-            this.stylesState.next(stylesMap);
-        }
-
-        // 6) Prune selections that reference maps/layers that are not present anymore
-        const panels = this.selectionState.getValue();
-        const nextPanels: InspectionPanelModel<TileFeatureId>[] = [];
-        let selectionChanged = false;
-
-        const parseKey = (tileKey: string): {mapId: string; mapLayerId: string} | undefined => {
-            let parsed: [string, string, unknown];
-            try {
-                parsed = parseMapPartitionKey(coreLib, tileKey);
-            } catch {
-                return undefined;
-            }
-            const [mapId, layerId] = parsed;
-            return {mapId, mapLayerId: `${mapId}/${layerId}`};
-        };
-
-        const keepFeatureSelection = (tileKey: string): boolean => {
-            const parsed = parseKey(tileKey);
-            if (!parsed) {
-                return false;
-            }
-            if (presentLayerIds.has(parsed.mapLayerId)) {
-                return true;
-            }
-            // Nonblocking datasource startup can transiently publish a map before its layers.
-            return !presentMapIds.has(parsed.mapId) || !mapsWithKnownFeatureLayers.has(parsed.mapId);
-        };
-
-        const keepSourceDataSelection = (tileKey: string): boolean => {
-            const parsed = parseKey(tileKey);
-            if (!parsed) {
-                return false;
-            }
-            if (presentSelectionLayerIds.has(parsed.mapLayerId)) {
-                return true;
-            }
-            return !presentMapIds.has(parsed.mapId) || !mapsWithKnownSelectionLayers.has(parsed.mapId);
-        };
-
-        for (const panel of panels) {
-            const updated: InspectionPanelModel<TileFeatureId> = {
-                id: panel.id,
-                features: [],
-                locked: panel.locked,
-                size: panel.size,
-                sourceData: panel.sourceData ? { ...panel.sourceData } : undefined,
-                color: panel.color,
-                undocked: panel.undocked,
-                focused: panel.focused
-            };
-
-            // Filter features
-            for (const feat of panel.features) {
-                if (keepFeatureSelection(feat.mapTileKey)) {
-                    updated.features.push(feat);
-                }
-            }
-
-            // Validate sourceData if present
-            if (updated.sourceData && !keepSourceDataSelection(updated.sourceData.mapTileKey)) {
-                delete updated.sourceData;
-            }
-
-            if (updated.features.length !== panel.features.length ||
-                (panel.sourceData !== undefined && updated.sourceData === undefined)) {
-                selectionChanged = true;
-            }
-
-            if (updated.features.length || updated.sourceData) {
-                nextPanels.push(updated);
-            } else {
-                selectionChanged = true;
-            }
-        }
-
-        if (selectionChanged || nextPanels.length !== panels.length) {
-            this.selectionState.next(nextPanels);
-        }
-            this.sanitizeInspectionComparisonForSelection(nextPanels);
-
-            // Sync all states, so the URL is replaced.
-            this.syncAllStates();
-        });
-    }
-
-    /** Migrates legacy `osm` URL/storage payloads into the generic background-layer state once on startup. */
-    private migrateLegacyOsmState(params: Params): void {
-        const hasBackgroundStorage = localStorage.getItem(this.backgroundState.appState.name) !== null;
-        const hasBackgroundUrl = params[this.backgroundState.appState.urlParamName ?? this.backgroundState.appState.name] !== undefined;
-        if (hasBackgroundStorage || hasBackgroundUrl) {
-            return;
-        }
-
-        const legacyStorage = localStorage.getItem('osm');
-        const legacyUrl = params['osm'];
-        const legacyPayload = legacyUrl ?? legacyStorage;
-        if (legacyPayload === undefined || legacyPayload === null) {
-            return;
-        }
-
-        const serializedStates = typeof legacyPayload === 'string' && legacyPayload.trim().startsWith('[')
-            ? this.parseLegacyOsmStorage(legacyPayload)
-            : this.parseLegacyOsmUrl(String(legacyPayload));
-        if (!serializedStates.length) {
-            return;
-        }
-
-        serializedStates.forEach((state, viewIndex) => {
-            this.setBackgroundState(viewIndex, state.layerId, state.opacity);
-        });
-    }
-
-    /** Parses the JSON-encoded local-storage payload used by the removed `osm` state slot. */
-    private parseLegacyOsmStorage(rawPayload: string): BackgroundLayerViewState[] {
-        try {
-            const parsed = JSON.parse(rawPayload);
-            if (!Array.isArray(parsed)) {
-                return [];
-            }
-            return parsed.map(token => this.parseLegacyOsmToken(String(token)));
-        } catch {
-            return [];
-        }
-    }
-
-    /** Parses the compact CSV URL form used by the removed `osm` query parameter. */
-    private parseLegacyOsmUrl(rawPayload: string): BackgroundLayerViewState[] {
-        if (!rawPayload.length) {
-            return [];
-        }
-        return rawPayload.split(',').map(token => this.parseLegacyOsmToken(token));
-    }
-
-    /** Converts one legacy `enabled~opacity` token into the new background-layer state shape. */
-    private parseLegacyOsmToken(rawToken: string): BackgroundLayerViewState {
-        const parts = rawToken.split('~');
-        const enabled = parts[0] === '1' || parts[0].toLowerCase() === 'true';
-        const opacity = parts[1] === undefined ? 6 : clampBackgroundOpacity(Number(parts[1]));
-        return {
-            layerId: enabled ? 'osm' : null,
-            opacity
-        };
-    }
-
-    /** Drops stale comparison state when the current selection no longer supports it. */
-    private sanitizeInspectionComparisonForSelection(panels: InspectionPanelModel<TileFeatureId>[]): void {
-        const model = this.inspectionComparisonState.getValue();
-        if (!model) {
-            return;
-        }
-        const eligiblePanelIds = new Set(
-            panels
-                .filter(panel => panel.sourceData === undefined && panel.features.length > 0)
-                .map(panel => panel.id)
-        );
-        const nextModel = this.sanitizeInspectionComparisonModel(model, eligiblePanelIds);
-        if (nextModel === model) {
-            return;
-        }
-        this.inspectionComparisonState.next(nextModel);
-    }
-
-    /** Removes ineligible panels from a comparison model and drops empty results. */
-    private sanitizeInspectionComparisonModel(model: InspectionComparisonModel, eligiblePanelIds: Set<number>): InspectionComparisonModel | null {
-        const entries = [model.base, ...model.others];
-        const remainingEntries = entries.filter(entry => eligiblePanelIds.has(entry.panelId));
-        if (remainingEntries.length === entries.length) {
-            return model;
-        }
-        if (remainingEntries.length === 0) {
-            return null;
-        }
-        return {
-            base: remainingEntries[0],
-            others: remainingEntries.slice(1)
-        };
-    }
-
-    /** Builds comparison candidates from the currently selected feature panels. */
-    buildCompareOptions(panels: InspectionPanelModel<FeatureWrapper>[], excludePanelId?: number): InspectionComparisonOption[] {
-        return panels
-            .filter(panel => excludePanelId === undefined || panel.id !== excludePanelId)
-            .filter(panel => this.isFeaturePanel(panel))
-            .map(panel => ({
-                label: this.formatFeatureLabel(panel.features),
-                value: panel.id
-            }));
-    }
-
-    /** Narrows inspection panels to those that represent actual feature selections. */
-    private isFeaturePanel(panel: InspectionPanelModel<FeatureWrapper> | undefined): panel is InspectionPanelModel<FeatureWrapper> {
-        return !!panel && panel.features.length > 0 && panel.sourceData === undefined;
-    }
-
-    /** Formats the user-facing label used for comparison entries. */
-    private formatFeatureLabel(features: FeatureWrapper[]): string {
-        return features.map(feature => `${feature.featureTile.mapName}.${feature.featureId}`).join(', ');
-    }
-
-    /** Builds one comparison entry from an existing feature inspection panel. */
-    private createComparisonEntryFromPanel(panel: InspectionPanelModel<FeatureWrapper>): InspectionComparisonEntry {
-        return {
-            panelId: panel.id,
-            mapId: panel.features[0]?.featureTile.mapName ?? '',
-            label: this.formatFeatureLabel(panel.features),
-            featureIds: panel.features.map(feature => ({
-                mapTileKey: feature.mapTileKey,
-                featureId: feature.featureId
-            }))
-        };
-    }
-
-    /** Creates the comparison-dialog model for the selected set of feature panels. */
-    createComparisonModel(basePanelId: number, otherPanelIds: number[], panels: InspectionPanelModel<FeatureWrapper>[]): InspectionComparisonModel | null {
-        const panelsById = new Map(
-            panels
-                .filter(this.isFeaturePanel)
-                .map(panel => [panel.id, panel] as const)
-        );
-        const basePanel = panelsById.get(basePanelId);
-        if (!basePanel) {
-            return null;
-        }
-        const others = Array.from(new Set(otherPanelIds))
-            .filter(panelId => panelId !== basePanelId)
-            .slice(0, MAX_COMPARE_PANELS - 1)
-            .map(panelId => panelsById.get(panelId))
-            .filter((panel): panel is InspectionPanelModel<FeatureWrapper> => !!panel)
-            .map(panel => this.createComparisonEntryFromPanel(panel));
-
-        return {
-            base: this.createComparisonEntryFromPanel(basePanel),
-            others
-        };
-    }
-
-    /** Applies the selection emitted by the view-sync toggle UI and mirrors it into state. */
-    updateSelectedSyncOptions(selectedCodes: string[]) {
-        const previousSelection = new Set(this.viewSync);
-        let nextSelection = Array.from(new Set(selectedCodes));
-        const hasMovement = nextSelection.includes(VIEW_SYNC_MOVEMENT);
-        const hasPosition = nextSelection.includes(VIEW_SYNC_POSITION);
-
-        if (hasMovement && hasPosition) {
-            let valueToRemove = VIEW_SYNC_POSITION;
-            if (!previousSelection.has(VIEW_SYNC_POSITION) && previousSelection.has(VIEW_SYNC_MOVEMENT)) {
-                valueToRemove = VIEW_SYNC_MOVEMENT;
-            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT) && previousSelection.has(VIEW_SYNC_POSITION)) {
-                valueToRemove = VIEW_SYNC_POSITION;
-            } else if (!previousSelection.has(VIEW_SYNC_MOVEMENT)) {
-                valueToRemove = VIEW_SYNC_POSITION;
-            } else if (!previousSelection.has(VIEW_SYNC_POSITION)) {
-                valueToRemove = VIEW_SYNC_MOVEMENT;
-            }
-            nextSelection = nextSelection.filter(code => code !== valueToRemove);
-        }
-
-        this.viewSync = nextSelection;
-        this.syncViews();
     }
 }

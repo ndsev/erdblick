@@ -1,3 +1,5 @@
+import {MapViewStateService} from "./mapview/map-view-state.service";
+import {inject} from "@angular/core";
 import {coreLib, ErdblickCore_} from "./integrations/wasm";
 import {Cartographic} from "./integrations/geo";
 import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
@@ -15,6 +17,7 @@ export interface DebugWindow extends Window {
 
 /** Stable browser-console facade for renderer, camera, and transport diagnostics. */
 export class ErdblickDebugApi {
+    readonly viewStateOwner = inject(MapViewStateService);
     /** Bind supported debug operations without exposing service internals directly. */
     constructor(
         private readonly tileStream: MapTileStreamService,
@@ -25,9 +28,9 @@ export class ErdblickDebugApi {
 
     /** Apply one serialized camera state after validating its logical view index. */
     setCamera(viewIndex: number, cameraInfoStr: string): void {
-        if (viewIndex >= this.stateService.numViews) {
+        if (viewIndex >= this.viewStateOwner.numViews) {
             console.error(
-                `Expected viewIndex < ${this.stateService.numViews}, got ${viewIndex}!`
+                `Expected viewIndex < ${this.viewStateOwner.numViews}, got ${viewIndex}!`
             );
             return;
         }
@@ -37,7 +40,7 @@ export class ErdblickDebugApi {
         }
         const cameraInfo = JSON.parse(cameraInfoStr);
         const [longitude, latitude, height] = cameraInfo.position;
-        this.stateService.setView(
+        this.viewStateOwner.setView(
             viewIndex,
             Cartographic.fromRadians(longitude, latitude, height),
             {
@@ -50,19 +53,19 @@ export class ErdblickDebugApi {
 
     /** Serialize one logical view's camera in the format accepted by `setCamera`. */
     getCamera(viewIndex: number): string | undefined {
-        if (viewIndex >= this.stateService.numViews) {
+        if (viewIndex >= this.viewStateOwner.numViews) {
             console.error(
-                `Expected viewIndex < ${this.stateService.numViews}, got ${viewIndex}!`
+                `Expected viewIndex < ${this.viewStateOwner.numViews}, got ${viewIndex}!`
             );
             return undefined;
         }
-        const destination = this.stateService.getCameraPosition(viewIndex);
+        const destination = this.viewStateOwner.getCameraPosition(viewIndex);
         const position = [
             destination.longitude,
             destination.latitude,
             destination.height
         ];
-        const orientation = this.stateService.getCameraOrientation(viewIndex);
+        const orientation = this.viewStateOwner.getCameraOrientation(viewIndex);
         return JSON.stringify({position, orientation});
     }
 

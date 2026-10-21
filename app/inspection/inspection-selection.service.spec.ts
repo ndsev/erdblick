@@ -1,3 +1,4 @@
+import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {BehaviorSubject} from "rxjs";
@@ -70,10 +71,10 @@ function createHarness(
                 panel.locked = locked;
             }
         })
-    } as unknown as AppStateService;
+    } as unknown as StateTestSystem;
     const infoMessageService = {showWarning: vi.fn()} as unknown as InfoMessageService;
     const service = new InspectionSelectionService(
-        stateService,
+        (stateService) as never,
         {loadFeatures} as never,
         {} as never,
         {registerShortcut: vi.fn()} as never,

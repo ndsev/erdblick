@@ -1,3 +1,7 @@
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {inject} from "@angular/core";
+import {z} from "zod";
+import {} from "../shared/app-state.model";
 import {Injectable} from "@angular/core";
 import {AppStateService} from "../shared/appstate.service";
 import {BehaviorSubject, skip} from "rxjs";
@@ -10,6 +14,19 @@ import {AppConfigService} from "../shared/app-config.service";
  * plugin-provided auxiliary coordinate systems.
  */
 export class CoordinatesService {
+    readonly viewStateOwner = inject(MapViewStateService);
+
+
+    readonly enabledCoordsTileIdsState = this.stateService.register({
+        name: 'enabledCoordsTileIds',
+        defaultValue: ["WGS84"],
+        schema: z.array(z.string())
+    }, "coordinates", "enabledCoordsTileIds");
+
+    get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
+
+    set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);}
+
     mouseMoveCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     mouseClickCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     auxiliaryCoordinatesFun: ((x: number, y: number) => Array<[string, Array<number>]>) | null = null;
@@ -20,7 +37,7 @@ export class CoordinatesService {
         this.mouseClickCoordinates.pipe(
             skip(1)  // Skip the first (null) value from mouseClickCoordinates BehaviorSubject
         ).subscribe(position => {
-            this.stateService.setMarkerPosition(position);
+            this.viewStateOwner.setMarkerPosition(position);
         });
     }
 
@@ -49,4 +66,9 @@ export class CoordinatesService {
                 console.error(error);
         });
     }
+}
+
+
+export interface CoordinatesServiceValues {
+    enabledCoordsTileIds: string[];
 }

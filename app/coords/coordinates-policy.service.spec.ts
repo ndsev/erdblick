@@ -1,3 +1,4 @@
+import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {BehaviorSubject} from "rxjs";
@@ -23,7 +24,7 @@ function createPolicy(coordinates: Partial<CoordinatesConfig> = {}, enabled = tr
     const messageService = {showError: vi.fn()};
     const policy = new CoordinatesPolicyService(
         configService as unknown as AppConfigService,
-        stateService as unknown as AppStateService,
+        (stateService as unknown as StateTestSystem) as never,
         messageService as unknown as InfoMessageService
     );
     return {policy, stateService, messageService};

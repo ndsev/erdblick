@@ -1,3 +1,4 @@
+import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {BehaviorSubject, Subject} from "rxjs";
@@ -26,7 +27,7 @@ describe("MapInfoService external-state reconciliation", () => {
             getMapPresetSelection: vi.fn(() => null),
             setMapPresetSelection: vi.fn(),
             prune: vi.fn()
-        } as unknown as AppStateService;
+        } as unknown as StateTestSystem;
         const style = {
             id: "Style",
             shortId: "Style",
@@ -55,7 +56,7 @@ describe("MapInfoService external-state reconciliation", () => {
         } as unknown as MapPresetService;
         const service = new MapInfoService(
             {} as HttpClient,
-            stateService,
+            (stateService) as never,
             styleService,
             mapPresetService,
             {} as InfoMessageService
@@ -83,9 +84,9 @@ describe("MapInfoService external-state reconciliation", () => {
         };
         const tree = new MapLayerTree(
             [mapInfo],
-            stateService,
+            (stateService) as never,
             styleService,
-            mapPresetService,
+            mapPresetService, stateService as never, stateService as never,
             false
         );
         service.maps$.getValue().destroy();

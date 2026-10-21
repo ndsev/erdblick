@@ -1,3 +1,5 @@
+import {InspectionStateService} from "./inspection-state.service";
+import {inject} from "@angular/core";
 import {ChangeDetectorRef, Component, OnDestroy} from "@angular/core";
 import {Subscription} from "rxjs";
 import {InspectionSelectionService} from "./inspection-selection.service";
@@ -20,6 +22,7 @@ import {AppStateService, InspectionComparisonModel, InspectionPanelModel} from "
 })
 /** Hosts floating inspection dialogs independently from the dock tab lifecycle. */
 export class InspectionDialogsComponent implements OnDestroy {
+    readonly inspectionState = inject(InspectionStateService);
     undockedPanels: InspectionPanelModel<FeatureWrapper>[] = [];
     comparison: InspectionComparisonModel | null = null;
 
@@ -32,7 +35,7 @@ export class InspectionDialogsComponent implements OnDestroy {
             this.undockedPanels = panels.filter(panel => panel.undocked);
             this.cdr.markForCheck();
         }));
-        this.subscriptions.add(this.stateService.inspectionComparisonState.subscribe(comparison => {
+        this.subscriptions.add(this.inspectionState.inspectionComparisonState.subscribe(comparison => {
             this.comparison = comparison;
             this.cdr.markForCheck();
         }));

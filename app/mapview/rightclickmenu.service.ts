@@ -1,3 +1,5 @@
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {inject} from "@angular/core";
 import {Injectable} from "@angular/core";
 import {MenuItem} from "primeng/api";
 import {BehaviorSubject, Subject} from "rxjs";
@@ -78,6 +80,7 @@ interface PickedFeatureMenuRow {
  * The service tracks source-data context so the menu can offer quick repeat actions across tiles.
  */
 export class RightClickMenuService {
+    readonly inspectionState = inject(InspectionStateService);
 
     menuItems: BehaviorSubject<MenuItem[]> = new BehaviorSubject<MenuItem[]>([]);
     preferredTileIdForSourceData: number | null = null;
@@ -352,7 +355,7 @@ export class RightClickMenuService {
             label: 'Inspect Source Data with Last Layer',
             icon: 'pi pi-database',
             command: () => {
-                this.stateService.setSelection({
+                this.inspectionState.setSelection({
                     mapTileKey: coreLib.getSourceDataLayerKey(sourceDataParams.mapId, sourceDataParams.layerId, sourceDataParams.tileId)
                 } as SelectedSourceData);
             }

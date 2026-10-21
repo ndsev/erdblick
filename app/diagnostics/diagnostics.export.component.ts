@@ -1,3 +1,5 @@
+import {AppLayoutService} from "../shared/app-layout.service";
+import {inject} from "@angular/core";
 import {Component, OnDestroy, ViewChild} from '@angular/core';
 import {Subscription} from 'rxjs';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
@@ -46,6 +48,7 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
 })
 /** Dialog that configures and launches diagnostics JSON exports. */
 export class DiagnosticsExportDialogComponent implements OnDestroy {
+    readonly layoutState = inject(AppLayoutService);
     readonly layoutId = DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID;
     @ViewChild('dialog') dialog?: AppDialogComponent;
     exporting = false;
@@ -81,11 +84,11 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
     }
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.layoutId);
+        return this.layoutState.isDialogOpen(this.layoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.layoutId, visible);
+        this.layoutState.setDialogOpen(this.layoutId, visible);
     }
 
     /** Releases the persisted export-options subscription. */

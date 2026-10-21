@@ -1,3 +1,5 @@
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {inject} from "@angular/core";
 import {Injectable} from "@angular/core";
 import {
     AppConfigService,
@@ -32,6 +34,7 @@ function isValidExternalViewerLocation(location: ExternalViewerLocation): boolea
 @Injectable({providedIn: "root"})
 /** Owns configured external-viewer URLs and the omnibox marker/viewport fallback policy. */
 export class ExternalViewerService {
+    readonly viewStateOwner = inject(MapViewStateService);
     constructor(
         private readonly stateService: AppStateService,
         private readonly configService: AppConfigService
@@ -47,13 +50,13 @@ export class ExternalViewerService {
         if (explicit) {
             return {...explicit, source: "input"};
         }
-        const marker = this.stateService.markedPosition;
+        const marker = this.viewStateOwner.markedPosition;
         const markerLocation = {lon: marker[0], lat: marker[1]};
-        if (this.stateService.marker && marker.length >= 2 && isValidExternalViewerLocation(markerLocation)) {
+        if (this.viewStateOwner.marker && marker.length >= 2 && isValidExternalViewerLocation(markerLocation)) {
             return {...markerLocation, source: "marker"};
         }
-        const destination = this.stateService.cameraViewDataState
-            .getValue(this.stateService.focusedView)
+        const destination = this.viewStateOwner.cameraViewDataState
+            .getValue(this.viewStateOwner.focusedView)
             .destination;
         return {lon: destination.lon, lat: destination.lat, source: "viewport"};
     }

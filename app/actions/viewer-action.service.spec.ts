@@ -1,8 +1,9 @@
+import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
 import "@angular/compiler";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {BehaviorSubject, Subject} from "rxjs";
 import {AppStateService, type CameraViewState, VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION} from "../shared/appstate.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewService} from "../mapview/map-view.service";
 import {createFeatureSearchStateEntry} from "../shared/feature-search-state";
 import {ViewerActionService} from "./viewer-action.service";
 import {ViewerActionFailure} from "./viewer-action-relay.contract";
@@ -25,7 +26,7 @@ function readySearchAnalysis(query: string): FeatureSearchSession["schemaAnalysi
 
 /** Builds real state/sync owners, with inert renderers and no tile/schema/scene access. */
 function setup() {
-    const state = new AppStateService({
+    const state = createStateTestSystem({
         events: new Subject(), routerState: {snapshot: {root: {queryParams: {}}}}, navigate: vi.fn()
     } as never, {showError: vi.fn()} as never);
     const maps = {
@@ -36,7 +37,7 @@ function setup() {
     state.viewSyncState.next([]);
     state.cameraViewDataState.next(0, camera(10, 40, 500));
     state.cameraViewDataState.next(1, camera(20, 50, 1000));
-    const views = new MapViewStateService(state, maps as never);
+    const views = new MapViewService((state) as never, maps as never);
     const renderers = [0, 1].map(viewIndex => ({
         viewIndex, isAvailable: vi.fn(() => true),
         getLiveCameraState: vi.fn((): CameraViewState | undefined => structuredClone(state.cameraViewDataState.getValue(viewIndex))),
@@ -69,7 +70,7 @@ function setup() {
     const diagnostics = {snapshot$: new BehaviorSubject({at: Date.now(), tiles: {expected: 3, loaded: 2, errors: 1}, progress: {rendered: {done: 1, total: 2}}}), perfStats$: new BehaviorSubject([])};
     const viewDiagnostics = {cameraInteracting$: new BehaviorSubject(false), snapshot: vi.fn()};
     const styleReports = {reports$: new BehaviorSubject<import("../styledata/style-validation.model").StyleValidationIssue[]>([])};
-    const service = new ViewerActionService(state, views, maps as never, searches as never, inspections as never, zone as never, stream as never,
+    const service = new ViewerActionService((state) as never, views, maps as never, searches as never, inspections as never, zone as never, stream as never,
         styles as never, config as never, render as never, diagnostics as never, viewDiagnostics as never, styleReports as never, new ViewerUiService());
     return {state, views, maps, renderers, searches, inspections, zone, service, stream, styles, config, render, diagnostics, viewDiagnostics, styleReports};
 }
@@ -85,7 +86,7 @@ function read(service: ViewerActionService, targets?: unknown[]): ViewerActionOu
 }
 
 describe("ViewerActionService", () => {
-    const cleanups: AppStateService[] = [];
+    const cleanups: StateTestSystem[] = [];
     const actionCleanups: ViewerActionService[] = [];
     afterEach(() => {
         actionCleanups.splice(0).forEach(service => service.ngOnDestroy());

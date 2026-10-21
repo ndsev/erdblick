@@ -1,3 +1,4 @@
+import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
 import "@angular/compiler";
 import {describe, expect, it, vi} from 'vitest';
 import {BehaviorSubject} from "rxjs";
@@ -292,9 +293,9 @@ describe("style option groups", () => {
 
         const tree = new MapLayerTree(
             [map],
-            stateService as unknown as AppStateService,
+            (stateService as unknown as StateTestSystem) as never,
             styleService as unknown as StyleService,
-            emptyPresetService(),
+            emptyPresetService(), stateService as unknown as AppStateService as never, stateService as unknown as AppStateService as never,
             false
         );
         const layer = tree.maps.get("Map")?.layers.get("Roads");
@@ -439,9 +440,9 @@ describe("layer presets in the map tree", () => {
         map.layers = {Example: featureLayer("Example")};
         const tree = new MapLayerTree(
             [map],
-            stateService as unknown as AppStateService,
+            (stateService as unknown as StateTestSystem) as never,
             styleService as unknown as StyleService,
-            presetService as unknown as MapPresetService,
+            presetService as unknown as MapPresetService, stateService as unknown as AppStateService as never, stateService as unknown as AppStateService as never,
             false);
         return {tree, stateService};
     }
@@ -629,9 +630,9 @@ describe("map presets in the map tree", () => {
 
         const tree = new MapLayerTree(
             [map],
-            stateService as unknown as AppStateService,
+            (stateService as unknown as StateTestSystem) as never,
             styleService as unknown as StyleService,
-            presetService as unknown as MapPresetService,
+            presetService as unknown as MapPresetService, stateService as unknown as AppStateService as never, stateService as unknown as AppStateService as never,
             false);
         const mapNode = tree.maps.get("Map")!;
         const renderedMap = filterMapTreeNodes(tree.nodes, "", 0)[0];

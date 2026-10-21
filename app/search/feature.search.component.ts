@@ -1,3 +1,7 @@
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {AppLayoutService} from "../shared/app-layout.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {inject} from "@angular/core";
 import {
     AfterViewInit,
     ChangeDetectorRef,
@@ -409,7 +413,7 @@ interface FeatureSearchResultTreeItem {
                                         [metaKeySelection]="false"
                                         [lazy]="true"
                                         [virtualScroll]="true"
-                                        [virtualScrollItemSize]="stateService.baseFontSize * 2"
+                                        [virtualScrollItemSize]="layoutState.baseFontSize * 2"
                                         [filter]="showFilter"
                                         filterPlaceholder="Filter matched features"
                                         [scrollHeight]="scrollHeight"
@@ -745,6 +749,9 @@ interface FeatureSearchResultTreeItem {
  * Dialog that presents long-running feature-search progress, result grouping, styles, and diagnostics.
  */
 export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestroy {
+    readonly viewStateOwner = inject(MapViewStateService);
+    readonly layoutState = inject(AppLayoutService);
+    readonly inspectionState = inject(InspectionStateService);
     @Input({required: true}) searchId!: string;
     @Input() dockedPanelCount = 1;
     @Output() panelDragRequest = new EventEmitter<{session: FeatureSearchSession, event: PointerEvent}>();
@@ -918,9 +925,9 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 private confirmPopupService: AppConfirmPopupService,
                 private readonly changeDetector: ChangeDetectorRef,
                 private readonly ngZone: NgZone) {
-        this.selectedGroupingOptions = this.groupingOptionsFromValues(this.stateService.featureSearchGrouping);
+        this.selectedGroupingOptions = this.groupingOptionsFromValues(this.searchService.featureSearchGrouping);
         this.subscriptions.add(this.styleService.styleGroups.subscribe(() => this.refreshSearchStyleOptions()));
-        this.subscriptions.add(this.stateService.featureSearchGroupingState.subscribe(groupingValues => {
+        this.subscriptions.add(this.searchService.featureSearchGroupingState.subscribe(groupingValues => {
             const nextOptions = this.groupingOptionsFromValues(groupingValues);
             if (this.sameGroupingOptions(this.selectedGroupingOptions, nextOptions)) {
                 return;
@@ -951,7 +958,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
                 this.syncSelectedTileLevelsFromSession(this.session);
             }
         }));
-        this.subscriptions.add(this.stateService.numViewsState.subscribe(() => {
+        this.subscriptions.add(this.viewStateOwner.numViewsState.subscribe(() => {
             this.refreshSearchViewOptions();
             if (this.session) {
                 this.syncSelectedViewIndicesFromSession(this.session);
@@ -1540,7 +1547,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.searchStyleApplicationWarning = false;
         }
         this.selectedSearchStyleId = null;
-        this.stateService.patchFeatureSearch(session.id, {searchStyleRules});
+        this.searchService.patchFeatureSearch(session.id, {searchStyleRules});
     }
 
     /** Accepts detached drafts emitted by the reusable rule editor. */
@@ -1618,7 +1625,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         const detachedRules = structuredClone(projection.rules);
         this.styleRuleDrafts = this.styleRuleDraftCodec.toDrafts(detachedRules);
         this.styleRulesStateSignature = JSON.stringify(detachedRules);
-        this.stateService.patchFeatureSearch(this.session.id, {searchStyleRules: detachedRules});
+        this.searchService.patchFeatureSearch(this.session.id, {searchStyleRules: detachedRules});
         this.selectedSearchStyleId = styleId;
         this.searchStyleApplicationWarning = projection.omissions.length > 0;
         this.searchStyleApplicationMessage = projection.omissions.length
@@ -1708,7 +1715,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         if (key === "showHighFiGeometry" && nextValue === false) {
             renderStrategy.showHighFiResultDots = false;
         }
-        this.stateService.patchFeatureSearch(session.id, {
+        this.searchService.patchFeatureSearch(session.id, {
             renderStrategy
         });
     }
@@ -2214,7 +2221,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         const visibleLayerKeys: string[] = [];
         for (const [mapId, mapInfo] of this.mapService.maps.maps) {
             for (const layer of mapInfo.allFeatureLayers()) {
-                for (let viewIndex = 0; viewIndex < this.stateService.numViews; ++viewIndex) {
+                for (let viewIndex = 0; viewIndex < this.viewStateOwner.numViews; ++viewIndex) {
                     if (this.mapService.maps.getMapLayerVisibility(viewIndex, mapId, layer.id)) {
                         visibleLayerKeys.push(`${viewIndex}:${mapId}:${layer.id}`);
                     }
@@ -2226,7 +2233,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     /** Returns whether a field candidate belongs to a currently visible map/layer context. */
     private isStyleFieldCandidateActive(mapId: string, layerId: string): boolean {
-        for (let viewIndex = 0; viewIndex < this.stateService.numViews; ++viewIndex) {
+        for (let viewIndex = 0; viewIndex < this.viewStateOwner.numViews; ++viewIndex) {
             if (this.mapService.maps.getMapLayerVisibility(viewIndex, mapId, layerId)) {
                 return true;
             }
@@ -2779,13 +2786,13 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     }
 
     protected showSearchViewControl(): boolean {
-        return this.stateService.numViews === 2 && this.featureSearchViewOptions.length === 2;
+        return this.viewStateOwner.numViews === 2 && this.featureSearchViewOptions.length === 2;
     }
 
     private refreshSearchViewOptions(): void {
         const viewLabels = ["Left", "Right"];
         const options = Array.from(
-            {length: Math.min(this.stateService.numViews, viewLabels.length)},
+            {length: Math.min(this.viewStateOwner.numViews, viewLabels.length)},
             (_, index) => ({label: viewLabels[index], value: index})
         );
         const signature = JSON.stringify(options);
@@ -2812,7 +2819,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     private syncSelectedViewIndicesFromSession(session: FeatureSearchSession): void {
         this.refreshSearchViewOptions();
         const nextIndices = this.normalizedSearchViewIndices(
-            this.stateService.numViews === 1 ? [0] : session.definition.selectedViewIndices
+            this.viewStateOwner.numViews === 1 ? [0] : session.definition.selectedViewIndices
         );
         const signature = JSON.stringify(nextIndices);
         if (signature === this.selectedViewIndicesSignature) {
@@ -3087,8 +3094,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.requestDiagnosticsValueSummaries();
         }
         this.syncStreamingResults(session);
-        if (this.isDocked() && this.stateService.isDockOpen && this.surfacedDockedSearchId !== session.id) {
-            this.stateService.dockActiveTab = SEARCH_DOCK_TAB_ID;
+        if (this.isDocked() && this.layoutState.isDockOpen && this.surfacedDockedSearchId !== session.id) {
+            this.layoutState.dockActiveTab = SEARCH_DOCK_TAB_ID;
             this.surfacedDockedSearchId = session.id;
         }
         if (session.complete) {
@@ -3205,10 +3212,10 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
 
     private measurePreferredBodyHeightEm(): number | undefined {
         const content = this.featureSearchContentContainer?.nativeElement;
-        if (!content || !this.stateService.baseFontSize) {
+        if (!content || !this.layoutState.baseFontSize) {
             return undefined;
         }
-        const height = content.scrollHeight / this.stateService.baseFontSize;
+        const height = content.scrollHeight / this.layoutState.baseFontSize;
         return Number.isFinite(height) && height > 0 ? height : undefined;
     }
 
@@ -3354,7 +3361,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
         if (this.session && this.searchEnabled() && this.session.definition.scope !== scope) {
             this.styleAttributeOptionsSessionSignature = "";
-            this.stateService.patchFeatureSearch(this.session.id, {scope});
+            this.searchService.patchFeatureSearch(this.session.id, {scope});
         }
     }
 
@@ -3641,13 +3648,13 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         if (mapTileKey && selectedFeatureId) {
             const keepDockedSearchVisible = this.isDocked();
             const lockSelection = !!event?.originalEvent?.ctrlKey;
-            const panelId = this.stateService.setSelection(
+            const panelId = this.inspectionState.setSelection(
                 [{mapTileKey, featureId: selectedFeatureId}],
                 undefined,
                 lockSelection,
                 keepDockedSearchVisible);
             if (lockSelection && panelId !== undefined) {
-                this.stateService.setInspectionPanelLockedState(panelId, true);
+                this.inspectionState.setInspectionPanelLockedState(panelId, true);
             }
             this.inspectionSelection.focusOnFeature(undefined, {
                 mapTileKey,
@@ -3657,7 +3664,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
         if (selected && selected.mapId && selected.featureId) {
             this.jumpService.highlightByJumpTargetFilter(selected.mapId, selected.featureId,
-                coreLib.HighlightMode.SELECTION_HIGHLIGHT, this.stateService.focusedView).then();
+                coreLib.HighlightMode.SELECTION_HIGHLIGHT, this.viewStateOwner.focusedView).then();
         }
     }
 
@@ -3824,7 +3831,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.selectedGroupingOptions = groupingValues
             .map(value => this.grouping.find(option => option.value === value))
             .filter((option): option is FeatureSearchGroupingOption => !!option);
-        this.stateService.featureSearchGrouping = groupingValues;
+        this.searchService.featureSearchGrouping = groupingValues;
         this.rebuildResultsTreeIncrementally();
     }
 
@@ -4229,7 +4236,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
     syncTreeScrollHeight(_event?: MouseEvent) {
         const host = this.featureSearchTreeHost?.nativeElement;
         const hostHeight = host?.getBoundingClientRect().height ?? 0;
-        if (!host || hostHeight <= 0 || !this.stateService.baseFontSize) {
+        if (!host || hostHeight <= 0 || !this.layoutState.baseFontSize) {
             return;
         }
 
@@ -4241,7 +4248,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             : 0;
         const filterHeight = filterElement?.getBoundingClientRect().height ?? 0;
         const nextHeight = Math.max(
-            this.stateService.baseFontSize * 6,
+            this.layoutState.baseFontSize * 6,
             Math.floor(hostHeight - filterHeight - treeVerticalPadding)
         );
         this.scrollHeight = `${nextHeight}px`;

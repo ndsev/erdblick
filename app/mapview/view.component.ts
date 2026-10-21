@@ -1,3 +1,8 @@
+import {computed} from "@angular/core";
+import {MapLayerStateService} from "../mapdata/map-layer-state.service";
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {MapViewStateService} from "./map-view-state.service";
+import {inject} from "@angular/core";
 import {
     AppStateService,
     type TileFeatureId
@@ -15,7 +20,7 @@ import {
     InputSignal
 } from "@angular/core";
 import {MapInfoService} from "../mapdata/map-info.service";
-import {MapViewStateService, ViewRecalculationReason} from "./map-view-state.service";
+import {MapViewService, ViewRecalculationReason} from "./map-view.service";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {FeatureSearchService} from "../search/feature.search.service";
@@ -101,7 +106,7 @@ interface PreparedContextMenuPosition {
         }
         @if (!environment.visualizationOnly && showSyncMenu) {
             <p-buttonGroup class="viewsync-select" data-testid="viewsync-select">
-                @for (option of stateService.syncOptions; track option.code) {
+                @for (option of viewStateOwner.syncOptions; track option.code) {
                     <p-toggleButton onIcon="" offIcon=""
                                     [ngModel]="isSyncOptionSelected(option.code)"
                                     [ngClass]="{'green': isSyncOptionSelected(option.code)}"
@@ -175,20 +180,24 @@ interface PreparedContextMenuPosition {
  * It owns renderer creation, hover details, right-click context-menu preparation, and view-local mode toggles.
  */
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
+    readonly viewStateOwner = inject(MapViewStateService);
+    readonly inspectionState = inject(InspectionStateService);
+    readonly layerState = inject(MapLayerStateService);
     private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 4;
     private static readonly SOURCE_DATA_TILE_LEVEL_COUNT = 16;
     private static readonly WEBGL_SETUP_HINT =
         "Ensure WebGL2 is available and browser hardware acceleration is enabled. " +
         "If hardware acceleration is unavailable, switch the browser to a supported software WebGL renderer " +
         "(this is controlled by the browser). Reload the page afterwards.";
-    protected readonly isSyncOptionSelected = (code: string) => this.stateService.viewSync.includes(code);
+    protected readonly isSyncOptionSelected = (code: string) => this.viewStateOwner.viewSync.includes(code);
 
     subscriptions: Subscription[] = [];
     menuItems: MenuItem[] = [];
     is2DMode: boolean = false;
     mapView?: IRenderView;
     viewerInitError = "";
-    viewIndex: InputSignal<number> = input.required<number>();
+    viewId = input.required<string>();
+    readonly viewIndex = computed(() => this.viewStateOwner.viewIds().indexOf(this.viewId()));
     outlined: boolean = false;
     showSyncMenu: boolean = false;
     isNarrow: boolean = false;
@@ -233,7 +242,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * map, search, config, and input services the renderer depends on.
      */
     constructor(public mapService: MapInfoService,
-                public mapViewState: MapViewStateService,
+                public mapViewState: MapViewService,
                 public tileStream: MapTileStreamService,
                 public inspectionSelection: InspectionSelectionService,
                 public featureSearchService: FeatureSearchService,
@@ -254,8 +263,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 private ngZone: NgZone
     ) {
         this.subscriptions.push(
-            this.stateService.focusedViewState.subscribe(focusedViewIndex => {
-                this.outlined = this.stateService.numViews > 1 && this.mapView?.viewIndex === focusedViewIndex;
+            this.viewStateOwner.focusedViewState.subscribe(focusedViewIndex => {
+                this.outlined = this.viewStateOwner.numViews > 1 && this.mapView?.viewIndex === focusedViewIndex;
             })
         );
     }
@@ -263,9 +272,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     /** Mirrors one sync toggle button back into the canonical view-sync selection. */
     onSyncOptionToggle(code: string, enabled: boolean): void {
         const nextSelection = enabled
-            ? [...this.stateService.viewSync, code]
-            : this.stateService.viewSync.filter(currentCode => currentCode !== code);
-        this.stateService.updateSelectedSyncOptions(nextSelection);
+            ? [...this.viewStateOwner.viewSync, code]
+            : this.viewStateOwner.viewSync.filter(currentCode => currentCode !== code);
+        this.viewStateOwner.updateSelectedSyncOptions(nextSelection);
     }
 
     /** Registers menu subscriptions and viewport-size listeners once the component inputs are available. */
@@ -300,12 +309,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             }),
             this.menuService.menuItems.subscribe(items => {
                 this.menuItems = [...items];
-                if (this.stateService.numViews === 1) {
+                if (this.viewStateOwner.numViews === 1) {
                     this.menuItems.push({
                         label: 'Split View',
                         icon: 'pi pi-plus',
                         command: () => {
-                            this.stateService.numViews += 1;
+                            this.viewStateOwner.numViews += 1;
                         }
                     });
                 } else {
@@ -383,9 +392,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.setupViewerContextMenuHandling();
         this.modeSubscription = combineLatest([
             this.stateService.ready.pipe(filter(ready => ready)),
-            this.stateService.mode2dState.pipe(this.viewIndex()),
-            this.stateService.deckAntialiasingEnabledState,
-            this.stateService.semanticCompositingEnabledState
+            this.viewStateOwner.mode2dState.pipe(this.viewIndex()),
+            this.viewStateOwner.deckAntialiasingEnabledState,
+            this.viewStateOwner.semanticCompositingEnabledState
         ]).subscribe(([_, mode2d, antialiasingEnabled, semanticCompositingEnabled]) => {
             const needsRebuild =
                 this.is2DMode !== mode2d ||
@@ -467,13 +476,13 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
                 this.inspectionSelection, this.featureSearchService,
                 this.menuService, this.coordinatesService, this.stateService, this.configService,
-                this.layerController!
+                this.layerController!, this.viewStateOwner, this.inspectionState, this.layerState
             )
             : new DeckMapView3D(
                 this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
                 this.inspectionSelection, this.featureSearchService,
                 this.menuService, this.coordinatesService, this.stateService, this.configService,
-                this.layerController!
+                this.layerController!, this.viewStateOwner, this.inspectionState, this.layerState
             );
         mapView.setDesktopDrillPickingEnabled(!this.isNarrow);
         this.initializingMapView = mapView;
@@ -576,12 +585,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                     if (spinner) {
                         spinner.style.display = 'none';
                     }
-                    this.stateService.focusedView = this.stateService.focusedView.valueOf();
+                    this.viewStateOwner.focusedView = this.viewStateOwner.focusedView.valueOf();
                     const mapView = this.mapView;
                     if (!mapView) {
                         this.cdr.markForCheck();
                     } else {
-                        this.showSyncMenu = this.stateService.numViews > 1 && mapView.viewIndex > 0;
+                        this.showSyncMenu = this.viewStateOwner.numViews > 1 && mapView.viewIndex > 0;
                         this.firstPersonViewActiveSubscription = mapView.firstPersonViewActive.subscribe(() => {
                             this.cdr.markForCheck();
                         });
@@ -617,9 +626,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             colorKey: field.colorKey,
             label: field.key
         }, {
-            varyColors: this.stateService.inspectionValueVaryColors,
-            varyOutlines: this.stateService.inspectionValueVaryOutlines,
-            varyStriping: this.stateService.inspectionValueVaryStriping
+            varyColors: this.inspectionState.inspectionValueVaryColors,
+            varyOutlines: this.inspectionState.inspectionValueVaryOutlines,
+            varyStriping: this.inspectionState.inspectionValueVaryStriping
         });
     }
 
@@ -755,8 +764,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         const featureIds = screenPos && this.mapView
             ? this.mapView.drillPickFeatures(
                 screenPos,
-                this.stateService.drillPickRadius,
-                this.stateService.inspectionsLimit
+                this.inspectionState.drillPickRadius,
+                this.inspectionState.inspectionsLimit
             ).featureIds
             : [];
         this.menuService.setPickedFeatures(featureIds);
@@ -789,7 +798,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         if (!this.mapView) {
             return null;
         }
-        this.stateService.focusedView = this.viewIndex();
+        this.viewStateOwner.focusedView = this.viewIndex();
         const canvasRect = this.mapView.getCanvasClientRect();
         return {
             x: event.clientX - canvasRect.left,

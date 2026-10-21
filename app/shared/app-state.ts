@@ -188,9 +188,9 @@ export class AppState<T> extends Observable<T> {
     private readonly binding: StateBinding<T>;
 
     get value(): T { return this.getValue(); }
-    getValue(): T { return deepCopy(this.binding.read()); }
-    /** Copies only the selected portion, including prepared values inside a transaction. */
-    read<R>(select: (value: T) => R): R { return deepCopy(select(this.binding.read())); }
+    getValue(): T { return this.binding.read(); }
+    /** Reads one portion, including prepared values inside a transaction. Values are immutable. */
+    read<R>(select: (value: T) => R): R { return select(this.binding.read()); }
     next(value: T): void { this.binding.write(value); }
 
     readonly name: string;
@@ -211,13 +211,14 @@ export class AppState<T> extends Observable<T> {
         const source = binding ?? stateBinding(pool, options.name, deepCopy(options.defaultValue));
         super(subscriber => {
             let previous = source.signal();
-            subscriber.next(previous);
-            return source.commits.subscribe(() => {
+            const subscription = source.commits.subscribe(() => {
                 const value = source.signal();
                 if (Object.is(previous, value)) return;
                 previous = value;
                 subscriber.next(value);
             });
+            subscriber.next(previous);
+            return subscription;
         });
         this.binding = source;
         this.signal = source.signal;
@@ -538,12 +539,19 @@ export class AppState<T> extends Observable<T> {
  * a single underlying state entry for URL/storage sync.
  */
 /** Convenience wrapper that exposes one `AppState<T[]>` as per-view accessors. */
+export interface ViewValueBinding<T> {
+    idAt(index: number): string | undefined;
+    read(id: string): T;
+    write(id: string, value: T): void;
+    select(id: string): Signal<T>;
+}
+
 export class MapViewState<T> {
     public appState: AppState<Array<T>>;
     private readonly defaultValue: T;
 
     /** Wraps one array-valued state slot and exposes it as a per-view accessor set. */
-    constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>) {
+    constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>, binding?: StateBinding<T[]>, private readonly views?: ViewValueBinding<T>) {
         this.defaultValue = deepCopy(options.defaultValue);
         this.appState = new AppState(pool, {
             name: options.name,
@@ -569,11 +577,17 @@ export class MapViewState<T> {
             urlIncludeInVisualizationOnly: options.urlIncludeInVisualizationOnly,
             snapshotPersist: options.snapshotPersist,
             configDefault: options.configDefault
-        });
+        }, binding);
     }
 
     /** Writes one view-specific value back into the underlying array state. */
     next(viewIndex: number, value: T) {
+        if (this.views) {
+            const id = this.views.idAt(viewIndex);
+            if (!id) throw new Error(`View index ${viewIndex} is unavailable`);
+            this.views.write(id, value);
+            return;
+        }
         const currentValue = [...this.appState.getValue()];
         if (viewIndex >= currentValue.length) {
             for (let i = currentValue.length; i <= viewIndex; ++i) {
@@ -586,22 +600,30 @@ export class MapViewState<T> {
 
     /** Subscribes to one view-specific slice of the shared array state. */
     subscribe(viewIndex: number, cb: (value: T) => void) {
-        return this.appState.pipe(
-            map(arr => (arr[viewIndex] !== undefined ? arr[viewIndex] : this.appState.defaultValue[0])),
-            // distinctUntilChanged()
-        ).subscribe(cb);
+        return this.pipe(viewIndex).subscribe(cb);
     }
 
     pipe<R = T>(viewIndex: number, ...ops: OperatorFunction<T, any>[]): Observable<R> {
+        const id = this.views?.idAt(viewIndex);
         const base$ = this.appState.pipe(
-            map(arr => (arr[viewIndex] !== undefined ? arr[viewIndex] : this.appState.defaultValue[0])),
-            // distinctUntilChanged()
+            map(array => id && this.views ? this.views.read(id) : array[viewIndex] ?? this.defaultValue),
+            distinctUntilChanged()
         );
         return ops.length ? (base$ as any).pipe(...ops) : (base$ as unknown as Observable<R>);
     }
 
     /** Returns the value for one view, falling back to the first default entry. */
+    /** Native per-view reader for ordinary consumers; logical identity survives reordering. */
+    signal(viewId: string): Signal<T> {
+        if (!this.views) throw new Error("This codec has no registered view owner");
+        return this.views.select(viewId);
+    }
+
     getValue(viewIndex: number): T {
+        if (this.views) {
+            const id = this.views.idAt(viewIndex);
+            return id ? this.views.read(id) : this.defaultValue;
+        }
         return this.appState.read(values => values[viewIndex] ?? this.defaultValue);
     }
 
@@ -647,28 +669,17 @@ function compactBooleans(value: unknown): unknown {
  */
 /** Specialized app-state slot for style option values keyed by map/layer/style metadata. */
 export class StyleState extends AppState<Map<string, (string|number|boolean)[]>> {
-    layerNamesState: AppState<string[]>;
-    numViewsState: AppState<number>;
+    get layerNamesState(): AppState<string[]> { return this.pool.get("layerNames") as AppState<string[]>; }
+    get numViewsState(): AppState<number> { return this.pool.get("numberOfViews") as AppState<number>; }
 
-    /** Creates the specialized style state used for per-style option persistence. */
-    constructor(pool: Map<string, AppState<unknown>>) {
+    /** Cross-slot dictionaries are resolved after all owners have registered at startup. */
+    constructor(private readonly pool: Map<string, AppState<unknown>>, binding?: StateBinding<Map<string, (string | number | boolean)[]>>) {
         super(pool, {
             name: "styleOptions",
             schema: z.record(z.string(), z.string()),
-            defaultValue: new Map<string, (string|number|boolean)[]>(),
+            defaultValue: new Map<string, (string | number | boolean)[]>(),
             snapshotPersist: false
-        });
-        const layerNamesState = pool.get("layerNames");
-        if (layerNamesState === undefined) {
-            throw Error("Expected layerNames state, got undefined!");
-        }
-        // Backward-compat: accept either 'numberOfViews' or legacy 'numViews'
-        const numViewsState = pool.get("numberOfViews");
-        if (numViewsState === undefined) {
-            throw Error("Expected numberOfViews state, got undefined!");
-        }
-        this.layerNamesState = layerNamesState as AppState<string[]>;
-        this.numViewsState = numViewsState as AppState<number>;
+        }, binding);
     }
 
     override isUrlState(): boolean {
@@ -800,6 +811,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
                 z.parse(this.schema, raw);
             }
 
+            if (!Object.keys(raw).some(key => this.isStyleOptionUrlParamKey(key))) return;
             const layerNames = this.layerNamesState.getValue();
             const numViews = this.numViewsState.getValue();
             const nextValues = deepCopy(this.getValue());

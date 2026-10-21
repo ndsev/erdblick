@@ -66,6 +66,8 @@ export interface FeatureSearchStateEntry {
     selectedFeatureTypes: string[];
     selectedTileLevels: number[];
     selectedViewIndices: number[];
+    /** Runtime identity; positional indices remain only for storage and UI interoperation. */
+    selectedViewIds?: string[];
     searchStyleRules: FeatureSearchStyleRule[];
     renderStrategy: FeatureSearchRenderStrategy;
 }
@@ -493,6 +495,7 @@ export function normalizeFeatureSearchStateEntry(value: unknown): FeatureSearchS
         selectedFeatureTypes: normalizeFeatureSearchFeatureTypes(raw["selectedFeatureTypes"]),
         selectedTileLevels: normalizeFeatureSearchTileLevels(raw["selectedTileLevels"]),
         selectedViewIndices: normalizeSearchViewIndices(raw["selectedViewIndices"]),
+        ...(Array.isArray(raw["selectedViewIds"]) ? {selectedViewIds: raw["selectedViewIds"].filter((id): id is string => typeof id === "string")} : {}),
         searchStyleRules: styleRules,
         renderStrategy: normalizeFeatureSearchRenderStrategy(raw["renderStrategy"])
     };

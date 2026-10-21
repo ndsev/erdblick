@@ -1,3 +1,4 @@
+import type {ViewIdentity} from "./view-id";
 import {Subject, Subscription} from "rxjs";
 import type {FilterTileState} from "../mapdata/filter-tile-state.model";
 import type {MapInfoService} from "../mapdata/map-info.service";
@@ -12,9 +13,9 @@ import type {StyleService, ErdblickStyle} from "../styledata/style.service";
 import {coreLib} from "../integrations/wasm";
 import type {IRenderSceneHandle} from "./render-view.model";
 import {
-    MapViewStateService,
+    MapViewService,
     ViewRecalculationReason
-} from "./map-view-state.service";
+} from "./map-view.service";
 import {
     TileSubsetLayerRenderService
 } from "./deck/tile-subset-layer-render.service";
@@ -144,10 +145,13 @@ export class ViewLayerController {
     private readonly unregisterDiagnostics: () => void;
 
     /** Bind one logical view to catalog, style, search, inspection, and worker state. */
+    private readonly identity: ViewIdentity;
+    get viewIndex(): number { return this.viewState.viewStateOwner.indexOf(this.identity.id); }
+
     constructor(
-        readonly viewIndex: number,
+        viewIndex: number,
         private readonly mapInfo: MapInfoService,
-        private readonly viewState: MapViewStateService,
+        private readonly viewState: MapViewService,
         private readonly tileStream: MapTileStreamService,
         private readonly styleService: StyleService,
         private readonly renderService: TileSubsetLayerRenderService,
@@ -158,6 +162,9 @@ export class ViewLayerController {
         private readonly styleValidationReports: StyleValidationReportService,
         private readonly ngZone: NgZone
     ) {
+        const identity = this.viewState.viewStateOwner.captureView(viewIndex);
+        if (!identity) throw new Error("Cannot attach layers to an unavailable view");
+        this.identity = identity;
         this.unregisterDiagnostics = diagnostics.register(
             viewIndex,
             () => this.diagnosticStyledLayers(),

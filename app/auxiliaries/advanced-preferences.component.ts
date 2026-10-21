@@ -1,3 +1,5 @@
+import {AppLayoutService} from "../shared/app-layout.service";
+import {inject} from "@angular/core";
 import {Component, ElementRef, HostListener, ViewChild} from '@angular/core';
 import {Subscription} from 'rxjs';
 import {ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, AppStateService} from '../shared/appstate.service';
@@ -64,6 +66,7 @@ import {DialogStackService} from '../shared/dialog-stack.service';
 })
 /** Provides the advanced preferences JSON editor dialog. */
 export class AdvancedPreferencesComponent {
+    readonly layoutState = inject(AppLayoutService);
     readonly dialogLayoutId = ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID;
     readonly advancedPreferencesEditorSessionId = 'advanced-preferences-editor';
     dirty = false;
@@ -83,11 +86,11 @@ export class AdvancedPreferencesComponent {
                 private readonly dialogStack: DialogStackService) {}
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.dialogLayoutId);
+        return this.layoutState.isDialogOpen(this.dialogLayoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+        this.layoutState.setDialogOpen(this.dialogLayoutId, visible);
     }
 
     onDialogShow() {

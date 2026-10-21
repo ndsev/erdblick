@@ -1,3 +1,5 @@
+import {AppLayoutService} from "../shared/app-layout.service";
+import {inject} from "@angular/core";
 import {Component, HostListener, ViewChild} from '@angular/core';
 import {HttpClient} from '@angular/common/http';
 import {Subscription} from 'rxjs';
@@ -84,6 +86,7 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
  * backend datasource configuration without leaving the viewer.
  */
 export class DatasourcesComponent {
+    readonly layoutState = inject(AppLayoutService);
     readonly dialogLayoutId = DATASOURCES_EDITOR_DIALOG_LAYOUT_ID;
     readonly datasourcesEditorSessionId = 'datasources-editor';
     warningDialogVisible = false;
@@ -111,11 +114,11 @@ export class DatasourcesComponent {
                 private readonly dialogStack: DialogStackService) {}
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.dialogLayoutId);
+        return this.layoutState.isDialogOpen(this.dialogLayoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+        this.layoutState.setDialogOpen(this.dialogLayoutId, visible);
     }
 
     /** Initializes the editor session whenever the datasource dialog becomes visible. */

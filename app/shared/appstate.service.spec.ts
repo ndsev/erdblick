@@ -1,3 +1,4 @@
+import {createStateTestSystem, type StateTestSystem} from "./state-test-system";
 import "@angular/compiler";
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { Subject } from 'rxjs';
@@ -85,7 +86,7 @@ describe('AppStateService', () => {
     it('hydrates URL state on startup and persists subsequent changes', async () => {
         const routerStub = createRouterStub({ m: '1' });
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
         // Trigger initial hydration (service wires up after first NavigationEnd)
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -118,7 +119,7 @@ describe('AppStateService', () => {
             registerDefaultContainer: vi.fn(),
             showAlertDialogDefault: vi.fn()
         } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -132,7 +133,7 @@ describe('AppStateService', () => {
 
     it('replaces and hydrates URL state through the explicit runtime boundary', async () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -159,7 +160,7 @@ describe('AppStateService', () => {
 
     it('rejects explicit URL replacement before persistence is ready', async () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         await expect(service.replaceUrlState({v2: '1'})).rejects.toThrow('before AppStateService is ready');
         expect(routerStub.navigate).not.toHaveBeenCalled();
@@ -170,7 +171,7 @@ describe('AppStateService', () => {
 
     it('keeps selected features with packed tile ids during datasource pruning', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         service.selection = [{
             id: 0,
             features: [feature(
@@ -202,7 +203,7 @@ describe('AppStateService', () => {
 
     it('keeps selected features while datasource layers are still initializing', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         service.selection = [{
             id: 0,
             features: [feature(
@@ -234,7 +235,7 @@ describe('AppStateService', () => {
 
     it('preserves focused selection metadata while pruning unavailable selections', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         service.selection = [{
             id: 0,
             features: [
@@ -269,7 +270,7 @@ describe('AppStateService', () => {
 
     it('keeps selections whose MapTileKey encodes slashes in the map id', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         service.selection = [{
             id: 0,
             features: [feature(
@@ -312,7 +313,7 @@ describe('AppStateService', () => {
             registerDefaultContainer: vi.fn(),
             showAlertDialogDefault: vi.fn()
         } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         expect(service.lod3TileThreshold).toBe(128);
 
@@ -328,7 +329,7 @@ describe('AppStateService', () => {
 
     it('normalizes the persisted subset-render worker preference', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(
+        const service = createStateTestSystem(
             routerStub as unknown as Router,
             infoServiceStub()
         );
@@ -344,7 +345,7 @@ describe('AppStateService', () => {
 
     it('persists a bounded drill-pick radius without adding it to shared URLs', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         expect(service.drillPickRadius).toBe(3);
 
@@ -365,7 +366,7 @@ describe('AppStateService', () => {
 
     it('persists bounded feature zoom clearance without adding it to shared URLs', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         expect(service.featureZoomClearanceMeters).toBe(20);
 
@@ -397,7 +398,7 @@ describe('AppStateService', () => {
         localStorage.setItem('featureZoomClearanceMeters', stored);
         vi.spyOn(console, 'error').mockImplementation(() => undefined);
         const routerStub = createRouterStub();
-        const service = new AppStateService(
+        const service = createStateTestSystem(
             routerStub as unknown as Router,
             infoServiceStub()
         );
@@ -419,7 +420,7 @@ describe('AppStateService', () => {
             registerDefaultContainer: vi.fn(),
             showAlertDialogDefault: vi.fn()
         } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         expect(service.deckAntialiasingEnabled).toBe(true);
         expect(service.semanticCompositingEnabled).toBe(true);
@@ -432,7 +433,7 @@ describe('AppStateService', () => {
     it('persists semantic compositing locally without adding it to shared URLs', async () => {
         localStorage.setItem('semanticCompositingEnabled', '0');
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -462,7 +463,7 @@ describe('AppStateService', () => {
             registerDefaultContainer: vi.fn(),
             showAlertDialogDefault: vi.fn()
         } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -486,7 +487,7 @@ describe('AppStateService', () => {
             registerDefaultContainer: vi.fn(),
             showAlertDialogDefault: vi.fn()
         } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -524,7 +525,7 @@ describe('AppStateService', () => {
             registerDefaultContainer: vi.fn(),
             showAlertDialogDefault: vi.fn()
         } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -582,7 +583,7 @@ describe('AppStateService', () => {
             l: 'Road:0',
             s: JSON.stringify(['features', '"PROHIBITED"']),
         });
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -600,7 +601,7 @@ describe('AppStateService', () => {
             l: 'Road:0',
             sel: '5~1f~Features:MapA:Road:tile-1:0~Road.1:attribute#0:validity#0~30:20~abc123~0',
         });
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -624,7 +625,7 @@ describe('AppStateService', () => {
             l: 'Road:0',
             sel: '0~0~F:0:545555209~Road.545555209.387~30,20~n0',
         });
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -653,7 +654,7 @@ describe('AppStateService', () => {
             registerDefaultContainer: vi.fn(),
             showAlertDialogDefault: vi.fn()
         } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -691,7 +692,7 @@ describe('AppStateService', () => {
             registerDefaultContainer: vi.fn(),
             showAlertDialogDefault: vi.fn()
         } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.initializePersistence();
         await flushMicrotasks();
@@ -718,7 +719,7 @@ describe('AppStateService', () => {
             registerDefaultContainer: vi.fn(),
             showAlertDialogDefault: vi.fn()
         } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.initializePersistence();
         service.addFeatureSearch({query: '**.speed > 80'});
@@ -727,7 +728,7 @@ describe('AppStateService', () => {
         const stored = JSON.parse(localStorage.getItem('featureSearchState') ?? '[]');
         expect(stored[0].selectedMapLayers).toEqual([]);
         expect(stored[0].selectedTileLevels).toEqual([]);
-        expect(stored[0].selectedViewIndices).toEqual([0, 1]);
+        expect(stored[0].selectedViewIndices).toEqual([0]);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -738,7 +739,7 @@ describe('AppStateService', () => {
             s: JSON.stringify(['features', '**.speed > 80']),
             external: 'keep-me',
         });
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         const params = (service as any).serializeUrlV2();
         expect(params.s).toBeUndefined();
@@ -751,9 +752,9 @@ describe('AppStateService', () => {
     it('shares current cameras, layers and selections without copying unknown URL credentials', async () => {
         window.history.pushState({}, '', '/viewer/?access_token=secret&external=private#token');
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         const restoreRouter = createRouterStub();
-        let restored: AppStateService | undefined;
+        let restored: StateTestSystem | undefined;
         try {
             service.layerNames = ['Map/Lane'];
             service.setMapLayerConfig('Map', 'Lane', [{visible: true, level: 13, autoLevel: false}]);
@@ -772,7 +773,7 @@ describe('AppStateService', () => {
             expect(routerStub.navigate).not.toHaveBeenCalled();
 
             window.history.pushState({}, '', link.href);
-            restored = new AppStateService(restoreRouter as unknown as Router, infoServiceStub());
+            restored = createStateTestSystem(restoreRouter as unknown as Router, infoServiceStub());
             restoreRouter.events.next(new NavigationEnd(1, '/', '/'));
             await flushMicrotasks();
             expect(restored.layerNames).toEqual(['Map/Lane']);
@@ -789,7 +790,7 @@ describe('AppStateService', () => {
 
     it('serializes active and selected-feature layers against one URL layer order', async () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         service.layerNamesState.next(['MapA/Lane', 'MapC/POI']);
         service.layerVisibilityState.next(0, [true, false]);
@@ -831,7 +832,7 @@ describe('AppStateService', () => {
             z: '13x2',
             az: '1x2',
         });
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -853,7 +854,7 @@ describe('AppStateService', () => {
 
     it('serializes an empty active layer list as an authoritative v2 layer list', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         service.layerNamesState.next(['MapA/Lane']);
         service.layerVisibilityState.next(0, [false]);
@@ -878,7 +879,7 @@ describe('AppStateService', () => {
             registerDefaultContainer: vi.fn(),
             showAlertDialogDefault: vi.fn()
         } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
         const stateApplied = vi.fn();
         service.stateApplied.subscribe(stateApplied);
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
@@ -914,7 +915,7 @@ describe('AppStateService', () => {
     it('hydrates marked position from CSV query params', async () => {
         const routerStub = createRouterStub({ mp: '11.141985707869166,48.002375728153766' });
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -928,7 +929,7 @@ describe('AppStateService', () => {
     it('serializes marked position to a CSV query param', async () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -960,7 +961,7 @@ describe('AppStateService', () => {
             registerDefaultContainer: vi.fn(),
             showAlertDialogDefault: vi.fn()
         } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.setMarkerPosition(Cartographic.fromDegrees(11.25, 48.5, 127.75));
 
@@ -972,7 +973,7 @@ describe('AppStateService', () => {
     it('hydrates background-layer settings from combined query params', async () => {
         const routerStub = createRouterStub({ n: '2', bg: 'osm~50,world-overview~30' });
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -987,7 +988,7 @@ describe('AppStateService', () => {
     it('serializes background-layer settings into a single bg query param', async () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1014,7 +1015,7 @@ describe('AppStateService', () => {
     it('migrates legacy osm query params into the new background-layer state', async () => {
         const routerStub = createRouterStub({ n: '2', osm: '1~50,0~30' });
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1029,7 +1030,7 @@ describe('AppStateService', () => {
     it('uses the configured default background opacity when a persisted layer no longer exists', async () => {
         const routerStub = createRouterStub({ bg: 'world-overview~100' });
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1060,7 +1061,7 @@ describe('AppStateService', () => {
     it('seeds the second view from the primary view when split view is opened', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const destination = Cartographic.fromDegrees(11.25, 48.5, 987654);
         const orientation = { heading: 1.25, pitch: -0.75, roll: 0.125 };
@@ -1104,7 +1105,7 @@ describe('AppStateService', () => {
     it('copies style option values into the second view when split view is opened', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.layerNamesState.next(['m1/layerA']);
         service.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
@@ -1122,7 +1123,7 @@ describe('AppStateService', () => {
 
     it.each([0, 1])('retains the other view when view %i is removed', (removed) => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         service.numViews = 2;
         service.layerNamesState.next(['m1/layerA']);
         for (const index of [0, 1]) {
@@ -1171,7 +1172,8 @@ describe('AppStateService', () => {
         expect(service.styles.get('m1/layerA/overlay/opacity')).toEqual([survivor ? 0.8 : 0.2]);
         expect(service.selectionState.signal()).toBe(selection);
         expect(service.featureSearches).toEqual(searches.map(search => ({
-            ...search, selectedViewIndices: search.selectedViewIndices.includes(survivor) ? [0] : []
+            ...search, selectedViewIndices: search.selectedViewIndices.includes(survivor) ? [0] : [],
+            selectedViewIds: search.selectedViewIndices.includes(survivor) ? [service.viewIds()[0]] : []
         })));
         expect(service.viewSync).toEqual([VIEW_SYNC_POSITION]);
 
@@ -1185,7 +1187,7 @@ describe('AppStateService', () => {
 
     it('retains sparse defaults and a live camera without propagating synchronization', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         service.numViewsState.next(3);
         const camera = {...service.cameraViewDataState.getValue(2), position: [1, 2, 3] as [number, number, number]};
         const defaultBackground = service.backgroundState.getValue(2);
@@ -1199,7 +1201,7 @@ describe('AppStateService', () => {
 
     it('writes a style-option batch atomically and emits style state once', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         service.layerNamesState.next(['m1/layerA']);
         service.numViews = 2;
         const nextSpy = vi.spyOn(service.stylesState, 'next');
@@ -1231,7 +1233,7 @@ describe('AppStateService', () => {
 
     it('rejects an invalid style-option batch before mutating any option', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         service.layerNamesState.next(['m1/layerA']);
 
         expect(() => service.setStyleOptionValuesBatch([
@@ -1258,7 +1260,7 @@ describe('AppStateService', () => {
 
     it('stores qualified layer and map preset selections outside snapshots', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         service.numViews = 2;
 
         service.setLayerPresetSelection(0, 'Vendor/Map', 'Lane', {
@@ -1297,7 +1299,7 @@ describe('AppStateService', () => {
             }
         }));
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         const errors = service.seedConfigDefaultState({mapPresets: [{id: 'legacy'}]}, 'map-preset-config');
 
@@ -1318,7 +1320,7 @@ describe('AppStateService', () => {
             }
         }]));
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         service.initializePersistence();
 
@@ -1333,7 +1335,7 @@ describe('AppStateService', () => {
 
     it('provides non-URL hover-label defaults for the preview preferences', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         expect(service.hoverLabelsEnabled).toBe(true);
         expect(service.hoverLabelFields).toEqual([{
@@ -1351,7 +1353,7 @@ describe('AppStateService', () => {
     it('seeds each newly added view from the previous view when the view count keeps increasing', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.layerNamesState.next(['m1/layerA']);
         service.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
@@ -1361,6 +1363,7 @@ describe('AppStateService', () => {
         const destination = Cartographic.fromDegrees(7.75, 50.2, 123456);
         const orientation = { heading: 0.5, pitch: -0.4, roll: 0.3 };
 
+        service.numViews = 2;
         service.setView(1, destination, orientation);
         service.setProjectionMode(1, true);
         service.setLayerSyncOption(1, true);
@@ -1405,7 +1408,7 @@ describe('AppStateService', () => {
         localStorage.setItem('selected', JSON.stringify(['1~1~Features:map:layer:tile~feature-1~30:20~abc123~0']));
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1420,11 +1423,12 @@ describe('AppStateService', () => {
     it('converts views to degrees when setting a camera view', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const destination = new Cartographic(Math.PI / 2, Math.PI / 4, 500);
         const orientation = { heading: 1, pitch: 2, roll: 3 };
 
+        service.numViews = 2;
         service.setView(1, destination, orientation);
 
         const view = service.cameraViewDataState.getValue(1);
@@ -1438,7 +1442,7 @@ describe('AppStateService', () => {
     it('rounds camera state values to 8 decimal places', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const destination = Cartographic.fromDegrees(11.141985707869166, 48.002375728153766, 123.123456789123);
         const orientation = { heading: 1.123456789, pitch: -2.987654321, roll: 3.000000009 };
@@ -1467,7 +1471,7 @@ describe('AppStateService', () => {
         });
 
         const storageState = service.cameraViewDataState.appState.serialize(false);
-        const restoredService = new AppStateService(
+        const restoredService = createStateTestSystem(
             createRouterStub() as unknown as Router,
             infoServiceStub
         );
@@ -1489,7 +1493,7 @@ describe('AppStateService', () => {
             p: '-0.75',
             r: '0'
         });
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1502,7 +1506,7 @@ describe('AppStateService', () => {
 
     it('synchronizes the complete target-relative camera position across views', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         service.numViews = 2;
         service.focusedView = 0;
         const orientation = {heading: 0.25, pitch: -0.5, roll: 0};
@@ -1547,7 +1551,7 @@ describe('AppStateService', () => {
         vi.useFakeTimers();
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -1588,7 +1592,7 @@ describe('AppStateService', () => {
     it('stores style parameters as URL state-friendly payloads', async () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         // Trigger initial hydration (service wires up after first NavigationEnd)
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
@@ -1633,7 +1637,7 @@ describe('AppStateService', () => {
 
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -1647,7 +1651,7 @@ describe('AppStateService', () => {
     it('initializes layer config with fallback values when first requested', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const config = service.mapLayerConfig('m1', 'layerA', false, 9);
 
@@ -1667,7 +1671,7 @@ describe('AppStateService', () => {
     it('persists layer config updates across mapLayerConfig calls', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         // Prime internal state so indices exist before updating.
         service.mapLayerConfig('m2', 'layerB');
@@ -1692,7 +1696,7 @@ describe('AppStateService', () => {
     it('reuses the last unlocked feature inspection and closes other unlocked feature inspections', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [feature('old-docked')], locked: false, size: [30, 20], color: '#111111', undocked: false },
@@ -1727,7 +1731,7 @@ describe('AppStateService', () => {
     it('keeps other unlocked feature inspections when selection targets a specific panel id', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [feature('old-first')], locked: false, size: [30, 20], color: '#111111', undocked: false },
@@ -1750,7 +1754,7 @@ describe('AppStateService', () => {
     it('replaces an unlocked inspection dialog when it is the only unlocked feature inspection', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -1773,7 +1777,7 @@ describe('AppStateService', () => {
     it('creates a new docked inspection panel when no unlocked panels or dialogs exist', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -1798,7 +1802,7 @@ describe('AppStateService', () => {
     it('activates the inspection dock tab when adding a docked feature selection', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.dockActiveTab = 'search';
         service.isDockOpen = false;
@@ -1816,7 +1820,7 @@ describe('AppStateService', () => {
     it('can create an undocked feature selection without stealing the dock search tab', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.dockActiveTab = 'search';
         service.isDockOpen = true;
@@ -1838,7 +1842,7 @@ describe('AppStateService', () => {
     it('reuses an unlocked floating feature inspection even when it focuses an attribute target', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             {
@@ -1879,7 +1883,7 @@ describe('AppStateService', () => {
     it('toggles an inspection panel between base feature and attribute-validity target', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             {
@@ -1906,7 +1910,7 @@ describe('AppStateService', () => {
     it('preserves transient inspection tree header expansion state defensively', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
         const expandedNodes = new Map<string, boolean | undefined>([['root', true], ['child', false]]);
         const restoreSnapshot = new Map<string, boolean | undefined>([['root', false]]);
 
@@ -1938,7 +1942,7 @@ describe('AppStateService', () => {
 
     it('keeps SourceData column defaults and per-panel overrides out of the URL', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         service.selection = [{
             id: 7,
             features: [],
@@ -1966,7 +1970,7 @@ describe('AppStateService', () => {
     it('focuses inspection panels when selections create, reuse, or target an existing panel', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -1994,7 +1998,7 @@ describe('AppStateService', () => {
     it('reopens the dock for default feature selections', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.isDockOpen = false;
         service.selection = [
@@ -2011,7 +2015,7 @@ describe('AppStateService', () => {
     it('does not replace unlocked SourceData with a feature inspection', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:1'), locked: false, size: [30, 40], color: '#111111', undocked: true },
@@ -2033,7 +2037,7 @@ describe('AppStateService', () => {
     it('reuses an unlocked SourceData inspection before creating a new SourceData dialog', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [feature('feature-panel')], locked: false, size: [30, 20], color: '#111111', undocked: false },
@@ -2055,7 +2059,7 @@ describe('AppStateService', () => {
     it('creates a new undocked SourceData dialog when no unlocked SourceData inspection exists', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [feature('feature-panel')], locked: false, size: [30, 20], color: '#111111', undocked: false },
@@ -2079,7 +2083,7 @@ describe('AppStateService', () => {
     it('falls back to a remaining inspection panel when the focused panel is removed', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [feature('remove-me')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -2099,7 +2103,7 @@ describe('AppStateService', () => {
     it('keeps SourceData selection in the same panel when requested by SourceData panel id even if locked', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -2120,7 +2124,7 @@ describe('AppStateService', () => {
     it('ignores SourceData panels when deduplicating feature selection', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const duplicated = feature('same-feature');
         service.selection = [
@@ -2150,7 +2154,7 @@ describe('AppStateService', () => {
     it('keeps unlocked SourceData inspections when clearing unlocked selections', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [feature('remove-me')], locked: false, size: [30, 20], color: '#111111', undocked: false },
@@ -2173,7 +2177,7 @@ describe('AppStateService', () => {
     it('creates one new panel per feature after clearing unlocked selections', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [feature('remove-a')], locked: false, size: [30, 20], color: '#111111', undocked: false },
@@ -2209,7 +2213,7 @@ describe('AppStateService', () => {
     it('stores inspection dialog layout in dialogLayouts state', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 11, features: [], locked: false, size: [30, 40], color: '#111111', undocked: true },
@@ -2238,7 +2242,7 @@ describe('AppStateService', () => {
     it('persists comparison and layout states after hydration', async () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
@@ -2277,7 +2281,7 @@ describe('AppStateService', () => {
     it('removes a compared other panel when unsetPanel is called', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -2317,7 +2321,7 @@ describe('AppStateService', () => {
     it('promotes another comparison entry to base when the current base panel is removed', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -2373,7 +2377,7 @@ describe('AppStateService', () => {
     it('removes cleared unlocked panels from comparison during bulk close', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.selection = [
             { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
@@ -2412,7 +2416,7 @@ describe('AppStateService', () => {
 
     it('validates and persists Connection preferences seeded through deployment state', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         expect(service.seedConfigDefaultState({connectionRetryInitialDelayMs: 7000,
             connectionRetryMaxDelayMs: 90000}, "connection-config")).toEqual([]);
         expect(service.connectionRetryPolicy.initialDelayMs).toBe(7000);
@@ -2427,7 +2431,7 @@ describe('AppStateService', () => {
 
     it('shares validated point-cloud preferences across config, snapshots and persisted state', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         expect(service.seedConfigDefaultState({pointCloudDetailPixels: 4,
             pointCloudGpuMemoryMiB: 128}, 'point-cloud-config')).toEqual([]);
         expect(service.pointCloudPolicy.detailPixels).toBe(4);
@@ -2449,7 +2453,7 @@ describe('AppStateService', () => {
     it('exports app state entries with compact style option storage keys', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.markerState.next(true);
         service.layerNamesState.next(['m1/layerA']);
@@ -2468,7 +2472,7 @@ describe('AppStateService', () => {
     it('omits transient dialog visibility flags from exported snapshots', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.openDialog('advanced-preferences-dialog');
         const snapshot = service.exportSnapshot();
@@ -2481,7 +2485,7 @@ describe('AppStateService', () => {
 
     it('keeps coordinate preference and legal acceptance out of URLs and snapshots', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         service.coordinatesEnabledState.next(false);
         service.coordinatesLegalTermsAcceptedState.next(true);
@@ -2500,7 +2504,7 @@ describe('AppStateService', () => {
     it('restores dialog visibility from dialogLayouts snapshot state', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const errors = service.importSnapshot({
             dialogLayouts: {
@@ -2522,7 +2526,7 @@ describe('AppStateService', () => {
     it('restores style dialog state from snapshot data', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const errors = service.importSnapshot({
             styleEditorTarget: 'generic',
@@ -2552,7 +2556,7 @@ describe('AppStateService', () => {
     it('rejects snapshot imports with unknown top-level keys and applies nothing', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.markerState.next(false);
         const errors = service.importSnapshot({
@@ -2570,7 +2574,7 @@ describe('AppStateService', () => {
     it('imports valid partial snapshots and keeps missing states unchanged', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.markerState.next(false);
 
@@ -2588,7 +2592,7 @@ describe('AppStateService', () => {
 
     it('resets omitted query-scene state and replaces camera and style options', async () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
         service.mapsOpenState.next(true);
@@ -2605,7 +2609,7 @@ describe('AppStateService', () => {
 
     it('rejects presentation snapshot replacement before persistence is ready', () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         expect(() => service.replaceSnapshotState({marker: true}))
             .toThrow('before AppStateService is ready');
@@ -2616,7 +2620,7 @@ describe('AppStateService', () => {
 
     it('validates presentation snapshot replacement before mutating any state', async () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
         const stateApplied = vi.fn();
@@ -2638,7 +2642,7 @@ describe('AppStateService', () => {
 
     it('replaces presentation state, resets omissions, and clears stale style options without persistence', async () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
@@ -2680,7 +2684,7 @@ describe('AppStateService', () => {
     it('imports compact style option entries after applying layer state', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const errors = service.importSnapshot({
             layerNames: ['m1/layerA'],
@@ -2698,7 +2702,7 @@ describe('AppStateService', () => {
     it('rejects non-string compact style option snapshot values before mutation', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const errors = service.importSnapshot({
             marker: true,
@@ -2716,7 +2720,7 @@ describe('AppStateService', () => {
     it('rejects prototype-pollution keys in snapshots', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const payload = JSON.parse('{"marker": true, "__proto__": {"polluted": true}}');
         const errors = service.importSnapshot(payload);
@@ -2732,7 +2736,7 @@ describe('AppStateService', () => {
     it('rejects nested __proto__ keys in snapshots', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const payload = JSON.parse('{"styleOptions": {"valid/key": [true], "__proto__": {"polluted": true}}}');
         const errors = service.importSnapshot(payload);
@@ -2748,7 +2752,7 @@ describe('AppStateService', () => {
     it('rejects constructor.prototype payloads in snapshots', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const payload = JSON.parse('{"styleOptions": {"constructor": {"prototype": {"polluted": true}}}}');
         const errors = service.importSnapshot(payload);
@@ -2764,7 +2768,7 @@ describe('AppStateService', () => {
     it('rejects oversized snapshot strings before state mutation', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
         const limits = service.getSnapshotImportLimits();
 
         const errors = service.importSnapshot({
@@ -2781,7 +2785,7 @@ describe('AppStateService', () => {
     it('rejects snapshots that exceed the max nesting depth', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
         const limits = service.getSnapshotImportLimits();
 
         const deepValue: Record<string, unknown> = {};
@@ -2805,7 +2809,7 @@ describe('AppStateService', () => {
     it('applies config default state for a fresh profile before hydration', async () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const errors = service.seedConfigDefaultState({
             marker: true,
@@ -2825,7 +2829,7 @@ describe('AppStateService', () => {
 
     it('applies the coordinate config default without making it snapshot state', async () => {
         const routerStub = createRouterStub();
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub());
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub());
 
         const errors = service.seedConfigDefaultState({coordinatesEnabled: false}, "coordinates-cfg");
         expect(errors).toEqual([]);
@@ -2844,7 +2848,7 @@ describe('AppStateService', () => {
 
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.seedConfigDefaultState({marker: true}, "cfg-hash-2");
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
@@ -2871,7 +2875,7 @@ describe('AppStateService', () => {
 
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.seedConfigDefaultState({marker: true}, "cfg-hash-3");
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
@@ -2898,7 +2902,7 @@ describe('AppStateService', () => {
 
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.seedConfigDefaultState({marker: true}, "cfg-hash-4");
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
@@ -2925,7 +2929,7 @@ describe('AppStateService', () => {
 
         const routerStub = createRouterStub({m: '1'});
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         service.seedConfigDefaultState({marker: false}, "cfg-hash-5");
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
@@ -2941,7 +2945,7 @@ describe('AppStateService', () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const errors = service.seedConfigDefaultState({marker: ["bad"]}, "cfg-hash-6");
         expect(errors.length).toBeGreaterThan(0);
@@ -2960,7 +2964,7 @@ describe('AppStateService', () => {
     it('ignores empty config default snapshots', async () => {
         const routerStub = createRouterStub();
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
-        const service = new AppStateService(routerStub as unknown as Router, infoServiceStub);
+        const service = createStateTestSystem(routerStub as unknown as Router, infoServiceStub);
 
         const errors = service.seedConfigDefaultState({}, "cfg-hash-empty");
         expect(errors).toEqual([]);

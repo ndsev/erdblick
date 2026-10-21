@@ -1,4 +1,5 @@
 import {describe, expect, it} from "vitest";
+import {take} from "rxjs";
 import {AppState} from "./app-state";
 import {ViewerState} from "./viewer-state";
 import {diagnosticsLogFilter, diagnosticsExportOptions} from "../diagnostics/diagnostics.facade.service.state";
@@ -20,6 +21,38 @@ function fixture() {
 }
 
 describe("SignalStore publication", () => {
+    it("does not publish or replace identities for a net-zero transaction", () => {
+        const {state, filter, options} = fixture();
+        const before = state.store.diagnostics();
+        const seen: unknown[] = [];
+        const subscription = filter.subscribe(value => seen.push(value));
+        state.transaction(() => {
+            filter.next({...filter.getValue(), info: false});
+            state.transaction(() => filter.next({...filter.getValue(), info: true}));
+            options.next({...options.getValue(), includeLogs: false});
+            options.next({...options.getValue(), includeLogs: true});
+        });
+        expect(seen).toHaveLength(1);
+        expect(state.store.diagnostics()).toBe(before);
+        subscription.unsubscribe(); state.destroy();
+    });
+    it("observes a write made during initial replay and tears down take(1) observers", () => {
+        const {state, filter} = fixture();
+        const observed: boolean[] = [];
+        const subscription = filter.subscribe(value => {
+            observed.push(value.info);
+            if (value.info) filter.next({...value, info: false});
+        });
+        expect(observed).toEqual([true, false]);
+        let once = 0;
+        filter.pipe(take(1)).subscribe(value => {
+            ++once;
+            filter.next({...value, info: true});
+        });
+        expect(once).toBe(1);
+        subscription.unsubscribe();
+        state.destroy();
+    });
     it("does not reevaluate a bound native selector when an unrelated field changes", () => {
         const {state, options} = fixture();
         let selections = 0;
@@ -56,7 +89,7 @@ describe("SignalStore publication", () => {
         })).toThrow();
         expect(filter.signal()).toBe(before);
         expect(filter.getValue().info).toBe(true);
-        const editable = filter.getValue();
+        const editable = {...filter.getValue()};
         editable.info = false;
         filter.next(editable);
         expect(before.info).toBe(true);

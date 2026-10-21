@@ -1,3 +1,5 @@
+import {AppLayoutService} from "../shared/app-layout.service";
+import {inject} from "@angular/core";
 import { Component } from "@angular/core";
 import { MapInfoService } from "../mapdata/map-info.service";
 import { AppStateService, LEGAL_INFO_DIALOG_LAYOUT_ID } from "../shared/appstate.service";
@@ -31,6 +33,7 @@ import { AppStateService, LEGAL_INFO_DIALOG_LAYOUT_ID } from "../shared/appstate
 })
 /** Dialog that aggregates map-level legal and copyright notices. */
 export class LegalInfoDialogComponent {
+    readonly layoutState = inject(AppLayoutService);
     readonly dialogLayoutId = LEGAL_INFO_DIALOG_LAYOUT_ID;
     public aggregatedLegalInfo: { mapName: string, entry: string }[] = [];
 
@@ -50,11 +53,11 @@ export class LegalInfoDialogComponent {
     }
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.dialogLayoutId);
+        return this.layoutState.isDialogOpen(this.dialogLayoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+        this.layoutState.setDialogOpen(this.dialogLayoutId, visible);
     }
 
     /** Closes the legal-information dialog. */

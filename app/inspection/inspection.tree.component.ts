@@ -1,3 +1,4 @@
+import {InspectionStateService} from "./inspection-state.service";
 import {
     AfterViewInit,
     ChangeDetectionStrategy,
@@ -411,7 +412,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         } else {
             this.hiddenColumnKeys.add(column.key);
         }
-        this.stateService.setInspectionTreeHiddenColumns(this.panelId(), this.hiddenColumnKeys);
+        this.inspectionState.setInspectionTreeHiddenColumns(this.panelId(), this.hiddenColumnKeys);
         this.refreshLayout();
         this.cdr.markForCheck();
     }
@@ -467,12 +468,13 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 public mapService: InspectionSelectionService,
                 private jumpService: JumpTargetService,
                 public stateService: AppStateService,
+                public inspectionState: InspectionStateService,
                 private messageService: InfoMessageService,
                 private featureSearchService: FeatureSearchService,
                 private sanitizer: DomSanitizer) {
         effect(() => {
             const columns = this.columns();
-            const savedHiddenColumns = this.stateService.getInspectionTreeHiddenColumns(this.panelId());
+            const savedHiddenColumns = this.inspectionState.getInspectionTreeHiddenColumns(this.panelId());
             const defaultVisibleColumns = this.defaultVisibleColumnKeys();
             const visibleByDefault = defaultVisibleColumns === undefined
                 ? undefined
@@ -525,7 +527,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
             this.scrollToHighlightedIndex(index);
         }));
-        this.subscriptions.push(this.stateService.inspectionTreeExpandByDefaultState.subscribe(expandByDefault => {
+        this.subscriptions.push(this.inspectionState.inspectionTreeExpandByDefaultState.subscribe(expandByDefault => {
             if (!this.data.length) {
                 return;
             }
@@ -543,9 +545,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.refreshLayout();
             this.cdr.markForCheck();
         }));
-        this.subscriptions.push(this.stateService.inspectionValueVaryColorsState.subscribe(() => this.cdr.markForCheck()));
-        this.subscriptions.push(this.stateService.inspectionValueVaryOutlinesState.subscribe(() => this.cdr.markForCheck()));
-        this.subscriptions.push(this.stateService.inspectionValueVaryStripingState.subscribe(() => this.cdr.markForCheck()));
+        this.subscriptions.push(this.inspectionState.inspectionValueVaryColorsState.subscribe(() => this.cdr.markForCheck()));
+        this.subscriptions.push(this.inspectionState.inspectionValueVaryOutlinesState.subscribe(() => this.cdr.markForCheck()));
+        this.subscriptions.push(this.inspectionState.inspectionValueVaryStripingState.subscribe(() => this.cdr.markForCheck()));
     }
 
     /** Attaches resize observers and window listeners once the PrimeNG tree has been rendered. */
@@ -1061,9 +1063,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Assigns stable kind and color classes so grouped bubbles keep their leaf colors. */
     protected valueBubbleClasses(bubble: any): Record<string, boolean> {
         return inspectionValueBubbleClasses(bubble, {
-            varyColors: this.stateService.inspectionValueVaryColors,
-            varyOutlines: this.stateService.inspectionValueVaryOutlines,
-            varyStriping: this.stateService.inspectionValueVaryStriping
+            varyColors: this.inspectionState.inspectionValueVaryColors,
+            varyOutlines: this.inspectionState.inspectionValueVaryOutlines,
+            varyStriping: this.inspectionState.inspectionValueVaryStriping
         });
     }
 
@@ -1231,7 +1233,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 ? "Relation/Validity"
                 : "Attr/Validity";
             const baseId = stripFeatureInspectionTarget(inspectionTarget);
-            const ownedByPanel = this.stateService.selection.find(panel => panel.id === this.panelId())
+            const ownedByPanel = this.inspectionState.selection.find(panel => panel.id === this.panelId())
                 ?.features.some(feature => feature.mapTileKey === mapTileKey
                     && stripFeatureInspectionTarget(feature.featureId) === baseId);
             this.inspectionMenuItems.push({
@@ -1241,9 +1243,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 icon: 'pi pi-bullseye',
                 command: () => {
                     if (ownedByPanel) {
-                        this.stateService.toggleInspectionFeatureHighlight(this.panelId(), mapTileKey, inspectionTarget);
+                        this.inspectionState.toggleInspectionFeatureHighlight(this.panelId(), mapTileKey, inspectionTarget);
                     } else {
-                        this.stateService.setSelection([{mapTileKey, featureId: inspectionTarget}]);
+                        this.inspectionState.setSelection([{mapTileKey, featureId: inspectionTarget}]);
                     }
                 }
             });
@@ -1273,7 +1275,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Checks whether this panel already highlights the requested attribute/validity target. */
     private isInspectionTargetHighlighted(mapTileKey: string, targetFeatureId: string): boolean {
         const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
-        const panel = this.stateService.selection.find(item => item.id === this.panelId());
+        const panel = this.inspectionState.selection.find(item => item.id === this.panelId());
         return panel?.features.some(feature =>
             feature.mapTileKey === mapTileKey &&
             stripFeatureInspectionTarget(feature.featureId) === targetBaseFeatureId &&
@@ -1600,7 +1602,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             return;
         }
         try {
-            this.stateService.setSelection({
+            this.inspectionState.setSelection({
                 mapTileKey: sourceDataRef.mapTileKey,
                 address: sourceDataRef.address
             } as SelectedSourceData);
@@ -1810,7 +1812,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Applies either the global expand-by-default preference or the legacy feature-tree heuristic. */
     private applyInitialExpansion(nodes: TreeTableNode[]): void {
-        if (this.stateService.inspectionTreeExpandByDefault) {
+        if (this.inspectionState.inspectionTreeExpandByDefault) {
             this.setTreeExpansion(nodes, true, true);
             return;
         }
@@ -1876,12 +1878,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (this.expansionSnapshotBeforeFullCollapse) {
             state.expansionSnapshotBeforeFullCollapse = this.expansionSnapshotBeforeFullCollapse;
         }
-        this.stateService.setInspectionTreeExpansionState(this.panelId(), state);
+        this.inspectionState.setInspectionTreeExpansionState(this.panelId(), state);
     }
 
     /** Restores expansion state captured by a previous component instance for the same panel. */
     private restorePanelExpansionState(nodes: TreeNode[]): void {
-        const state = this.stateService.getInspectionTreeExpansionState(this.panelId());
+        const state = this.inspectionState.getInspectionTreeExpansionState(this.panelId());
         if (!state) {
             return;
         }

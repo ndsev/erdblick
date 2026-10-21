@@ -1,3 +1,6 @@
+import {AppConfigService} from "../shared/app-config.service";
+import {AppLayoutService} from "../shared/app-layout.service";
+import {inject} from "@angular/core";
 import {diagnosticsLogFilter, diagnosticsExportOptions} from "./diagnostics.facade.service.state";
 import {Injectable, NgZone, OnDestroy} from '@angular/core';
 import {BehaviorSubject} from 'rxjs';
@@ -39,6 +42,7 @@ interface MapgetStatusDataResponse {
  * It extends the datasource with dialog-opening helpers and export bundling.
  */
 export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy {
+    readonly versionState = inject(AppConfigService);
     readonly diagnosticsLogFilterState = this.stateService.register(diagnosticsLogFilter, "diagnostics", "logFilter");
     readonly diagnosticsExportOptionsState = this.stateService.register(diagnosticsExportOptions, "diagnostics", "exportOptions");
     readonly logFilter = this.diagnosticsLogFilterState.signal;
@@ -73,13 +77,13 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
             requestId: this.nextPerformanceScopeRequestId++
         } : null);
         this.refreshPerfStats();
-        this.stateService.openDialog(DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID);
+        this.layoutState.openDialog(DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID);
     }
 
     /** Opens the log dialog and optionally prefilters it to errors only. */
     openLogDialog(errorsOnly: boolean = false) {
         this.refreshLogs();
-        this.stateService.openDialog(DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID);
+        this.layoutState.openDialog(DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID);
         if (errorsOnly) {
             this.diagnosticsLogFilter = {info: false, warn: false, error: true};
         }
@@ -95,7 +99,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
             ...options,
             logFilter: {...(options?.logFilter ?? base.logFilter)}
         };
-        this.stateService.openDialog(DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID);
+        this.layoutState.openDialog(DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID);
     }
 
     /** Builds the export bundle from the currently cached diagnostics data. */
@@ -104,8 +108,8 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         const perfStats = this.perfStats$.getValue();
         const logs = this.logs$.getValue();
         const metadata = {
-            erdblickVersion: this.stateService.erdblickVersion.getValue() || undefined,
-            distributionVersions: this.stateService.distributionVersions.getValue() || undefined,
+            erdblickVersion: this.versionState.erdblickVersion.getValue() || undefined,
+            distributionVersions: this.versionState.distributionVersions.getValue() || undefined,
             userAgent: navigator.userAgent,
             url: window.location.href
         };

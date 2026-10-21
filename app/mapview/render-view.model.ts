@@ -1,3 +1,4 @@
+import type {ViewIdentity} from "./view-id";
 import {BehaviorSubject, type Observable} from "rxjs";
 import {CameraViewState, TileFeatureId} from "../shared/appstate.service";
 import {Viewport} from "../../build/libs/core/erdblick-core";
@@ -78,6 +79,7 @@ export interface IRenderSceneHandle {
  * Views expose picking, camera sync, and movement without leaking deck-specific details upward.
  */
 export interface IRenderView {
+    readonly identity: ViewIdentity;
     readonly viewIndex: number;
     readonly hoveredFeatureIds: BehaviorSubject<TileFeatureId[]>;
     readonly firstPersonViewActive: BehaviorSubject<boolean>;

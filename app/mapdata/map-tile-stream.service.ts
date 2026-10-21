@@ -1,3 +1,9 @@
+import {retryMultiplierSchema} from "../shared/connection-retry-policy";
+import {retryDelaySchema} from "../shared/connection-retry-policy";
+import {connectionRetryPolicySchema} from "../shared/connection-retry-policy";
+import {DEFAULT_CONNECTION_RETRY_POLICY} from "../shared/connection-retry-policy";
+import {Boolish} from "../shared/app-state";
+import {} from "../shared/app-state.model";
 import {Injectable, NgZone, OnDestroy} from "@angular/core";
 import {auditTime, BehaviorSubject, combineLatest, Subject, Subscription} from "rxjs";
 import {MapInfoService} from "./map-info.service";
@@ -102,6 +108,69 @@ const MAX_OBJECT_DISCOVERY_CACHE_TILES = 4096;
  */
 @Injectable({providedIn: "root"})
 export class MapTileStreamService implements OnDestroy {
+
+
+    readonly tilePullCompressionEnabledState = this.stateService.register({
+        name: 'tilePullCompressionEnabled',
+        defaultValue: false,
+        schema: Boolish
+    }, "connection", "tilePullCompressionEnabled");
+
+
+    private invalidConnectionPolicy = "";
+
+
+    readonly connectionRetryEnabledState = this.stateService.register({
+        name: 'connectionRetryEnabled', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.enabled, schema: Boolish
+    }, "connection", "connectionRetryEnabled");
+
+    readonly connectionRetryInitialDelayMsState = this.stateService.register({
+        name: 'connectionRetryInitialDelayMs', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.initialDelayMs,
+        schema: retryDelaySchema
+    }, "connection", "connectionRetryInitialDelayMs");
+
+    readonly connectionRetryBackoffMultiplierState = this.stateService.register({
+        name: 'connectionRetryBackoffMultiplier', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.backoffMultiplier,
+        schema: retryMultiplierSchema
+    }, "connection", "connectionRetryBackoffMultiplier");
+
+    readonly connectionRetryMaxDelayMsState = this.stateService.register({
+        name: 'connectionRetryMaxDelayMs', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.maxDelayMs,
+        schema: retryDelaySchema
+    }, "connection", "connectionRetryMaxDelayMs");
+
+
+    /** Combines validated slots; inconsistent imported bounds fall back without disabling an explicit opt-out. */
+    get connectionRetryPolicy(): ConnectionRetryPolicy {
+        const policy = {
+            enabled: this.connectionRetryEnabledState.getValue(),
+            initialDelayMs: this.connectionRetryInitialDelayMsState.getValue(),
+            backoffMultiplier: this.connectionRetryBackoffMultiplierState.getValue(),
+            maxDelayMs: this.connectionRetryMaxDelayMsState.getValue()
+        };
+        const result = connectionRetryPolicySchema.safeParse(policy);
+        const invalid = result.success ? "" : JSON.stringify(policy);
+        if (invalid && invalid !== this.invalidConnectionPolicy) {
+            console.warn("Ignoring inconsistent connection retry settings; using default timing.");
+        }
+        this.invalidConnectionPolicy = invalid;
+        return result.success ? result.data : {...DEFAULT_CONNECTION_RETRY_POLICY, enabled: policy.enabled};
+    }
+
+
+    /** Validate the complete preference edit before publishing any persisted values. */
+    setConnectionRetryPolicy(policy: ConnectionRetryPolicy): void {
+        const parsed = connectionRetryPolicySchema.parse(policy);
+        this.connectionRetryEnabledState.next(parsed.enabled);
+        this.connectionRetryInitialDelayMsState.next(parsed.initialDelayMs);
+        this.connectionRetryBackoffMultiplierState.next(parsed.backoffMultiplier);
+        this.connectionRetryMaxDelayMsState.next(parsed.maxDelayMs);
+    }
+
+    get tilePullCompressionEnabled() {return this.tilePullCompressionEnabledState.getValue();}
+
+    set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);}
+
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
     readonly actionClientId$ = new BehaviorSubject<string | null>(null);
     readonly actionControlReceived = new Subject<{payload: unknown; receivedAt: number}>();
@@ -180,14 +249,14 @@ export class MapTileStreamService implements OnDestroy {
         private readonly messageService: InfoMessageService,
         private readonly ngZone: NgZone
     ) {
-        this.retryPolicy = this.stateService.connectionRetryPolicy;
+        this.retryPolicy = this.connectionRetryPolicy;
         this.stateSubscriptions.add(combineLatest([
-            this.stateService.connectionRetryEnabledState,
-            this.stateService.connectionRetryInitialDelayMsState,
-            this.stateService.connectionRetryBackoffMultiplierState,
-            this.stateService.connectionRetryMaxDelayMsState
+            this.connectionRetryEnabledState,
+            this.connectionRetryInitialDelayMsState,
+            this.connectionRetryBackoffMultiplierState,
+            this.connectionRetryMaxDelayMsState
         ]).pipe(auditTime(0)).subscribe(() => this.applyRetryPolicy()));
-        this.stateService.tilePullCompressionEnabledState.subscribe(enabled =>
+        this.tilePullCompressionEnabledState.subscribe(enabled =>
             this.tileStream?.setPullCompressionEnabled(enabled)
         );
         this.mapInfo.dataSourceInfoChanged.subscribe(() => {
@@ -206,7 +275,7 @@ export class MapTileStreamService implements OnDestroy {
         this.tileStream.onClientId = clientId => this.actionClientId$.next(clientId);
         this.tileStream.onActionControl = (payload, receivedAt) => this.actionControlReceived.next({payload, receivedAt});
         this.tileStream.setPullCompressionEnabled(
-            this.stateService.tilePullCompressionEnabled
+            this.tilePullCompressionEnabled
         );
         this.tileStream.setFrameProcessingPaused(this.tilePipelinePaused);
         this.tileStream.onSubsets = payload =>
@@ -1154,7 +1223,7 @@ export class MapTileStreamService implements OnDestroy {
 
     /** Recomputes waiting deadlines when preferences change, retaining attempts and live work. */
     private applyRetryPolicy(): void {
-        this.retryPolicy = this.stateService.connectionRetryPolicy;
+        this.retryPolicy = this.connectionRetryPolicy;
         if (this.connectionRetry && this.connectionRetry.at > 0) {
             this.connectionRetry.at = connectionRetryDeadline(this.retryPolicy, this.connectionRetry);
             this.connectionRetryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);
@@ -1739,4 +1808,13 @@ export class MapTileStreamService implements OnDestroy {
             this.messageService.showBackendProtocolError(message)
         );
     }
+}
+
+
+export interface MapTileStreamServiceValues {
+    tilePullCompressionEnabled: boolean;
+    connectionRetryEnabled: boolean;
+    connectionRetryInitialDelayMs: number;
+    connectionRetryBackoffMultiplier: number;
+    connectionRetryMaxDelayMs: number;
 }

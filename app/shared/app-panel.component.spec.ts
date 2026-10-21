@@ -1,3 +1,4 @@
+import {createStateTestSystem, type StateTestSystem} from "./state-test-system";
 import '@angular/compiler';
 import {ElementRef} from '@angular/core';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -55,8 +56,8 @@ describe('AppPanelComponent custom resizing', () => {
         const stateService = {
             baseFontSize: 16,
             setPanelLayout
-        } as unknown as AppStateService;
-        component = new AppPanelComponent(stateService, new ViewerUiService());
+        } as unknown as StateTestSystem;
+        component = new AppPanelComponent((stateService) as never, new ViewerUiService());
         component.layoutId = 'test-panel';
         component.persistLayout = true;
         component.resizeMode = 'vertical';

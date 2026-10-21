@@ -1,3 +1,5 @@
+import {AppLayoutService} from "../shared/app-layout.service";
+import {inject} from "@angular/core";
 import {Injectable, NgZone, OnDestroy} from "@angular/core";
 import {BehaviorSubject, interval, Subscription} from "rxjs";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
@@ -40,6 +42,7 @@ import type {StyleValidationIssue} from "../styledata/style-validation.model";
  */
 @Injectable()
 export class DiagnosticsDatasource implements OnDestroy {
+    readonly layoutState = inject(AppLayoutService);
     readonly snapshot$ = new BehaviorSubject<DiagnosticsSnapshot>(
         this.buildSnapshot()
     );
@@ -282,7 +285,7 @@ export class DiagnosticsDatasource implements OnDestroy {
 
     /** Avoid expensive aggregation while the performance dialog is closed. */
     refreshPerfStatsIfVisible(): void {
-        if (this.appStateService.isDialogOpen(
+        if (this.layoutState.isDialogOpen(
             DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
         )) {
             this.refreshPerfStats();

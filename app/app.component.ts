@@ -1,3 +1,5 @@
+import {AppLayoutService} from "./shared/app-layout.service";
+import {inject} from "@angular/core";
 import {AfterViewInit, Component, OnDestroy, ViewContainerRef} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
 import {MapInfoService} from "./mapdata/map-info.service";
@@ -35,22 +37,22 @@ declare let window: DebugWindow;
             <datasources></datasources>
             <advanced-preferences></advanced-preferences>
             <map-panel></map-panel>
-            @if (stateService.isDialogOpen(cacheResetDialogLayoutId)) {
+            @if (layoutState.isDialogOpen(cacheResetDialogLayoutId)) {
                 <cache-reset-dialog></cache-reset-dialog>
             }
-            @if (stateService.isDialogOpen(diagnosticsPerformanceDialogLayoutId)) {
+            @if (layoutState.isDialogOpen(diagnosticsPerformanceDialogLayoutId)) {
                 <diagnostics-performance-dialog></diagnostics-performance-dialog>
             }
-            @if (stateService.isDialogOpen(diagnosticsLogDialogLayoutId)) {
+            @if (layoutState.isDialogOpen(diagnosticsLogDialogLayoutId)) {
                 <diagnostics-log-dialog></diagnostics-log-dialog>
             }
-            @if (stateService.isDialogOpen(diagnosticsExportDialogLayoutId)) {
+            @if (layoutState.isDialogOpen(diagnosticsExportDialogLayoutId)) {
                 <diagnostics-export-dialog></diagnostics-export-dialog>
             }
             <style-panel></style-panel>
             <inspection-dialogs></inspection-dialogs>
             <feature-search-dialogs></feature-search-dialogs>
-            @if (stateService.isDialogOpen(featureSearchExportDialogLayoutId)) {
+            @if (layoutState.isDialogOpen(featureSearchExportDialogLayoutId)) {
                 <feature-search-export-dialog></feature-search-export-dialog>
             }
             <keyboard-dialog></keyboard-dialog>
@@ -76,6 +78,7 @@ declare let window: DebugWindow;
  * and startup version loading.
  */
 export class AppComponent implements AfterViewInit, OnDestroy {
+    readonly layoutState = inject(AppLayoutService);
     protected readonly cacheResetDialogLayoutId = CACHE_RESET_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsPerformanceDialogLayoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsLogDialogLayoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
@@ -192,7 +195,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         import(/* @vite-ignore */ distribVersionsPath)
             .then((plugin) => plugin.default() as Array<Versions>)
             .then((versions: Array<Versions>) => {
-                this.stateService.distributionVersions.next(versions);
+                this.configService.distributionVersions.next(versions);
                 if (versions[0]?.name.trim()) {
                     this.titleService.setTitle(this.capitalizeTitle(versions[0].name.trim()));
                 } else {
@@ -264,7 +267,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     getBasicVersion() {
         this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
             data => {
-                this.stateService.erdblickVersion.next(`${this.title} ${data.toString()}`);
+                this.configService.erdblickVersion.next(`${this.title} ${data.toString()}`);
                 this.titleService.setTitle(this.capitalizeTitle(this.title));
             });
     }

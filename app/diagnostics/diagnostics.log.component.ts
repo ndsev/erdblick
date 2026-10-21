@@ -1,3 +1,5 @@
+import {AppLayoutService} from "../shared/app-layout.service";
+import {inject} from "@angular/core";
 import {Component, OnDestroy, ViewChild} from '@angular/core';
 import {BehaviorSubject, combineLatest, map, Subscription} from 'rxjs';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
@@ -101,6 +103,7 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
 })
 /** Dialog that filters, sorts, and exports captured diagnostics log entries. */
 export class DiagnosticsLogDialogComponent implements OnDestroy {
+    readonly layoutState = inject(AppLayoutService);
     readonly layoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
     @ViewChild('dialog') dialog?: AppDialogComponent;
     readonly dialogStyle: {[key: string]: string} = {
@@ -142,11 +145,11 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
     }
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.layoutId);
+        return this.layoutState.isDialogOpen(this.layoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.layoutId, visible);
+        this.layoutState.setDialogOpen(this.layoutId, visible);
     }
 
     /** Releases dialog-local subscriptions. */

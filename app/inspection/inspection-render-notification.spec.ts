@@ -1,3 +1,4 @@
+import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
 import "@angular/compiler";
 import {ChangeDetectorRef, Renderer2} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
@@ -45,10 +46,10 @@ describe("inspection host render notifications", () => {
             isDockAutoCollapsible: true,
             hasDockedSurface: () => false,
             reorderInspectionPanels: vi.fn()
-        } as unknown as AppStateService;
+        } as unknown as StateTestSystem;
         const cdr = changeDetector();
         const component = new InspectionContainerComponent(
-            stateService,
+            (stateService) as never,
             mapService,
             {} as Renderer2,
             cdr
@@ -67,9 +68,9 @@ describe("inspection host render notifications", () => {
         const selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
         const inspectionComparisonState = new BehaviorSubject<InspectionComparisonModel | null>(null);
         const mapService = {selectionTopic} as unknown as InspectionSelectionService;
-        const stateService = {inspectionComparisonState} as unknown as AppStateService;
+        const stateService = {inspectionComparisonState} as unknown as StateTestSystem;
         const cdr = changeDetector();
-        const component = new InspectionDialogsComponent(mapService, stateService, cdr);
+        const component = new InspectionDialogsComponent(mapService, (stateService) as never, cdr);
         vi.mocked(cdr.markForCheck).mockClear();
 
         selectionTopic.next([loadingPanel(true)]);

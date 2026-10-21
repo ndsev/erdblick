@@ -1,3 +1,5 @@
+import {AppLayoutService} from "./app-layout.service";
+import {inject} from "@angular/core";
 import {NgTemplateOutlet} from '@angular/common';
 import {
     Component,
@@ -91,6 +93,7 @@ interface AppDialogResizeSession {
 })
 /** Wraps PrimeNG dialogs with shared layout persistence behavior. */
 export class AppDialogComponent implements OnChanges, OnDestroy {
+    readonly layoutState = inject(AppLayoutService);
     @ContentChild('header', {descendants: true, read: TemplateRef}) projectedHeaderTemplate?: TemplateRef<unknown>;
     @ContentChild('content', {descendants: true, read: TemplateRef}) projectedContentTemplate?: TemplateRef<unknown>;
     @ContentChild('footer', {descendants: true, read: TemplateRef}) projectedFooterTemplate?: TemplateRef<unknown>;
@@ -435,7 +438,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
             if (!updatedContainer) {
                 return;
             }
-            const existing = this.stateService.getDialogLayout(this.layoutId!);
+            const existing = this.layoutState.getDialogLayout(this.layoutId!);
             if (existing) {
                 const normalized = {
                     ...this.normalizeLayout(existing),
@@ -443,12 +446,12 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
                 };
                 if (this.resizable) {
                     this.applyLayout(updatedContainer, normalized);
-                    this.stateService.upsertDialogLayout(this.layoutId!, normalized);
+                    this.layoutState.upsertDialogLayout(this.layoutId!, normalized);
                     this.refreshEffectiveStyle(false, normalized);
                 } else {
                     this.applyPosition(updatedContainer, normalized.position);
                     const current = this.readLayoutFromContainer(updatedContainer);
-                    this.stateService.upsertDialogLayout(this.layoutId!, {
+                    this.layoutState.upsertDialogLayout(this.layoutId!, {
                         position: {...normalized.position},
                         size: {...current.size},
                         open: this.persistOpenState ? true : false
@@ -463,7 +466,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
                 return;
             }
             const initialLayout = this.readLayoutFromContainer(updatedContainer);
-            this.stateService.ensureDialogLayout(this.layoutId!, () => ({
+            this.layoutState.ensureDialogLayout(this.layoutId!, () => ({
                 ...initialLayout,
                 open: this.persistOpenState ? true : false
             }));
@@ -487,7 +490,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         };
         this.resizedLayout = layout;
         this.refreshEffectiveStyle(false, layout);
-        if (this.persistLayout && this.layoutId) this.stateService.upsertDialogLayout(this.layoutId, layout);
+        if (this.persistLayout && this.layoutId) this.layoutState.upsertDialogLayout(this.layoutId, layout);
     }
 
     /** Reads rounded dialog bounds from a container element. */
@@ -541,7 +544,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     private refreshEffectiveStyle(hideUntilApplied: boolean = false, layoutOverride?: AppDialogLayout): void {
         const nextStyle = {...this.style};
         const layout = layoutOverride ?? (this.persistLayout && this.layoutId
-            ? this.stateService.getDialogLayout(this.layoutId)
+            ? this.layoutState.getDialogLayout(this.layoutId)
             : this.resizedLayout);
         if (!layout) {
             this.effectiveStyle = nextStyle;
@@ -586,7 +589,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         if (!this.persistLayout || !this.layoutId || !this.persistOpenState) {
             return;
         }
-        this.stateService.setDialogLayoutOpen(this.layoutId, open);
+        this.layoutState.setDialogLayoutOpen(this.layoutId, open);
     }
 
     /** Returns whether this floating dialog overlaps the configured dock target enough to dock. */
@@ -606,7 +609,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
             0,
             Math.min(dialogRect.bottom, targetRect.bottom) - Math.max(dialogRect.top, targetRect.top)
         );
-        return overlapWidth >= this.stateService.baseFontSize * this.dockDropThresholdEm && overlapHeight > 0;
+        return overlapWidth >= this.layoutState.baseFontSize * this.dockDropThresholdEm && overlapHeight > 0;
     }
 
     private bindDockDropCue(): void {

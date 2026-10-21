@@ -1,3 +1,5 @@
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {inject} from "@angular/core";
 import {Injectable, OnDestroy} from "@angular/core";
 import {debounceTime, skip, Subject, Subscription} from "rxjs";
 import type {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
@@ -41,6 +43,7 @@ const DECODED_TILE_CACHE_LIMIT = 16;
  */
 @Injectable({providedIn: "root"})
 export class HoverDetailService implements OnDestroy {
+    readonly inspectionState = inject(InspectionStateService);
     readonly valuesChanged = new Subject<string | null>();
 
     private readonly subscriptions = new Subscription();
@@ -67,16 +70,16 @@ export class HoverDetailService implements OnDestroy {
         private readonly mapInfo: MapInfoService,
         private readonly tileStream: MapTileStreamService
     ) {
-        this.enabled = this.state.hoverLabelsEnabled;
-        this.activeFields = this.normalizeFields(this.state.hoverLabelFields);
-        this.subscriptions.add(this.state.hoverLabelsEnabledState.pipe(
+        this.enabled = this.inspectionState.hoverLabelsEnabled;
+        this.activeFields = this.normalizeFields(this.inspectionState.hoverLabelFields);
+        this.subscriptions.add(this.inspectionState.hoverLabelsEnabledState.pipe(
             skip(1)
         ).subscribe(enabled => {
             this.enabled = enabled;
             this.rebuildLayers();
             this.valuesChanged.next(null);
         }));
-        this.subscriptions.add(this.state.hoverLabelFieldsState.pipe(
+        this.subscriptions.add(this.inspectionState.hoverLabelFieldsState.pipe(
             skip(1),
             debounceTime(200)
         ).subscribe(fields => {

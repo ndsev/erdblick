@@ -1,6 +1,8 @@
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {inject} from "@angular/core";
 import {ChangeDetectorRef, Component, Input, OnDestroy} from "@angular/core";
 import {CoordinatesService} from "./coordinates.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewService} from "../mapview/map-view.service";
 import {AppStateService} from "../shared/appstate.service";
 import {GeoMath} from "../integrations/geo";
 import {ClipboardService} from "../shared/clipboard.service";
@@ -85,6 +87,7 @@ interface PanelOption {
  * position once marker placement is enabled.
  */
 export class CoordinatesPanelComponent implements OnDestroy {
+    readonly viewStateOwner = inject(MapViewStateService);
 
     @Input() coordinatesVisible = true;
 
@@ -103,7 +106,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
     readonly ndsCoordinatesOption = NDS_COORDINATES_OPTION;
     private subscriptions: Subscription[] = [];
 
-    constructor(public mapService: MapViewStateService,
+    constructor(public mapService: MapViewService,
                 public coordinatesService: CoordinatesService,
                 public clipboardService: ClipboardService,
                 public stateService: AppStateService,
@@ -112,8 +115,8 @@ export class CoordinatesPanelComponent implements OnDestroy {
             this.displayOptions.push({name: packedTileIdOptionName(level)});
         }
         this.subscriptions.push(combineLatest([
-            this.stateService.markerState,
-            this.stateService.markedPositionState
+            this.viewStateOwner.markerState,
+            this.viewStateOwner.markedPositionState
         ]).subscribe(([markerEnabled, markedPosition]) => {
             this.isMarkerEnabled = markerEnabled;
             if (markedPosition.length >= 2) {
@@ -139,7 +142,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
             this.restoreSelectedOptions();
         }));
 
-        this.subscriptions.push(this.stateService.enabledCoordsTileIdsState.subscribe(() => {
+        this.subscriptions.push(this.coordinatesService.enabledCoordsTileIdsState.subscribe(() => {
             this.restoreSelectedOptions();
         }));
 
@@ -165,7 +168,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
 
     /** Reapplies persisted display-option selections after option lists change. */
     private restoreSelectedOptions() {
-        for (const option of this.stateService.enabledCoordsTileIds) {
+        for (const option of this.coordinatesService.enabledCoordsTileIds) {
             const normalizedOption = normalizeCoordinatePanelOptionName(option);
             if (!this.isSelectedOption(normalizedOption) && this.displayOptions.some(val => val.name == normalizedOption)) {
                 this.selectedOptions.push({name: normalizedOption});
@@ -229,26 +232,26 @@ export class CoordinatesPanelComponent implements OnDestroy {
     toggleMarker() {
         if (!this.isMarkerEnabled) {
             this.isMarkerEnabled = true;
-            this.stateService.setMarkerState(true);
-            this.stateService.setMarkerPosition(null);
+            this.viewStateOwner.setMarkerState(true);
+            this.viewStateOwner.setMarkerPosition(null);
             this.markerButtonIcon = "location_on";
             this.markerButtonTooltip = "Disable marker placement";
         } else if (!this.markerPosition) {
             this.isMarkerEnabled = false;
-            this.stateService.setMarkerState(false);
+            this.viewStateOwner.setMarkerState(false);
             this.markerButtonIcon = "location_off";
             this.markerButtonTooltip = "Enable marker placement";
         } else if (this.markerPosition) {
             this.isMarkerEnabled = true;
-            this.stateService.setMarkerState(true);
-            this.stateService.setMarkerPosition(null);
+            this.viewStateOwner.setMarkerState(true);
+            this.viewStateOwner.setMarkerPosition(null);
             this.markerButtonIcon = "location_on";
             this.markerButtonTooltip = "Disable marker placement";
         } else {
             this.isMarkerEnabled = true;
             this.markerPosition = null;
-            this.stateService.setMarkerState(true);
-            this.stateService.setMarkerPosition(null);
+            this.viewStateOwner.setMarkerState(true);
+            this.viewStateOwner.setMarkerPosition(null);
             this.markerButtonIcon = "wrong_location";
             this.markerButtonTooltip = "Reset marker";
         }
@@ -266,7 +269,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
 
     /** Persists the currently selected coordinate and tile-id entries. */
     updateSelectedOptions() {
-        this.stateService.enabledCoordsTileIds = this.selectedOptions.reduce(
+        this.coordinatesService.enabledCoordsTileIds = this.selectedOptions.reduce(
             (array: Array<string>, option) => {
             array.push(option.name);
             return array;
@@ -283,7 +286,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
 
     /** Centers the focused map view on the current marker position. */
     focusOnMarker(markerPosition:  {x: number, y: number}) {
-        const focusedViewIndex = this.stateService.focusedView;
+        const focusedViewIndex = this.viewStateOwner.focusedView;
         this.mapService.moveToWgs84PositionTopic.next({
             targetView: focusedViewIndex,
             x: markerPosition.x,

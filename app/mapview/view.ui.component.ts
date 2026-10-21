@@ -1,3 +1,5 @@
+import {MapViewStateService} from "./map-view-state.service";
+import {inject} from "@angular/core";
 import {
     AfterViewInit,
     Component,
@@ -71,6 +73,7 @@ import {filter} from "rxjs/operators";
  * It hosts movement controls, projection toggles, and the animated compass bound to the active renderer.
  */
 export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
+    readonly viewStateOwner = inject(MapViewStateService);
     @ViewChild('compassNeedle', {static: false}) needleRef!: ElementRef<HTMLElement>;
 
     mapView: InputSignal<IRenderView | undefined> = input<IRenderView | undefined>(undefined);
@@ -98,7 +101,7 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
                 public stateService: AppStateService,
                 private keyboardService: KeyboardService,
                 private ngZone: NgZone) {
-        this.numViews = toSignal(this.stateService.numViewsState, {initialValue: this.stateService.numViewsState.getValue()});
+        this.numViews = toSignal(this.viewStateOwner.numViewsState, {initialValue: this.viewStateOwner.numViewsState.getValue()});
         this.mapView$ = toObservable(this.mapView);
     }
 
@@ -161,9 +164,9 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         if (!mapView) {
             return;
         }
-        this.stateService.focusedView = mapView.viewIndex;
-        const currentMode = this.stateService.mode2dState.getValue(mapView.viewIndex);
-        this.stateService.setProjectionMode(mapView.viewIndex, !currentMode);
+        this.viewStateOwner.focusedView = mapView.viewIndex;
+        const currentMode = this.viewStateOwner.mode2dState.getValue(mapView.viewIndex);
+        this.viewStateOwner.setProjectionMode(mapView.viewIndex, !currentMode);
     }
 
     /** Builds a stable test id for view UI controls. */

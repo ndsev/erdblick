@@ -1,8 +1,12 @@
+import {MapLayerStateService} from "../mapdata/map-layer-state.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {inject} from "@angular/core";
 import {Injectable, NgZone, OnDestroy} from "@angular/core";
 import {BehaviorSubject, Subscription} from "rxjs";
 import type {z} from "zod";
 import {AppStateService, tileGridMaxLevel, type TileFeatureId, VIEW_SYNC_LAYERS, VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION} from "../shared/appstate.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewService} from "../mapview/map-view.service";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
@@ -61,6 +65,9 @@ interface PendingViewerAction {
 /** Binds the explicit action allowlist to existing owners; it stores no replica of application state. */
 @Injectable({providedIn: "root"})
 export class ViewerActionService implements OnDestroy {
+    readonly inspectionState = inject(InspectionStateService);
+    readonly viewStateOwner = inject(MapViewStateService);
+    readonly layerState = inject(MapLayerStateService);
     private readonly descriptors = describeAppStateChannels();
     private readonly encoder = new TextEncoder();
     readonly activity$ = new BehaviorSubject<readonly ViewerActionActivity[]>([]);
@@ -82,7 +89,7 @@ export class ViewerActionService implements OnDestroy {
 
     constructor(
         private readonly state: AppStateService,
-        private readonly views: MapViewStateService,
+        private readonly views: MapViewService,
         private readonly maps: MapInfoService,
         private readonly searches: FeatureSearchService,
         private readonly inspections: InspectionSelectionService,
@@ -337,8 +344,8 @@ export class ViewerActionService implements OnDestroy {
             case "viewer_inspect": return this.inspect(this.arguments(viewerActions[name].inputSchema, argumentsValue), signal);
             case "viewer_close_inspection": return this.zone.run(() => {
                 const {panelId} = this.arguments(viewerActions[name].inputSchema, argumentsValue);
-                if (!this.state.selection.some(panel => panel.id === panelId)) this.reject("The inspection no longer exists");
-                this.state.unsetPanel(panelId);
+                if (!this.inspectionState.selection.some(panel => panel.id === panelId)) this.reject("The inspection no longer exists");
+                this.inspectionState.unsetPanel(panelId);
                 return this.applied();
             });
             case "viewer_open_source_data": return this.zone.run(() => this.openSourceData(this.arguments(viewerActions[name].inputSchema, argumentsValue)));
@@ -390,7 +397,7 @@ export class ViewerActionService implements OnDestroy {
             check();
             const scale = Math.min(1, (input.maxWidth ?? 1280) / viewportWidth, (input.maxHeight ?? 960) / viewportHeight);
             const canvases = new Map<HTMLCanvasElement, string>();
-            for (let index = 0; index < this.state.numViews; ++index) {
+            for (let index = 0; index < this.viewStateOwner.numViews; ++index) {
                 const view = this.views.renderViewFor(index);
                 if (!view?.isAvailable()) this.reject("A map renderer is not ready for capture");
                 const snapshot = view.captureCanvas(scale);
@@ -492,7 +499,7 @@ export class ViewerActionService implements OnDestroy {
     private catalog(input: ViewerActionInput<"viewer_get_catalog">): ViewerActionOutput<"viewer_get_catalog"> {
         if (input.viewIndex !== undefined) this.checkView(input.viewIndex, this.views.viewLayoutRevision);
         if (input.layerId && !input.mapId) this.reject("layerId requires mapId", "invalid_arguments");
-        const vi = input.viewIndex ?? this.state.focusedView;
+        const vi = input.viewIndex ?? this.viewStateOwner.focusedView;
         const map = input.mapId ? this.maps.maps.maps.get(input.mapId) : undefined;
         if (input.mapId && !map) this.reject("The requested map is unavailable");
         const layer = input.layerId ? this.layer(input.mapId!, input.layerId) : undefined;
@@ -581,12 +588,12 @@ export class ViewerActionService implements OnDestroy {
     private manageView(input: ViewerActionInput<"viewer_manage_view">): ViewerActionOutput<"viewer_manage_view"> {
         this.checkView(input.viewIndex, input.viewLayoutRevision);
         if (input.operation === "remove") {
-            if (this.state.numViews === 1) this.reject("Cannot remove the last view", "invalid_arguments");
+            if (this.viewStateOwner.numViews === 1) this.reject("Cannot remove the last view", "invalid_arguments");
             this.views.removeView(input.viewIndex);
         } else {
-            if (this.state.numViews >= 2) this.reject("The comparison layout already has two views");
-            this.state.focusedView = input.viewIndex;
-            this.state.numViews += 1;
+            if (this.viewStateOwner.numViews >= 2) this.reject("The comparison layout already has two views");
+            this.viewStateOwner.focusedView = input.viewIndex;
+            this.viewStateOwner.numViews += 1;
         }
         return this.applied();
     }
@@ -603,7 +610,7 @@ export class ViewerActionService implements OnDestroy {
         if (!parsed || !mapTileKey.startsWith("SourceData:")) this.reject("Expected a native SourceData key", "invalid_arguments");
         const address = "mapTileKey" in source ? source.address : source.reference.address;
         if (address !== undefined && BigInt(address) > 18446744073709551615n) this.reject("Address exceeds uint64", "invalid_arguments");
-        const panelId = this.state.setSelection({mapTileKey, ...(address === undefined ? {} : {address: BigInt(address)})}, undefined, input.newPanel ?? false);
+        const panelId = this.inspectionState.setSelection({mapTileKey, ...(address === undefined ? {} : {address: BigInt(address)})}, undefined, input.newPanel ?? false);
         if (panelId === undefined) this.reject("An inspection could not be opened");
         return {status: "applied", panelId, mapTileKey};
     }
@@ -700,7 +707,7 @@ export class ViewerActionService implements OnDestroy {
             renderStrategy: {...current.renderStrategy, ...input.settings.renderStrategy}});
         this.checkSearchTargets(settings.selectedMapLayers, settings.selectedViewIndices, input.viewLayoutRevision);
         const changed = !deepEquals(current, settings);
-        if (changed) this.state.patchFeatureSearch(session.id, {...settings,
+        if (changed) this.searches.patchFeatureSearch(session.id, {...settings,
             ...(input.settings.selectedMapLayers === undefined ? {} : {selectedMapLayersManual: true})});
         return this.applied(changed);
     }
@@ -754,7 +761,7 @@ export class ViewerActionService implements OnDestroy {
             }
         }).call(this), 100, 64000);
         const searches = this.collection((function* (this: ViewerActionService) {
-            for (const search of this.state.featureSearches) {
+            for (const search of this.searches.featureSearches) {
                 if (search.enabled && search.showResultsOnMap) yield unicodePrefix(search.id, 4096);
             }
         }).call(this), 100, 64000);
@@ -880,12 +887,12 @@ export class ViewerActionService implements OnDestroy {
         if (input.color !== undefined && !input.newPanel) this.reject("color requires newPanel:true; use inspection.panel state to recolor an existing panel", "invalid_arguments");
         if (input.panelId !== undefined && input.newPanel) this.reject("panelId and newPanel are mutually exclusive", "invalid_arguments");
         if (input.panelId !== undefined) {
-            const panel = this.state.selection.find(panel => panel.id === input.panelId);
+            const panel = this.inspectionState.selection.find(panel => panel.id === input.panelId);
             if (!panel || panel.locked || panel.sourceData) this.reject("An explicit target must be an existing unlocked feature panel");
         }
         // Selection setters can mutate the same array in place; reference equality is not a change guard.
         let changed: boolean;
-        const guard = this.state.selectionState.subscribe(() => { changed = true; });
+        const guard = this.inspectionState.selectionState.subscribe(() => { changed = true; });
         changed = false;
         let features: TileFeatureId[];
         try {
@@ -896,12 +903,12 @@ export class ViewerActionService implements OnDestroy {
         return this.zone.run(() => {
             let newPanelId: number | undefined;
             if (input.panelId !== undefined || input.newPanel) {
-                newPanelId = this.state.setSelection(features, input.panelId, input.newPanel ?? false);
+                newPanelId = this.inspectionState.setSelection(features, input.panelId, input.newPanel ?? false);
             } else this.inspections.inspectFeatureIds(features, input.lock ?? false);
-            const panels = this.state.selection.filter(panel => !panel.sourceData && (!input.newPanel || panel.id === newPanelId) && panel.features.some(candidate =>
+            const panels = this.inspectionState.selection.filter(panel => !panel.sourceData && (!input.newPanel || panel.id === newPanelId) && panel.features.some(candidate =>
                 features.some(feature => candidate.mapTileKey === feature.mapTileKey && candidate.featureId === feature.featureId)));
-            if (input.lock) panels.forEach(panel => this.state.setInspectionPanelLockedState(panel.id, true));
-            if (input.color !== undefined) panels.forEach(panel => this.state.setInspectionPanelColor(panel.id, input.color!));
+            if (input.lock) panels.forEach(panel => this.inspectionState.setInspectionPanelLockedState(panel.id, true));
+            if (input.color !== undefined) panels.forEach(panel => this.inspectionState.setInspectionPanelColor(panel.id, input.color!));
             const represented = features.filter(feature => panels.some(panel => panel.features.some(candidate =>
                 candidate.mapTileKey === feature.mapTileKey && candidate.featureId === feature.featureId)));
             return {status: "applied", panelIds: panels.map(panel => panel.id), features: represented,
@@ -912,8 +919,8 @@ export class ViewerActionService implements OnDestroy {
     /** Owns cancellation only until the camera commit; human edits, layout changes and retired renderers win. */
     private async navigate(input: ViewerActionInput<"viewer_navigate">, signal?: AbortSignal): Promise<ViewerActionOutput<"viewer_navigate">> {
         this.checkView(input.viewIndex, input.viewLayoutRevision);
-        const sync = this.state.viewSync.includes(VIEW_SYNC_POSITION) || this.state.viewSync.includes(VIEW_SYNC_MOVEMENT);
-        const affected = sync ? Array.from({length: this.state.numViews}, (_, index) => index) : [input.viewIndex];
+        const sync = this.viewStateOwner.viewSync.includes(VIEW_SYNC_POSITION) || this.viewStateOwner.viewSync.includes(VIEW_SYNC_MOVEMENT);
+        const affected = sync ? Array.from({length: this.viewStateOwner.numViews}, (_, index) => index) : [input.viewIndex];
         const renderers = affected.map(index => this.views.renderViewFor(index));
         if (renderers.some(view => !view || view.isFirstPersonViewActive())) this.reject("Map navigation requires an available map camera");
         if (renderers.some(view => view!.isCameraInteractionActive())) this.reject("A human camera gesture is active", "busy");
@@ -925,12 +932,12 @@ export class ViewerActionService implements OnDestroy {
         const guards = new Subscription();
         guards.add(this.views.navigationStarted.subscribe(abort));
         const poses = affected.map(index => this.views.renderViewFor(index)!.getLiveCameraState());
-        const syncBefore = this.state.viewSync;
+        const syncBefore = this.viewStateOwner.viewSync;
         guards.add(this.viewDiagnostics.cameraInteracting$.subscribe(active => { if (active && renderers.some(view => view!.isCameraInteractionActive())) abort(); }));
-        guards.add(this.state.cameraViewDataState.appState.subscribe(() => {
+        guards.add(this.viewStateOwner.cameraViewDataState.appState.subscribe(() => {
             if (affected.some((index, offset) => !deepEquals(this.views.renderViewFor(index)?.getLiveCameraState(), poses[offset]))) abort();
         }));
-        guards.add(this.state.viewSyncState.subscribe(value => { if (!deepEquals(value, syncBefore)) abort(); }));
+        guards.add(this.viewStateOwner.viewSyncState.subscribe(value => { if (!deepEquals(value, syncBefore)) abort(); }));
         for (const view of renderers) guards.add(view!.rendererInvalidated.subscribe(abort));
         try {
             const target = input.target;
@@ -954,7 +961,7 @@ export class ViewerActionService implements OnDestroy {
             guards.unsubscribe();
             return this.zone.run(() => {
                 controller.signal.throwIfAborted();
-                this.state.focusedView = input.viewIndex;
+                this.viewStateOwner.focusedView = input.viewIndex;
                 if (position) this.views.moveToWgs84PositionTopic.next({targetView: input.viewIndex, ...position});
                 else this.views.moveToRectangleTopic.next({targetView: input.viewIndex, rectangle: bounds!});
                 return this.applied();
@@ -1067,13 +1074,13 @@ export class ViewerActionService implements OnDestroy {
         };
         const targets: AppStateTarget[] = input.targets ?? [
             {channel: "app.views"}, {channel: "app.selections"}, {channel: "app.searches"},
-            ...Array.from({length: Math.min(this.state.numViews, 14)}, (_, viewIndex) => [
+            ...Array.from({length: Math.min(this.viewStateOwner.numViews, 14)}, (_, viewIndex) => [
                 {channel: "view.camera" as const, viewIndex}, {channel: "view.layers" as const, viewIndex}
             ]).flat()
         ];
         // Reserve space for all targets and omission metadata without serializing unbounded values.
         let budget = VIEWER_ACTION_RESULT_BYTES - 48 * 1024;
-        if (!input.targets && this.state.numViews > 14) {
+        if (!input.targets && this.viewStateOwner.numViews > 14) {
             result.omissions.push({target: {channel: "app.views"}, reason: "item_limit"});
         }
         for (const target of targets) {
@@ -1100,7 +1107,7 @@ export class ViewerActionService implements OnDestroy {
 
     /** Reads one declared target, with no whole-feature traversal or implicit data loading. */
     private readTarget(target: AppStateTarget, omissions: z.infer<typeof appStateOmissionSchema>[], budget: number): unknown {
-        if ("viewIndex" in target && target.viewIndex >= this.state.numViews) {
+        if ("viewIndex" in target && target.viewIndex >= this.viewStateOwner.numViews) {
             return {target, unavailable: "view_unavailable"};
         }
         switch (target.channel) {
@@ -1131,7 +1138,7 @@ export class ViewerActionService implements OnDestroy {
                 return {target, value: this.boundedItems(layerValues(), target, omissions, budget)};
             }
             case "app.selections": {
-                const panels = this.state.selectionState.getValue();
+                const panels = this.inspectionState.selectionState.getValue();
                 if (target.panelId !== undefined && !panels.some(panel => panel.id === target.panelId)) {
                     return {target, unavailable: "target_unavailable"};
                 }
@@ -1159,7 +1166,7 @@ export class ViewerActionService implements OnDestroy {
                 return {target, value: this.boundedItems(selections(), target, omissions, budget)};
             }
             case "app.searches": {
-                const definitions = this.state.featureSearchState.getValue();
+                const definitions = this.searches.featureSearchState.getValue();
                 if (target.searchId && !definitions.some(definition => definition.id === target.searchId)) {
                     return {target, unavailable: "target_unavailable"};
                 }
@@ -1194,13 +1201,13 @@ export class ViewerActionService implements OnDestroy {
 
     /** Samples only the small view registry; never inspects scene objects or GPU state. */
     private viewSummary(omissions: z.infer<typeof appStateOmissionSchema>[]): z.infer<typeof appStateChannels["app.views"]["valueSchema"]> {
-        if (this.state.numViews > APP_STATE_COLLECTION_LIMIT) this.omit(omissions, {channel: "app.views"}, "item_limit");
+        if (this.viewStateOwner.numViews > APP_STATE_COLLECTION_LIMIT) this.omit(omissions, {channel: "app.views"}, "item_limit");
         return {
-            focusedView: this.state.focusedView, sync: [...this.state.viewSync],
-            views: Array.from({length: Math.min(this.state.numViews, APP_STATE_COLLECTION_LIMIT)}, (_, viewIndex) => {
+            focusedView: this.viewStateOwner.focusedView, sync: [...this.viewStateOwner.viewSync],
+            views: Array.from({length: Math.min(this.viewStateOwner.numViews, APP_STATE_COLLECTION_LIMIT)}, (_, viewIndex) => {
                 const view = this.views.renderViewFor(viewIndex);
                 return {
-                    viewIndex, projection: this.state.mode2dState.getValue(viewIndex) ? "2d" : "3d",
+                    viewIndex, projection: this.viewStateOwner.mode2dState.getValue(viewIndex) ? "2d" : "3d",
                     navigationMode: !view ? "unavailable" : view.isFirstPersonViewActive() ? "first_person" : "map"
                 };
             })
@@ -1247,15 +1254,15 @@ export class ViewerActionService implements OnDestroy {
     /** Checks a view's identity before any mutation; view indices are not durable identities. */
     private checkView(viewIndex: number, revision: number | undefined): void {
         if (revision !== this.views.viewLayoutRevision) this.reject("The view layout changed; read it again", "not_available", "stale_view_layout");
-        if (viewIndex < 0 || viewIndex >= this.state.numViews) this.reject("The requested view is unavailable");
+        if (viewIndex < 0 || viewIndex >= this.viewStateOwner.numViews) this.reject("The requested view is unavailable");
     }
 
     /** Reads normalized values from their existing owners; storage representations never cross this API. */
     private settingValue(target: AppStateTarget): unknown {
         const vi = "viewIndex" in target ? target.viewIndex : 0;
         switch (target.channel) {
-            case "view.projection": return this.state.mode2dState.getValue(vi) ? "2d" : "3d";
-            case "view.background": return this.state.getBackgroundState(vi);
+            case "view.projection": return this.viewStateOwner.mode2dState.getValue(vi) ? "2d" : "3d";
+            case "view.background": return this.layerState.getBackgroundState(vi);
             case "view.grid": return {
                 visible: this.maps.maps.getViewTileBorderState(vi), mode: this.maps.maps.getViewTileGridMode(vi),
                 level: this.maps.maps.getViewTileGridLevel(vi), autoLevel: this.maps.maps.getViewTileGridAutoLevel(vi),
@@ -1270,29 +1277,29 @@ export class ViewerActionService implements OnDestroy {
             }
             case "view.layerPreset":
                 this.layer(target.mapId, target.layerId);
-                return this.state.getLayerPresetSelection(vi, target.mapId, target.layerId);
+                return this.layerState.getLayerPresetSelection(vi, target.mapId, target.layerId);
             case "view.mapPreset":
                 if (!this.maps.maps.maps.has(target.mapId)) this.reject("The requested map is unavailable");
-                return this.state.getMapPresetSelection(vi, target.mapId);
-            case "app.focusedView": return this.state.focusedView;
-            case "app.viewSync": return [...this.state.viewSync];
-            case "app.marker": return {enabled: this.state.marker, position: this.state.markedPosition.length >= 2
-                ? {lon: this.state.markedPosition[0], lat: this.state.markedPosition[1], alt: this.state.markedPosition[2] ?? 0} : null};
+                return this.layerState.getMapPresetSelection(vi, target.mapId);
+            case "app.focusedView": return this.viewStateOwner.focusedView;
+            case "app.viewSync": return [...this.viewStateOwner.viewSync];
+            case "app.marker": return {enabled: this.viewStateOwner.marker, position: this.viewStateOwner.markedPosition.length >= 2
+                ? {lon: this.viewStateOwner.markedPosition[0], lat: this.viewStateOwner.markedPosition[1], alt: this.viewStateOwner.markedPosition[2] ?? 0} : null};
             case "app.preferences.rendering": return {
-                antialiasing: this.state.deckAntialiasingEnabled, semanticCompositing: this.state.semanticCompositingEnabled,
-                contactShading: this.state.contactShadingEnabled, tilePullCompression: this.state.tilePullCompressionEnabled,
-                tileLimit: this.state.tilesLoadLimit, renderWorkers: this.state.tileSubsetRenderWorkerCount
+                antialiasing: this.viewStateOwner.deckAntialiasingEnabled, semanticCompositing: this.viewStateOwner.semanticCompositingEnabled,
+                contactShading: this.viewStateOwner.contactShadingEnabled, tilePullCompression: this.stream.tilePullCompressionEnabled,
+                tileLimit: this.viewStateOwner.tilesLoadLimit, renderWorkers: this.viewStateOwner.tileSubsetRenderWorkerCount
             };
-            case "app.preferences.navigation": return {zoomStep: this.state.mapZoomStep, featureZoomClearance: this.state.featureZoomClearanceMeters};
+            case "app.preferences.navigation": return {zoomStep: this.viewStateOwner.mapZoomStep, featureZoomClearance: this.viewStateOwner.featureZoomClearanceMeters};
             case "app.preferences.inspection": return {
-                limit: this.state.inspectionsLimit, drillPickRadius: this.state.drillPickRadius, expandByDefault: this.state.inspectionTreeExpandByDefault,
-                varyColors: this.state.inspectionValueVaryColors, varyOutlines: this.state.inspectionValueVaryOutlines, varyStriping: this.state.inspectionValueVaryStriping
+                limit: this.inspectionState.inspectionsLimit, drillPickRadius: this.inspectionState.drillPickRadius, expandByDefault: this.inspectionState.inspectionTreeExpandByDefault,
+                varyColors: this.inspectionState.inspectionValueVaryColors, varyOutlines: this.inspectionState.inspectionValueVaryOutlines, varyStriping: this.inspectionState.inspectionValueVaryStriping
             };
-            case "app.preferences.hover": return {enabled: this.state.hoverLabelsEnabled, fields: this.state.hoverLabelFields};
+            case "app.preferences.hover": return {enabled: this.inspectionState.hoverLabelsEnabled, fields: this.inspectionState.hoverLabelFields};
             case "inspection.panel": {
-                const panel = this.state.selection.find(panel => panel.id === target.panelId);
+                const panel = this.inspectionState.selection.find(panel => panel.id === target.panelId);
                 if (!panel) this.reject("The inspection no longer exists");
-                return {locked: panel.locked, undocked: panel.undocked, focused: this.state.focusedInspectionPanelId === panel.id, color: panel.color};
+                return {locked: panel.locked, undocked: panel.undocked, focused: this.inspectionState.focusedInspectionPanelId === panel.id, color: panel.color};
             }
             default: this.reject("This channel is read-only", "invalid_arguments");
         }
@@ -1304,26 +1311,26 @@ export class ViewerActionService implements OnDestroy {
         if (!appStateChannels[target.channel].writable) this.reject("This channel is read-only", "invalid_arguments");
         if ("viewIndex" in target) this.checkView(target.viewIndex, input.viewLayoutRevision);
         const previous = this.settingValue(target);
-        const previousFocus = this.state.focusedView;
+        const previousFocus = this.viewStateOwner.focusedView;
         const vi = "viewIndex" in target ? target.viewIndex : 0;
         const raw = input.value;
         switch (target.channel) {
             case "view.projection": {
                 const value = this.arguments(appStateChannels[target.channel].valueSchema, raw);
-                const affectedViews = this.state.viewSync.includes("proj")
-                    ? Array.from({length: this.state.numViews}, (_, index) => index) : [vi];
+                const affectedViews = this.viewStateOwner.viewSync.includes("proj")
+                    ? Array.from({length: this.viewStateOwner.numViews}, (_, index) => index) : [vi];
                 for (const index of affectedViews) {
                     const view = this.views.renderViewFor(index);
                     if (!view || view.isCameraInteractionActive() || view.isFirstPersonViewActive()) this.reject("Projection is unavailable during navigation", "busy");
                 }
-                this.state.focusedView = vi;
-                this.state.setProjectionMode(vi, value === "2d");
+                this.viewStateOwner.focusedView = vi;
+                this.viewStateOwner.setProjectionMode(vi, value === "2d");
                 break;
             }
             case "view.background": {
                 const value = this.arguments(appStateChannels[target.channel].valueSchema, raw);
                 if (value.layerId && !this.config.getBackgroundLayers().some(layer => layer.id === value.layerId)) this.reject("Unknown background", "invalid_arguments");
-                this.state.setBackgroundState(vi, value.layerId, value.opacity);
+                this.layerState.setBackgroundState(vi, value.layerId, value.opacity);
                 this.views.syncBackgroundSettings(vi);
                 break;
             }
@@ -1367,70 +1374,70 @@ export class ViewerActionService implements OnDestroy {
             case "app.focusedView": {
                 const value = this.arguments(appStateChannels[target.channel].valueSchema, raw);
                 this.checkView(value, input.viewLayoutRevision);
-                this.state.focusedView = value;
+                this.viewStateOwner.focusedView = value;
                 break;
             }
             case "app.viewSync": {
                 const value = this.arguments(appStateChannels[target.channel].valueSchema, raw);
                 if (value.includes("pos") && value.includes("mov")) this.reject("Position and movement sync are mutually exclusive", "invalid_arguments");
-                this.state.updateSelectedSyncOptions(value);
+                this.viewStateOwner.updateSelectedSyncOptions(value);
                 break;
             }
             case "app.marker": {
                 const value = this.arguments(appStateChannels[target.channel].valueSchema, raw);
-                this.state.setMarkerPosition(value.position ? Cartographic.fromDegrees(value.position.lon, value.position.lat, value.position.alt) : null);
-                this.state.setMarkerState(value.enabled);
+                this.viewStateOwner.setMarkerPosition(value.position ? Cartographic.fromDegrees(value.position.lon, value.position.lat, value.position.alt) : null);
+                this.viewStateOwner.setMarkerState(value.enabled);
                 break;
             }
             case "app.preferences.rendering": {
                 const value = this.arguments(appStateChannels[target.channel].valueSchema, raw);
-                this.state.deckAntialiasingEnabled = value.antialiasing;
-                this.state.semanticCompositingEnabled = value.semanticCompositing;
-                this.state.contactShadingEnabled = value.contactShading;
-                this.state.tilePullCompressionEnabled = value.tilePullCompression;
-                this.state.tilesLoadLimit = value.tileLimit;
-                this.state.tileSubsetRenderWorkerCount = value.renderWorkers;
+                this.viewStateOwner.deckAntialiasingEnabled = value.antialiasing;
+                this.viewStateOwner.semanticCompositingEnabled = value.semanticCompositing;
+                this.viewStateOwner.contactShadingEnabled = value.contactShading;
+                this.stream.tilePullCompressionEnabled = value.tilePullCompression;
+                this.viewStateOwner.tilesLoadLimit = value.tileLimit;
+                this.viewStateOwner.tileSubsetRenderWorkerCount = value.renderWorkers;
                 break;
             }
             case "app.preferences.navigation": {
                 const value = this.arguments(appStateChannels[target.channel].valueSchema, raw);
-                this.state.mapZoomStep = value.zoomStep;
-                this.state.featureZoomClearanceMeters = value.featureZoomClearance;
+                this.viewStateOwner.mapZoomStep = value.zoomStep;
+                this.viewStateOwner.featureZoomClearanceMeters = value.featureZoomClearance;
                 break;
             }
             case "app.preferences.inspection": {
                 const value = this.arguments(appStateChannels[target.channel].valueSchema, raw);
-                this.state.inspectionsLimit = value.limit;
-                this.state.drillPickRadius = value.drillPickRadius;
-                this.state.inspectionTreeExpandByDefault = value.expandByDefault;
-                this.state.inspectionValueVaryColors = value.varyColors;
-                this.state.inspectionValueVaryOutlines = value.varyOutlines;
-                this.state.inspectionValueVaryStriping = value.varyStriping;
+                this.inspectionState.inspectionsLimit = value.limit;
+                this.inspectionState.drillPickRadius = value.drillPickRadius;
+                this.inspectionState.inspectionTreeExpandByDefault = value.expandByDefault;
+                this.inspectionState.inspectionValueVaryColors = value.varyColors;
+                this.inspectionState.inspectionValueVaryOutlines = value.varyOutlines;
+                this.inspectionState.inspectionValueVaryStriping = value.varyStriping;
                 break;
             }
             case "app.preferences.hover": {
                 const value = this.arguments(appStateChannels[target.channel].valueSchema, raw);
-                this.state.hoverLabelsEnabled = value.enabled;
-                this.state.hoverLabelFields = value.fields;
+                this.inspectionState.hoverLabelsEnabled = value.enabled;
+                this.inspectionState.hoverLabelFields = value.fields;
                 break;
             }
             case "inspection.panel": {
                 const value = this.arguments(appStateChannels[target.channel].valueSchema, raw);
                 if (!value.undocked && !value.locked) this.reject("Docked inspections are locked", "invalid_arguments");
-                this.state.setInspectionPanelUndockedState(target.panelId, value.undocked);
-                this.state.setInspectionPanelLockedState(target.panelId, value.locked);
-                this.state.setInspectionPanelColor(target.panelId, value.color);
-                if (value.focused || this.state.focusedInspectionPanelId === target.panelId) this.state.setFocusedInspectionPanel(value.focused ? target.panelId : undefined);
+                this.inspectionState.setInspectionPanelUndockedState(target.panelId, value.undocked);
+                this.inspectionState.setInspectionPanelLockedState(target.panelId, value.locked);
+                this.inspectionState.setInspectionPanelColor(target.panelId, value.color);
+                if (value.focused || this.inspectionState.focusedInspectionPanelId === target.panelId) this.inspectionState.setFocusedInspectionPanel(value.focused ? target.panelId : undefined);
                 break;
             }
             default: this.reject("Unsupported writable channel", "invalid_arguments");
         }
         const value = this.settingValue(target);
-        const synced = target.channel === "view.projection" ? this.state.viewSync.includes("proj") : this.state.viewSync.includes(VIEW_SYNC_LAYERS);
+        const synced = target.channel === "view.projection" ? this.viewStateOwner.viewSync.includes("proj") : this.viewStateOwner.viewSync.includes(VIEW_SYNC_LAYERS);
         return viewerActions.viewer_set_app_state.outputSchema.parse({
-            status: "applied", target, value, changed: previousFocus !== this.state.focusedView || !deepEquals(previous, value),
-            focusedView: this.state.focusedView, affectedViews: "viewIndex" in target
-                ? synced ? Array.from({length: this.state.numViews}, (_, index) => index) : [vi] : [],
+            status: "applied", target, value, changed: previousFocus !== this.viewStateOwner.focusedView || !deepEquals(previous, value),
+            focusedView: this.viewStateOwner.focusedView, affectedViews: "viewIndex" in target
+                ? synced ? Array.from({length: this.viewStateOwner.numViews}, (_, index) => index) : [vi] : [],
             viewLayoutRevision: this.views.viewLayoutRevision, readiness: {status: "unknown"}
         });
     }
@@ -1438,15 +1445,15 @@ export class ViewerActionService implements OnDestroy {
     /** Validates the complete synchronous commit before focus or camera state can change. */
     private set(input: ViewerActionInput<"viewer_set_app_state">): ViewerActionOutput<"viewer_set_app_state"> {
         if (input.target.channel !== "view.camera") return this.setSetting(input);
-        if (this.state.numViews > APP_STATE_COLLECTION_LIMIT) {
+        if (this.viewStateOwner.numViews > APP_STATE_COLLECTION_LIMIT) {
             throw new ViewerActionFailure({code: "not_available", message: "Too many views for one bounded camera operation", outcome: "not_applied"});
         }
         if (input.viewLayoutRevision !== this.views.viewLayoutRevision) {
             throw new ViewerActionFailure({code: "not_available", message: "The view layout changed; read it again", reason: "stale_view_layout", outcome: "not_applied"});
         }
         const viewIndex = input.target.viewIndex;
-        const synchronized = this.state.viewSync.includes(VIEW_SYNC_POSITION) || this.state.viewSync.includes(VIEW_SYNC_MOVEMENT);
-        const affectedViews = synchronized ? Array.from({length: this.state.numViews}, (_, index) => index) : [viewIndex];
+        const synchronized = this.viewStateOwner.viewSync.includes(VIEW_SYNC_POSITION) || this.viewStateOwner.viewSync.includes(VIEW_SYNC_MOVEMENT);
+        const affectedViews = synchronized ? Array.from({length: this.viewStateOwner.numViews}, (_, index) => index) : [viewIndex];
         const view = this.views.renderViewFor(viewIndex);
         if (!view || affectedViews.some(index => !this.views.renderViewFor(index))) {
             throw new ViewerActionFailure({code: "not_available", message: "A target view is unavailable", reason: "view_unavailable", outcome: "not_applied"});
@@ -1461,19 +1468,19 @@ export class ViewerActionService implements OnDestroy {
             }
         }
         const value = this.arguments(appStateChannels["view.camera"].valueSchema, input.value);
-        if (this.state.mode2dState.getValue(viewIndex) && (value.orientation.heading !== 0
+        if (this.viewStateOwner.mode2dState.getValue(viewIndex) && (value.orientation.heading !== 0
             || value.orientation.pitch !== -Math.PI / 2 || value.position?.some(component => component !== 0))) {
             throw new ViewerActionFailure({code: "invalid_arguments", message: "2D camera requires heading 0, top-down pitch and zero offset", outcome: "not_applied"});
         }
-        const previousFocus = this.state.focusedView;
+        const previousFocus = this.viewStateOwner.focusedView;
         const previous = affectedViews.map(index => this.views.renderViewFor(index)!.getLiveCameraState());
         try {
-            this.state.focusedView = viewIndex;
-            this.state.setView(viewIndex, Cartographic.fromDegrees(value.destination.lon, value.destination.lat, value.destination.alt),
+            this.viewStateOwner.focusedView = viewIndex;
+            this.viewStateOwner.setView(viewIndex, Cartographic.fromDegrees(value.destination.lon, value.destination.lat, value.destination.alt),
                 value.orientation, value.position ?? [0, 0, 0]);
             const result = viewerActions.viewer_set_app_state.outputSchema.parse({
-                status: "applied", target: input.target, value: view.getLiveCameraState(), focusedView: this.state.focusedView,
-                changed: previousFocus !== this.state.focusedView || affectedViews.some((index, offset) =>
+                status: "applied", target: input.target, value: view.getLiveCameraState(), focusedView: this.viewStateOwner.focusedView,
+                changed: previousFocus !== this.viewStateOwner.focusedView || affectedViews.some((index, offset) =>
                     !deepEquals(previous[offset], this.views.renderViewFor(index)!.getLiveCameraState())),
                 affectedViews, viewLayoutRevision: this.views.viewLayoutRevision,
                 // Existing full diagnostics rebuild tile rows on demand; do not scan them for an action acknowledgement.

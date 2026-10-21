@@ -1,3 +1,7 @@
+import {inject} from "@angular/core";
+import {AppStateService} from "../shared/appstate.service";
+import {z} from "zod";
+import {DEFAULT_LOCATION_SEARCH_RESULT_LIMIT, MAX_LOCATION_SEARCH_RESULT_LIMIT, clampLocationSearchResultLimit} from "../shared/app-state.model";
 import {HttpClient, HttpHeaders, HttpParams} from "@angular/common/http";
 import {Injectable} from "@angular/core";
 import {catchError, forkJoin, map, Observable, of, timeout} from "rxjs";
@@ -271,6 +275,21 @@ function arrayNumbers(value: unknown): number[] | null {
 
 @Injectable({providedIn: "root"})
 export class LocationSearchService {
+    private readonly stateService = inject(AppStateService);
+
+
+    readonly locationSearchResultLimitState = this.stateService.register({
+        name: 'locationSearchResultLimit',
+        defaultValue: DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,
+        schema: z.coerce.number().int().min(1).max(MAX_LOCATION_SEARCH_RESULT_LIMIT),
+        toStorage: (value: number) => clampLocationSearchResultLimit(value),
+        fromStorage: (payload: any): number => clampLocationSearchResultLimit(payload)
+    }, "location", "locationSearchResultLimit");
+
+    get locationSearchResultLimit() {return this.locationSearchResultLimitState.getValue();}
+
+    set locationSearchResultLimit(val: number) {this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val));}
+
     constructor(
         private readonly httpClient: HttpClient,
         private readonly configService: AppConfigService) {
@@ -540,4 +559,9 @@ export class LocationSearchService {
             + (credit?.url ? ` | <a href="${escapeHtml(credit.url)}" target="_blank" rel="noopener noreferrer">Source</a>` : "")
             + (credit?.licenseUrl ? ` | <a href="${escapeHtml(credit.licenseUrl)}" target="_blank" rel="noopener noreferrer">License</a>` : "");
     }
+}
+
+
+export interface LocationSearchServiceValues {
+    locationSearchResultLimit: number;
 }

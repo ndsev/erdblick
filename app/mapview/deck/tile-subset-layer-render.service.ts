@@ -3,7 +3,7 @@ import {auditTime, combineLatest, skip, Subject} from "rxjs";
 import {DEFAULT_POINT_CLOUD_POLICY, pointCloudSpacingMeters, type PointCloudRenderPolicy} from "../../shared/point-cloud-policy";
 import {gpuMemoryBudget, type GpuMemoryReservation} from "./gpu-memory-budget";
 import {pointCloudInputBudget} from "../../shared/point-cloud-input-budget";
-import {AppStateService} from "../../shared/appstate.service";
+import {MapViewStateService} from "../map-view-state.service";
 import {AUTO_TILE_SUBSET_RENDER_WORKER_COUNT} from
     "../../shared/tile-render-policy";
 import type {
@@ -276,7 +276,7 @@ export class TileSubsetLayerRenderService {
     /** Track runtime worker-count changes when application state is available. */
     constructor(
         @Optional()
-        private readonly appState: AppStateService | null = null
+        private readonly appState: MapViewStateService | null = null
     ) {
         if (!appState) {
             return;

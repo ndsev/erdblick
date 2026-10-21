@@ -1,3 +1,6 @@
+import {inject} from "@angular/core";
+import {AppStateService} from "../shared/appstate.service";
+import {Versions} from "../shared/app-state.model";
 import {Injectable} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
 import {BehaviorSubject, Observable, firstValueFrom} from "rxjs";
@@ -552,6 +555,22 @@ function mergeMeaningfulObjectValues(
 /** Loads and normalizes `config.json` once, then exposes it as a shared application service. */
 @Injectable({providedIn: 'root'})
 export class AppConfigService {
+    private readonly stateService = inject(AppStateService);
+
+
+    readonly distributionVersions = this.stateService.register({
+        name: 'distributionVersions',
+        defaultValue: [],
+        schema: z.array(z.record(z.string(), z.string()))
+    }, "config", "distributionVersions");
+
+
+    readonly erdblickVersion = this.stateService.register({
+        name: 'erdblickVersion',
+        defaultValue: "",
+        schema: z.string()
+    }, "config", "erdblickVersion");
+
     private readonly configSubject = new BehaviorSubject<AppConfig>(DEFAULT_APP_CONFIG);
     private loadPromise: Promise<AppConfig> | null = null;
     private staticRawConfig: RawAppConfig = {};
@@ -1351,4 +1370,10 @@ export class AppConfigService {
         }
         return JSON.stringify(value);
     }
+}
+
+
+export interface AppConfigServiceValues {
+    distributionVersions: Versions[];
+    erdblickVersion: string;
 }

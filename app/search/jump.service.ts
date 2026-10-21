@@ -1,3 +1,6 @@
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {inject} from "@angular/core";
 import {Injectable} from "@angular/core";
 import {BehaviorSubject, Subject} from "rxjs";
 import {MapInfoService} from "../mapdata/map-info.service";
@@ -85,6 +88,8 @@ interface FeatureJumpAction {
  * and the temporary map-selection flow used when a feature can exist in multiple maps.
  */
 export class JumpTargetService {
+    readonly viewStateOwner = inject(MapViewStateService);
+    readonly inspectionState = inject(InspectionStateService);
 
     markedPosition: Subject<Array<number>> = new Subject<Array<number>>();
     targetValueSubject = new BehaviorSubject<string>("");
@@ -119,8 +124,8 @@ export class JumpTargetService {
         // Forward marked cartesian position to AppStateService.
         this.markedPosition.subscribe(position => {
             if (position.length >= 2) {
-                this.stateService.setMarkerState(true);
-                this.stateService.setMarkerPosition(Cartographic.fromDegrees(
+                this.viewStateOwner.setMarkerState(true);
+                this.viewStateOwner.setMarkerPosition(Cartographic.fromDegrees(
                     position[1],
                     position[0],
                     position[2] ?? 0
@@ -302,7 +307,7 @@ export class JumpTargetService {
                                 if (sourceLayerId) {
                                     sourceLayerId = this.mapService.sourceDataLayerIdForLayerName(sourceLayerId) || "";
                                     if (sourceLayerId) {
-                                        this.stateService.setSelection({
+                                        this.inspectionState.setSelection({
                                             mapTileKey: coreLib.getSourceDataLayerKey(mapId, sourceLayerId, tileId)
                                         } as SelectedSourceData);
                                     } else {
@@ -354,7 +359,7 @@ export class JumpTargetService {
                     enabled: !fjt.error,
                     execute: (_: string) => {
                         this.highlightByJumpTarget(fjt, null, coreLib.HighlightMode.SELECTION_HIGHLIGHT,
-                            this.stateService.focusedView).then();
+                            this.viewStateOwner.focusedView).then();
                     },
                     validate: (_: string) => { return !fjt.error; },
                 }
@@ -396,6 +401,8 @@ export class JumpTargetService {
         mapId?: string | null,
         mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT,
         cameraMoveViewIndex?: number) {
+        const target = cameraMoveViewIndex === undefined ? undefined : this.viewStateOwner.captureView(cameraMoveViewIndex);
+        if (cameraMoveViewIndex !== undefined && !target) return;
         // Select the map.
         if (!mapId) {
             if (action.maps.length > 1) {
@@ -409,7 +416,7 @@ export class JumpTargetService {
                 mapId = action.maps[0];
             }
         }
-        if (!mapId) {
+        if (!mapId || target && !this.viewStateOwner.isCurrent(target)) {
             return;
         }
 
@@ -431,12 +438,13 @@ export class JumpTargetService {
             this.messageService.showError("Could not locate feature!")
             return;
         }
+        if (target && !this.viewStateOwner.isCurrent(target)) return;
         let selectThisFeature = extRefsResolved.responses[0][0];
 
         // Set feature-to-select on MapService.
         const featureId = `${selectThisFeature.typeId}.${selectThisFeature.featureId.filter((_, index) => index % 2 === 1).join('.')}`;
         if (mode === coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
-            this.stateService.setSelection([{
+            this.inspectionState.setSelection([{
                 mapTileKey: selectThisFeature.tileId,
                 featureId: featureId
             } as TileFeatureId]);
@@ -449,7 +457,7 @@ export class JumpTargetService {
 
         // Center the camera on the feature if a view index was passed.
         if (cameraMoveViewIndex !== undefined) {
-            await this.inspectionSelection.focusOnFeature(cameraMoveViewIndex, {
+            await this.inspectionSelection.focusOnFeature(target ? this.viewStateOwner.indexOf(target.id) : cameraMoveViewIndex, {
                 featureId: featureId,
                 mapTileKey: selectThisFeature.tileId,
             });

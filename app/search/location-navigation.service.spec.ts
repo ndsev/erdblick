@@ -2,7 +2,7 @@ import "@angular/compiler";
 import {TestBed} from "@angular/core/testing";
 import {BehaviorSubject, Observable, Subject, of} from "rxjs";
 import {afterEach, describe, expect, it, vi} from "vitest";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewService} from "../mapview/map-view.service";
 import {ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
 import {AppStateService} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
@@ -31,7 +31,7 @@ function setup() {
     const jumps = {markedPosition: new Subject()};
     const messages = {showError: vi.fn(), showInfo: vi.fn()};
     TestBed.configureTestingModule({providers: [LocationNavigationService,
-        {provide: LocationSearchService, useValue: locations}, {provide: MapViewStateService, useValue: views},
+        {provide: LocationSearchService, useValue: locations}, {provide: MapViewService, useValue: views},
         {provide: AppStateService, useValue: state}, {provide: ViewLayerDiagnosticsService, useValue: diagnostics},
         {provide: JumpTargetService, useValue: jumps}, {provide: InfoMessageService, useValue: messages}]});
     const service = TestBed.inject(LocationNavigationService);

@@ -1,5 +1,19 @@
+import type {MapViewStateServiceValues} from "../mapview/map-view-state.service";
+import type {MapLayerStateServiceValues} from "../mapdata/map-layer-state.service";
+import type {InspectionStateServiceValues} from "../inspection/inspection-state.service";
+import type {AppLayoutServiceValues} from "./app-layout.service";
+import type {StyleServiceValues} from "../styledata/style.service";
+import type {FeatureSearchServiceValues} from "../search/feature.search.service";
+import type {MapTileStreamServiceValues} from "../mapdata/map-tile-stream.service";
+import type {CoordinatesServiceValues} from "../coords/coordinates.service";
+import type {CoordinatesPolicyServiceValues} from "../coords/coordinates-policy.service";
+import type {LocationSearchServiceValues} from "../search/location.search.service";
+import type {StyleEditorRequestServiceValues} from "../styledata/style-editor-request.service";
+import type {AppConfigServiceValues} from "./app-config.service";
+import type {ViewIdentity} from "../mapview/view-id";
+import {withEntities} from "@ngrx/signals/entities";
 import {computed, Injector, Signal} from "@angular/core";
-import {getState, patchState, signalStore, StateSource, watchState, withState} from "@ngrx/signals";
+import {getState, patchState, signalStore, StateSource, type, watchState, withState} from "@ngrx/signals";
 import {Observable, Subject} from "rxjs";
 import {withDiagnosticsState} from "../diagnostics/diagnostics.facade.service.state";
 import {deepCopy, deepEquals} from "./state-value";
@@ -11,8 +25,23 @@ import {deepCopy, deepEquals} from "./state-value";
  */
 export const ViewerStore = signalStore(
     {protectedState: false},
-    withState({legacy: {} as Record<string, unknown>}),
-    withDiagnosticsState()
+    withState({
+        legacy: {} as Record<string, unknown>,
+        views: {} as MapViewStateServiceValues,
+        layers: {} as MapLayerStateServiceValues,
+        inspection: {} as InspectionStateServiceValues,
+        layout: {} as AppLayoutServiceValues,
+        styles: {} as StyleServiceValues,
+        searches: {} as FeatureSearchServiceValues,
+        connection: {} as MapTileStreamServiceValues,
+        coordinates: {} as CoordinatesServiceValues,
+        coordinatePolicy: {} as CoordinatesPolicyServiceValues,
+        location: {} as LocationSearchServiceValues,
+        styleEditor: {} as StyleEditorRequestServiceValues,
+        config: {} as AppConfigServiceValues
+    }),
+    withDiagnosticsState(),
+    withEntities({entity: type<ViewIdentity>(), collection: "view"})
 );
 export type ViewerValues = InstanceType<typeof ViewerStore> extends StateSource<infer Values> ? Values : never;
 
@@ -33,7 +62,19 @@ export class ViewerState {
     readonly store = new ViewerStore();
     private readonly injector = Injector.create({providers: []});
     private readonly committed = new Subject<void>();
+    /** Read a prepared root only while coordinating a transaction; native readers stay narrow. */
+    read<T>(fromDraft: (state: ViewerValues) => T, current: () => T): T {
+        return this.draft ? fromDraft(this.draft) : current();
+    }
+
+    private readonly preparations = new Set<() => void>();
+    beforeCommit(prepare: () => void): () => void {
+        this.preparations.add(prepare);
+        return () => this.preparations.delete(prepare);
+    }
+
     private draft: ViewerValues | undefined;
+    private originalBindings: Map<object, unknown> | undefined;
     private publishing = false;
     private pendingPatch: Partial<ViewerValues> | undefined;
     private readonly watcher = watchState(this.store, () => {
@@ -50,15 +91,30 @@ export class ViewerState {
     /** Nested domain preparation joins the transaction; an exception rolls back its writes. */
     transaction<T>(operation: () => T): T {
         const parent = this.draft;
+        const parentBindings = this.originalBindings;
+        this.originalBindings = new Map(parentBindings);
         const initial = parent ?? {...getState(this.store), ...this.pendingPatch};
         this.draft = initial;
         try {
             const result = operation();
+            if (!parent) for (const prepare of this.preparations) prepare();
             const next = this.draft;
             if (!parent) {
                 this.draft = undefined;
-                const patch = Object.fromEntries(Object.entries(next).filter(([key, value]) =>
-                    value !== initial[key as keyof ViewerValues])) as Partial<ViewerValues>;
+                this.originalBindings = undefined;
+                const patch = Object.fromEntries(Object.entries(next).filter(([key, value]) => {
+                    const previous = initial[key as keyof ViewerValues];
+                    if (value === previous) return false;
+                    // A reverted binding reuses its original value. Check only the small
+                    // touched owner slice's field identities, never its layer/style contents.
+                    if (Object.getPrototypeOf(value) === Object.prototype && Object.getPrototypeOf(previous) === Object.prototype) {
+                        const fields = Object.keys(value);
+                        const before = previous as Record<string, unknown>;
+                        const after = value as Record<string, unknown>;
+                        if (fields.length === Object.keys(before).length && fields.every(field => after[field] === before[field])) return false;
+                    }
+                    return true;
+                })) as Partial<ViewerValues>;
                 if (Object.keys(patch).length) {
                     if (this.publishing) this.pendingPatch = {...this.pendingPatch, ...patch};
                     else patchState(this.store, patch);
@@ -67,21 +123,27 @@ export class ViewerState {
             return result;
         } catch (error) {
             this.draft = parent;
+            this.originalBindings = parentBindings;
             throw error;
         }
     }
 
     bind<T>(read: (state: ViewerValues) => T, update: (state: ViewerValues, value: T) => Partial<ViewerValues>,
         select: () => T = () => read(getState(this.store))): StateBinding<T> {
+        const key = {};
         return {
             signal: computed(select),
             commits: this.committed,
-            read: () => read(this.draft ?? getState(this.store)),
+            read: () => this.draft ? read(this.draft) : select(),
             write: value => {
                 const apply = () => {
                     const state = this.draft!;
-                    if (deepEquals(read(state), value)) return;
-                    this.draft = {...state, ...update(state, deepCopy(value))};
+                    const previous = read(state);
+                    if (deepEquals(previous, value)) return;
+                    const originals = this.originalBindings!;
+                    if (!originals.has(key)) originals.set(key, previous);
+                    else if (deepEquals(originals.get(key), value)) value = originals.get(key) as T;
+                    this.draft = {...state, ...update(state, value)};
                 };
                 if (this.draft) apply();
                 else this.transaction(apply);

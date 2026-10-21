@@ -1,3 +1,7 @@
+import type {ViewIdentity} from "../mapview/view-id";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {InspectionStateService} from "./inspection-state.service";
+import {inject} from "@angular/core";
 import {TileDeliveryError} from "../mapdata/tile-diagnostics";
 import {Injectable, NgZone} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
@@ -5,7 +9,7 @@ import {
     MapTileStreamService,
     RetainedTileExpiryOwner
 } from "../mapdata/map-tile-stream.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewService} from "../mapview/map-view.service";
 import {
     featureSetsEqual,
     FeatureWrapper
@@ -51,6 +55,8 @@ interface InspectionExpiryOwner extends RetainedTileExpiryOwner {
  */
 @Injectable({providedIn: "root"})
 export class InspectionSelectionService {
+    readonly inspectionState = inject(InspectionStateService);
+    readonly viewStateOwner = inject(MapViewStateService);
     readonly selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
     readonly hoverIdsTopic = new BehaviorSubject<TileFeatureId[]>([]);
     readonly selectionIdsTopic =
@@ -67,7 +73,7 @@ export class InspectionSelectionService {
     constructor(
         private readonly stateService: AppStateService,
         private readonly tileStream: MapTileStreamService,
-        private readonly viewState: MapViewStateService,
+        private readonly viewState: MapViewService,
         private readonly keyboardService: KeyboardService,
         private readonly messageService: InfoMessageService,
         private readonly ngZone: NgZone
@@ -77,7 +83,7 @@ export class InspectionSelectionService {
 
     /** Wires app-state selection projection once the tile stream can serve feature loads. */
     initialize(): void {
-        this.stateService.selectionState.subscribe(selected => {
+        this.inspectionState.selectionState.subscribe(selected => {
             this.ngZone.run(() => this.selectionIdsTopic.next(selected));
             const revision = ++this.selectionConversionRevision;
             const demanded = new Set(selected.map(panel => this.featureLoadKey(panel.features)));
@@ -285,50 +291,50 @@ export class InspectionSelectionService {
         }
 
         if (foundFeatureCount === 1) {
-            const currentPanels = this.stateService.selection;
+            const currentPanels = this.inspectionState.selection;
             const featureAlreadyInspected = this.panelsContainFeature(currentPanels, featureIds[0]);
             const reusableFeaturePanel = currentPanels.some(panel =>
                 panel.sourceData === undefined && !panel.locked
             );
             if (featureAlreadyInspected
                 || reusableFeaturePanel
-                || currentPanels.length < this.stateService.inspectionsLimit) {
-                const panelId = this.stateService.setSelection(
+                || currentPanels.length < this.inspectionState.inspectionsLimit) {
+                const panelId = this.inspectionState.setSelection(
                     [featureIds[0]],
                     undefined,
                     lockNewPanels
                 );
                 if (lockNewPanels && panelId !== undefined) {
-                    this.stateService.setInspectionPanelLockedState(panelId, true);
+                    this.inspectionState.setInspectionPanelLockedState(panelId, true);
                 }
             }
         } else {
             // Match the existing merged-feature flow: preserve pinned/source-data panels and
             // create one new inspection panel for each candidate that still fits.
-            this.stateService.unsetUnlockedSelections();
+            this.inspectionState.unsetUnlockedSelections();
             let remainingSlots = Math.max(
                 0,
-                this.stateService.inspectionsLimit - this.stateService.selection.length
+                this.inspectionState.inspectionsLimit - this.inspectionState.selection.length
             );
             for (const featureId of featureIds) {
-                if (this.panelsContainFeature(this.stateService.selection, featureId)) {
+                if (this.panelsContainFeature(this.inspectionState.selection, featureId)) {
                     continue;
                 }
                 if (remainingSlots <= 0) {
                     break;
                 }
-                const panelId = this.stateService.setSelection([featureId], undefined, true);
+                const panelId = this.inspectionState.setSelection([featureId], undefined, true);
                 if (panelId !== undefined) {
                     remainingSlots -= 1;
                     if (lockNewPanels) {
-                        this.stateService.setInspectionPanelLockedState(panelId, true);
+                        this.inspectionState.setInspectionPanelLockedState(panelId, true);
                     }
                 }
             }
         }
 
         const inspectedFeatureCount = featureIds.filter(featureId =>
-            this.panelsContainFeature(this.stateService.selection, featureId)
+            this.panelsContainFeature(this.inspectionState.selection, featureId)
         ).length;
         if (inspectedFeatureCount < foundFeatureCount) {
             this.messageService.showWarning(
@@ -375,7 +381,7 @@ export class InspectionSelectionService {
     ): void {
         const requestedTargets = tileFeatureIds
             .filter((id): id is TileFeatureId => !!id);
-        const selectedTargets = this.stateService.selectionState.getValue()
+        const selectedTargets = this.inspectionState.selectionState.getValue()
             .flatMap(panel => panel.features);
         const hoverTargets = requestedTargets.filter(id =>
             !selectedTargets.some(selected =>
@@ -523,18 +529,30 @@ export class InspectionSelectionService {
 
     /** Loads a feature and centers the target view on its reported center point. */
     async focusOnFeature(viewIndex: number|undefined, tileFeatureId: TileFeatureId) {
+        const focused = this.viewStateOwner.captureView(this.viewStateOwner.focusedView);
+        const candidates = viewIndex === undefined ? this.viewStateOwner.identities()
+            : [this.viewStateOwner.captureView(viewIndex)].filter((view): view is ViewIdentity => !!view);
+        if (!candidates.length) return;
         this.viewState.navigationStarted.next();
         const features = await this.tileStream.loadFeatures([tileFeatureId]);
+        if (!candidates.some(view => this.viewStateOwner.isCurrent(view))) return;
         if (!features.length) {
-            this.showErrorMessage(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`)
+            this.showErrorMessage(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`);
             return;
         }
-        this.zoomToFeature(viewIndex, features[0]);
+        const current = candidates.filter(view => this.viewStateOwner.isCurrent(view))
+            .map(view => this.viewStateOwner.indexOf(view.id));
+        const targets = viewIndex === undefined
+            ? this.targetViewsForFeatureZoom(undefined, features[0].featureTile, current,
+                focused && this.viewStateOwner.isCurrent(focused) ? this.viewStateOwner.indexOf(focused.id) : -1)
+            : current;
+        const target = this.featureSetZoomTarget(features.slice(0, 1));
+        if (target) targets.forEach(targetView => this.viewState.moveToWgs84PositionTopic.next({targetView, ...target}));
     }
 
     /** Moves the focused view to the inspection panel most recently focused by the user. */
     zoomToFocusedInspectionPanel() {
-        const focusedPanelId = this.stateService.focusedInspectionPanelId;
+        const focusedPanelId = this.inspectionState.focusedInspectionPanelId;
         if (focusedPanelId === undefined) {
             return;
         }
@@ -542,7 +560,7 @@ export class InspectionSelectionService {
         if (!panel) {
             return;
         }
-        const targetView = this.stateService.focusedView;
+        const targetView = this.viewStateOwner.focusedView;
         if (panel.features.length) {
             this.zoomToFeature(targetView, panel.features[0]);
             return;
@@ -592,13 +610,15 @@ export class InspectionSelectionService {
     }
 
     /** Resolves the view indices affected by a feature zoom request. */
-    private targetViewsForFeatureZoom(viewIndex: number|undefined, featureTile: FeatureWrapper["featureTile"]): number[] {
+    private targetViewsForFeatureZoom(viewIndex: number|undefined, featureTile: FeatureWrapper["featureTile"],
+                                      candidates = Array.from({length: this.viewStateOwner.numViews}, (_, index) => index),
+                                      fallback = this.viewStateOwner.focusedView): number[] {
         if (viewIndex !== undefined) {
-            return viewIndex >= 0 && viewIndex < this.stateService.numViews ? [viewIndex] : [];
+            return viewIndex >= 0 && viewIndex < this.viewStateOwner.numViews ? [viewIndex] : [];
         }
 
         const targetViews: number[] = [];
-        for (let i = 0; i < this.stateService.numViews; ++i) {
+        for (const i of candidates) {
             if (featureTile.tileId !== null &&
                 this.viewState.showsFeatureSearchTileInView(
                     i,
@@ -609,12 +629,12 @@ export class InspectionSelectionService {
                 targetViews.push(i);
             }
         }
-        return targetViews.length ? targetViews : [this.stateService.focusedView];
+        return targetViews.length ? targetViews : candidates.includes(fallback) ? [fallback] : [];
     }
 
     /** Fits the target view to the tile represented by a focused source-data inspection. */
     private zoomToSourceDataSelection(viewIndex: number, sourceData: SelectedSourceData) {
-        if (viewIndex < 0 || viewIndex >= this.stateService.numViews) {
+        if (viewIndex < 0 || viewIndex >= this.viewStateOwner.numViews) {
             return;
         }
         const parsedKey = this.tileStream.parseMapTileKeySafe(sourceData.mapTileKey);

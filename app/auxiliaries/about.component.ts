@@ -1,3 +1,6 @@
+import {AppConfigService} from "../shared/app-config.service";
+import {AppLayoutService} from "../shared/app-layout.service";
+import {inject} from "@angular/core";
 import {Component} from '@angular/core';
 import {ABOUT_DIALOG_LAYOUT_ID, AppStateService} from '../shared/appstate.service';
 
@@ -8,7 +11,7 @@ import {ABOUT_DIALOG_LAYOUT_ID, AppStateService} from '../shared/appstate.servic
                   [resizable]="false" class="pref-dialog" [style]="{'min-width': '24em', 'max-width': '42em'}"
                   [persistLayout]="true" [layoutId]="dialogLayoutId">
             <div class="about-dialog-content">
-                @if (stateService.distributionVersions.getValue().length) {
+                @if (configService.distributionVersions.getValue().length) {
                     <div class="about-section-title">Distribution</div>
                     <table class="about-table">
                         <thead>
@@ -18,7 +21,7 @@ import {ABOUT_DIALOG_LAYOUT_ID, AppStateService} from '../shared/appstate.servic
                             </tr>
                         </thead>
                         <tbody>
-                            @for (version of stateService.distributionVersions.getValue(); track $index) {
+                            @for (version of configService.distributionVersions.getValue(); track $index) {
                                 <tr>
                                     <td>{{ version.name }}</td>
                                     <td>
@@ -34,8 +37,8 @@ import {ABOUT_DIALOG_LAYOUT_ID, AppStateService} from '../shared/appstate.servic
                 } @else {
                     <div class="about-summary">
                         <div class="about-title">Erdblick</div>
-                        @if (stateService.erdblickVersion.getValue().length) {
-                            <div class="about-version">{{ stateService.erdblickVersion.getValue() }}</div>
+                        @if (configService.erdblickVersion.getValue().length) {
+                            <div class="about-version">{{ configService.erdblickVersion.getValue() }}</div>
                         } @else {
                             <div class="about-version">Version information unavailable.</div>
                         }
@@ -51,16 +54,18 @@ import {ABOUT_DIALOG_LAYOUT_ID, AppStateService} from '../shared/appstate.servic
 })
 /** About dialog that shows either packaged distribution versions or the raw erdblick version. */
 export class AboutComponent {
+    readonly layoutState = inject(AppLayoutService);
+    readonly configService = inject(AppConfigService);
     readonly dialogLayoutId = ABOUT_DIALOG_LAYOUT_ID;
 
     constructor(public stateService: AppStateService) {}
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.dialogLayoutId);
+        return this.layoutState.isDialogOpen(this.dialogLayoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+        this.layoutState.setDialogOpen(this.dialogLayoutId, visible);
     }
 
     /** Closes the about dialog. */

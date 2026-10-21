@@ -1,3 +1,5 @@
+import {InspectionStateService} from "./inspection-state.service";
+import {inject} from "@angular/core";
 import {
     ChangeDetectorRef,
     Component,
@@ -65,7 +67,7 @@ interface LoadedSourceDataLayer {
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
                              [showFilter]="showFilter()"
-                             [defaultVisibleColumnKeys]="stateService.sourceDataInspectionDefaultColumns"
+                             [defaultVisibleColumnKeys]="inspectionState.sourceDataInspectionDefaultColumns"
                              [firstHighlightedItemIndex]="firstHighlightedItemIndex">
             </inspection-tree>
         }
@@ -74,6 +76,7 @@ interface LoadedSourceDataLayer {
 })
 /** Loads one source-data tile on demand and renders it through the shared inspection tree. */
 export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOwner {
+    readonly inspectionState = inject(InspectionStateService);
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
     filterText = input<string | undefined>();

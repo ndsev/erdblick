@@ -1,3 +1,5 @@
+import {AppLayoutService} from "../shared/app-layout.service";
+import {inject} from "@angular/core";
 import {AsyncPipe} from "@angular/common";
 import {HttpErrorResponse} from "@angular/common/http";
 import {Component} from "@angular/core";
@@ -118,6 +120,7 @@ import {InfoMessageService} from "../shared/info.service";
 })
 /** Lists caller-visible primary maps and runs one guarded reset at a time per row. */
 export class CacheResetComponent {
+    readonly layoutState = inject(AppLayoutService);
     readonly dialogLayoutId = CACHE_RESET_DIALOG_LAYOUT_ID;
     readonly mapIds$: Observable<string[]> = this.mapInfo.maps$.pipe(
         map(tree => [...tree.maps.values()]
@@ -141,11 +144,11 @@ export class CacheResetComponent {
     }
 
     get dialogVisible(): boolean {
-        return this.state.isDialogOpen(this.dialogLayoutId);
+        return this.layoutState.isDialogOpen(this.dialogLayoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.state.setDialogOpen(this.dialogLayoutId, visible);
+        this.layoutState.setDialogOpen(this.dialogLayoutId, visible);
     }
 
     isPending(mapId: string): boolean {

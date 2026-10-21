@@ -1,3 +1,4 @@
+import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
 import "@angular/compiler";
 import {HttpClient, HttpHeaders, HttpResponse} from "@angular/common/http";
 import {BehaviorSubject, of, Subject} from "rxjs";
@@ -27,13 +28,13 @@ function fixture() {
     const get = vi.fn();
     const service = new MapInfoService(
         {get} as unknown as HttpClient,
-        {
+        ({
             ready: new BehaviorSubject(true), numViews: 1, numViewsState: new BehaviorSubject(1),
             stateApplied: new Subject<void>(),
             mapLayerConfig: () => [{visible: true, level: 13, autoLevel: false}],
             getMapPresetSelection: () => null, getLayerSyncOption: () => false,
             prune: vi.fn()
-        } as unknown as AppStateService,
+        } as unknown as StateTestSystem) as never,
         {styles: new Map(), styleGroups: new BehaviorSubject([])} as unknown as StyleService,
         {presets: [], presets$: new BehaviorSubject([]), presetsForLayer: () => []} as unknown as MapPresetService,
         {clearBackendConnectionError: vi.fn(), showBackendConnectionError: vi.fn()} as unknown as InfoMessageService

@@ -1,8 +1,14 @@
+import {AppLayoutService} from "../shared/app-layout.service";
+import {LocationSearchService} from "../search/location.search.service";
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import {inject} from "@angular/core";
 import {Component, OnDestroy, OnInit, ViewChild} from '@angular/core';
 import {combineLatest, Subscription} from "rxjs";
 import {DEFAULT_POINT_CLOUD_POLICY, pointCloudPolicySchema, PointCloudPolicy} from "../shared/point-cloud-policy";
 import {InfoMessageService} from "../shared/info.service";
-import {MapViewStateService, ViewRecalculationReason} from "../mapview/map-view-state.service";
+import {MapViewService, ViewRecalculationReason} from "../mapview/map-view.service";
 import {StyleService} from "../styledata/style.service";
 import {
     ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID,
@@ -141,7 +147,7 @@ import type {
                         </div>
                         <div class="button-container">
                             <label>Collapse Dock automatically</label>
-                            <p-toggleswitch [(ngModel)]="stateService.isDockAutoCollapsible"></p-toggleswitch>
+                            <p-toggleswitch [(ngModel)]="layoutState.isDockAutoCollapsible"></p-toggleswitch>
                         </div>
                     </p-tabpanel>
 
@@ -201,7 +207,7 @@ import type {
                         <p-divider></p-divider>
                         <div class="button-container">
                             <label>Expand inspection trees by default</label>
-                            <p-toggleswitch [(ngModel)]="stateService.inspectionTreeExpandByDefault"></p-toggleswitch>
+                            <p-toggleswitch [(ngModel)]="inspectionState.inspectionTreeExpandByDefault"></p-toggleswitch>
                         </div>
                         <div class="button-container value-presentation-container">
                             <label for="inspection-value-presentation">Inspection value bubbles</label>
@@ -268,7 +274,7 @@ import type {
                                 <label for="hover-labels-enabled">Show hover labels</label>
                                 <p-toggleswitch inputId="hover-labels-enabled"
                                                 data-testid="hover-labels-enabled"
-                                                [(ngModel)]="stateService.hoverLabelsEnabled">
+                                                [(ngModel)]="inspectionState.hoverLabelsEnabled">
                                 </p-toggleswitch>
                             </div>
                             <p-divider></p-divider>
@@ -577,6 +583,11 @@ import type {
  * Hosts persisted viewer preferences and maps dialog controls to runtime state transitions.
  */
 export class PreferencesComponent implements OnInit, OnDestroy {
+    readonly connectionState = inject(MapTileStreamService);
+    readonly viewStateOwner = inject(MapViewStateService);
+    readonly inspectionState = inject(InspectionStateService);
+    readonly locationSearch = inject(LocationSearchService);
+    readonly layoutState = inject(AppLayoutService);
     readonly dialogLayoutId = PREFERENCES_DIALOG_LAYOUT_ID;
     readonly advancedPreferencesDialogLayoutId = ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID;
 
@@ -649,85 +660,85 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Subscribes dialog fields to persisted preference state and runtime services. */
     constructor(private messageService: InfoMessageService,
-                public mapService: MapViewStateService,
+                public mapService: MapViewService,
                 public styleService: StyleService,
                 public stateService: AppStateService,
                 public coordinatesPolicy: CoordinatesPolicyService,
                 private searchSchema: FeatureSearchSchemaService,
                 private dialogStack: DialogStackService) {
-        this.subscriptions.push(this.stateService.connectionRetryEnabledState.subscribe(value => this.connectionRetryEnabled = value));
-        this.subscriptions.push(combineLatest([this.stateService.pointCloudDownsamplingEnabledState,
-            this.stateService.pointCloudDetailPixelsState, this.stateService.pointCloudWorkingMemoryMiBState,
-            this.stateService.pointCloudGpuMemoryMiBState]).subscribe(() => {
-                this.pointCloudPolicyDraft = {...this.stateService.pointCloudPolicy};
+        this.subscriptions.push(this.connectionState.connectionRetryEnabledState.subscribe(value => this.connectionRetryEnabled = value));
+        this.subscriptions.push(combineLatest([this.viewStateOwner.pointCloudDownsamplingEnabledState,
+            this.viewStateOwner.pointCloudDetailPixelsState, this.viewStateOwner.pointCloudWorkingMemoryMiBState,
+            this.viewStateOwner.pointCloudGpuMemoryMiBState]).subscribe(() => {
+                this.pointCloudPolicyDraft = {...this.viewStateOwner.pointCloudPolicy};
             }));
-        this.subscriptions.push(this.stateService.connectionRetryInitialDelayMsState.subscribe(value => this.connectionInitialSeconds = value / 1000));
-        this.subscriptions.push(this.stateService.connectionRetryBackoffMultiplierState.subscribe(value => this.connectionBackoffMultiplier = value));
-        this.subscriptions.push(this.stateService.connectionRetryMaxDelayMsState.subscribe(value => this.connectionMaximumSeconds = value / 1000));
-        this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
+        this.subscriptions.push(this.connectionState.connectionRetryInitialDelayMsState.subscribe(value => this.connectionInitialSeconds = value / 1000));
+        this.subscriptions.push(this.connectionState.connectionRetryBackoffMultiplierState.subscribe(value => this.connectionBackoffMultiplier = value));
+        this.subscriptions.push(this.connectionState.connectionRetryMaxDelayMsState.subscribe(value => this.connectionMaximumSeconds = value / 1000));
+        this.subscriptions.push(this.viewStateOwner.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;
         }));
-        this.subscriptions.push(this.stateService.inspectionsLimitState.subscribe(limit => {
+        this.subscriptions.push(this.inspectionState.inspectionsLimitState.subscribe(limit => {
             this.limitSimultaneousInspectionsInput = limit;
         }));
-        this.subscriptions.push(this.stateService.drillPickRadiusState.subscribe(radius => {
+        this.subscriptions.push(this.inspectionState.drillPickRadiusState.subscribe(radius => {
             this.drillPickRadiusInput = radius;
         }));
-        this.subscriptions.push(this.stateService.locationSearchResultLimitState.subscribe(limit => {
+        this.subscriptions.push(this.locationSearch.locationSearchResultLimitState.subscribe(limit => {
             this.locationSearchResultLimitInput = limit;
         }));
-        this.subscriptions.push(this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
+        this.subscriptions.push(this.connectionState.tilePullCompressionEnabledState.subscribe(enabled => {
             this.tilePullCompressionEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.stateService.deckAntialiasingEnabledState.subscribe(enabled => {
+        this.subscriptions.push(this.viewStateOwner.deckAntialiasingEnabledState.subscribe(enabled => {
             this.deckAntialiasingEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.stateService.semanticCompositingEnabledState.subscribe(enabled => {
+        this.subscriptions.push(this.viewStateOwner.semanticCompositingEnabledState.subscribe(enabled => {
             this.semanticCompositingEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.stateService.contactShadingEnabledState.subscribe(enabled => {
+        this.subscriptions.push(this.viewStateOwner.contactShadingEnabledState.subscribe(enabled => {
             this.contactShadingEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.stateService.lod3TileThresholdState.subscribe(threshold => {
+        this.subscriptions.push(this.viewStateOwner.lod3TileThresholdState.subscribe(threshold => {
             this.lod3TileThresholdInput = threshold;
             this.updateLod3TileThresholdChangeState();
         }));
         this.subscriptions.push(
-            this.stateService.tileSubsetRenderWorkerCountState.subscribe(
+            this.viewStateOwner.tileSubsetRenderWorkerCountState.subscribe(
                 workerCount => {
                     this.renderWorkerCountInput = workerCount;
                     this.updateRenderWorkerCountChangeState();
                 }
             )
         );
-        this.subscriptions.push(this.stateService.mapZoomStepState.subscribe(step => {
+        this.subscriptions.push(this.viewStateOwner.mapZoomStepState.subscribe(step => {
             this.mapZoomStepInput = step;
         }));
         this.subscriptions.push(
-            this.stateService.featureZoomClearanceMetersState.subscribe(clearance => {
+            this.viewStateOwner.featureZoomClearanceMetersState.subscribe(clearance => {
                 this.featureZoomClearanceMetersInput = clearance;
             })
         );
-        this.subscriptions.push(this.stateService.inspectionValueVaryColorsState.subscribe(() => {
+        this.subscriptions.push(this.inspectionState.inspectionValueVaryColorsState.subscribe(() => {
             this.syncInspectionValuePresentationSelection();
         }));
-        this.subscriptions.push(this.stateService.inspectionValueVaryOutlinesState.subscribe(() => {
+        this.subscriptions.push(this.inspectionState.inspectionValueVaryOutlinesState.subscribe(() => {
             this.syncInspectionValuePresentationSelection();
         }));
-        this.subscriptions.push(this.stateService.inspectionValueVaryStripingState.subscribe(() => {
+        this.subscriptions.push(this.inspectionState.inspectionValueVaryStripingState.subscribe(() => {
             this.syncInspectionValuePresentationSelection();
         }));
-        this.subscriptions.push(this.stateService.sourceDataInspectionDefaultColumnsState.subscribe(columns => {
+        this.subscriptions.push(this.inspectionState.sourceDataInspectionDefaultColumnsState.subscribe(columns => {
             this.sourceDataColumnSelection = [...columns];
         }));
-        this.subscriptions.push(this.stateService.hoverLabelFieldsState.subscribe(fields => {
+        this.subscriptions.push(this.inspectionState.hoverLabelFieldsState.subscribe(fields => {
             this.hoverLabelFields = fields.map(field => ({...field}));
         }));
         this.syncInspectionValuePresentationSelection();
     }
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.dialogLayoutId);
+        return this.layoutState.isDialogOpen(this.dialogLayoutId);
     }
 
     /** Applies one complete, validated connection policy without restarting healthy requests. */
@@ -739,11 +750,11 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             maxDelayMs: this.connectionMaximumSeconds * 1000
         });
         this.connectionValidationMessage = result.success ? "" : result.error.issues.map(issue => issue.message).join(" ");
-        if (result.success) this.stateService.setConnectionRetryPolicy(result.data);
+        if (result.success) this.connectionState.setConnectionRetryPolicy(result.data);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+        this.layoutState.setDialogOpen(this.dialogLayoutId, visible);
     }
 
     get renderWorkerCountDescription(): string {
@@ -758,13 +769,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Keeps the multiselect value stable between change-detection passes. */
     private syncInspectionValuePresentationSelection(): void {
         const selection: string[] = [];
-        if (this.stateService.inspectionValueVaryColors) {
+        if (this.inspectionState.inspectionValueVaryColors) {
             selection.push("colors");
         }
-        if (this.stateService.inspectionValueVaryOutlines) {
+        if (this.inspectionState.inspectionValueVaryOutlines) {
             selection.push("outlines");
         }
-        if (this.stateService.inspectionValueVaryStriping) {
+        if (this.inspectionState.inspectionValueVaryStriping) {
             selection.push("striping");
         }
         if (selection.join("|") !== this.inspectionValuePresentationSelection.join("|")) {
@@ -780,15 +791,15 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         this.inspectionValuePresentationSelection = [...nextValues];
         const selection = new Set(values ?? []);
-        this.stateService.inspectionValueVaryColors = selection.has("colors");
-        this.stateService.inspectionValueVaryOutlines = selection.has("outlines");
-        this.stateService.inspectionValueVaryStriping = selection.has("striping");
+        this.inspectionState.inspectionValueVaryColors = selection.has("colors");
+        this.inspectionState.inspectionValueVaryOutlines = selection.has("outlines");
+        this.inspectionState.inspectionValueVaryStriping = selection.has("striping");
     }
 
     /** Applies which optional SourceData columns new inspection panels show initially. */
     onSourceDataColumnSelectionChange(values: string[] | null | undefined): void {
         this.sourceDataColumnSelection = [...(values ?? [])];
-        this.stateService.sourceDataInspectionDefaultColumns = this.sourceDataColumnSelection;
+        this.inspectionState.sourceDataInspectionDefaultColumns = this.sourceDataColumnSelection;
     }
 
     /** Restores the persisted dark-mode preference during component startup. */
@@ -806,16 +817,16 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Refreshes dialog fields from current state whenever the preferences dialog opens. */
     onDialogShow() {
-        this.tilesToLoadInput = this.stateService.tilesLoadLimit;
-        this.limitSimultaneousInspectionsInput = this.stateService.inspectionsLimit;
-        this.drillPickRadiusInput = this.stateService.drillPickRadius;
-        this.locationSearchResultLimitInput = this.stateService.locationSearchResultLimit;
-        this.mapZoomStepInput = this.stateService.mapZoomStep;
+        this.tilesToLoadInput = this.viewStateOwner.tilesLoadLimit;
+        this.limitSimultaneousInspectionsInput = this.inspectionState.inspectionsLimit;
+        this.drillPickRadiusInput = this.inspectionState.drillPickRadius;
+        this.locationSearchResultLimitInput = this.locationSearch.locationSearchResultLimit;
+        this.mapZoomStepInput = this.viewStateOwner.mapZoomStep;
         this.featureZoomClearanceMetersInput =
-            this.stateService.featureZoomClearanceMeters;
-        this.lod3TileThresholdInput = this.stateService.lod3TileThreshold;
+            this.viewStateOwner.featureZoomClearanceMeters;
+        this.lod3TileThresholdInput = this.viewStateOwner.lod3TileThreshold;
         this.renderWorkerCountInput =
-            this.stateService.tileSubsetRenderWorkerCount;
+            this.viewStateOwner.tileSubsetRenderWorkerCount;
         this.tilesToLoadChanged = false;
         this.inspectionsLimitChanged = false;
         this.drillPickRadiusChanged = false;
@@ -833,7 +844,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         const selected = new Set(this.hoverLabelFields.map(field => field.expression));
         const expression = this.hoverLabelFieldOptions.find(option =>
             !selected.has(option.value))?.value ?? "";
-        this.stateService.hoverLabelFields = [
+        this.inspectionState.hoverLabelFields = [
             ...this.hoverLabelFields,
             {expression, customExpression: false}
         ];
@@ -841,13 +852,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Removes one ordered field from the map-hover overlay. */
     removeHoverLabelField(index: number): void {
-        this.stateService.hoverLabelFields = this.hoverLabelFields.filter(
+        this.inspectionState.hoverLabelFields = this.hoverLabelFields.filter(
             (_field, fieldIndex) => fieldIndex !== index);
     }
 
     /** Switches one field between the schema picker and free-form SIMFIL editor. */
     toggleHoverLabelExpressionMode(index: number): void {
-        this.stateService.hoverLabelFields = this.hoverLabelFields.map(
+        this.inspectionState.hoverLabelFields = this.hoverLabelFields.map(
             (field, fieldIndex) => fieldIndex === index
                 ? {...field, customExpression: !field.customExpression}
                 : field);
@@ -855,7 +866,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Updates one hover-field expression while preserving row order and editor mode. */
     setHoverLabelExpression(index: number, expression: string): void {
-        this.stateService.hoverLabelFields = this.hoverLabelFields.map(
+        this.inspectionState.hoverLabelFields = this.hoverLabelFields.map(
             (field, fieldIndex) => fieldIndex === index
                 ? {...field, expression: expression ?? ""}
                 : field);
@@ -863,7 +874,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Updates or clears the optional short key displayed beside one hover value. */
     setHoverLabelDisplayKey(index: number, displayKey: string): void {
-        this.stateService.hoverLabelFields = this.hoverLabelFields.map(
+        this.inspectionState.hoverLabelFields = this.hoverLabelFields.map(
             (field, fieldIndex) => fieldIndex === index
                 ? {...field, displayKey: displayKey || undefined}
                 : field);
@@ -914,7 +925,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         this.tilesToLoadInput = limit;
-        this.stateService.tilesLoadLimit = limit;
+        this.viewStateOwner.tilesLoadLimit = limit;
         this.tilesToLoadChanged = false;
         this.mapService.requestViewRecalculation(ViewRecalculationReason.TileLimit);
         this.messageService.showSuccess("Successfully updated tile limits!");
@@ -951,31 +962,31 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         if (environment.visualizationOnly) {
             return;
         }
-        this.stateService.openDialog(this.advancedPreferencesDialogLayoutId);
+        this.layoutState.openDialog(this.advancedPreferencesDialogLayoutId);
     }
 
     /** Toggles HTTP compression for `/interactive/payload` pull responses. */
     setTilePullCompressionEnabled(enabled: boolean) {
         this.tilePullCompressionEnabledSetting = enabled;
-        this.stateService.tilePullCompressionEnabled = enabled;
+        this.connectionState.tilePullCompressionEnabled = enabled;
     }
 
     /** Enables or disables WebGL antialiasing; map views recreate their renderer when this changes. */
     setDeckAntialiasingEnabled(enabled: boolean) {
         this.deckAntialiasingEnabledSetting = enabled;
-        this.stateService.deckAntialiasingEnabled = enabled;
+        this.viewStateOwner.deckAntialiasingEnabled = enabled;
     }
 
     /** Recreates map renderers with or without the semantic compositor for diagnosis. */
     setSemanticCompositingEnabled(enabled: boolean) {
         this.semanticCompositingEnabledSetting = enabled;
-        this.stateService.semanticCompositingEnabled = enabled;
+        this.viewStateOwner.semanticCompositingEnabled = enabled;
     }
 
     /** Enables or disables the final-depth screen-space contact shading pass. */
     setContactShadingEnabled(enabled: boolean) {
         this.contactShadingEnabledSetting = enabled;
-        this.stateService.contactShadingEnabled = enabled;
+        this.viewStateOwner.contactShadingEnabled = enabled;
     }
 
     /** Applies the pending LOD 3 tile threshold after validating the input. */
@@ -992,13 +1003,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const normalized = clampLod3TileThreshold(threshold);
         this.lod3TileThresholdInput = normalized;
-        this.stateService.lod3TileThreshold = normalized;
+        this.viewStateOwner.lod3TileThreshold = normalized;
         this.lod3TileThresholdChanged = false;
     }
 
     /** Keep numeric drafts out of persisted state until the whole policy is applied. */
     get pointCloudPolicyChanged(): boolean {
-        return JSON.stringify(this.pointCloudPolicyDraft) !== JSON.stringify(this.stateService.pointCloudPolicy);
+        return JSON.stringify(this.pointCloudPolicyDraft) !== JSON.stringify(this.viewStateOwner.pointCloudPolicy);
     }
 
     /** Publish one validated point-cloud preference edit through AppState. */
@@ -1008,7 +1019,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.messageService.showError("Point spacing must be 0.5–32 pixels, working memory 32–4096 MiB, and GPU allowance 16–2048 MiB.");
             return;
         }
-        this.stateService.setPointCloudPolicy(parsed.data);
+        this.viewStateOwner.setPointCloudPolicy(parsed.data);
     }
 
     /** Applies zero-for-auto or one explicit subset-render worker count. */
@@ -1029,7 +1040,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const normalized = clampTileSubsetRenderWorkerCount(workerCount);
         this.renderWorkerCountInput = normalized;
-        this.stateService.tileSubsetRenderWorkerCount = normalized;
+        this.viewStateOwner.tileSubsetRenderWorkerCount = normalized;
         this.renderWorkerCountChanged = false;
     }
 
@@ -1045,7 +1056,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const clampedStep = clampMapZoomStep(step);
         this.mapZoomStepInput = clampedStep;
-        this.stateService.mapZoomStep = clampedStep;
+        this.viewStateOwner.mapZoomStep = clampedStep;
         this.mapZoomStepChanged = false;
     }
 
@@ -1067,7 +1078,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const clampedClearance = clampFeatureZoomClearanceMeters(clearance);
         this.featureZoomClearanceMetersInput = clampedClearance;
-        this.stateService.featureZoomClearanceMeters = clampedClearance;
+        this.viewStateOwner.featureZoomClearanceMeters = clampedClearance;
         this.featureZoomClearanceMetersChanged = false;
     }
 
@@ -1127,7 +1138,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.messageService.showError(`Please enter a valid inspections limit (1-${MAX_SIMULTANEOUS_INSPECTIONS})!`);
             return;
         }
-        this.stateService.inspectionsLimit = limit;
+        this.inspectionState.inspectionsLimit = limit;
         this.inspectionsLimitChanged = false;
         this.messageService.showSuccess("Successfully updated inspections limit!");
     }
@@ -1145,7 +1156,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             );
             return;
         }
-        this.stateService.drillPickRadius = radius;
+        this.inspectionState.drillPickRadius = radius;
         this.drillPickRadiusChanged = false;
     }
 
@@ -1159,38 +1170,38 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.messageService.showError(`Please enter a valid location match limit (1-${MAX_LOCATION_SEARCH_RESULT_LIMIT})!`);
             return;
         }
-        this.stateService.locationSearchResultLimit = limit;
+        this.locationSearch.locationSearchResultLimit = limit;
         this.locationSearchResultLimitChanged = false;
     }
 
     /** Tracks slider edits for the tile-load limit without applying them immediately. */
     protected onTilesToLoadSliderChange(value: number) {
         this.tilesToLoadInput = value;
-        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.stateService.tilesLoadLimit);
+        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.viewStateOwner.tilesLoadLimit);
     }
 
     /** Tracks slider edits for the simultaneous inspection limit. */
     protected onInspectionsLimitSliderChange(value: number) {
         this.limitSimultaneousInspectionsInput = value;
-        this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.stateService.inspectionsLimit);
+        this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.inspectionState.inspectionsLimit);
     }
 
     /** Tracks slider edits for the point drill-pick radius. */
     protected onDrillPickRadiusSliderChange(value: number) {
         this.drillPickRadiusInput = value;
-        this.drillPickRadiusChanged = this.hasPendingNumericChange(value, this.stateService.drillPickRadius);
+        this.drillPickRadiusChanged = this.hasPendingNumericChange(value, this.inspectionState.drillPickRadius);
     }
 
     /** Tracks slider edits for the location-search result limit. */
     protected onLocationSearchResultLimitSliderChange(value: number) {
         this.locationSearchResultLimitInput = value;
-        this.locationSearchResultLimitChanged = this.hasPendingNumericChange(value, this.stateService.locationSearchResultLimit);
+        this.locationSearchResultLimitChanged = this.hasPendingNumericChange(value, this.locationSearch.locationSearchResultLimit);
     }
 
     /** Tracks slider edits for the map zoom-step preference. */
     protected onMapZoomStepSliderChange(value: number) {
         this.mapZoomStepInput = value;
-        this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.stateService.mapZoomStep);
+        this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.viewStateOwner.mapZoomStep);
     }
 
     /** Tracks slider edits for the 3D feature zoom clearance. */
@@ -1198,7 +1209,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.featureZoomClearanceMetersInput = value;
         this.featureZoomClearanceMetersChanged = this.hasPendingNumericChange(
             value,
-            this.stateService.featureZoomClearanceMeters
+            this.viewStateOwner.featureZoomClearanceMeters
         );
     }
 
@@ -1217,31 +1228,31 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Tracks free-form edits for the tile-load input. */
     protected onTilesToLoadInputChange(value: number | string) {
         this.tilesToLoadInput = value;
-        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.stateService.tilesLoadLimit);
+        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.viewStateOwner.tilesLoadLimit);
     }
 
     /** Tracks free-form edits for the inspection-limit input. */
     protected onInspectionsLimitInputChange(value: number | string) {
         this.limitSimultaneousInspectionsInput = value;
-        this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.stateService.inspectionsLimit);
+        this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.inspectionState.inspectionsLimit);
     }
 
     /** Tracks free-form edits for the point drill-pick radius. */
     protected onDrillPickRadiusInputChange(value: number | string) {
         this.drillPickRadiusInput = value;
-        this.drillPickRadiusChanged = this.hasPendingNumericChange(value, this.stateService.drillPickRadius);
+        this.drillPickRadiusChanged = this.hasPendingNumericChange(value, this.inspectionState.drillPickRadius);
     }
 
     /** Tracks free-form edits for the location-search result limit. */
     protected onLocationSearchResultLimitInputChange(value: number | string) {
         this.locationSearchResultLimitInput = value;
-        this.locationSearchResultLimitChanged = this.hasPendingNumericChange(value, this.stateService.locationSearchResultLimit);
+        this.locationSearchResultLimitChanged = this.hasPendingNumericChange(value, this.locationSearch.locationSearchResultLimit);
     }
 
     /** Tracks free-form edits for the map zoom-step input. */
     protected onMapZoomStepInputChange(value: number | string) {
         this.mapZoomStepInput = value;
-        this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.stateService.mapZoomStep);
+        this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.viewStateOwner.mapZoomStep);
     }
 
     /** Tracks free-form edits for the 3D feature zoom clearance. */
@@ -1249,7 +1260,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.featureZoomClearanceMetersInput = value;
         this.featureZoomClearanceMetersChanged = this.hasPendingNumericChange(
             value,
-            this.stateService.featureZoomClearanceMeters
+            this.viewStateOwner.featureZoomClearanceMeters
         );
     }
 
@@ -1274,7 +1285,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         this.lod3TileThresholdChanged =
-            clampLod3TileThreshold(threshold) !== this.stateService.lod3TileThreshold;
+            clampLod3TileThreshold(threshold) !== this.viewStateOwner.lod3TileThreshold;
     }
 
     /** Updates the dirty flag for the subset-render worker control. */
@@ -1288,7 +1299,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         this.renderWorkerCountChanged =
             clampTileSubsetRenderWorkerCount(workerCount) !==
-            this.stateService.tileSubsetRenderWorkerCount;
+            this.viewStateOwner.tileSubsetRenderWorkerCount;
     }
 
     /** Determines whether a numeric preference control still has an unapplied change. */

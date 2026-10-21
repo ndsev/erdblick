@@ -1,3 +1,5 @@
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {inject} from "@angular/core";
 import {
     AfterViewInit,
     ChangeDetectorRef,
@@ -17,7 +19,7 @@ import {
     SearchJumpResult,
     SearchTarget
 } from "./jump.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewService} from "../mapview/map-view.service";
 import {AppStateService} from "../shared/appstate.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {debounce, debounceTime, distinctUntilChanged, Subject, switchMap, timer, Subscription} from "rxjs";
@@ -212,6 +214,7 @@ interface SearchResizeSession {
  * Implements the omnibox-style search panel used for jumping, searching loaded features, and query completion.
  */
 export class SearchPanelComponent implements AfterViewInit, OnDestroy {
+    readonly viewStateOwner = inject(MapViewStateService);
     private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 130000;
     readonly searchActionsBaseZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX;
     searchResizeHandleZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 1;
@@ -405,7 +408,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
      */
     constructor(private renderer: Renderer2,
                 private elRef: ElementRef,
-                public mapService: MapViewStateService,
+                public mapService: MapViewService,
                 public stateService: AppStateService,
                 private keyboardService: KeyboardService,
                 private messageService: InfoMessageService,
@@ -430,7 +433,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
 
         this.subscriptions.add(this.locationSearchQueryChanged.pipe(
             debounce(() => timer(this.locationSearchService.debounceMs)),
-            switchMap(query => this.locationSearchService.search(query, this.stateService.locationSearchResultLimit))
+            switchMap(query => this.locationSearchService.search(query, this.locationSearchService.locationSearchResultLimit))
         ).subscribe(matches => {
             const completedQuery = this.searchInputValue.trim();
             // A cached provider can complete synchronously while Angular is
@@ -452,7 +455,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             }, 0);
         }));
 
-        this.subscriptions.add(this.stateService.locationSearchResultLimitState.subscribe(() => {
+        this.subscriptions.add(this.locationSearchService.locationSearchResultLimitState.subscribe(() => {
             this.updateLocationSearchQuery(this.searchInputValue);
             this.refreshSearchMenu();
         }));
@@ -1089,11 +1092,11 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
         }
         const jump = normalizeSearchJumpResult(result);
         const coordinates = jump.target;
-        const targetViewIndex = this.stateService.focusedView;
+        const targetViewIndex = this.viewStateOwner.focusedView;
         if (Array.isArray(coordinates)) {
             let lat = coordinates[0];
             let lon = coordinates[1];
-            const cameraView = this.stateService.cameraViewDataState.getValue(targetViewIndex);
+            const cameraView = this.viewStateOwner.cameraViewDataState.getValue(targetViewIndex);
             let alt = coordinates[2] ? coordinates[2] : cameraView.destination.alt;
 
             this.mapService.moveToWgs84PositionTopic.next({
