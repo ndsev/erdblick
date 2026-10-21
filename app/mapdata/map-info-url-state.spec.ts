@@ -1,14 +1,12 @@
-import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
-import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
-import {BehaviorSubject, Subject} from "rxjs";
 import type {HttpClient} from "@angular/common/http";
+import "@angular/compiler";
+import {BehaviorSubject, Subject} from "rxjs";
+import {describe, expect, it, vi} from "vitest";
+import type {InfoMessageService} from "../shared/info.service";
+import type {MapPresetService} from "../styledata/map-preset.service";
+import type {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {MapInfoService} from "./map-info.service";
 import {layerStyleOptions, MapLayerTree, type MapInfoItem} from "./map.tree.model";
-import type {AppStateService} from "../shared/appstate.service";
-import type {ErdblickStyle, StyleService} from "../styledata/style.service";
-import type {MapPresetService} from "../styledata/map-preset.service";
-import type {InfoMessageService} from "../shared/info.service";
 
 describe("MapInfoService external-state reconciliation", () => {
     it("reapplies layer and style state without relying on a view-count change", () => {
@@ -27,7 +25,7 @@ describe("MapInfoService external-state reconciliation", () => {
             getMapPresetSelection: vi.fn(() => null),
             setMapPresetSelection: vi.fn(),
             prune: vi.fn()
-        } as unknown as StateTestSystem;
+        };
         const style = {
             id: "Style",
             shortId: "Style",

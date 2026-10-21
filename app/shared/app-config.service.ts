@@ -1,22 +1,24 @@
-import {inject} from "@angular/core";
-import {AppStateService} from "../shared/appstate.service";
-import {Versions} from "../shared/app-state.model";
-import {Injectable} from "@angular/core";
 import {HttpClient} from "@angular/common/http";
+import {Injectable, inject} from "@angular/core";
+import * as jsyaml from "js-yaml";
 import {BehaviorSubject, Observable, firstValueFrom} from "rxjs";
 import {z} from "zod";
-import * as jsyaml from "js-yaml";
+import {identifierSchema, pageInput, pageOutput, text} from "../actions/action-schema";
+import {pageActionItems} from "../actions/action-utils";
+import {AppActionService} from "../actions/app-action.service";
 import {
-    MapPresetDefinition,
-    MapPresetIssue,
-    parseMapPresetDefinitions
-} from "../styledata/map-preset.model";
-
-/** Background layer id used when neither URL nor stored state selects a layer. */
-export const DEFAULT_BACKGROUND_LAYER_ID = "osm";
-
-/** Default background opacity chosen for the shipped OSM layer so map data stays dominant. */
-export const DEFAULT_BACKGROUND_OPACITY = 6;
+    DEFAULT_BACKGROUND_LAYER_ID,
+    DEFAULT_BACKGROUND_OPACITY,
+    clampBackgroundOpacity
+} from "../mapdata/background-layer.model";
+import {AppStateService} from "../shared/appstate.service";
+import {MapPresetDefinition, MapPresetIssue, parseMapPresetDefinitions} from "../styledata/map-preset.model";
+import {ownerState} from "./app-config.service.state";
+export {
+    DEFAULT_BACKGROUND_LAYER_ID,
+    DEFAULT_BACKGROUND_OPACITY,
+    clampBackgroundOpacity
+} from "../mapdata/background-layer.model";
 
 /** Highest XYZ zoom requested when a custom background does not declare its own maxZoom. */
 export const DEFAULT_XYZ_BACKGROUND_MAX_ZOOM = 22;
@@ -86,11 +88,15 @@ export interface WmsBackgroundLayerConfig extends BackgroundLayerBaseConfig {
 /** Discriminated union of every currently supported background-layer type. */
 export type BackgroundLayerConfig = XyzBackgroundLayerConfig | WmsBackgroundLayerConfig;
 
-export type LocationSearchFieldSelector = string | number | boolean | {
-    path?: string;
-    value?: string | number | boolean;
-    template?: string;
-};
+export type LocationSearchFieldSelector =
+    | string
+    | number
+    | boolean
+    | {
+          path?: string;
+          value?: string | number | boolean;
+          template?: string;
+      };
 
 export interface LocationSearchAdapterFieldsConfig {
     id?: LocationSearchFieldSelector;
@@ -258,17 +264,9 @@ const BACKGROUND_LAYER_BASE_SCHEMA = z.object({
 
 const XYZ_BACKGROUND_LAYER_SCHEMA = BACKGROUND_LAYER_BASE_SCHEMA.extend({
     type: z.literal("xyz"),
-    urlTemplate: z.union([
-        z.string().min(1),
-        z.array(z.string().min(1)).min(1)
-    ]),
+    urlTemplate: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]),
     tileSize: z.coerce.number().int().positive().optional(),
-    extent: z.tuple([
-        z.coerce.number(),
-        z.coerce.number(),
-        z.coerce.number(),
-        z.coerce.number()
-    ]).optional()
+    extent: z.tuple([z.coerce.number(), z.coerce.number(), z.coerce.number(), z.coerce.number()]).optional()
 });
 
 const WMS_BACKGROUND_LAYER_SCHEMA = BACKGROUND_LAYER_BASE_SCHEMA.extend({
@@ -282,10 +280,7 @@ const WMS_BACKGROUND_LAYER_SCHEMA = BACKGROUND_LAYER_BASE_SCHEMA.extend({
     vendorParameters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional()
 });
 
-const BACKGROUND_LAYER_SCHEMA = z.union([
-    XYZ_BACKGROUND_LAYER_SCHEMA,
-    WMS_BACKGROUND_LAYER_SCHEMA
-]);
+const BACKGROUND_LAYER_SCHEMA = z.union([XYZ_BACKGROUND_LAYER_SCHEMA, WMS_BACKGROUND_LAYER_SCHEMA]);
 
 type RawBackgroundLayerConfig = z.infer<typeof BACKGROUND_LAYER_SCHEMA>;
 
@@ -293,11 +288,13 @@ const LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA = z.union([
     z.string().min(1),
     z.number(),
     z.boolean(),
-    z.object({
-        path: z.string().min(1).optional(),
-        value: z.union([z.string(), z.number(), z.boolean()]).optional(),
-        template: z.string().min(1).optional()
-    }).refine(value => value.path !== undefined || value.value !== undefined || value.template !== undefined)
+    z
+        .object({
+            path: z.string().min(1).optional(),
+            value: z.union([z.string(), z.number(), z.boolean()]).optional(),
+            template: z.string().min(1).optional()
+        })
+        .refine((value) => value.path !== undefined || value.value !== undefined || value.template !== undefined)
 ]);
 
 const LOCATION_SEARCH_ADAPTER_FIELDS_SCHEMA = z.object({
@@ -316,10 +313,12 @@ const LOCATION_SEARCH_ADAPTER_SCHEMA = z.object({
     itemsPath: z.string().min(1).optional(),
     fields: LOCATION_SEARCH_ADAPTER_FIELDS_SCHEMA.optional(),
     lonLatOrder: z.enum(["lonLat", "latLon"]).optional(),
-    bbox: z.object({
-        path: z.string().min(1),
-        format: z.enum(["aabb", "westSouthEastNorth", "southNorthWestEast"])
-    }).optional()
+    bbox: z
+        .object({
+            path: z.string().min(1),
+            format: z.enum(["aabb", "westSouthEastNorth", "southNorthWestEast"])
+        })
+        .optional()
 });
 
 const LOCATION_SEARCH_PROVIDER_SCHEMA = z.object({
@@ -348,30 +347,35 @@ const EXTERNAL_VIEWER_SCHEMA = z.object({
 });
 
 const COORDINATES_LEGAL_TERMS_SCHEMA = z.object({
-    "legal-terms": z.string().refine(value => value.trim().length > 0)
+    "legal-terms": z.string().refine((value) => value.trim().length > 0)
 });
 
 type RawLocationSearchConfig = z.infer<typeof LOCATION_SEARCH_SCHEMA>;
 type RawLocationSearchAdapterConfig = z.infer<typeof LOCATION_SEARCH_ADAPTER_SCHEMA>;
 type RawLocationSearchFieldSelector = z.infer<typeof LOCATION_SEARCH_FIELD_SELECTOR_SCHEMA>;
 
-const RAW_APP_CONFIG_SCHEMA = z.object({
-    extensionModules: z.object({
-        jumpTargets: z.string().optional(),
-        distribVersions: z.string().optional()
-    }).partial().optional(),
-    surveys: z.array(z.unknown()).optional(),
-    styles: z.array(z.union([STYLE_CONFIG_ENTRY_SCHEMA, z.string().min(1)])).optional(),
-    additionalStyles: z.array(z.union([STYLE_CONFIG_ENTRY_SCHEMA, z.string().min(1)])).optional(),
-    state: z.record(z.string(), z.unknown()).nullable().optional(),
-    backgroundLayers: z.array(BACKGROUND_LAYER_SCHEMA).optional(),
-    defaultBackgroundLayerId: z.string().nullable().optional(),
-    locationSearch: LOCATION_SEARCH_SCHEMA.optional(),
-    externalViewers: z.array(z.unknown()).optional(),
-    mapPresets: z.array(z.unknown()).max(200).optional().catch(undefined),
-    "coordinates-enabled": z.boolean().optional(),
-    "coordinates-legal-terms": z.string().min(1).optional()
-}).passthrough();
+const RAW_APP_CONFIG_SCHEMA = z
+    .object({
+        extensionModules: z
+            .object({
+                jumpTargets: z.string().optional(),
+                distribVersions: z.string().optional()
+            })
+            .partial()
+            .optional(),
+        surveys: z.array(z.unknown()).optional(),
+        styles: z.array(z.union([STYLE_CONFIG_ENTRY_SCHEMA, z.string().min(1)])).optional(),
+        additionalStyles: z.array(z.union([STYLE_CONFIG_ENTRY_SCHEMA, z.string().min(1)])).optional(),
+        state: z.record(z.string(), z.unknown()).nullable().optional(),
+        backgroundLayers: z.array(BACKGROUND_LAYER_SCHEMA).optional(),
+        defaultBackgroundLayerId: z.string().nullable().optional(),
+        locationSearch: LOCATION_SEARCH_SCHEMA.optional(),
+        externalViewers: z.array(z.unknown()).optional(),
+        mapPresets: z.array(z.unknown()).max(200).optional().catch(undefined),
+        "coordinates-enabled": z.boolean().optional(),
+        "coordinates-legal-terms": z.string().min(1).optional()
+    })
+    .passthrough();
 
 const DEFAULT_BACKGROUND_LAYERS: BackgroundLayerConfig[] = [
     {
@@ -443,14 +447,6 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     serverConfig: DEFAULT_SERVER_CONFIG_STATUS
 };
 
-/** Clamps persisted and config-driven background opacity to the supported percentage range. */
-export function clampBackgroundOpacity(value: number): number {
-    if (!Number.isFinite(value)) {
-        return 100;
-    }
-    return Math.max(0, Math.min(100, Math.round(value)));
-}
-
 /** Server and frontend allow-list for HTML fragments allowed in survey banners. */
 export function isAllowedSurveyLinkHtml(linkHtml: string): boolean {
     if (!linkHtml || linkHtml.length > 1024) {
@@ -476,7 +472,10 @@ export function isAllowedSurveyLinkHtml(linkHtml: string): boolean {
             return false;
         }
 
-        let token = linkHtml.slice(open + 1, close).trim().toLowerCase();
+        let token = linkHtml
+            .slice(open + 1, close)
+            .trim()
+            .toLowerCase();
         if (!token.length) {
             return false;
         }
@@ -532,7 +531,7 @@ function isMeaningfulValue(value: unknown): boolean {
         return value.length > 0;
     }
     if (isPlainObject(value)) {
-        return Object.values(value).some(entry => isMeaningfulValue(entry));
+        return Object.values(value).some((entry) => isMeaningfulValue(entry));
     }
     return false;
 }
@@ -553,23 +552,30 @@ function mergeMeaningfulObjectValues(
 }
 
 /** Loads and normalizes `config.json` once, then exposes it as a shared application service. */
-@Injectable({providedIn: 'root'})
+@Injectable({providedIn: "root"})
 export class AppConfigService {
+    static readonly actions = {
+        listBackgrounds: {
+            name: "viewer_list_backgrounds",
+            mutation: false,
+            description: "List configured background identities and labels without exposing URLs or credentials.",
+            inputSchema: z.strictObject({...pageInput}),
+            outputSchema: z.strictObject({
+                ...pageOutput,
+                items: z.array(z.strictObject({id: identifierSchema, name: text, kind: text})).max(100)
+            })
+        }
+    } as const;
+
     private readonly stateService = inject(AppStateService);
 
+    readonly distributionVersions = this.stateService.register(
+        ownerState.distributionVersions,
+        "config",
+        "distributionVersions"
+    );
 
-    readonly distributionVersions = this.stateService.register({
-        name: 'distributionVersions',
-        defaultValue: [],
-        schema: z.array(z.record(z.string(), z.string()))
-    }, "config", "distributionVersions");
-
-
-    readonly erdblickVersion = this.stateService.register({
-        name: 'erdblickVersion',
-        defaultValue: "",
-        schema: z.string()
-    }, "config", "erdblickVersion");
+    readonly erdblickVersion = this.stateService.register(ownerState.erdblickVersion, "config", "erdblickVersion");
 
     private readonly configSubject = new BehaviorSubject<AppConfig>(DEFAULT_APP_CONFIG);
     private loadPromise: Promise<AppConfig> | null = null;
@@ -577,6 +583,9 @@ export class AppConfigService {
 
     /** Creates the shared config loader used by styles, plugins, and background-layer UI. */
     constructor(private readonly httpClient: HttpClient) {
+        inject(AppActionService).registerAction(AppConfigService.actions.listBackgrounds, (input) =>
+            this.listBackgrounds(input)
+        );
     }
 
     /** Returns the latest normalized config value, starting with the built-in fallback defaults. */
@@ -608,7 +617,8 @@ export class AppConfigService {
         const merged = this.mergeServerErdblickConfig(
             this.staticRawConfig,
             serverResult.erdblickConfig,
-            serverResult.serverConfig);
+            serverResult.serverConfig
+        );
         const normalized = this.normalizeConfig(merged, serverResult.serverConfig);
         const previous = this.snapshot;
         const refreshed: AppConfig = {
@@ -624,8 +634,7 @@ export class AppConfigService {
     /** Commits a canonical successful PATCH response to the shared config snapshot. */
     applyCanonicalMapPresets(definitions: unknown, revision: string): boolean {
         const parsed = parseMapPresetDefinitions(definitions);
-        if (parsed.issues.length || !Array.isArray(definitions)
-            || parsed.presets.length !== definitions.length) {
+        if (parsed.issues.length || !Array.isArray(definitions) || parsed.presets.length !== definitions.length) {
             return false;
         }
         const previous = this.snapshot;
@@ -679,7 +688,8 @@ export class AppConfigService {
         const mergedRawConfig = this.mergeServerErdblickConfig(
             staticRawConfig,
             serverResult.erdblickConfig,
-            serverResult.serverConfig);
+            serverResult.serverConfig
+        );
         const normalized = this.normalizeConfig(mergedRawConfig, serverResult.serverConfig);
         const resolved = await this.loadCoordinatesLegalTerms(normalized);
         this.configSubject.next(resolved);
@@ -689,7 +699,9 @@ export class AppConfigService {
     /** Loads the bundled static application configuration. */
     private async loadStaticConfig(): Promise<RawAppConfig> {
         try {
-            const rawConfig = await firstValueFrom(this.httpClient.get("/static-config/config.json", {responseType: "json"}));
+            const rawConfig = await firstValueFrom(
+                this.httpClient.get("/static-config/config.json", {responseType: "json"})
+            );
             return this.parseRawConfig(rawConfig, "/static-config/config.json");
         } catch (error) {
             console.error("[AppConfigService] Failed to load /static-config/config.json", error);
@@ -726,33 +738,23 @@ export class AppConfigService {
                     ? payload.datasourceConfigUnavailableReason
                     : null;
             serverConfig.cacheReset =
-                isPlainObject(payload.capabilities) &&
-                payload.capabilities["cacheReset"] === true;
+                isPlainObject(payload.capabilities) && payload.capabilities["cacheReset"] === true;
 
-            const capabilities = isPlainObject(payload.capabilities)
-                ? payload.capabilities["mapPresets"]
-                : undefined;
+            const capabilities = isPlainObject(payload.capabilities) ? payload.capabilities["mapPresets"] : undefined;
             if (isPlainObject(capabilities)) {
-                const endpoint = typeof capabilities["endpoint"] === "string"
-                    ? capabilities["endpoint"]
-                    : null;
-                const method = typeof capabilities["method"] === "string"
-                    ? capabilities["method"]
-                    : null;
-                const path = typeof capabilities["path"] === "string"
-                    ? capabilities["path"]
-                    : null;
-                const revision = typeof capabilities["revision"] === "string"
-                    ? capabilities["revision"]
-                    : null;
+                const endpoint = typeof capabilities["endpoint"] === "string" ? capabilities["endpoint"] : null;
+                const method = typeof capabilities["method"] === "string" ? capabilities["method"] : null;
+                const path = typeof capabilities["path"] === "string" ? capabilities["path"] : null;
+                const revision = typeof capabilities["revision"] === "string" ? capabilities["revision"] : null;
                 serverConfig.mapPresets = {
                     configured: capabilities["configured"] === true,
                     valid: capabilities["valid"] !== false,
-                    write: capabilities["write"] === true
-                        && endpoint === "/config"
-                        && method === "PATCH"
-                        && path === "/erdblick/mapPresets"
-                        && !!revision,
+                    write:
+                        capabilities["write"] === true &&
+                        endpoint === "/config" &&
+                        method === "PATCH" &&
+                        path === "/erdblick/mapPresets" &&
+                        !!revision,
                     endpoint,
                     method,
                     path,
@@ -760,24 +762,27 @@ export class AppConfigService {
                     ephemeral: capabilities["ephemeral"] === true,
                     issues: Array.isArray(capabilities["issues"])
                         ? capabilities["issues"]
-                            .filter((issue): issue is string => typeof issue === "string")
-                            .slice(0, 20)
-                            .map(message => ({message}))
+                              .filter((issue): issue is string => typeof issue === "string")
+                              .slice(0, 20)
+                              .map((message) => ({message}))
                         : []
                 };
             }
 
             const styleEditing = payload.erdblickRuntime?.styleEditing;
             serverConfig.styleEditingEnabled = styleEditing?.enabled === true;
-            serverConfig.styleEditingDirectory = serverConfig.styleEditingEnabled
-                && typeof styleEditing?.directory === "string"
-                && styleEditing.directory.trim().length > 0
-                ? styleEditing.directory.trim()
-                : null;
+            serverConfig.styleEditingDirectory =
+                serverConfig.styleEditingEnabled &&
+                typeof styleEditing?.directory === "string" &&
+                styleEditing.directory.trim().length > 0
+                    ? styleEditing.directory.trim()
+                    : null;
 
             if (payload.erdblick && isPlainObject(payload.erdblick)) {
-                if (!isPlainObject(capabilities)
-                    && Object.prototype.hasOwnProperty.call(payload.erdblick, "mapPresets")) {
+                if (
+                    !isPlainObject(capabilities) &&
+                    Object.prototype.hasOwnProperty.call(payload.erdblick, "mapPresets")
+                ) {
                     serverConfig.mapPresets.configured = true;
                 }
                 erdblickConfig = this.parseRawConfig(payload.erdblick, "/config.erdblick");
@@ -796,8 +801,8 @@ export class AppConfigService {
 
     /** Parses raw configuration text into an object. */
     private parseRawConfig(rawConfig: unknown, sourceLabel: string): RawAppConfig {
-        const mapPresetsPresent = isPlainObject(rawConfig)
-            && Object.prototype.hasOwnProperty.call(rawConfig, "mapPresets");
+        const mapPresetsPresent =
+            isPlainObject(rawConfig) && Object.prototype.hasOwnProperty.call(rawConfig, "mapPresets");
         const parsed = RAW_APP_CONFIG_SCHEMA.safeParse(rawConfig);
         if (!parsed.success) {
             console.error(`[AppConfigService] Invalid ${sourceLabel}; ignoring payload`, parsed.error);
@@ -821,18 +826,18 @@ export class AppConfigService {
             styles: staticConfig.styles ? [...staticConfig.styles] : undefined,
             additionalStyles: staticConfig.additionalStyles ? [...staticConfig.additionalStyles] : undefined,
             surveys: staticConfig.surveys ? [...staticConfig.surveys] : undefined,
-            state: staticConfig.state ? {...staticConfig.state} : staticConfig.state ?? null,
+            state: staticConfig.state ? {...staticConfig.state} : (staticConfig.state ?? null),
             backgroundLayers: staticConfig.backgroundLayers ? [...staticConfig.backgroundLayers] : undefined,
             externalViewers: staticConfig.externalViewers ? [...staticConfig.externalViewers] : undefined,
             mapPresets: staticConfig.mapPresets ? [...staticConfig.mapPresets] : undefined,
             _mapPresetsInvalid: staticConfig._mapPresetsInvalid,
             locationSearch: staticConfig.locationSearch
                 ? {
-                    ...staticConfig.locationSearch,
-                    providers: staticConfig.locationSearch.providers
-                        ? [...staticConfig.locationSearch.providers]
-                        : undefined
-                }
+                      ...staticConfig.locationSearch,
+                      providers: staticConfig.locationSearch.providers
+                          ? [...staticConfig.locationSearch.providers]
+                          : undefined
+                  }
                 : undefined
         };
 
@@ -840,10 +845,7 @@ export class AppConfigService {
             merged.styles = [...serverErdblickConfig.styles];
         }
         if (Array.isArray(serverErdblickConfig.additionalStyles) && serverErdblickConfig.additionalStyles.length > 0) {
-            merged.additionalStyles = [
-                ...(merged.additionalStyles ?? []),
-                ...serverErdblickConfig.additionalStyles
-            ];
+            merged.additionalStyles = [...(merged.additionalStyles ?? []), ...serverErdblickConfig.additionalStyles];
         }
         if (Array.isArray(serverErdblickConfig.surveys) && serverErdblickConfig.surveys.length > 0) {
             merged.surveys = [...serverErdblickConfig.surveys];
@@ -864,10 +866,11 @@ export class AppConfigService {
             merged._mapPresetsInvalid = false;
         } else if (!serverConfig.mapPresets.configured && serverConfig.mapPresets.write) {
             const parsedStaticPresets = parseMapPresetDefinitions(staticConfig.mapPresets ?? []);
-            const hasValidStaticCatalog = Array.isArray(staticConfig.mapPresets)
-                && !staticConfig._mapPresetsInvalid
-                && parsedStaticPresets.issues.length === 0
-                && parsedStaticPresets.presets.length === staticConfig.mapPresets.length;
+            const hasValidStaticCatalog =
+                Array.isArray(staticConfig.mapPresets) &&
+                !staticConfig._mapPresetsInvalid &&
+                parsedStaticPresets.issues.length === 0 &&
+                parsedStaticPresets.presets.length === staticConfig.mapPresets.length;
             if (!hasValidStaticCatalog) {
                 // With no valid inherited catalog, expose a writable empty value for first-time setup.
                 merged.mapPresets = [];
@@ -877,15 +880,16 @@ export class AppConfigService {
         if (serverErdblickConfig.locationSearch && isPlainObject(serverErdblickConfig.locationSearch)) {
             const mergedLocationSearch: RawLocationSearchConfig = {
                 ...(merged.locationSearch ?? {}),
-                providers: merged.locationSearch?.providers
-                    ? [...merged.locationSearch.providers]
-                    : undefined
+                providers: merged.locationSearch?.providers ? [...merged.locationSearch.providers] : undefined
             };
             const serverLocationSearch = serverErdblickConfig.locationSearch;
             if (Array.isArray(serverLocationSearch.providers) && serverLocationSearch.providers.length > 0) {
                 mergedLocationSearch.providers = [...serverLocationSearch.providers];
             }
-            if (serverLocationSearch.minCharacters !== undefined && Number.isFinite(serverLocationSearch.minCharacters)) {
+            if (
+                serverLocationSearch.minCharacters !== undefined &&
+                Number.isFinite(serverLocationSearch.minCharacters)
+            ) {
                 mergedLocationSearch.minCharacters = serverLocationSearch.minCharacters;
             }
             if (serverLocationSearch.debounceMs !== undefined && Number.isFinite(serverLocationSearch.debounceMs)) {
@@ -893,15 +897,19 @@ export class AppConfigService {
             }
             merged.locationSearch = mergedLocationSearch;
         }
-        if (typeof serverErdblickConfig.defaultBackgroundLayerId === "string"
-            && serverErdblickConfig.defaultBackgroundLayerId.trim().length > 0) {
+        if (
+            typeof serverErdblickConfig.defaultBackgroundLayerId === "string" &&
+            serverErdblickConfig.defaultBackgroundLayerId.trim().length > 0
+        ) {
             merged.defaultBackgroundLayerId = serverErdblickConfig.defaultBackgroundLayerId.trim();
         }
         if (typeof serverErdblickConfig["coordinates-enabled"] === "boolean") {
             merged["coordinates-enabled"] = serverErdblickConfig["coordinates-enabled"];
         }
-        if (typeof serverErdblickConfig["coordinates-legal-terms"] === "string"
-            && serverErdblickConfig["coordinates-legal-terms"].trim()) {
+        if (
+            typeof serverErdblickConfig["coordinates-legal-terms"] === "string" &&
+            serverErdblickConfig["coordinates-legal-terms"].trim()
+        ) {
             merged["coordinates-legal-terms"] = serverErdblickConfig["coordinates-legal-terms"].trim();
         }
 
@@ -933,7 +941,7 @@ export class AppConfigService {
         const surveys = this.normalizeSurveys(rawConfig.surveys);
         const extensionModules = this.normalizeExtensionModules(rawConfig.extensionModules);
         const legalTermsUrl = rawConfig["coordinates-legal-terms"]?.trim() || null;
-        const enabledByDefault = legalTermsUrl ? false : rawConfig["coordinates-enabled"] ?? true;
+        const enabledByDefault = legalTermsUrl ? false : (rawConfig["coordinates-enabled"] ?? true);
         const mapPresetsConfigured = rawConfig.mapPresets !== undefined;
         const parsedMapPresets = parseMapPresetDefinitions(rawConfig.mapPresets ?? []);
         const localPresetIssues = rawConfig._mapPresetsInvalid
@@ -946,11 +954,8 @@ export class AppConfigService {
         const serverPresetStatus = serverConfig.mapPresets;
         const mapPresetConfig: MapPresetConfigStatus = {
             configured: mapPresetsConfigured,
-            valid: localPresetIssues.length === 0
-                && serverPresetStatus.valid,
-            write: localPresetIssues.length === 0
-                && serverPresetStatus.valid
-                && serverPresetStatus.write,
+            valid: localPresetIssues.length === 0 && serverPresetStatus.valid,
+            write: localPresetIssues.length === 0 && serverPresetStatus.valid && serverPresetStatus.write,
             endpoint: serverPresetStatus.endpoint,
             method: serverPresetStatus.method,
             path: serverPresetStatus.path,
@@ -961,9 +966,9 @@ export class AppConfigService {
 
         const rawBackgroundLayers = rawConfig.backgroundLayers?.length
             ? rawConfig.backgroundLayers
-            // Keep a minimal, non-Blue-Marble fallback available when config.json omits the section.
-            : DEFAULT_BACKGROUND_LAYERS;
-        const backgroundLayers = rawBackgroundLayers.map(layer => this.normalizeBackgroundLayer(layer));
+            : // Keep a minimal, non-Blue-Marble fallback available when config.json omits the section.
+              DEFAULT_BACKGROUND_LAYERS;
+        const backgroundLayers = rawBackgroundLayers.map((layer) => this.normalizeBackgroundLayer(layer));
         const defaultBackgroundLayerId = this.resolveDefaultBackgroundLayerId(
             rawConfig.defaultBackgroundLayerId ?? null,
             backgroundLayers
@@ -1034,9 +1039,7 @@ export class AppConfigService {
 
         const normalized: StyleConfigEntry[] = [];
         for (const entry of styles) {
-            const parsed = STYLE_CONFIG_ENTRY_SCHEMA.safeParse(
-                typeof entry === "string" ? {url: entry} : entry
-            );
+            const parsed = STYLE_CONFIG_ENTRY_SCHEMA.safeParse(typeof entry === "string" ? {url: entry} : entry);
             if (!parsed.success) {
                 continue;
             }
@@ -1098,11 +1101,8 @@ export class AppConfigService {
     private normalizeBackgroundLayer(layer: RawBackgroundLayerConfig): BackgroundLayerConfig {
         const defaultOpacity = clampBackgroundOpacity(layer.defaultOpacity ?? 100);
         const minZoom = layer.minZoom ?? 0;
-        const maxZoom = layer.maxZoom ?? (
-            layer.type === "xyz"
-                ? DEFAULT_XYZ_BACKGROUND_MAX_ZOOM
-                : DEFAULT_WMS_BACKGROUND_MAX_ZOOM
-        );
+        const maxZoom =
+            layer.maxZoom ?? (layer.type === "xyz" ? DEFAULT_XYZ_BACKGROUND_MAX_ZOOM : DEFAULT_WMS_BACKGROUND_MAX_ZOOM);
 
         if (layer.type === "xyz") {
             return {
@@ -1147,24 +1147,24 @@ export class AppConfigService {
                 name: parsed.data.name.trim(),
                 urlTemplate: parsed.data.urlTemplate.trim()
             };
-            const sampleUrl = viewer.urlTemplate
-                .replaceAll("{lat}", "0")
-                .replaceAll("{lon}", "0");
+            const sampleUrl = viewer.urlTemplate.replaceAll("{lat}", "0").replaceAll("{lon}", "0");
             let protocol = "";
             try {
                 protocol = new URL(sampleUrl).protocol;
             } catch {
                 // The warning below also covers malformed and relative templates.
             }
-            if (!viewer.id
-                || !viewer.name
-                || !viewer.urlTemplate.includes("{lat}")
-                || !viewer.urlTemplate.includes("{lon}")
-                || (protocol !== "http:" && protocol !== "https:")
-                || seenIds.has(viewer.id)) {
+            if (
+                !viewer.id ||
+                !viewer.name ||
+                !viewer.urlTemplate.includes("{lat}") ||
+                !viewer.urlTemplate.includes("{lon}") ||
+                (protocol !== "http:" && protocol !== "https:") ||
+                seenIds.has(viewer.id)
+            ) {
                 console.warn(
                     `[AppConfigService] Ignoring external viewer '${viewer.id || index + 1}': ` +
-                    "expected a unique id and an HTTP(S) URL template containing {lat} and {lon}."
+                        "expected a unique id and an HTTP(S) URL template containing {lat} and {lon}."
                 );
                 return;
             }
@@ -1176,9 +1176,10 @@ export class AppConfigService {
 
     /** Normalizes configured location-search providers and behavior knobs. */
     private normalizeLocationSearch(locationSearch: RawLocationSearchConfig | undefined): LocationSearchConfig {
-        const rawProviders = Array.isArray(locationSearch?.providers) && locationSearch.providers.length > 0
-            ? locationSearch.providers
-            : DEFAULT_LOCATION_SEARCH_CONFIG.providers;
+        const rawProviders =
+            Array.isArray(locationSearch?.providers) && locationSearch.providers.length > 0
+                ? locationSearch.providers
+                : DEFAULT_LOCATION_SEARCH_CONFIG.providers;
         const providers: LocationSearchProviderConfig[] = [];
         const seenProviderIds = new Set<string>();
         for (const provider of rawProviders) {
@@ -1212,13 +1213,25 @@ export class AppConfigService {
 
         return {
             providers: providers.length ? providers : [...DEFAULT_LOCATION_SEARCH_CONFIG.providers],
-            minCharacters: this.clampInteger(locationSearch?.minCharacters, 1, 64, DEFAULT_LOCATION_SEARCH_CONFIG.minCharacters),
-            debounceMs: this.clampInteger(locationSearch?.debounceMs, 0, 2000, DEFAULT_LOCATION_SEARCH_CONFIG.debounceMs)
+            minCharacters: this.clampInteger(
+                locationSearch?.minCharacters,
+                1,
+                64,
+                DEFAULT_LOCATION_SEARCH_CONFIG.minCharacters
+            ),
+            debounceMs: this.clampInteger(
+                locationSearch?.debounceMs,
+                0,
+                2000,
+                DEFAULT_LOCATION_SEARCH_CONFIG.debounceMs
+            )
         };
     }
 
     /** Normalizes a declarative provider adapter without allowing arbitrary executable mapping logic. */
-    private normalizeLocationSearchAdapter(adapter: RawLocationSearchAdapterConfig | undefined): LocationSearchAdapterConfig | undefined {
+    private normalizeLocationSearchAdapter(
+        adapter: RawLocationSearchAdapterConfig | undefined
+    ): LocationSearchAdapterConfig | undefined {
         if (!adapter) {
             return undefined;
         }
@@ -1247,7 +1260,8 @@ export class AppConfigService {
 
     /** Normalizes field selectors used by a location-search adapter. */
     private normalizeLocationSearchAdapterFields(
-        fields: RawLocationSearchAdapterConfig["fields"] | undefined): LocationSearchAdapterFieldsConfig | undefined {
+        fields: RawLocationSearchAdapterConfig["fields"] | undefined
+    ): LocationSearchAdapterFieldsConfig | undefined {
         if (!fields) {
             return undefined;
         }
@@ -1277,7 +1291,8 @@ export class AppConfigService {
 
     /** Normalizes one path, constant, or template selector from config. */
     private normalizeLocationSearchFieldSelector(
-        selector: RawLocationSearchFieldSelector | undefined): LocationSearchFieldSelector | undefined {
+        selector: RawLocationSearchFieldSelector | undefined
+    ): LocationSearchFieldSelector | undefined {
         if (typeof selector === "string") {
             const trimmed = selector.trim();
             return trimmed ? trimmed : undefined;
@@ -1305,7 +1320,10 @@ export class AppConfigService {
                 if (trimmed) {
                     result.value = trimmed;
                 }
-            } else if (typeof selector.value === "boolean" || (typeof selector.value === "number" && Number.isFinite(selector.value))) {
+            } else if (
+                typeof selector.value === "boolean" ||
+                (typeof selector.value === "number" && Number.isFinite(selector.value))
+            ) {
                 result.value = selector.value;
             }
         }
@@ -1323,11 +1341,14 @@ export class AppConfigService {
     }
 
     /** Chooses a valid default background id or falls back to the first available layer. */
-    private resolveDefaultBackgroundLayerId(requestedDefaultId: string | null, backgroundLayers: BackgroundLayerConfig[]): string | null {
+    private resolveDefaultBackgroundLayerId(
+        requestedDefaultId: string | null,
+        backgroundLayers: BackgroundLayerConfig[]
+    ): string | null {
         if (backgroundLayers.length === 0) {
             return null;
         }
-        if (requestedDefaultId && backgroundLayers.some(layer => layer.id === requestedDefaultId)) {
+        if (requestedDefaultId && backgroundLayers.some((layer) => layer.id === requestedDefaultId)) {
             return requestedDefaultId;
         }
         // Falling back to the first configured layer keeps persisted state valid even when a
@@ -1362,18 +1383,28 @@ export class AppConfigService {
             return JSON.stringify(value);
         }
         if (Array.isArray(value)) {
-            return `[${value.map(entry => this.stableSerialize(entry)).join(",")}]`;
+            return `[${value.map((entry) => this.stableSerialize(entry)).join(",")}]`;
         }
         if (isPlainObject(value)) {
             const keys = Object.keys(value).sort();
-            return `{${keys.map(key => `${JSON.stringify(key)}:${this.stableSerialize(value[key])}`).join(",")}}`;
+            return `{${keys.map((key) => `${JSON.stringify(key)}:${this.stableSerialize(value[key])}`).join(",")}}`;
         }
         return JSON.stringify(value);
     }
+
+    listBackgrounds(input: {offset?: number; limit?: number}) {
+        const backgrounds = this.getBackgroundLayers().map((layer) => ({
+            id: layer.id,
+            name: layer.name,
+            kind: layer.type
+        }));
+        return pageActionItems(backgrounds, input.offset, input.limit);
+    }
 }
 
-
-export interface AppConfigServiceValues {
-    distributionVersions: Versions[];
-    erdblickVersion: string;
+/** Version information shown in diagnostics and about dialogs. */
+export interface Versions {
+    name: string;
+    tag: string;
+    whatsnew?: string;
 }

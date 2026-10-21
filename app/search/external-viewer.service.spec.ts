@@ -1,8 +1,6 @@
-import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import type {AppConfigService, ExternalViewerConfig} from "../shared/app-config.service";
-import type {AppStateService} from "../shared/appstate.service";
 import {ExternalViewerService} from "./external-viewer.service";
 
 const PROVIDERS: ExternalViewerConfig[] = [
@@ -47,7 +45,7 @@ function createService() {
     };
     return {
         service: new ExternalViewerService(
-            (state as unknown as StateTestSystem) as never,
+            (state) as never,
             configService as unknown as AppConfigService
         ),
         state

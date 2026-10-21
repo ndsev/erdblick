@@ -1,18 +1,18 @@
 import {ChangeDetectorRef, Component, effect, input, NgZone, OnDestroy, output, ViewChild} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
-import {coreLib} from "../integrations/wasm";
-import {InspectionPanelModel} from "../shared/appstate.service";
-import {FeatureWrapper, IncomingInspectionResult} from "../mapdata/feature-inspection.model";
-import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspection.tree.component";
-import {MapInfoService} from "../mapdata/map-info.service";
 import {Subscription} from "rxjs";
-import {Feature} from '../../build/libs/core/erdblick-core';
+import {Feature} from "../../build/libs/core/erdblick-core";
+import {coreLib} from "../integrations/wasm";
+import {FeatureWrapper, IncomingInspectionResult} from "../mapdata/feature-inspection.model";
+import {MapInfoService} from "../mapdata/map-info.service";
 import {
     hasFeatureInspectionValidity,
     isFeatureInspectionSubTarget,
     stripFeatureInspectionTarget,
     stripFeatureInspectionValidity
 } from "../shared/tile-feature-id";
+import {InspectionPanelModel} from "./inspection-state.model";
+import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspection.tree.component";
 
 /** Click target metadata emitted by C++ for propagated scalar value pills. */
 interface InspectionValueBubble {
@@ -60,25 +60,36 @@ interface IncomingSectionState {
 }
 
 @Component({
-    selector: 'feature-panel',
+    selector: "feature-panel",
     template: `
-        <div style="position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; min-height: 0;">
+        <div
+            style="position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; min-height: 0;"
+        >
             @if (loading) {
-                <div style="position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--p-content-background) 55%, transparent);">
-                    <p-progressSpinner ariaLabel="loading"/>
+                <div
+                    style="position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--p-content-background) 55%, transparent);"
+                >
+                    <p-progressSpinner ariaLabel="loading" />
                 </div>
             }
             @for (warning of selectionWarnings; track warning) {
-                <div role="status" data-testid="feature-representation-warning" style="padding: .5rem;">{{ warning }}</div>
+                <div role="status" data-testid="feature-representation-warning" style="padding: .5rem;">
+                    {{ warning }}
+                </div>
             }
-            <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
-                             [geoJson]="geoJson"
-                             [featureIds]="featureIds"
-                             [firstHighlightedItemIndex]="firstHighlightedItemIndex"
-                             [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
-                             [showFilter]="showFilter()"
-                             [enableSourceDataNavigation]="enableSourceDataNavigation()"
-                             style="flex: 1 1 auto; min-height: 0;">
+            <inspection-tree
+                [treeData]="treeData"
+                [columns]="columns"
+                [panelId]="panel().id"
+                [geoJson]="geoJson"
+                [featureIds]="featureIds"
+                [firstHighlightedItemIndex]="firstHighlightedItemIndex"
+                [filterText]="filterText()"
+                (filterTextChange)="filterTextChange.emit($event)"
+                [showFilter]="showFilter()"
+                [enableSourceDataNavigation]="enableSourceDataNavigation()"
+                style="flex: 1 1 auto; min-height: 0;"
+            >
             </inspection-tree>
         </div>
     `,
@@ -86,7 +97,6 @@ interface IncomingSectionState {
 })
 /** Renders feature-restricted inspection data. */
 export class FeaturePanelComponent implements OnDestroy {
-
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
     enableSourceDataNavigation = input<boolean>(true);
     filterText = input<string | undefined>();
@@ -95,8 +105,8 @@ export class FeaturePanelComponent implements OnDestroy {
 
     treeData: TreeTableNode[] = [];
     columns: Column[] = [
-        { key: "key",   header: "Key",   width: '0*', transform: this.formatData.bind(this) },
-        { key: "value", header: "Value", width: '0*', transform: this.formatData.bind(this) }
+        {key: "key", header: "Key", width: "0*", transform: this.formatData.bind(this)},
+        {key: "value", header: "Value", width: "0*", transform: this.formatData.bind(this)}
     ];
     filterOptions = new FeatureFilterOptions();
     /** Serialize complete geometry only when the user requests an export. */
@@ -112,21 +122,24 @@ export class FeaturePanelComponent implements OnDestroy {
 
     /** Keep source fidelity and incomplete-data notices visible beside inspection/export controls. */
     get selectionWarnings(): string[] {
-        return [...new Set((this.selectedFeatures ?? []).flatMap(feature => feature.featureTile.warnings))];
+        return [...new Set((this.selectedFeatures ?? []).flatMap((feature) => feature.featureTile.warnings))];
     }
 
     /** Export the full current selection, skipping wrappers whose native tile was released. */
     private exportGeoJson(): string {
-        const features = (this.selectedFeatures ?? []).map(wrapper =>
-            this.inspectionFeature(wrapper).peek((feature: Feature) => feature.geojson() as string)).filter(value => value !== null);
+        const features = (this.selectedFeatures ?? [])
+            .map((wrapper) => this.inspectionFeature(wrapper).peek((feature: Feature) => feature.geojson() as string))
+            .filter((value) => value !== null);
         return `{"type":"FeatureCollection","features":[${features.join(",")}]}`;
     }
 
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
-    constructor(private cdr: ChangeDetectorRef,
-                private ngZone: NgZone,
-                mapInfo: MapInfoService) {
+    constructor(
+        private cdr: ChangeDetectorRef,
+        private ngZone: NgZone,
+        mapInfo: MapInfoService
+    ) {
         this.catalogSubscription = mapInfo.dataSourceInfoChanged.subscribe(() => {
             for (const state of this.incoming.values()) {
                 state.controller.abort();
@@ -206,13 +219,13 @@ export class FeaturePanelComponent implements OnDestroy {
             return;
         }
 
-        this.featureIds = Array.from(new Set(
-            this.selectedFeatures.map(feature => stripFeatureInspectionTarget(feature.featureId))
-        ));
+        this.featureIds = Array.from(
+            new Set(this.selectedFeatures.map((feature) => stripFeatureInspectionTarget(feature.featureId)))
+        );
         this.loading = false;
 
         const selectedFeatureInspectionModels: InspectionModelData[][] = [];
-        this.selectedFeatures.forEach(featureWrapper => {
+        this.selectedFeatures.forEach((featureWrapper) => {
             try {
                 this.inspectionFeature(featureWrapper).peek((feature: Feature) => {
                     const model = feature.inspectionModel() as InspectionModelData[];
@@ -268,14 +281,26 @@ export class FeaturePanelComponent implements OnDestroy {
         }
         const result = state.result;
         const section: InspectionModelData = result?.model[0] ?? {
-            key: "Incoming Relations", type: coreLib.ValueType.SECTION.value, value: "", children: []
+            key: "Incoming Relations",
+            type: coreLib.ValueType.SECTION.value,
+            value: "",
+            children: []
         };
-        return {...section, nodeId: "incoming-relations", incomingLoading: state.loading,
-            value: state.loading ? "Loading…" : state.error ?? (result?.complete
-                ? (section.children?.length ? "" : "No matching relations in this partition")
-                : "Partial result"),
+        return {
+            ...section,
+            nodeId: "incoming-relations",
+            incomingLoading: state.loading,
+            value: state.loading
+                ? "Loading…"
+                : (state.error ??
+                  (result?.complete
+                      ? section.children?.length
+                          ? ""
+                          : "No matching relations in this partition"
+                      : "Partial result")),
             info: state.error ?? result?.issues.join("\n") ?? section.info,
-            retryIncoming: !state.loading ? () => this.retryIncoming(feature) : undefined};
+            retryIncoming: !state.loading ? () => this.retryIncoming(feature) : undefined
+        };
     }
 
     /** Publish only while the selected wrapper and request generation remain current. */
@@ -285,8 +310,10 @@ export class FeaturePanelComponent implements OnDestroy {
             if (this.destroyed || this.incoming.get(feature) !== state) return;
             state.result = result;
             if (result.expiresAtMs !== undefined) {
-                state.timer = setTimeout(() => this.retryIncoming(feature),
-                    Math.min(2147483647, Math.max(1000, result.expiresAtMs - Date.now())));
+                state.timer = setTimeout(
+                    () => this.retryIncoming(feature),
+                    Math.min(2147483647, Math.max(1000, result.expiresAtMs - Date.now()))
+                );
             }
         } catch (error) {
             if (state.controller.signal.aborted) return;
@@ -306,7 +333,9 @@ export class FeaturePanelComponent implements OnDestroy {
         previous.controller.abort();
         clearTimeout(previous.timer);
         const state: IncomingSectionState = {
-            controller: new AbortController(), loading: true, result: previous?.result
+            controller: new AbortController(),
+            loading: true,
+            result: previous?.result
         };
         this.incoming.set(feature, state);
         void this.loadIncoming(feature, state);
@@ -349,12 +378,12 @@ export class FeaturePanelComponent implements OnDestroy {
     /** Marks and expands the inspection row or subtree addressed by a suffixed selected feature id. */
     private highlightSelectedInspectionTarget(nodes: TreeTableNode[]): number | undefined {
         const selectedTargetIds = (this.selectedFeatures ?? [])
-            .map(feature => feature.featureId)
+            .map((feature) => feature.featureId)
             .filter(isFeatureInspectionSubTarget);
         const exactTargetIds = new Set(selectedTargetIds);
-        const parentTargetIds = new Set(selectedTargetIds
-            .map(stripFeatureInspectionValidity)
-            .filter(isFeatureInspectionSubTarget));
+        const parentTargetIds = new Set(
+            selectedTargetIds.map(stripFeatureInspectionValidity).filter(isFeatureInspectionSubTarget)
+        );
         if (!exactTargetIds.size) {
             return undefined;
         }
@@ -365,28 +394,20 @@ export class FeaturePanelComponent implements OnDestroy {
         let selectedHighlightMode: "soft" | "strong" = "soft";
         const rowTargetsForNode = (node: TreeTableNode): string[] => {
             const data = node.data as Record<string, unknown> | undefined;
-            return [
-                data?.["hoverId"],
-                data?.["strongHoverGroupId"],
-                data?.["softHoverGroupId"]
-            ].filter((value): value is string => typeof value === "string");
+            return [data?.["hoverId"], data?.["strongHoverGroupId"], data?.["softHoverGroupId"]].filter(
+                (value): value is string => typeof value === "string"
+            );
         };
-        const findTarget = (
-            node: TreeTableNode,
-            parents: TreeTableNode[],
-            targetIds: ReadonlySet<string>
-        ): boolean => {
+        const findTarget = (node: TreeTableNode, parents: TreeTableNode[], targetIds: ReadonlySet<string>): boolean => {
             const rowTargets = rowTargetsForNode(node);
-            const matchedTarget = rowTargets.find(target => targetIds.has(target));
+            const matchedTarget = rowTargets.find((target) => targetIds.has(target));
             const rowMatches = matchedTarget !== undefined;
             if (rowMatches && !highlightedNode) {
                 highlightedNode = node;
                 highlightedParents = parents;
                 selectedHighlightTarget = matchedTarget;
-                selectedHighlightMode = matchedTarget &&
-                    hasFeatureInspectionValidity(matchedTarget)
-                    ? "strong"
-                    : "soft";
+                selectedHighlightMode =
+                    matchedTarget && hasFeatureInspectionValidity(matchedTarget) ? "strong" : "soft";
                 for (const parent of parents) {
                     parent.expanded = true;
                 }
@@ -424,11 +445,12 @@ export class FeaturePanelComponent implements OnDestroy {
         const applySelectionHighlight = (nodeList: TreeTableNode[]) => {
             for (const node of nodeList) {
                 const data = node.data as Record<string, unknown> | undefined;
-                const rowTargetMatches = selectedHighlightMode === "strong"
-                    ? data?.["hoverId"] === selectedHighlightTarget ||
-                        data?.["strongHoverGroupId"] === selectedHighlightTarget
-                    : data?.["hoverId"] === selectedHighlightTarget ||
-                        data?.["softHoverGroupId"] === selectedHighlightTarget;
+                const rowTargetMatches =
+                    selectedHighlightMode === "strong"
+                        ? data?.["hoverId"] === selectedHighlightTarget ||
+                          data?.["strongHoverGroupId"] === selectedHighlightTarget
+                        : data?.["hoverId"] === selectedHighlightTarget ||
+                          data?.["softHoverGroupId"] === selectedHighlightTarget;
                 if (rowTargetMatches) {
                     node.data = {
                         ...(node.data ?? {}),
@@ -480,7 +502,7 @@ export class FeaturePanelComponent implements OnDestroy {
 
         /** Extracts the geometry name bubble from an inspection tree node. */
         const extractGeometryNameBubble = (children: TreeTableNode[]): string | null => {
-            const nameNode = children.find(child => child.data?.["key"] === "name");
+            const nameNode = children.find((child) => child.data?.["key"] === "name");
             const name = nameNode?.data?.["value"];
             if (typeof name !== "string") {
                 return null;
@@ -504,14 +526,16 @@ export class FeaturePanelComponent implements OnDestroy {
             if (!Array.isArray(bubbles) || !bubbles.length) {
                 return undefined;
             }
-            return bubbles.map(bubble => ({
+            return bubbles.map((bubble) => ({
                 ...bubble,
-                targetNodeId: typeof bubble.targetNodeId === "string"
-                    ? `${nodeIdPrefix}${bubble.targetNodeId}`
-                    : bubble.targetNodeId,
-                hoverTargetNodeId: typeof bubble.hoverTargetNodeId === "string"
-                    ? `${nodeIdPrefix}${bubble.hoverTargetNodeId}`
-                    : bubble.hoverTargetNodeId,
+                targetNodeId:
+                    typeof bubble.targetNodeId === "string"
+                        ? `${nodeIdPrefix}${bubble.targetNodeId}`
+                        : bubble.targetNodeId,
+                hoverTargetNodeId:
+                    typeof bubble.hoverTargetNodeId === "string"
+                        ? `${nodeIdPrefix}${bubble.hoverTargetNodeId}`
+                        : bubble.hoverTargetNodeId,
                 children: prefixValueBubbleTargets(bubble.children, nodeIdPrefix)
             }));
         };
@@ -532,9 +556,11 @@ export class FeaturePanelComponent implements OnDestroy {
                 let value = data?.value;
                 if (valueType === coreLib.ValueType.NULL.value && data?.children === undefined) {
                     value = "NULL";
-                } else if ((valueType & coreLib.ValueType.ARRAY.value)
-                    && (valueType & coreLib.ValueType.NUMBER.value)
-                    && Array.isArray(value)) {
+                } else if (
+                    valueType & coreLib.ValueType.ARRAY.value &&
+                    valueType & coreLib.ValueType.NUMBER.value &&
+                    Array.isArray(value)
+                ) {
                     for (let i = 0; i < value.length; i++) {
                         if (!Number.isInteger(value[i])) {
                             const strValue = String(value[i]);
@@ -556,9 +582,10 @@ export class FeaturePanelComponent implements OnDestroy {
                     }
                 }
 
-                const nodeId = typeof data?.nodeId === "string"
-                    ? `${context.nodeIdPrefix}${data.nodeId}`
-                    : makeNodeId(context, data?.key ?? "", nodeIndex);
+                const nodeId =
+                    typeof data?.nodeId === "string"
+                        ? `${context.nodeIdPrefix}${data.nodeId}`
+                        : makeNodeId(context, data?.key ?? "", nodeIndex);
                 node.data = {
                     key: data?.key ?? "",
                     value: value ?? "",
@@ -599,8 +626,7 @@ export class FeaturePanelComponent implements OnDestroy {
                 let nextStrongHoverGroupId = context.strongHoverGroupId;
                 if (typeof data?.hoverId === "string") {
                     if (hasFeatureInspectionValidity(data.hoverId)) {
-                        nextSoftHoverGroupId =
-                            stripFeatureInspectionValidity(data.hoverId);
+                        nextSoftHoverGroupId = stripFeatureInspectionValidity(data.hoverId);
                         nextStrongHoverGroupId = data.hoverId;
                     } else {
                         nextSoftHoverGroupId = data.hoverId;
@@ -614,17 +640,14 @@ export class FeaturePanelComponent implements OnDestroy {
                     node.data["strongHoverGroupId"] = nextStrongHoverGroupId;
                 }
 
-                const children = convertToTreeTableNodes(
-                    Array.isArray(data?.children) ? data.children : [],
-                    {
-                        mapTileKey: node.data["mapTileKey"],
-                        mapId: typeof node.data["mapId"] === "string" ? node.data["mapId"] : context.mapId,
-                        softHoverGroupId: nextSoftHoverGroupId,
-                        strongHoverGroupId: nextStrongHoverGroupId,
-                        nodePath: node.data["nodeId"],
-                        nodeIdPrefix: context.nodeIdPrefix
-                    }
-                );
+                const children = convertToTreeTableNodes(Array.isArray(data?.children) ? data.children : [], {
+                    mapTileKey: node.data["mapTileKey"],
+                    mapId: typeof node.data["mapId"] === "string" ? node.data["mapId"] : context.mapId,
+                    softHoverGroupId: nextSoftHoverGroupId,
+                    strongHoverGroupId: nextStrongHoverGroupId,
+                    nodePath: node.data["nodeId"],
+                    nodeIdPrefix: context.nodeIdPrefix
+                });
                 if (isGeometryTypeValue(node.data["value"])) {
                     const nameBubble = extractGeometryNameBubble(children);
                     if (nameBubble) {
@@ -651,9 +674,10 @@ export class FeaturePanelComponent implements OnDestroy {
             const nodeIdPrefix = `feature-${featureIndex}:`;
             for (const section of inspectionModels) {
                 const node: TreeTableNode = {};
-                const sectionNodeId = typeof section?.nodeId === "string"
-                    ? `${nodeIdPrefix}${section.nodeId}`
-                    : `${nodeIdPrefix}${section?.key ?? ""}`;
+                const sectionNodeId =
+                    typeof section?.nodeId === "string"
+                        ? `${nodeIdPrefix}${section.nodeId}`
+                        : `${nodeIdPrefix}${section?.key ?? ""}`;
                 node.data = {
                     key: section?.key ?? "",
                     value: section?.value ?? "",
@@ -676,15 +700,12 @@ export class FeaturePanelComponent implements OnDestroy {
                 if (valueBubbles) {
                     node.data["valueBubbles"] = valueBubbles;
                 }
-                node.children = convertToTreeTableNodes(
-                    Array.isArray(section?.children) ? section.children : [],
-                    {
-                        mapTileKey,
-                        mapId,
-                        nodePath: sectionNodeId,
-                        nodeIdPrefix
-                    }
-                );
+                node.children = convertToTreeTableNodes(Array.isArray(section?.children) ? section.children : [], {
+                    mapTileKey,
+                    mapId,
+                    nodePath: sectionNodeId,
+                    nodeIdPrefix
+                });
                 treeNodes.push(node);
             }
         }

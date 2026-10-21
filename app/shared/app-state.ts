@@ -1,12 +1,20 @@
 import type {Signal} from "@angular/core";
-import {AppStateOptions, AppStateSerializedValue, AppStateToStorageFun, AppStateFromStorageFun, Boolish, deepCopy, deepEquals} from "./state-value";
-import {stateBinding, type StateBinding} from "./viewer-state";
-export {Boolish, deepCopy, deepEquals} from "./state-value";
-export type {AppStateOptions} from "./state-value";
+import type {Params} from "@angular/router";
 import {distinctUntilChanged, map, Observable, OperatorFunction} from "rxjs";
 import {z, ZodTypeAny} from "zod";
-import type {Params} from "@angular/router";
 import {environment} from "../environments/environment";
+import {
+    AppStateFromStorageFun,
+    AppStateOptions,
+    AppStateSerializedValue,
+    AppStateToStorageFun,
+    Boolish,
+    deepCopy,
+    deepEquals
+} from "./state-value";
+import {type StateBinding} from "./viewer-state";
+export {Boolish, deepCopy, deepEquals} from "./state-value";
+export type {AppStateOptions} from "./state-value";
 
 // TODO: Do we actually need this?
 /** Removes optional/default/lazy wrappers so scalar checks can inspect the underlying schema. */
@@ -32,7 +40,7 @@ function isScalar(schema: z.ZodTypeAny): boolean {
         return true;
     }
     if (schema instanceof z.ZodUnion) {
-        return schema.options.every(opt => isScalar(opt as ZodTypeAny));
+        return schema.options.every((opt) => isScalar(opt as ZodTypeAny));
     }
     const unwrapped = unwrapScalar(schema);
     const scalarKinds = [
@@ -45,9 +53,9 @@ function isScalar(schema: z.ZodTypeAny): boolean {
         z.ZodLiteral,
         z.ZodSymbol,
         z.ZodUndefined,
-        z.ZodNull,
+        z.ZodNull
     ];
-    return scalarKinds.some(type => unwrapped instanceof type);
+    return scalarKinds.some((type) => unwrapped instanceof type);
 }
 
 /** Coerces one URL/storage token into the primitive shape expected by the schema. */
@@ -56,7 +64,7 @@ function coerceFromString(txt: string, schema: ZodTypeAny): any {
 
     if (unwrapped === Boolish || unwrapped instanceof z.ZodBoolean) {
         const v = txt.trim().toLowerCase();
-        return v === '1' || v === 'true';
+        return v === "1" || v === "true";
     }
     if (unwrapped instanceof z.ZodNumber) return Number(txt);
     if (unwrapped instanceof z.ZodString) return txt;
@@ -117,26 +125,26 @@ function splitCSV(val: string): string[] {
         return [];
     }
     return String(val)
-        .split(',')
-        .map(s => {
+        .split(",")
+        .map((s) => {
             try {
                 return decodeURIComponent(s);
             } catch {
                 return s;
             }
         })
-        .filter(s => s.length > 0 || s === '');
+        .filter((s) => s.length > 0 || s === "");
 }
 
 /** Joins primitive values into the compact CSV form used in URLs. */
 function joinCSV(values: unknown[]): string {
-    return values.map(v => String(compactBooleans(v))).join(',');
+    return values.map((v) => String(compactBooleans(v))).join(",");
 }
 
 /** Detects array values that were stored as JSON rather than compact CSV. */
 function looksLikeJsonArray(raw: string): boolean {
     const trimmed = raw.trim();
-    return trimmed.startsWith('[') && trimmed.endsWith(']');
+    return trimmed.startsWith("[") && trimmed.endsWith("]");
 }
 
 /** Detect array-of-arrays-of-primitives */
@@ -153,7 +161,7 @@ function isArrayOfPrimitiveArrays(schema: z.ZodTypeAny): schema is z.ZodArray<z.
  * */
 /** Joins arrays-of-arrays into the colon-delimited compact URL representation. */
 function joinColonCSV(groups: unknown[][]): string {
-    return groups.map(g => joinCSV(g)).join(':');
+    return groups.map((g) => joinCSV(g)).join(":");
 }
 
 /**
@@ -165,8 +173,8 @@ function splitColonCSV(val: string): string[][] {
         return [];
     }
     return String(val)
-        .split(':')
-        .map(seg => (seg === '' ? [] : splitCSV(seg)));
+        .split(":")
+        .map((seg) => (seg === "" ? [] : splitCSV(seg)));
 }
 
 /**
@@ -187,11 +195,22 @@ export class AppState<T> extends Observable<T> {
     readonly signal: Signal<T>;
     private readonly binding: StateBinding<T>;
 
-    get value(): T { return this.getValue(); }
-    getValue(): T { return this.binding.read(); }
+    get value(): T {
+        return this.getValue();
+    }
+    getValue(): T {
+        return this.binding.read();
+    }
     /** Reads one portion, including prepared values inside a transaction. Values are immutable. */
-    read<R>(select: (value: T) => R): R { return select(this.binding.read()); }
-    next(value: T): void { this.binding.write(value); }
+    get writeOrigin() {
+        return this.binding.writeOrigin?.();
+    }
+    read<R>(select: (value: T) => R): R {
+        return select(this.binding.read());
+    }
+    next(value: T): void {
+        this.binding.write(value);
+    }
 
     readonly name: string;
     readonly defaultValue: T;
@@ -207,9 +226,9 @@ export class AppState<T> extends Observable<T> {
     protected readonly schema: ZodTypeAny;
 
     /** Registers the state slot in the shared pool and seeds it with the default value. */
-    constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>, binding?: StateBinding<T>) {
-        const source = binding ?? stateBinding(pool, options.name, deepCopy(options.defaultValue));
-        super(subscriber => {
+    constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>, binding: StateBinding<T>) {
+        const source = binding;
+        super((subscriber) => {
             let previous = source.signal();
             const subscription = source.commits.subscribe(() => {
                 const value = source.signal();
@@ -226,7 +245,7 @@ export class AppState<T> extends Observable<T> {
         this.defaultValue = deepCopy(options.defaultValue);
 
         this.schema = options.schema;
-        this.preprocess = options.toStorage ?? (value => compactBooleans(value));
+        this.preprocess = options.toStorage ?? ((value) => compactBooleans(value));
         this.postprocess = options.fromStorage;
 
         this.urlParamName = options.urlParamName;
@@ -243,7 +262,7 @@ export class AppState<T> extends Observable<T> {
 
     /** Restores the state to its configured default value. */
     resetToDefault(): void {
-        // Callers can mutate live arrays/records; never let those edits become reset defaults.
+        // Defaults are copied only at import/reset boundaries, never on ordinary reads.
         this.next(deepCopy(this.defaultValue));
     }
 
@@ -299,13 +318,15 @@ export class AppState<T> extends Observable<T> {
     /** Returns whether the state is an array of object values encoded via form fields. */
     private arrayIsFormObject(): boolean {
         const el = this.arrayElemSchema();
-        return !!el && (unwrapScalar(el) instanceof z.ZodObject) && this.urlFormEncode;
+        return !!el && unwrapScalar(el) instanceof z.ZodObject && this.urlFormEncode;
     }
 
     /** Returns whether this state slot should participate in URL serialization. */
     isUrlState(): boolean {
-        return (this.urlParamName !== undefined || this.urlFormEncode) &&
-            !(environment.visualizationOnly && this.urlIncludeInVisualizationOnly === false);
+        return (
+            (this.urlParamName !== undefined || this.urlFormEncode) &&
+            !(environment.visualizationOnly && this.urlIncludeInVisualizationOnly === false)
+        );
     }
 
     /** Returns URL keys that must be cleared when this state encodes an empty value. */
@@ -380,7 +401,7 @@ export class AppState<T> extends Observable<T> {
                     const elSchema = this.arrayElemSchema() as z.ZodObject<any>;
                     const shape = (unwrapScalar(elSchema) as z.ZodObject<any>).shape as Record<string, ZodTypeAny>;
                     for (const field of Object.keys(shape)) {
-                        const column = (payload as any[]).map(item => (item ?? {})[field]);
+                        const column = (payload as any[]).map((item) => (item ?? {})[field]);
                         result[field] = joinCSV(column);
                     }
                     return result;
@@ -419,7 +440,7 @@ export class AppState<T> extends Observable<T> {
     deserialize(raw: string | Params) {
         try {
             // Raw storage path (JSON string)
-            if (typeof raw === 'string') {
+            if (typeof raw === "string") {
                 if (raw) {
                     const parsed = JSON.parse(raw);
                     const verified = this.schema.parse(parsed);
@@ -433,8 +454,7 @@ export class AppState<T> extends Observable<T> {
             }
 
             // No need to update from URL params if this is not a URL state.
-            if (!this.isUrlState())
-                return;
+            if (!this.isUrlState()) return;
 
             let parsed: unknown = undefined;
             const base = this.urlParamName ?? this.name;
@@ -453,15 +473,15 @@ export class AppState<T> extends Observable<T> {
                         parsed = JSON.parse(rawValue);
                     } else {
                         const parts = expandRunLengthTokens(splitCSV(rawValue), elSchema);
-                        parsed = parts.map(s => coerceFromString(s, elSchema));
+                        parsed = parts.map((s) => coerceFromString(s, elSchema));
                     }
                 }
                 // Array of arrays of primitives from colon-separated CSV
                 else if (isArrayOfPrimitiveArrays(this.schema) && raw[base] !== undefined) {
                     const inner = (elSchema as z.ZodArray<any>).element as ZodTypeAny; // inner primitive schema
                     const groups = splitColonCSV(String(raw[base])); // string[][]
-                    parsed = groups.map(group =>
-                        expandRunLengthTokens(group, inner).map(s => coerceFromString(s, inner))
+                    parsed = groups.map((group) =>
+                        expandRunLengthTokens(group, inner).map((s) => coerceFromString(s, inner))
                     );
                 }
                 // Array of objects from per-field CSV
@@ -471,8 +491,7 @@ export class AppState<T> extends Observable<T> {
                     let maxLen = 0;
 
                     for (const field of Object.keys(shape)) {
-                        if (raw[field] === undefined)
-                            continue;
+                        if (raw[field] === undefined) continue;
                         const arr = expandRunLengthTokens(splitCSV(String(raw[field])), shape[field]);
                         fieldArrays[field] = arr;
                         if (arr.length > maxLen) maxLen = Math.max(maxLen, arr.length);
@@ -551,33 +570,42 @@ export class MapViewState<T> {
     private readonly defaultValue: T;
 
     /** Wraps one array-valued state slot and exposes it as a per-view accessor set. */
-    constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>, binding?: StateBinding<T[]>, private readonly views?: ViewValueBinding<T>) {
+    constructor(
+        pool: Map<string, AppState<unknown>>,
+        options: AppStateOptions<T>,
+        binding: StateBinding<T[]>,
+        private readonly views?: ViewValueBinding<T>
+    ) {
         this.defaultValue = deepCopy(options.defaultValue);
-        this.appState = new AppState(pool, {
-            name: options.name,
-            defaultValue: [deepCopy(options.defaultValue)],
-            schema: z.array(options.schema),
-            toStorage: (array: Array<T>) => {
-                if (options.toStorage === undefined) {
-                    return array;
-                }
-                return array.map(options.toStorage);
+        this.appState = new AppState(
+            pool,
+            {
+                name: options.name,
+                defaultValue: [deepCopy(options.defaultValue)],
+                schema: z.array(options.schema),
+                toStorage: (array: Array<T>) => {
+                    if (options.toStorage === undefined) {
+                        return array;
+                    }
+                    return array.map(options.toStorage);
+                },
+                fromStorage: (value: ZodTypeAny, currentValue: Array<T>): Array<T> => {
+                    if (options.fromStorage === undefined) {
+                        return value as unknown as Array<T>;
+                    }
+                    return (value as unknown as Array<any>).map((el, i) => {
+                        const current = i < currentValue.length ? currentValue[i] : deepCopy(this.defaultValue);
+                        return options.fromStorage!(el as ZodTypeAny, current);
+                    });
+                },
+                urlParamName: options.urlParamName,
+                urlFormEncode: options.urlFormEncode,
+                urlIncludeInVisualizationOnly: options.urlIncludeInVisualizationOnly,
+                snapshotPersist: options.snapshotPersist,
+                configDefault: options.configDefault
             },
-            fromStorage: (value: ZodTypeAny, currentValue: Array<T>): Array<T> => {
-                if (options.fromStorage === undefined) {
-                    return value as unknown as Array<T>;
-                }
-                return (value as unknown as Array<any>).map((el, i) => {
-                    const current = i < currentValue.length ? currentValue[i] : deepCopy(this.defaultValue);
-                    return options.fromStorage!(el as ZodTypeAny, current);
-                })
-            },
-            urlParamName: options.urlParamName,
-            urlFormEncode: options.urlFormEncode,
-            urlIncludeInVisualizationOnly: options.urlIncludeInVisualizationOnly,
-            snapshotPersist: options.snapshotPersist,
-            configDefault: options.configDefault
-        }, binding);
+            binding
+        );
     }
 
     /** Writes one view-specific value back into the underlying array state. */
@@ -606,7 +634,7 @@ export class MapViewState<T> {
     pipe<R = T>(viewIndex: number, ...ops: OperatorFunction<T, any>[]): Observable<R> {
         const id = this.views?.idAt(viewIndex);
         const base$ = this.appState.pipe(
-            map(array => id && this.views ? this.views.read(id) : array[viewIndex] ?? this.defaultValue),
+            map((array) => (id && this.views ? this.views.read(id) : (array[viewIndex] ?? this.defaultValue))),
             distinctUntilChanged()
         );
         return ops.length ? (base$ as any).pipe(...ops) : (base$ as unknown as Observable<R>);
@@ -624,7 +652,7 @@ export class MapViewState<T> {
             const id = this.views.idAt(viewIndex);
             return id ? this.views.read(id) : this.defaultValue;
         }
-        return this.appState.read(values => values[viewIndex] ?? this.defaultValue);
+        return this.appState.read((values) => values[viewIndex] ?? this.defaultValue);
     }
 
     /** Returns the number of currently stored per-view entries. */
@@ -639,10 +667,12 @@ function compactBooleans(value: unknown): unknown {
         return value ? 1 : 0;
     }
     if (Array.isArray(value)) {
-        return value.map(item => compactBooleans(item));
+        return value.map((item) => compactBooleans(item));
     }
     if (value && typeof value === "object") {
-        return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, compactBooleans(entry)]));
+        return Object.fromEntries(
+            Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, compactBooleans(entry)])
+        );
     }
     return value;
 }
@@ -668,18 +698,29 @@ function compactBooleans(value: unknown): unknown {
  *
  */
 /** Specialized app-state slot for style option values keyed by map/layer/style metadata. */
-export class StyleState extends AppState<Map<string, (string|number|boolean)[]>> {
-    get layerNamesState(): AppState<string[]> { return this.pool.get("layerNames") as AppState<string[]>; }
-    get numViewsState(): AppState<number> { return this.pool.get("numberOfViews") as AppState<number>; }
+export class StyleState extends AppState<Map<string, (string | number | boolean)[]>> {
+    get layerNamesState(): AppState<string[]> {
+        return this.pool.get("layerNames") as AppState<string[]>;
+    }
+    get numViewsState(): AppState<number> {
+        return this.pool.get("numberOfViews") as AppState<number>;
+    }
 
     /** Cross-slot dictionaries are resolved after all owners have registered at startup. */
-    constructor(private readonly pool: Map<string, AppState<unknown>>, binding?: StateBinding<Map<string, (string | number | boolean)[]>>) {
-        super(pool, {
-            name: "styleOptions",
-            schema: z.record(z.string(), z.string()),
-            defaultValue: new Map<string, (string | number | boolean)[]>(),
-            snapshotPersist: false
-        }, binding);
+    constructor(
+        private readonly pool: Map<string, AppState<unknown>>,
+        binding: StateBinding<Map<string, (string | number | boolean)[]>>
+    ) {
+        super(
+            pool,
+            {
+                name: "styleOptions",
+                schema: z.record(z.string(), z.string()),
+                defaultValue: new Map<string, (string | number | boolean)[]>(),
+                snapshotPersist: false
+            },
+            binding
+        );
     }
 
     override isUrlState(): boolean {
@@ -687,7 +728,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
     }
 
     override toSnapshotValue(): unknown {
-        const snapshot: Record<string, (string|number|boolean)[]> = {};
+        const snapshot: Record<string, (string | number | boolean)[]> = {};
         for (const [key, values] of this.value.entries()) {
             snapshot[key] = [...values];
         }
@@ -702,9 +743,9 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         this.next(nextMap);
     }
 
-    override validateSnapshotValue(value: unknown): Map<string, (string|number|boolean)[]> {
+    override validateSnapshotValue(value: unknown): Map<string, (string | number | boolean)[]> {
         const parsed = z.record(z.string(), z.array(z.union([z.string(), z.number(), z.boolean()]))).parse(value);
-        const nextMap = new Map<string, (string|number|boolean)[]>();
+        const nextMap = new Map<string, (string | number | boolean)[]>();
         for (const [key, values] of Object.entries(parsed)) {
             nextMap.set(key, [...values]);
         }
@@ -727,7 +768,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         //     'showOptionB': {'MapA/LayerX': [0, 0], 'MapB/LayerX': [1, 1]}
         //   }
         // }
-        const grouped = new Map<string, Map<string, Map<string, (string|number|boolean)[]>>>();
+        const grouped = new Map<string, Map<string, Map<string, (string | number | boolean)[]>>>();
 
         for (const [fullKey, values] of this.value.entries()) {
             const fullKeyParts = fullKey.split("/");
@@ -748,7 +789,9 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
             const byLayer = byOption.get(optionId)!;
 
             if (values.length < numViews) {
-                console.warn(`[StyleState.serialize]: Omitting option ${fullKey}: Expected ${numViews} values, got: ${values.length}!`);
+                console.warn(
+                    `[StyleState.serialize]: Omitting option ${fullKey}: Expected ${numViews} values, got: ${values.length}!`
+                );
             } else if (values.length > numViews) {
                 byLayer.set(mapLayerId, values.slice(0, numViews));
             } else {
@@ -784,20 +827,20 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
                         const arr = byLayer.get(mapLayerId) ?? [];
                         const raw = arr[view];
                         const enc = (val: any) => {
-                            if (typeof val === 'boolean') return val ? '1' : '0';
-                            if (typeof val === 'number') return String(val);
-                            if (val === null || val === undefined) return '';
+                            if (typeof val === "boolean") return val ? "1" : "0";
+                            if (typeof val === "number") return String(val);
+                            if (val === null || val === undefined) return "";
                             return String(val);
                         };
                         perLayerValues.push(enc(raw));
                     }
-                    perViewStrings.push(perLayerValues.join(','));
+                    perViewStrings.push(perLayerValues.join(","));
                 }
-                optionBodies.push(perViewStrings.join(':'));
+                optionBodies.push(perViewStrings.join(":"));
             }
 
-            const paramKey = `${shortStyleId}~${[...layerSet].join('-')}~${[...byOption.keys()].join('~')}`;
-            result[paramKey] = optionBodies.join('~');
+            const paramKey = `${shortStyleId}~${[...layerSet].join("-")}~${[...byOption.keys()].join("~")}`;
+            result[paramKey] = optionBodies.join("~");
         }
 
         return result;
@@ -806,12 +849,12 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
     override deserialize(raw: string | Params) {
         try {
             // A raw local storage string must be converted to the Record<string, string>
-            if (typeof raw === 'string') {
+            if (typeof raw === "string") {
                 raw = JSON.parse(raw);
                 z.parse(this.schema, raw);
             }
 
-            if (!Object.keys(raw).some(key => this.isStyleOptionUrlParamKey(key))) return;
+            if (!Object.keys(raw).some((key) => this.isStyleOptionUrlParamKey(key))) return;
             const layerNames = this.layerNamesState.getValue();
             const numViews = this.numViewsState.getValue();
             const nextValues = deepCopy(this.getValue());
@@ -820,14 +863,17 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
                 if (!this.isStyleOptionUrlParamKey(key)) {
                     continue;
                 }
-                if (typeof value !== 'string') {
+                if (typeof value !== "string") {
                     console.warn(`[StyleState.deserialize]: Skipping style option ${key}: expected string payload.`);
                     continue;
                 }
-                const parts = key.split('~');
+                const parts = key.split("~");
                 const shortStyleId = parts[0];
-                const layerPart = parts[1] ?? '';
-                const layerIndices = layerPart.split('-').map(s => Number(s)).filter(n => Number.isFinite(n));
+                const layerPart = parts[1] ?? "";
+                const layerIndices = layerPart
+                    .split("-")
+                    .map((s) => Number(s))
+                    .filter((n) => Number.isFinite(n));
                 const optionIds = parts.slice(2); // remaining parts are option IDs
 
                 if (!optionIds.length || !layerIndices.length) {
@@ -835,7 +881,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
                 }
 
                 // Split value by '~' per option, same order as in key
-                const optionValueSegments = value.split('~');
+                const optionValueSegments = value.split("~");
                 if (optionValueSegments.length < optionIds.length) {
                     // If fewer bodies than option ids, skip
                     continue;
@@ -843,17 +889,16 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
 
                 for (let oi = 0; oi < optionIds.length; oi++) {
                     const optionId = this.normalizeStyleOptionId(optionIds[oi]);
-                    const optionBody = optionValueSegments[oi] ?? '';
-                    const perView = optionBody.split(':'); // per-view strings
-                    const effectivePerView = perView.length === 1 && numViews > 1
-                        ? Array.from({length: numViews}, () => perView[0])
-                        : perView;
+                    const optionBody = optionValueSegments[oi] ?? "";
+                    const perView = optionBody.split(":"); // per-view strings
+                    const effectivePerView =
+                        perView.length === 1 && numViews > 1
+                            ? Array.from({length: numViews}, () => perView[0])
+                            : perView;
 
                     for (let view = 0; view < numViews; view++) {
-                        const layerCsv = effectivePerView[view] ?? '';
-                        const perLayer = layerCsv.length
-                            ? this.expandStyleRunLengthTokens(layerCsv.split(','))
-                            : [];
+                        const layerCsv = effectivePerView[view] ?? "";
+                        const perLayer = layerCsv.length ? this.expandStyleRunLengthTokens(layerCsv.split(",")) : [];
                         for (let li = 0; li < layerIndices.length; li++) {
                             const layerIndex = layerIndices[li];
                             if (layerIndex < 0 || layerIndex >= layerNames.length) {
@@ -862,7 +907,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
                             const mapLayerId = layerNames[layerIndex];
                             const storeKey = this.styleOptionKeyFromMapLayer(mapLayerId, shortStyleId, optionId);
                             const valuesForStoreKey = nextValues.get(storeKey) || [];
-                            const rawVal = perLayer[li] ?? '';
+                            const rawVal = perLayer[li] ?? "";
 
                             // Ensure length up to current view
                             while (valuesForStoreKey.length <= view) {
@@ -887,7 +932,7 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
         if (!key) {
             return false;
         }
-        const parts = key.split('~');
+        const parts = key.split("~");
         if (parts.length < 3) return false;
         // layers part must be dash-separated indices
         const layerPart = parts[1];
@@ -902,7 +947,10 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
     }
 
     /** Compares two style-option maps structurally without relying on reference identity. */
-    private styleMapEquals(a: Map<string, (string|number|boolean)[]>, b: Map<string, (string|number|boolean)[]>): boolean {
+    private styleMapEquals(
+        a: Map<string, (string | number | boolean)[]>,
+        b: Map<string, (string | number | boolean)[]>
+    ): boolean {
         if (a.size !== b.size) {
             return false;
         }
@@ -956,27 +1004,27 @@ export class StyleState extends AppState<Map<string, (string|number|boolean)[]>>
     }
 
     /** Coerces a raw URL/storage style-option value to the declared option type. */
-    public coerceOptionValue(value: any, optionType: string): string|number|boolean {
-        const t = (optionType || '').toLowerCase();
-        if (t === 'bool' || t === 'boolean') {
-            if (typeof value === 'boolean') return value;
-            if (typeof value === 'number') return value !== 0;
-            if (typeof value === 'string') {
+    public coerceOptionValue(value: any, optionType: string): string | number | boolean {
+        const t = (optionType || "").toLowerCase();
+        if (t === "bool" || t === "boolean") {
+            if (typeof value === "boolean") return value;
+            if (typeof value === "number") return value !== 0;
+            if (typeof value === "string") {
                 const v = value.trim().toLowerCase();
-                return v === '1' || v === 'true';
+                return v === "1" || v === "true";
             }
             return false;
         }
-        if (t === 'number') {
-            if (typeof value === 'number') return value;
+        if (t === "number") {
+            if (typeof value === "number") return value;
             const n = Number(value);
             return Number.isNaN(n) ? 0 : n;
         }
-        if (t === 'string') {
-            if (value === null || value === undefined) return '';
+        if (t === "string") {
+            if (value === null || value === undefined) return "";
             return String(value);
         }
         // Default to boolean semantics
-        return typeof value === 'boolean' ? value : false;
+        return typeof value === "boolean" ? value : false;
     }
 }

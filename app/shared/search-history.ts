@@ -1,4 +1,5 @@
 import {z} from "zod";
+import {ViewId, viewIdSchema} from "../mapview/view-id";
 
 export interface SearchHistoryEntry {
     version: 2;
@@ -7,6 +8,7 @@ export interface SearchHistoryEntry {
     actionName?: string;
     payload?: unknown;
     savedAt?: number;
+    viewId?: ViewId;
 }
 
 export type LegacySearchHistoryEntry = [number, string];
@@ -20,6 +22,7 @@ export const VersionedSearchHistoryEntrySchema = z.object({
     input: z.string(),
     actionName: z.string().optional(),
     payload: z.unknown().optional(),
+    viewId: viewIdSchema.optional(),
     savedAt: z.coerce.number().optional()
 });
 
@@ -32,13 +35,12 @@ export const SearchHistoryStateEntrySchema = z.union([
     LegacySearchHistoryEntrySchema
 ]);
 
-export const SearchStateSchema = z.union([
-    z.tuple([]),
-    SearchHistoryStateEntrySchema
-]);
+export const SearchStateSchema = z.union([z.tuple([]), SearchHistoryStateEntrySchema]);
 
 /** Returns whether a stored search entry uses the legacy index format. */
-export function isLegacySearchHistoryEntry(entry: SearchHistoryStateEntry | null | undefined): entry is LegacySearchHistoryEntry {
+export function isLegacySearchHistoryEntry(
+    entry: SearchHistoryStateEntry | null | undefined
+): entry is LegacySearchHistoryEntry {
     return Array.isArray(entry) && entry.length === 2 && typeof entry[0] === "number";
 }
 
@@ -74,13 +76,12 @@ export function normalizeSearchHistoryEntry(raw: unknown): SearchHistoryStateEnt
         return null;
     }
 
-    const actionName = typeof value.actionName === "string" && value.actionName.trim()
-        ? value.actionName.trim()
-        : undefined;
-    const savedAt = typeof value.savedAt === "number" && Number.isFinite(value.savedAt)
-        ? value.savedAt
-        : undefined;
+    const actionName =
+        typeof value.actionName === "string" && value.actionName.trim() ? value.actionName.trim() : undefined;
+    const savedAt = typeof value.savedAt === "number" && Number.isFinite(value.savedAt) ? value.savedAt : undefined;
     const payload = normalizeSearchHistoryPayload(value.payload);
+    // An explicit invalid target cannot become an unscoped entry on replay.
+    if (value.viewId !== undefined && !viewIdSchema.safeParse(value.viewId).success) return null;
 
     return {
         version: 2,
@@ -88,6 +89,7 @@ export function normalizeSearchHistoryEntry(raw: unknown): SearchHistoryStateEnt
         input,
         ...(actionName ? {actionName} : {}),
         ...(payload !== undefined ? {payload} : {}),
+        ...(value.viewId !== undefined ? {viewId: value.viewId} : {}),
         ...(savedAt !== undefined ? {savedAt} : {})
     };
 }
@@ -142,7 +144,7 @@ export function serializeSearchStateValue(value: SearchStateValue): SerializedSe
 
 /** Builds the dedupe key for a search history entry. */
 export function historyEntryDedupeKey(entry: SearchHistoryEntry): string {
-    return `${entry.actionId}\u0000${entry.input}`;
+    return `${entry.actionId}\u0000${entry.input}\u0000${entry.viewId ?? ""}`;
 }
 
 /** Builds the stable key for a search history entry. */
@@ -152,11 +154,14 @@ export function historyEntryKey(entry: SearchHistoryEntry): string {
 
 /** Returns whether two search history entries target the same result. */
 export function sameSearchHistoryEntry(lhs: SearchHistoryEntry | null, rhs: SearchHistoryEntry | null): boolean {
-    return !!lhs && !!rhs && lhs.actionId === rhs.actionId && lhs.input === rhs.input;
+    return !!lhs && !!rhs && historyEntryDedupeKey(lhs) === historyEntryDedupeKey(rhs);
 }
 
 /** Attaches an action name to a search history entry. */
-export function withSearchHistoryActionName(entry: SearchHistoryEntry, actionName: string | undefined): SearchHistoryEntry {
+export function withSearchHistoryActionName(
+    entry: SearchHistoryEntry,
+    actionName: string | undefined
+): SearchHistoryEntry {
     const trimmedName = actionName?.trim();
     return {
         ...entry,

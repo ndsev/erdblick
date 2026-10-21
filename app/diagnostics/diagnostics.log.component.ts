@@ -1,71 +1,94 @@
+import {Component, inject, OnDestroy, ViewChild} from "@angular/core";
+import {BehaviorSubject, combineLatest, map, Subscription} from "rxjs";
+import {AppDialogComponent} from "../shared/app-dialog.component";
+import {DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
 import {AppLayoutService} from "../shared/app-layout.service";
-import {inject} from "@angular/core";
-import {Component, OnDestroy, ViewChild} from '@angular/core';
-import {BehaviorSubject, combineLatest, map, Subscription} from 'rxjs';
-import {DiagnosticsFacadeService} from './diagnostics.facade.service';
-import type {DiagnosticsLogFilter} from './diagnostics.model';
-import {DialogStackService} from '../shared/dialog-stack.service';
-import {AppStateService, DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
-import {AppDialogComponent} from '../shared/app-dialog.component';
+import {AppStateService} from "../shared/appstate.service";
+import {DialogStackService} from "../shared/dialog-stack.service";
+import {DiagnosticsFacadeService} from "./diagnostics.facade.service";
+import type {DiagnosticsLogFilter} from "./diagnostics.model";
 
 @Component({
-    selector: 'diagnostics-log-dialog',
+    selector: "diagnostics-log-dialog",
     template: `
-        <app-dialog #dialog header="Diagnostics Log" class="diagnostics-log-dialog"
-                  [(visible)]="dialogVisible"
-                  [modal]="false"
-                  [persistLayout]="true" [layoutId]="layoutId"
-                  [style]="dialogStyle"
-                  (onShow)="onDialogShow()">
+        <app-dialog
+            #dialog
+            header="Diagnostics Log"
+            class="diagnostics-log-dialog"
+            [(visible)]="dialogVisible"
+            [modal]="false"
+            [persistLayout]="true"
+            [layoutId]="layoutId"
+            [style]="dialogStyle"
+            (onShow)="onDialogShow()"
+        >
             <div class="diagnostics-log-controls">
                 <div class="diagnostics-log-filters">
-                    <p-checkbox inputId="diag-log-info" [(ngModel)]="logFilter.info" [binary]="true"
-                                (ngModelChange)="updateFilter()"></p-checkbox>
+                    <p-checkbox
+                        inputId="diag-log-info"
+                        [(ngModel)]="logFilter.info"
+                        [binary]="true"
+                        (ngModelChange)="updateFilter()"
+                    ></p-checkbox>
                     <label for="diag-log-info">Info</label>
-                    <p-checkbox inputId="diag-log-warn" [(ngModel)]="logFilter.warn" [binary]="true"
-                                (ngModelChange)="updateFilter()"></p-checkbox>
+                    <p-checkbox
+                        inputId="diag-log-warn"
+                        [(ngModel)]="logFilter.warn"
+                        [binary]="true"
+                        (ngModelChange)="updateFilter()"
+                    ></p-checkbox>
                     <label for="diag-log-warn">Warnings</label>
-                    <p-checkbox inputId="diag-log-error" [(ngModel)]="logFilter.error" [binary]="true"
-                                (ngModelChange)="updateFilter()"></p-checkbox>
+                    <p-checkbox
+                        inputId="diag-log-error"
+                        [(ngModel)]="logFilter.error"
+                        [binary]="true"
+                        (ngModelChange)="updateFilter()"
+                    ></p-checkbox>
                     <label for="diag-log-error">Errors</label>
                 </div>
                 <div class="diagnostics-log-actions">
                     @if (diagnostics.logFilter(); as filterState) {
                         @if (filterState.error && !filterState.warn && !filterState.info) {
-                            <p-button size="small" label="Show all" (click)="unsetAllFilter()"/>
+                            <p-button size="small" label="Show all" (click)="unsetAllFilter()" />
                         } @else {
-                            <p-button size="small" label="Only errors" (click)="setErrorsOnly()"/>
+                            <p-button size="small" label="Only errors" (click)="setErrorsOnly()" />
                         }
                     }
                     <div class="diagnostics-log-sort">
-                        <p-selectbutton [options]="sortOrderOptions"
-                                        optionLabel="label"
-                                        optionValue="value"
-                                        [(ngModel)]="sortOrder"
-                                        (ngModelChange)="setSortOrder($event)"></p-selectbutton>
+                        <p-selectbutton
+                            [options]="sortOrderOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            [(ngModel)]="sortOrder"
+                            (ngModelChange)="setSortOrder($event)"
+                        ></p-selectbutton>
                     </div>
                 </div>
             </div>
 
             <div class="diagnostics-log-table">
                 @if (filteredLogs$ | async; as logs) {
-                    <p-table #dt2
-                             [value]="logs"
-                             [globalFilterFields]="['at', 'level', 'message']"
-                             [scrollable]="true"
-                             scrollHeight="flex"
-                             [rowTrackBy]="trackByLogRow">
+                    <p-table
+                        #dt2
+                        [value]="logs"
+                        [globalFilterFields]="['at', 'level', 'message']"
+                        [scrollable]="true"
+                        scrollHeight="flex"
+                        [rowTrackBy]="trackByLogRow"
+                    >
                         <ng-template pTemplate="caption">
                             <div class="diagnostics-log-caption">
                                 <p-iconfield iconPosition="left" class="diagnostics-log-caption-search">
                                     <p-inputicon>
                                         <i class="pi pi-filter"></i>
                                     </p-inputicon>
-                                    <input #globalFilterInput
-                                           pInputText
-                                           type="text"
-                                           (input)="dt2.filterGlobal(globalFilterInput.value, 'contains')"
-                                           placeholder="Filter">
+                                    <input
+                                        #globalFilterInput
+                                        pInputText
+                                        type="text"
+                                        (input)="dt2.filterGlobal(globalFilterInput.value, 'contains')"
+                                        placeholder="Filter"
+                                    />
                                 </p-iconfield>
                             </div>
                         </ng-template>
@@ -95,7 +118,7 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
             </div>
 
             <div class="diagnostics-log-footer">
-                <p-button size="small" label="Export" (click)="openExport()"/>
+                <p-button size="small" label="Export" (click)="openExport()" />
             </div>
         </app-dialog>
     `,
@@ -105,16 +128,16 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
 export class DiagnosticsLogDialogComponent implements OnDestroy {
     readonly layoutState = inject(AppLayoutService);
     readonly layoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
-    @ViewChild('dialog') dialog?: AppDialogComponent;
+    @ViewChild("dialog") dialog?: AppDialogComponent;
     readonly dialogStyle: {[key: string]: string} = {
-        height: '75vh'
+        height: "75vh"
     };
-    sortOrder: 'asc' | 'desc' = 'desc';
-    readonly sortOrderOptions: Array<{label: string; value: 'desc' | 'asc'}> = [
-        {label: 'Newest first', value: 'desc'},
-        {label: 'Newest last', value: 'asc'}
+    sortOrder: "asc" | "desc" = "desc";
+    readonly sortOrderOptions: Array<{label: string; value: "desc" | "asc"}> = [
+        {label: "Newest first", value: "desc"},
+        {label: "Newest last", value: "asc"}
     ];
-    private readonly sortOrder$ = new BehaviorSubject<'asc' | 'desc'>(this.sortOrder);
+    private readonly sortOrder$ = new BehaviorSubject<"asc" | "desc">(this.sortOrder);
     readonly filteredLogs$ = combineLatest([
         this.diagnostics.logs$,
         this.diagnostics.diagnosticsLogFilterState,
@@ -122,7 +145,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
     ]).pipe(
         map(([logs, filter, sortOrder]) => {
             const filtered = this.diagnostics.filterLogs(logs, filter);
-            return [...filtered].sort((a, b) => sortOrder === 'desc' ? b.at - a.at : a.at - b.at);
+            return [...filtered].sort((a, b) => (sortOrder === "desc" ? b.at - a.at : a.at - b.at));
         })
     );
 
@@ -134,11 +157,13 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
 
     private readonly subscriptions: Subscription[] = [];
 
-    constructor(public readonly diagnostics: DiagnosticsFacadeService,
-                public readonly stateService: AppStateService,
-                private readonly dialogStack: DialogStackService) {
+    constructor(
+        public readonly diagnostics: DiagnosticsFacadeService,
+        public readonly stateService: AppStateService,
+        private readonly dialogStack: DialogStackService
+    ) {
         this.subscriptions.push(
-            this.diagnostics.diagnosticsLogFilterState.subscribe(filter => {
+            this.diagnostics.diagnosticsLogFilterState.subscribe((filter) => {
                 this.logFilter = {...filter};
             })
         );
@@ -154,7 +179,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
 
     /** Releases dialog-local subscriptions. */
     ngOnDestroy() {
-        this.subscriptions.forEach(sub => sub.unsubscribe());
+        this.subscriptions.forEach((sub) => sub.unsubscribe());
     }
 
     /** Refreshes logs and promotes the dialog above other overlays. */
@@ -169,7 +194,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
     }
 
     /** Updates the sort order used by the reactive filtered-log stream. */
-    setSortOrder(order: 'asc' | 'desc') {
+    setSortOrder(order: "asc" | "desc") {
         this.sortOrder = order;
         this.sortOrder$.next(order);
     }

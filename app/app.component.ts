@@ -1,36 +1,32 @@
-import {AppLayoutService} from "./shared/app-layout.service";
-import {inject} from "@angular/core";
-import {AfterViewInit, Component, OnDestroy, ViewContainerRef} from '@angular/core';
 import {HttpClient} from "@angular/common/http";
+import {AfterViewInit, Component, inject, OnDestroy, ViewContainerRef} from "@angular/core";
+import {Title} from "@angular/platform-browser";
+import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
+import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
+import {environment} from "./environments/environment";
 import {MapInfoService} from "./mapdata/map-info.service";
 import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
+import {TileSubsetLayerRenderService} from "./mapview/deck/tile-subset-layer-render.service";
+import {AppConfigService, Versions} from "./shared/app-config.service";
 import {
-    AppStateService,
     CACHE_RESET_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
-    FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID,
-    Versions
-} from "./shared/appstate.service";
-import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
-import {InfoMessageService} from "./shared/info.service";
-import {environment} from "./environments/environment";
+    FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID
+} from "./shared/app-layout.model";
+import {AppLayoutService} from "./shared/app-layout.service";
+import {AppStateService} from "./shared/appstate.service";
 import {DialogStackService} from "./shared/dialog-stack.service";
-import {Title} from "@angular/platform-browser";
+import {InfoMessageService} from "./shared/info.service";
 import {KeyboardService} from "./shared/keyboard.service";
-import {AppConfigService} from "./shared/app-config.service";
 import {StyleService} from "./styledata/style.service";
-import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
-import {
-    TileSubsetLayerRenderService
-} from "./mapview/deck/tile-subset-layer-render.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
 
 @Component({
-    selector: 'app-root',
+    selector: "app-root",
     template: `
         <dockable-layout></dockable-layout>
         @if (!environment.visualizationOnly) {
@@ -86,36 +82,33 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     protected readonly featureSearchExportDialogLayoutId = FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID;
 
     title: string = "erdblick";
-    private readonly presentationEmbed =
-        new URLSearchParams(window.location.search).get("embed") === "presentation";
+    private readonly presentationEmbed = new URLSearchParams(window.location.search).get("embed") === "presentation";
     private detachDialogFocusListener?: () => void;
     private detachDialogDragStartListener?: () => void;
     private detachDialogDragEndListener?: () => void;
     private dialogDragActive = false;
 
-    constructor(public stateService: AppStateService,
-                private httpClient: HttpClient,
-                private mapInfo: MapInfoService,
-                private tileStream: MapTileStreamService,
-                private subsetRenderer: TileSubsetLayerRenderService,
-                private styleService: StyleService,
-                private keyboardService: KeyboardService,
-                private viewContainerRef: ViewContainerRef,
-                private infoMessageService: InfoMessageService,
-                private dialogStack: DialogStackService,
-                private configService: AppConfigService,
-                private diagnostics: DiagnosticsFacadeService,
-                private titleService: Title) {
+    constructor(
+        public stateService: AppStateService,
+        private httpClient: HttpClient,
+        private mapInfo: MapInfoService,
+        private tileStream: MapTileStreamService,
+        private subsetRenderer: TileSubsetLayerRenderService,
+        private styleService: StyleService,
+        private keyboardService: KeyboardService,
+        private viewContainerRef: ViewContainerRef,
+        private infoMessageService: InfoMessageService,
+        private dialogStack: DialogStackService,
+        private configService: AppConfigService,
+        private diagnostics: DiagnosticsFacadeService,
+        private titleService: Title
+    ) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
         this.titleService.setTitle(this.capitalizeTitle(this.title));
         this.bindDialogFocusStacking();
         this.bindDialogDragSelectionGuard();
-        window.ebDebug = new ErdblickDebugApi(
-            this.tileStream,
-            this.subsetRenderer,
-            this.stateService
-        );
+        window.ebDebug = new ErdblickDebugApi(this.tileStream, this.subsetRenderer, this.stateService);
 
         this.loadDistributionVersions();
 
@@ -131,10 +124,9 @@ export class AppComponent implements AfterViewInit, OnDestroy {
             const serverConfig = this.configService.snapshot.serverConfig;
             if (serverConfig.styleEditingEnabled || serverConfig.mapPresets.write) {
                 this.infoMessageService.showConfigurationEditingNotices(
-                    serverConfig.styleEditingEnabled
-                        ? serverConfig.styleEditingDirectory ?? ""
-                        : null,
-                    serverConfig.mapPresets.write);
+                    serverConfig.styleEditingEnabled ? (serverConfig.styleEditingDirectory ?? "") : null,
+                    serverConfig.mapPresets.write
+                );
             }
         });
     }
@@ -153,14 +145,14 @@ export class AppComponent implements AfterViewInit, OnDestroy {
             if (!target) {
                 return;
             }
-            const dialogElement = target.closest('.p-dialog') as HTMLElement | null;
+            const dialogElement = target.closest(".p-dialog") as HTMLElement | null;
             if (dialogElement) {
-                if (dialogElement.closest('.search-menu-dialog')) {
-                    const mainBar = document.querySelector('.main-bar') as HTMLElement | null;
+                if (dialogElement.closest(".search-menu-dialog")) {
+                    const mainBar = document.querySelector(".main-bar") as HTMLElement | null;
                     if (mainBar) {
                         this.dialogStack.bringToFront(mainBar);
                     }
-                    const wrapper = dialogElement.closest('.search-wrapper') as HTMLElement | null;
+                    const wrapper = dialogElement.closest(".search-wrapper") as HTMLElement | null;
                     this.dialogStack.bringToFront(wrapper ?? dialogElement);
                     return;
                 }
@@ -168,8 +160,8 @@ export class AppComponent implements AfterViewInit, OnDestroy {
                 return;
             }
 
-            const mainBar = target.closest('.main-bar') as HTMLElement | null;
-            const searchWrapper = target.closest('.search-wrapper') as HTMLElement | null;
+            const mainBar = target.closest(".main-bar") as HTMLElement | null;
+            const searchWrapper = target.closest(".search-wrapper") as HTMLElement | null;
             if (mainBar) {
                 this.dialogStack.bringToFront(mainBar);
             }
@@ -177,9 +169,9 @@ export class AppComponent implements AfterViewInit, OnDestroy {
                 this.dialogStack.bringToFront(searchWrapper);
             }
         };
-        document.addEventListener('mousedown', handler, true);
+        document.addEventListener("mousedown", handler, true);
         this.detachDialogFocusListener = () => {
-            document.removeEventListener('mousedown', handler, true);
+            document.removeEventListener("mousedown", handler, true);
         };
     }
 
@@ -218,12 +210,12 @@ export class AppComponent implements AfterViewInit, OnDestroy {
             if (!target) {
                 return;
             }
-            const header = target.closest('.p-dialog-header') as HTMLElement | null;
-            const resizeHandle = target.closest('.p-resizable-handle') as HTMLElement | null;
+            const header = target.closest(".p-dialog-header") as HTMLElement | null;
+            const resizeHandle = target.closest(".p-resizable-handle") as HTMLElement | null;
             if (!header && !resizeHandle) {
                 return;
             }
-            const dialog = (header ?? resizeHandle)?.closest('.p-dialog') as HTMLElement | null;
+            const dialog = (header ?? resizeHandle)?.closest(".p-dialog") as HTMLElement | null;
             if (!dialog) {
                 return;
             }
@@ -234,18 +226,18 @@ export class AppComponent implements AfterViewInit, OnDestroy {
             this.setDialogDragSelection(false);
         };
 
-        document.addEventListener('pointerdown', handlePointerDown, true);
-        window.addEventListener('pointerup', handlePointerEnd, true);
-        window.addEventListener('pointercancel', handlePointerEnd, true);
-        window.addEventListener('blur', handlePointerEnd);
+        document.addEventListener("pointerdown", handlePointerDown, true);
+        window.addEventListener("pointerup", handlePointerEnd, true);
+        window.addEventListener("pointercancel", handlePointerEnd, true);
+        window.addEventListener("blur", handlePointerEnd);
 
         this.detachDialogDragStartListener = () => {
-            document.removeEventListener('pointerdown', handlePointerDown, true);
+            document.removeEventListener("pointerdown", handlePointerDown, true);
         };
         this.detachDialogDragEndListener = () => {
-            window.removeEventListener('pointerup', handlePointerEnd, true);
-            window.removeEventListener('pointercancel', handlePointerEnd, true);
-            window.removeEventListener('blur', handlePointerEnd);
+            window.removeEventListener("pointerup", handlePointerEnd, true);
+            window.removeEventListener("pointercancel", handlePointerEnd, true);
+            window.removeEventListener("blur", handlePointerEnd);
         };
     }
 
@@ -256,20 +248,19 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         }
         this.dialogDragActive = active;
         if (active) {
-            document.body?.classList.add('dialog-dragging');
+            document.body?.classList.add("dialog-dragging");
             window.getSelection()?.removeAllRanges();
             return;
         }
-        document.body?.classList.remove('dialog-dragging');
+        document.body?.classList.remove("dialog-dragging");
     }
 
     /** Loads the bundled fallback version string when distribution metadata is unavailable. */
     getBasicVersion() {
-        this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
-            data => {
-                this.configService.erdblickVersion.next(`${this.title} ${data.toString()}`);
-                this.titleService.setTitle(this.capitalizeTitle(this.title));
-            });
+        this.httpClient.get("./bundle/VERSION", {responseType: "text"}).subscribe((data) => {
+            this.configService.erdblickVersion.next(`${this.title} ${data.toString()}`);
+            this.titleService.setTitle(this.capitalizeTitle(this.title));
+        });
     }
 
     /** Capitalizes the application title for use in the browser tab. */

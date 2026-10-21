@@ -3,7 +3,7 @@ import {WebMercatorViewport} from "@deck.gl/core";
 import {addMetersToLngLat} from "@math.gl/web-mercator";
 import {describe, expect, it, vi} from "vitest";
 
-import type {TileFeatureId} from "../../shared/appstate.service";
+import type {TileFeatureId} from "../../inspection/inspection-state.model";
 import {DeckMapView2D} from "./deck-view2d";
 import {DeckMapView3D} from "./deck-view3d";
 import {ErdblickVectorLayer} from "./erdblick-vector.layer";

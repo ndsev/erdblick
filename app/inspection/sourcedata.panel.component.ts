@@ -1,40 +1,19 @@
-import {InspectionStateService} from "./inspection-state.service";
-import {inject} from "@angular/core";
-import {
-    ChangeDetectorRef,
-    Component,
-    effect,
-    input,
-    OnDestroy,
-    output,
-    ViewChild
-} from "@angular/core";
+import {ChangeDetectorRef, Component, effect, inject, input, OnDestroy, output, ViewChild} from "@angular/core";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
-import {AppStateService, InspectionPanelModel} from "../shared/appstate.service";
 import {TreeTableNode} from "primeng/api";
 import {TileSourceDataLayer} from "../../build/libs/core/erdblick-core";
-import {TileDeliveryError} from "../mapdata/tile-diagnostics";
-import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
-import {
-    MapTileStreamClientTiles,
-} from "../mapdata/tilestream";
+import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {MapInfoService} from "../mapdata/map-info.service";
+import {MapTileStreamService, RetainedTileExpiryOwner} from "../mapdata/map-tile-stream.service";
+import {parseMapPartitionKey, partitionJson, partitionKey, partitionKeySuffix} from "../mapdata/partition.model";
+import {TileDeliveryError} from "../mapdata/tile-diagnostics";
+import {MapTileStreamClientTiles} from "../mapdata/tilestream";
+import {AppStateService} from "../shared/appstate.service";
+import {InspectionPanelModel} from "./inspection-state.model";
+import {InspectionStateService} from "./inspection-state.service";
 import {Column, InspectionTreeComponent} from "./inspection.tree.component";
-import {
-    expandSingleChildSourceDataPaths,
-    sourceDataTreePresentation
-} from "./sourcedata-tree.presentation";
-import {
-    MapTileStreamService,
-    RetainedTileExpiryOwner
-} from "../mapdata/map-tile-stream.service";
-import {
-    parseMapPartitionKey,
-    partitionJson,
-    partitionKey,
-    partitionKeySuffix
-} from "../mapdata/partition.model";
+import {expandSingleChildSourceDataPaths, sourceDataTreePresentation} from "./sourcedata-tree.presentation";
 
 interface LoadedSourceDataLayer {
     layer: TileSourceDataLayer;
@@ -42,21 +21,17 @@ interface LoadedSourceDataLayer {
 }
 
 @Component({
-    selector: 'sourcedata-panel',
+    selector: "sourcedata-panel",
     template: `
         @if (loading) {
             <div class="spinner">
-                <p-progressSpinner ariaLabel="loading"/>
+                <p-progressSpinner ariaLabel="loading" />
             </div>
         } @else if (errorMessage) {
-            <div>
-                <strong>Error</strong><br>{{ errorMessage }}
-            </div>
+            <div><strong>Error</strong><br />{{ errorMessage }}</div>
         } @else {
             @if (staleErrorMessage) {
-                <div class="source-data-stale-error">
-                    <strong>Refresh failed:</strong> {{ staleErrorMessage }}
-                </div>
+                <div class="source-data-stale-error"><strong>Refresh failed:</strong> {{ staleErrorMessage }}</div>
             }
             @if (sqlQuery) {
                 <details class="source-data-sql-query" data-testid="source-data-sql-query">
@@ -64,11 +39,16 @@ interface LoadedSourceDataLayer {
                     <code>{{ sqlQuery }}</code>
                 </details>
             }
-            <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
-                             [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
-                             [showFilter]="showFilter()"
-                             [defaultVisibleColumnKeys]="inspectionState.sourceDataInspectionDefaultColumns"
-                             [firstHighlightedItemIndex]="firstHighlightedItemIndex">
+            <inspection-tree
+                [treeData]="treeData"
+                [columns]="columns"
+                [panelId]="panel().id"
+                [filterText]="filterText()"
+                (filterTextChange)="filterTextChange.emit($event)"
+                [showFilter]="showFilter()"
+                [defaultVisibleColumnKeys]="inspectionState.sourceDataInspectionDefaultColumns"
+                [firstHighlightedItemIndex]="firstHighlightedItemIndex"
+            >
             </inspection-tree>
         }
     `,
@@ -82,7 +62,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
     filterText = input<string | undefined>();
     filterTextChange = output<string>();
     showFilter = input<boolean>(true);
-    error = output<string>({ alias: 'errorOccurred' });
+    error = output<string>({alias: "errorOccurred"});
 
     loading: boolean = true;
     errorMessage: string = "";
@@ -91,12 +71,12 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
 
     treeData: TreeTableNode[] = [];
     columns: Column[] = [
-        { key: "key",     header: "Key",     width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
-        { key: "value",   header: "Value",   width: '0*',    transform: (colKey, rowData) => rowData[colKey] },
+        {key: "key", header: "Key", width: "0*", transform: (colKey, rowData) => rowData[colKey]},
+        {key: "value", header: "Value", width: "0*", transform: (colKey, rowData) => rowData[colKey]},
         {
             key: "displayAddress",
             header: "Address",
-            width: '100px',
+            width: "100px",
             transform: this.addressFormatter.bind(this),
             toggleable: true,
             toggleIcon: "numbers"
@@ -104,7 +84,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         {
             key: "schemaType",
             header: "Type",
-            width: 'auto',
+            width: "auto",
             transform: this.schemaTypeURLFormatter.bind(this),
             toggleable: true,
             toggleIcon: "data_object"
@@ -119,10 +99,12 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
     private loadRevision = 0;
     private valueEpoch = 0;
 
-    constructor(private mapService: MapInfoService,
-                public stateService: AppStateService,
-                private tileStream: MapTileStreamService,
-                private readonly cdr: ChangeDetectorRef) {
+    constructor(
+        private mapService: MapInfoService,
+        public stateService: AppStateService,
+        private tileStream: MapTileStreamService,
+        private readonly cdr: ChangeDetectorRef
+    ) {
         effect(() => {
             const sourceData = this.panel().sourceData;
             const revision = ++this.loadRevision;
@@ -135,12 +117,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             this.errorMessage = "";
             this.staleErrorMessage = "";
             this.sqlQuery = undefined;
-            void this.refreshSourceData(
-                sourceData.mapTileKey,
-                sourceData.address,
-                revision,
-                false
-            );
+            void this.refreshSourceData(sourceData.mapTileKey, sourceData.address, revision, false);
         });
     }
 
@@ -149,11 +126,13 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         this.tileStream.cancelRetainedTileExpiries?.(this);
     }
 
-    expireTiles(tokens: ReadonlyArray<{
-        tileId: string | number;
-        valueVersion: number;
-    }>): void {
-        if (!tokens.some(token => token.valueVersion === this.valueEpoch)) {
+    expireTiles(
+        tokens: ReadonlyArray<{
+            tileId: string | number;
+            valueVersion: number;
+        }>
+    ): void {
+        if (!tokens.some((token) => token.valueVersion === this.valueEpoch)) {
             return;
         }
         const sourceData = this.panel().sourceData;
@@ -161,12 +140,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             return;
         }
         const revision = this.loadRevision;
-        void this.refreshSourceData(
-            sourceData.mapTileKey,
-            sourceData.address,
-            revision,
-            true
-        );
+        void this.refreshSourceData(sourceData.mapTileKey, sourceData.address, revision, true);
     }
 
     /** Keeps the current tree visible until a current replacement has parsed successfully. */
@@ -196,12 +170,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             this.selectItemWithAddress(address);
             const [, , partition] = parseMapPartitionKey(coreLib, mapTileKey);
             const epoch = ++this.valueEpoch;
-            this.tileStream.updateRetainedTileExpiry?.(
-                this,
-                partitionKey(partition),
-                epoch,
-                loaded.expiresAtMs
-            );
+            this.tileStream.updateRetainedTileExpiry?.(this, partitionKey(partition), epoch, loaded.expiresAtMs);
         } catch (error) {
             if (revision !== this.loadRevision) {
                 return;
@@ -209,7 +178,11 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             if (error instanceof TileDeliveryError) {
                 const [, , partition] = parseMapPartitionKey(coreLib, mapTileKey);
                 this.tileStream.updateRetainedTileExpiry(
-                    this, partitionKey(partition), this.valueEpoch, error.expiresAtMs);
+                    this,
+                    partitionKey(partition),
+                    this.valueEpoch,
+                    error.expiresAtMs
+                );
             }
             const message = `${error}`;
             if (renewal && this.treeData.length) {
@@ -229,22 +202,19 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
     }
 
     /** Fetches and parses one source-data layer through the bounded POST /tiles endpoint. */
-    async loadSourceDataLayer(mapTileKey: string) : Promise<LoadedSourceDataLayer> {
-        const [mapId, layerId, partition] = parseMapPartitionKey(
-            coreLib,
-            mapTileKey
-        );
+    async loadSourceDataLayer(mapTileKey: string): Promise<LoadedSourceDataLayer> {
+        const [mapId, layerId, partition] = parseMapPartitionKey(coreLib, mapTileKey);
         if (!this.mapService.isMapLayerReady(mapId, layerId)) {
             const map = this.mapService.maps.maps.get(mapId);
-            throw new Error(map
-                ? this.mapService.dataSourceStatusText(map.info)
-                : "Map layer is not available.");
+            throw new Error(map ? this.mapService.dataSourceStatusText(map.info) : "Map layer is not available.");
         }
-        const requests = [{
-            mapId: mapId,
-            layerId: layerId,
-            partitions: [partitionJson(partition)]
-        }];
+        const requests = [
+            {
+                mapId: mapId,
+                layerId: layerId,
+                partitions: [partitionJson(partition)]
+            }
+        ];
 
         let layer: TileSourceDataLayer | null = null;
         let expiresAtMs: number | null = null;
@@ -255,9 +225,10 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         }
 
         transport.withSourceDataCallback((payload) => {
-            const metadata = uint8ArrayToWasm((wasmBlob) =>
-                transport.parser.readTileLayerMetadata(wasmBlob),
-            payload) as unknown as {
+            const metadata = uint8ArrayToWasm(
+                (wasmBlob) => transport.parser.readTileLayerMetadata(wasmBlob),
+                payload
+            ) as unknown as {
                 error?: string;
                 mapName?: string;
                 warnings?: string[];
@@ -267,13 +238,8 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             for (const warning of metadata.warnings ?? []) console.warn(`Tile warning (${mapTileKey}): ${warning}`);
             const timestamp = Number(metadata.conversionTimestampMs);
             const ttl = Number(metadata.ttlMs);
-            const expiry = Number.isFinite(timestamp) &&
-                Number.isFinite(ttl) && ttl > 0
-                ? timestamp + ttl
-                : null;
-            expiresAtMs = expiry !== null && Number.isFinite(expiry)
-                ? expiry
-                : null;
+            const expiry = Number.isFinite(timestamp) && Number.isFinite(ttl) && ttl > 0 ? timestamp + ttl : null;
+            expiresAtMs = expiry !== null && Number.isFinite(expiry) ? expiry : null;
             if (metadata.error) throw new TileDeliveryError(metadata.error, expiresAtMs);
             const parsedLayer = uint8ArrayToWasm((wasmBlob) => {
                 return transport.parser.readTileSourceDataLayer(wasmBlob);
@@ -315,13 +281,14 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
 
     /** Builds a user-facing empty-state message for a partition without source data. */
     private noSourceDataMessage(mapTileKey: string): string {
-        const [mapId, layerId, partition] = parseMapPartitionKey(
-            coreLib,
-            mapTileKey
+        const [mapId, layerId, partition] = parseMapPartitionKey(coreLib, mapTileKey);
+        const layerName = this.mapService.layerNameForSourceDataLayerId(
+            String(layerId),
+            String(layerId).startsWith("Metadata")
         );
-        const layerName = this.mapService.layerNameForSourceDataLayerId(String(layerId), String(layerId).startsWith("Metadata"));
-        return `No source data for ${partition.kind} ` +
-            `${partitionKeySuffix(partition)} (${layerName}) of map ${mapId}.`;
+        return (
+            `No source data for ${partition.kind} ` + `${partitionKeySuffix(partition)} (${layerName}) of map ${mapId}.`
+        );
     }
 
     /** Replaces the tree with an error state and notifies the parent panel. */
@@ -370,8 +337,8 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         if (!address) {
             return "";
         }
-        if (typeof address === 'object') {
-            return `${address.offset}:${address.size}`
+        if (typeof address === "object") {
+            return `${address.offset}:${address.size}`;
         }
         return address;
     }
@@ -387,22 +354,24 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         let addressInRange: (candidate: any) => boolean;
         if (this.addressFormat == coreLib.SourceDataAddressFormat.BIT_RANGE) {
             const searchAddress = {
-                offset: address >> BigInt(32) & BigInt(0xFFFFFFFF),
-                size: address & BigInt(0xFFFFFFFF),
-            }
+                offset: (address >> BigInt(32)) & BigInt(0xffffffff),
+                size: address & BigInt(0xffffffff)
+            };
 
             const addressLow = searchAddress.offset;
             const addressHigh = addressLow + searchAddress.size;
 
             addressInRange = (candidate: any) => {
-                return candidate.offset >= addressLow &&
+                return (
+                    candidate.offset >= addressLow &&
                     candidate.offset + candidate.size <= addressHigh &&
-                    (candidate.size != 0 || addressLow == addressHigh);
-            }
+                    (candidate.size != 0 || addressLow == addressHigh)
+                );
+            };
         } else {
             addressInRange = (candidate: any) => {
                 return candidate == address;
-            }
+            };
         }
         // Virtual row index (visible row index) of the first highlighted row, or undefined.
         let firstHighlightedItemIndex: number | undefined;
@@ -424,7 +393,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
                 }
 
                 node.data.styleClass = "highlight";
-                parents.forEach((parent: TreeTableNode) =>{
+                parents.forEach((parent: TreeTableNode) => {
                     parent.expanded = true;
                 });
             }

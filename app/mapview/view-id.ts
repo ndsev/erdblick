@@ -1,8 +1,10 @@
 import {z} from "zod";
 
 /** Record-backed identity must not collide with inherited JavaScript property names. */
-export const viewIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)
-    .refine(id => !Object.prototype.hasOwnProperty.call(Object.prototype, id), "Reserved view ID");
+export const viewIdSchema = z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,64}$/)
+    .refine((id) => !Object.prototype.hasOwnProperty.call(Object.prototype, id), "Reserved view ID");
 
 /** Logical view identity shared by durable state, links, and live renderer targets. */
 export type ViewId = string;
@@ -11,4 +13,6 @@ export type ViewId = string;
 export interface ViewIdentity {
     id: ViewId;
     generation: number;
+    /** Creation intent used when owners initialize a newly copied view. */
+    copySourceId?: ViewId;
 }

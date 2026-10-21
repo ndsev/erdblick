@@ -1,4 +1,4 @@
-import type {TileFeatureId} from "../../shared/appstate.service";
+import type {TileFeatureId} from "../../inspection/inspection-state.model";
 import type {DeckInteractionEffect} from "./deck-interaction-effect";
 
 /** Style-order boundary separating ordinary presentation from transient interaction rules. */

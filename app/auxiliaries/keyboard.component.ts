@@ -1,17 +1,26 @@
+import {Component, inject, ViewChild} from "@angular/core";
+import {AppDialogComponent} from "../shared/app-dialog.component";
+import {KEYBOARD_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
 import {AppLayoutService} from "../shared/app-layout.service";
-import {inject} from "@angular/core";
-import {Component, ViewChild} from '@angular/core';
-import {AppStateService, KEYBOARD_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
-import {DialogStackService} from '../shared/dialog-stack.service';
-import {AppDialogComponent} from '../shared/app-dialog.component';
+import {AppStateService} from "../shared/appstate.service";
+import {DialogStackService} from "../shared/dialog-stack.service";
 
 @Component({
-    selector: 'keyboard-dialog',
+    selector: "keyboard-dialog",
     template: `
-        <app-dialog header="Keyboard Controls" [(visible)]="dialogVisible" [position]="'center'"
-                  [resizable]="false" [modal]="false" [draggable]="true" class="pref-dialog"
-                  [persistLayout]="true" [layoutId]="dialogLayoutId"
-                  #keyboardDialog (onShow)="onDialogShow()">
+        <app-dialog
+            header="Keyboard Controls"
+            [(visible)]="dialogVisible"
+            [position]="'center'"
+            [resizable]="false"
+            [modal]="false"
+            [draggable]="true"
+            class="pref-dialog"
+            [persistLayout]="true"
+            [layoutId]="dialogLayoutId"
+            #keyboardDialog
+            (onShow)="onDialogShow()"
+        >
             <div class="keyboard-dialog">
                 <ul class="keyboard-list">
                     <li>
@@ -100,10 +109,12 @@ export class KeyboardComponent {
     readonly layoutState = inject(AppLayoutService);
     readonly dialogLayoutId = KEYBOARD_DIALOG_LAYOUT_ID;
 
-    @ViewChild('keyboardDialog') keyboardDialog?: AppDialogComponent;
+    @ViewChild("keyboardDialog") keyboardDialog?: AppDialogComponent;
 
-    constructor(public stateService: AppStateService,
-                private dialogStack: DialogStackService) {}
+    constructor(
+        public stateService: AppStateService,
+        private dialogStack: DialogStackService
+    ) {}
 
     get dialogVisible(): boolean {
         return this.layoutState.isDialogOpen(this.dialogLayoutId);

@@ -1,10 +1,8 @@
-import {createStateTestSystem, type StateTestSystem} from "./state-test-system";
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
-import type {StyleService} from "../styledata/style.service";
-import type {AppStateService} from "./appstate.service";
 import type {MapViewService} from "../mapview/map-view.service";
 import type {FeatureSearchService} from "../search/feature.search.service";
+import type {StyleService} from "../styledata/style.service";
 import {
     PRESENTATION_BRIDGE_APPLY,
     PRESENTATION_BRIDGE_APPLY_URL_STATE,
@@ -97,7 +95,7 @@ describe("PresentationStateBridgeService", () => {
             ready = resolve;
         }));
         const bridge = new PresentationStateBridgeService(
-            ({replaceUrlState} as unknown as StateTestSystem) as never,
+            ({replaceUrlState}) as never,
             view, styleServiceFixture(), searchService as unknown as FeatureSearchService
         );
         bridge.initialize(fixture.host);
@@ -145,7 +143,7 @@ describe("PresentationStateBridgeService", () => {
         const view = mapViewStateFixture();
         const searchService = {dismissForPresentation: vi.fn(), importSearchJsonPayload: vi.fn()};
         const bridge = new PresentationStateBridgeService(
-            ({replaceUrlState} as unknown as StateTestSystem) as never, view, styleServiceFixture(),
+            ({replaceUrlState}) as never, view, styleServiceFixture(),
             searchService as unknown as FeatureSearchService
         );
         bridge.initialize(fixture.host);
@@ -169,7 +167,7 @@ describe("PresentationStateBridgeService", () => {
         const state = {replaceUrlState: vi.fn()};
         const searchService = {dismissForPresentation: vi.fn(), importSearchJsonPayload: vi.fn()};
         const bridge = new PresentationStateBridgeService(
-            (state as unknown as StateTestSystem) as never, mapViewStateFixture(), styleServiceFixture(),
+            (state) as never, mapViewStateFixture(), styleServiceFixture(),
             searchService as unknown as FeatureSearchService
         );
         bridge.initialize(fixture.host);
@@ -191,7 +189,7 @@ describe("PresentationStateBridgeService", () => {
         const fixture = framedWindow();
         const state = {replaceUrlState: vi.fn()};
         const bridge = new PresentationStateBridgeService(
-            (state as unknown as StateTestSystem) as never, mapViewStateFixture(), styleServiceFixture()
+            (state) as never, mapViewStateFixture(), styleServiceFixture()
         );
         bridge.initialize(fixture.host);
         fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2,
@@ -208,7 +206,7 @@ describe("PresentationStateBridgeService", () => {
         const fixture = framedWindow();
         const replaceUrlState = vi.fn().mockResolvedValue(undefined);
         const service = new PresentationStateBridgeService(
-            ({replaceUrlState} as unknown as StateTestSystem) as never,
+            ({replaceUrlState}) as never,
             mapViewStateFixture(), styleServiceFixture()
         );
         service.initialize(fixture.host);
@@ -228,7 +226,7 @@ describe("PresentationStateBridgeService", () => {
         const camera = {destination: {lon: 11, lat: 48, alt: 100}, orientation: {heading: 0, pitch: -1, roll: 0}};
         let complete!: () => void;
         const state = {cameraViewDataState: {getValue: () => camera},
-            replaceUrlState: () => new Promise<void>(resolve => {complete = resolve;})} as unknown as StateTestSystem;
+            replaceUrlState: () => new Promise<void>(resolve => {complete = resolve;})};
         const view = mapViewStateFixture();
         const bridge = new PresentationStateBridgeService((state) as never, view, styleServiceFixture());
         bridge.initialize(fixture.host);
@@ -245,7 +243,7 @@ describe("PresentationStateBridgeService", () => {
         const state = {replaceUrlState: vi.fn(async () => {}), isDockOpen: false, dockActiveTab: 'search', selection: [
             {undocked: false, features: [{featureId: 'Road.1'}]},
             {undocked: true, features: [], sourceData: {mapTileKey: 'SourceData:map:layer:1'}}
-        ]} as unknown as StateTestSystem;
+        ]};
         const bridge = new PresentationStateBridgeService((state) as never, mapViewStateFixture(), styleServiceFixture());
         bridge.initialize(fixture.host);
         fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2, requestId: 1,
@@ -264,7 +262,7 @@ describe("PresentationStateBridgeService", () => {
         const to = {destination: {lon: 12, lat: 49, alt: 10000}, orientation: {heading: 0.1, pitch: -0.5, roll: 0}};
         let camera = from;
         const state = {cameraViewDataState: {getValue: () => camera},
-            replaceUrlState: vi.fn(async () => { camera = to; })} as unknown as StateTestSystem;
+            replaceUrlState: vi.fn(async () => { camera = to; })};
         const view = mapViewStateFixture();
         const next = vi.mocked(view.presentationCameraViewStateTopic.next);
         const bridge = new PresentationStateBridgeService((state) as never, view, styleServiceFixture());
@@ -286,7 +284,7 @@ describe("PresentationStateBridgeService", () => {
 
     it("rejects unbounded camera transition durations", async () => {
         const fixture = framedWindow();
-        const state = {replaceUrlState: vi.fn()} as unknown as StateTestSystem;
+        const state = {replaceUrlState: vi.fn()};
         const bridge = new PresentationStateBridgeService((state) as never, mapViewStateFixture(), styleServiceFixture());
         bridge.initialize(fixture.host);
         for (const transitionMs of [-1, 10001, NaN, '2000']) {
@@ -306,7 +304,7 @@ describe("PresentationStateBridgeService", () => {
         });
         const view = mapViewStateFixture();
         const next = vi.mocked(view.presentationCameraViewStateTopic.next);
-        const service = new PresentationStateBridgeService(({} as StateTestSystem) as never, view, styleServiceFixture());
+        const service = new PresentationStateBridgeService(({}) as never, view, styleServiceFixture());
         service.initialize(fixture.host);
         fixture.dispatch({type: PRESENTATION_BRIDGE_START_FLIGHT, version: 2, flight: {
             durationMs: 120_000, pingPong: false, canvasOnly: true,
@@ -326,7 +324,7 @@ describe("PresentationStateBridgeService", () => {
         service.ngOnDestroy();
     });
     it("activates only in a framed presentation document and announces readiness", () => {
-        const stateService = {replaceSnapshotState: vi.fn()} as unknown as StateTestSystem;
+        const stateService = {replaceSnapshotState: vi.fn()};
         const fixture = framedWindow();
         const service = new PresentationStateBridgeService((stateService) as never, mapViewStateFixture(), styleServiceFixture());
 
@@ -352,7 +350,7 @@ describe("PresentationStateBridgeService", () => {
         const replaceSnapshotState = vi.fn().mockReturnValue([]);
         const fixture = framedWindow();
         const service = new PresentationStateBridgeService(
-            ({replaceSnapshotState} as unknown as StateTestSystem) as never,
+            ({replaceSnapshotState}) as never,
             mapViewStateFixture(), styleServiceFixture()
         );
         service.initialize(fixture.host);
@@ -375,7 +373,7 @@ describe("PresentationStateBridgeService", () => {
         const replaceUrlState = vi.fn().mockResolvedValue(undefined);
         const fixture = framedWindow();
         const service = new PresentationStateBridgeService(
-            ({replaceUrlState} as unknown as StateTestSystem) as never,
+            ({replaceUrlState}) as never,
             mapViewStateFixture(), styleServiceFixture()
         );
         service.initialize(fixture.host);
@@ -406,7 +404,7 @@ describe("PresentationStateBridgeService", () => {
         const replaceSnapshotState = vi.fn().mockReturnValue(["Invalid value for 'mode2d'."]);
         const fixture = framedWindow();
         const service = new PresentationStateBridgeService(
-            ({replaceSnapshotState} as unknown as StateTestSystem) as never,
+            ({replaceSnapshotState}) as never,
             mapViewStateFixture(), styleServiceFixture()
         );
         const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -431,7 +429,7 @@ describe("PresentationStateBridgeService", () => {
         const replaceSnapshotState = vi.fn().mockReturnValue([]);
         const fixture = framedWindow();
         const service = new PresentationStateBridgeService(
-            ({replaceSnapshotState} as unknown as StateTestSystem) as never,
+            ({replaceSnapshotState}) as never,
             mapViewStateFixture(), styleServiceFixture()
         );
         service.initialize(fixture.host);
@@ -473,7 +471,7 @@ describe("PresentationStateBridgeService", () => {
             .mockReturnValue([]);
         const fixture = framedWindow();
         const service = new PresentationStateBridgeService(
-            ({replaceSnapshotState} as unknown as StateTestSystem) as never,
+            ({replaceSnapshotState}) as never,
             mapViewStateFixture(), styleServiceFixture()
         );
         service.initialize(fixture.host);
@@ -512,7 +510,7 @@ describe("PresentationStateBridgeService", () => {
             presentationCameraViewStateTopic: {next}
         } as unknown as MapViewService;
         const service = new PresentationStateBridgeService(
-            ({replaceSnapshotState: vi.fn()} as unknown as StateTestSystem) as never,
+            ({replaceSnapshotState: vi.fn()}) as never,
             mapViewState, styleServiceFixture()
         );
         service.initialize(fixture.host);

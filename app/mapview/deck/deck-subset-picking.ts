@@ -1,10 +1,7 @@
-import type {TileFeatureId} from "../../shared/appstate.service";
-import type {PresentationKind} from
-    "../../mapdata/styled-mapget-layer.model";
+import type {TileFeatureId} from "../../inspection/inspection-state.model";
 import {SceneMode} from "../../integrations/geo";
-import type {
-    DeckGltfPickProxyStyleContribution
-} from "./deck-gltf-node.layer";
+import type {PresentationKind} from "../../mapdata/styled-mapget-layer.model";
+import type {DeckGltfPickProxyStyleContribution} from "./deck-gltf-node.layer";
 
 export type SubsetPickResolver = (pickIndex: number) => TileFeatureId[];
 
@@ -33,10 +30,7 @@ export interface DeckSubsetInteractionProps {
 }
 
 /** Names one owner-specific invisible GLTF proxy so presentation kinds never mix. */
-export function deckSubsetGltfPickProxyKey(
-    mapTileKey: string,
-    ownerId: string
-): string {
+export function deckSubsetGltfPickProxyKey(mapTileKey: string, ownerId: string): string {
     return `${mapTileKey}/gltf-pick-proxy/${encodeURIComponent(ownerId)}`;
 }
 
@@ -47,16 +41,10 @@ export function deckSubsetInteractionProps(
     noHighlightModeValue: number,
     sceneMode: SceneMode | undefined
 ): DeckSubsetInteractionProps {
-    const ordinaryPresentation =
-        highlightModeValue === noHighlightModeValue;
+    const ordinaryPresentation = highlightModeValue === noHighlightModeValue;
     return {
-        pickable: ordinaryPresentation
-            ? sceneMode === SceneMode.SCENE3D
-                ? "3d"
-                : true
-            : false,
-        drillPickEligible:
-            ordinaryPresentation && presentationKind === "regular"
+        pickable: ordinaryPresentation ? (sceneMode === SceneMode.SCENE3D ? "3d" : true) : false,
+        drillPickEligible: ordinaryPresentation && presentationKind === "regular"
     };
 }
 
@@ -70,9 +58,7 @@ interface GltfPickContribution {
  * Rebinds contributor-local subset addresses into one pick-proxy address table.
  * This keeps shared proxy data paired with the exact immutable subset that owns it.
  */
-export function remapGltfPickContributions(
-    source: readonly GltfPickContribution[]
-): {
+export function remapGltfPickContributions(source: readonly GltfPickContribution[]): {
     contributions: DeckGltfPickProxyStyleContribution[];
     pickResolver: SubsetPickResolver;
 } {
@@ -80,11 +66,11 @@ export function remapGltfPickContributions(
         resolver: SubsetPickResolver;
         address: number;
     }> = [];
-    const contributions = source.map(item => {
+    const contributions = source.map((item) => {
         const remapped = new Map<number, number>();
         return {
             sourceId: item.sourceId,
-            data: item.data.map(datum => {
+            data: item.data.map((datum) => {
                 let address = remapped.get(datum.featureAddress);
                 if (address === undefined) {
                     address = entries.length;
@@ -100,7 +86,7 @@ export function remapGltfPickContributions(
     });
     return {
         contributions,
-        pickResolver: address => {
+        pickResolver: (address) => {
             const entry = entries[address];
             return entry ? entry.resolver(entry.address) : [];
         }

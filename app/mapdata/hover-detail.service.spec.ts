@@ -1,12 +1,9 @@
 import "@angular/compiler";
 import {BehaviorSubject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
+import type {HoverLabelFieldConfig, TileFeatureId} from "../inspection/inspection-state.model";
+import {defaultHoverLabelFieldKey} from "../inspection/inspection-state.model";
 import {coreLib} from "../integrations/wasm";
-import type {
-    HoverLabelFieldConfig,
-    TileFeatureId
-} from "../shared/appstate.service";
-import {defaultHoverLabelFieldKey} from "../shared/appstate.service";
 import {HoverDetailService} from "./hover-detail.service";
 import {MapgetLayer} from "./mapget-layer.model";
 import {partitionKey, tilePartition} from "./partition.model";

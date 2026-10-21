@@ -1,33 +1,25 @@
-import type {ViewId, ViewIdentity} from "./view-id";
-import {MapViewStateService} from "./map-view-state.service";
-import {inject} from "@angular/core";
-import {Injectable} from "@angular/core";
+import {Injectable, inject} from "@angular/core";
 import {Subject, filter, firstValueFrom, fromEvent, merge, startWith} from "rxjs";
-import {MapInfoService} from "../mapdata/map-info.service";
+import {z} from "zod";
+import type {FeatureLayerStyle, Viewport} from "../../build/libs/core/erdblick-core";
+import {appliedAction, rejectAction} from "../actions/action-utils";
+import {AppActionService} from "../actions/app-action.service";
+import type {ViewerActionInput, ViewerActionOutput} from "../actions/viewer-action.contract";
+import {Cartographic} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
-import {
-    AppStateService,
-    CameraViewState,
-    TileGridMode,
-    VIEW_SYNC_LAYERS,
-    VIEW_SYNC_MOVEMENT,
-    VIEW_SYNC_POSITION
-} from "../shared/appstate.service";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {TileGridMode, tileGridMaxLevel} from "../mapdata/map-layer-state.model";
+import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import {AppConfigService} from "../shared/app-config.service";
+import {AppStateService} from "../shared/appstate.service";
+import {clampPresentationLod, clampStyleLod} from "../shared/lod-policy";
+import {CameraViewState, VIEW_SYNC_LAYERS, VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION} from "./map-view-state.model";
+import {MapViewStateService} from "./map-view-state.service";
+import {mapViewActions, mapViewControls} from "./map-view.service.declarations";
 import {IRenderView, LocationArea, RenderRectangle, RenderViewCameraState} from "./render-view.model";
+import {autoTileGridLevel, coarsenedTileLevel, tileGridVisibleCellCount} from "./tile-grid-visibility";
+import type {ViewId} from "./view-id";
 import {ViewVisualizationState} from "./view.visualization.model";
-import type {
-    FeatureLayerStyle,
-    Viewport
-} from "../../build/libs/core/erdblick-core";
-import {
-    autoTileGridLevel,
-    coarsenedTileLevel,
-    tileGridVisibleCellCount
-} from "./tile-grid-visibility";
-import {
-    clampPresentationLod,
-    clampStyleLod
-} from "../shared/lod-policy";
 
 export enum ViewRecalculationReason {
     AutoLevel = "auto-level",
@@ -58,18 +50,25 @@ export interface LiveCameraViewStateUpdate {
  */
 @Injectable({providedIn: "root"})
 export class MapViewService {
+    private readonly persistence = inject(AppStateService);
+    private readonly config = inject(AppConfigService);
+    private readonly stream = inject(MapTileStreamService);
+
+    static readonly controls = mapViewControls;
+    static readonly actions = mapViewActions;
+
     private static readonly AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES = 64;
     private static readonly SEARCH_COVERAGE_TILE_LIMIT = 1 << 20;
 
     readonly viewStateChanged = new Subject<ViewRecalculationReason | string>();
     /** Announces an accepted asynchronous navigation before its data/camera is ready. */
     readonly navigationStarted = new Subject<void>();
-    readonly moveToWgs84PositionTopic = new Subject<{ targetView: number, x: number, y: number, z?: number }>();
-    readonly moveToRectangleTopic = new Subject<{ targetView: number, rectangle: RenderRectangle }>();
+    readonly moveToWgs84PositionTopic = new Subject<{targetView: number; x: number; y: number; z?: number}>();
+    readonly moveToRectangleTopic = new Subject<{targetView: number; rectangle: RenderRectangle}>();
     readonly moveToLocationAreaTopic = new Subject<{targetView: number; area: LocationArea}>();
     readonly clearLocationHighlightTopic = new Subject<number>();
     readonly locationBoundaryUnavailableTopic = new Subject<void>();
-    readonly showLocationLabelTopic = new Subject<{ targetView: number, x: number, y: number, label: string }>();
+    readonly showLocationLabelTopic = new Subject<{targetView: number; x: number; y: number; label: string}>();
     readonly liveCameraViewStateTopic = new Subject<LiveCameraViewStateUpdate>();
     /** Presentation-only camera poses; consumers update both rendering and tile coverage. */
     readonly presentationCameraViewStateTopic = new Subject<{
@@ -78,7 +77,7 @@ export class MapViewService {
     }>();
     private readonly visualizationByView = new Map<ViewId, {generation: number; state: ViewVisualizationState}>();
     get viewVisualizationState(): ViewVisualizationState[] {
-        return this.viewStateOwner.viewIds().map(id => this.visualizationByView.get(id)!.state);
+        return this.viewStateOwner.viewIds().map((id) => this.visualizationByView.get(id)!.state);
     }
     /** Retiring components synchronously capture cameras and dispose before reindexing. */
     readonly beforeViewRemoval = new Subject<{
@@ -90,14 +89,21 @@ export class MapViewService {
     private readonly renderViews = new Map<ViewId, IRenderView>();
     private layoutRevision = 0;
 
-    get viewLayoutRevision(): number { return this.layoutRevision; }
+    get viewLayoutRevision(): number {
+        return this.layoutRevision;
+    }
 
     constructor(
         readonly viewStateOwner: MapViewStateService,
         private readonly mapInfo: MapInfoService
     ) {
+        this.registerControls();
+
+        const actions = inject(AppActionService);
+        actions.registerAction(MapViewService.actions.viewer_manage_view, (input, context) => this.manageView(input));
+
         let previousOrder = this.viewStateOwner.viewIds();
-        this.viewStateOwner.viewIdsState.subscribe(ids => {
+        this.viewStateOwner.viewIdsState.subscribe((ids) => {
             if (ids !== previousOrder) {
                 ++this.layoutRevision;
                 previousOrder = ids;
@@ -107,15 +113,19 @@ export class MapViewService {
             }
             for (const target of this.viewStateOwner.identities()) {
                 if (this.visualizationByView.get(target.id)?.generation !== target.generation) {
-                    this.visualizationByView.set(target.id, {generation: target.generation, state: new ViewVisualizationState()});
+                    this.visualizationByView.set(target.id, {
+                        generation: target.generation,
+                        state: new ViewVisualizationState()
+                    });
                 }
             }
             this.mapInfo.reapplySyncOptionsForAllViews();
             this.requestViewRecalculation(ViewRecalculationReason.NumViews);
         });
         this.viewStateOwner.lod3TileThresholdState.subscribe(() =>
-            this.requestViewRecalculation(ViewRecalculationReason.LodThreshold));
-        this.mapInfo.layerStateChanged.subscribe(reason => this.requestViewRecalculation(reason));
+            this.requestViewRecalculation(ViewRecalculationReason.LodThreshold)
+        );
+        this.mapInfo.layerStateChanged.subscribe((reason) => this.requestViewRecalculation(reason));
     }
 
     /** Registers a renderer reference, not a second camera-state store; teardown is generation-safe. */
@@ -140,22 +150,28 @@ export class MapViewService {
 
     /** Waits for live renderers to publish their current camera footprints, including after projection changes. */
     async waitForCurrentViewports(signal: AbortSignal): Promise<void> {
-        await firstValueFrom(merge(this.viewStateChanged, fromEvent(signal, "abort")).pipe(
-            startWith(null),
-            filter(() => {
-                signal.throwIfAborted();
-                for (let index = 0; index < this.viewStateOwner.numViews; index++) {
-                    const viewport = this.renderViewFor(index)?.computeViewport();
-                    const published = this.viewStateFor(index)?.viewport;
-                    if (!viewport || !published || !([
-                        "south", "west", "width", "height", "camPosLon", "camPosLat", "orientation"
-                    ] as const).every(key => viewport[key] === published[key])) {
-                        return false;
+        await firstValueFrom(
+            merge(this.viewStateChanged, fromEvent(signal, "abort")).pipe(
+                startWith(null),
+                filter(() => {
+                    signal.throwIfAborted();
+                    for (let index = 0; index < this.viewStateOwner.numViews; index++) {
+                        const viewport = this.renderViewFor(index)?.computeViewport();
+                        const published = this.viewStateFor(index)?.viewport;
+                        if (
+                            !viewport ||
+                            !published ||
+                            !(
+                                ["south", "west", "width", "height", "camPosLon", "camPosLat", "orientation"] as const
+                            ).every((key) => viewport[key] === published[key])
+                        ) {
+                            return false;
+                        }
                     }
-                }
-                return true;
-            })
-        ));
+                    return true;
+                })
+            )
+        );
     }
 
     /** Returns the mutable visualization state for one view, if it exists. */
@@ -170,12 +186,13 @@ export class MapViewService {
         if (this.removingView || count <= 1 || !Number.isInteger(viewIndex) || viewIndex < 0 || viewIndex >= count) {
             return;
         }
-        const retainedIndices = Array.from({length: count}, (_, index) => index)
-            .filter(index => index !== viewIndex);
+        const retainedIndices = Array.from({length: count}, (_, index) => index).filter((index) => index !== viewIndex);
         this.removingView = true;
         try {
             // Include an unconsumed handoff if another close happens during setup.
-            const cameras = new Map([...this.retainedCameras].map(([id, camera]) => [this.viewStateOwner.indexOf(id), camera]));
+            const cameras = new Map(
+                [...this.retainedCameras].map(([id, camera]) => [this.viewStateOwner.indexOf(id), camera])
+            );
             this.beforeViewRemoval.next({retainedIndices, cameras});
             this.retainedCameras.clear();
             retainedIndices.forEach((index, target) => {
@@ -184,8 +201,10 @@ export class MapViewService {
                     this.retainedCameras.set(this.viewStateOwner.idAt(index)!, camera);
                 }
             });
-            this.viewStateOwner.retainViews(retainedIndices,
-                new Map([...cameras].map(([index, state]) => [index, state.camera])));
+            this.viewStateOwner.retainViews(
+                retainedIndices,
+                new Map([...cameras].map(([index, state]) => [index, state.camera]))
+            );
         } finally {
             this.removingView = false;
         }
@@ -207,9 +226,12 @@ export class MapViewService {
      * touching persisted AppState, storage, URL state, or Angular-bound consumers.
      */
     publishLiveCameraViewState(sourceView: number, sourceState: CameraViewState): void {
-        if (this.viewStateOwner.numViews < 2 ||
+        if (
+            this.viewStateOwner.numViews < 2 ||
             sourceView !== this.viewStateOwner.focusedView ||
-            sourceView < 0 || sourceView >= this.viewStateOwner.numViews) {
+            sourceView < 0 ||
+            sourceView >= this.viewStateOwner.numViews
+        ) {
             return;
         }
 
@@ -230,19 +252,19 @@ export class MapViewService {
             const targetState = this.viewStateOwner.cameraViewDataState.getValue(targetView);
             const cameraViewData: CameraViewState = syncPosition
                 ? {
-                    destination: {...sourceState.destination},
-                    orientation: {...sourceState.orientation},
-                    position: [...(sourceState.position ?? [0, 0, 0])]
-                }
+                      destination: {...sourceState.destination},
+                      orientation: {...sourceState.orientation},
+                      position: [...(sourceState.position ?? [0, 0, 0])]
+                  }
                 : {
-                    destination: {
-                        lon: targetState.destination.lon + longitudeDelta,
-                        lat: targetState.destination.lat + latitudeDelta,
-                        alt: targetState.destination.alt
-                    },
-                    orientation: {...targetState.orientation},
-                    position: [...(targetState.position ?? [0, 0, 0])]
-                };
+                      destination: {
+                          lon: targetState.destination.lon + longitudeDelta,
+                          lat: targetState.destination.lat + latitudeDelta,
+                          alt: targetState.destination.alt
+                      },
+                      orientation: {...targetState.orientation},
+                      position: [...(targetState.position ?? [0, 0, 0])]
+                  };
             this.liveCameraViewStateTopic.next({sourceView, targetView, cameraViewData});
         }
     }
@@ -262,8 +284,7 @@ export class MapViewService {
         const state = this.viewVisualizationState[viewIndex];
         state.viewport = viewport;
         if (Number.isFinite(canonicalCameraAltitudeMeters)) {
-            state.canonicalCameraAltitudeMeters =
-                Number(canonicalCameraAltitudeMeters);
+            state.canonicalCameraAltitudeMeters = Number(canonicalCameraAltitudeMeters);
         }
         if (Number.isFinite(metersPerPixel)) {
             state.metersPerPixel = Number(metersPerPixel);
@@ -288,49 +309,46 @@ export class MapViewService {
                 tileLimit,
                 this.visibleFeatureLevelsInView(viewIndex),
                 state.canonicalCameraAltitudeMeters ??
-                    this.viewStateOwner.cameraViewDataState
-                        .getValue(viewIndex).destination.alt
+                    this.viewStateOwner.cameraViewDataState.getValue(viewIndex).destination.alt
             );
         });
     }
 
     /** Resolve one stylesheet's LOD from canonical viewport density at a tile level. */
-    styleLod(
-        viewIndex: number,
-        level: number,
-        style: FeatureLayerStyle
-    ): number {
+    styleLod(viewIndex: number, level: number, style: FeatureLayerStyle): number {
         const tileCount = this.styleVisibleTileCount(viewIndex, level);
-        return clampStyleLod(style.lodForVisibleTileCount(
-            tileCount,
-            this.viewStateOwner.lod3TileThreshold
-        ));
+        return clampStyleLod(style.lodForVisibleTileCount(tileCount, this.viewStateOwner.lod3TileThreshold));
     }
 
     /** Resolve the continuous GPU LOD used to fade retained style records. */
-    stylePresentationLod(
-        viewIndex: number,
-        level: number,
-        style: FeatureLayerStyle
-    ): number {
-        return clampPresentationLod(style.presentationLodForVisibleTileCount(
-            this.styleVisibleTileCount(viewIndex, level),
-            this.viewStateOwner.lod3TileThreshold
-        ));
+    stylePresentationLod(viewIndex: number, level: number, style: FeatureLayerStyle): number {
+        return clampPresentationLod(
+            style.presentationLodForVisibleTileCount(
+                this.styleVisibleTileCount(viewIndex, level),
+                this.viewStateOwner.lod3TileThreshold
+            )
+        );
     }
 
     /** Return the canonical density shared by planning and GPU presentation LOD. */
     private styleVisibleTileCount(viewIndex: number, level: number): number {
         const state = this.viewVisualizationState[viewIndex];
-        const altitude = state?.canonicalCameraAltitudeMeters ??
-            this.viewStateOwner.cameraViewDataState
-                .getValue(viewIndex).destination.alt;
-        return state?.canonicalVisibleTileCountPerLevel.get(level) ??
-            Number(coreLib.getNumTileIdsForCanonicalCamera(altitude, level));
+        const altitude =
+            state?.canonicalCameraAltitudeMeters ??
+            this.viewStateOwner.cameraViewDataState.getValue(viewIndex).destination.alt;
+        return (
+            state?.canonicalVisibleTileCountPerLevel.get(level) ??
+            Number(coreLib.getNumTileIdsForCanonicalCamera(altitude, level))
+        );
     }
 
     /** Returns whether search-result geometry should be rendered for one visible source tile. */
-    prefersHighFidelityForSearchResultTile(viewIndex: number, searchId: string, tileId: number, maxVisibleTiles: number): boolean {
+    prefersHighFidelityForSearchResultTile(
+        viewIndex: number,
+        searchId: string,
+        tileId: number,
+        maxVisibleTiles: number
+    ): boolean {
         return this.visibleSearchGridCellCountForLevel(viewIndex, tileId) <= maxVisibleTiles;
     }
 
@@ -411,8 +429,10 @@ export class MapViewService {
         if (!viewState || !viewState.visibleTileIds.has(tileId)) {
             return false;
         }
-        return this.mapInfo.maps.getMapLayerVisibility(viewIndex, mapId, layerId)
-            && coreLib.getTileLevel(tileId) === this.getEffectiveMapLayerLevel(viewIndex, mapId, layerId);
+        return (
+            this.mapInfo.maps.getMapLayerVisibility(viewIndex, mapId, layerId) &&
+            coreLib.getTileLevel(tileId) === this.getEffectiveMapLayerLevel(viewIndex, mapId, layerId)
+        );
     }
 
     /** Returns whether a search-result source tile is in view, without consulting Map Panel visibility. */
@@ -532,12 +552,8 @@ export class MapViewService {
     /** Enables or disables viewport-based automatic tile-grid level selection. */
     setViewTileGridAutoLevel(viewIndex: number, autoLevel: boolean): void {
         if (autoLevel) {
-            const configuredLevel =
-                this.mapInfo.maps.getViewTileGridLevel(viewIndex);
-            this.mapInfo.setViewTileGridLevel(
-                viewIndex,
-                this.autoSelectedTileGridLevel(viewIndex, configuredLevel)
-            );
+            const configuredLevel = this.mapInfo.maps.getViewTileGridLevel(viewIndex);
+            this.mapInfo.setViewTileGridLevel(viewIndex, this.autoSelectedTileGridLevel(viewIndex, configuredLevel));
         }
         this.mapInfo.setViewTileGridAutoLevel(viewIndex, autoLevel);
         this.mapInfo.syncViewsIfEnabled(viewIndex);
@@ -551,8 +567,7 @@ export class MapViewService {
 
     /** Returns the configured grid level or its viewport-derived value in auto mode. */
     getEffectiveViewTileGridLevel(viewIndex: number): number {
-        const configuredLevel =
-            this.mapInfo.maps.getViewTileGridLevel(viewIndex);
+        const configuredLevel = this.mapInfo.maps.getViewTileGridLevel(viewIndex);
         if (!this.mapInfo.maps.getViewTileGridAutoLevel(viewIndex)) {
             return configuredLevel;
         }
@@ -631,24 +646,22 @@ export class MapViewService {
     }
 
     /** Chooses the automatic grid level solely from canonical camera altitude. */
-    private autoSelectedTileGridLevel(
-        viewIndex: number,
-        fallbackLevel: number
-    ): number {
-        const canonicalAltitude =
-            this.viewVisualizationState[viewIndex]?.canonicalCameraAltitudeMeters;
+    private autoSelectedTileGridLevel(viewIndex: number, fallbackLevel: number): number {
+        const canonicalAltitude = this.viewVisualizationState[viewIndex]?.canonicalCameraAltitudeMeters;
         if (!Number.isFinite(canonicalAltitude)) {
             return fallbackLevel;
         }
-        return autoTileGridLevel(
-            Number(canonicalAltitude),
-            this.mapInfo.maps.getViewTileGridMode(viewIndex)
-        );
+        return autoTileGridLevel(Number(canonicalAltitude), this.mapInfo.maps.getViewTileGridMode(viewIndex));
     }
 
     /** Chooses the deepest advertised level whose canonical tile density stays below the threshold. */
     private autoSelectedMapLayerLevel(viewIndex: number, mapId: string, layerId: string, fallbackLevel: number): number;
-    private autoSelectedMapLayerLevel(viewIndex: number, mapId: string, layerId: string, fallbackLevel: null): number | null;
+    private autoSelectedMapLayerLevel(
+        viewIndex: number,
+        mapId: string,
+        layerId: string,
+        fallbackLevel: null
+    ): number | null;
     private autoSelectedMapLayerLevel(
         viewIndex: number,
         mapId: string,
@@ -659,8 +672,7 @@ export class MapViewService {
         if (!advertisedLevels.length) {
             return fallbackLevel;
         }
-        const canonicalAltitude =
-            this.viewVisualizationState[viewIndex]?.canonicalCameraAltitudeMeters;
+        const canonicalAltitude = this.viewVisualizationState[viewIndex]?.canonicalCameraAltitudeMeters;
         if (!Number.isFinite(canonicalAltitude)) {
             return fallbackLevel === null
                 ? advertisedLevels[advertisedLevels.length - 1]
@@ -668,10 +680,7 @@ export class MapViewService {
         }
         for (let index = advertisedLevels.length - 1; index >= 0; index--) {
             const candidateLevel = advertisedLevels[index];
-            const visibleTileCount = coreLib.getNumTileIdsForCanonicalCamera(
-                Number(canonicalAltitude),
-                candidateLevel
-            );
+            const visibleTileCount = coreLib.getNumTileIdsForCanonicalCamera(Number(canonicalAltitude), candidateLevel);
             if (visibleTileCount <= MapViewService.AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES) {
                 return candidateLevel;
             }
@@ -686,11 +695,13 @@ export class MapViewService {
         if (!layer) {
             return [];
         }
-        return [...new Set(
-            layer.info.zoomLevels
-                .filter(level => Number.isFinite(level))
-                .map(level => Math.max(0, Math.min(22, Math.floor(level))))
-        )].sort((lhs, rhs) => lhs - rhs);
+        return [
+            ...new Set(
+                layer.info.zoomLevels
+                    .filter((level) => Number.isFinite(level))
+                    .map((level) => Math.max(0, Math.min(22, Math.floor(level))))
+            )
+        ].sort((lhs, rhs) => lhs - rhs);
     }
 
     /** Clamps an arbitrary level down to the nearest advertised level that does not exceed it. */
@@ -703,5 +714,201 @@ export class MapViewService {
             clampedLevel = advertisedLevel;
         }
         return clampedLevel;
+    }
+
+    /** Creates/removes comparison views using the same retained-camera/layout path as the UI. */
+    manageView(input: ViewerActionInput<"viewer_manage_view">): ViewerActionOutput<"viewer_manage_view"> {
+        const viewIndex = this.controlViewIndex(input.viewId);
+        if (input.operation === "remove") {
+            if (this.viewStateOwner.numViews === 1) rejectAction("Cannot remove the last view", "invalid_arguments");
+            this.removeView(viewIndex);
+        } else {
+            if (this.viewStateOwner.numViews >= 32) rejectAction("The layout already has 32 views");
+            this.viewStateOwner.createView(input.viewId);
+        }
+        return appliedAction();
+    }
+
+    private registerControls(): void {
+        const actions = inject(AppActionService),
+            controls = MapViewService.controls;
+        actions.registerControl(controls.views, {read: () => this.viewSummary(), overview: () => [{}]});
+        actions.registerControl(controls.camera, {
+            read: ({viewId}) => MapViewService.controls.camera.valueSchema.parse(this.cameraControl(viewId)),
+            write: ({viewId}, value) => this.setCameraControl(viewId, value),
+            overview: () => this.viewStateOwner.viewIds().map((viewId) => ({viewId}))
+        });
+        actions.registerControl(controls.projection, {
+            read: ({viewId}) => (this.viewStateOwner.mode2dState.getValue(this.controlViewIndex(viewId)) ? "2d" : "3d"),
+            write: ({viewId}, value) => this.setProjectionControl(viewId, value)
+        });
+        actions.registerControl(controls.background, {
+            read: ({viewId}) => this.mapInfo.layerState.getBackgroundState(this.controlViewIndex(viewId)),
+            write: ({viewId}, value) => this.setBackgroundControl(viewId, value)
+        });
+        actions.registerControl(controls.grid, {
+            read: ({viewId}) => this.gridControl(viewId),
+            write: ({viewId}, value) => this.setGridControl(viewId, value)
+        });
+        actions.registerControl(controls.layer, {
+            read: (selector) => ({
+                ...this.mapInfo.requireLayer(selector.mapId, selector.layerId).viewConfig[
+                    this.controlViewIndex(selector.viewId)
+                ]
+            }),
+            write: (selector, value) => this.setLayerControl(selector, value)
+        });
+        actions.registerControl(controls.rendering, {
+            read: () => this.renderingPreferences(),
+            write: (_, value) => this.setRenderingPreferences(value)
+        });
+    }
+
+    private controlViewIndex(viewId: string): number {
+        return this.viewStateOwner.indexOf(this.viewStateOwner.requireView(viewId).id);
+    }
+
+    viewSummary() {
+        return {
+            focusedViewId: this.viewStateOwner.focusedViewId(),
+            sync: [...this.viewStateOwner.viewSync],
+            views: this.viewStateOwner.viewIds().map((viewId, index) => {
+                const view = this.renderViewFor(index);
+                return {
+                    viewId,
+                    projection: this.viewStateOwner.mode2dState.getValue(index) ? ("2d" as const) : ("3d" as const),
+                    navigationMode: !view
+                        ? ("unavailable" as const)
+                        : view.isFirstPersonViewActive()
+                          ? ("first_person" as const)
+                          : ("map" as const)
+                };
+            })
+        };
+    }
+
+    cameraControl(viewId: string) {
+        const view = this.renderViewFor(this.controlViewIndex(viewId));
+        if (!view) rejectAction("The renderer is unavailable", "not_available", "view_unavailable");
+        const value = view.getLiveCameraState();
+        if (!value) rejectAction("The view is in first-person mode", "not_available", "first_person");
+        return value;
+    }
+
+    private requireIdleCameras(indices: number[]): void {
+        for (const index of indices) {
+            const view = this.renderViewFor(index);
+            if (!view || view.isFirstPersonViewActive())
+                rejectAction("Map camera is unavailable", "not_available", "first_person");
+            if (view.isCameraInteractionActive()) rejectAction("A human camera gesture is active", "busy");
+        }
+    }
+
+    setCameraControl(viewId: string, value: z.infer<typeof MapViewService.controls.camera.valueSchema>): void {
+        const index = this.controlViewIndex(viewId);
+        const synced =
+            this.viewStateOwner.viewSync.includes(VIEW_SYNC_POSITION) ||
+            this.viewStateOwner.viewSync.includes(VIEW_SYNC_MOVEMENT);
+        this.requireIdleCameras(synced ? this.viewStateOwner.viewIds().map((_, i) => i) : [index]);
+        if (
+            this.viewStateOwner.mode2dState.getValue(index) &&
+            (value.orientation.heading !== 0 ||
+                value.orientation.pitch !== -Math.PI / 2 ||
+                value.position?.some((component) => component !== 0))
+        ) {
+            rejectAction("2D camera requires heading 0, top-down pitch and zero offset", "invalid_arguments");
+        }
+        this.persistence.transaction(() => {
+            this.viewStateOwner.focusedView = index;
+            this.viewStateOwner.setView(
+                index,
+                Cartographic.fromDegrees(value.destination.lon, value.destination.lat, value.destination.alt),
+                value.orientation,
+                value.position ?? [0, 0, 0]
+            );
+        });
+    }
+
+    setProjectionControl(viewId: string, value: "2d" | "3d"): void {
+        const index = this.controlViewIndex(viewId);
+        this.requireIdleCameras(
+            this.viewStateOwner.viewSync.includes("proj") ? this.viewStateOwner.viewIds().map((_, i) => i) : [index]
+        );
+        this.persistence.transaction(() => {
+            this.viewStateOwner.focusedView = index;
+            this.viewStateOwner.setProjectionMode(index, value === "2d");
+        });
+    }
+
+    setBackgroundControl(viewId: string, value: z.infer<typeof MapViewService.controls.background.valueSchema>): void {
+        const index = this.controlViewIndex(viewId);
+        if (value.layerId && !this.config.getBackgroundLayers().some((layer) => layer.id === value.layerId))
+            rejectAction("Unknown background", "invalid_arguments");
+        this.persistence.transaction(() => {
+            this.mapInfo.layerState.setBackgroundState(index, value.layerId, value.opacity);
+            this.syncBackgroundSettings(index);
+        });
+    }
+
+    gridControl(viewId: string) {
+        const index = this.controlViewIndex(viewId),
+            maps = this.mapInfo.maps;
+        return {
+            visible: maps.getViewTileBorderState(index),
+            mode: maps.getViewTileGridMode(index),
+            level: maps.getViewTileGridLevel(index),
+            autoLevel: maps.getViewTileGridAutoLevel(index),
+            color: maps.getViewTileGridColor(index),
+            opacity: maps.getViewTileGridOpacity(index)
+        };
+    }
+
+    setGridControl(viewId: string, value: z.infer<typeof MapViewService.controls.grid.valueSchema>): void {
+        const index = this.controlViewIndex(viewId);
+        if (value.level > tileGridMaxLevel(value.mode))
+            rejectAction("Grid level exceeds its coordinate system's range", "invalid_arguments");
+        this.persistence.transaction(() => {
+            this.setViewTileGridMode(index, value.mode);
+            this.setViewTileGridLevel(index, value.level);
+            this.setViewTileGridAutoLevel(index, value.autoLevel);
+            this.setViewTileGridColor(index, value.color);
+            this.setViewTileGridOpacity(index, value.opacity);
+            this.setViewTileBorderVisibility(index, value.visible);
+        });
+    }
+
+    setLayerControl(
+        selector: z.infer<typeof MapViewService.controls.layer.selectorSchema>,
+        value: z.infer<typeof MapViewService.controls.layer.valueSchema>
+    ): void {
+        const index = this.controlViewIndex(selector.viewId);
+        this.mapInfo.requireLayer(selector.mapId, selector.layerId);
+        this.persistence.transaction(() => {
+            this.setMapLayerLevel(index, selector.mapId, selector.layerId, value.level);
+            this.setMapLayerAutoLevel(index, selector.mapId, selector.layerId, value.autoLevel);
+            this.setMapLayerVisibility(index, selector.mapId, selector.layerId, value.visible);
+        });
+    }
+
+    renderingPreferences() {
+        return {
+            antialiasing: this.viewStateOwner.deckAntialiasingEnabled,
+            semanticCompositing: this.viewStateOwner.semanticCompositingEnabled,
+            contactShading: this.viewStateOwner.contactShadingEnabled,
+            tilePullCompression: this.stream.tilePullCompressionEnabled,
+            tileLimit: this.viewStateOwner.tilesLoadLimit,
+            renderWorkers: this.viewStateOwner.tileSubsetRenderWorkerCount
+        };
+    }
+
+    setRenderingPreferences(value: z.infer<typeof MapViewService.controls.rendering.valueSchema>): void {
+        this.persistence.transaction(() => {
+            this.viewStateOwner.deckAntialiasingEnabled = value.antialiasing;
+            this.viewStateOwner.semanticCompositingEnabled = value.semanticCompositing;
+            this.viewStateOwner.contactShadingEnabled = value.contactShading;
+            this.stream.tilePullCompressionEnabled = value.tilePullCompression;
+            this.viewStateOwner.tilesLoadLimit = value.tileLimit;
+            this.viewStateOwner.tileSubsetRenderWorkerCount = value.renderWorkers;
+        });
     }
 }

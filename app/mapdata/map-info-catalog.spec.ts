@@ -1,14 +1,12 @@
-import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
-import "@angular/compiler";
 import {HttpClient, HttpHeaders, HttpResponse} from "@angular/common/http";
+import "@angular/compiler";
 import {BehaviorSubject, of, Subject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
+import type {InfoMessageService} from "../shared/info.service";
+import type {MapPresetService} from "../styledata/map-preset.service";
+import type {StyleService} from "../styledata/style.service";
 import {MapInfoService} from "./map-info.service";
 import type {MapInfoItem} from "./map.tree.model";
-import type {AppStateService} from "../shared/appstate.service";
-import type {StyleService} from "../styledata/style.service";
-import type {MapPresetService} from "../styledata/map-preset.service";
-import type {InfoMessageService} from "../shared/info.service";
 
 /** Minimal valid catalog entry; each refresh below crosses a real JSON boundary. */
 function source(mapId: string, configIndex: number, status = "ready"): MapInfoItem {
@@ -34,7 +32,7 @@ function fixture() {
             mapLayerConfig: () => [{visible: true, level: 13, autoLevel: false}],
             getMapPresetSelection: () => null, getLayerSyncOption: () => false,
             prune: vi.fn()
-        } as unknown as StateTestSystem) as never,
+        }) as never,
         {styles: new Map(), styleGroups: new BehaviorSubject([])} as unknown as StyleService,
         {presets: [], presets$: new BehaviorSubject([]), presetsForLayer: () => []} as unknown as MapPresetService,
         {clearBackendConnectionError: vi.fn(), showBackendConnectionError: vi.fn()} as unknown as InfoMessageService

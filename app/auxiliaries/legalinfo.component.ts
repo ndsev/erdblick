@@ -1,15 +1,20 @@
+import {Component, inject} from "@angular/core";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {LEGAL_INFO_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
 import {AppLayoutService} from "../shared/app-layout.service";
-import {inject} from "@angular/core";
-import { Component } from "@angular/core";
-import { MapInfoService } from "../mapdata/map-info.service";
-import { AppStateService, LEGAL_INFO_DIALOG_LAYOUT_ID } from "../shared/appstate.service";
+import {AppStateService} from "../shared/appstate.service";
 
 @Component({
-    selector: 'legal-dialog',
+    selector: "legal-dialog",
     template: `
-        <app-dialog header="Copyright and Legal Information" [(visible)]="dialogVisible" [modal]="false"
-                  [style]="{'min-height': '10em', 'min-width': '40em'}"
-                  [persistLayout]="false" [layoutId]="dialogLayoutId">
+        <app-dialog
+            header="Copyright and Legal Information"
+            [(visible)]="dialogVisible"
+            [modal]="false"
+            [style]="{'min-height': '10em', 'min-width': '40em'}"
+            [persistLayout]="false"
+            [layoutId]="dialogLayoutId"
+        >
             <div class="stats-content">
                 <table class="stats-table">
                     <thead>
@@ -35,18 +40,20 @@ import { AppStateService, LEGAL_INFO_DIALOG_LAYOUT_ID } from "../shared/appstate
 export class LegalInfoDialogComponent {
     readonly layoutState = inject(AppLayoutService);
     readonly dialogLayoutId = LEGAL_INFO_DIALOG_LAYOUT_ID;
-    public aggregatedLegalInfo: { mapName: string, entry: string }[] = [];
+    public aggregatedLegalInfo: {mapName: string; entry: string}[] = [];
 
-    constructor(private mapService: MapInfoService,
-                public stateService: AppStateService) {
-        this.mapService.legalInformationUpdated.subscribe(_ => {
+    constructor(
+        private mapService: MapInfoService,
+        public stateService: AppStateService
+    ) {
+        this.mapService.legalInformationUpdated.subscribe((_) => {
             this.aggregatedLegalInfo = [];
             this.mapService.legalInformationPerMap.forEach((entries, mapName) => {
                 if (entries.size) {
                     this.aggregatedLegalInfo.push({
                         mapName: mapName,
-                        entry: Array.from(entries).join('\n\n')
-                    })
+                        entry: Array.from(entries).join("\n\n")
+                    });
                 }
             });
         });

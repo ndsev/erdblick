@@ -2,18 +2,14 @@ import "@angular/compiler";
 import {Subject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 
-import {
-    CameraViewState,
-    VIEW_SYNC_MOVEMENT,
-    VIEW_SYNC_POSITION
-} from "../shared/appstate.service";
+import {CameraViewState, VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION} from "./map-view-state.model";
 import {
     LiveCameraViewStateUpdate,
     MapViewService,
     ViewRecalculationReason
 } from "./map-view.service";
-import {ViewVisualizationState} from "./view.visualization.model";
 import type {RenderViewCameraState} from "./render-view.model";
+import {ViewVisualizationState} from "./view.visualization.model";
 
 /** Builds a complete camera value with explicit target-relative position. */
 function camera(

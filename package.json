@@ -3,7 +3,7 @@
   "version": "2026.5.0",
   "scripts": {
     "ng": "ng",
-    "generate:viewer-actions": "tsc -p tsconfig.viewer-actions.json && node .angular/viewer-actions/tools/export-viewer-actions.js",
+    "generate:viewer-actions": "node tools/export-viewer-actions.cjs",
     "prestart": "npm run generate:viewer-actions",
     "start": "ng serve",
     "prebuild": "npm run generate:viewer-actions",

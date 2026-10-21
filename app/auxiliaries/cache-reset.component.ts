@@ -1,40 +1,37 @@
-import {AppLayoutService} from "../shared/app-layout.service";
-import {inject} from "@angular/core";
 import {AsyncPipe} from "@angular/common";
 import {HttpErrorResponse} from "@angular/common/http";
-import {Component} from "@angular/core";
+import {Component, inject} from "@angular/core";
 import {TooltipModule} from "primeng/tooltip";
 import {map, Observable} from "rxjs";
+import {AppLayoutService} from "../shared/app-layout.service";
 
 import {CacheResetService} from "../mapdata/cache-reset.service";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {isDataSourceCatalogEntryReady} from "../mapdata/map.tree.model";
-import {AppDialogComponent} from "../shared/app-dialog.component";
 import {AppConfigService} from "../shared/app-config.service";
-import {
-    AppStateService,
-    CACHE_RESET_DIALOG_LAYOUT_ID
-} from "../shared/appstate.service";
+import {AppDialogComponent} from "../shared/app-dialog.component";
+import {CACHE_RESET_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
+import {AppStateService} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 
 @Component({
     selector: "cache-reset-dialog",
     template: `
-        <app-dialog header="Cache Reset"
-                    styleClass="app-dialog-compact cache-reset-dialog"
-                    data-testid="cache-reset-dialog"
-                    [(visible)]="dialogVisible"
-                    [modal]="false"
-                    [persistLayout]="true"
-                    [layoutId]="dialogLayoutId"
-                    [style]="{'width': 'min(32rem, 92vw)'}">
+        <app-dialog
+            header="Cache Reset"
+            styleClass="app-dialog-compact cache-reset-dialog"
+            data-testid="cache-reset-dialog"
+            [(visible)]="dialogVisible"
+            [modal]="false"
+            [persistLayout]="true"
+            [layoutId]="dialogLayoutId"
+            [style]="{width: 'min(32rem, 92vw)'}"
+        >
             <p class="cache-reset-description">
                 Clear server-side tile data for a configured map. Its visible layers will then load again.
             </p>
             @if (!enabled) {
-                <p class="cache-reset-unavailable" role="status">
-                    Cache reset is not enabled for this session.
-                </p>
+                <p class="cache-reset-unavailable" role="status">Cache reset is not enabled for this session.</p>
             }
             @if (mapIds$ | async; as mapIds) {
                 @if (mapIds.length) {
@@ -43,13 +40,15 @@ import {InfoMessageService} from "../shared/info.service";
                             <div class="cache-reset-row">
                                 <span class="cache-reset-map-id" [title]="mapId">{{ mapId }}</span>
                                 <span [pTooltip]="tooltip(mapId)" tooltipPosition="left">
-                                    <button type="button"
-                                            class="cache-reset-button"
-                                            [attr.data-testid]="'cache-reset-map-' + index"
-                                            [attr.aria-label]="'Reset tile cache for ' + mapId"
-                                            [attr.aria-busy]="isPending(mapId)"
-                                            [disabled]="!enabled || isPending(mapId)"
-                                            (click)="reset(mapId)">
+                                    <button
+                                        type="button"
+                                        class="cache-reset-button"
+                                        [attr.data-testid]="'cache-reset-map-' + index"
+                                        [attr.aria-label]="'Reset tile cache for ' + mapId"
+                                        [attr.aria-busy]="isPending(mapId)"
+                                        [disabled]="!enabled || isPending(mapId)"
+                                        (click)="reset(mapId)"
+                                    >
                                         <span class="material-symbols-outlined">cycle</span>
                                     </button>
                                 </span>
@@ -62,59 +61,61 @@ import {InfoMessageService} from "../shared/info.service";
             }
         </app-dialog>
     `,
-    styles: [`
-        .cache-reset-description,
-        .cache-reset-unavailable,
-        .cache-reset-empty {
-            margin: 0 0 1rem;
-        }
+    styles: [
+        `
+            .cache-reset-description,
+            .cache-reset-unavailable,
+            .cache-reset-empty {
+                margin: 0 0 1rem;
+            }
 
-        .cache-reset-unavailable {
-            color: var(--p-text-muted-color);
-        }
+            .cache-reset-unavailable {
+                color: var(--p-text-muted-color);
+            }
 
-        .cache-reset-list {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
+            .cache-reset-list {
+                display: flex;
+                flex-direction: column;
+                gap: 0.5rem;
+            }
 
-        .cache-reset-row {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            align-items: center;
-            gap: 1rem;
-            min-height: 2.5rem;
-            padding: 0.375rem 0.5rem;
-            border: 1px solid var(--p-content-border-color);
-            border-radius: var(--p-border-radius-md);
-        }
+            .cache-reset-row {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
+                align-items: center;
+                gap: 1rem;
+                min-height: 2.5rem;
+                padding: 0.375rem 0.5rem;
+                border: 1px solid var(--p-content-border-color);
+                border-radius: var(--p-border-radius-md);
+            }
 
-        .cache-reset-map-id {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
+            .cache-reset-map-id {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
 
-        .cache-reset-button {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 2.25rem;
-            height: 2.25rem;
-            padding: 0;
-            color: var(--p-primary-color);
-            background: transparent;
-            border: 1px solid var(--p-primary-color);
-            border-radius: var(--p-border-radius-md);
-            cursor: pointer;
-        }
+            .cache-reset-button {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 2.25rem;
+                height: 2.25rem;
+                padding: 0;
+                color: var(--p-primary-color);
+                background: transparent;
+                border: 1px solid var(--p-primary-color);
+                border-radius: var(--p-border-radius-md);
+                cursor: pointer;
+            }
 
-        .cache-reset-button:disabled {
-            opacity: 0.45;
-            cursor: not-allowed;
-        }
-    `],
+            .cache-reset-button:disabled {
+                opacity: 0.45;
+                cursor: not-allowed;
+            }
+        `
+    ],
     standalone: true,
     imports: [AppDialogComponent, AsyncPipe, TooltipModule]
 })
@@ -123,11 +124,11 @@ export class CacheResetComponent {
     readonly layoutState = inject(AppLayoutService);
     readonly dialogLayoutId = CACHE_RESET_DIALOG_LAYOUT_ID;
     readonly mapIds$: Observable<string[]> = this.mapInfo.maps$.pipe(
-        map(tree => [...tree.maps.values()]
-            .filter(node =>
-                isDataSourceCatalogEntryReady(node.info) &&
-                !node.info.addOn)
-            .map(node => node.id))
+        map((tree) =>
+            [...tree.maps.values()]
+                .filter((node) => isDataSourceCatalogEntryReady(node.info) && !node.info.addOn)
+                .map((node) => node.id)
+        )
     );
     private readonly pendingMapIds = new Set<string>();
 

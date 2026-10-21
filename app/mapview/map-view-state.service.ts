@@ -1,128 +1,98 @@
-import {viewIdSchema} from "./view-id";
+import {computed, inject} from "@angular/core";
 import {setAllEntities} from "@ngrx/signals/entities";
-import {computed} from "@angular/core";
-import type {StateBinding} from "../shared/viewer-state";
+import {rejectAction} from "../actions/action-utils";
+import {AppActionService} from "../actions/app-action.service";
+import {viewStateControls} from "./map-view-state.service.declarations";
+import {ownerState} from "./map-view-state.service.state";
 import type {ViewId, ViewIdentity} from "./view-id";
+import {viewIdSchema} from "./view-id";
 
-import {Injectable, OnDestroy, Signal} from "@angular/core";
-import {NavigationEnd, NavigationStart, Params, Router} from "@angular/router";
-import {BehaviorSubject, skip, Subject, Subscription, take} from "rxjs";
-import {filter} from "rxjs/operators";
-import {Cartographic, GeoMath} from "../integrations/geo";
-import {AppState, AppStateOptions, Boolish, MapViewState, StyleState} from "../shared/app-state";
+import {Injectable} from "@angular/core";
+import {Params} from "@angular/router";
 import {z} from "zod";
-import {
-    PointCloudPolicy, DEFAULT_POINT_CLOUD_POLICY, pointCloudPolicySchema,
-    pointCloudDetailSchema, pointCloudWorkingMemorySchema, pointCloudGpuMemorySchema
-} from "../shared/point-cloud-policy";
-import {MapTreeNode} from "../mapdata/map.tree.model";
-import {ErdblickStyle} from "../styledata/style.service";
-import {coreLib} from "../integrations/wasm";
-import {InfoMessageService} from "../shared/info.service";
-import type {FeatureWrapper} from "../mapdata/feature-inspection.model";
-import type {DiagnosticsExportOptions, DiagnosticsLogFilter} from "../diagnostics/diagnostics.model";
-import {
-    BackgroundLayerConfig,
-    clampBackgroundOpacity,
-    DEFAULT_BACKGROUND_LAYER_ID,
-    DEFAULT_BACKGROUND_OPACITY
-} from "../shared/app-config.service";
-import {
-    createFeatureSearchStateEntry,
-    FeatureSearchStateEntry,
-    FeatureSearchStatePatch,
-    FeatureSearchStateSchema,
-    normalizeFeatureSearchState,
-    serializeFeatureSearchState
-} from "../shared/feature-search-state";
-import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
-import {
-    ConnectionRetryPolicy, DEFAULT_CONNECTION_RETRY_POLICY,
-    connectionRetryPolicySchema, retryDelaySchema, retryMultiplierSchema
-} from "../shared/connection-retry-policy";
-import type {LayerPresetRef} from "../styledata/layer-preset.model";
-import {
-    compressUrlCsvRuns,
-    decodeLayerNamesV2,
-    decodeMapNamesV2,
-    decodeSelectionsV2,
-    decodeStyleOptionsV2,
-    encodeLayerNamesV2,
-    encodeSelectionsV2,
-    encodeStyleOptionsV2,
-    featureSelectionLayerNames,
-    firstParamValue,
-    sourceDataSelectionMapIds
-} from "../shared/url-state-codec";
-import type {UrlV2MapTileKeyFactory} from "../shared/url-state-codec";
-import {
-    clampTileSubsetRenderWorkerCount
-} from "../shared/tile-render-policy";
-import {
-    clampLod3TileThreshold,
-    DEFAULT_LOD3_TILE_THRESHOLD
-} from "../shared/lod-policy";
-import {parseMapPartitionKey} from "../mapdata/partition.model";
+import {roundCoordinateStateValue} from "../coords/coordinate-state";
+import {Cartographic, GeoMath} from "../integrations/geo";
 import {AppStateService} from "../shared/appstate.service";
-import {MAX_NUM_TILES_TO_LOAD, DEFAULT_MAP_ZOOM_STEP, DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS, VIEW_SYNC_PROJECTION, VIEW_SYNC_POSITION, VIEW_SYNC_MOVEMENT, VIEW_SYNC_LAYERS, CameraViewState, ViewSyncOptionDescriptor, roundCoordinateStateValue, clampMapZoomStep, clampFeatureZoomClearanceMeters} from "../shared/app-state.model";
-
-export interface MapViewStateServiceValues {
-    marker: boolean;
-    markedPosition: number[];
-    focusedViewId: ViewId;
-    viewSync: string[];
-    cameraViewData: Record<string, CameraViewState>;
-    mode2d: Record<string, boolean>;
-    deckAntialiasingEnabled: boolean;
-    semanticCompositingEnabled: boolean;
-    contactShadingEnabled: boolean;
-    lod3TileThreshold: number;
-    tileSubsetRenderWorkerCount: number;
-    pointCloudDownsamplingEnabled: boolean;
-    pointCloudDetailPixels: number;
-    pointCloudWorkingMemoryMiB: number;
-    pointCloudGpuMemoryMiB: number;
-    mapZoomStep: number;
-    featureZoomClearanceMeters: number;
-    tilesLoadLimit: number;
-}
+import {InfoMessageService} from "../shared/info.service";
+import {clampLod3TileThreshold, DEFAULT_LOD3_TILE_THRESHOLD} from "../shared/lod-policy";
+import {PointCloudPolicy, pointCloudPolicySchema} from "../shared/point-cloud-policy";
+import {clampTileSubsetRenderWorkerCount} from "../shared/tile-render-policy";
+import {firstParamValue} from "../shared/url-state-codec";
+import {
+    CameraViewState,
+    clampFeatureZoomClearanceMeters,
+    clampMapZoomStep,
+    VIEW_SYNC_LAYERS,
+    VIEW_SYNC_MOVEMENT,
+    VIEW_SYNC_POSITION,
+    VIEW_SYNC_PROJECTION,
+    ViewSyncOptionDescriptor
+} from "./map-view-state.model";
 
 /** Owns views values, validation, and user operations. */
 @Injectable({providedIn: "root"})
 export class MapViewStateService {
-
+    static readonly controls = viewStateControls;
 
     private nextGeneration = 0;
-    private readonly idSchema = z.array(viewIdSchema)
-        .min(1).max(32).refine(ids => new Set(ids).size === ids.length, "View IDs must be unique");
+    private copySourceId: ViewId | undefined;
+    private readonly idSchema = z
+        .array(viewIdSchema)
+        .min(1)
+        .max(32)
+        .refine((ids) => new Set(ids).size === ids.length, "View IDs must be unique");
     private readonly membership = this.stateService.values.bind<ViewId[]>(
-        state => state.viewIds as ViewId[],
+        (state) => state.viewIds as ViewId[],
         (state, ids) => ({
-            ...setAllEntities(this.idSchema.parse(ids).map(id =>
-                state.viewEntityMap[id] ?? {id, generation: ++this.nextGeneration}), {collection: "view"})(state),
-            views: {...state.views, focusedViewId: ids.includes(state.views.focusedViewId)
-                ? state.views.focusedViewId : ids[0]}
+            ...setAllEntities(
+                this.idSchema.parse(ids).map(
+                    (id) =>
+                        state.viewEntityMap[id] ?? {
+                            id,
+                            generation: ++this.nextGeneration,
+                            ...(this.copySourceId ? {copySourceId: this.copySourceId} : {})
+                        }
+                ),
+                {collection: "view"}
+            )(state),
+            views: {
+                ...state.views,
+                focusedViewId: ids.includes(state.views.focusedViewId) ? state.views.focusedViewId : ids[0]
+            }
         }),
         this.stateService.store.viewIds as () => ViewId[]
     );
     private readonly initialIds = this.createInitialIds();
 
-    readonly viewIdsState = this.stateService.registerCodec({
-        name: "viewIds", defaultValue: this.initialIds, schema: this.idSchema, urlParamName: "vid"
-    }, this.membership);
+    readonly viewIdsState = this.stateService.registerCodec(
+        {
+            name: "viewIds",
+            defaultValue: this.initialIds,
+            schema: this.idSchema,
+            urlParamName: "vid"
+        },
+        this.membership
+    );
     readonly viewIds = this.viewIdsState.signal;
     readonly identities = this.stateService.store.viewEntities;
 
     // The old persistence keys remain projections. Neither count nor a positional focus
     // is stored alongside the authoritative logical identities.
-    readonly numViewsState = this.stateService.registerCodec<number>({
-        name: "numberOfViews", defaultValue: 1, schema: z.coerce.number().int().min(1).max(32), urlParamName: "n"
-    }, {
-        signal: computed(() => this.viewIds().length),
-        commits: this.membership.commits,
-        read: () => this.membership.read().length,
-        write: count => this.resizeViews(count)
-    });
+    readonly numViewsState = this.stateService.registerCodec<number>(
+        {
+            name: "numberOfViews",
+            defaultValue: 1,
+            schema: z.coerce.number().int().min(1).max(32),
+            urlParamName: "n"
+        },
+        {
+            signal: computed(() => this.viewIds().length),
+            commits: this.membership.commits,
+            writeOrigin: this.membership.writeOrigin,
+            read: () => this.membership.read().length,
+            write: (count) => this.resizeViews(count)
+        }
+    );
 
     private createInitialIds(): ViewId[] {
         const ids = [this.newViewId()];
@@ -130,7 +100,9 @@ export class MapViewStateService {
         return ids;
     }
 
-    private newViewId(): ViewId { return `view-${crypto.randomUUID()}`; }
+    private newViewId(): ViewId {
+        return `view-${crypto.randomUUID()}`;
+    }
 
     private resizeViews(count: number): void {
         z.number().int().min(1).max(32).parse(count);
@@ -140,26 +112,55 @@ export class MapViewStateService {
         this.membership.write(next);
     }
 
+    /** Creates one view using an explicit live source for camera, layers, styles and search visibility. */
+    createView(sourceId: ViewId): ViewId {
+        this.requireView(sourceId);
+        if (this.membership.read().length >= 32) rejectAction("The layout already has 32 views", "invalid_arguments");
+        const id = this.newViewId();
+        this.copySourceId = sourceId;
+        try {
+            this.stateService.transaction(() => {
+                this.focusedView = this.indexOf(sourceId);
+                this.membership.write([...this.membership.read(), id]);
+            });
+        } finally {
+            this.copySourceId = undefined;
+        }
+        return id;
+    }
+
     /** Capture once before awaiting; generation rejects work from a removed/restored view. */
     captureView(index: number): ViewIdentity | undefined {
         const id = this.idAt(index);
-        return id ? this.stateService.values.read(state => state.viewEntityMap[id],
-            () => this.stateService.store.viewEntityMap()[id]) : undefined;
+        return id
+            ? this.stateService.values.read(
+                  (state) => state.viewEntityMap[id],
+                  () => this.stateService.store.viewEntityMap()[id]
+              )
+            : undefined;
     }
 
     isCurrent(target: ViewIdentity): boolean {
-        return this.stateService.values.read(state => state.viewEntityMap[target.id]?.generation,
-            () => this.stateService.store.viewEntityMap()[target.id]?.generation) === target.generation;
+        return (
+            this.stateService.values.read(
+                (state) => state.viewEntityMap[target.id]?.generation,
+                () => this.stateService.store.viewEntityMap()[target.id]?.generation
+            ) === target.generation
+        );
     }
 
-    idAt(index: number): ViewId | undefined { return this.membership.read()[index]; }
-    indexOf(id: ViewId): number { return this.membership.read().indexOf(id); }
+    idAt(index: number): ViewId | undefined {
+        return this.membership.read()[index];
+    }
+    indexOf(id: ViewId): number {
+        return this.membership.read().indexOf(id);
+    }
 
     /** Reorder only live IDs. Values and renderer lifetimes retain their logical owners. */
     reorderViews(ids: ViewId[]): void {
         const current = this.membership.read();
         this.idSchema.parse(ids);
-        if (ids.length !== current.length || ids.some(id => !current.includes(id))) {
+        if (ids.length !== current.length || ids.some((id) => !current.includes(id))) {
             throw new Error("A reorder must contain every current view exactly once");
         }
         this.membership.write(ids);
@@ -167,8 +168,8 @@ export class MapViewStateService {
 
     /** Commit captured camera poses before retiring selected view identities. */
     retainViews(indices: readonly number[], cameras: ReadonlyMap<number, CameraViewState>): void {
-        const ids = indices.map(index => this.idAt(index));
-        if (ids.some(id => !id)) throw new Error("Cannot retain an unavailable view");
+        const ids = indices.map((index) => this.idAt(index));
+        if (ids.some((id) => !id)) throw new Error("Cannot retain an unavailable view");
         this.idSchema.parse(ids);
         this.stateService.transaction(() => {
             for (const [index, camera] of cameras) {
@@ -181,9 +182,12 @@ export class MapViewStateService {
     /** Resolve missing identity once, before any positional URL importer runs. */
     private prepareUrl(params: Params, resetMissing: boolean): Params {
         const hasIds = Object.prototype.hasOwnProperty.call(params, "vid");
-        const count = params["n"] === undefined
-            ? resetMissing ? 1 : this.numViews
-            : z.coerce.number().int().min(1).max(32).parse(firstParamValue(params, "n"));
+        const count =
+            params["n"] === undefined
+                ? resetMissing
+                    ? 1
+                    : this.numViews
+                : z.coerce.number().int().min(1).max(32).parse(firstParamValue(params, "n"));
         let ids: ViewId[];
         if (hasIds) {
             const raw = params["vid"];
@@ -191,175 +195,103 @@ export class MapViewStateService {
             ids = this.idSchema.parse(String(raw).split(","));
             if (ids.length !== count) throw new Error("The view-ID count must match the effective number of views");
         } else {
-            ids = Array.from({length: count}, () => this.newViewId());
+            // A legacy link has positional values, so reuse the current mapping for
+            // omitted fields as well. Only new positions need a fresh identity.
+            ids = resetMissing ? [] : this.membership.read().slice(0, count);
+            while (ids.length < count) ids.push(this.newViewId());
         }
         return {...params, vid: ids.join(","), n: String(count)};
     }
 
+    readonly markerState = this.stateService.register(ownerState.marker, "views", "marker");
 
-    readonly markerState = this.stateService.register({
-        name: 'marker',
-        defaultValue: false,
-        schema: Boolish,
-        urlParamName: 'm',
-        urlIncludeInVisualizationOnly: false
-    }, "views", "marker");
+    readonly markedPositionState = this.stateService.register(ownerState.markedPosition, "views", "markedPosition");
 
-
-    readonly markedPositionState = this.stateService.register({
-        name: 'markedPosition',
-        defaultValue: [],
-        schema: z.array(z.coerce.number()).max(3),
-        toStorage: (value: number[]) => value.map(v => roundCoordinateStateValue(v)),
-        fromStorage: (payload: any): number[] => (payload as number[]).map(v => roundCoordinateStateValue(v)),
-        urlParamName: 'mp',
-        urlIncludeInVisualizationOnly: false
-    }, "views", "markedPosition");
-
-
-    readonly focusedViewState = this.stateService.registerCodec<number>({
-        name: "focus", defaultValue: 0, schema: z.coerce.number().int().nonnegative(),
-        urlParamName: "f", urlIncludeInVisualizationOnly: false
-    }, this.stateService.values.bind(
-        state => Math.max(0, state.viewIds.indexOf(state.views.focusedViewId)),
-        (state, index) => ({views: {...state.views,
-            focusedViewId: String(state.viewIds[index] ?? state.viewIds[0])}}),
+    private readonly focusBinding = this.stateService.values.bind(
+        (state) => Math.max(0, state.viewIds.indexOf(state.views.focusedViewId)),
+        (state, index) => ({
+            views: {
+                ...state.views,
+                focusedViewId: String(state.viewIds[index] ?? state.viewIds[0])
+            }
+        }),
         () => Math.max(0, this.viewIds().indexOf(this.stateService.store.views.focusedViewId()))
-    ));
+    );
+
+    readonly focusedViewState = this.stateService.registerCodec<number>(
+        {
+            name: "focus",
+            defaultValue: 0,
+            schema: z.coerce.number().int().nonnegative(),
+            urlParamName: "f",
+            urlIncludeInVisualizationOnly: false
+        },
+        {
+            ...this.focusBinding,
+            writeOrigin: () => this.focusBinding.writeOrigin?.() ?? this.membership.writeOrigin?.()
+        }
+    );
     readonly focusedViewId = computed(() => this.viewIds()[this.focusedViewState.signal()]);
 
+    readonly viewSyncState = this.stateService.register(ownerState.viewSync, "views", "viewSync");
 
-    readonly viewSyncState = this.stateService.register({
-        name: 'viewSync',
-        defaultValue: [],
-        schema: z.array(z.union([
-            z.literal(VIEW_SYNC_PROJECTION),
-            z.literal(VIEW_SYNC_POSITION),
-            z.literal(VIEW_SYNC_MOVEMENT),
-            z.literal(VIEW_SYNC_LAYERS)
-        ])),
-        urlParamName: 'sync',
-        urlIncludeInVisualizationOnly: false
-    }, "views", "viewSync");
+    readonly cameraViewDataState = this.stateService.registerView(ownerState.cameraViewData, "views", "cameraViewData");
 
+    readonly mode2dState = this.stateService.registerView(ownerState.mode2d, "views", "mode2d");
 
-    readonly cameraViewDataState = this.stateService.registerView({
-        name: 'cameraView',
-        defaultValue: {
-            destination: {lon: 22.837473, lat: 38.490817, alt: 16000000},
-            orientation: {heading: 0, pitch: -Math.PI / 2, roll: 0},
-            position: [0, 0, 0]
-        },
-        schema: z.object({
-            lon: z.coerce.number().optional(),
-            lat: z.coerce.number().optional(),
-            alt: z.coerce.number().optional(),
-            h: z.coerce.number().optional(),
-            p: z.coerce.number().optional(),
-            r: z.coerce.number().optional(),
-            px: z.coerce.number().optional(),
-            py: z.coerce.number().optional(),
-            pz: z.coerce.number().optional()
-        }),
-        toStorage: (value: any) => ({
-            lon: roundCoordinateStateValue(value.destination.lon),
-            lat: roundCoordinateStateValue(value.destination.lat),
-            alt: roundCoordinateStateValue(value.destination.alt),
-            h: roundCoordinateStateValue(value.orientation.heading),
-            p: roundCoordinateStateValue(value.orientation.pitch),
-            r: roundCoordinateStateValue(value.orientation.roll),
-            px: roundCoordinateStateValue(value.position?.[0] ?? 0),
-            py: roundCoordinateStateValue(value.position?.[1] ?? 0),
-            pz: roundCoordinateStateValue(value.position?.[2] ?? 0)
-        }),
-        fromStorage: (payload: any, currentValue: CameraViewState): CameraViewState => ({
-            destination: {
-                lon: roundCoordinateStateValue(payload.lon ?? currentValue.destination.lon),
-                lat: roundCoordinateStateValue(payload.lat ?? currentValue.destination.lat),
-                alt: roundCoordinateStateValue(payload.alt ?? currentValue.destination.alt),
-            },
-            orientation: {
-                heading: roundCoordinateStateValue(payload.h ?? currentValue.orientation.heading),
-                pitch: roundCoordinateStateValue(payload.p ?? currentValue.orientation.pitch),
-                roll: roundCoordinateStateValue(payload.r ?? currentValue.orientation.roll),
-            },
-            // Older URLs, local-storage entries, and snapshots have no map-centre offset.
-            position: [
-                roundCoordinateStateValue(payload.px ?? 0),
-                roundCoordinateStateValue(payload.py ?? 0),
-                roundCoordinateStateValue(payload.pz ?? 0)
-            ]
-        }),
-        urlFormEncode: true
-    }, "views", "cameraViewData");
+    readonly deckAntialiasingEnabledState = this.stateService.register(
+        ownerState.deckAntialiasingEnabled,
+        "views",
+        "deckAntialiasingEnabled"
+    );
 
+    readonly semanticCompositingEnabledState = this.stateService.register(
+        ownerState.semanticCompositingEnabled,
+        "views",
+        "semanticCompositingEnabled"
+    );
 
-    readonly mode2dState = this.stateService.registerView({
-        name: 'mode2d',
-        defaultValue: false,
-        schema: Boolish,
-        urlParamName: 'm2d',
-        urlIncludeInVisualizationOnly: false
-    }, "views", "mode2d");
+    readonly contactShadingEnabledState = this.stateService.register(
+        ownerState.contactShadingEnabled,
+        "views",
+        "contactShadingEnabled"
+    );
 
+    readonly lod3TileThresholdState = this.stateService.register(
+        ownerState.lod3TileThreshold,
+        "views",
+        "lod3TileThreshold"
+    );
 
-    readonly deckAntialiasingEnabledState = this.stateService.register({
-        name: 'deckAntialiasingEnabled',
-        defaultValue: true,
-        schema: Boolish
-    }, "views", "deckAntialiasingEnabled");
+    readonly tileSubsetRenderWorkerCountState = this.stateService.register(
+        ownerState.tileSubsetRenderWorkerCount,
+        "views",
+        "tileSubsetRenderWorkerCount"
+    );
 
+    readonly pointCloudDownsamplingEnabledState = this.stateService.register(
+        ownerState.pointCloudDownsamplingEnabled,
+        "views",
+        "pointCloudDownsamplingEnabled"
+    );
 
-    readonly semanticCompositingEnabledState = this.stateService.register({
-        name: 'semanticCompositingEnabled',
-        defaultValue: true,
-        schema: Boolish
-    }, "views", "semanticCompositingEnabled");
+    readonly pointCloudDetailPixelsState = this.stateService.register(
+        ownerState.pointCloudDetailPixels,
+        "views",
+        "pointCloudDetailPixels"
+    );
 
+    readonly pointCloudWorkingMemoryMiBState = this.stateService.register(
+        ownerState.pointCloudWorkingMemoryMiB,
+        "views",
+        "pointCloudWorkingMemoryMiB"
+    );
 
-    readonly contactShadingEnabledState = this.stateService.register({
-        name: 'contactShadingEnabled',
-        defaultValue: true,
-        schema: Boolish
-    }, "views", "contactShadingEnabled");
-
-
-    readonly lod3TileThresholdState = this.stateService.register({
-        name: 'lod3TileThreshold',
-        defaultValue: DEFAULT_LOD3_TILE_THRESHOLD,
-        schema: z.coerce.number().int(),
-        toStorage: value => clampLod3TileThreshold(value, DEFAULT_LOD3_TILE_THRESHOLD),
-        fromStorage: value => clampLod3TileThreshold(value, DEFAULT_LOD3_TILE_THRESHOLD)
-    }, "views", "lod3TileThreshold");
-
-
-    readonly tileSubsetRenderWorkerCountState = this.stateService.register({
-        name: 'tileSubsetRenderWorkerCount',
-        defaultValue: 0,
-        schema: z.coerce.number().int(),
-        toStorage: value => clampTileSubsetRenderWorkerCount(value),
-        fromStorage: value => clampTileSubsetRenderWorkerCount(value)
-    }, "views", "tileSubsetRenderWorkerCount");
-
-    readonly pointCloudDownsamplingEnabledState = this.stateService.register({
-        name: 'pointCloudDownsamplingEnabled', defaultValue: DEFAULT_POINT_CLOUD_POLICY.enabled, schema: Boolish
-    }, "views", "pointCloudDownsamplingEnabled");
-
-    readonly pointCloudDetailPixelsState = this.stateService.register({
-        name: 'pointCloudDetailPixels', defaultValue: DEFAULT_POINT_CLOUD_POLICY.detailPixels,
-        schema: pointCloudDetailSchema
-    }, "views", "pointCloudDetailPixels");
-
-    readonly pointCloudWorkingMemoryMiBState = this.stateService.register({
-        name: 'pointCloudWorkingMemoryMiB', defaultValue: DEFAULT_POINT_CLOUD_POLICY.workingMemoryMiB,
-        schema: pointCloudWorkingMemorySchema
-    }, "views", "pointCloudWorkingMemoryMiB");
-
-    readonly pointCloudGpuMemoryMiBState = this.stateService.register({
-        name: 'pointCloudGpuMemoryMiB', defaultValue: DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB,
-        schema: pointCloudGpuMemorySchema
-    }, "views", "pointCloudGpuMemoryMiB");
-
+    readonly pointCloudGpuMemoryMiBState = this.stateService.register(
+        ownerState.pointCloudGpuMemoryMiB,
+        "views",
+        "pointCloudGpuMemoryMiB"
+    );
 
     /** Read the same validated policy for Preferences, rendering and worker admission. */
     get pointCloudPolicy(): PointCloudPolicy {
@@ -370,7 +302,6 @@ export class MapViewStateService {
             gpuMemoryMiB: this.pointCloudGpuMemoryMiBState.getValue()
         };
     }
-
 
     /** Validate the whole preference edit before changing any persisted field. */
     setPointCloudPolicy(policy: PointCloudPolicy): void {
@@ -383,39 +314,43 @@ export class MapViewStateService {
         });
     }
 
+    readonly mapZoomStepState = this.stateService.register(ownerState.mapZoomStep, "views", "mapZoomStep");
 
-    readonly mapZoomStepState = this.stateService.register({
-        name: 'mapZoomStep',
-        defaultValue: DEFAULT_MAP_ZOOM_STEP,
-        schema: z.coerce.number(),
-        fromStorage: value => clampMapZoomStep(Number(value))
-    }, "views", "mapZoomStep");
+    readonly featureZoomClearanceMetersState = this.stateService.register(
+        ownerState.featureZoomClearanceMeters,
+        "views",
+        "featureZoomClearanceMeters"
+    );
 
-
-    readonly featureZoomClearanceMetersState = this.stateService.register({
-        name: 'featureZoomClearanceMeters',
-        defaultValue: DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS,
-        schema: z.coerce.number(),
-        fromStorage: value => clampFeatureZoomClearanceMeters(Number(value))
-    }, "views", "featureZoomClearanceMeters");
-
-
-    readonly tilesLoadLimitState = this.stateService.register({
-        name: 'tilesLoadLimit',
-        defaultValue: MAX_NUM_TILES_TO_LOAD,
-        schema: z.coerce.number().nonnegative(),
-        urlParamName: 'tll'
-    }, "views", "tilesLoadLimit");
-
+    readonly tilesLoadLimitState = this.stateService.register(ownerState.tilesLoadLimit, "views", "tilesLoadLimit");
 
     /** Immutable view-sync option descriptors consumed by the split-view UI. */
     readonly syncOptions: readonly ViewSyncOptionDescriptor[] = [
-        {name: "Position", code: VIEW_SYNC_POSITION, icon: "location_on", tooltip: "Sync camera position/orientation across views"},
-        {name: "Movement", code: VIEW_SYNC_MOVEMENT, icon: "drag_pan", tooltip: "Sync camera movement delta across views"},
-        {name: "Projection", code: VIEW_SYNC_PROJECTION, icon: "3d_rotation", tooltip: "Sync projection mode across views"},
-        {name: "Layers", code: VIEW_SYNC_LAYERS, icon: "layers", tooltip: "Sync layer activation/style/background settings across views"},
+        {
+            name: "Position",
+            code: VIEW_SYNC_POSITION,
+            icon: "location_on",
+            tooltip: "Sync camera position/orientation across views"
+        },
+        {
+            name: "Movement",
+            code: VIEW_SYNC_MOVEMENT,
+            icon: "drag_pan",
+            tooltip: "Sync camera movement delta across views"
+        },
+        {
+            name: "Projection",
+            code: VIEW_SYNC_PROJECTION,
+            icon: "3d_rotation",
+            tooltip: "Sync projection mode across views"
+        },
+        {
+            name: "Layers",
+            code: VIEW_SYNC_LAYERS,
+            icon: "layers",
+            tooltip: "Sync layer activation/style/background settings across views"
+        }
     ];
-
 
     /** Copies synchronized view properties from the focused view to the others. */
     syncViews(): void {
@@ -425,10 +360,16 @@ export class MapViewStateService {
             }
             if (this.viewSync.includes(VIEW_SYNC_POSITION)) {
                 const camState = this.cameraViewDataState.getValue(this.focusedView);
-                this.setView(this.focusedView,
-                    Cartographic.fromDegrees(camState.destination.lon, camState.destination.lat, camState.destination.alt),
+                this.setView(
+                    this.focusedView,
+                    Cartographic.fromDegrees(
+                        camState.destination.lon,
+                        camState.destination.lat,
+                        camState.destination.alt
+                    ),
                     camState.orientation,
-                    camState.position);
+                    camState.position
+                );
             }
             if (this.viewSync.includes(VIEW_SYNC_PROJECTION)) {
                 this.setProjectionMode(this.focusedView, this.mode2dState.getValue(this.focusedView));
@@ -436,12 +377,13 @@ export class MapViewStateService {
         });
     }
 
-
     // -----------------
     // Public API below
     // -----------------
 
-    get numViews() {return this.numViewsState.getValue();}
+    get numViews() {
+        return this.numViewsState.getValue();
+    }
 
     set numViews(val: number) {
         this.stateService.transaction(() => {
@@ -453,28 +395,39 @@ export class MapViewStateService {
         });
     }
 
-    get deckAntialiasingEnabled() {return this.deckAntialiasingEnabledState.getValue();}
+    get deckAntialiasingEnabled() {
+        return this.deckAntialiasingEnabledState.getValue();
+    }
 
     set deckAntialiasingEnabled(val: boolean) {
-        this.stateService.transaction(() => {this.deckAntialiasingEnabledState.next(!!val);
+        this.stateService.transaction(() => {
+            this.deckAntialiasingEnabledState.next(!!val);
         });
     }
 
-    get semanticCompositingEnabled() {return this.semanticCompositingEnabledState.getValue();}
+    get semanticCompositingEnabled() {
+        return this.semanticCompositingEnabledState.getValue();
+    }
 
     set semanticCompositingEnabled(val: boolean) {
-        this.stateService.transaction(() => {this.semanticCompositingEnabledState.next(!!val);
+        this.stateService.transaction(() => {
+            this.semanticCompositingEnabledState.next(!!val);
         });
     }
 
-    get contactShadingEnabled() {return this.contactShadingEnabledState.getValue();}
+    get contactShadingEnabled() {
+        return this.contactShadingEnabledState.getValue();
+    }
 
     set contactShadingEnabled(val: boolean) {
-        this.stateService.transaction(() => {this.contactShadingEnabledState.next(!!val);
+        this.stateService.transaction(() => {
+            this.contactShadingEnabledState.next(!!val);
         });
     }
 
-    get lod3TileThreshold() {return this.lod3TileThresholdState.getValue();}
+    get lod3TileThreshold() {
+        return this.lod3TileThresholdState.getValue();
+    }
 
     set lod3TileThreshold(val: number) {
         this.stateService.transaction(() => {
@@ -488,16 +441,17 @@ export class MapViewStateService {
 
     set tileSubsetRenderWorkerCount(val: number) {
         this.stateService.transaction(() => {
-            this.tileSubsetRenderWorkerCountState.next(
-                clampTileSubsetRenderWorkerCount(val)
-            );
+            this.tileSubsetRenderWorkerCountState.next(clampTileSubsetRenderWorkerCount(val));
         });
     }
 
-    get mapZoomStep() {return this.mapZoomStepState.getValue();}
+    get mapZoomStep() {
+        return this.mapZoomStepState.getValue();
+    }
 
     set mapZoomStep(val: number) {
-        this.stateService.transaction(() => {this.mapZoomStepState.next(clampMapZoomStep(Number(val)));
+        this.stateService.transaction(() => {
+            this.mapZoomStepState.next(clampMapZoomStep(Number(val)));
         });
     }
 
@@ -507,41 +461,53 @@ export class MapViewStateService {
 
     set featureZoomClearanceMeters(val: number) {
         this.stateService.transaction(() => {
-            this.featureZoomClearanceMetersState.next(
-                clampFeatureZoomClearanceMeters(Number(val))
-            );
+            this.featureZoomClearanceMetersState.next(clampFeatureZoomClearanceMeters(Number(val)));
         });
     }
 
-    get marker() {return this.markerState.getValue();}
+    get marker() {
+        return this.markerState.getValue();
+    }
 
     set marker(val: boolean) {
-        this.stateService.transaction(() => {this.markerState.next(val);
+        this.stateService.transaction(() => {
+            this.markerState.next(val);
         });
     }
 
-    get markedPosition() {return this.markedPositionState.getValue();}
+    get markedPosition() {
+        return this.markedPositionState.getValue();
+    }
 
     set markedPosition(val: number[]) {
-        this.stateService.transaction(() => {this.markedPositionState.next(val.map(v => roundCoordinateStateValue(v)));
+        this.stateService.transaction(() => {
+            this.markedPositionState.next(val.map((v) => roundCoordinateStateValue(v)));
         });
     }
 
-    get focusedView() {return this.focusedViewState.getValue();}
+    get focusedView() {
+        return this.focusedViewState.getValue();
+    }
 
     set focusedView(val: number) {
-        this.stateService.transaction(() => {this.focusedViewState.next(val);
+        this.stateService.transaction(() => {
+            this.focusedViewState.next(val);
         });
     }
 
-    get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}
+    get tilesLoadLimit() {
+        return this.tilesLoadLimitState.getValue();
+    }
 
     set tilesLoadLimit(val: number) {
-        this.stateService.transaction(() => {this.tilesLoadLimitState.next(val);
+        this.stateService.transaction(() => {
+            this.tilesLoadLimitState.next(val);
         });
     }
 
-    get viewSync() {return this.viewSyncState.getValue();}
+    get viewSync() {
+        return this.viewSyncState.getValue();
+    }
 
     set viewSync(val: string[]) {
         this.stateService.transaction(() => {
@@ -550,27 +516,25 @@ export class MapViewStateService {
             const hasMovement = uniqueValues.includes(VIEW_SYNC_MOVEMENT);
             const hasPosition = uniqueValues.includes(VIEW_SYNC_POSITION);
             let sanitized = uniqueValues;
-    
+
             if (hasMovement && hasPosition) {
                 if (!previous.has(VIEW_SYNC_MOVEMENT)) {
-                    sanitized = uniqueValues.filter(value => value !== VIEW_SYNC_POSITION);
+                    sanitized = uniqueValues.filter((value) => value !== VIEW_SYNC_POSITION);
                 } else if (!previous.has(VIEW_SYNC_POSITION)) {
-                    sanitized = uniqueValues.filter(value => value !== VIEW_SYNC_MOVEMENT);
+                    sanitized = uniqueValues.filter((value) => value !== VIEW_SYNC_MOVEMENT);
                 } else {
-                    sanitized = uniqueValues.filter(value => value !== VIEW_SYNC_POSITION);
+                    sanitized = uniqueValues.filter((value) => value !== VIEW_SYNC_POSITION);
                 }
             }
-    
+
             this.viewSyncState.next(sanitized);
         });
     }
-
 
     /** Returns the persisted orientation for the given view. */
     getCameraOrientation(viewIndex: number) {
         return this.cameraViewDataState.getValue(viewIndex).orientation;
     }
-
 
     /** Returns the persisted camera destination for the given view. */
     getCameraPosition(viewIndex: number) {
@@ -578,12 +542,11 @@ export class MapViewStateService {
         return Cartographic.fromDegrees(destination.lon, destination.lat, destination.alt);
     }
 
-
     /** Internal helper that writes a complete camera pose without extra synchronization policy. */
     private _setView(
         viewIndex: number,
         destination: Cartographic,
-        orientation?: { heading: number, pitch: number, roll: number },
+        orientation?: {heading: number; pitch: number; roll: number},
         position: readonly [number, number, number] = [0, 0, 0]
     ) {
         // Fall back to the current orientation if none was passed.
@@ -592,24 +555,23 @@ export class MapViewStateService {
             destination: {
                 lon: roundCoordinateStateValue(GeoMath.toDegrees(destination.longitude)),
                 lat: roundCoordinateStateValue(GeoMath.toDegrees(destination.latitude)),
-                alt: roundCoordinateStateValue(destination.height),
+                alt: roundCoordinateStateValue(destination.height)
             },
             orientation: {
                 heading: roundCoordinateStateValue(orientation.heading),
                 pitch: roundCoordinateStateValue(orientation.pitch),
-                roll: roundCoordinateStateValue(orientation.roll),
+                roll: roundCoordinateStateValue(orientation.roll)
             },
             position: position.map(roundCoordinateStateValue) as [number, number, number]
         };
         this.cameraViewDataState.next(viewIndex, view);
     }
 
-
     /** Persists a camera pose and applies the configured cross-view synchronization policy. */
     setView(
         viewIndex: number,
         destination: Cartographic,
-        orientation?: { heading: number, pitch: number, roll: number },
+        orientation?: {heading: number; pitch: number; roll: number},
         position: readonly [number, number, number] = [0, 0, 0]
     ) {
         const syncPosition = this.viewSync.includes(VIEW_SYNC_POSITION);
@@ -656,7 +618,6 @@ export class MapViewStateService {
         this._setView(viewIndex, destination, orientation, position);
     }
 
-
     /** Switches one view between 2D and 3D projection mode. */
     setProjectionMode(viewIndex: number, is2DMode: boolean) {
         return this.stateService.transaction(() => {
@@ -665,7 +626,7 @@ export class MapViewStateService {
                 if (viewIndex !== this.focusedView) {
                     return;
                 }
-    
+
                 for (let i = 0; i < this.numViews; i++) {
                     this.mode2dState.next(i, is2DMode);
                 }
@@ -674,7 +635,6 @@ export class MapViewStateService {
             this.mode2dState.next(viewIndex, is2DMode);
         });
     }
-
 
     /** Enables or disables the explicit location marker overlay. */
     setMarkerState(enabled: boolean) {
@@ -685,7 +645,6 @@ export class MapViewStateService {
             }
         });
     }
-
 
     /** Updates the explicit location marker position, optionally delaying URL sync. */
     setMarkerPosition(position: Cartographic | null, delayUpdate: boolean = false) {
@@ -700,7 +659,6 @@ export class MapViewStateService {
             this.stateService.pushNextUrl();
         }
     }
-
 
     /** Applies the selection emitted by the view-sync toggle UI and mirrors it into state. */
     updateSelectedSyncOptions(selectedCodes: string[]) {
@@ -720,20 +678,89 @@ export class MapViewStateService {
             } else if (!previousSelection.has(VIEW_SYNC_POSITION)) {
                 valueToRemove = VIEW_SYNC_MOVEMENT;
             }
-            nextSelection = nextSelection.filter(code => code !== valueToRemove);
+            nextSelection = nextSelection.filter((code) => code !== valueToRemove);
         }
 
         this.viewSync = nextSelection;
         this.syncViews();
     }
-    constructor(private readonly stateService: AppStateService, private readonly infoMessageService: InfoMessageService) {
+    constructor(
+        private readonly stateService: AppStateService,
+        private readonly infoMessageService: InfoMessageService
+    ) {
+        this.registerControls();
+
         this.focusedViewState.next(0);
         this.stateService.registerUrlNormalizer((params, resetMissing) => this.prepareUrl(params, resetMissing));
-        this.stateService.beforeCommit(() => {
-            const ids = this.membership.read();
-            const focused = this.stateService.values.read(state => state.views.focusedViewId,
-                () => this.stateService.store.views.focusedViewId());
-            if (!ids.includes(focused)) this.focusedViewState.next(0);
+    }
+
+    /** Resolves a public logical target and captures its current runtime lifetime. */
+    requireView(id: ViewId): ViewIdentity {
+        const index = this.indexOf(id);
+        const target = index >= 0 ? this.captureView(index) : undefined;
+        if (!target) rejectAction("The requested view is unavailable", "not_available", "view_unavailable");
+        return target;
+    }
+
+    requireCurrentView(target: ViewIdentity): number {
+        if (!this.isCurrent(target)) rejectAction("The target view was removed", "cancelled");
+        return this.indexOf(target.id);
+    }
+
+    private registerControls(): void {
+        const actions = inject(AppActionService);
+        const controls = MapViewStateService.controls;
+        actions.registerControl(controls.focusedView, {
+            read: () => this.focusedViewId(),
+            write: (_, id) => {
+                this.focusedView = this.indexOf(this.requireView(id).id);
+            }
+        });
+        actions.registerControl(controls.viewSync, {
+            read: () => MapViewStateService.controls.viewSync.valueSchema.parse(this.viewSync),
+            write: (_, value) => this.setSynchronization(value)
+        });
+        actions.registerControl(controls.marker, {
+            read: () => this.markerControl(),
+            write: (_, value) => this.setMarkerControl(value)
+        });
+        actions.registerControl(controls.navigation, {
+            read: () => ({zoomStep: this.mapZoomStep, featureZoomClearance: this.featureZoomClearanceMeters}),
+            write: (_, value) => this.setNavigationPreferences(value)
+        });
+    }
+
+    setSynchronization(value: string[]): void {
+        if (value.includes("pos") && value.includes("mov"))
+            rejectAction("Position and movement sync are mutually exclusive", "invalid_arguments");
+        this.updateSelectedSyncOptions(value);
+    }
+
+    markerControl() {
+        return {
+            enabled: this.marker,
+            position:
+                this.markedPosition.length >= 2
+                    ? {lon: this.markedPosition[0], lat: this.markedPosition[1], alt: this.markedPosition[2] ?? 0}
+                    : null
+        };
+    }
+
+    setMarkerControl(value: z.infer<typeof MapViewStateService.controls.marker.valueSchema>): void {
+        this.stateService.transaction(() => {
+            this.setMarkerPosition(
+                value.position
+                    ? Cartographic.fromDegrees(value.position.lon, value.position.lat, value.position.alt)
+                    : null
+            );
+            this.setMarkerState(value.enabled);
+        });
+    }
+
+    setNavigationPreferences(value: z.infer<typeof MapViewStateService.controls.navigation.valueSchema>): void {
+        this.stateService.transaction(() => {
+            this.mapZoomStep = value.zoomStep;
+            this.featureZoomClearanceMeters = value.featureZoomClearance;
         });
     }
 }

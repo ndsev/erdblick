@@ -1,64 +1,72 @@
-import {AppLayoutService} from "../shared/app-layout.service";
-import {LocationSearchService} from "../search/location.search.service";
-import {InspectionStateService} from "../inspection/inspection-state.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
-import {inject} from "@angular/core";
-import {Component, OnDestroy, OnInit, ViewChild} from '@angular/core';
+import {Component, inject, OnDestroy, OnInit, ViewChild} from "@angular/core";
 import {combineLatest, Subscription} from "rxjs";
-import {DEFAULT_POINT_CLOUD_POLICY, pointCloudPolicySchema, PointCloudPolicy} from "../shared/point-cloud-policy";
-import {InfoMessageService} from "../shared/info.service";
-import {MapViewService, ViewRecalculationReason} from "../mapview/map-view.service";
-import {StyleService} from "../styledata/style.service";
+import {CoordinatesPolicyService} from "../coords/coordinates-policy.service";
+import {environment} from "../environments/environment";
 import {
-    ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID,
+    DEFAULT_DRILL_PICK_RADIUS,
+    defaultHoverLabelFieldKey,
+    MAX_DRILL_PICK_RADIUS,
+    MAX_SIMULTANEOUS_INSPECTIONS,
+    MIN_DRILL_PICK_RADIUS,
+    type HoverLabelFieldConfig
+} from "../inspection/inspection-state.model";
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {FeatureSearchSchemaService} from "../mapdata/feature-search-schema.service";
+import type {FeatureSearchStyleFieldCandidate} from "../mapdata/map-runtime.model";
+import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import {getTileSubsetLayerRenderAutoWorkerCount} from "../mapview/deck/tile-subset-layer-render.service";
+import {
     clampFeatureZoomClearanceMeters,
     clampMapZoomStep,
-    DEFAULT_DRILL_PICK_RADIUS,
     DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS,
     DEFAULT_MAP_ZOOM_STEP,
-    MAX_DRILL_PICK_RADIUS,
     MAX_FEATURE_ZOOM_CLEARANCE_METERS,
     MAX_MAP_ZOOM_STEP,
     MAX_NUM_TILES_TO_LOAD,
-    MAX_SIMULTANEOUS_INSPECTIONS,
-    DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,
-    MAX_LOCATION_SEARCH_RESULT_LIMIT,
-    PREFERENCES_DIALOG_LAYOUT_ID,
-    MIN_MAP_ZOOM_STEP,
-    MIN_DRILL_PICK_RADIUS,
     MIN_FEATURE_ZOOM_CLEARANCE_METERS,
-    AppStateService,
-    defaultHoverLabelFieldKey,
+    MIN_MAP_ZOOM_STEP
+} from "../mapview/map-view-state.model";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewService, ViewRecalculationReason} from "../mapview/map-view.service";
+import {DEFAULT_LOCATION_SEARCH_RESULT_LIMIT, MAX_LOCATION_SEARCH_RESULT_LIMIT} from "../search/location-search-limits";
+import {LocationSearchService} from "../search/location.search.service";
+import {AppDialogComponent} from "../shared/app-dialog.component";
+import {ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, PREFERENCES_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
+import {AppLayoutService} from "../shared/app-layout.service";
+import {AppStateService} from "../shared/appstate.service";
+import {connectionRetryPolicySchema} from "../shared/connection-retry-policy";
+import {DialogStackService} from "../shared/dialog-stack.service";
+import {InfoMessageService} from "../shared/info.service";
+import {
+    clampLod3TileThreshold,
     DEFAULT_LOD3_TILE_THRESHOLD,
-    MAX_TILE_SUBSET_RENDER_WORKER_COUNT,
     MAX_LOD3_TILE_THRESHOLD,
-    MIN_LOD3_TILE_THRESHOLD,
+    MIN_LOD3_TILE_THRESHOLD
+} from "../shared/lod-policy";
+import {DEFAULT_POINT_CLOUD_POLICY, PointCloudPolicy, pointCloudPolicySchema} from "../shared/point-cloud-policy";
+import {
     AUTO_TILE_SUBSET_RENDER_WORKER_COUNT,
     clampTileSubsetRenderWorkerCount,
-    clampLod3TileThreshold,
-    type HoverLabelFieldConfig
-} from "../shared/appstate.service";
-import {
-    getTileSubsetLayerRenderAutoWorkerCount
-} from "../mapview/deck/tile-subset-layer-render.service";
-import {DialogStackService} from "../shared/dialog-stack.service";
-import {AppDialogComponent} from "../shared/app-dialog.component";
-import {environment} from "../environments/environment";
-import {CoordinatesPolicyService} from "../coords/coordinates-policy.service";
-import {connectionRetryPolicySchema} from "../shared/connection-retry-policy";
-import {FeatureSearchSchemaService} from "../mapdata/feature-search-schema.service";
-import type {
-    FeatureSearchStyleFieldCandidate
-} from "../mapdata/map-runtime.model";
+    MAX_TILE_SUBSET_RENDER_WORKER_COUNT
+} from "../shared/tile-render-policy";
+import {StyleService} from "../styledata/style.service";
 
 @Component({
-    selector: 'preferences',
+    selector: "preferences",
     template: `
-        <app-dialog header="Preferences" [(visible)]="dialogVisible" [position]="'center'"
-                    [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog"
-                    [persistLayout]="true" [layoutId]="dialogLayoutId"
-                    (onShow)="onDialogShow()">
+        <app-dialog
+            header="Preferences"
+            [(visible)]="dialogVisible"
+            [position]="'center'"
+            [resizable]="false"
+            [modal]="false"
+            [draggable]="true"
+            #pref
+            class="pref-dialog"
+            [persistLayout]="true"
+            [layoutId]="dialogLayoutId"
+            (onShow)="onDialogShow()"
+        >
             <p-tabs value="general" class="preferences-tabs" data-testid="preferences-tabs" scrollable>
                 <p-tablist>
                     <p-tab value="general" data-testid="preferences-tab-general">General</p-tab>
@@ -71,79 +79,100 @@ import type {
                 <p-tabpanels>
                     <p-tabpanel value="general">
                         <div class="slider-container">
-                            <label [for]="mapZoomStepInput">Zoom Speed
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Controls mouse-wheel zoom sensitivity and the Q/E / +/- zoom step."
-                                   tooltipPosition="top"></i>
+                            <label [for]="mapZoomStepInput"
+                                >Zoom Speed
+                                <i
+                                    class="pi pi-info-circle"
+                                    pTooltip="Controls mouse-wheel zoom sensitivity and the Q/E / +/- zoom step."
+                                    tooltipPosition="top"
+                                ></i>
                             </label>
                             <div class="slider-controls">
                                 <div style="display: inline-block">
-                                    <input class="tiles-input w-full"
-                                           type="text"
-                                           pInputText
-                                           [(ngModel)]="mapZoomStepInput"
-                                           (ngModelChange)="onMapZoomStepInputChange($event)"
-                                           (keydown.enter)="applyMapZoomStep()"/>
-                                    <p-slider [(ngModel)]="mapZoomStepInput"
-                                              (ngModelChange)="onMapZoomStepSliderChange($event)"
-                                              class="w-full"
-                                              [min]="MIN_MAP_ZOOM_STEP"
-                                              [max]="MAX_MAP_ZOOM_STEP"
-                                              [step]="0.05"></p-slider>
+                                    <input
+                                        class="tiles-input w-full"
+                                        type="text"
+                                        pInputText
+                                        [(ngModel)]="mapZoomStepInput"
+                                        (ngModelChange)="onMapZoomStepInputChange($event)"
+                                        (keydown.enter)="applyMapZoomStep()"
+                                    />
+                                    <p-slider
+                                        [(ngModel)]="mapZoomStepInput"
+                                        (ngModelChange)="onMapZoomStepSliderChange($event)"
+                                        class="w-full"
+                                        [min]="MIN_MAP_ZOOM_STEP"
+                                        [max]="MAX_MAP_ZOOM_STEP"
+                                        [step]="0.05"
+                                    ></p-slider>
                                 </div>
-                                <p-button (click)="applyMapZoomStep()"
-                                          label=""
-                                          icon="pi pi-check"
-                                          [disabled]="!mapZoomStepChanged"></p-button>
+                                <p-button
+                                    (click)="applyMapZoomStep()"
+                                    label=""
+                                    icon="pi pi-check"
+                                    [disabled]="!mapZoomStepChanged"
+                                ></p-button>
                             </div>
                         </div>
                         <p-divider></p-divider>
                         <div class="slider-container">
                             <label for="feature-zoom-clearance-input">
                                 3D Feature Zoom Clearance (m)
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Minimum camera distance from a picked 3D feature while zooming. Increase it to stop farther away; set it to 0 to disable the limit."
-                                   tooltipPosition="top"></i>
+                                <i
+                                    class="pi pi-info-circle"
+                                    pTooltip="Minimum camera distance from a picked 3D feature while zooming. Increase it to stop farther away; set it to 0 to disable the limit."
+                                    tooltipPosition="top"
+                                ></i>
                             </label>
                             <div class="slider-controls">
                                 <div style="display: inline-block">
-                                    <input id="feature-zoom-clearance-input"
-                                           data-testid="feature-zoom-clearance-input"
-                                           class="tiles-input w-full"
-                                           type="text"
-                                           pInputText
-                                           [(ngModel)]="featureZoomClearanceMetersInput"
-                                           (ngModelChange)="onFeatureZoomClearanceInputChange($event)"
-                                           (keydown.enter)="applyFeatureZoomClearance()"/>
-                                    <p-slider [(ngModel)]="featureZoomClearanceMetersInput"
-                                              (ngModelChange)="onFeatureZoomClearanceSliderChange($event)"
-                                              class="w-full"
-                                              [min]="MIN_FEATURE_ZOOM_CLEARANCE_METERS"
-                                              [max]="MAX_FEATURE_ZOOM_CLEARANCE_METERS"
-                                              [step]="1"></p-slider>
+                                    <input
+                                        id="feature-zoom-clearance-input"
+                                        data-testid="feature-zoom-clearance-input"
+                                        class="tiles-input w-full"
+                                        type="text"
+                                        pInputText
+                                        [(ngModel)]="featureZoomClearanceMetersInput"
+                                        (ngModelChange)="onFeatureZoomClearanceInputChange($event)"
+                                        (keydown.enter)="applyFeatureZoomClearance()"
+                                    />
+                                    <p-slider
+                                        [(ngModel)]="featureZoomClearanceMetersInput"
+                                        (ngModelChange)="onFeatureZoomClearanceSliderChange($event)"
+                                        class="w-full"
+                                        [min]="MIN_FEATURE_ZOOM_CLEARANCE_METERS"
+                                        [max]="MAX_FEATURE_ZOOM_CLEARANCE_METERS"
+                                        [step]="1"
+                                    ></p-slider>
                                 </div>
-                                <p-button (click)="applyFeatureZoomClearance()"
-                                          data-testid="apply-feature-zoom-clearance"
-                                          label=""
-                                          icon="pi pi-check"
-                                          [disabled]="!featureZoomClearanceMetersChanged"></p-button>
+                                <p-button
+                                    (click)="applyFeatureZoomClearance()"
+                                    data-testid="apply-feature-zoom-clearance"
+                                    label=""
+                                    icon="pi pi-check"
+                                    [disabled]="!featureZoomClearanceMetersChanged"
+                                ></p-button>
                             </div>
                         </div>
                         <p-divider></p-divider>
                         <div class="button-container">
                             <label>Dark Mode</label>
-                            <p-selectButton [options]="darkModeOptions"
-                                            [(ngModel)]="darkModeSetting"
-                                            optionLabel="label"
-                                            optionValue="value"
-                                            (ngModelChange)="setDarkMode($event)"></p-selectButton>
+                            <p-selectButton
+                                [options]="darkModeOptions"
+                                [(ngModel)]="darkModeSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setDarkMode($event)"
+                            ></p-selectButton>
                         </div>
                         <div class="button-container">
                             <label for="coordinates-enabled-setting">Show coordinates</label>
-                            <p-toggleswitch inputId="coordinates-enabled-setting"
-                                            data-testid="coordinates-enabled-setting"
-                                            [ngModel]="coordinatesPolicy.effectiveEnabled"
-                                            (ngModelChange)="coordinatesPolicy.requestEnabled($event)"/>
+                            <p-toggleswitch
+                                inputId="coordinates-enabled-setting"
+                                data-testid="coordinates-enabled-setting"
+                                [ngModel]="coordinatesPolicy.effectiveEnabled"
+                                (ngModelChange)="coordinatesPolicy.requestEnabled($event)"
+                            />
                         </div>
                         <div class="button-container">
                             <label>Collapse Dock automatically</label>
@@ -156,91 +185,112 @@ import type {
                             <label [for]="limitSimultaneousInspectionsInput">Max Inspections</label>
                             <div class="slider-controls">
                                 <div style="display: inline-block">
-                                    <input class="tiles-input w-full"
-                                           type="text"
-                                           pInputText
-                                           [(ngModel)]="limitSimultaneousInspectionsInput"
-                                           (ngModelChange)="onInspectionsLimitInputChange($event)"
-                                           (keydown.enter)="applyInspectionsLimits()"/>
-                                    <p-slider [(ngModel)]="limitSimultaneousInspectionsInput"
-                                              (ngModelChange)="onInspectionsLimitSliderChange($event)"
-                                              class="w-full"
-                                              [min]="1"
-                                              [max]="MAX_SIMULTANEOUS_INSPECTIONS"></p-slider>
+                                    <input
+                                        class="tiles-input w-full"
+                                        type="text"
+                                        pInputText
+                                        [(ngModel)]="limitSimultaneousInspectionsInput"
+                                        (ngModelChange)="onInspectionsLimitInputChange($event)"
+                                        (keydown.enter)="applyInspectionsLimits()"
+                                    />
+                                    <p-slider
+                                        [(ngModel)]="limitSimultaneousInspectionsInput"
+                                        (ngModelChange)="onInspectionsLimitSliderChange($event)"
+                                        class="w-full"
+                                        [min]="1"
+                                        [max]="MAX_SIMULTANEOUS_INSPECTIONS"
+                                    ></p-slider>
                                 </div>
-                                <p-button (click)="applyInspectionsLimits()"
-                                          label=""
-                                          icon="pi pi-check"
-                                          [disabled]="!inspectionsLimitChanged"></p-button>
+                                <p-button
+                                    (click)="applyInspectionsLimits()"
+                                    label=""
+                                    icon="pi pi-check"
+                                    [disabled]="!inspectionsLimitChanged"
+                                ></p-button>
                             </div>
                         </div>
                         <p-divider></p-divider>
                         <div class="slider-container">
-                            <label for="drill-pick-radius-input">Drill Pick Radius (px)
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Pixel radius used by feature drill-picking."
-                                   tooltipPosition="top"></i>
+                            <label for="drill-pick-radius-input"
+                                >Drill Pick Radius (px)
+                                <i
+                                    class="pi pi-info-circle"
+                                    pTooltip="Pixel radius used by feature drill-picking."
+                                    tooltipPosition="top"
+                                ></i>
                             </label>
                             <div class="slider-controls">
                                 <div style="display: inline-block">
-                                    <input id="drill-pick-radius-input"
-                                           data-testid="drill-pick-radius-input"
-                                           class="tiles-input w-full"
-                                           type="text"
-                                           pInputText
-                                           [(ngModel)]="drillPickRadiusInput"
-                                           (ngModelChange)="onDrillPickRadiusInputChange($event)"
-                                           (keydown.enter)="applyDrillPickRadius()"/>
-                                    <p-slider [(ngModel)]="drillPickRadiusInput"
-                                              (ngModelChange)="onDrillPickRadiusSliderChange($event)"
-                                              class="w-full"
-                                              [min]="MIN_DRILL_PICK_RADIUS"
-                                              [max]="MAX_DRILL_PICK_RADIUS"></p-slider>
+                                    <input
+                                        id="drill-pick-radius-input"
+                                        data-testid="drill-pick-radius-input"
+                                        class="tiles-input w-full"
+                                        type="text"
+                                        pInputText
+                                        [(ngModel)]="drillPickRadiusInput"
+                                        (ngModelChange)="onDrillPickRadiusInputChange($event)"
+                                        (keydown.enter)="applyDrillPickRadius()"
+                                    />
+                                    <p-slider
+                                        [(ngModel)]="drillPickRadiusInput"
+                                        (ngModelChange)="onDrillPickRadiusSliderChange($event)"
+                                        class="w-full"
+                                        [min]="MIN_DRILL_PICK_RADIUS"
+                                        [max]="MAX_DRILL_PICK_RADIUS"
+                                    ></p-slider>
                                 </div>
-                                <p-button (click)="applyDrillPickRadius()"
-                                          data-testid="apply-drill-pick-radius"
-                                          label=""
-                                          icon="pi pi-check"
-                                          [disabled]="!drillPickRadiusChanged"></p-button>
+                                <p-button
+                                    (click)="applyDrillPickRadius()"
+                                    data-testid="apply-drill-pick-radius"
+                                    label=""
+                                    icon="pi pi-check"
+                                    [disabled]="!drillPickRadiusChanged"
+                                ></p-button>
                             </div>
                         </div>
                         <p-divider></p-divider>
                         <div class="button-container">
                             <label>Expand inspection trees by default</label>
-                            <p-toggleswitch [(ngModel)]="inspectionState.inspectionTreeExpandByDefault"></p-toggleswitch>
+                            <p-toggleswitch
+                                [(ngModel)]="inspectionState.inspectionTreeExpandByDefault"
+                            ></p-toggleswitch>
                         </div>
                         <div class="button-container value-presentation-container">
                             <label for="inspection-value-presentation">Inspection value bubbles</label>
-                            <p-multiSelect inputId="inspection-value-presentation"
-                                           class="value-presentation-select"
-                                           [options]="inspectionValuePresentationOptions"
-                                           [ngModel]="inspectionValuePresentationSelection"
-                                           optionLabel="label"
-                                           optionValue="value"
-                                           [filter]="false"
-                                           [showToggleAll]="false"
-                                           [maxSelectedLabels]="1"
-                                           selectedItemsLabel="{0} options"
-                                           placeholder="Plain"
-                                           appendTo="body"
-                                           (ngModelChange)="onInspectionValuePresentationChange($event)">
+                            <p-multiSelect
+                                inputId="inspection-value-presentation"
+                                class="value-presentation-select"
+                                [options]="inspectionValuePresentationOptions"
+                                [ngModel]="inspectionValuePresentationSelection"
+                                optionLabel="label"
+                                optionValue="value"
+                                [filter]="false"
+                                [showToggleAll]="false"
+                                [maxSelectedLabels]="1"
+                                selectedItemsLabel="{0} options"
+                                placeholder="Plain"
+                                appendTo="body"
+                                (ngModelChange)="onInspectionValuePresentationChange($event)"
+                            >
                             </p-multiSelect>
                         </div>
                         <div class="button-container value-presentation-container">
                             <label for="source-data-default-columns">Source data columns</label>
-                            <p-multiSelect inputId="source-data-default-columns"
-                                           class="value-presentation-select"
-                                           [options]="sourceDataColumnOptions"
-                                           [ngModel]="sourceDataColumnSelection"
-                                           optionLabel="label"
-                                           optionValue="value"
-                                           [filter]="false"
-                                           [showToggleAll]="false"
-                                           [maxSelectedLabels]="1"
-                                           selectedItemsLabel="{0} columns"
-                                           placeholder="Key and value only"
-                                           appendTo="body"
-                                           (ngModelChange)="onSourceDataColumnSelectionChange($event)">
+                            <p-multiSelect
+                                inputId="source-data-default-columns"
+                                class="value-presentation-select"
+                                [options]="sourceDataColumnOptions"
+                                [ngModel]="sourceDataColumnSelection"
+                                optionLabel="label"
+                                optionValue="value"
+                                [filter]="false"
+                                [showToggleAll]="false"
+                                [maxSelectedLabels]="1"
+                                selectedItemsLabel="{0} columns"
+                                placeholder="Key and value only"
+                                appendTo="body"
+                                (ngModelChange)="onSourceDataColumnSelectionChange($event)"
+                            >
                             </p-multiSelect>
                         </div>
                         <p-divider></p-divider>
@@ -248,22 +298,28 @@ import type {
                             <label [for]="locationSearchResultLimitInput">Location Matches</label>
                             <div class="slider-controls">
                                 <div style="display: inline-block">
-                                    <input class="tiles-input w-full"
-                                           type="text"
-                                           pInputText
-                                           [(ngModel)]="locationSearchResultLimitInput"
-                                           (ngModelChange)="onLocationSearchResultLimitInputChange($event)"
-                                           (keydown.enter)="applyLocationSearchResultLimit()"/>
-                                    <p-slider [(ngModel)]="locationSearchResultLimitInput"
-                                              (ngModelChange)="onLocationSearchResultLimitSliderChange($event)"
-                                              class="w-full"
-                                              [min]="1"
-                                              [max]="MAX_LOCATION_SEARCH_RESULT_LIMIT"></p-slider>
+                                    <input
+                                        class="tiles-input w-full"
+                                        type="text"
+                                        pInputText
+                                        [(ngModel)]="locationSearchResultLimitInput"
+                                        (ngModelChange)="onLocationSearchResultLimitInputChange($event)"
+                                        (keydown.enter)="applyLocationSearchResultLimit()"
+                                    />
+                                    <p-slider
+                                        [(ngModel)]="locationSearchResultLimitInput"
+                                        (ngModelChange)="onLocationSearchResultLimitSliderChange($event)"
+                                        class="w-full"
+                                        [min]="1"
+                                        [max]="MAX_LOCATION_SEARCH_RESULT_LIMIT"
+                                    ></p-slider>
                                 </div>
-                                <p-button (click)="applyLocationSearchResultLimit()"
-                                          label=""
-                                          icon="pi pi-check"
-                                          [disabled]="!locationSearchResultLimitChanged"></p-button>
+                                <p-button
+                                    (click)="applyLocationSearchResultLimit()"
+                                    label=""
+                                    icon="pi pi-check"
+                                    [disabled]="!locationSearchResultLimitChanged"
+                                ></p-button>
                             </div>
                         </div>
                     </p-tabpanel>
@@ -272,9 +328,11 @@ import type {
                         <div class="hover-label-preferences" data-testid="hover-label-preferences">
                             <div class="button-container">
                                 <label for="hover-labels-enabled">Show hover labels</label>
-                                <p-toggleswitch inputId="hover-labels-enabled"
-                                                data-testid="hover-labels-enabled"
-                                                [(ngModel)]="inspectionState.hoverLabelsEnabled">
+                                <p-toggleswitch
+                                    inputId="hover-labels-enabled"
+                                    data-testid="hover-labels-enabled"
+                                    [(ngModel)]="inspectionState.hoverLabelsEnabled"
+                                >
                                 </p-toggleswitch>
                             </div>
                             <p-divider></p-divider>
@@ -283,12 +341,14 @@ import type {
                                 <div class="hover-label-field-list">
                                     @for (field of hoverLabelFields; track $index) {
                                         <div class="hover-label-field-row">
-                                            <button type="button"
-                                                    class="search-style-expression-toggle"
-                                                    [class.search-style-expression-toggle-active]="field.customExpression"
-                                                    [attr.aria-pressed]="field.customExpression"
-                                                    title="Custom expression"
-                                                    (click)="toggleHoverLabelExpressionMode($index)">
+                                            <button
+                                                type="button"
+                                                class="search-style-expression-toggle"
+                                                [class.search-style-expression-toggle-active]="field.customExpression"
+                                                [attr.aria-pressed]="field.customExpression"
+                                                title="Custom expression"
+                                                (click)="toggleHoverLabelExpressionMode($index)"
+                                            >
                                                 *
                                             </button>
                                             @if (field.customExpression) {
@@ -300,52 +360,66 @@ import type {
                                                     [completionOwnerId]="'hover-label-field-' + $index"
                                                     completionScope="feature"
                                                     [completionZIndex]="30050"
-                                                    placeholder="SIMFIL expression">
+                                                    placeholder="SIMFIL expression"
+                                                >
                                                 </simfil-expression-input>
                                             } @else {
-                                                <p-select class="hover-label-expression"
-                                                          [options]="hoverLabelFieldOptions"
-                                                          [ngModel]="field.expression"
-                                                          (ngModelChange)="setHoverLabelExpression($index, $event)"
-                                                          optionLabel="label"
-                                                          optionValue="value"
-                                                          [filter]="true"
-                                                          [virtualScroll]="true"
-                                                          [virtualScrollItemSize]="36"
-                                                          scrollHeight="20rem"
-                                                          appendTo="body"
-                                                          placeholder="Select field">
+                                                <p-select
+                                                    class="hover-label-expression"
+                                                    [options]="hoverLabelFieldOptions"
+                                                    [ngModel]="field.expression"
+                                                    (ngModelChange)="setHoverLabelExpression($index, $event)"
+                                                    optionLabel="label"
+                                                    optionValue="value"
+                                                    [filter]="true"
+                                                    [virtualScroll]="true"
+                                                    [virtualScrollItemSize]="36"
+                                                    scrollHeight="20rem"
+                                                    appendTo="body"
+                                                    placeholder="Select field"
+                                                >
                                                 </p-select>
                                             }
-                                            <input class="hover-label-display-key"
-                                                   type="text"
-                                                   pInputText
-                                                   aria-label="Display key"
-                                                   title="Display key"
-                                                   [disabled]="field.expression.trim() === 'id'"
-                                                   [placeholder]="field.expression.trim() === 'id' ? 'No key' : defaultHoverLabelFieldKey(field.expression)"
-                                                   [ngModel]="field.displayKey ?? ''"
-                                                   (ngModelChange)="setHoverLabelDisplayKey($index, $event)"/>
-                                            <p-button icon="pi pi-times"
-                                                      size="small"
-                                                      severity="danger"
-                                                      [outlined]="true"
-                                                      pTooltip="Remove field"
-                                                      tooltipPosition="bottom"
-                                                      (click)="removeHoverLabelField($index)">
+                                            <input
+                                                class="hover-label-display-key"
+                                                type="text"
+                                                pInputText
+                                                aria-label="Display key"
+                                                title="Display key"
+                                                [disabled]="field.expression.trim() === 'id'"
+                                                [placeholder]="
+                                                    field.expression.trim() === 'id'
+                                                        ? 'No key'
+                                                        : defaultHoverLabelFieldKey(field.expression)
+                                                "
+                                                [ngModel]="field.displayKey ?? ''"
+                                                (ngModelChange)="setHoverLabelDisplayKey($index, $event)"
+                                            />
+                                            <p-button
+                                                icon="pi pi-times"
+                                                size="small"
+                                                severity="danger"
+                                                [outlined]="true"
+                                                pTooltip="Remove field"
+                                                tooltipPosition="bottom"
+                                                (click)="removeHoverLabelField($index)"
+                                            >
                                             </p-button>
                                         </div>
                                     }
                                 </div>
-                                <p-button icon="pi pi-plus"
-                                          label="Add field"
-                                          size="small"
-                                          severity="secondary"
-                                          [outlined]="true"
-                                          (click)="addHoverLabelField()">
+                                <p-button
+                                    icon="pi pi-plus"
+                                    label="Add field"
+                                    size="small"
+                                    severity="secondary"
+                                    [outlined]="true"
+                                    (click)="addHoverLabelField()"
+                                >
                                 </p-button>
                                 <div class="hover-label-notice">
-                                    Values are projected without geometry while their map layers are visible. Hovering never starts a request.
+                                    Values are projected without geometry while their map layers are visible. Hovering
+                                    never starts a request.
                                 </div>
                             </section>
                         </div>
@@ -356,197 +430,295 @@ import type {
                             <h3>Point clouds</h3>
                             <div class="button-container">
                                 <label for="point-cloud-downsampling">Adaptive detail</label>
-                                <p-toggleswitch inputId="point-cloud-downsampling"
-                                               [(ngModel)]="pointCloudPolicyDraft.enabled" />
+                                <p-toggleswitch
+                                    inputId="point-cloud-downsampling"
+                                    [(ngModel)]="pointCloudPolicyDraft.enabled"
+                                />
                             </div>
                             <div class="slider-container">
                                 <label for="point-cloud-detail">Point spacing (pixels)</label>
-                                <input id="point-cloud-detail" type="number" pInputText
-                                       min="0.5" max="32" step="0.5"
-                                       [(ngModel)]="pointCloudPolicyDraft.detailPixels" />
-                                <small>Lower spacing keeps more detail. Full detail still respects memory limits.</small>
+                                <input
+                                    id="point-cloud-detail"
+                                    type="number"
+                                    pInputText
+                                    min="0.5"
+                                    max="32"
+                                    step="0.5"
+                                    [(ngModel)]="pointCloudPolicyDraft.detailPixels"
+                                />
+                                <small
+                                    >Lower spacing keeps more detail. Full detail still respects memory limits.</small
+                                >
                             </div>
                             <details>
                                 <summary>Memory limits</summary>
                                 <div class="slider-container">
                                     <label for="point-cloud-working-memory">Rendering working memory (MiB)</label>
-                                    <input id="point-cloud-working-memory" type="number" pInputText
-                                           min="32" max="4096" [(ngModel)]="pointCloudPolicyDraft.workingMemoryMiB" />
+                                    <input
+                                        id="point-cloud-working-memory"
+                                        type="number"
+                                        pInputText
+                                        min="32"
+                                        max="4096"
+                                        [(ngModel)]="pointCloudPolicyDraft.workingMemoryMiB"
+                                    />
                                 </div>
                                 <div class="slider-container">
                                     <label for="point-cloud-gpu-memory">GPU allocation allowance (MiB)</label>
-                                    <input id="point-cloud-gpu-memory" type="number" pInputText
-                                           min="16" max="2048" [(ngModel)]="pointCloudPolicyDraft.gpuMemoryMiB" />
+                                    <input
+                                        id="point-cloud-gpu-memory"
+                                        type="number"
+                                        pInputText
+                                        min="16"
+                                        max="2048"
+                                        [(ngModel)]="pointCloudPolicyDraft.gpuMemoryMiB"
+                                    />
                                 </div>
                                 <small>Shared across map views. These settings do not change server limits.</small>
                             </details>
-                            <p-button label="Apply" data-testid="point-cloud-apply"
-                                      [disabled]="!pointCloudPolicyChanged" (click)="applyPointCloudPolicy()" />
+                            <p-button
+                                label="Apply"
+                                data-testid="point-cloud-apply"
+                                [disabled]="!pointCloudPolicyChanged"
+                                (click)="applyPointCloudPolicy()"
+                            />
                         </section>
                         <p-divider></p-divider>
                         <div class="slider-container">
-                            <label [for]="tilesToLoadInput">Max Tiles to Load
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Caps how many visible map tiles may be requested and rendered at once. Lower values reduce load; higher values allow more tiles before throttling."
-                                   tooltipPosition="top"></i>
+                            <label [for]="tilesToLoadInput"
+                                >Max Tiles to Load
+                                <i
+                                    class="pi pi-info-circle"
+                                    pTooltip="Caps how many visible map tiles may be requested and rendered at once. Lower values reduce load; higher values allow more tiles before throttling."
+                                    tooltipPosition="top"
+                                ></i>
                             </label>
                             <div class="slider-controls">
                                 <div style="display: inline-block">
-                                    <input class="tiles-input w-full"
-                                           type="text"
-                                           pInputText
-                                           [(ngModel)]="tilesToLoadInput"
-                                           (ngModelChange)="onTilesToLoadInputChange($event)"
-                                           (keydown.enter)="applyTileLimits()"/>
-                                    <p-slider [(ngModel)]="tilesToLoadInput"
-                                              (ngModelChange)="onTilesToLoadSliderChange($event)"
-                                              class="w-full"
-                                              [min]="0"
-                                              [max]="MAX_NUM_TILES_TO_LOAD"></p-slider>
+                                    <input
+                                        class="tiles-input w-full"
+                                        type="text"
+                                        pInputText
+                                        [(ngModel)]="tilesToLoadInput"
+                                        (ngModelChange)="onTilesToLoadInputChange($event)"
+                                        (keydown.enter)="applyTileLimits()"
+                                    />
+                                    <p-slider
+                                        [(ngModel)]="tilesToLoadInput"
+                                        (ngModelChange)="onTilesToLoadSliderChange($event)"
+                                        class="w-full"
+                                        [min]="0"
+                                        [max]="MAX_NUM_TILES_TO_LOAD"
+                                    ></p-slider>
                                 </div>
-                                <p-button (click)="applyTileLimits()"
-                                          label=""
-                                          icon="pi pi-check"
-                                          [disabled]="!tilesToLoadChanged"></p-button>
+                                <p-button
+                                    (click)="applyTileLimits()"
+                                    label=""
+                                    icon="pi pi-check"
+                                    [disabled]="!tilesToLoadChanged"
+                                ></p-button>
                             </div>
                         </div>
                         <p-divider></p-divider>
                         <div class="button-container">
-                            <label>Tile pull compression
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Use only when the bandwith is low"
-                                   tooltipPosition="top"></i>
+                            <label
+                                >Tile pull compression
+                                <i
+                                    class="pi pi-info-circle"
+                                    pTooltip="Use only when the bandwith is low"
+                                    tooltipPosition="top"
+                                ></i>
                             </label>
-                            <p-selectButton [options]="toggleOptions"
-                                            [(ngModel)]="tilePullCompressionEnabledSetting"
-                                            optionLabel="label"
-                                            optionValue="value"
-                                            (ngModelChange)="setTilePullCompressionEnabled($event)"></p-selectButton>
+                            <p-selectButton
+                                [options]="toggleOptions"
+                                [(ngModel)]="tilePullCompressionEnabledSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setTilePullCompressionEnabled($event)"
+                            ></p-selectButton>
                         </div>
                         <div class="button-container">
-                            <label>WebGL antialiasing
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Recreates the map renderer. Keep disabled if WebGL context creation fails."
-                                   tooltipPosition="top"></i>
+                            <label
+                                >WebGL antialiasing
+                                <i
+                                    class="pi pi-info-circle"
+                                    pTooltip="Recreates the map renderer. Keep disabled if WebGL context creation fails."
+                                    tooltipPosition="top"
+                                ></i>
                             </label>
-                            <p-selectButton [options]="toggleOptions"
-                                            [(ngModel)]="deckAntialiasingEnabledSetting"
-                                            optionLabel="label"
-                                            optionValue="value"
-                                            (ngModelChange)="setDeckAntialiasingEnabled($event)"></p-selectButton>
+                            <p-selectButton
+                                [options]="toggleOptions"
+                                [(ngModel)]="deckAntialiasingEnabledSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setDeckAntialiasingEnabled($event)"
+                            ></p-selectButton>
                         </div>
                         <div class="button-container">
-                            <label id="semantic-compositing-label">Semantic layer compositing
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Diagnostic switch. Recreates the map renderer. Disabling hides semantic decorations (such as cinematic lane markings) and their picking. Other rendering effects remain enabled."
-                                   tooltipPosition="top"></i>
+                            <label id="semantic-compositing-label"
+                                >Semantic layer compositing
+                                <i
+                                    class="pi pi-info-circle"
+                                    pTooltip="Diagnostic switch. Recreates the map renderer. Disabling hides semantic decorations (such as cinematic lane markings) and their picking. Other rendering effects remain enabled."
+                                    tooltipPosition="top"
+                                ></i>
                             </label>
-                            <p-selectButton [options]="toggleOptions"
-                                            [(ngModel)]="semanticCompositingEnabledSetting"
-                                            optionLabel="label"
-                                            optionValue="value"
-                                            [allowEmpty]="false"
-                                            ariaLabelledBy="semantic-compositing-label"
-                                            data-testid="semantic-compositing-setting"
-                                            (ngModelChange)="setSemanticCompositingEnabled($event)"></p-selectButton>
+                            <p-selectButton
+                                [options]="toggleOptions"
+                                [(ngModel)]="semanticCompositingEnabledSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                [allowEmpty]="false"
+                                ariaLabelledBy="semantic-compositing-label"
+                                data-testid="semantic-compositing-setting"
+                                (ngModelChange)="setSemanticCompositingEnabled($event)"
+                            ></p-selectButton>
                         </div>
                         <div class="button-container">
-                            <label>Contact shading
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Darkens nearby lower surfaces using final scene depth. Disable on slower GPUs."
-                                   tooltipPosition="top"></i>
+                            <label
+                                >Contact shading
+                                <i
+                                    class="pi pi-info-circle"
+                                    pTooltip="Darkens nearby lower surfaces using final scene depth. Disable on slower GPUs."
+                                    tooltipPosition="top"
+                                ></i>
                             </label>
-                            <p-selectButton [options]="toggleOptions"
-                                            [(ngModel)]="contactShadingEnabledSetting"
-                                            optionLabel="label"
-                                            optionValue="value"
-                                            (ngModelChange)="setContactShadingEnabled($event)"></p-selectButton>
+                            <p-selectButton
+                                [options]="toggleOptions"
+                                [(ngModel)]="contactShadingEnabledSetting"
+                                optionLabel="label"
+                                optionValue="value"
+                                (ngModelChange)="setContactShadingEnabled($event)"
+                            ></p-selectButton>
                         </div>
                         <div class="slider-container">
-                            <label for="lod3-tile-threshold-input">LOD 3 Tile Threshold
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Visible-tile boundary between style LOD 2 and LOD 3. Higher values preserve more detailed LODs over larger viewports but can cost more."
-                                   tooltipPosition="top"></i>
+                            <label for="lod3-tile-threshold-input"
+                                >LOD 3 Tile Threshold
+                                <i
+                                    class="pi pi-info-circle"
+                                    pTooltip="Visible-tile boundary between style LOD 2 and LOD 3. Higher values preserve more detailed LODs over larger viewports but can cost more."
+                                    tooltipPosition="top"
+                                ></i>
                             </label>
                             <div class="slider-controls">
                                 <div style="display: inline-block">
-                                    <input id="lod3-tile-threshold-input"
-                                           class="tiles-input w-full"
-                                           type="text"
-                                           pInputText
-                                           [(ngModel)]="lod3TileThresholdInput"
-                                           (ngModelChange)="onLod3TileThresholdInputChange($event)"
-                                           (keydown.enter)="applyLod3TileThreshold()"/>
-                                    <p-slider [(ngModel)]="lod3TileThresholdInput"
-                                              (ngModelChange)="onLod3TileThresholdSliderChange($event)"
-                                              class="w-full"
-                                              [min]="MIN_LOD3_TILE_THRESHOLD"
-                                              [max]="MAX_LOD3_TILE_THRESHOLD"></p-slider>
+                                    <input
+                                        id="lod3-tile-threshold-input"
+                                        class="tiles-input w-full"
+                                        type="text"
+                                        pInputText
+                                        [(ngModel)]="lod3TileThresholdInput"
+                                        (ngModelChange)="onLod3TileThresholdInputChange($event)"
+                                        (keydown.enter)="applyLod3TileThreshold()"
+                                    />
+                                    <p-slider
+                                        [(ngModel)]="lod3TileThresholdInput"
+                                        (ngModelChange)="onLod3TileThresholdSliderChange($event)"
+                                        class="w-full"
+                                        [min]="MIN_LOD3_TILE_THRESHOLD"
+                                        [max]="MAX_LOD3_TILE_THRESHOLD"
+                                    ></p-slider>
                                 </div>
-                                <p-button (click)="applyLod3TileThreshold()"
-                                          label=""
-                                          icon="pi pi-check"
-                                          [disabled]="!lod3TileThresholdChanged"></p-button>
+                                <p-button
+                                    (click)="applyLod3TileThreshold()"
+                                    label=""
+                                    icon="pi pi-check"
+                                    [disabled]="!lod3TileThresholdChanged"
+                                ></p-button>
                             </div>
                         </div>
                         <p-divider></p-divider>
                         <div class="slider-container">
-                            <label for="render-worker-count-input">Render Workers
-                                <i class="pi pi-info-circle"
-                                   pTooltip="Number of parallel TileSubsetLayer WASM workers. Zero selects half of the available logical CPUs automatically."
-                                   tooltipPosition="top"></i>
+                            <label for="render-worker-count-input"
+                                >Render Workers
+                                <i
+                                    class="pi pi-info-circle"
+                                    pTooltip="Number of parallel TileSubsetLayer WASM workers. Zero selects half of the available logical CPUs automatically."
+                                    tooltipPosition="top"
+                                ></i>
                             </label>
                             <div class="slider-controls">
                                 <div style="display: inline-block">
-                                    <input id="render-worker-count-input"
-                                           class="tiles-input w-full"
-                                           type="text"
-                                           pInputText
-                                           [(ngModel)]="renderWorkerCountInput"
-                                           (ngModelChange)="onRenderWorkerCountInputChange($event)"
-                                           (keydown.enter)="applyRenderWorkerCount()"/>
-                                    <p-slider [(ngModel)]="renderWorkerCountInput"
-                                              (ngModelChange)="onRenderWorkerCountSliderChange($event)"
-                                              class="w-full"
-                                              [min]="AUTO_TILE_SUBSET_RENDER_WORKER_COUNT"
-                                              [max]="MAX_TILE_SUBSET_RENDER_WORKER_COUNT"></p-slider>
+                                    <input
+                                        id="render-worker-count-input"
+                                        class="tiles-input w-full"
+                                        type="text"
+                                        pInputText
+                                        [(ngModel)]="renderWorkerCountInput"
+                                        (ngModelChange)="onRenderWorkerCountInputChange($event)"
+                                        (keydown.enter)="applyRenderWorkerCount()"
+                                    />
+                                    <p-slider
+                                        [(ngModel)]="renderWorkerCountInput"
+                                        (ngModelChange)="onRenderWorkerCountSliderChange($event)"
+                                        class="w-full"
+                                        [min]="AUTO_TILE_SUBSET_RENDER_WORKER_COUNT"
+                                        [max]="MAX_TILE_SUBSET_RENDER_WORKER_COUNT"
+                                    ></p-slider>
                                     <small>{{ renderWorkerCountDescription }}</small>
                                 </div>
-                                <p-button (click)="applyRenderWorkerCount()"
-                                          label=""
-                                          icon="pi pi-check"
-                                          [disabled]="!renderWorkerCountChanged"></p-button>
+                                <p-button
+                                    (click)="applyRenderWorkerCount()"
+                                    label=""
+                                    icon="pi pi-check"
+                                    [disabled]="!renderWorkerCountChanged"
+                                ></p-button>
                             </div>
                         </div>
                     </p-tabpanel>
 
                     <p-tabpanel value="connection">
-                        <p>Configure this browser's reconnection to mapget. Datasource startup retries are configured on the server; tile freshness uses tile TTLs.</p>
+                        <p>
+                            Configure this browser's reconnection to mapget. Datasource startup retries are configured
+                            on the server; tile freshness uses tile TTLs.
+                        </p>
                         <div class="button-container">
                             <label for="connection-retry-enabled">Automatic retry</label>
                             <p-toggleswitch inputId="connection-retry-enabled" [(ngModel)]="connectionRetryEnabled" />
                         </div>
                         <div class="button-container">
                             <label for="connection-retry-initial">Initial delay (seconds)</label>
-                            <input id="connection-retry-initial" pInputText type="number" min="0.001" step="0.1"
-                                   [(ngModel)]="connectionInitialSeconds" />
+                            <input
+                                id="connection-retry-initial"
+                                pInputText
+                                type="number"
+                                min="0.001"
+                                step="0.1"
+                                [(ngModel)]="connectionInitialSeconds"
+                            />
                         </div>
                         <div class="button-container">
                             <label for="connection-retry-multiplier">Backoff multiplier</label>
-                            <input id="connection-retry-multiplier" pInputText type="number" min="1" step="0.1"
-                                   [(ngModel)]="connectionBackoffMultiplier" />
+                            <input
+                                id="connection-retry-multiplier"
+                                pInputText
+                                type="number"
+                                min="1"
+                                step="0.1"
+                                [(ngModel)]="connectionBackoffMultiplier"
+                            />
                         </div>
                         <div class="button-container">
                             <label for="connection-retry-maximum">Maximum delay / cooldown (seconds)</label>
-                            <input id="connection-retry-maximum" pInputText type="number" min="0.001" step="0.1"
-                                   [(ngModel)]="connectionMaximumSeconds" />
+                            <input
+                                id="connection-retry-maximum"
+                                pInputText
+                                type="number"
+                                min="0.001"
+                                step="0.1"
+                                [(ngModel)]="connectionMaximumSeconds"
+                            />
                         </div>
                         <p>Reconnection continues at the maximum delay during a prolonged outage.</p>
                         @if (connectionValidationMessage) {
                             <p role="alert">{{ connectionValidationMessage }}</p>
                         }
-                        <p-button label="Apply" icon="pi pi-check" (click)="applyConnectionPreferences()"
-                                  data-testid="connection-preferences-apply" />
+                        <p-button
+                            label="Apply"
+                            icon="pi pi-check"
+                            (click)="applyConnectionPreferences()"
+                            data-testid="connection-preferences-apply"
+                        />
                     </p-tabpanel>
 
                     <p-tabpanel value="storage">
@@ -565,9 +737,11 @@ import type {
                         <p-divider></p-divider>
                         <div class="button-container">
                             <label>Advanced Preferences</label>
-                            <p-button (click)="openAdvancedPreferences()"
-                                      label="Advanced"
-                                      icon="pi pi-sliders-h"></p-button>
+                            <p-button
+                                (click)="openAdvancedPreferences()"
+                                label="Advanced"
+                                icon="pi pi-sliders-h"
+                            ></p-button>
                         </div>
                     </p-tabpanel>
                 </p-tabpanels>
@@ -591,7 +765,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     readonly dialogLayoutId = PREFERENCES_DIALOG_LAYOUT_ID;
     readonly advancedPreferencesDialogLayoutId = ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID;
 
-    @ViewChild('pref') preferencesDialog?: AppDialogComponent;
+    @ViewChild("pref") preferencesDialog?: AppDialogComponent;
 
     tilesToLoadInput: number | string = 0;
     limitSimultaneousInspectionsInput: number | string = 0;
@@ -608,11 +782,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     semanticCompositingEnabledSetting: boolean = true;
     contactShadingEnabledSetting: boolean = true;
     lod3TileThresholdInput: number | string = DEFAULT_LOD3_TILE_THRESHOLD;
-    renderWorkerCountInput: number | string =
-        AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
+    renderWorkerCountInput: number | string = AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
     mapZoomStepInput: number | string = DEFAULT_MAP_ZOOM_STEP;
-    featureZoomClearanceMetersInput: number | string =
-        DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS;
+    featureZoomClearanceMetersInput: number | string = DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS;
     tilesToLoadChanged: boolean = false;
     inspectionsLimitChanged: boolean = false;
     drillPickRadiusChanged: boolean = false;
@@ -622,14 +794,14 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     mapZoomStepChanged: boolean = false;
     featureZoomClearanceMetersChanged: boolean = false;
     toggleOptions = [
-        {label: 'Off', value: false},
-        {label: 'On', value: true}
+        {label: "Off", value: false},
+        {label: "On", value: true}
     ];
-    darkModeSetting: 'off' | 'on' | 'auto' = 'auto';
+    darkModeSetting: "off" | "on" | "auto" = "auto";
     darkModeOptions = [
-        { label: 'Off', value: 'off' },
-        { label: 'On', value: 'on' },
-        { label: 'Auto', value: 'auto' }
+        {label: "Off", value: "off"},
+        {label: "On", value: "on"},
+        {label: "Auto", value: "auto"}
     ];
     readonly inspectionValuePresentationOptions = [
         {label: "Vary Value Colors", value: "colors"},
@@ -643,97 +815,148 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     inspectionValuePresentationSelection: string[] = [];
     sourceDataColumnSelection: string[] = [];
     hoverLabelFields: HoverLabelFieldConfig[] = [];
-    hoverLabelFieldOptions: Array<{label: string; value: string}> = [{
-        label: "Feature ID",
-        value: "id"
-    }];
+    hoverLabelFieldOptions: Array<{label: string; value: string}> = [
+        {
+            label: "Feature ID",
+            value: "id"
+        }
+    ];
     private mediaQueryList?: MediaQueryList;
-    private readonly DARK_MODE_CLASS = 'erdblick-dark';
-    private readonly DARK_MODE_KEY = 'ui.darkMode';
-    private readonly PREFERS_DARK_QUERY = '(prefers-color-scheme: dark)';
+    private readonly DARK_MODE_CLASS = "erdblick-dark";
+    private readonly DARK_MODE_KEY = "ui.darkMode";
+    private readonly PREFERS_DARK_QUERY = "(prefers-color-scheme: dark)";
     private handleSystemSchemeChange = (e: MediaQueryListEvent) => {
-        if (this.darkModeSetting === 'auto') {
+        if (this.darkModeSetting === "auto") {
             this.updateDarkClass(e.matches);
         }
     };
     private subscriptions: Subscription[] = [];
 
     /** Subscribes dialog fields to persisted preference state and runtime services. */
-    constructor(private messageService: InfoMessageService,
-                public mapService: MapViewService,
-                public styleService: StyleService,
-                public stateService: AppStateService,
-                public coordinatesPolicy: CoordinatesPolicyService,
-                private searchSchema: FeatureSearchSchemaService,
-                private dialogStack: DialogStackService) {
-        this.subscriptions.push(this.connectionState.connectionRetryEnabledState.subscribe(value => this.connectionRetryEnabled = value));
-        this.subscriptions.push(combineLatest([this.viewStateOwner.pointCloudDownsamplingEnabledState,
-            this.viewStateOwner.pointCloudDetailPixelsState, this.viewStateOwner.pointCloudWorkingMemoryMiBState,
-            this.viewStateOwner.pointCloudGpuMemoryMiBState]).subscribe(() => {
-                this.pointCloudPolicyDraft = {...this.viewStateOwner.pointCloudPolicy};
-            }));
-        this.subscriptions.push(this.connectionState.connectionRetryInitialDelayMsState.subscribe(value => this.connectionInitialSeconds = value / 1000));
-        this.subscriptions.push(this.connectionState.connectionRetryBackoffMultiplierState.subscribe(value => this.connectionBackoffMultiplier = value));
-        this.subscriptions.push(this.connectionState.connectionRetryMaxDelayMsState.subscribe(value => this.connectionMaximumSeconds = value / 1000));
-        this.subscriptions.push(this.viewStateOwner.tilesLoadLimitState.subscribe(limit => {
-            this.tilesToLoadInput = limit;
-        }));
-        this.subscriptions.push(this.inspectionState.inspectionsLimitState.subscribe(limit => {
-            this.limitSimultaneousInspectionsInput = limit;
-        }));
-        this.subscriptions.push(this.inspectionState.drillPickRadiusState.subscribe(radius => {
-            this.drillPickRadiusInput = radius;
-        }));
-        this.subscriptions.push(this.locationSearch.locationSearchResultLimitState.subscribe(limit => {
-            this.locationSearchResultLimitInput = limit;
-        }));
-        this.subscriptions.push(this.connectionState.tilePullCompressionEnabledState.subscribe(enabled => {
-            this.tilePullCompressionEnabledSetting = enabled;
-        }));
-        this.subscriptions.push(this.viewStateOwner.deckAntialiasingEnabledState.subscribe(enabled => {
-            this.deckAntialiasingEnabledSetting = enabled;
-        }));
-        this.subscriptions.push(this.viewStateOwner.semanticCompositingEnabledState.subscribe(enabled => {
-            this.semanticCompositingEnabledSetting = enabled;
-        }));
-        this.subscriptions.push(this.viewStateOwner.contactShadingEnabledState.subscribe(enabled => {
-            this.contactShadingEnabledSetting = enabled;
-        }));
-        this.subscriptions.push(this.viewStateOwner.lod3TileThresholdState.subscribe(threshold => {
-            this.lod3TileThresholdInput = threshold;
-            this.updateLod3TileThresholdChangeState();
-        }));
+    constructor(
+        private messageService: InfoMessageService,
+        public mapService: MapViewService,
+        public styleService: StyleService,
+        public stateService: AppStateService,
+        public coordinatesPolicy: CoordinatesPolicyService,
+        private searchSchema: FeatureSearchSchemaService,
+        private dialogStack: DialogStackService
+    ) {
         this.subscriptions.push(
-            this.viewStateOwner.tileSubsetRenderWorkerCountState.subscribe(
-                workerCount => {
-                    this.renderWorkerCountInput = workerCount;
-                    this.updateRenderWorkerCountChangeState();
-                }
+            this.connectionState.connectionRetryEnabledState.subscribe((value) => (this.connectionRetryEnabled = value))
+        );
+        this.subscriptions.push(
+            combineLatest([
+                this.viewStateOwner.pointCloudDownsamplingEnabledState,
+                this.viewStateOwner.pointCloudDetailPixelsState,
+                this.viewStateOwner.pointCloudWorkingMemoryMiBState,
+                this.viewStateOwner.pointCloudGpuMemoryMiBState
+            ]).subscribe(() => {
+                this.pointCloudPolicyDraft = {...this.viewStateOwner.pointCloudPolicy};
+            })
+        );
+        this.subscriptions.push(
+            this.connectionState.connectionRetryInitialDelayMsState.subscribe(
+                (value) => (this.connectionInitialSeconds = value / 1000)
             )
         );
-        this.subscriptions.push(this.viewStateOwner.mapZoomStepState.subscribe(step => {
-            this.mapZoomStepInput = step;
-        }));
         this.subscriptions.push(
-            this.viewStateOwner.featureZoomClearanceMetersState.subscribe(clearance => {
+            this.connectionState.connectionRetryBackoffMultiplierState.subscribe(
+                (value) => (this.connectionBackoffMultiplier = value)
+            )
+        );
+        this.subscriptions.push(
+            this.connectionState.connectionRetryMaxDelayMsState.subscribe(
+                (value) => (this.connectionMaximumSeconds = value / 1000)
+            )
+        );
+        this.subscriptions.push(
+            this.viewStateOwner.tilesLoadLimitState.subscribe((limit) => {
+                this.tilesToLoadInput = limit;
+            })
+        );
+        this.subscriptions.push(
+            this.inspectionState.inspectionsLimitState.subscribe((limit) => {
+                this.limitSimultaneousInspectionsInput = limit;
+            })
+        );
+        this.subscriptions.push(
+            this.inspectionState.drillPickRadiusState.subscribe((radius) => {
+                this.drillPickRadiusInput = radius;
+            })
+        );
+        this.subscriptions.push(
+            this.locationSearch.locationSearchResultLimitState.subscribe((limit) => {
+                this.locationSearchResultLimitInput = limit;
+            })
+        );
+        this.subscriptions.push(
+            this.connectionState.tilePullCompressionEnabledState.subscribe((enabled) => {
+                this.tilePullCompressionEnabledSetting = enabled;
+            })
+        );
+        this.subscriptions.push(
+            this.viewStateOwner.deckAntialiasingEnabledState.subscribe((enabled) => {
+                this.deckAntialiasingEnabledSetting = enabled;
+            })
+        );
+        this.subscriptions.push(
+            this.viewStateOwner.semanticCompositingEnabledState.subscribe((enabled) => {
+                this.semanticCompositingEnabledSetting = enabled;
+            })
+        );
+        this.subscriptions.push(
+            this.viewStateOwner.contactShadingEnabledState.subscribe((enabled) => {
+                this.contactShadingEnabledSetting = enabled;
+            })
+        );
+        this.subscriptions.push(
+            this.viewStateOwner.lod3TileThresholdState.subscribe((threshold) => {
+                this.lod3TileThresholdInput = threshold;
+                this.updateLod3TileThresholdChangeState();
+            })
+        );
+        this.subscriptions.push(
+            this.viewStateOwner.tileSubsetRenderWorkerCountState.subscribe((workerCount) => {
+                this.renderWorkerCountInput = workerCount;
+                this.updateRenderWorkerCountChangeState();
+            })
+        );
+        this.subscriptions.push(
+            this.viewStateOwner.mapZoomStepState.subscribe((step) => {
+                this.mapZoomStepInput = step;
+            })
+        );
+        this.subscriptions.push(
+            this.viewStateOwner.featureZoomClearanceMetersState.subscribe((clearance) => {
                 this.featureZoomClearanceMetersInput = clearance;
             })
         );
-        this.subscriptions.push(this.inspectionState.inspectionValueVaryColorsState.subscribe(() => {
-            this.syncInspectionValuePresentationSelection();
-        }));
-        this.subscriptions.push(this.inspectionState.inspectionValueVaryOutlinesState.subscribe(() => {
-            this.syncInspectionValuePresentationSelection();
-        }));
-        this.subscriptions.push(this.inspectionState.inspectionValueVaryStripingState.subscribe(() => {
-            this.syncInspectionValuePresentationSelection();
-        }));
-        this.subscriptions.push(this.inspectionState.sourceDataInspectionDefaultColumnsState.subscribe(columns => {
-            this.sourceDataColumnSelection = [...columns];
-        }));
-        this.subscriptions.push(this.inspectionState.hoverLabelFieldsState.subscribe(fields => {
-            this.hoverLabelFields = fields.map(field => ({...field}));
-        }));
+        this.subscriptions.push(
+            this.inspectionState.inspectionValueVaryColorsState.subscribe(() => {
+                this.syncInspectionValuePresentationSelection();
+            })
+        );
+        this.subscriptions.push(
+            this.inspectionState.inspectionValueVaryOutlinesState.subscribe(() => {
+                this.syncInspectionValuePresentationSelection();
+            })
+        );
+        this.subscriptions.push(
+            this.inspectionState.inspectionValueVaryStripingState.subscribe(() => {
+                this.syncInspectionValuePresentationSelection();
+            })
+        );
+        this.subscriptions.push(
+            this.inspectionState.sourceDataInspectionDefaultColumnsState.subscribe((columns) => {
+                this.sourceDataColumnSelection = [...columns];
+            })
+        );
+        this.subscriptions.push(
+            this.inspectionState.hoverLabelFieldsState.subscribe((fields) => {
+                this.hoverLabelFields = fields.map((field) => ({...field}));
+            })
+        );
         this.syncInspectionValuePresentationSelection();
     }
 
@@ -749,7 +972,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             backoffMultiplier: this.connectionBackoffMultiplier,
             maxDelayMs: this.connectionMaximumSeconds * 1000
         });
-        this.connectionValidationMessage = result.success ? "" : result.error.issues.map(issue => issue.message).join(" ");
+        this.connectionValidationMessage = result.success
+            ? ""
+            : result.error.issues.map((issue) => issue.message).join(" ");
         if (result.success) this.connectionState.setConnectionRetryPolicy(result.data);
     }
 
@@ -758,9 +983,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     get renderWorkerCountDescription(): string {
-        const configured = clampTileSubsetRenderWorkerCount(
-            this.renderWorkerCountInput
-        );
+        const configured = clampTileSubsetRenderWorkerCount(this.renderWorkerCountInput);
         return configured === AUTO_TILE_SUBSET_RENDER_WORKER_COUNT
             ? `Auto (${getTileSubsetLayerRenderAutoWorkerCount()})`
             : `${configured} active worker${configured === 1 ? "" : "s"}`;
@@ -804,14 +1027,14 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Restores the persisted dark-mode preference during component startup. */
     ngOnInit() {
-        const saved = (localStorage.getItem(this.DARK_MODE_KEY) as 'off' | 'on' | 'auto' | null);
-        this.darkModeSetting = saved ?? 'auto';
+        const saved = localStorage.getItem(this.DARK_MODE_KEY) as "off" | "on" | "auto" | null;
+        this.darkModeSetting = saved ?? "auto";
         this.applyDarkModeSetting(this.darkModeSetting);
     }
 
     /** Releases dialog-owned subscriptions and media-query listeners. */
     ngOnDestroy() {
-        this.subscriptions.forEach(sub => sub.unsubscribe());
+        this.subscriptions.forEach((sub) => sub.unsubscribe());
         this.cleanupMediaQueryListener();
     }
 
@@ -822,11 +1045,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.drillPickRadiusInput = this.inspectionState.drillPickRadius;
         this.locationSearchResultLimitInput = this.locationSearch.locationSearchResultLimit;
         this.mapZoomStepInput = this.viewStateOwner.mapZoomStep;
-        this.featureZoomClearanceMetersInput =
-            this.viewStateOwner.featureZoomClearanceMeters;
+        this.featureZoomClearanceMetersInput = this.viewStateOwner.featureZoomClearanceMeters;
         this.lod3TileThresholdInput = this.viewStateOwner.lod3TileThreshold;
-        this.renderWorkerCountInput =
-            this.viewStateOwner.tileSubsetRenderWorkerCount;
+        this.renderWorkerCountInput = this.viewStateOwner.tileSubsetRenderWorkerCount;
         this.tilesToLoadChanged = false;
         this.inspectionsLimitChanged = false;
         this.drillPickRadiusChanged = false;
@@ -841,68 +1062,55 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Adds one schema-backed hover field without duplicating an existing picker value. */
     addHoverLabelField(): void {
-        const selected = new Set(this.hoverLabelFields.map(field => field.expression));
-        const expression = this.hoverLabelFieldOptions.find(option =>
-            !selected.has(option.value))?.value ?? "";
-        this.inspectionState.hoverLabelFields = [
-            ...this.hoverLabelFields,
-            {expression, customExpression: false}
-        ];
+        const selected = new Set(this.hoverLabelFields.map((field) => field.expression));
+        const expression = this.hoverLabelFieldOptions.find((option) => !selected.has(option.value))?.value ?? "";
+        this.inspectionState.hoverLabelFields = [...this.hoverLabelFields, {expression, customExpression: false}];
     }
 
     /** Removes one ordered field from the map-hover overlay. */
     removeHoverLabelField(index: number): void {
         this.inspectionState.hoverLabelFields = this.hoverLabelFields.filter(
-            (_field, fieldIndex) => fieldIndex !== index);
+            (_field, fieldIndex) => fieldIndex !== index
+        );
     }
 
     /** Switches one field between the schema picker and free-form SIMFIL editor. */
     toggleHoverLabelExpressionMode(index: number): void {
-        this.inspectionState.hoverLabelFields = this.hoverLabelFields.map(
-            (field, fieldIndex) => fieldIndex === index
-                ? {...field, customExpression: !field.customExpression}
-                : field);
+        this.inspectionState.hoverLabelFields = this.hoverLabelFields.map((field, fieldIndex) =>
+            fieldIndex === index ? {...field, customExpression: !field.customExpression} : field
+        );
     }
 
     /** Updates one hover-field expression while preserving row order and editor mode. */
     setHoverLabelExpression(index: number, expression: string): void {
-        this.inspectionState.hoverLabelFields = this.hoverLabelFields.map(
-            (field, fieldIndex) => fieldIndex === index
-                ? {...field, expression: expression ?? ""}
-                : field);
+        this.inspectionState.hoverLabelFields = this.hoverLabelFields.map((field, fieldIndex) =>
+            fieldIndex === index ? {...field, expression: expression ?? ""} : field
+        );
     }
 
     /** Updates or clears the optional short key displayed beside one hover value. */
     setHoverLabelDisplayKey(index: number, displayKey: string): void {
-        this.inspectionState.hoverLabelFields = this.hoverLabelFields.map(
-            (field, fieldIndex) => fieldIndex === index
-                ? {...field, displayKey: displayKey || undefined}
-                : field);
+        this.inspectionState.hoverLabelFields = this.hoverLabelFields.map((field, fieldIndex) =>
+            fieldIndex === index ? {...field, displayKey: displayKey || undefined} : field
+        );
     }
 
     protected readonly defaultHoverLabelFieldKey = defaultHoverLabelFieldKey;
 
     /** Loads unique scalar feature fields from the shared schema worker. */
     private refreshHoverLabelFieldOptions(): void {
-        this.searchSchema.requestSearchStyleFields("true", "feature")
-            .then(options => this.applyHoverLabelFieldOptions(options));
+        this.searchSchema
+            .requestSearchStyleFields("true", "feature")
+            .then((options) => this.applyHoverLabelFieldOptions(options));
     }
 
     /** Merges per-layer schema candidates into the concise hover-field picker. */
-    private applyHoverLabelFieldOptions(
-        candidates: FeatureSearchStyleFieldCandidate[]
-    ): void {
-        const scalarKinds = new Set([
-            "number",
-            "integer",
-            "string",
-            "boolean",
-            "enum"
-        ]);
-        const paths = new Set(candidates
-            .filter(candidate => scalarKinds.has(candidate.valueKind))
-            .map(candidate => candidate.path));
-        this.hoverLabelFields.forEach(field => {
+    private applyHoverLabelFieldOptions(candidates: FeatureSearchStyleFieldCandidate[]): void {
+        const scalarKinds = new Set(["number", "integer", "string", "boolean", "enum"]);
+        const paths = new Set(
+            candidates.filter((candidate) => scalarKinds.has(candidate.valueKind)).map((candidate) => candidate.path)
+        );
+        this.hoverLabelFields.forEach((field) => {
             if (!field.customExpression && field.expression) {
                 paths.add(field.expression);
             }
@@ -910,7 +1118,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         paths.delete("id");
         this.hoverLabelFieldOptions = [
             {label: "Feature ID", value: "id"},
-            ...[...paths].sort().map(path => ({label: path, value: path}))
+            ...[...paths].sort().map((path) => ({label: path, value: path}))
         ];
     }
 
@@ -995,10 +1203,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         const threshold = Number(this.lod3TileThresholdInput);
-        if (!Number.isFinite(threshold)
-            || threshold < MIN_LOD3_TILE_THRESHOLD || threshold > MAX_LOD3_TILE_THRESHOLD) {
+        if (!Number.isFinite(threshold) || threshold < MIN_LOD3_TILE_THRESHOLD || threshold > MAX_LOD3_TILE_THRESHOLD) {
             this.messageService.showError(
-                `Please enter a tile threshold between ${MIN_LOD3_TILE_THRESHOLD} and ${MAX_LOD3_TILE_THRESHOLD}.`);
+                `Please enter a tile threshold between ${MIN_LOD3_TILE_THRESHOLD} and ${MAX_LOD3_TILE_THRESHOLD}.`
+            );
             return;
         }
         const normalized = clampLod3TileThreshold(threshold);
@@ -1016,7 +1224,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     applyPointCloudPolicy(): void {
         const parsed = pointCloudPolicySchema.safeParse(this.pointCloudPolicyDraft);
         if (!parsed.success) {
-            this.messageService.showError("Point spacing must be 0.5–32 pixels, working memory 32–4096 MiB, and GPU allowance 16–2048 MiB.");
+            this.messageService.showError(
+                "Point spacing must be 0.5–32 pixels, working memory 32–4096 MiB, and GPU allowance 16–2048 MiB."
+            );
             return;
         }
         this.viewStateOwner.setPointCloudPolicy(parsed.data);
@@ -1028,13 +1238,15 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         const workerCount = Number(this.renderWorkerCountInput);
-        if (!Number.isInteger(workerCount) ||
+        if (
+            !Number.isInteger(workerCount) ||
             workerCount < AUTO_TILE_SUBSET_RENDER_WORKER_COUNT ||
-            workerCount > MAX_TILE_SUBSET_RENDER_WORKER_COUNT) {
+            workerCount > MAX_TILE_SUBSET_RENDER_WORKER_COUNT
+        ) {
             this.messageService.showError(
                 `Please enter a render worker count between ` +
-                `${AUTO_TILE_SUBSET_RENDER_WORKER_COUNT} (Auto) and ` +
-                `${MAX_TILE_SUBSET_RENDER_WORKER_COUNT}.`
+                    `${AUTO_TILE_SUBSET_RENDER_WORKER_COUNT} (Auto) and ` +
+                    `${MAX_TILE_SUBSET_RENDER_WORKER_COUNT}.`
             );
             return;
         }
@@ -1051,7 +1263,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const step = Number(this.mapZoomStepInput);
         if (!Number.isFinite(step) || step < MIN_MAP_ZOOM_STEP || step > MAX_MAP_ZOOM_STEP) {
-            this.messageService.showError(`Please enter a zoom speed between ${MIN_MAP_ZOOM_STEP} and ${MAX_MAP_ZOOM_STEP}.`);
+            this.messageService.showError(
+                `Please enter a zoom speed between ${MIN_MAP_ZOOM_STEP} and ${MAX_MAP_ZOOM_STEP}.`
+            );
             return;
         }
         const clampedStep = clampMapZoomStep(step);
@@ -1066,13 +1280,15 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         const clearance = Number(this.featureZoomClearanceMetersInput);
-        if (!Number.isFinite(clearance)
-            || clearance < MIN_FEATURE_ZOOM_CLEARANCE_METERS
-            || clearance > MAX_FEATURE_ZOOM_CLEARANCE_METERS) {
+        if (
+            !Number.isFinite(clearance) ||
+            clearance < MIN_FEATURE_ZOOM_CLEARANCE_METERS ||
+            clearance > MAX_FEATURE_ZOOM_CLEARANCE_METERS
+        ) {
             this.messageService.showError(
                 `Please enter a 3D feature zoom clearance between ` +
-                `${MIN_FEATURE_ZOOM_CLEARANCE_METERS} and ` +
-                `${MAX_FEATURE_ZOOM_CLEARANCE_METERS} metres.`
+                    `${MIN_FEATURE_ZOOM_CLEARANCE_METERS} and ` +
+                    `${MAX_FEATURE_ZOOM_CLEARANCE_METERS} metres.`
             );
             return;
         }
@@ -1083,21 +1299,21 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     }
 
     /** Persists the dark-mode preference and updates the root document class immediately. */
-    setDarkMode(setting: 'off' | 'on' | 'auto') {
+    setDarkMode(setting: "off" | "on" | "auto") {
         this.darkModeSetting = setting;
         localStorage.setItem(this.DARK_MODE_KEY, setting);
         this.applyDarkModeSetting(setting);
     }
 
     /** Applies explicit dark/light mode or follows the system color scheme in auto mode. */
-    private applyDarkModeSetting(setting: 'off' | 'on' | 'auto') {
-        if (setting === 'on') {
+    private applyDarkModeSetting(setting: "off" | "on" | "auto") {
+        if (setting === "on") {
             this.cleanupMediaQueryListener();
             this.updateDarkClass(true);
             return;
         }
 
-        if (setting === 'off') {
+        if (setting === "off") {
             this.cleanupMediaQueryListener();
             this.updateDarkClass(false);
             return;
@@ -1106,7 +1322,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         // AUTO: follow system preference
         this.cleanupMediaQueryListener();
         this.mediaQueryList = window.matchMedia(this.PREFERS_DARK_QUERY);
-        this.mediaQueryList.addEventListener('change', this.handleSystemSchemeChange);
+        this.mediaQueryList.addEventListener("change", this.handleSystemSchemeChange);
         this.updateDarkClass(this.mediaQueryList.matches);
     }
 
@@ -1123,7 +1339,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Removes the active system color-scheme listener before reconfiguring it. */
     private cleanupMediaQueryListener() {
         if (this.mediaQueryList) {
-            this.mediaQueryList.removeEventListener('change', this.handleSystemSchemeChange);
+            this.mediaQueryList.removeEventListener("change", this.handleSystemSchemeChange);
             this.mediaQueryList = undefined;
         }
     }
@@ -1135,7 +1351,9 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const limit = Number(this.limitSimultaneousInspectionsInput);
         if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > MAX_SIMULTANEOUS_INSPECTIONS) {
-            this.messageService.showError(`Please enter a valid inspections limit (1-${MAX_SIMULTANEOUS_INSPECTIONS})!`);
+            this.messageService.showError(
+                `Please enter a valid inspections limit (1-${MAX_SIMULTANEOUS_INSPECTIONS})!`
+            );
             return;
         }
         this.inspectionState.inspectionsLimit = limit;
@@ -1149,8 +1367,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         const radius = Number(this.drillPickRadiusInput);
-        if (!Number.isFinite(radius) || !Number.isInteger(radius)
-            || radius < MIN_DRILL_PICK_RADIUS || radius > MAX_DRILL_PICK_RADIUS) {
+        if (
+            !Number.isFinite(radius) ||
+            !Number.isInteger(radius) ||
+            radius < MIN_DRILL_PICK_RADIUS ||
+            radius > MAX_DRILL_PICK_RADIUS
+        ) {
             this.messageService.showError(
                 `Please enter a valid drill pick radius (${MIN_DRILL_PICK_RADIUS}-${MAX_DRILL_PICK_RADIUS})!`
             );
@@ -1166,8 +1388,15 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         const limit = Number(this.locationSearchResultLimitInput);
-        if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > MAX_LOCATION_SEARCH_RESULT_LIMIT) {
-            this.messageService.showError(`Please enter a valid location match limit (1-${MAX_LOCATION_SEARCH_RESULT_LIMIT})!`);
+        if (
+            !Number.isFinite(limit) ||
+            !Number.isInteger(limit) ||
+            limit < 1 ||
+            limit > MAX_LOCATION_SEARCH_RESULT_LIMIT
+        ) {
+            this.messageService.showError(
+                `Please enter a valid location match limit (1-${MAX_LOCATION_SEARCH_RESULT_LIMIT})!`
+            );
             return;
         }
         this.locationSearch.locationSearchResultLimit = limit;
@@ -1195,7 +1424,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Tracks slider edits for the location-search result limit. */
     protected onLocationSearchResultLimitSliderChange(value: number) {
         this.locationSearchResultLimitInput = value;
-        this.locationSearchResultLimitChanged = this.hasPendingNumericChange(value, this.locationSearch.locationSearchResultLimit);
+        this.locationSearchResultLimitChanged = this.hasPendingNumericChange(
+            value,
+            this.locationSearch.locationSearchResultLimit
+        );
     }
 
     /** Tracks slider edits for the map zoom-step preference. */
@@ -1246,7 +1478,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Tracks free-form edits for the location-search result limit. */
     protected onLocationSearchResultLimitInputChange(value: number | string) {
         this.locationSearchResultLimitInput = value;
-        this.locationSearchResultLimitChanged = this.hasPendingNumericChange(value, this.locationSearch.locationSearchResultLimit);
+        this.locationSearchResultLimitChanged = this.hasPendingNumericChange(
+            value,
+            this.locationSearch.locationSearchResultLimit
+        );
     }
 
     /** Tracks free-form edits for the map zoom-step input. */
@@ -1279,27 +1514,26 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Updates the dirty flag for the LOD 3 threshold control. */
     private updateLod3TileThresholdChangeState(): void {
         const threshold = Number(this.lod3TileThresholdInput);
-        if (!Number.isFinite(threshold)
-            || threshold < MIN_LOD3_TILE_THRESHOLD || threshold > MAX_LOD3_TILE_THRESHOLD) {
+        if (!Number.isFinite(threshold) || threshold < MIN_LOD3_TILE_THRESHOLD || threshold > MAX_LOD3_TILE_THRESHOLD) {
             this.lod3TileThresholdChanged = true;
             return;
         }
-        this.lod3TileThresholdChanged =
-            clampLod3TileThreshold(threshold) !== this.viewStateOwner.lod3TileThreshold;
+        this.lod3TileThresholdChanged = clampLod3TileThreshold(threshold) !== this.viewStateOwner.lod3TileThreshold;
     }
 
     /** Updates the dirty flag for the subset-render worker control. */
     private updateRenderWorkerCountChangeState(): void {
         const workerCount = Number(this.renderWorkerCountInput);
-        if (!Number.isInteger(workerCount) ||
+        if (
+            !Number.isInteger(workerCount) ||
             workerCount < AUTO_TILE_SUBSET_RENDER_WORKER_COUNT ||
-            workerCount > MAX_TILE_SUBSET_RENDER_WORKER_COUNT) {
+            workerCount > MAX_TILE_SUBSET_RENDER_WORKER_COUNT
+        ) {
             this.renderWorkerCountChanged = true;
             return;
         }
         this.renderWorkerCountChanged =
-            clampTileSubsetRenderWorkerCount(workerCount) !==
-            this.viewStateOwner.tileSubsetRenderWorkerCount;
+            clampTileSubsetRenderWorkerCount(workerCount) !== this.viewStateOwner.tileSubsetRenderWorkerCount;
     }
 
     /** Determines whether a numeric preference control still has an unapplied change. */
@@ -1318,14 +1552,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     protected readonly MAX_LOCATION_SEARCH_RESULT_LIMIT = MAX_LOCATION_SEARCH_RESULT_LIMIT;
     protected readonly MIN_MAP_ZOOM_STEP = MIN_MAP_ZOOM_STEP;
     protected readonly MAX_MAP_ZOOM_STEP = MAX_MAP_ZOOM_STEP;
-    protected readonly MIN_FEATURE_ZOOM_CLEARANCE_METERS =
-        MIN_FEATURE_ZOOM_CLEARANCE_METERS;
-    protected readonly MAX_FEATURE_ZOOM_CLEARANCE_METERS =
-        MAX_FEATURE_ZOOM_CLEARANCE_METERS;
+    protected readonly MIN_FEATURE_ZOOM_CLEARANCE_METERS = MIN_FEATURE_ZOOM_CLEARANCE_METERS;
+    protected readonly MAX_FEATURE_ZOOM_CLEARANCE_METERS = MAX_FEATURE_ZOOM_CLEARANCE_METERS;
     protected readonly MIN_LOD3_TILE_THRESHOLD = MIN_LOD3_TILE_THRESHOLD;
     protected readonly MAX_LOD3_TILE_THRESHOLD = MAX_LOD3_TILE_THRESHOLD;
-    protected readonly AUTO_TILE_SUBSET_RENDER_WORKER_COUNT =
-        AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
-    protected readonly MAX_TILE_SUBSET_RENDER_WORKER_COUNT =
-        MAX_TILE_SUBSET_RENDER_WORKER_COUNT;
+    protected readonly AUTO_TILE_SUBSET_RENDER_WORKER_COUNT = AUTO_TILE_SUBSET_RENDER_WORKER_COUNT;
+    protected readonly MAX_TILE_SUBSET_RENDER_WORKER_COUNT = MAX_TILE_SUBSET_RENDER_WORKER_COUNT;
 }

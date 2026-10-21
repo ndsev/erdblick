@@ -1,9 +1,10 @@
+import "@angular/compiler";
 import {createHash} from "node:crypto";
 import {mkdirSync, writeFileSync} from "node:fs";
 import {canonicalViewerContractJson, viewerActionCatalog, viewerJsonSchema} from "../app/actions/viewer-action.contract.js";
 import {viewerActionClientMessageSchema, viewerActionServerMessageSchema, viewerMcpInfoSchema} from "../app/actions/viewer-action-relay.contract.js";
 
-// This program imports only pure contract definitions. Never bootstrap Angular/WASM to export tools.
+// Bundle and import actual owner classes; static declarations need no service construction or browser globals.
 const catalog = viewerActionCatalog();
 const canonical = canonicalViewerContractJson(catalog);
 const catalogId = `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;

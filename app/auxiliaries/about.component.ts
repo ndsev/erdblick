@@ -1,15 +1,22 @@
+import {Component, inject} from "@angular/core";
 import {AppConfigService} from "../shared/app-config.service";
+import {ABOUT_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
 import {AppLayoutService} from "../shared/app-layout.service";
-import {inject} from "@angular/core";
-import {Component} from '@angular/core';
-import {ABOUT_DIALOG_LAYOUT_ID, AppStateService} from '../shared/appstate.service';
+import {AppStateService} from "../shared/appstate.service";
 
 @Component({
-    selector: 'about-dialog',
+    selector: "about-dialog",
     template: `
-        <app-dialog header="About" [(visible)]="dialogVisible" [modal]="false"
-                  [resizable]="false" class="pref-dialog" [style]="{'min-width': '24em', 'max-width': '42em'}"
-                  [persistLayout]="true" [layoutId]="dialogLayoutId">
+        <app-dialog
+            header="About"
+            [(visible)]="dialogVisible"
+            [modal]="false"
+            [resizable]="false"
+            class="pref-dialog"
+            [style]="{'min-width': '24em', 'max-width': '42em'}"
+            [persistLayout]="true"
+            [layoutId]="dialogLayoutId"
+        >
             <div class="about-dialog-content">
                 @if (configService.distributionVersions.getValue().length) {
                     <div class="about-section-title">Distribution</div>
@@ -27,7 +34,7 @@ import {ABOUT_DIALOG_LAYOUT_ID, AppStateService} from '../shared/appstate.servic
                                     <td>
                                         {{ version.tag }}
                                         @if (version.whatsnew !== undefined) {
-                                            <br><a [href]="version.whatsnew">What's new</a>
+                                            <br /><a [href]="version.whatsnew">What's new</a>
                                         }
                                     </td>
                                 </tr>

@@ -1,18 +1,15 @@
-import type {
-    TileFeatureLayer,
-    TileLayerParser
-} from "../../build/libs/core/erdblick-core";
-import {TileDeliveryError} from "./tile-diagnostics";
+import type {TileFeatureLayer, TileLayerParser} from "../../build/libs/core/erdblick-core";
+import type {TileFeatureId} from "../inspection/inspection-state.model";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
-import {MapTileStreamClientTiles, MAP_TILE_STREAM_HEADER_SIZE,
-    MAP_TILE_STREAM_TYPE_INCOMING_RELATIONS, MAP_TILE_STREAM_TYPE_STATUS} from "./tilestream";
-import type {TileFeatureId} from "../shared/appstate.service";
 import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
+import {parsePartition, partitionKey, type PartitionId} from "./partition.model";
+import {TileDeliveryError} from "./tile-diagnostics";
 import {
-    parsePartition,
-    partitionKey,
-    type PartitionId
-} from "./partition.model";
+    MAP_TILE_STREAM_HEADER_SIZE,
+    MAP_TILE_STREAM_TYPE_INCOMING_RELATIONS,
+    MAP_TILE_STREAM_TYPE_STATUS,
+    MapTileStreamClientTiles
+} from "./tilestream";
 
 /** Completed incoming context; rows and associations were validated by the native feature model. */
 export interface IncomingInspectionResult {
@@ -49,10 +46,7 @@ export class InspectionFeatureTile {
         private readonly parser: TileLayerParser,
         readonly blob: Uint8Array
     ) {
-        const metadata = uint8ArrayToWasm(
-            data => parser.readTileLayerMetadata(data),
-            blob
-        ) as unknown as {
+        const metadata = uint8ArrayToWasm((data) => parser.readTileLayerMetadata(data), blob) as unknown as {
             id: string;
             stringPoolId: string;
             mapName: string;
@@ -73,34 +67,21 @@ export class InspectionFeatureTile {
         this.layerName = metadata.layerName;
         this.partition = parsePartition(metadata.partition);
         this.partitionKey = partitionKey(this.partition);
-        this.tileId = this.partition.kind === "tile"
-            ? this.partition.id
-            : null;
+        this.tileId = this.partition.kind === "tile" ? this.partition.id : null;
         this.legalInfo = metadata.legalInfo ?? "";
         this.numFeatures = Math.max(0, Math.floor(Number(metadata.numFeatures)));
         const timestamp = Number(metadata.conversionTimestampMs);
         const ttl = Number(metadata.ttlMs);
-        this.conversionTimestampMs = Number.isFinite(timestamp)
-            ? timestamp
-            : null;
-        this.ttlMs = Number.isFinite(ttl) && ttl > 0
-            ? ttl
-            : null;
-        const expiry = this.conversionTimestampMs !== null &&
-            this.ttlMs !== null
-            ? this.conversionTimestampMs + this.ttlMs
-            : null;
-        this.expiresAtMs = expiry !== null && Number.isFinite(expiry)
-            ? expiry
-            : null;
+        this.conversionTimestampMs = Number.isFinite(timestamp) ? timestamp : null;
+        this.ttlMs = Number.isFinite(ttl) && ttl > 0 ? ttl : null;
+        const expiry =
+            this.conversionTimestampMs !== null && this.ttlMs !== null ? this.conversionTimestampMs + this.ttlMs : null;
+        this.expiresAtMs = expiry !== null && Number.isFinite(expiry) ? expiry : null;
         if (metadata.error) throw new TileDeliveryError(metadata.error, this.expiresAtMs);
     }
 
     peek<T>(callback: (layer: TileFeatureLayer) => T): T | null {
-        const layer = uint8ArrayToWasm(
-            data => this.parser.readTileFeatureLayer(data),
-            this.blob
-        );
+        const layer = uint8ArrayToWasm((data) => this.parser.readTileFeatureLayer(data), this.blob);
         if (!layer) {
             return null;
         }
@@ -113,8 +94,10 @@ export class InspectionFeatureTile {
 
     /** Ask native schema metadata whether this feature has any deferred incoming families. */
     hasIncomingRelations(featureId: string): boolean {
-        return this.peek(layer => this.parser.hasIncomingRelations(layer,
-            stripFeatureInspectionTarget(featureId))) ?? false;
+        return (
+            this.peek((layer) => this.parser.hasIncomingRelations(layer, stripFeatureInspectionTarget(featureId))) ??
+            false
+        );
     }
 
     /** Load a request-local snapshot bundle without delaying or modifying ordinary inspection. */
@@ -129,14 +112,16 @@ export class InspectionFeatureTile {
         let bytes = 0;
         const abort = () => client.destroy();
         signal.addEventListener("abort", abort, {once: true});
-        client.onFeatures = blob => {
+        client.onFeatures = (blob) => {
             if (successful) throw new Error("Incoming snapshot arrived after terminal status.");
             bytes += blob.byteLength;
             if (snapshots.length >= 64 || bytes > 64 * 1024 * 1024)
                 throw new Error("Incoming inspection exceeds its snapshot limit.");
             snapshots.push(new InspectionFeatureTile(this.parser, blob));
         };
-        client.onSubsets = () => { throw new Error("Backend does not support incoming inspection."); };
+        client.onSubsets = () => {
+            throw new Error("Backend does not support incoming inspection.");
+        };
         client.onFrame = (frame, type) => {
             if (type !== MAP_TILE_STREAM_TYPE_INCOMING_RELATIONS && type !== MAP_TILE_STREAM_TYPE_STATUS) return;
             const value = JSON.parse(new TextDecoder().decode(frame.subarray(MAP_TILE_STREAM_HEADER_SIZE)));
@@ -151,19 +136,31 @@ export class InspectionFeatureTile {
             }
         };
         try {
-            await client.request([{
-                mapId: this.mapName, layerId: this.layerName, partitions: [this.partition],
-                roots: [{partition: this.partition, featureId: canonicalId}]
-            }], {channels: [{channelId: "incoming", scope: "relation", relation: {traversal: "incoming"}}]});
+            await client.request(
+                [
+                    {
+                        mapId: this.mapName,
+                        layerId: this.layerName,
+                        partitions: [this.partition],
+                        roots: [{partition: this.partition, featureId: canonicalId}]
+                    }
+                ],
+                {channels: [{channelId: "incoming", scope: "relation", relation: {traversal: "incoming"}}]}
+            );
             signal.throwIfAborted();
             if (failure || !successful || manifests.length !== 1)
                 throw new Error(failure ?? "Incomplete incoming inspection response.");
             const manifest = manifests[0];
             const view = new coreLib.IncomingInspection(JSON.stringify(manifest), this.mapTileKey, canonicalId);
             try {
-                for (const snapshot of snapshots) snapshot.peek(layer => view.addSnapshot(layer));
-                return {model: view.inspectionModel(), target: snapshots.find(tile => tile.mapTileKey === this.mapTileKey), complete: manifest.complete,
-                    issues: manifest.issues, expiresAtMs: manifest.expiresAtMs};
+                for (const snapshot of snapshots) snapshot.peek((layer) => view.addSnapshot(layer));
+                return {
+                    model: view.inspectionModel(),
+                    target: snapshots.find((tile) => tile.mapTileKey === this.mapTileKey),
+                    complete: manifest.complete,
+                    issues: manifest.issues,
+                    expiresAtMs: manifest.expiresAtMs
+                };
             } finally {
                 view.delete();
             }
@@ -174,14 +171,16 @@ export class InspectionFeatureTile {
     }
 
     contains(featureId: string): boolean {
-        return this.peek(layer => {
-            const feature = layer.find(stripFeatureInspectionTarget(featureId));
-            try {
-                return !feature.isNull();
-            } finally {
-                feature.delete();
-            }
-        }) ?? false;
+        return (
+            this.peek((layer) => {
+                const feature = layer.find(stripFeatureInspectionTarget(featureId));
+                try {
+                    return !feature.isNull();
+                } finally {
+                    feature.delete();
+                }
+            }) ?? false
+        );
     }
 }
 
@@ -197,10 +196,8 @@ export class FeatureWrapper implements TileFeatureId {
     }
 
     peek<T>(callback: (feature: any) => T): T | null {
-        return this.featureTile.peek(layer => {
-            const feature = layer.find(
-                stripFeatureInspectionTarget(this.featureId)
-            );
+        return this.featureTile.peek((layer) => {
+            const feature = layer.find(stripFeatureInspectionTarget(this.featureId));
             if (feature.isNull()) {
                 feature.delete();
                 return null;
@@ -214,9 +211,7 @@ export class FeatureWrapper implements TileFeatureId {
     }
 
     equals(other: FeatureWrapper | null): boolean {
-        return !!other &&
-            this.mapTileKey === other.mapTileKey &&
-            this.featureId === other.featureId;
+        return !!other && this.mapTileKey === other.mapTileKey && this.featureId === other.featureId;
     }
 
     key(): TileFeatureId {
@@ -228,22 +223,19 @@ export class FeatureWrapper implements TileFeatureId {
 }
 
 export function featureSetsEqual(rhs: TileFeatureId[], lhs: TileFeatureId[]): boolean {
-    return rhs.length === lhs.length && rhs.every(candidate =>
-        lhs.some(item =>
-            item.mapTileKey === candidate.mapTileKey &&
-            item.featureId === candidate.featureId
+    return (
+        rhs.length === lhs.length &&
+        rhs.every((candidate) =>
+            lhs.some((item) => item.mapTileKey === candidate.mapTileKey && item.featureId === candidate.featureId)
         )
     );
 }
 
-export function featureSetContains(
-    container: TileFeatureId[],
-    maybeSubset: TileFeatureId[]
-): boolean {
-    return maybeSubset.length > 0 && maybeSubset.every(candidate =>
-        container.some(item =>
-            item.mapTileKey === candidate.mapTileKey &&
-            item.featureId === candidate.featureId
+export function featureSetContains(container: TileFeatureId[], maybeSubset: TileFeatureId[]): boolean {
+    return (
+        maybeSubset.length > 0 &&
+        maybeSubset.every((candidate) =>
+            container.some((item) => item.mapTileKey === candidate.mapTileKey && item.featureId === candidate.featureId)
         )
     );
 }

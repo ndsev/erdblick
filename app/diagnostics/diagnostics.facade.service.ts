@@ -1,19 +1,27 @@
+import {inject, Injectable, NgZone, OnDestroy} from "@angular/core";
+import {BehaviorSubject} from "rxjs";
+import {collectActionItems, rejectAction} from "../actions/action-utils";
+import {AppActionService} from "../actions/app-action.service";
+import type {ViewerActionInput, ViewerActionOutput} from "../actions/viewer-action.contract";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import {TileSubsetLayerRenderService} from "../mapview/deck/tile-subset-layer-render.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {MapViewService} from "../mapview/map-view.service";
+import {ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
+import {FeatureSearchService} from "../search/feature.search.service";
 import {AppConfigService} from "../shared/app-config.service";
-import {AppLayoutService} from "../shared/app-layout.service";
-import {inject} from "@angular/core";
-import {diagnosticsLogFilter, diagnosticsExportOptions} from "./diagnostics.facade.service.state";
-import {Injectable, NgZone, OnDestroy} from '@angular/core';
-import {BehaviorSubject} from 'rxjs';
 import {
-    AppStateService,
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
-} from '../shared/appstate.service';
-import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
-import {TileSubsetLayerRenderService} from '../mapview/deck/tile-subset-layer-render.service';
-import {ViewLayerDiagnosticsService} from '../mapview/view-layer-diagnostics.service';
-import {DiagnosticsDatasource} from './diagnostics.datasource';
+} from "../shared/app-layout.model";
+import {AppStateService} from "../shared/appstate.service";
+import {unicodePrefix} from "../shared/unicode-string";
+import {StyleValidationReportService} from "../styledata/style-validation-report.service";
+import {DiagnosticsDatasource} from "./diagnostics.datasource";
+import {diagnosticsActions} from "./diagnostics.facade.service.declarations";
+import {diagnosticsExportOptions, diagnosticsLogFilter} from "./diagnostics.facade.service.state";
 import {
     DiagnosticsExportBundle,
     DiagnosticsExportOptions,
@@ -21,38 +29,54 @@ import {
     LogEntry,
     PerformanceDiagnosticsScope,
     TileSizeDistribution
-} from './diagnostics.model';
-import {StyleValidationReportService} from '../styledata/style-validation-report.service';
+} from "./diagnostics.model";
 
 interface MapgetStatusDataResponse {
     timestampMs?: unknown;
     service?: {
         datasources?: unknown;
-        'active-requests'?: unknown;
-        'cached-feature-tile-size-distribution'?: unknown;
+        "active-requests"?: unknown;
+        "cached-feature-tile-size-distribution"?: unknown;
     };
     cache?: unknown;
     tilesWebsocket?: unknown;
 }
 
-@Injectable({providedIn: 'root'})
+@Injectable({providedIn: "root"})
 /**
  * High-level diagnostics service used by the UI.
  *
  * It extends the datasource with dialog-opening helpers and export bundling.
  */
 export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy {
+    static readonly actions = diagnosticsActions;
+    private readonly stream = inject(MapTileStreamService);
+    private readonly render = inject(TileSubsetLayerRenderService);
+    private readonly maps = inject(MapInfoService);
+    private readonly views = inject(MapViewService);
+    private readonly viewStateOwner = inject(MapViewStateService);
+    private readonly searches = inject(FeatureSearchService);
+    private readonly styleReports = inject(StyleValidationReportService);
+
     readonly versionState = inject(AppConfigService);
     readonly diagnosticsLogFilterState = this.stateService.register(diagnosticsLogFilter, "diagnostics", "logFilter");
-    readonly diagnosticsExportOptionsState = this.stateService.register(diagnosticsExportOptions, "diagnostics", "exportOptions");
+    readonly diagnosticsExportOptionsState = this.stateService.register(
+        diagnosticsExportOptions,
+        "diagnostics",
+        "exportOptions"
+    );
     readonly logFilter = this.diagnosticsLogFilterState.signal;
     readonly exportOptions = this.diagnosticsExportOptionsState.signal;
 
-    get diagnosticsLogFilter(): DiagnosticsLogFilter { return this.logFilter(); }
+    get diagnosticsLogFilter(): DiagnosticsLogFilter {
+        return this.logFilter();
+    }
     set diagnosticsLogFilter(value: DiagnosticsLogFilter) {
         this.diagnosticsLogFilterState.next({...value});
     }
-    get diagnosticsExportOptions(): DiagnosticsExportOptions { return this.exportOptions(); }
+    get diagnosticsExportOptions(): DiagnosticsExportOptions {
+        return this.exportOptions();
+    }
     set diagnosticsExportOptions(value: DiagnosticsExportOptions) {
         this.diagnosticsExportOptionsState.next({...value, logFilter: {...value.logFilter}});
     }
@@ -60,22 +84,31 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     readonly performanceScope$ = new BehaviorSubject<PerformanceDiagnosticsScope | null>(null);
     private nextPerformanceScopeRequestId = 1;
 
-    constructor(mapService: MapTileStreamService,
-                renderService: TileSubsetLayerRenderService,
-                viewDiagnostics: ViewLayerDiagnosticsService,
-                private readonly stateService: AppStateService,
-                styleValidationReportService: StyleValidationReportService,
-                ngZone: NgZone) {
-        super(mapService, renderService, viewDiagnostics, stateService,
-            styleValidationReportService, ngZone);
+    constructor(
+        mapService: MapTileStreamService,
+        renderService: TileSubsetLayerRenderService,
+        viewDiagnostics: ViewLayerDiagnosticsService,
+        private readonly stateService: AppStateService,
+        styleValidationReportService: StyleValidationReportService,
+        ngZone: NgZone
+    ) {
+        super(mapService, renderService, viewDiagnostics, stateService, styleValidationReportService, ngZone);
+        const actions = inject(AppActionService);
+        actions.registerAction(DiagnosticsFacadeService.actions.viewer_get_diagnostics, (input, context) =>
+            this.getDiagnostics(input)
+        );
     }
 
     /** Opens the performance dialog after refreshing the current aggregated stats. */
     openPerformanceDialog(scope?: PerformanceDiagnosticsScope) {
-        this.performanceScope$.next(scope ? {
-            ...scope,
-            requestId: this.nextPerformanceScopeRequestId++
-        } : null);
+        this.performanceScope$.next(
+            scope
+                ? {
+                      ...scope,
+                      requestId: this.nextPerformanceScopeRequestId++
+                  }
+                : null
+        );
         this.refreshPerfStats();
         this.layoutState.openDialog(DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID);
     }
@@ -138,12 +171,15 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     }
 
     /** Downloads a diagnostics export bundle, enriching it with backend status when available. */
-    async downloadExportBundle(options: DiagnosticsExportOptions, filename: string = 'diagnostics-export.json'): Promise<void> {
+    async downloadExportBundle(
+        options: DiagnosticsExportOptions,
+        filename: string = "diagnostics-export.json"
+    ): Promise<void> {
         const bundle = this.createExportBundle(options);
         await this.enrichBundleWithMapgetStatus(bundle);
-        const blob = new Blob([JSON.stringify(bundle, null, 2)], {type: 'application/json'});
+        const blob = new Blob([JSON.stringify(bundle, null, 2)], {type: "application/json"});
         const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
+        const link = document.createElement("a");
         link.href = url;
         link.download = filename;
         link.click();
@@ -152,11 +188,11 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
 
     /** Applies the active log-level filter to a log entry list. */
     filterLogs(logs: LogEntry[], filter: DiagnosticsLogFilter): LogEntry[] {
-        return logs.filter(entry => {
-            if (entry.level === 'info') {
+        return logs.filter((entry) => {
+            if (entry.level === "info") {
                 return filter.info;
             }
-            if (entry.level === 'warn') {
+            if (entry.level === "warn") {
                 return filter.warn;
             }
             return filter.error;
@@ -165,25 +201,29 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
 
     /** Fetches `/status-data` and attaches the relevant parts to the export bundle. */
     private async enrichBundleWithMapgetStatus(bundle: DiagnosticsExportBundle): Promise<void> {
-        const statusQuery = '/status-data?includeTileSizeDistribution=1&includeCachedFeatureTreeBytes=0';
+        const statusQuery = "/status-data?includeTileSizeDistribution=1&includeCachedFeatureTreeBytes=0";
 
         try {
-            const response = await fetch(statusQuery, {cache: 'no-store'});
+            const response = await fetch(statusQuery, {cache: "no-store"});
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText || 'Failed to fetch /status-data'}`);
+                throw new Error(`HTTP ${response.status}: ${response.statusText || "Failed to fetch /status-data"}`);
             }
 
             const statusData = (await response.json()) as MapgetStatusDataResponse;
             const serviceData = statusData.service;
-            const timestampMs = typeof statusData.timestampMs === 'number' ? statusData.timestampMs : undefined;
-            const tileSizeDistribution = this.getTileSizeDistribution(serviceData?.['cached-feature-tile-size-distribution']);
+            const timestampMs = typeof statusData.timestampMs === "number" ? statusData.timestampMs : undefined;
+            const tileSizeDistribution = this.getTileSizeDistribution(
+                serviceData?.["cached-feature-tile-size-distribution"]
+            );
 
             bundle.backendStatus = {
                 timestampMs,
-                service: serviceData ? {
-                    datasources: serviceData.datasources,
-                    'active-requests': serviceData['active-requests']
-                } : undefined,
+                service: serviceData
+                    ? {
+                          datasources: serviceData.datasources,
+                          "active-requests": serviceData["active-requests"]
+                      }
+                    : undefined,
                 cache: statusData.cache,
                 tilesWebsocket: statusData.tilesWebsocket
             };
@@ -198,7 +238,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
 
     /** Returns the cached tile-size distribution payload when it has the expected shape. */
     private getTileSizeDistribution(value: unknown): TileSizeDistribution | undefined {
-        if (!value || typeof value !== 'object') {
+        if (!value || typeof value !== "object") {
             return undefined;
         }
 
@@ -216,5 +256,139 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     /** Narrows visibility only to expose the inherited destroy hook for Angular. */
     override ngOnDestroy(): void {
         super.ngOnDestroy();
+    }
+
+    /** Samples fixed-size counters and existing caches only, never the per-tile diagnostics/export path. */
+    getDiagnostics(input: ViewerActionInput<"viewer_get_diagnostics">): ViewerActionOutput<"viewer_get_diagnostics"> {
+        const viewIndex =
+            input.viewId === undefined
+                ? undefined
+                : this.viewStateOwner.indexOf(this.viewStateOwner.requireView(input.viewId).id);
+        if (input.layerId && !input.mapId) rejectAction("layerId requires mapId", "invalid_arguments");
+        if (input.mapId && !this.maps.maps.maps.has(input.mapId)) rejectAction("The requested map is unavailable");
+        if (input.mapId && input.layerId) this.maps.requireLayer(input.mapId, input.layerId);
+        const sections = input.sections ?? ["transport", "workers", "loading", "gpu", "errors"];
+        const metrics: ViewerActionOutput<"viewer_get_diagnostics">["metrics"] = [];
+        const unavailable: string[] = [];
+        const add = (section: string, values: Record<string, number | boolean | null>, cached = false) => {
+            for (const [name, value] of Object.entries(values))
+                metrics.push({
+                    section,
+                    name,
+                    value: typeof value === "number" && !Number.isFinite(value) ? null : value,
+                    scope: "tab",
+                    cached
+                });
+        };
+        if (sections.includes("transport"))
+            add("transport", {
+                connected: this.stream.isTileStreamConnected(),
+                paused: this.stream.tilePipelinePaused,
+                parseQueue: this.stream.getPendingFrameQueueSize(),
+                downstreamBytesPerSecond: this.stream.getDownstreamBytesPerSecond(),
+                ...this.stream.getTileStreamTransportCompressionStats()
+            });
+        if (sections.includes("workers")) {
+            const {latestNativeMs, ...browserWorkers} = this.render.queueSummary();
+            add("workers", {...browserWorkers, latestWasmMs: latestNativeMs});
+        }
+        if (sections.includes("loading")) {
+            if (viewIndex !== undefined || input.mapId)
+                unavailable.push(
+                    "Scoped loading counters are unavailable without a tile scan; tab-wide cached counters are returned."
+                );
+            const snapshot = this.snapshot$.value;
+            add(
+                "loading",
+                {
+                    expected: snapshot.tiles.expected,
+                    loaded: snapshot.tiles.loaded,
+                    errors: snapshot.tiles.errors,
+                    rendered: snapshot.progress.rendered.done,
+                    renderTotal: snapshot.progress.rendered.total,
+                    sampleAgeMs: Math.max(0, Date.now() - snapshot.at)
+                },
+                true
+            );
+        }
+        if (sections.includes("gpu")) {
+            metrics.push({
+                section: "gpu",
+                name: "frameIntervalP90Ms",
+                value: this.render.currentFrameTimeMs(viewIndex) || null,
+                scope: viewIndex === undefined ? "tab" : "view",
+                ...(viewIndex === undefined ? {} : {viewId: input.viewId})
+            });
+            if (viewIndex !== undefined || input.mapId)
+                unavailable.push("Scoped GPU allocation is unavailable; no scene readback or scan was performed.");
+            else {
+                let found = false;
+                for (const stat of this.perfStats$.value) {
+                    if (stat.scope === "view" && stat.path[1] === "GPU Scene" && metrics.length < 100) {
+                        add("gpu", {[stat.key]: stat.average ?? stat.peak}, true);
+                        found = true;
+                    }
+                }
+                if (!found)
+                    unavailable.push("GPU allocation metrics have not been sampled by the performance diagnostics UI.");
+            }
+        }
+        const errorItems = function* (this: DiagnosticsFacadeService) {
+            for (const issue of this.styleReports.reports$.value) {
+                if (input.mapId && issue.runtimeContext?.mapName !== input.mapId) continue;
+                if (input.layerId && issue.runtimeContext?.layerName !== input.layerId) continue;
+                if (issue.severity !== "info")
+                    yield {
+                        source: unicodePrefix(issue.source.styleName ?? "style", 4096),
+                        message: unicodePrefix(issue.message, 4096),
+                        severity: issue.severity,
+                        phase: issue.phase,
+                        property: issue.property === undefined ? undefined : unicodePrefix(issue.property, 4096),
+                        expression: issue.expression === undefined ? undefined : unicodePrefix(issue.expression, 4096),
+                        rulePath: issue.rulePath === undefined ? undefined : unicodePrefix(issue.rulePath, 4096),
+                        mapId:
+                            issue.runtimeContext?.mapName === undefined
+                                ? undefined
+                                : unicodePrefix(issue.runtimeContext.mapName, 4096),
+                        layerId:
+                            issue.runtimeContext?.layerName === undefined
+                                ? undefined
+                                : unicodePrefix(issue.runtimeContext.layerName, 4096),
+                        featureId:
+                            issue.runtimeContext?.featureId === undefined
+                                ? undefined
+                                : unicodePrefix(issue.runtimeContext.featureId, 4096)
+                    };
+            }
+            for (const session of this.searches.getSessions()) {
+                if (viewIndex !== undefined && !session.definition.selectedViewIndices.includes(viewIndex)) continue;
+                if (
+                    input.mapId &&
+                    !session.definition.selectedMapLayers.some(
+                        (layer) => layer.mapId === input.mapId && (!input.layerId || layer.layerId === input.layerId)
+                    )
+                )
+                    continue;
+                for (const error of session.errors) yield {source: session.id, message: unicodePrefix(error, 4096)};
+            }
+        }.bind(this);
+        const errors = collectActionItems(sections.includes("errors") ? errorItems() : [], input.limit, 64000);
+        if (sections.includes("errors") && viewIndex !== undefined)
+            unavailable.push(
+                "Style errors have no per-view attribution; map/layer-filtered style issues and view-filtered search errors are returned."
+            );
+        return {
+            observedAt: new Date().toISOString(),
+            executionContext: "browser",
+            interpretation:
+                "All metrics describe this browser tab. Workers execute browser WASM rendering, not native backend jobs. " +
+                "Frame intervals measure observed rendering cadence, not GPU execution time, and can include idle periods. " +
+                "This snapshot alone cannot identify a panning bottleneck. Backend queues, CPU and memory were not sampled.",
+            metrics,
+            errors: errors.items,
+            unavailable,
+            complete: errors.complete,
+            reason: errors.reason
+        };
     }
 }

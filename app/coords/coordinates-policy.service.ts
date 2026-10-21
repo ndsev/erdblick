@@ -1,5 +1,5 @@
-import {Boolish} from "../shared/app-state";
-import {} from "../shared/app-state.model";
+import {ownerState} from "./coordinates-policy.service.state";
+
 import {Injectable, OnDestroy} from "@angular/core";
 import {BehaviorSubject, Subscription} from "rxjs";
 import {AppConfigService} from "../shared/app-config.service";
@@ -9,23 +9,17 @@ import {InfoMessageService} from "../shared/info.service";
 @Injectable({providedIn: "root"})
 /** Enforces the local coordinate-readout preference and its optional legal gate. */
 export class CoordinatesPolicyService implements OnDestroy {
+    readonly coordinatesEnabledState = this.stateService.register(
+        ownerState.coordinatesEnabled,
+        "coordinatePolicy",
+        "coordinatesEnabled"
+    );
 
-
-    readonly coordinatesEnabledState = this.stateService.register({
-        name: "coordinatesEnabled",
-        defaultValue: true,
-        schema: Boolish,
-        snapshotPersist: false,
-        configDefault: true
-    }, "coordinatePolicy", "coordinatesEnabled");
-
-
-    readonly coordinatesLegalTermsAcceptedState = this.stateService.register({
-        name: "coordinatesLegalTermsAccepted",
-        defaultValue: false,
-        schema: Boolish,
-        snapshotPersist: false
-    }, "coordinatePolicy", "coordinatesLegalTermsAccepted");
+    readonly coordinatesLegalTermsAcceptedState = this.stateService.register(
+        ownerState.coordinatesLegalTermsAccepted,
+        "coordinatePolicy",
+        "coordinatesLegalTermsAccepted"
+    );
 
     private readonly effectiveEnabledSubject = new BehaviorSubject(false);
     private readonly subscriptions = new Subscription();
@@ -105,8 +99,10 @@ export class CoordinatesPolicyService implements OnDestroy {
     /** Forces the raw preference off when configured terms have not been accepted or failed to load. */
     private enforceLegalGate(): void {
         const coordinatesConfig = this.configService.snapshot.coordinates;
-        if (coordinatesConfig.legalTermsUrl
-            && (coordinatesConfig.legalTermsError || !this.coordinatesLegalTermsAcceptedState.getValue())) {
+        if (
+            coordinatesConfig.legalTermsUrl &&
+            (coordinatesConfig.legalTermsError || !this.coordinatesLegalTermsAcceptedState.getValue())
+        ) {
             this.coordinatesEnabledState.next(false);
         }
     }
@@ -114,18 +110,9 @@ export class CoordinatesPolicyService implements OnDestroy {
     /** Publishes the effective readout state after applying the loaded legal configuration. */
     private refreshEffectiveState(): void {
         const coordinatesConfig = this.configService.snapshot.coordinates;
-        const legalGateOpen = !coordinatesConfig.legalTermsUrl
-            || (!coordinatesConfig.legalTermsError
-                && this.coordinatesLegalTermsAcceptedState.getValue());
-        this.effectiveEnabledSubject.next(
-            this.initialized
-            && legalGateOpen
-            && this.coordinatesEnabledState.getValue());
+        const legalGateOpen =
+            !coordinatesConfig.legalTermsUrl ||
+            (!coordinatesConfig.legalTermsError && this.coordinatesLegalTermsAcceptedState.getValue());
+        this.effectiveEnabledSubject.next(this.initialized && legalGateOpen && this.coordinatesEnabledState.getValue());
     }
-}
-
-
-export interface CoordinatesPolicyServiceValues {
-    coordinatesEnabled: boolean;
-    coordinatesLegalTermsAccepted: boolean;
 }

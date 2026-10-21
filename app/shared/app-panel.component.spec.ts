@@ -1,10 +1,8 @@
-import {createStateTestSystem, type StateTestSystem} from "./state-test-system";
 import '@angular/compiler';
 import {ElementRef} from '@angular/core';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {AppPanelComponent} from './app-panel.component';
-import {AppStateService} from './appstate.service';
 import {ViewerUiService} from '../actions/viewer-ui.service';
+import {AppPanelComponent} from './app-panel.component';
 
 interface AppPanelTestAccess {
     contentRef?: ElementRef<HTMLElement>;
@@ -56,7 +54,7 @@ describe('AppPanelComponent custom resizing', () => {
         const stateService = {
             baseFontSize: 16,
             setPanelLayout
-        } as unknown as StateTestSystem;
+        };
         component = new AppPanelComponent((stateService) as never, new ViewerUiService());
         component.layoutId = 'test-panel';
         component.persistLayout = true;

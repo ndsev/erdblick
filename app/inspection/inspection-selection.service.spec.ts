@@ -1,16 +1,11 @@
-import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
 import {BehaviorSubject} from "rxjs";
+import {describe, expect, it, vi} from "vitest";
 
-import type {
-    AppStateService,
-    InspectionPanelModel,
-    TileFeatureId
-} from "../shared/appstate.service";
-import type {InfoMessageService} from "../shared/info.service";
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
+import type {InfoMessageService} from "../shared/info.service";
 import {InspectionSelectionService} from "./inspection-selection.service";
+import type {InspectionPanelModel, TileFeatureId} from "./inspection-state.model";
 
 const feature = (featureId: string, mapTileKey: string): TileFeatureId => ({featureId, mapTileKey});
 
@@ -71,7 +66,7 @@ function createHarness(
                 panel.locked = locked;
             }
         })
-    } as unknown as StateTestSystem;
+    };
     const infoMessageService = {showWarning: vi.fn()} as unknown as InfoMessageService;
     const service = new InspectionSelectionService(
         (stateService) as never,

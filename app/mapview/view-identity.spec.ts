@@ -1,24 +1,26 @@
 import "@angular/compiler";
-import {afterEach, describe, expect, it, vi} from "vitest";
 import {computed, Injector, runInInjectionContext} from "@angular/core";
+import {Subject} from "rxjs";
+import {afterEach, describe, expect, it, vi} from "vitest";
+import {AppActionService} from "../actions/app-action.service";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {InspectionStateService} from "../inspection/inspection-state.service";
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
-import {Subject} from "rxjs";
-import {createStateTestSystem, StateTestSystem} from "../shared/state-test-system";
+import {MapLayerStateService} from "../mapdata/map-layer-state.service";
+import {createStateOwners, StateOwners} from "../shared/state-test-owners";
 import {MapViewStateService} from "./map-view-state.service";
-import {FeatureSearchService} from "../search/feature.search.service";
+import {ViewLayerDiagnosticsService} from "./view-layer-diagnostics.service";
 
-const systems: StateTestSystem[] = [];
+const systems: StateOwners[] = [];
 function fixture(params: Record<string, string> = {}) {
     const router = {events: new Subject(), routerState: {snapshot: {root: {queryParams: params}}},
         navigate: vi.fn().mockResolvedValue(true), getCurrentNavigation: vi.fn()};
     const messages = {showError: vi.fn(), showSuccess: vi.fn(), showWarning: vi.fn()};
-    const state = createStateTestSystem(router as never, messages as never);
+    const state = createStateOwners(router as never, messages as never);
     systems.push(state);
-    return {state, views: state.owner(MapViewStateService), router, messages};
+    return {state, views: state.views, router, messages};
 }
-afterEach(() => { systems.splice(0).forEach(system => system.ngOnDestroy()); localStorage.clear(); });
+afterEach(() => { systems.splice(0).forEach(system => system.destroy()); localStorage.clear(); });
 
 describe("logical view ownership", () => {
     it("retains cameras, options, search targets and native readers across a reorder", () => {
@@ -26,11 +28,11 @@ describe("logical view ownership", () => {
         views.numViews = 2;
         const [left, right] = views.viewIds();
         const target = views.captureView(1)!;
-        state.layerNames = ["Map/Layer"];
-        state.setStyleOptionValues("Map", "Layer", "Style", "opacity", [0.2, 0.8]);
-        state.cameraViewDataState.next(1, {destination: {lon: 10, lat: 20, alt: 30},
+        state.layers.layerNames = ["Map/Layer"];
+        state.layers.setStyleOptionValues("Map", "Layer", "Style", "opacity", [0.2, 0.8]);
+        state.views.cameraViewDataState.next(1, {destination: {lon: 10, lat: 20, alt: 30},
             orientation: {heading: 0, pitch: -1, roll: 0}, position: [0, 0, 0]});
-        state.addFeatureSearch({query: "Road", selectedViewIndices: [1]});
+        state.searches.addFeatureSearch({query: "Road", selectedViewIndices: [1]});
         const camera = views.cameraViewDataState.signal(right);
         const saved = camera();
         views.focusedView = 1;
@@ -39,9 +41,40 @@ describe("logical view ownership", () => {
         expect(views.focusedViewId()).toBe(right);
         expect(views.cameraViewDataState.getValue(0)).toBe(saved);
         expect(camera()).toBe(saved);
-        expect(state.styles.get("Map/Layer/Style/opacity")).toEqual([0.8, 0.2]);
-        expect(state.owner(FeatureSearchService).featureSearches[0].selectedViewIds).toEqual([right]);
-        expect(state.featureSearches[0].selectedViewIndices).toEqual([0]);
+        expect(state.layers.styles.get("Map/Layer/Style/opacity")).toEqual([0.8, 0.2]);
+        expect(state.searches.featureSearches[0].selectedViewIds).toEqual([right]);
+        expect(state.searches.featureSearches[0].selectedViewIndices).toEqual([0]);
+    });
+
+    it("copies an explicit source across cameras, style options and selected searches", () => {
+        const {state, views} = fixture();
+        views.numViews = 2;
+        const [left, right] = views.viewIds();
+        state.layers.layerNames = ["Map/Layer"];
+        state.layers.setStyleOptionValues("Map", "Layer", "Style", "opacity", [0.2, 0.8]);
+        views.cameraViewDataState.next(0, {...views.cameraViewDataState.getValue(0), destination: {lon: 1, lat: 2, alt: 300}});
+        state.searches.addFeatureSearch({query: "Road", selectedViewIndices: [0]});
+        const copy = views.createView(left);
+        expect(views.cameraViewDataState.getValue(views.indexOf(copy))).toEqual(views.cameraViewDataState.getValue(0));
+        expect(state.layers.styles.get("Map/Layer/Style/opacity")).toEqual([0.2, 0.8, 0.2]);
+        expect(state.searches.featureSearches[0].selectedViewIds).toEqual([left, copy]);
+        const unselectedCopy = views.createView(right);
+        expect(state.searches.featureSearches[0].selectedViewIds).not.toContain(unselectedCopy);
+    });
+
+    it("applies a fresh config view count after restoring previously generated IDs", async () => {
+        const first = fixture();
+        expect(first.state.persistence.seedConfigDefaultState({numberOfViews: 1}, "first")).toEqual([]);
+        first.state.persistence.initializePersistence();
+        await Promise.resolve();
+        const retained = first.views.viewIds()[0];
+        first.state.destroy();
+        systems.splice(systems.indexOf(first.state), 1);
+        const second = fixture();
+        expect(second.state.persistence.seedConfigDefaultState({numberOfViews: 2}, "second")).toEqual([]);
+        second.state.persistence.initializePersistence();
+        expect(second.views.numViews).toBe(2);
+        expect(second.views.viewIds()[0]).toBe(retained);
     });
 
     it("does not reevaluate a native per-view reader when another view changes", () => {
@@ -62,7 +95,7 @@ describe("logical view ownership", () => {
         views.numViews = 2;
         const ids = views.viewIds();
         const oldTarget = views.captureView(1)!;
-        state.retainViews([0], new Map());
+        state.views.retainViews([0], new Map());
         expect(views.isCurrent(oldTarget)).toBe(false);
         views.viewIdsState.next(ids);
         expect(views.captureView(1)!.id).toBe(oldTarget.id);
@@ -72,21 +105,21 @@ describe("logical view ownership", () => {
 
     it("rejects duplicate explicit URL IDs before navigation or any state mutation", async () => {
         const {state, views, router} = fixture();
-        state.initializePersistence();
-        const before = state.exportSnapshot();
+        state.persistence.initializePersistence();
+        const before = state.persistence.exportSnapshot();
         const identity = views.captureView(0)!;
-        await expect(state.replaceUrlState({n: "2", vid: "same,same", m: "1"})).rejects.toThrow();
+        await expect(state.persistence.replaceUrlState({n: "2", vid: "same,same", m: "1"})).rejects.toThrow();
         expect(router.navigate).not.toHaveBeenCalled();
-        expect(state.exportSnapshot()).toEqual(before);
+        expect(state.persistence.exportSnapshot()).toEqual(before);
         expect(views.isCurrent(identity)).toBe(true);
     });
 
     it.each(["constructor", "__proto__", "toString", "hasOwnProperty"])("rejects reserved view ID %s atomically", async id => {
         const {state, views, router} = fixture();
-        state.initializePersistence();
+        state.persistence.initializePersistence();
         const previous = views.viewIds();
         expect(() => views.viewIdsState.next([id])).toThrow("Reserved view ID");
-        await expect(state.replaceUrlState({vid: id, m: "1"})).rejects.toThrow("Reserved view ID");
+        await expect(state.persistence.replaceUrlState({vid: id, m: "1"})).rejects.toThrow("Reserved view ID");
         expect(views.viewIds()).toBe(previous);
         expect(views.marker).toBe(false);
         expect(router.navigate).not.toHaveBeenCalled();
@@ -94,8 +127,8 @@ describe("logical view ownership", () => {
 
     it("continues startup on invalid IDs and reports the rejected link", () => {
         const {state, views, messages} = fixture({n: "2", vid: "bad", m: "1"});
-        state.initializePersistence();
-        expect(state.ready.getValue()).toBe(true);
+        state.persistence.initializePersistence();
+        expect(state.persistence.ready.getValue()).toBe(true);
         expect(views.numViews).toBe(1);
         expect(views.marker).toBe(false);
         expect(messages.showError).toHaveBeenCalledOnce();
@@ -109,13 +142,13 @@ describe("logical view ownership", () => {
         localStorage.setItem("layerNames", JSON.stringify(["Map/Layer"]));
         localStorage.setItem("Style~0~opacity", "0.2:0.8");
         const {state, views} = fixture({lon: "99,88", m: "1"});
-        state.initializePersistence();
+        state.persistence.initializePersistence();
         expect(views.viewIds()).toHaveLength(2);
         expect(new Set(views.viewIds()).size).toBe(2);
         expect(views.cameraViewDataState.getValue(0).destination).toEqual({lon: 99, lat: 22, alt: 33});
         expect(views.cameraViewDataState.getValue(1).destination).toEqual({lon: 88, lat: 55, alt: 66});
-        expect(state.styles.get("Map/Layer/Style/opacity")).toEqual(["0.2", "0.8"]);
-        expect(new URL(state.shareableUrl()).searchParams.get("vid")).toBe(views.viewIds().join(","));
+        expect(state.layers.styles.get("Map/Layer/Style/opacity")).toEqual(["0.2", "0.8"]);
+        expect(new URL(state.url.shareableUrl()).searchParams.get("vid")).toBe(views.viewIds().join(","));
     });
 });
 
@@ -123,7 +156,7 @@ describe("logical view ownership", () => {
 describe("view membership preparations", () => {
     it("inherits source search selection for added views and prunes removed targets", () => {
         const {state, views} = fixture();
-        const search = state.owner(FeatureSearchService);
+        const search = state.searches;
         search.addFeatureSearch({query: "Road", selectedViewIndices: [0]});
         views.numViews = 2;
         const [first, removed] = views.viewIds();
@@ -141,13 +174,13 @@ describe("view membership preparations", () => {
 
     it("does not enumerate style options or layer records for unrelated preferences", () => {
         const {state, views} = fixture();
-        state.layerNames = ["Map/Layer"];
-        state.setStyleOptionValues("Map", "Layer", "Style", "opacity", [0.5]);
-        const options = state.store.layers.options();
+        state.layers.layerNames = ["Map/Layer"];
+        state.layers.setStyleOptionValues("Map", "Layer", "Style", "opacity", [0.5]);
+        const options = state.persistence.store.layers.options();
         const iteration = vi.spyOn(options, Symbol.iterator);
         const entries = vi.spyOn(options, "entries");
         const keys = vi.spyOn(Object, "keys");
-        const layerRecords = state.store.layers.layerVisibility();
+        const layerRecords = state.persistence.store.layers.layerVisibility();
         views.marker = true;
         expect(iteration).not.toHaveBeenCalled();
         expect(entries).not.toHaveBeenCalled();
@@ -164,12 +197,14 @@ function pendingFocus() {
     const move = vi.fn();
     const runtime = {navigationStarted: new Subject(), moveToWgs84PositionTopic: {next: move},
         showsFeatureSearchTileInView: vi.fn(() => true)};
-    const injector = Injector.create({providers: [
+    const injector = Injector.create({providers: [AppActionService,
+        {provide: ViewLayerDiagnosticsService, useValue: {}},
+        {provide: MapLayerStateService, useValue: state.layers},
         {provide: MapViewStateService, useValue: views},
-        {provide: InspectionStateService, useValue: state.owner(InspectionStateService)}
+        {provide: InspectionStateService, useValue: state.inspections}
     ]});
     const selection = runInInjectionContext(injector, () => new InspectionSelectionService(
-        state as never, tiles as never, runtime as never, {registerShortcut: vi.fn()} as never,
+        state.persistence as never, tiles as never, runtime as never, {registerShortcut: vi.fn()} as never,
         {showError: vi.fn()} as never, {run: (callback: () => void) => callback()} as never));
     const loaded = {featureTile: {tileId: 1n, mapName: "Map", layerName: "Layer"},
         peek: (callback: (value: unknown) => unknown) => callback({

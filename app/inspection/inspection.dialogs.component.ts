@@ -1,13 +1,13 @@
-import {InspectionStateService} from "./inspection-state.service";
-import {inject} from "@angular/core";
-import {ChangeDetectorRef, Component, OnDestroy} from "@angular/core";
+import {ChangeDetectorRef, Component, inject, OnDestroy} from "@angular/core";
 import {Subscription} from "rxjs";
-import {InspectionSelectionService} from "./inspection-selection.service";
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
-import {AppStateService, InspectionComparisonModel, InspectionPanelModel} from "../shared/appstate.service";
+import {AppStateService} from "../shared/appstate.service";
+import {InspectionSelectionService} from "./inspection-selection.service";
+import {InspectionComparisonModel, InspectionPanelModel} from "./inspection-state.model";
+import {InspectionStateService} from "./inspection-state.service";
 
 @Component({
-    selector: 'inspection-dialogs',
+    selector: "inspection-dialogs",
     template: `
         @for (panel of undockedPanels; track panel.id; let i = $index) {
             @if (panel.loading || panel.features.length > 0 || panel.sourceData !== undefined) {
@@ -28,17 +28,23 @@ export class InspectionDialogsComponent implements OnDestroy {
 
     private readonly subscriptions = new Subscription();
 
-    constructor(private mapService: InspectionSelectionService,
-                private stateService: AppStateService,
-                private readonly cdr: ChangeDetectorRef) {
-        this.subscriptions.add(this.mapService.selectionTopic.subscribe(panels => {
-            this.undockedPanels = panels.filter(panel => panel.undocked);
-            this.cdr.markForCheck();
-        }));
-        this.subscriptions.add(this.inspectionState.inspectionComparisonState.subscribe(comparison => {
-            this.comparison = comparison;
-            this.cdr.markForCheck();
-        }));
+    constructor(
+        private mapService: InspectionSelectionService,
+        private stateService: AppStateService,
+        private readonly cdr: ChangeDetectorRef
+    ) {
+        this.subscriptions.add(
+            this.mapService.selectionTopic.subscribe((panels) => {
+                this.undockedPanels = panels.filter((panel) => panel.undocked);
+                this.cdr.markForCheck();
+            })
+        );
+        this.subscriptions.add(
+            this.inspectionState.inspectionComparisonState.subscribe((comparison) => {
+                this.comparison = comparison;
+                this.cdr.markForCheck();
+            })
+        );
     }
 
     /** Stops listening to inspection state when the host is destroyed. */

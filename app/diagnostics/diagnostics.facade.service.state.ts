@@ -13,19 +13,27 @@ export const diagnosticsLogFilter: AppStateOptions<DiagnosticsLogFilter> = {
 export const diagnosticsExportOptions: AppStateOptions<DiagnosticsExportOptions> = {
     name: "diagnosticsExportOptions",
     defaultValue: {
-        includeProgress: true, includePerformance: true, includeLogs: true,
+        includeProgress: true,
+        includePerformance: true,
+        includeLogs: true,
         logFilter: {info: true, warn: true, error: true}
     },
     schema: z.object({
-        includeProgress: Boolish, includePerformance: Boolish, includeLogs: Boolish,
+        includeProgress: Boolish,
+        includePerformance: Boolish,
+        includeLogs: Boolish,
         logFilter: z.object({info: Boolish, warn: Boolish, error: Boolish})
     })
 };
 
 /** The shared store composes this owner-authored feature; it adds no diagnostics behavior. */
 export function withDiagnosticsState() {
-    return signalStoreFeature(withState({diagnostics: {
-        logFilter: deepCopy(diagnosticsLogFilter.defaultValue),
-        exportOptions: deepCopy(diagnosticsExportOptions.defaultValue)
-    }}));
+    return signalStoreFeature(
+        withState(() => ({
+            diagnostics: {
+                logFilter: deepCopy(diagnosticsLogFilter.defaultValue),
+                exportOptions: deepCopy(diagnosticsExportOptions.defaultValue)
+            }
+        }))
+    );
 }

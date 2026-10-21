@@ -1,8 +1,34 @@
 // @vitest-environment node
-import { describe, it, expect } from 'vitest';
-import { z } from 'zod';
+import {describe, expect, it} from 'vitest';
+import {z} from 'zod';
 
-import { AppState, Boolish, MapViewState, StyleState } from './app-state';
+import {signal} from '@angular/core';
+import {Subject} from 'rxjs';
+import {Boolish, AppState as StateCodec, StyleState as StyleCodec, MapViewState as ViewCodec} from './app-state';
+import {AppStateOptions, deepCopy} from './state-value';
+import {StateBinding} from './viewer-state';
+
+// Unit fixtures supply explicit storage. Production codecs always bind to named SignalStore slices.
+function binding<T>(initial: T): StateBinding<T> {
+    const value = signal(deepCopy(initial));
+    const commits = new Subject<void>();
+    return {signal: value.asReadonly(), commits, read: value,
+        write: next => { value.set(next); commits.next(); }};
+}
+class AppState<T> extends StateCodec<T> {
+    constructor(pool: Map<string, StateCodec<unknown>>, options: AppStateOptions<T>) {
+        super(pool, options, binding(options.defaultValue));
+    }
+}
+class MapViewState<T> extends ViewCodec<T> {
+    constructor(pool: Map<string, StateCodec<unknown>>, options: AppStateOptions<T>) {
+        super(pool, options, binding([options.defaultValue]));
+    }
+}
+class StyleState extends StyleCodec {
+    constructor(pool: Map<string, StateCodec<unknown>>) { super(pool, binding(new Map())); }
+}
+
 
 describe('AppState', () => {
     it('does not let in-place edits poison defaults across repeated resets', () => {

@@ -1,11 +1,19 @@
-import {AppLayoutService} from "./shared/app-layout.service";
-import {MapViewStateService} from "./mapview/map-view-state.service";
+import {AfterViewInit, Component, ElementRef, inject, NgZone, OnDestroy, ViewChild} from "@angular/core";
+import {MenuItem} from "primeng/api";
+import {Subscription} from "rxjs";
+import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
+import {environment} from "./environments/environment";
+import {MapInfoService} from "./mapdata/map-info.service";
 import {MapLayerStateService} from "./mapdata/map-layer-state.service";
-import {inject} from "@angular/core";
-import {AfterViewInit, Component, ElementRef, NgZone, OnDestroy, ViewChild} from '@angular/core';
-import {Subscription} from 'rxjs';
-import {MapInfoService} from './mapdata/map-info.service';
-import {MapViewService} from './mapview/map-view.service';
+import {
+    VIEW_SYNC_LAYERS,
+    VIEW_SYNC_MOVEMENT,
+    VIEW_SYNC_POSITION,
+    VIEW_SYNC_PROJECTION
+} from "./mapview/map-view-state.model";
+import {MapViewStateService} from "./mapview/map-view-state.service";
+import {MapViewService} from "./mapview/map-view.service";
+import {FeatureSearchService} from "./search/feature.search.service";
 import {
     ABOUT_DIALOG_LAYOUT_ID,
     CACHE_RESET_DIALOG_LAYOUT_ID,
@@ -13,25 +21,18 @@ import {
     KEYBOARD_DIALOG_LAYOUT_ID,
     LEGAL_INFO_DIALOG_LAYOUT_ID,
     PREFERENCES_DIALOG_LAYOUT_ID,
-    AppStateService,
-    STYLES_DIALOG_LAYOUT_ID,
-    VIEW_SYNC_LAYERS,
-    VIEW_SYNC_MOVEMENT,
-    VIEW_SYNC_POSITION,
-    VIEW_SYNC_PROJECTION
-} from './shared/appstate.service';
-import {environment} from './environments/environment';
-import {DiagnosticsFacadeService} from './diagnostics/diagnostics.facade.service';
-import {MenuItem} from "primeng/api";
-import {FeatureSearchService} from "./search/feature.search.service";
+    STYLES_DIALOG_LAYOUT_ID
+} from "./shared/app-layout.model";
+import {AppLayoutService} from "./shared/app-layout.service";
+import {AppStateService} from "./shared/appstate.service";
 import {InfoMessageService} from "./shared/info.service";
-import {StyleService} from "./styledata/style.service";
 import {StyleEditorRequestService} from "./styledata/style-editor-request.service";
+import {StyleService} from "./styledata/style.service";
 
-const MAIN_BAR_BREAKPOINT = '56em';
+const MAIN_BAR_BREAKPOINT = "56em";
 const MAIN_BAR_MEDIA_QUERY = `(max-width: ${MAIN_BAR_BREAKPOINT})`;
 const MAIN_BAR_AVAILABLE_WIDTH_BREAKPOINT_EM = 56;
-const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = '1000000px';
+const MAIN_BAR_FORCED_MOBILE_BREAKPOINT = "1000000px";
 const SEARCH_JSON_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 const STYLE_YAML_IMPORT_MAX_BYTES = 1024 * 1024;
 const MENU_LABEL_MAX_LENGTH = 48;
@@ -44,26 +45,41 @@ interface StyleSheetMenuNode {
 }
 
 @Component({
-    selector: 'main-bar',
+    selector: "main-bar",
     host: {
-        '[class.main-bar-mobile-layout]': 'isMobileMenubar',
-        '[class.main-bar-viewport-mobile-layout]': 'viewportMobileMenubar'
+        "[class.main-bar-mobile-layout]": "isMobileMenubar",
+        "[class.main-bar-viewport-mobile-layout]": "viewportMobileMenubar"
     },
     template: `
         @if (mapsPanelOpen) {
-            <p-button class="maps-button" data-testid="maps-toggle" (click)="closeMapsPanel()" label=""
-                      ariaLabel="Close maps configuration panel" aria-label="Close maps configuration panel"
-                      tooltipPosition="bottom" tooltipStyleClass="maps-panel-button-tooltip"
-                      (mouseenter)="alignMapsPanelTooltip($event)"
-                      pTooltip="Close maps configuration panel">
+            <p-button
+                class="maps-button"
+                data-testid="maps-toggle"
+                (click)="closeMapsPanel()"
+                label=""
+                ariaLabel="Close maps configuration panel"
+                aria-label="Close maps configuration panel"
+                tooltipPosition="bottom"
+                tooltipStyleClass="maps-panel-button-tooltip"
+                (mouseenter)="alignMapsPanelTooltip($event)"
+                pTooltip="Close maps configuration panel"
+            >
                 <span class="material-symbols-outlined" aria-hidden="true">close</span>
             </p-button>
         } @else {
-            <p-button class="maps-button" data-testid="maps-toggle" (click)="showMapsPanel()" icon="" label=""
-                      ariaLabel="Open maps configuration panel" aria-label="Open maps configuration panel"
-                      tooltipPosition="bottom" tooltipStyleClass="maps-panel-button-tooltip"
-                      (mouseenter)="alignMapsPanelTooltip($event)"
-                      pTooltip="Open maps configuration panel">
+            <p-button
+                class="maps-button"
+                data-testid="maps-toggle"
+                (click)="showMapsPanel()"
+                icon=""
+                label=""
+                ariaLabel="Open maps configuration panel"
+                aria-label="Open maps configuration panel"
+                tooltipPosition="bottom"
+                tooltipStyleClass="maps-panel-button-tooltip"
+                (mouseenter)="alignMapsPanelTooltip($event)"
+                pTooltip="Open maps configuration panel"
+            >
                 <span class="material-symbols-outlined" aria-hidden="true">stacks</span>
             </p-button>
         }
@@ -74,9 +90,12 @@ interface StyleSheetMenuNode {
                 }
             </ng-template>
             <ng-template #item let-item let-root="root">
-                <a pRipple class="p-menubar-item-link"
-                   [ngClass]="{'sync-option-active': isSyncViewOptionActive(item), 'p-disabled': item.disabled}"
-                   [attr.aria-disabled]="item.disabled ? 'true' : null">
+                <a
+                    pRipple
+                    class="p-menubar-item-link"
+                    [ngClass]="{'sync-option-active': isSyncViewOptionActive(item), 'p-disabled': item.disabled}"
+                    [attr.aria-disabled]="item.disabled ? 'true' : null"
+                >
                     <span class="material-symbols-outlined">{{ item.icon }}</span>
                     <span>{{ item.name ?? item.label }}</span>
                     @if (!root && item.items?.length) {
@@ -91,16 +110,20 @@ interface StyleSheetMenuNode {
                 </div>
             </ng-template>
         </p-menubar>
-        <input #searchJsonImportInput
-               type="file"
-               accept=".json,application/json"
-               class="hidden-file-input"
-               (change)="onSearchJsonImportSelected($event)">
-        <input #styleYamlImportInput
-               type="file"
-               accept=".yaml,.yml,application/x-yaml,text/yaml,text/plain"
-               class="hidden-file-input"
-               (change)="onStyleYamlImportSelected($event)">
+        <input
+            #searchJsonImportInput
+            type="file"
+            accept=".json,application/json"
+            class="hidden-file-input"
+            (change)="onSearchJsonImportSelected($event)"
+        />
+        <input
+            #styleYamlImportInput
+            type="file"
+            accept=".yaml,.yml,application/x-yaml,text/yaml,text/plain"
+            class="hidden-file-input"
+            (change)="onStyleYamlImportSelected($event)"
+        />
     `,
     standalone: false
 })
@@ -131,50 +154,62 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     protected readonly forcedMobileMenubarBreakpoint = MAIN_BAR_FORCED_MOBILE_BREAKPOINT;
     protected readonly environment = environment;
     menuItems: MenuItem[] = [];
-    @ViewChild('searchJsonImportInput') private searchJsonImportInput?: ElementRef<HTMLInputElement>;
-    @ViewChild('styleYamlImportInput') private styleYamlImportInput?: ElementRef<HTMLInputElement>;
+    @ViewChild("searchJsonImportInput") private searchJsonImportInput?: ElementRef<HTMLInputElement>;
+    @ViewChild("styleYamlImportInput") private styleYamlImportInput?: ElementRef<HTMLInputElement>;
 
     protected get menubarBreakpoint(): string {
-        return this.isMobileMenubar
-            ? this.forcedMobileMenubarBreakpoint
-            : this.desktopMenubarBreakpoint;
+        return this.isMobileMenubar ? this.forcedMobileMenubarBreakpoint : this.desktopMenubarBreakpoint;
     }
 
     get mapsPanelOpen(): boolean {
         return this.layerState.mapsOpenState.getValue();
     }
 
-    constructor(public mapService: MapInfoService,
-                public stateService: AppStateService,
-                private mapViewState: MapViewService,
-                private diagnostics: DiagnosticsFacadeService,
-                private featureSearchService: FeatureSearchService,
-                private styleService: StyleService,
-                private styleEditorRequestService: StyleEditorRequestService,
-                private infoMessageService: InfoMessageService,
-                private elementRef: ElementRef<HTMLElement>,
-                private ngZone: NgZone) {
+    constructor(
+        public mapService: MapInfoService,
+        public stateService: AppStateService,
+        private mapViewState: MapViewService,
+        private diagnostics: DiagnosticsFacadeService,
+        private featureSearchService: FeatureSearchService,
+        private styleService: StyleService,
+        private styleEditorRequestService: StyleEditorRequestService,
+        private infoMessageService: InfoMessageService,
+        private elementRef: ElementRef<HTMLElement>,
+        private ngZone: NgZone
+    ) {
         this.setupMobileMenuTracking();
         this.initializeViewerLayoutMobileState();
         this.rebuildMenuItems();
-        this.subscriptions.add(this.viewStateOwner.numViewsState.subscribe(numViews => {
-            this.rebuildMenuItems(numViews);
-        }));
-        this.subscriptions.add(this.viewStateOwner.viewSyncState.subscribe(() => {
-            this.rebuildMenuItems();
-        }));
-        this.subscriptions.add(this.layoutState.dockOpenState.subscribe(() => {
-            this.scheduleMobileMenubarStateUpdate();
-        }));
-        this.subscriptions.add(this.featureSearchService.sessionsChanged.subscribe(() => {
-            this.rebuildMenuItems();
-        }));
-        this.subscriptions.add(this.featureSearchService.featureSearchState.subscribe(() => {
-            this.rebuildMenuItems();
-        }));
-        this.subscriptions.add(this.styleService.styleGroups.subscribe(() => {
-            this.rebuildMenuItems();
-        }));
+        this.subscriptions.add(
+            this.viewStateOwner.numViewsState.subscribe((numViews) => {
+                this.rebuildMenuItems(numViews);
+            })
+        );
+        this.subscriptions.add(
+            this.viewStateOwner.viewSyncState.subscribe(() => {
+                this.rebuildMenuItems();
+            })
+        );
+        this.subscriptions.add(
+            this.layoutState.dockOpenState.subscribe(() => {
+                this.scheduleMobileMenubarStateUpdate();
+            })
+        );
+        this.subscriptions.add(
+            this.featureSearchService.sessionsChanged.subscribe(() => {
+                this.rebuildMenuItems();
+            })
+        );
+        this.subscriptions.add(
+            this.featureSearchService.featureSearchState.subscribe(() => {
+                this.rebuildMenuItems();
+            })
+        );
+        this.subscriptions.add(
+            this.styleService.styleGroups.subscribe(() => {
+                this.rebuildMenuItems();
+            })
+        );
     }
 
     /** Starts observing the viewer layout width once the main bar is attached to the DOM. */
@@ -204,7 +239,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             this.viewportMobileMenubar = event.matches;
             this.scheduleMobileMenubarStateUpdate();
         };
-        this.mediaQueryList.addEventListener('change', this.mediaQueryChangeListener);
+        this.mediaQueryList.addEventListener("change", this.mediaQueryChangeListener);
     }
 
     /** Opens the preferences dialog from the menu. */
@@ -238,7 +273,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the external user guide. */
     openHelp() {
-        window.open('https://developer.nds.live/tools/mapviewer/', '_blank');
+        window.open("https://developer.nds.live/tools/mapviewer/", "_blank");
     }
 
     /** Opens the About dialog. */
@@ -285,7 +320,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             const message = error instanceof Error ? error.message : String(error);
             this.infoMessageService.showError(`Could not import Search JSON: ${message}`);
         } finally {
-            input.value = '';
+            input.value = "";
         }
     }
 
@@ -313,7 +348,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             const message = error instanceof Error ? error.message : String(error);
             this.infoMessageService.showError(`Could not import Style Sheet: ${message}`);
         } finally {
-            input.value = '';
+            input.value = "";
             this.openStylesDialog();
         }
     }
@@ -356,12 +391,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Aligns the maps-panel tooltip under the triggering button and keeps it on-screen. */
     private alignMapsPanelTooltipToTarget(target: HTMLElement) {
-        const tooltip = document.querySelector<HTMLElement>('.maps-panel-button-tooltip');
+        const tooltip = document.querySelector<HTMLElement>(".maps-panel-button-tooltip");
         if (!tooltip) {
             return;
         }
 
-        const button = target.querySelector<HTMLElement>('button') ?? target;
+        const button = target.querySelector<HTMLElement>("button") ?? target;
         const targetRect = button.getBoundingClientRect();
         const tooltipRect = tooltip.getBoundingClientRect();
         const viewportPaddingPx = 4;
@@ -373,7 +408,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         tooltip.style.left = `${left + window.scrollX}px`;
         tooltip.style.top = `${targetRect.bottom + window.scrollY + viewportPaddingPx}px`;
 
-        const arrow = tooltip.querySelector<HTMLElement>('.p-tooltip-arrow');
+        const arrow = tooltip.querySelector<HTMLElement>(".p-tooltip-arrow");
         if (arrow) {
             arrow.style.left = `${targetRect.left - left + targetRect.width / 2}px`;
         }
@@ -396,7 +431,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         if (!this.mediaQueryList || !this.mediaQueryChangeListener) {
             return;
         }
-        this.mediaQueryList.removeEventListener('change', this.mediaQueryChangeListener);
+        this.mediaQueryList.removeEventListener("change", this.mediaQueryChangeListener);
         this.mediaQueryChangeListener = undefined;
         this.mediaQueryList = undefined;
     }
@@ -410,7 +445,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
         this.viewerLayoutElement = viewerLayoutElement;
         const width = viewerLayoutElement.getBoundingClientRect().width;
-        if (typeof width !== 'number' || width <= 0) {
+        if (typeof width !== "number" || width <= 0) {
             return;
         }
 
@@ -426,12 +461,10 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         }
 
         this.viewerLayoutElement = viewerLayoutElement;
-        this.viewerLayoutResizeObserver = new ResizeObserver(entries => {
+        this.viewerLayoutResizeObserver = new ResizeObserver((entries) => {
             this.ngZone.run(() => {
                 const [entry] = entries;
-                const width = entry?.contentRect.width
-                    ?? this.viewerLayoutElement?.getBoundingClientRect().width
-                    ?? 0;
+                const width = entry?.contentRect.width ?? this.viewerLayoutElement?.getBoundingClientRect().width ?? 0;
                 this.updateViewerLayoutMobileState(width);
             });
         });
@@ -486,7 +519,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Locates the enclosing viewer layout element for width-based menu decisions. */
     private findViewerLayoutElement(): HTMLElement | undefined {
-        const viewerLayoutElement = this.elementRef.nativeElement.closest('.viewer-layout');
+        const viewerLayoutElement = this.elementRef.nativeElement.closest(".viewer-layout");
         return viewerLayoutElement instanceof HTMLElement ? viewerLayoutElement : undefined;
     }
 
@@ -506,176 +539,212 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     /** Builds the PrimeNG menu model for the current application and layout state. */
     private buildMenuItems(numViews: number, includeMobileMaps: boolean): MenuItem[] {
         const exportSearchItems = this.buildExportSearchItems();
-        const editStyleSheetItems = this.buildStyleSheetItems(
-            'Edit',
-            'edit',
-            styleId => { this.styleEditorRequestService.open(styleId); }
-        );
-        const exportStyleSheetItems = this.buildStyleSheetItems(
-            'Export',
-            'file_save',
-            styleId => { this.exportStyleSheet(styleId); }
-        );
+        const editStyleSheetItems = this.buildStyleSheetItems("Edit", "edit", (styleId) => {
+            this.styleEditorRequestService.open(styleId);
+        });
+        const exportStyleSheetItems = this.buildStyleSheetItems("Export", "file_save", (styleId) => {
+            this.exportStyleSheet(styleId);
+        });
         const menuItems: MenuItem[] = [
             {
-                name: 'File',
-                icon: 'folder_open',
+                name: "File",
+                icon: "folder_open",
                 items: [
                     {
-                        name: 'Import Search',
-                        icon: 'manage_search',
-                        command: () => { this.triggerSearchJsonImport(); }
+                        name: "Import Search",
+                        icon: "manage_search",
+                        command: () => {
+                            this.triggerSearchJsonImport();
+                        }
                     },
                     {
-                        name: 'Import Style Sheet',
-                        icon: 'palette',
-                        command: () => { this.triggerStyleYamlImport(); }
+                        name: "Import Style Sheet",
+                        icon: "palette",
+                        command: () => {
+                            this.triggerStyleYamlImport();
+                        }
                     },
                     {
-                        name: 'Export Diagnostics',
-                        icon: 'download',
-                        command: () => { this.openDiagnosticsExport(); }
+                        name: "Export Diagnostics",
+                        icon: "download",
+                        command: () => {
+                            this.openDiagnosticsExport();
+                        }
                     },
                     {
-                        name: 'Export Search',
-                        icon: 'travel_explore',
+                        name: "Export Search",
+                        icon: "travel_explore",
                         disabled: !exportSearchItems.length,
                         items: exportSearchItems
                     },
                     {
-                        name: 'Export Style Sheet',
-                        icon: 'file_save',
+                        name: "Export Style Sheet",
+                        icon: "file_save",
                         disabled: !exportStyleSheetItems.length,
                         items: exportStyleSheetItems
                     }
                 ]
             },
             {
-                name: 'Edit',
-                icon: 'tune',
+                name: "Edit",
+                icon: "tune",
                 items: [
                     {
-                        name: 'Styles Configurator',
-                        icon: 'palette',
-                        command: () => { this.openStylesDialog(); }
+                        name: "Styles Configurator",
+                        icon: "palette",
+                        command: () => {
+                            this.openStylesDialog();
+                        }
                     },
                     {
-                        name: 'Styles',
-                        icon: 'palette',
+                        name: "Styles",
+                        icon: "palette",
                         disabled: !editStyleSheetItems.length,
                         items: editStyleSheetItems
                     },
                     {separator: true},
                     {
-                        name: 'Datasources',
-                        icon: 'data_table',
-                        command: () => { this.openDatasources(); }
+                        name: "Datasources",
+                        icon: "data_table",
+                        command: () => {
+                            this.openDatasources();
+                        }
                     },
                     {
-                        name: 'Preferences',
-                        icon: 'settings',
-                        command: () => { this.showPreferencesDialog(); },
+                        name: "Preferences",
+                        icon: "settings",
+                        command: () => {
+                            this.showPreferencesDialog();
+                        }
                     }
                 ]
             },
             {
-                name: 'View',
-                icon: 'view_column',
+                name: "View",
+                icon: "view_column",
                 items: [
                     {
-                        name: 'Split View',
-                        icon: 'add_column_right',
+                        name: "Split View",
+                        icon: "add_column_right",
                         visible: numViews <= 1,
-                        command: () => { this.viewStateOwner.numViews = 2; }
+                        command: () => {
+                            this.viewStateOwner.numViews = 2;
+                        }
                     },
                     {
-                        name: 'Close Left View',
-                        icon: 'tab_close',
+                        name: "Close Left View",
+                        icon: "tab_close",
                         visible: numViews > 1,
-                        command: () => { this.mapViewState.removeView(0); }
+                        command: () => {
+                            this.mapViewState.removeView(0);
+                        }
                     },
                     {
-                        name: 'Close Right View',
-                        icon: 'tab_close',
+                        name: "Close Right View",
+                        icon: "tab_close",
                         visible: numViews > 1,
-                        command: () => { this.mapViewState.removeView(1); }
+                        command: () => {
+                            this.mapViewState.removeView(1);
+                        }
                     },
                     {
-                        name: 'Sync Views',
-                        icon: 'sync',
+                        name: "Sync Views",
+                        icon: "sync",
                         items: [
                             {
                                 name: "Position",
                                 icon: "location_on",
-                                command: () => { this.toggleSyncOption(VIEW_SYNC_POSITION); }
+                                command: () => {
+                                    this.toggleSyncOption(VIEW_SYNC_POSITION);
+                                }
                             },
                             {
                                 name: "Movement",
                                 icon: "drag_pan",
-                                command: () => { this.toggleSyncOption(VIEW_SYNC_MOVEMENT); }
+                                command: () => {
+                                    this.toggleSyncOption(VIEW_SYNC_MOVEMENT);
+                                }
                             },
                             {
                                 name: "Projection",
                                 icon: "3d_rotation",
-                                command: () => { this.toggleSyncOption(VIEW_SYNC_PROJECTION); }
+                                command: () => {
+                                    this.toggleSyncOption(VIEW_SYNC_PROJECTION);
+                                }
                             },
                             {
                                 name: "Layers",
                                 icon: "layers",
-                                command: () => { this.toggleSyncOption(VIEW_SYNC_LAYERS); }
+                                command: () => {
+                                    this.toggleSyncOption(VIEW_SYNC_LAYERS);
+                                }
                             }
                         ]
                     }
                 ]
             },
             {
-                name: 'Tools',
-                icon: 'build',
+                name: "Tools",
+                icon: "build",
                 items: [
                     {
-                        name: 'Cache Reset',
-                        icon: 'cycle',
-                        command: () => { this.layoutState.openDialog(CACHE_RESET_DIALOG_LAYOUT_ID); }
+                        name: "Cache Reset",
+                        icon: "cycle",
+                        command: () => {
+                            this.layoutState.openDialog(CACHE_RESET_DIALOG_LAYOUT_ID);
+                        }
                     },
                     {
-                        name: 'Performance Statistics',
-                        icon: 'insights',
-                        command: () => { this.openDiagnosticsPerformance(); }
+                        name: "Performance Statistics",
+                        icon: "insights",
+                        command: () => {
+                            this.openDiagnosticsPerformance();
+                        }
                     },
                     {
-                        name: 'Logs',
-                        icon: 'list_alt',
-                        command: () => { this.openDiagnosticsLog(); }
+                        name: "Logs",
+                        icon: "list_alt",
+                        command: () => {
+                            this.openDiagnosticsLog();
+                        }
                     }
                 ]
             },
             {
-                name: 'Help',
-                icon: 'question_mark',
+                name: "Help",
+                icon: "question_mark",
                 items: [
                     {
-                        name: 'Controls',
-                        icon: 'keyboard',
-                        command: () => { this.showControlsDialog(); }
+                        name: "Controls",
+                        icon: "keyboard",
+                        command: () => {
+                            this.showControlsDialog();
+                        }
                     },
                     {
-                        name: 'Help',
-                        icon: 'question_mark',
-                        command: () => { this.openHelp(); }
+                        name: "Help",
+                        icon: "question_mark",
+                        command: () => {
+                            this.openHelp();
+                        }
                     },
                     {
-                        name: 'About',
-                        icon: 'info',
-                        command: () => { this.openAboutDialog(); }
+                        name: "About",
+                        icon: "info",
+                        command: () => {
+                            this.openAboutDialog();
+                        }
                     }
                 ]
             }
         ];
         if (includeMobileMaps) {
             menuItems.unshift({
-                name: 'Maps',
-                icon: 'stacks',
-                command: () => { this.showMapsPanel(); }
+                name: "Maps",
+                icon: "stacks",
+                command: () => {
+                    this.showMapsPanel();
+                }
             });
         }
         return menuItems;
@@ -687,10 +756,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         if (!sessions.length) {
             return [];
         }
-        return sessions.map(session => ({
+        return sessions.map((session) => ({
             name: this.ellipsizeMenuLabel(session.definition.query, session.id),
-            icon: 'manage_search',
-            command: () => { this.featureSearchService.openExportDialog(session.id); }
+            icon: "manage_search",
+            command: () => {
+                this.featureSearchService.openExportDialog(session.id);
+            }
         }));
     }
 
@@ -701,7 +772,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         action: (styleId: string) => void
     ): MenuItem[] {
         const styles = Array.from(this.styleService.styles.values())
-            .filter(style => !!style.source)
+            .filter((style) => !!style.source)
             .sort((left, right) => left.id.localeCompare(right.id));
         if (!styles.length) {
             return [];
@@ -719,15 +790,17 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
             }
             current.styleId = style.id;
         }
-        return Array.from(root.children.values())
-            .map(node => this.styleSheetMenuItem(node, actionName, actionIcon, action));
+        return Array.from(root.children.values()).map((node) =>
+            this.styleSheetMenuItem(node, actionName, actionIcon, action)
+        );
     }
 
     /** Splits a style id into menu path segments, ignoring empty slash path parts. */
     private styleSheetMenuSegments(styleId: string): string[] {
-        const segments = styleId.split("/")
-            .map(segment => segment.trim())
-            .filter(segment => !!segment);
+        const segments = styleId
+            .split("/")
+            .map((segment) => segment.trim())
+            .filter((segment) => !!segment);
         return segments.length ? segments : [styleId];
     }
 
@@ -738,26 +811,31 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         actionIcon: string,
         action: (styleId: string) => void
     ): MenuItem {
-        const childItems = Array.from(node.children.values())
-            .map(childNode => this.styleSheetMenuItem(childNode, actionName, actionIcon, action));
+        const childItems = Array.from(node.children.values()).map((childNode) =>
+            this.styleSheetMenuItem(childNode, actionName, actionIcon, action)
+        );
         const styleId = node.styleId;
         if (styleId && !childItems.length) {
             return {
                 name: this.ellipsizeMenuLabel(node.name, styleId),
-                icon: 'palette',
-                command: () => { action(styleId); }
+                icon: "palette",
+                command: () => {
+                    action(styleId);
+                }
             };
         }
         if (styleId) {
             childItems.unshift({
                 name: actionName,
                 icon: actionIcon,
-                command: () => { action(styleId); }
+                command: () => {
+                    action(styleId);
+                }
             });
         }
         return {
             name: this.ellipsizeMenuLabel(node.name, styleId ?? node.name),
-            icon: 'folder_open',
+            icon: "folder_open",
             items: childItems
         };
     }
@@ -783,22 +861,22 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     /** Toggles one synchronized-view option and mirrors the change into state. */
     private toggleSyncOption(code: string): void {
         const nextSelection = this.viewStateOwner.viewSync.includes(code)
-            ? this.viewStateOwner.viewSync.filter(currentCode => currentCode !== code)
+            ? this.viewStateOwner.viewSync.filter((currentCode) => currentCode !== code)
             : [...this.viewStateOwner.viewSync, code];
         this.viewStateOwner.updateSelectedSyncOptions(nextSelection);
     }
 
     /** Returns whether a menu item corresponds to an active synchronized-view option. */
     protected isSyncViewOptionActive(item: MenuItem): boolean {
-        const itemName = item['name'];
+        const itemName = item["name"];
         switch (itemName) {
-            case 'Position':
+            case "Position":
                 return this.viewStateOwner.viewSync.includes(VIEW_SYNC_POSITION);
-            case 'Movement':
+            case "Movement":
                 return this.viewStateOwner.viewSync.includes(VIEW_SYNC_MOVEMENT);
-            case 'Projection':
+            case "Projection":
                 return this.viewStateOwner.viewSync.includes(VIEW_SYNC_PROJECTION);
-            case 'Layers':
+            case "Layers":
                 return this.viewStateOwner.viewSync.includes(VIEW_SYNC_LAYERS);
             default:
                 return false;

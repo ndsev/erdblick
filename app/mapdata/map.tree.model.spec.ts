@@ -1,7 +1,13 @@
-import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
 import "@angular/compiler";
-import {describe, expect, it, vi} from 'vitest';
 import {BehaviorSubject} from "rxjs";
+import {describe, expect, it, vi} from 'vitest';
+import type {AppStateService} from "../shared/appstate.service";
+import type {MapPresetService, ResolvedLayerPreset} from "../styledata/map-preset.service";
+import type {
+    ErdblickStyle,
+    FeatureStyleOptionWithStringType,
+    StyleService
+} from "../styledata/style.service";
 import {
     bestMatchingLayerPreset,
     dataSourceCatalogStatus,
@@ -9,25 +15,17 @@ import {
     filterMapTreeNodes,
     GroupTreeNode,
     isDataSourceCatalogEntryReady,
+    LayerInfoItem,
     layerPresetInferenceKey,
     layerPresetNode,
     layerStyleOptions,
-    LayerInfoItem,
-    MapLayerTree,
     MapInfoItem,
+    MapLayerTree,
     MapTreeNode,
     MapTreeViewNode,
-    StyleOptionNode,
-    sortDataSourceCatalogEntries
+    sortDataSourceCatalogEntries,
+    StyleOptionNode
 } from './map.tree.model';
-import type {AppStateService} from "../shared/appstate.service";
-import type {
-    ErdblickStyle,
-    FeatureStyleOptionWithStringType,
-    StyleService
-} from "../styledata/style.service";
-import type {MapPresetService} from "../styledata/map-preset.service";
-import type {ResolvedLayerPreset} from "../styledata/map-preset.service";
 
 function source(mapId: string, configIndex?: number, status?: string): MapInfoItem {
     return {
@@ -293,7 +291,7 @@ describe("style option groups", () => {
 
         const tree = new MapLayerTree(
             [map],
-            (stateService as unknown as StateTestSystem) as never,
+            (stateService) as never,
             styleService as unknown as StyleService,
             emptyPresetService(), stateService as unknown as AppStateService as never, stateService as unknown as AppStateService as never,
             false
@@ -440,7 +438,7 @@ describe("layer presets in the map tree", () => {
         map.layers = {Example: featureLayer("Example")};
         const tree = new MapLayerTree(
             [map],
-            (stateService as unknown as StateTestSystem) as never,
+            (stateService) as never,
             styleService as unknown as StyleService,
             presetService as unknown as MapPresetService, stateService as unknown as AppStateService as never, stateService as unknown as AppStateService as never,
             false);
@@ -630,7 +628,7 @@ describe("map presets in the map tree", () => {
 
         const tree = new MapLayerTree(
             [map],
-            (stateService as unknown as StateTestSystem) as never,
+            (stateService) as never,
             styleService as unknown as StyleService,
             presetService as unknown as MapPresetService, stateService as unknown as AppStateService as never, stateService as unknown as AppStateService as never,
             false);

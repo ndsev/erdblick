@@ -1,19 +1,22 @@
-import {InspectionStateService} from "../inspection/inspection-state.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {inject} from "@angular/core";
-import {Injectable} from "@angular/core";
-import {BehaviorSubject, Subject} from "rxjs";
-import {MapInfoService} from "../mapdata/map-info.service";
-import {InspectionSelectionService} from "../inspection/inspection-selection.service";
-import {InfoMessageService} from "../shared/info.service";
-import {coreLib} from "../integrations/wasm";
-import {FeatureSearchService} from "./feature.search.service";
+import {inject, Injectable} from "@angular/core";
 import {HighlightMode} from "build/libs/core/erdblick-core";
-import {RightClickMenuService} from "../mapview/rightclickmenu.service";
-import {AppStateService, SelectedSourceData, TileFeatureId} from "../shared/appstate.service";
-import {Cartographic, Rectangle} from "../integrations/geo";
-import {AppConfigService} from "../shared/app-config.service";
+import {BehaviorSubject, Subject} from "rxjs";
+import {AppActionService} from "../actions/app-action.service";
+import type {SearchJump, SearchJumpResult, SearchTarget} from "../actions/omnibar";
 import {parsePackedTileId} from "../coords/nds-coordinate.util";
+import {InspectionSelectionService} from "../inspection/inspection-selection.service";
+import {SelectedSourceData, TileFeatureId} from "../inspection/inspection-state.model";
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {Cartographic} from "../integrations/geo";
+import {coreLib} from "../integrations/wasm";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {RightClickMenuService} from "../mapview/rightclickmenu.service";
+import {AppConfigService} from "../shared/app-config.service";
+import {AppStateService} from "../shared/appstate.service";
+import {InfoMessageService} from "../shared/info.service";
+import {FeatureSearchService} from "./feature.search.service";
+export type {SearchJump, SearchJumpResult, SearchTarget} from "../actions/omnibar";
 
 export const FEATURE_SEARCH_TARGET_ID = "features";
 
@@ -21,21 +24,14 @@ export const FEATURE_SEARCH_TARGET_ID = "features";
  * Response shape returned by the backend /locate endpoint for jump-target resolution.
  */
 interface LocateResponse {
-    responses: Array<Array<{
-        tileId: string;
-        typeId: string;
-        featureId: Array<string>;
-    }>>;
+    responses: Array<
+        Array<{
+            tileId: string;
+            typeId: string;
+            featureId: Array<string>;
+        }>
+    >;
 }
-
-/** Camera target plus an optional exact coordinate at which to place the persistent marker. */
-export interface SearchJump {
-    target: number[] | Rectangle;
-    markerPosition?: number[];
-}
-
-/** Legacy plugin jump values and the richer built-in jump representation. */
-export type SearchJumpResult = number[] | Rectangle | SearchJump;
 
 /** Normalizes plugin and built-in jump results while preserving point markers for legacy array targets. */
 export function normalizeSearchJumpResult(result: SearchJumpResult): SearchJump {
@@ -49,38 +45,17 @@ export function normalizeSearchJumpResult(result: SearchJumpResult): SearchJump 
 }
 
 /**
- * One action offered by the omnibox-style search panel.
- *
- * Targets can either jump to a location or execute a side effect such as starting a feature search.
- */
-export interface SearchTarget {
-    id: string;
-    icon: string;
-    iconType?: "prime" | "material";
-    color: string;
-    name: string;
-    label: string;
-    enabled: boolean;
-    acceptsEmptyInput?: boolean;
-    saveToHistory?: (value: string) => boolean;
-    payload?: unknown;
-    jump?: (value: string, payload?: unknown) => SearchJumpResult | undefined;
-    execute?: (value: string, payload?: unknown) => void;
-    validate: (value: string) => boolean;
-}
-
-/**
  * Core-lib jump-target description parsed from a feature id expression.
  */
 interface FeatureJumpAction {
     id: string;
     name: string;
-    error: string|null;
-    idParts: Array<{key: string, value: string|number}>;
+    error: string | null;
+    idParts: Array<{key: string; value: string | number}>;
     maps: Array<string>;
 }
 
-@Injectable({providedIn: 'root'})
+@Injectable({providedIn: "root"})
 /**
  * Builds and executes the action list shown by the global search panel.
  *
@@ -102,36 +77,44 @@ export class JumpTargetService {
     // the setSelectedMap promise resolver is used by the dialog to communicate the
     // user's choice.
     mapSelectionSubject = new Subject<Array<string>>();
-    setSelectedMap: ((choice: string|null)=>void)|null = null;
+    setSelectedMap: ((choice: string | null) => void) | null = null;
+    private initialized = false;
 
     /**
      * Loads optional jump-target plugins and wires the reactive channels used by the search UI.
      */
-    constructor(private mapService: MapInfoService,
-                private inspectionSelection: InspectionSelectionService,
-                private messageService: InfoMessageService,
-                private menuService: RightClickMenuService,
-                private stateService: AppStateService,
-                private searchService: FeatureSearchService,
-                private configService: AppConfigService) {
-        this.loadConfiguredJumpTargets();
-
-        // Filter out feature jump targets based on search value.
-        this.targetValueSubject.subscribe(_ => {
-            this.update();
-        })
+    constructor(
+        private mapService: MapInfoService,
+        private inspectionSelection: InspectionSelectionService,
+        private messageService: InfoMessageService,
+        private menuService: RightClickMenuService,
+        private stateService: AppStateService,
+        private searchService: FeatureSearchService,
+        private configService: AppConfigService
+    ) {
+        inject(AppActionService).registerOmnibar(
+            "feature-and-plugin-jumps",
+            (query) => this.getJumpTargetsForValue(query),
+            10
+        );
 
         // Forward marked cartesian position to AppStateService.
-        this.markedPosition.subscribe(position => {
+        this.markedPosition.subscribe((position) => {
             if (position.length >= 2) {
                 this.viewStateOwner.setMarkerState(true);
-                this.viewStateOwner.setMarkerPosition(Cartographic.fromDegrees(
-                    position[1],
-                    position[0],
-                    position[2] ?? 0
-                ));
+                this.viewStateOwner.setMarkerPosition(
+                    Cartographic.fromDegrees(position[1], position[0], position[2] ?? 0)
+                );
             }
         });
+    }
+
+    /** The parser and configured plugins become available after core and map data startup. */
+    initialize(): void {
+        if (this.initialized) return;
+        this.initialized = true;
+        this.loadConfiguredJumpTargets();
+        this.targetValueSubject.subscribe(() => this.update());
     }
 
     /** Loads optional jump-target plugins declared in the shared frontend config. */
@@ -160,7 +143,9 @@ export class JumpTargetService {
         const seenIds = new Set<string>();
         for (const target of jumpTargets) {
             if (!target || typeof target.id !== "string" || !target.id.trim()) {
-                throw new Error(`Jump-target plugin returned a target without a stable id: ${target?.name ?? "<unnamed>"}`);
+                throw new Error(
+                    `Jump-target plugin returned a target without a stable id: ${target?.name ?? "<unnamed>"}`
+                );
             }
             if (seenIds.has(target.id)) {
                 throw new Error(`Duplicate jump-target plugin id: ${target.id}`);
@@ -174,11 +159,11 @@ export class JumpTargetService {
      * Returns the dynamic action that runs a simfil query across the currently loaded tiles.
      */
     getFeatureMatchTarget(searchString: string = this.targetValueSubject.getValue()): SearchTarget {
-        let simfilError = '';
+        let simfilError = "";
         try {
             coreLib.validateSimfilQuery(searchString);
         } catch (e: any) {
-            const parsingError = e.message.split(': ');
+            const parsingError = e.message.split(": ");
             simfilError = parsingError.length > 1 ? parsingError.slice(1).join(": ") : parsingError[0];
         }
         let label = "Match features with a filter expression";
@@ -198,7 +183,7 @@ export class JumpTargetService {
             validate: (_: string) => {
                 return !simfilError;
             }
-        }
+        };
     }
 
     /** Accepts only valid signed NDS.Live packed tile ids without embedded whitespace. */
@@ -215,8 +200,9 @@ export class JumpTargetService {
         let label = "packedTileId = ? | (mapId = ?) | (sourceLayerId = ?)";
         let valid = true;
 
-        const matchSourceDataElements = (value: string): [number, string, string]|null => {
-            const regex = /^\s*(-?\d+)(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?\s*$/;
+        const matchSourceDataElements = (value: string): [number, string, string] | null => {
+            const regex =
+                /^\s*(-?\d+)(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?(?:\s+"([^"]+)"|\s+([^\s,;"]+(?:\\\s[^\s,;"]+)*))?\s*$/;
             const match = value.match(regex);
             let tileId: number;
             let mapId = "";
@@ -231,7 +217,7 @@ export class JumpTargetService {
                 tileId = packedTileId.value;
 
                 if (quoted1 || unquoted1) {
-                    mapId = (quoted1 ? quoted1 : unquoted1).replace(/\\ /g, ' ');
+                    mapId = (quoted1 ? quoted1 : unquoted1).replace(/\\ /g, " ");
                     if (mapId.startsWith('"') || mapId.startsWith("'")) {
                         mapId = mapId.slice(1, -1);
                     }
@@ -240,7 +226,7 @@ export class JumpTargetService {
                     }
                 }
                 if (quoted2 || unquoted2) {
-                    sourceLayerId = (quoted2 ? quoted2 : unquoted2).replace(/\\ /g, ' ');
+                    sourceLayerId = (quoted2 ? quoted2 : unquoted2).replace(/\\ /g, " ");
                     if (sourceLayerId.startsWith('"') || sourceLayerId.startsWith("'")) {
                         sourceLayerId = sourceLayerId.slice(1, -1);
                     }
@@ -252,8 +238,8 @@ export class JumpTargetService {
                 return null;
             }
 
-            return [tileId, mapId, sourceLayerId]
-        }
+            return [tileId, mapId, sourceLayerId];
+        };
 
         const matches = matchSourceDataElements(searchString);
         if (matches) {
@@ -285,8 +271,7 @@ export class JumpTargetService {
             }
 
             valid &&= this.validatePackedTileId(matches[0].toString());
-        }
-        else {
+        } else {
             valid = false;
         }
 
@@ -328,7 +313,7 @@ export class JumpTargetService {
             validate: (_: string) => {
                 return valid;
             }
-        }
+        };
     }
 
     /**
@@ -342,11 +327,13 @@ export class JumpTargetService {
      * Recomputes the active search targets whenever the query string or plugin state changes.
      */
     getJumpTargetsForValue(value: string): Array<SearchTarget> {
-        let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(value) as Array<FeatureJumpAction>;
+        let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(
+            value
+        ) as Array<FeatureJumpAction>;
         let featureJumpTargetsConverted: Array<SearchTarget> = [];
         if (featureJumpTargets) {
             featureJumpTargetsConverted = featureJumpTargets.map((fjt: FeatureJumpAction) => {
-                let label = fjt.idParts.map(idPart => `${idPart.key}=${idPart.value}`).join(" | ")
+                let label = fjt.idParts.map((idPart) => `${idPart.key}=${idPart.value}`).join(" | ");
                 if (fjt.error) {
                     label += `<br><span class="search-option-warning">${fjt.error}</span>`;
                 }
@@ -358,11 +345,17 @@ export class JumpTargetService {
                     label: label,
                     enabled: !fjt.error,
                     execute: (_: string) => {
-                        this.highlightByJumpTarget(fjt, null, coreLib.HighlightMode.SELECTION_HIGHLIGHT,
-                            this.viewStateOwner.focusedView).then();
+                        this.highlightByJumpTarget(
+                            fjt,
+                            null,
+                            coreLib.HighlightMode.SELECTION_HIGHLIGHT,
+                            this.viewStateOwner.focusedView
+                        ).then();
                     },
-                    validate: (_: string) => { return !fjt.error; },
-                }
+                    validate: (_: string) => {
+                        return !fjt.error;
+                    }
+                };
             });
         }
 
@@ -381,9 +374,16 @@ export class JumpTargetService {
     /**
      * Resolves a raw feature id expression to the first valid jump action and executes it.
      */
-    async highlightByJumpTargetFilter(mapId: string, featureId: string, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT, cameraMoveViewIndex?: number) {
-        let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
-        const validIndex = featureJumpTargets.findIndex(action => !action.error);
+    async highlightByJumpTargetFilter(
+        mapId: string,
+        featureId: string,
+        mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT,
+        cameraMoveViewIndex?: number
+    ) {
+        let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(
+            featureId
+        ) as Array<FeatureJumpAction>;
+        const validIndex = featureJumpTargets.findIndex((action) => !action.error);
         if (validIndex == -1) {
             console.error(`Error highlighting ${featureId}!`);
             return;
@@ -400,67 +400,82 @@ export class JumpTargetService {
         action: FeatureJumpAction,
         mapId?: string | null,
         mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT,
-        cameraMoveViewIndex?: number) {
-        const target = cameraMoveViewIndex === undefined ? undefined : this.viewStateOwner.captureView(cameraMoveViewIndex);
+        cameraMoveViewIndex?: number
+    ) {
+        const target =
+            cameraMoveViewIndex === undefined ? undefined : this.viewStateOwner.captureView(cameraMoveViewIndex);
         if (cameraMoveViewIndex !== undefined && !target) return;
         // Select the map.
         if (!mapId) {
             if (action.maps.length > 1) {
                 let selectedMapPromise = new Promise<string | null>((resolve, _) => {
                     this.setSelectedMap = resolve;
-                })
+                });
                 this.mapSelectionSubject.next(action.maps);
                 mapId = await selectedMapPromise;
-            }
-            else {
+            } else {
                 mapId = action.maps[0];
             }
         }
-        if (!mapId || target && !this.viewStateOwner.isCurrent(target)) {
+        if (!mapId || (target && !this.viewStateOwner.isCurrent(target))) {
             return;
         }
 
         // Locate the feature.
-        let resolveMe = {requests: [{
-            typeId: action.name,
-            mapId: mapId,
-            featureId: action.idParts.map((kv) => [kv.key, kv.value]).flat()
-        }]};
+        let resolveMe = {
+            requests: [
+                {
+                    typeId: action.name,
+                    mapId: mapId,
+                    featureId: action.idParts.map((kv) => [kv.key, kv.value]).flat()
+                }
+            ]
+        };
         let response = await fetch("locate", {
             body: JSON.stringify(resolveMe),
             method: "POST"
-        }).catch((err)=>console.error(`Error during /locate call: ${err}`));
+        }).catch((err) => console.error(`Error during /locate call: ${err}`));
         if (!response) {
             return;
         }
-        let extRefsResolved = await response.json() as LocateResponse;
+        let extRefsResolved = (await response.json()) as LocateResponse;
         if (extRefsResolved.responses[0].length < 1) {
-            this.messageService.showError("Could not locate feature!")
+            this.messageService.showError("Could not locate feature!");
             return;
         }
         if (target && !this.viewStateOwner.isCurrent(target)) return;
         let selectThisFeature = extRefsResolved.responses[0][0];
 
         // Set feature-to-select on MapService.
-        const featureId = `${selectThisFeature.typeId}.${selectThisFeature.featureId.filter((_, index) => index % 2 === 1).join('.')}`;
+        const featureId = `${selectThisFeature.typeId}.${selectThisFeature.featureId.filter((_, index) => index % 2 === 1).join(".")}`;
         if (mode === coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
-            this.inspectionState.setSelection([{
-                mapTileKey: selectThisFeature.tileId,
-                featureId: featureId
-            } as TileFeatureId]);
+            this.inspectionState.setSelection([
+                {
+                    mapTileKey: selectThisFeature.tileId,
+                    featureId: featureId
+                } as TileFeatureId
+            ]);
         } else {
-            this.inspectionSelection.setHoveredFeatures([{
-                mapTileKey: selectThisFeature.tileId,
-                featureId: featureId
-            }], true);
+            this.inspectionSelection.setHoveredFeatures(
+                [
+                    {
+                        mapTileKey: selectThisFeature.tileId,
+                        featureId: featureId
+                    }
+                ],
+                true
+            );
         }
 
         // Center the camera on the feature if a view index was passed.
         if (cameraMoveViewIndex !== undefined) {
-            await this.inspectionSelection.focusOnFeature(target ? this.viewStateOwner.indexOf(target.id) : cameraMoveViewIndex, {
-                featureId: featureId,
-                mapTileKey: selectThisFeature.tileId,
-            });
+            await this.inspectionSelection.focusOnFeature(
+                target ? this.viewStateOwner.indexOf(target.id) : cameraMoveViewIndex,
+                {
+                    featureId: featureId,
+                    mapTileKey: selectThisFeature.tileId
+                }
+            );
         }
     }
 }

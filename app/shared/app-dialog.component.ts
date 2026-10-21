@@ -1,10 +1,9 @@
-import {AppLayoutService} from "./app-layout.service";
-import {inject} from "@angular/core";
-import {NgTemplateOutlet} from '@angular/common';
+import {NgTemplateOutlet} from "@angular/common";
 import {
     Component,
     ContentChild,
     EventEmitter,
+    inject,
     Input,
     OnChanges,
     OnDestroy,
@@ -13,18 +12,20 @@ import {
     SimpleChanges,
     TemplateRef,
     ViewChild
-} from '@angular/core';
-import {Dialog, DialogModule} from 'primeng/dialog';
-import {AppDialogLayout, AppStateService} from './appstate.service';
-import {ViewerUiService} from '../actions/viewer-ui.service';
-import {ViewerResizeSize} from '../actions/viewer-ui.contract';
+} from "@angular/core";
+import {Dialog, DialogModule} from "primeng/dialog";
+import {ViewerResizeSize} from "../actions/viewer-ui.contract";
+import {ViewerUiService} from "../actions/viewer-ui.service";
 import {
     AppDialogBounds,
     AppDialogResizeCorner,
     AppDialogResizeLimits,
     resizeAppDialogBounds,
     resolveAppDialogCssLength
-} from './app-dialog-resize';
+} from "./app-dialog-resize";
+import {AppDialogLayout} from "./app-layout.model";
+import {AppLayoutService} from "./app-layout.service";
+import {AppStateService} from "./appstate.service";
 
 interface AppDialogResizeSession {
     pointerId: number;
@@ -39,37 +40,38 @@ interface AppDialogResizeSession {
 }
 
 @Component({
-    selector: 'app-dialog',
+    selector: "app-dialog",
     host: {
-        class: 'app-dialog'
+        class: "app-dialog"
     },
     template: `
-        <p-dialog #dialog
-                  [visible]="visible"
-                  (visibleChange)="handleVisibleChange($event)"
-                  [header]="header"
-                  [modal]="modal"
-                  [closable]="closable"
-                  [draggable]="draggable"
-                  [resizable]="false"
-                  [style]="effectiveStyle"
-                  [position]="position"
-                  [showHeader]="showHeader"
-                  [appendTo]="appendTo"
-                  [baseZIndex]="baseZIndex"
-                  [autoZIndex]="autoZIndex"
-                  [focusOnShow]="focusOnShow"
-                  [closeOnEscape]="closeOnEscape"
-                  [dismissableMask]="dismissableMask"
-                  [keepInViewport]="keepInViewport"
-                  [contentStyle]="contentStyle"
-                  [contentStyleClass]="contentStyleClass"
-                  [styleClass]="styleClass"
-                  [maskStyleClass]="maskStyleClass"
-                  (onShow)="handleOnShow($event)"
-                  (onHide)="handleOnHide($event)"
-                  (onDragEnd)="handleOnDragEnd($event)"
-                  >
+        <p-dialog
+            #dialog
+            [visible]="visible"
+            (visibleChange)="handleVisibleChange($event)"
+            [header]="header"
+            [modal]="modal"
+            [closable]="closable"
+            [draggable]="draggable"
+            [resizable]="false"
+            [style]="effectiveStyle"
+            [position]="position"
+            [showHeader]="showHeader"
+            [appendTo]="appendTo"
+            [baseZIndex]="baseZIndex"
+            [autoZIndex]="autoZIndex"
+            [focusOnShow]="focusOnShow"
+            [closeOnEscape]="closeOnEscape"
+            [dismissableMask]="dismissableMask"
+            [keepInViewport]="keepInViewport"
+            [contentStyle]="contentStyle"
+            [contentStyleClass]="contentStyleClass"
+            [styleClass]="styleClass"
+            [maskStyleClass]="maskStyleClass"
+            (onShow)="handleOnShow($event)"
+            (onHide)="handleOnHide($event)"
+            (onDragEnd)="handleOnDragEnd($event)"
+        >
             @if (projectedHeaderTemplate) {
                 <ng-template #header>
                     <ng-container *ngTemplateOutlet="projectedHeaderTemplate"></ng-container>
@@ -94,14 +96,14 @@ interface AppDialogResizeSession {
 /** Wraps PrimeNG dialogs with shared layout persistence behavior. */
 export class AppDialogComponent implements OnChanges, OnDestroy {
     readonly layoutState = inject(AppLayoutService);
-    @ContentChild('header', {descendants: true, read: TemplateRef}) projectedHeaderTemplate?: TemplateRef<unknown>;
-    @ContentChild('content', {descendants: true, read: TemplateRef}) projectedContentTemplate?: TemplateRef<unknown>;
-    @ContentChild('footer', {descendants: true, read: TemplateRef}) projectedFooterTemplate?: TemplateRef<unknown>;
+    @ContentChild("header", {descendants: true, read: TemplateRef}) projectedHeaderTemplate?: TemplateRef<unknown>;
+    @ContentChild("content", {descendants: true, read: TemplateRef}) projectedContentTemplate?: TemplateRef<unknown>;
+    @ContentChild("footer", {descendants: true, read: TemplateRef}) projectedFooterTemplate?: TemplateRef<unknown>;
 
     @Input() visible = false;
     @Output() visibleChange = new EventEmitter<boolean>();
 
-    @Input() header = '';
+    @Input() header = "";
     @Input() modal = false;
     @Input() closable = true;
     @Input() draggable = true;
@@ -117,11 +119,11 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     @Input() dismissableMask = false;
     @Input() keepInViewport = true;
     @Input() contentStyle: {[key: string]: any} = {};
-    @Input() contentStyleClass = '';
-    @Input() styleClass = '';
-    @Input() maskStyleClass = '';
+    @Input() contentStyleClass = "";
+    @Input() styleClass = "";
+    @Input() maskStyleClass = "";
     @Input() dockDropCue = false;
-    @Input() dockDropTargetSelector = '.collapsible-dock';
+    @Input() dockDropTargetSelector = ".collapsible-dock";
     @Input() dockDropThresholdEm = 2;
 
     @Input() layoutId?: string;
@@ -134,7 +136,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     @Output() onDragEnd = new EventEmitter<any>();
     @Output() onResizeEnd = new EventEmitter<any>();
 
-    @ViewChild('dialog') private dialog?: Dialog;
+    @ViewChild("dialog") private dialog?: Dialog;
     protected effectiveStyle: {[key: string]: any} = {};
     private revealPersistedLayoutFrame?: number;
     private detachDockCueHeaderDown?: () => void;
@@ -148,19 +150,28 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     private unregisterResizeTarget?: () => void;
     private resizedLayout?: AppDialogLayout;
 
-    constructor(private readonly stateService: AppStateService,
-                private readonly renderer: Renderer2,
-                private readonly viewerUi: ViewerUiService) {
+    constructor(
+        private readonly stateService: AppStateService,
+        private readonly renderer: Renderer2,
+        private readonly viewerUi: ViewerUiService
+    ) {
         this.refreshEffectiveStyle();
     }
 
     /** Refreshes dialog layout style when inputs change. */
     ngOnChanges(changes: SimpleChanges): void {
-        if (changes['style'] || changes['layoutId'] || changes['persistLayout'] || changes['persistOpenState'] || changes['resizable'] || changes['visible']) {
-            const becameVisible = changes['visible']?.currentValue === true;
+        if (
+            changes["style"] ||
+            changes["layoutId"] ||
+            changes["persistLayout"] ||
+            changes["persistOpenState"] ||
+            changes["resizable"] ||
+            changes["visible"]
+        ) {
+            const becameVisible = changes["visible"]?.currentValue === true;
             this.refreshEffectiveStyle(becameVisible);
         }
-        if (changes['resizable'] && this.visible) {
+        if (changes["resizable"] && this.visible) {
             this.syncResizeHandles();
         }
     }
@@ -181,7 +192,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
 
     /** Closes the wrapped PrimeNG dialog. */
     close(event?: Event): void {
-        this.dialog?.close(event ?? new Event('close'));
+        this.dialog?.close(event ?? new Event("close"));
     }
 
     /** Starts PrimeNG's built-in dialog dragging from a projected header drag handle. */
@@ -216,11 +227,16 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.bindDockDropCue();
         this.unregisterResizeTarget?.();
         const container = this.container();
-        if (container) this.unregisterResizeTarget = this.viewerUi.registerResizeTarget(container, {
-            describe: () => ({kind: "dialog", dimensions: this.resizable ? ["widthPx", "heightPx"] : [],
-                busy: !!this.resizeSession || this.dragging, ...(this.layoutId ? {layoutId: this.layoutId} : {})}),
-            resize: size => this.resizeTo(size)
-        });
+        if (container)
+            this.unregisterResizeTarget = this.viewerUi.registerResizeTarget(container, {
+                describe: () => ({
+                    kind: "dialog",
+                    dimensions: this.resizable ? ["widthPx", "heightPx"] : [],
+                    busy: !!this.resizeSession || this.dragging,
+                    ...(this.layoutId ? {layoutId: this.layoutId} : {})
+                }),
+                resize: (size) => this.resizeTo(size)
+            });
         this.onShow.emit(event);
     }
 
@@ -255,8 +271,13 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         const container = this.container();
         if (!container || "panelSizes" in size) return;
         const rect = container.getBoundingClientRect();
-        const bounds = resizeAppDialogBounds(rect, (size.widthPx ?? rect.width) - rect.width,
-            (size.heightPx ?? rect.height) - rect.height, "se", this.resizeLimits(getComputedStyle(container)));
+        const bounds = resizeAppDialogBounds(
+            rect,
+            (size.widthPx ?? rect.width) - rect.width,
+            (size.heightPx ?? rect.height) - rect.height,
+            "se",
+            this.resizeLimits(getComputedStyle(container))
+        );
         this.onResizeInit.emit(new Event("resize"));
         this.applyLayout(container, {position: bounds, size: bounds});
         this.handleOnResizeEnd(new Event("resize"));
@@ -387,16 +408,8 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     private resizeLimits(computedStyle: CSSStyleDeclaration): AppDialogResizeLimits {
         const minWidth = resolveAppDialogCssLength(computedStyle.minWidth, window.innerWidth, 1);
         const minHeight = resolveAppDialogCssLength(computedStyle.minHeight, window.innerHeight, 1);
-        const maxWidth = resolveAppDialogCssLength(
-            computedStyle.maxWidth,
-            window.innerWidth,
-            window.innerWidth
-        );
-        const maxHeight = resolveAppDialogCssLength(
-            computedStyle.maxHeight,
-            window.innerHeight,
-            window.innerHeight
-        );
+        const maxWidth = resolveAppDialogCssLength(computedStyle.maxWidth, window.innerWidth, window.innerWidth);
+        const maxHeight = resolveAppDialogCssLength(computedStyle.maxHeight, window.innerHeight, window.innerHeight);
         return {
             viewportWidth: window.innerWidth,
             viewportHeight: window.innerHeight,
@@ -415,7 +428,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
             document.body.style.cursor = session.bodyCursor;
             document.body.style.userSelect = session.bodyUserSelect;
         }
-        this.detachResizeHandleListeners.forEach(detach => detach());
+        this.detachResizeHandleListeners.forEach((detach) => detach());
         this.detachResizeHandleListeners = [];
         for (const handle of this.resizeHandles) {
             this.renderer.removeChild(handle.parentNode, handle);
@@ -432,7 +445,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         if (!container) {
             return;
         }
-        container.style.visibility = 'hidden';
+        container.style.visibility = "hidden";
         window.requestAnimationFrame(() => {
             const updatedContainer = this.container();
             if (!updatedContainer) {
@@ -534,34 +547,36 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
 
     /** Applies persisted fixed positioning to a dialog container. */
     private applyPosition(container: HTMLElement, position: {left: number; top: number}): void {
-        container.style.position = 'fixed';
+        container.style.position = "fixed";
         container.style.left = `${position.left}px`;
         container.style.top = `${position.top}px`;
-        container.style.margin = '0';
+        container.style.margin = "0";
     }
 
     /** Rebuilds the style object passed to the wrapped dialog. */
     private refreshEffectiveStyle(hideUntilApplied: boolean = false, layoutOverride?: AppDialogLayout): void {
         const nextStyle = {...this.style};
-        const layout = layoutOverride ?? (this.persistLayout && this.layoutId
-            ? this.layoutState.getDialogLayout(this.layoutId)
-            : this.resizedLayout);
+        const layout =
+            layoutOverride ??
+            (this.persistLayout && this.layoutId
+                ? this.layoutState.getDialogLayout(this.layoutId)
+                : this.resizedLayout);
         if (!layout) {
             this.effectiveStyle = nextStyle;
             return;
         }
 
         const normalized = this.normalizeLayout(layout);
-        nextStyle['position'] = 'fixed';
-        nextStyle['left'] = `${normalized.position.left}px`;
-        nextStyle['top'] = `${normalized.position.top}px`;
-        nextStyle['margin'] = '0';
+        nextStyle["position"] = "fixed";
+        nextStyle["left"] = `${normalized.position.left}px`;
+        nextStyle["top"] = `${normalized.position.top}px`;
+        nextStyle["margin"] = "0";
         if (this.resizable) {
-            nextStyle['width'] = `${normalized.size.width}px`;
-            nextStyle['height'] = `${normalized.size.height}px`;
+            nextStyle["width"] = `${normalized.size.width}px`;
+            nextStyle["height"] = `${normalized.size.height}px`;
         }
         if (hideUntilApplied) {
-            nextStyle['visibility'] = 'hidden';
+            nextStyle["visibility"] = "hidden";
         }
         this.effectiveStyle = nextStyle;
     }
@@ -571,7 +586,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.cancelRevealPersistedLayout();
         this.revealPersistedLayoutFrame = window.requestAnimationFrame(() => {
             this.revealPersistedLayoutFrame = undefined;
-            container.style.visibility = '';
+            container.style.visibility = "";
         });
     }
 
@@ -618,11 +633,11 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         if (!this.dockDropCue) {
             return;
         }
-        const header = this.container()?.querySelector<HTMLElement>('.p-dialog-header');
+        const header = this.container()?.querySelector<HTMLElement>(".p-dialog-header");
         if (!header) {
             return;
         }
-        this.detachDockCueHeaderDown = this.renderer.listen(header, 'mousedown', () => this.startDockDropCueTracking());
+        this.detachDockCueHeaderDown = this.renderer.listen(header, "mousedown", () => this.startDockDropCueTracking());
     }
 
     private startDockDropCueTracking(): void {
@@ -630,13 +645,13 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
             return;
         }
         this.detachDockDropCueTracking(false);
-        this.detachDockCueMove = this.renderer.listen('window', 'mousemove', () => this.updateDockDropCue());
-        this.detachDockCuePointerMove = this.renderer.listen('window', 'pointermove', () => this.updateDockDropCue());
-        this.detachDockCueUp = this.renderer.listen('window', 'mouseup', () => {
+        this.detachDockCueMove = this.renderer.listen("window", "mousemove", () => this.updateDockDropCue());
+        this.detachDockCuePointerMove = this.renderer.listen("window", "pointermove", () => this.updateDockDropCue());
+        this.detachDockCueUp = this.renderer.listen("window", "mouseup", () => {
             this.detachDockDropCueTracking(false);
             this.clearDockDropCue();
         });
-        this.detachDockCuePointerUp = this.renderer.listen('window', 'pointerup', () => {
+        this.detachDockCuePointerUp = this.renderer.listen("window", "pointerup", () => {
             this.detachDockDropCueTracking(false);
             this.clearDockDropCue();
         });
@@ -656,9 +671,9 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
             return;
         }
         if (active) {
-            this.renderer.addClass(target, 'dock-drop-active');
+            this.renderer.addClass(target, "dock-drop-active");
         } else {
-            this.renderer.removeClass(target, 'dock-drop-active');
+            this.renderer.removeClass(target, "dock-drop-active");
         }
     }
 

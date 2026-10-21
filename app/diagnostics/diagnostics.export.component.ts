@@ -1,27 +1,49 @@
+import {Component, inject, OnDestroy, ViewChild} from "@angular/core";
+import {Subscription} from "rxjs";
+import {AppDialogComponent} from "../shared/app-dialog.component";
+import {DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
 import {AppLayoutService} from "../shared/app-layout.service";
-import {inject} from "@angular/core";
-import {Component, OnDestroy, ViewChild} from '@angular/core';
-import {Subscription} from 'rxjs';
-import {DiagnosticsFacadeService} from './diagnostics.facade.service';
-import type {DiagnosticsExportOptions} from './diagnostics.model';
-import {DialogStackService} from '../shared/dialog-stack.service';
-import {AppStateService, DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
-import {AppDialogComponent} from '../shared/app-dialog.component';
+import {AppStateService} from "../shared/appstate.service";
+import {DialogStackService} from "../shared/dialog-stack.service";
+import {DiagnosticsFacadeService} from "./diagnostics.facade.service";
+import type {DiagnosticsExportOptions} from "./diagnostics.model";
 
 @Component({
-    selector: 'diagnostics-export-dialog',
+    selector: "diagnostics-export-dialog",
     template: `
-        <app-dialog #dialog header="Export Diagnostics Data" class="diagnostics-export-dialog" [(visible)]="dialogVisible"
-                  [modal]="false" [layoutId]="layoutId" (onShow)="onDialogShow()">
+        <app-dialog
+            #dialog
+            header="Export Diagnostics Data"
+            class="diagnostics-export-dialog"
+            [(visible)]="dialogVisible"
+            [modal]="false"
+            [layoutId]="layoutId"
+            (onShow)="onDialogShow()"
+        >
             <div class="diagnostics-export-content">
                 <div class="diagnostics-export-section">
                     <div class="diagnostics-label">Include</div>
                     <div class="diagnostics-export-options">
-                        <p-checkbox inputId="diag-export-progress" [(ngModel)]="exportOptions.includeProgress" [binary]="true" (ngModelChange)="updateOptions()"></p-checkbox>
+                        <p-checkbox
+                            inputId="diag-export-progress"
+                            [(ngModel)]="exportOptions.includeProgress"
+                            [binary]="true"
+                            (ngModelChange)="updateOptions()"
+                        ></p-checkbox>
                         <label for="diag-export-progress">Progress</label>
-                        <p-checkbox inputId="diag-export-performance" [(ngModel)]="exportOptions.includePerformance" [binary]="true" (ngModelChange)="updateOptions()"></p-checkbox>
+                        <p-checkbox
+                            inputId="diag-export-performance"
+                            [(ngModel)]="exportOptions.includePerformance"
+                            [binary]="true"
+                            (ngModelChange)="updateOptions()"
+                        ></p-checkbox>
                         <label for="diag-export-performance">Performance</label>
-                        <p-checkbox inputId="diag-export-logs" [(ngModel)]="exportOptions.includeLogs" [binary]="true" (ngModelChange)="updateOptions()"></p-checkbox>
+                        <p-checkbox
+                            inputId="diag-export-logs"
+                            [(ngModel)]="exportOptions.includeLogs"
+                            [binary]="true"
+                            (ngModelChange)="updateOptions()"
+                        ></p-checkbox>
                         <label for="diag-export-logs">Logs</label>
                     </div>
                 </div>
@@ -29,11 +51,26 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
                 <div class="diagnostics-export-section" [class.hidden]="!exportOptions.includeLogs">
                     <div class="diagnostics-label">Log levels</div>
                     <div class="diagnostics-export-options">
-                        <p-checkbox inputId="diag-export-info" [(ngModel)]="exportOptions.logFilter.info" [binary]="true" (ngModelChange)="updateOptions()"></p-checkbox>
+                        <p-checkbox
+                            inputId="diag-export-info"
+                            [(ngModel)]="exportOptions.logFilter.info"
+                            [binary]="true"
+                            (ngModelChange)="updateOptions()"
+                        ></p-checkbox>
                         <label for="diag-export-info">Info</label>
-                        <p-checkbox inputId="diag-export-warn" [(ngModel)]="exportOptions.logFilter.warn" [binary]="true" (ngModelChange)="updateOptions()"></p-checkbox>
+                        <p-checkbox
+                            inputId="diag-export-warn"
+                            [(ngModel)]="exportOptions.logFilter.warn"
+                            [binary]="true"
+                            (ngModelChange)="updateOptions()"
+                        ></p-checkbox>
                         <label for="diag-export-warn">Warnings</label>
-                        <p-checkbox inputId="diag-export-error" [(ngModel)]="exportOptions.logFilter.error" [binary]="true" (ngModelChange)="updateOptions()"></p-checkbox>
+                        <p-checkbox
+                            inputId="diag-export-error"
+                            [(ngModel)]="exportOptions.logFilter.error"
+                            [binary]="true"
+                            (ngModelChange)="updateOptions()"
+                        ></p-checkbox>
                         <label for="diag-export-error">Errors</label>
                     </div>
                 </div>
@@ -50,7 +87,7 @@ import {AppDialogComponent} from '../shared/app-dialog.component';
 export class DiagnosticsExportDialogComponent implements OnDestroy {
     readonly layoutState = inject(AppLayoutService);
     readonly layoutId = DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID;
-    @ViewChild('dialog') dialog?: AppDialogComponent;
+    @ViewChild("dialog") dialog?: AppDialogComponent;
     exporting = false;
     exportOptions: DiagnosticsExportOptions = {
         includeProgress: true,
@@ -65,16 +102,18 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
 
     private readonly subscriptions: Subscription[] = [];
 
-    constructor(public readonly diagnostics: DiagnosticsFacadeService,
-                public readonly stateService: AppStateService,
-                private readonly dialogStack: DialogStackService) {
+    constructor(
+        public readonly diagnostics: DiagnosticsFacadeService,
+        public readonly stateService: AppStateService,
+        private readonly dialogStack: DialogStackService
+    ) {
         const options = this.diagnostics.diagnosticsExportOptions;
         this.exportOptions = {
             ...options,
             logFilter: {...options.logFilter}
         };
         this.subscriptions.push(
-            this.diagnostics.diagnosticsExportOptionsState.subscribe(options => {
+            this.diagnostics.diagnosticsExportOptionsState.subscribe((options) => {
                 this.exportOptions = {
                     ...options,
                     logFilter: {...options.logFilter}
@@ -93,7 +132,7 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
 
     /** Releases the persisted export-options subscription. */
     ngOnDestroy() {
-        this.subscriptions.forEach(sub => sub.unsubscribe());
+        this.subscriptions.forEach((sub) => sub.unsubscribe());
     }
 
     /** Promotes the export dialog above other overlays. */
@@ -103,7 +142,11 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
 
     /** Returns whether at least one diagnostics category is selected for export. */
     get canExport(): boolean {
-        return this.exportOptions.includeProgress || this.exportOptions.includePerformance || this.exportOptions.includeLogs;
+        return (
+            this.exportOptions.includeProgress ||
+            this.exportOptions.includePerformance ||
+            this.exportOptions.includeLogs
+        );
     }
 
     /** Persists the current export-option toggles. */
@@ -121,7 +164,7 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
         }
 
         this.exporting = true;
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
         const filename = `diagnostics-${timestamp}.json`;
         try {
             await this.diagnostics.downloadExportBundle(this.exportOptions, filename);

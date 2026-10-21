@@ -1,7 +1,8 @@
-import type {ViewIdentity} from "./view-id";
 import {BehaviorSubject, type Observable} from "rxjs";
-import {CameraViewState, TileFeatureId} from "../shared/appstate.service";
 import {Viewport} from "../../build/libs/core/erdblick-core";
+import {TileFeatureId} from "../inspection/inspection-state.model";
+import {CameraViewState} from "./map-view-state.model";
+import type {ViewIdentity} from "./view-id";
 
 /** WGS84 rectangle used for fit-to-bounds navigation requests. */
 export interface RenderRectangle {
@@ -30,12 +31,7 @@ export interface RenderVector3 {
 }
 
 /** Semantic source of a physical navigation target. */
-export type RenderNavigationTargetOrigin =
-    | "feature"
-    | "path"
-    | "gltf-proxy"
-    | "ground"
-    | "unknown";
+export type RenderNavigationTargetOrigin = "feature" | "path" | "gltf-proxy" | "ground" | "unknown";
 
 /** Physical surface used as a 3D navigation or first-person camera target. */
 export interface RenderNavigationTarget {
@@ -104,11 +100,7 @@ export interface IRenderView {
 
     pickCartographic(screenPos: {x: number; y: number}): {lon: number; lat: number; alt: number} | undefined;
     pickNavigationTarget(screenPos: {x: number; y: number}): RenderNavigationTarget | undefined;
-    drillPickFeatures(
-        screenPos: {x: number; y: number},
-        radius: number,
-        maxObjects: number
-    ): RenderedFeaturePickResult;
+    drillPickFeatures(screenPos: {x: number; y: number}, radius: number, maxObjects: number): RenderedFeaturePickResult;
     setViewFromState(cameraData: CameraViewState): void;
     getViewState(): CameraViewState;
     /** Reads the live renderer pose without persisting it; unavailable in first-person mode. */

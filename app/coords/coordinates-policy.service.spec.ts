@@ -1,9 +1,7 @@
-import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
 import {BehaviorSubject} from "rxjs";
+import {describe, expect, it, vi} from "vitest";
 import type {AppConfigService, CoordinatesConfig} from "../shared/app-config.service";
-import type {AppStateService} from "../shared/appstate.service";
 import type {InfoMessageService} from "../shared/info.service";
 import {CoordinatesPolicyService} from "./coordinates-policy.service";
 
@@ -24,7 +22,7 @@ function createPolicy(coordinates: Partial<CoordinatesConfig> = {}, enabled = tr
     const messageService = {showError: vi.fn()};
     const policy = new CoordinatesPolicyService(
         configService as unknown as AppConfigService,
-        (stateService as unknown as StateTestSystem) as never,
+        (stateService) as never,
         messageService as unknown as InfoMessageService
     );
     return {policy, stateService, messageService};

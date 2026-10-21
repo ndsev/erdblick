@@ -1,33 +1,26 @@
-import {InspectionStateService} from "../inspection/inspection-state.service";
-import {inject} from "@angular/core";
-import {Injectable} from "@angular/core";
+import {inject, Injectable} from "@angular/core";
 import {MenuItem} from "primeng/api";
 import {BehaviorSubject, Subject} from "rxjs";
-import {Color, HeightReference, Rectangle} from "../integrations/geo";
-import {coreLib} from "../integrations/wasm";
-import {
-    AppStateService,
-    SelectedSourceData,
-    type TileFeatureId
-} from "../shared/appstate.service";
-import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
-import {FeatureSearchService} from "../search/feature.search.service";
-import {InfoMessageService} from "../shared/info.service";
 import {DiagnosticsFacadeService} from "../diagnostics/diagnostics.facade.service";
 import {PerformanceDiagnosticsScope} from "../diagnostics/diagnostics.model";
-import {
-    ExternalViewerLocation,
-    ExternalViewerService
-} from "../search/external-viewer.service";
-import type {RenderNavigationTarget} from "./render-view.model";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
+import {SelectedSourceData, type TileFeatureId} from "../inspection/inspection-state.model";
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {Color, HeightReference, Rectangle} from "../integrations/geo";
+import {coreLib} from "../integrations/wasm";
 import {parseMapPartitionKey} from "../mapdata/partition.model";
+import {ExternalViewerLocation, ExternalViewerService} from "../search/external-viewer.service";
+import {FeatureSearchService} from "../search/feature.search.service";
+import {AppStateService} from "../shared/appstate.service";
+import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
+import {InfoMessageService} from "../shared/info.service";
+import type {RenderNavigationTarget} from "./render-view.model";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {
-    id: number | string,
-    name: string,
-    disabled?: boolean
+    id: number | string;
+    name: string;
+    disabled?: boolean;
     tileLevel?: number;
 }
 
@@ -84,8 +77,8 @@ export class RightClickMenuService {
 
     menuItems: BehaviorSubject<MenuItem[]> = new BehaviorSubject<MenuItem[]>([]);
     preferredTileIdForSourceData: number | null = null;
-    lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null> =
-        new BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null>(null);
+    lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number; mapId: string; layerId: string} | null> =
+        new BehaviorSubject<{tileId: number; mapId: string; layerId: string} | null>(null);
     closeContextMenus: Subject<void> = new Subject<void>();
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
     tileOutline: Subject<TileOutlinePayload | null> = new Subject<TileOutlinePayload | null>();
@@ -93,21 +86,23 @@ export class RightClickMenuService {
     firstPersonViewRequests: Subject<FirstPersonViewMenuRequest> = new Subject<FirstPersonViewMenuRequest>();
     private tileDiagnosticsOptions: TileDiagnosticsMenuOption[] = [];
     private sourceDataDialogVisible = false;
-    private sourceDataShortcut: {tileId: number, mapId: string, layerId: string} | null = null;
+    private sourceDataShortcut: {tileId: number; mapId: string; layerId: string} | null = null;
     private featureSearchScope: FeatureSearchContextMenuScope | null = null;
     private externalViewerLocation: ExternalViewerLocation | null = null;
     private firstPersonViewContext: FirstPersonViewMenuContext | null = null;
     private pickedFeatureRows: PickedFeatureMenuRow[] = [];
 
     /** Seeds the default menu and keeps the “inspect last layer” shortcut synchronized with context. */
-    constructor(private stateService: AppStateService,
-                private featureSearchService: FeatureSearchService,
-                private infoMessageService: InfoMessageService,
-                private diagnostics: DiagnosticsFacadeService,
-                private externalViewerService: ExternalViewerService,
-                private inspectionSelection: InspectionSelectionService) {
+    constructor(
+        private stateService: AppStateService,
+        private featureSearchService: FeatureSearchService,
+        private infoMessageService: InfoMessageService,
+        private diagnostics: DiagnosticsFacadeService,
+        private externalViewerService: ExternalViewerService,
+        private inspectionSelection: InspectionSelectionService
+    ) {
         this.rebuildMenuItems();
-        this.tileIdsForSourceData.subscribe(tileIds => {
+        this.tileIdsForSourceData.subscribe((tileIds) => {
             this.sourceDataShortcut = null;
             const lastOption = this.lastInspectedTileSourceDataOption.getValue();
             if (lastOption) {
@@ -173,10 +168,7 @@ export class RightClickMenuService {
         const rows: PickedFeatureMenuRow[] = [];
         const seen = new Set<string>();
         for (const feature of features) {
-            const [mapId, layerId] = parseMapPartitionKey(
-                coreLib,
-                feature.mapTileKey
-            );
+            const [mapId, layerId] = parseMapPartitionKey(coreLib, feature.mapTileKey);
             const identity = JSON.stringify([mapId, layerId, feature.featureId]);
             if (seen.has(identity)) {
                 continue;
@@ -198,7 +190,9 @@ export class RightClickMenuService {
      */
     preferredSourceDataTile(tileIds: SourceDataDropdownOption[]): SourceDataDropdownOption | undefined {
         if (this.preferredTileIdForSourceData !== null) {
-            const preferredTile = tileIds.find(tileId => tileId.id === this.preferredTileIdForSourceData && !tileId.disabled);
+            const preferredTile = tileIds.find(
+                (tileId) => tileId.id === this.preferredTileIdForSourceData && !tileId.disabled
+            );
             if (preferredTile) {
                 return preferredTile;
             }
@@ -207,7 +201,7 @@ export class RightClickMenuService {
         const lastOption = this.lastInspectedTileSourceDataOption.getValue();
         if (lastOption) {
             const level = coreLib.getTileLevel(lastOption.tileId);
-            const matchingTile = tileIds.find(tileId => tileId.tileLevel === level && !tileId.disabled);
+            const matchingTile = tileIds.find((tileId) => tileId.tileLevel === level && !tileId.disabled);
             if (matchingTile) {
                 return matchingTile;
             }
@@ -231,7 +225,7 @@ export class RightClickMenuService {
                 height: HeightReference.CLAMP_TO_GROUND,
                 material: color.withAlpha(0.2),
                 outline: true,
-                outlineWidth: 3.,
+                outlineWidth: 3,
                 outlineColor: color
             }
         });
@@ -244,8 +238,7 @@ export class RightClickMenuService {
             if (this.pickedFeatureRows.length > 1) {
                 items.push(this.selectAllPickedFeaturesMenuItem());
             }
-            items.push(...this.pickedFeatureRows.map((row, index) =>
-                this.pickedFeatureMenuItem(row, index)));
+            items.push(...this.pickedFeatureRows.map((row, index) => this.pickedFeatureMenuItem(row, index)));
             items.push({separator: true});
         }
         items.push(...this.sourceDataMenuItems());
@@ -286,8 +279,7 @@ export class RightClickMenuService {
             label: "Select all",
             icon: "pi pi-list-check",
             title: `Select all ${this.pickedFeatureRows.length} features under the cursor`,
-            command: () => this.inspectionSelection.inspectFeatureIds(
-                this.pickedFeatureRows.map(row => row.feature))
+            command: () => this.inspectionSelection.inspectFeatureIds(this.pickedFeatureRows.map((row) => row.feature))
         };
     }
 
@@ -297,20 +289,22 @@ export class RightClickMenuService {
             return {
                 label: "Exit First Person View",
                 icon: "pi pi-sign-out",
-                command: () => this.firstPersonViewRequests.next({
-                    viewIndex: context.viewIndex,
-                    action: "exit"
-                })
+                command: () =>
+                    this.firstPersonViewRequests.next({
+                        viewIndex: context.viewIndex,
+                        action: "exit"
+                    })
             };
         }
         return {
             label: "Show First Person View",
             icon: "pi pi-eye",
-            command: () => this.firstPersonViewRequests.next({
-                viewIndex: context.viewIndex,
-                action: "enter",
-                target: context.target
-            })
+            command: () =>
+                this.firstPersonViewRequests.next({
+                    viewIndex: context.viewIndex,
+                    action: "enter",
+                    target: context.target
+                })
         };
     }
 
@@ -319,7 +313,7 @@ export class RightClickMenuService {
         return {
             label: "Open in…",
             icon: "pi pi-external-link",
-            items: this.externalViewerService.providers.map(provider => ({
+            items: this.externalViewerService.providers.map((provider) => ({
                 label: provider.name,
                 icon: "pi pi-map-marker",
                 command: () => this.externalViewerService.open(provider, location)
@@ -332,17 +326,14 @@ export class RightClickMenuService {
         if (!this.sourceDataShortcut) {
             return [this.sourceDataPickerMenuItem()];
         }
-        return [
-            this.buildLastInspectedSourceDataMenuItem(this.sourceDataShortcut),
-            this.sourceDataPickerMenuItem()
-        ];
+        return [this.buildLastInspectedSourceDataMenuItem(this.sourceDataShortcut), this.sourceDataPickerMenuItem()];
     }
 
     /** Builds the source-data picker action for the currently prepared tile candidates. */
     private sourceDataPickerMenuItem(): MenuItem {
         return {
-            label: 'Inspect Source Data for Tile',
-            icon: 'pi pi-database',
+            label: "Inspect Source Data for Tile",
+            icon: "pi pi-database",
             command: () => {
                 this.openTileSourceDataDialog();
             }
@@ -350,13 +341,21 @@ export class RightClickMenuService {
     }
 
     /** Builds a shortcut that reuses the last inspected source-data layer for the current tile. */
-    private buildLastInspectedSourceDataMenuItem(sourceDataParams: {tileId: number, mapId: string, layerId: string}): MenuItem {
+    private buildLastInspectedSourceDataMenuItem(sourceDataParams: {
+        tileId: number;
+        mapId: string;
+        layerId: string;
+    }): MenuItem {
         return {
-            label: 'Inspect Source Data with Last Layer',
-            icon: 'pi pi-database',
+            label: "Inspect Source Data with Last Layer",
+            icon: "pi pi-database",
             command: () => {
                 this.inspectionState.setSelection({
-                    mapTileKey: coreLib.getSourceDataLayerKey(sourceDataParams.mapId, sourceDataParams.layerId, sourceDataParams.tileId)
+                    mapTileKey: coreLib.getSourceDataLayerKey(
+                        sourceDataParams.mapId,
+                        sourceDataParams.layerId,
+                        sourceDataParams.tileId
+                    )
                 } as SelectedSourceData);
             }
         };
@@ -366,12 +365,12 @@ export class RightClickMenuService {
     private tileDiagnosticsMenuItem(option: TileDiagnosticsMenuOption): MenuItem {
         return {
             label: `Diagnostics for Tile ${option.tileId}`,
-            icon: 'pi pi-chart-line',
+            icon: "pi pi-chart-line",
             command: () => {
                 this.diagnostics.openPerformanceDialog({
                     tileIds: [option.tileId],
                     layers: option.layers,
-                    source: 'context-menu'
+                    source: "context-menu"
                 });
             }
         };
@@ -381,8 +380,8 @@ export class RightClickMenuService {
     private featureSearchMenuItem(scope: FeatureSearchContextMenuScope): MenuItem {
         const disabled = !scope.selectedMapLayers.length;
         return {
-            label: disabled ? 'No loaded feature data in this view' : 'Search all features in this view',
-            icon: 'pi pi-search',
+            label: disabled ? "No loaded feature data in this view" : "Search all features in this view",
+            icon: "pi pi-search",
             disabled,
             command: () => {
                 if (!scope.selectedMapLayers.length) {

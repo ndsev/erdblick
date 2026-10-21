@@ -1,11 +1,11 @@
-import {inject} from "@angular/core";
-import {AppStateService} from "../shared/appstate.service";
-import {z} from "zod";
-import {DEFAULT_LOCATION_SEARCH_RESULT_LIMIT, MAX_LOCATION_SEARCH_RESULT_LIMIT, clampLocationSearchResultLimit} from "../shared/app-state.model";
 import {HttpClient, HttpHeaders, HttpParams} from "@angular/common/http";
-import {Injectable} from "@angular/core";
+import {inject, Injectable} from "@angular/core";
 import {catchError, forkJoin, map, Observable, of, timeout} from "rxjs";
+import {AppStateService} from "../shared/appstate.service";
+import {clampLocationSearchResultLimit} from "./location-search-limits";
+import {ownerState} from "./location.search.service.state";
 
+import type {LocationArea} from "../mapview/render-view.model";
 import {
     AppConfigService,
     LocationSearchAdapterConfig,
@@ -13,7 +13,6 @@ import {
     LocationSearchProviderConfig
 } from "../shared/app-config.service";
 import {SearchTarget} from "./jump.service";
-import type {LocationArea} from "../mapview/render-view.model";
 import {locationExtent, locationGeometryExtent, locationPoint, locationPolygons} from "./location-geometry";
 
 export type LocationPoint = [number, number];
@@ -61,15 +60,21 @@ export function normalizeLocationSearchPayload(raw: unknown): LocationSearchMatc
         return null;
     }
     const value = raw as Partial<LocationSearchMatch>;
-    if (typeof value.id !== "string" || !value.id.trim()
-        || typeof value.name !== "string" || !value.name.trim()
-        || typeof value.providerId !== "string" || !value.providerId.trim()
-        || typeof value.providerName !== "string" || !value.providerName.trim()) {
+    if (
+        typeof value.id !== "string" ||
+        !value.id.trim() ||
+        typeof value.name !== "string" ||
+        !value.name.trim() ||
+        typeof value.providerId !== "string" ||
+        !value.providerId.trim() ||
+        typeof value.providerName !== "string" ||
+        !value.providerName.trim()
+    ) {
         return null;
     }
 
     const point = locationPoint(value.lonLat);
-    const aabb = normalizeAabb(value.aabb) ?? (point ? [point, [0, 0]] as LocationAabb : undefined);
+    const aabb = normalizeAabb(value.aabb) ?? (point ? ([point, [0, 0]] as LocationAabb) : undefined);
     const builtin = value.providerId === MAPGET_LOCATION_PROVIDER_ID && /^wof:[1-9]\d*$/.test(value.id);
     if (!point && !(builtin && (locationExtent(aabb) || value.geometryAvailable === true))) return null;
 
@@ -86,7 +91,8 @@ export function normalizeLocationSearchPayload(raw: unknown): LocationSearchMatc
         normalized.attribution = {name: value.attribution.name.slice(0, 200)};
         for (const key of ["url", "licenseUrl"] as const) {
             const url = value.attribution[key];
-            if (typeof url === "string" && /^https?:\/\//i.test(url) && url.length <= 2048) normalized.attribution[key] = url;
+            if (typeof url === "string" && /^https?:\/\//i.test(url) && url.length <= 2048)
+                normalized.attribution[key] = url;
         }
     }
 
@@ -103,13 +109,17 @@ export function normalizeLocationSearchPayload(raw: unknown): LocationSearchMatc
 }
 
 function normalizeAabb(value: unknown): LocationAabb | null {
-    if (!(Array.isArray(value)
-        && value.length === 2
-        && Array.isArray(value[0])
-        && Array.isArray(value[1])
-        && value[0].length === 2
-        && value[1].length === 2
-        && value.flat().every(entry => typeof entry === "number" && Number.isFinite(entry)))) {
+    if (
+        !(
+            Array.isArray(value) &&
+            value.length === 2 &&
+            Array.isArray(value[0]) &&
+            Array.isArray(value[1]) &&
+            value[0].length === 2 &&
+            value[1].length === 2 &&
+            value.flat().every((entry) => typeof entry === "number" && Number.isFinite(entry))
+        )
+    ) {
         return null;
     }
     const aabb = value as [[unknown, unknown], [unknown, unknown]];
@@ -129,9 +139,7 @@ function escapeHtml(value: string): string {
 }
 
 function populationRank(match: LocationSearchMatch): number {
-    return typeof match.population === "number" && Number.isFinite(match.population)
-        ? match.population
-        : -1;
+    return typeof match.population === "number" && Number.isFinite(match.population) ? match.population : -1;
 }
 
 function compareLocationMatches(lhs: LocationSearchMatch, rhs: LocationSearchMatch): number {
@@ -139,9 +147,11 @@ function compareLocationMatches(lhs: LocationSearchMatch, rhs: LocationSearchMat
     if (populationDelta !== 0) {
         return populationDelta;
     }
-    return lhs.name.localeCompare(rhs.name)
-        || lhs.providerName.localeCompare(rhs.providerName)
-        || lhs.id.localeCompare(rhs.id);
+    return (
+        lhs.name.localeCompare(rhs.name) ||
+        lhs.providerName.localeCompare(rhs.providerName) ||
+        lhs.id.localeCompare(rhs.id)
+    );
 }
 
 function parseAdapterPath(path: string): Array<string | number> | null {
@@ -171,8 +181,8 @@ function parseAdapterPath(path: string): Array<string | number> | null {
                 return null;
             }
             const token = source.slice(cursor + 1, close).trim();
-            const quoted = (token.startsWith("\"") && token.endsWith("\""))
-                || (token.startsWith("'") && token.endsWith("'"));
+            const quoted =
+                (token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"));
             if (quoted) {
                 segments.push(token.slice(1, -1));
             } else {
@@ -188,7 +198,8 @@ function parseAdapterPath(path: string): Array<string | number> | null {
 
         const nextDot = source.indexOf(".", cursor);
         const nextBracket = source.indexOf("[", cursor);
-        const next = [nextDot, nextBracket].filter(index => index >= 0).sort((lhs, rhs) => lhs - rhs)[0] ?? source.length;
+        const next =
+            [nextDot, nextBracket].filter((index) => index >= 0).sort((lhs, rhs) => lhs - rhs)[0] ?? source.length;
         const key = source.slice(cursor, next).trim();
         if (!key) {
             return null;
@@ -227,10 +238,12 @@ function readAdapterPath(source: unknown, path: string | undefined): unknown {
 }
 
 function renderAdapterTemplate(source: unknown, template: string): string {
-    return template.replace(/\{([^{}]+)\}/g, (_match, path: string) => {
-        const value = readAdapterPath(source, path);
-        return value === undefined || value === null ? "" : String(value);
-    }).trim();
+    return template
+        .replace(/\{([^{}]+)\}/g, (_match, path: string) => {
+            const value = readAdapterPath(source, path);
+            return value === undefined || value === null ? "" : String(value);
+        })
+        .trim();
 }
 
 function readAdapterField(source: unknown, selector: LocationSearchFieldSelector | undefined): unknown {
@@ -269,31 +282,32 @@ function arrayNumbers(value: unknown): number[] | null {
     if (!Array.isArray(value)) {
         return null;
     }
-    const result = value.map(entry => numberValue(entry));
-    return result.every(entry => entry !== undefined) ? result as number[] : null;
+    const result = value.map((entry) => numberValue(entry));
+    return result.every((entry) => entry !== undefined) ? (result as number[]) : null;
 }
 
 @Injectable({providedIn: "root"})
 export class LocationSearchService {
     private readonly stateService = inject(AppStateService);
 
+    readonly locationSearchResultLimitState = this.stateService.register(
+        ownerState.locationSearchResultLimit,
+        "location",
+        "locationSearchResultLimit"
+    );
 
-    readonly locationSearchResultLimitState = this.stateService.register({
-        name: 'locationSearchResultLimit',
-        defaultValue: DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,
-        schema: z.coerce.number().int().min(1).max(MAX_LOCATION_SEARCH_RESULT_LIMIT),
-        toStorage: (value: number) => clampLocationSearchResultLimit(value),
-        fromStorage: (payload: any): number => clampLocationSearchResultLimit(payload)
-    }, "location", "locationSearchResultLimit");
+    get locationSearchResultLimit() {
+        return this.locationSearchResultLimitState.getValue();
+    }
 
-    get locationSearchResultLimit() {return this.locationSearchResultLimitState.getValue();}
-
-    set locationSearchResultLimit(val: number) {this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val));}
+    set locationSearchResultLimit(val: number) {
+        this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val));
+    }
 
     constructor(
         private readonly httpClient: HttpClient,
-        private readonly configService: AppConfigService) {
-    }
+        private readonly configService: AppConfigService
+    ) {}
 
     get debounceMs(): number {
         return this.configService.snapshot.locationSearch.debounceMs;
@@ -311,13 +325,13 @@ export class LocationSearchService {
         }
 
         const cappedLimit = Math.max(1, Math.trunc(limit));
-        const providers = this.configService.snapshot.locationSearch.providers.filter(provider => provider.enabled);
+        const providers = this.configService.snapshot.locationSearch.providers.filter((provider) => provider.enabled);
         if (!providers.length) {
             return of([]);
         }
 
-        return forkJoin(providers.map(provider => this.searchProvider(provider, trimmedQuery, cappedLimit))).pipe(
-            map(results => results.flat().sort(compareLocationMatches).slice(0, cappedLimit))
+        return forkJoin(providers.map((provider) => this.searchProvider(provider, trimmedQuery, cappedLimit))).pipe(
+            map((results) => results.flat().sort(compareLocationMatches).slice(0, cappedLimit))
         );
     }
 
@@ -358,8 +372,11 @@ export class LocationSearchService {
         const id = actionId.startsWith(prefix) ? actionId.slice(prefix.length) : undefined;
         if (!id || !/^wof:[1-9]\d*$/.test(id)) {
             // Legacy GeoNames payloads and external adapters keep their point contract.
-            return of(match?.lonLat ? {point: match.lonLat, label: match.name}
-                : {error: "This saved location is unavailable. Search for the place again."});
+            return of(
+                match?.lonLat
+                    ? {point: match.lonLat, label: match.name}
+                    : {error: "This saved location is unavailable. Search for the place again."}
+            );
         }
         if (match?.geometryAvailable === false) return of(this.navigationFromMatch(match));
         const provider = this.configuredMapgetLocationProvider();
@@ -371,40 +388,63 @@ export class LocationSearchService {
             }
         }
         params = params.set("id", id);
-        return this.httpClient.get<unknown>(provider.url, {params, headers: new HttpHeaders(provider.headers ?? {})}).pipe(
-            timeout(LOCATION_DETAIL_TIMEOUT_MS),
-            map(response => {
-                const raw = Array.isArray(response) && response.length === 1 ? response[0] : undefined;
-                if (!raw || typeof raw !== "object" || raw.id !== id) {
-                    return this.navigationFromMatch(match, undefined, "The location boundary is unavailable.");
-                }
-                // A bad point/extent must not discard a valid boundary, and vice versa.
-                const polygons = locationPolygons(raw.geometry);
-                const fresh = normalizeLocationSearchPayload({
-                    ...raw, providerId: provider.id, providerName: provider.name,
-                    ...(polygons ? {geometryAvailable: true} : {})
-                }) ?? match;
-                return this.navigationFromMatch(fresh, polygons,
-                    !polygons && (raw.geometry !== undefined || raw.geometryAvailable === true)
-                        ? "The location boundary could not be displayed." : undefined);
-            }),
-            catchError(() => of(this.navigationFromMatch(match, undefined, "The location boundary could not be loaded.")))
-        );
+        return this.httpClient
+            .get<unknown>(provider.url, {params, headers: new HttpHeaders(provider.headers ?? {})})
+            .pipe(
+                timeout(LOCATION_DETAIL_TIMEOUT_MS),
+                map((response) => {
+                    const raw = Array.isArray(response) && response.length === 1 ? response[0] : undefined;
+                    if (!raw || typeof raw !== "object" || raw.id !== id) {
+                        return this.navigationFromMatch(match, undefined, "The location boundary is unavailable.");
+                    }
+                    // A bad point/extent must not discard a valid boundary, and vice versa.
+                    const polygons = locationPolygons(raw.geometry);
+                    const fresh =
+                        normalizeLocationSearchPayload({
+                            ...raw,
+                            providerId: provider.id,
+                            providerName: provider.name,
+                            ...(polygons ? {geometryAvailable: true} : {})
+                        }) ?? match;
+                    return this.navigationFromMatch(
+                        fresh,
+                        polygons,
+                        !polygons && (raw.geometry !== undefined || raw.geometryAvailable === true)
+                            ? "The location boundary could not be displayed."
+                            : undefined
+                    );
+                }),
+                catchError(() =>
+                    of(this.navigationFromMatch(match, undefined, "The location boundary could not be loaded."))
+                )
+            );
     }
 
     /** Selects geometry, extent, then point without placing boundary arrays in search history. */
     private navigationFromMatch(
-        match?: LocationSearchMatch, polygons?: LocationArea["polygons"], reason?: string
+        match?: LocationSearchMatch,
+        polygons?: LocationArea["polygons"],
+        reason?: string
     ): ResolvedLocationNavigation {
         if (!match) return {error: reason ?? "This location has no usable position or extent."};
         const extent = locationExtent(match.aabb);
         const rectangle = polygons ? locationGeometryExtent(polygons, extent) : extent;
-        if (rectangle) return {
-            area: {rectangle, ...(polygons ? {polygons} : {}), label: match.name, representativePoint: match.lonLat},
-            ...(reason ? {notice: `${reason} Showing its bounding extent.`} : {})
-        };
-        if (match.lonLat) return {point: match.lonLat, label: match.name,
-            ...(reason ? {notice: `${reason} Showing its representative point.`} : {})};
+        if (rectangle)
+            return {
+                area: {
+                    rectangle,
+                    ...(polygons ? {polygons} : {}),
+                    label: match.name,
+                    representativePoint: match.lonLat
+                },
+                ...(reason ? {notice: `${reason} Showing its bounding extent.`} : {})
+            };
+        if (match.lonLat)
+            return {
+                point: match.lonLat,
+                label: match.name,
+                ...(reason ? {notice: `${reason} Showing its representative point.`} : {})
+            };
         return {error: "This location has no usable position or extent."};
     }
 
@@ -416,9 +456,10 @@ export class LocationSearchService {
     private searchProvider(
         provider: LocationSearchProviderConfig,
         query: string,
-        limit: number): Observable<LocationSearchMatch[]> {
+        limit: number
+    ): Observable<LocationSearchMatch[]> {
         return this.searchProviderRequest(provider, query, limit).pipe(
-            catchError(error => {
+            catchError((error) => {
                 console.warn(`[LocationSearchService] ${provider.id} request failed`, error);
                 return of([]);
             })
@@ -428,29 +469,27 @@ export class LocationSearchService {
     private searchProviderRequest(
         provider: LocationSearchProviderConfig,
         query: string,
-        limit: number): Observable<LocationSearchMatch[]> {
+        limit: number
+    ): Observable<LocationSearchMatch[]> {
         let params = new HttpParams();
         for (const [key, value] of Object.entries(provider.params ?? {})) {
             params = params.set(key, String(value));
         }
-        params = params
-            .set(provider.queryParam || "name", query)
-            .set(provider.limitParam || "limit", String(limit));
+        params = params.set(provider.queryParam || "name", query).set(provider.limitParam || "limit", String(limit));
         const headers = new HttpHeaders(provider.headers ?? {});
 
-        return this.httpClient.get<unknown>(provider.url, {params, headers}).pipe(
-            map(payload => this.normalizeProviderResponse(provider, payload))
-        );
+        return this.httpClient
+            .get<unknown>(provider.url, {params, headers})
+            .pipe(map((payload) => this.normalizeProviderResponse(provider, payload)));
     }
 
     private configuredMapgetLocationProvider(): LocationSearchProviderConfig | undefined {
-        return this.configService.snapshot.locationSearch.providers.find(provider =>
-            provider.id === MAPGET_LOCATION_PROVIDER_ID && provider.url === MAPGET_LOCATION_ENDPOINT_URL);
+        return this.configService.snapshot.locationSearch.providers.find(
+            (provider) => provider.id === MAPGET_LOCATION_PROVIDER_ID && provider.url === MAPGET_LOCATION_ENDPOINT_URL
+        );
     }
 
-    private normalizeProviderResponse(
-        provider: LocationSearchProviderConfig,
-        payload: unknown): LocationSearchMatch[] {
+    private normalizeProviderResponse(provider: LocationSearchProviderConfig, payload: unknown): LocationSearchMatch[] {
         const rawMatches = this.providerResponseItems(provider, payload);
         if (!Array.isArray(rawMatches)) {
             return [];
@@ -463,7 +502,7 @@ export class LocationSearchService {
             }
             const value = provider.adapter
                 ? this.adaptProviderMatch(rawMatch, provider.adapter)
-                : rawMatch as Record<string, unknown>;
+                : (rawMatch as Record<string, unknown>);
             const candidate = normalizeLocationSearchPayload({
                 ...value,
                 providerId: provider.id,
@@ -539,10 +578,14 @@ export class LocationSearchService {
             return undefined;
         }
 
-        const [west, south, east, north] = adapter.bbox.format === "southNorthWestEast"
-            ? [bboxValues[2], bboxValues[0], bboxValues[3], bboxValues[1]]
-            : [bboxValues[0], bboxValues[1], bboxValues[2], bboxValues[3]];
-        return [[west, south], [east - west, north - south]];
+        const [west, south, east, north] =
+            adapter.bbox.format === "southNorthWestEast"
+                ? [bboxValues[2], bboxValues[0], bboxValues[3], bboxValues[1]]
+                : [bboxValues[0], bboxValues[1], bboxValues[2], bboxValues[3]];
+        return [
+            [west, south],
+            [east - west, north - south]
+        ];
     }
 
     private labelForMatch(match: LocationSearchMatch): string {
@@ -555,13 +598,14 @@ export class LocationSearchService {
         ].filter(Boolean);
         const credit = match.attribution;
         if (credit) details.push(credit.name);
-        return details.map(detail => escapeHtml(String(detail))).join(" | ")
-            + (credit?.url ? ` | <a href="${escapeHtml(credit.url)}" target="_blank" rel="noopener noreferrer">Source</a>` : "")
-            + (credit?.licenseUrl ? ` | <a href="${escapeHtml(credit.licenseUrl)}" target="_blank" rel="noopener noreferrer">License</a>` : "");
+        return (
+            details.map((detail) => escapeHtml(String(detail))).join(" | ") +
+            (credit?.url
+                ? ` | <a href="${escapeHtml(credit.url)}" target="_blank" rel="noopener noreferrer">Source</a>`
+                : "") +
+            (credit?.licenseUrl
+                ? ` | <a href="${escapeHtml(credit.licenseUrl)}" target="_blank" rel="noopener noreferrer">License</a>`
+                : "")
+        );
     }
-}
-
-
-export interface LocationSearchServiceValues {
-    locationSearchResultLimit: number;
 }

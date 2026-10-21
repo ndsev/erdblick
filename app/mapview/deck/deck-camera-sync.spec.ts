@@ -1,7 +1,7 @@
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 
-import {VIEW_SYNC_POSITION} from "../../shared/appstate.service";
+import {VIEW_SYNC_POSITION} from "../map-view-state.model";
 import {DeckMapView3D} from "./deck-view3d";
 
 interface CameraSyncTestInternals {

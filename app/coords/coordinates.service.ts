@@ -1,14 +1,14 @@
-import {MapViewStateService} from "../mapview/map-view-state.service";
 import {inject} from "@angular/core";
-import {z} from "zod";
-import {} from "../shared/app-state.model";
+import {MapViewStateService} from "../mapview/map-view-state.service";
+import {ownerState} from "./coordinates.service.state";
+
 import {Injectable} from "@angular/core";
-import {AppStateService} from "../shared/appstate.service";
 import {BehaviorSubject, skip} from "rxjs";
 import {Cartographic} from "../integrations/geo";
 import {AppConfigService} from "../shared/app-config.service";
+import {AppStateService} from "../shared/appstate.service";
 
-@Injectable({providedIn: 'root'})
+@Injectable({providedIn: "root"})
 /**
  * Shared coordinate event service for hover/click coordinates and optional
  * plugin-provided auxiliary coordinate systems.
@@ -16,29 +16,36 @@ import {AppConfigService} from "../shared/app-config.service";
 export class CoordinatesService {
     readonly viewStateOwner = inject(MapViewStateService);
 
+    readonly enabledCoordsTileIdsState = this.stateService.register(
+        ownerState.enabledCoordsTileIds,
+        "coordinates",
+        "enabledCoordsTileIds"
+    );
 
-    readonly enabledCoordsTileIdsState = this.stateService.register({
-        name: 'enabledCoordsTileIds',
-        defaultValue: ["WGS84"],
-        schema: z.array(z.string())
-    }, "coordinates", "enabledCoordsTileIds");
+    get enabledCoordsTileIds() {
+        return this.enabledCoordsTileIdsState.getValue();
+    }
 
-    get enabledCoordsTileIds() {return this.enabledCoordsTileIdsState.getValue();}
-
-    set enabledCoordsTileIds(val: string[]) {this.enabledCoordsTileIdsState.next(val);}
+    set enabledCoordsTileIds(val: string[]) {
+        this.enabledCoordsTileIdsState.next(val);
+    }
 
     mouseMoveCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     mouseClickCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     auxiliaryCoordinatesFun: ((x: number, y: number) => Array<[string, Array<number>]>) | null = null;
     auxiliaryTileIdsFun: ((x: number, y: number, level: number) => Array<[string, bigint | number]>) | null = null;
 
-    constructor(public stateService: AppStateService,
-                private configService: AppConfigService) {
-        this.mouseClickCoordinates.pipe(
-            skip(1)  // Skip the first (null) value from mouseClickCoordinates BehaviorSubject
-        ).subscribe(position => {
-            this.viewStateOwner.setMarkerPosition(position);
-        });
+    constructor(
+        public stateService: AppStateService,
+        private configService: AppConfigService
+    ) {
+        this.mouseClickCoordinates
+            .pipe(
+                skip(1) // Skip the first (null) value from mouseClickCoordinates BehaviorSubject
+            )
+            .subscribe((position) => {
+                this.viewStateOwner.setMarkerPosition(position);
+            });
     }
 
     /** Loads the configured jump-target module via dynamic import. */
@@ -54,21 +61,18 @@ export class CoordinatesService {
         }
 
         const jumpTargetsPath = `/static-config/${jumpTargetsConfig}.js`;
-        this.loadJumpTargetsModule(jumpTargetsPath).then((plugin) => {
-            const {getAuxCoordinates, getAuxTileIds} = plugin;
-            if (typeof getAuxCoordinates === "function") {
-                this.auxiliaryCoordinatesFun = getAuxCoordinates;
-            }
-            if (typeof getAuxTileIds === "function") {
-                this.auxiliaryTileIdsFun = getAuxTileIds;
-            }
-        }).catch((error) => {
+        this.loadJumpTargetsModule(jumpTargetsPath)
+            .then((plugin) => {
+                const {getAuxCoordinates, getAuxTileIds} = plugin;
+                if (typeof getAuxCoordinates === "function") {
+                    this.auxiliaryCoordinatesFun = getAuxCoordinates;
+                }
+                if (typeof getAuxTileIds === "function") {
+                    this.auxiliaryTileIdsFun = getAuxTileIds;
+                }
+            })
+            .catch((error) => {
                 console.error(error);
-        });
+            });
     }
-}
-
-
-export interface CoordinatesServiceValues {
-    enabledCoordsTileIds: string[];
 }

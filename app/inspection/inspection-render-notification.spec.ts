@@ -1,17 +1,11 @@
-import {createStateTestSystem, type StateTestSystem} from "../shared/state-test-system";
 import "@angular/compiler";
 import {ChangeDetectorRef, Renderer2} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
-import {
-    AppStateService,
-    InspectionComparisonModel,
-    InspectionPanelModel,
-    TileFeatureId
-} from "../shared/appstate.service";
 import {InspectionSelectionService} from "./inspection-selection.service";
+import {InspectionComparisonModel, InspectionPanelModel, TileFeatureId} from "./inspection-state.model";
 import {InspectionContainerComponent} from "./inspection.container.component";
 import {InspectionDialogsComponent} from "./inspection.dialogs.component";
 
@@ -46,7 +40,7 @@ describe("inspection host render notifications", () => {
             isDockAutoCollapsible: true,
             hasDockedSurface: () => false,
             reorderInspectionPanels: vi.fn()
-        } as unknown as StateTestSystem;
+        };
         const cdr = changeDetector();
         const component = new InspectionContainerComponent(
             (stateService) as never,
@@ -68,7 +62,7 @@ describe("inspection host render notifications", () => {
         const selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
         const inspectionComparisonState = new BehaviorSubject<InspectionComparisonModel | null>(null);
         const mapService = {selectionTopic} as unknown as InspectionSelectionService;
-        const stateService = {inspectionComparisonState} as unknown as StateTestSystem;
+        const stateService = {inspectionComparisonState};
         const cdr = changeDetector();
         const component = new InspectionDialogsComponent(mapService, (stateService) as never, cdr);
         vi.mocked(cdr.markForCheck).mockClear();
