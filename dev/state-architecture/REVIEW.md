@@ -53,6 +53,16 @@ the 94-test run includes both the actual owner and SearchPanel history adapter.
 The warnings are reported as present warnings, without claiming an unmeasured
 baseline count.
 
+At `af62ef99` (the implementation plus the parent-owned omnibar browser spec),
+the parent independently passed all 125 files / 1,359 tests and the default
+production build in 31.173 seconds (14.54 MB initial bundle; existing size warning).
+Read-only review then found the inherited locate network catch could still resolve
+as applied. The focused follow-up propagates network/HTTP failure, handles that
+rejection in direct UI callers, and expands only the common registration comments.
+Its official gate passed 3 files / 37 tests; lint exits 0 with 0 errors and the same
+8 max-lines warnings. Logs are `locate-error-gate.log` and `lint-locate-final.log`;
+the final rebuilt browser gate remains independent.
+
 The parent independently verified earlier checkpoints:
 
 - `d7048247`: 180-test state/URL/identity gate, profiling build and native browser

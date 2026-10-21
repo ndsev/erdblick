@@ -3661,7 +3661,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
         if (selected && selected.mapId && selected.featureId) {
             this.jumpService.highlightByJumpTargetFilter(selected.mapId, selected.featureId,
-                coreLib.HighlightMode.SELECTION_HIGHLIGHT, this.viewSettings.focusedView).then();
+                coreLib.HighlightMode.SELECTION_HIGHLIGHT, this.viewSettings.focusedView)
+                .catch(error => this.infoMessageService.showError(error instanceof Error ? error.message : String(error)));
         }
     }
 

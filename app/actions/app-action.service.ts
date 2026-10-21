@@ -17,7 +17,10 @@ import {
 import { controlActions, describeControls } from "./app-action.service.declarations";
 import { ViewerActionFailure } from "./viewer-action-relay.contract";
 
-type ControlTarget = { control: string;[key: string]: unknown };
+type ControlTarget = {
+    control: string;
+    [key: string]: unknown;
+};
 interface RegisteredControl {
     declaration: AppControl;
     read(selector: Record<string, unknown>, context: ControlReadContext): unknown;
@@ -31,7 +34,11 @@ interface RegisteredControl {
  */
 @Injectable({ providedIn: "root" })
 export class AppActionService {
-    private readonly actions = new Map<string, { declaration: AppAction; execute: (input: unknown, signal?: AbortSignal) => unknown; candidates?: (query: string, history?: ActionCandidateHistory) => AppActionCandidate[] }>();
+    private readonly actions = new Map<string, {
+        declaration: AppAction;
+        execute: (input: unknown, signal?: AbortSignal) => unknown;
+        candidates?: (query: string, history?: ActionCandidateHistory) => AppActionCandidate[];
+    }>();
     private readonly controls = new Map<string, RegisteredControl>();
     private sealed = false;
 
@@ -41,6 +48,11 @@ export class AppActionService {
         this.registerAction(controlActions.setControl, input => this.write(input));
     }
 
+    /**
+     * Binds one declared action to its owner's method. Optional live candidates
+     * supply omnibar arguments to that same method; execution validates both
+     * arguments and result, including asynchronous failures.
+     */
     registerAction<Input extends z.ZodType, Output extends z.ZodType>(
         declaration: AppAction<Input, Output>,
         execute: (input: z.infer<Input>, signal?: AbortSignal) => z.infer<Output> | Promise<z.infer<Output>>,
@@ -65,6 +77,11 @@ export class AppActionService {
         return candidates;
     }
 
+    /**
+     * Binds an explicit public value to owner readers/writers. Default targets
+     * select the bounded overview; they do not discover or register stored slots.
+     * A writable declaration must have exactly one owner write binding.
+     */
     registerControl<Selector extends z.ZodObject, Value extends z.ZodType>(
         declaration: AppControl<Selector, Value>, binding: {
             read(selector: z.infer<Selector>, context: ControlReadContext): z.infer<Value>;

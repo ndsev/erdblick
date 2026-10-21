@@ -36,7 +36,9 @@ function fixture() {
     const moved = vi.fn();
     const views = {
         moveToWgs84PositionTopic: { next: moved }, moveToRectangleTopic: { next: moved },
-        showLocationLabelTopic: { next: vi.fn() }, locationBoundaryUnavailableTopic: new Subject<void>()
+        showLocationLabelTopic: { next: vi.fn() }, locationBoundaryUnavailableTopic: new Subject<void>(),
+        captureView: (index: number) => ({ viewId: owners.viewSettings.viewIdAt(index), generation: 1 }),
+        resolveCapturedView: (target: { viewId: string }) => owners.viewSettings.viewIds.includes(target.viewId) ? {} : undefined
     };
     const parser = { filterFeatureJumpTargets: vi.fn(() => []) };
     const maps = { tileLayerParser: parser, maps: { maps: new Map() }, sourceDataLayerIdForLayerName: vi.fn() };
@@ -168,6 +170,24 @@ describe('owner action candidates', () => {
         }];
         const plugin = h.actions.getCandidates('route').find(candidate => candidate.id === 'plugin:async')!;
         await expect(h.actions.execute(plugin.action, plugin.input)).rejects.toThrow('plugin request rejected');
+    });
+
+    it.each(['network', 'HTTP'] as const)('rejects a failed %s locate request through the common dispatcher', async kind => {
+        const h = fixture();
+        h.parser.filterFeatureJumpTargets.mockReturnValue([{
+            id: 'Road.id:1', name: 'Road', idParts: [{ key: 'id', value: 1 }], maps: ['Map'], error: null
+        }] as never);
+        const fetch = vi.spyOn(globalThis, 'fetch');
+        if (kind === 'network') fetch.mockRejectedValue(new Error('locate network request failed'));
+        else fetch.mockResolvedValue(new Response('Unavailable', { status: 503 }));
+
+        const feature = h.actions.getCandidates('Road.1').find(candidate => candidate.id === 'fj:Road.id:1')!;
+        await expect(h.actions.execute(feature.action, feature.input)).rejects.toThrow(
+            kind === 'network' ? 'locate network request failed' : 'Could not locate feature (HTTP 503).'
+        );
+        expect(fetch).toHaveBeenCalledExactlyOnceWith('locate', expect.objectContaining({ method: 'POST' }));
+        expect(h.owners.inspectionState.selection).toEqual([]);
+        expect(h.moved).not.toHaveBeenCalled();
     });
 
     it('resolves async location and external-viewer choices on their actual owners', () => {

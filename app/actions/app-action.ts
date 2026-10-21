@@ -13,7 +13,11 @@ export interface AppAction<Input extends z.ZodType = z.ZodType, Output extends z
     readonly outputSchema: Output;
 }
 
-/** A live omnibar choice carries validated action arguments and presentation only. */
+/**
+ * A live owner-produced omnibar choice carries typed action arguments and presentation.
+ * Dispatch validates those arguments against the declaration immediately before
+ * execution; the owner revalidates any captured identity or lifetime.
+ */
 export interface AppActionCandidate<Input = unknown> {
     id: string;
     name: string;

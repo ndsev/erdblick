@@ -139,7 +139,7 @@ export class JumpTargetService {
         public readonly inspectionState: InspectionStateService,
         public readonly viewSettings: MapViewStateService,
         private readonly views: MapViewService) {
-        // Forward marked cartesian position to AppStateService.
+        // Forward marked positions to the coordinate owner.
         this.markedPosition.subscribe(position => {
             if (position.length >= 2) {
                 this.coordinates.setMarkerState(true);
@@ -417,12 +417,12 @@ export class JumpTargetService {
                 featureId: action.idParts.map((kv) => [kv.key, kv.value]).flat()
             }]
         };
-        let response = await fetch("locate", {
+        const response = await fetch("locate", {
             body: JSON.stringify(resolveMe),
             method: "POST"
-        }).catch((err) => console.error(`Error during /locate call: ${err}`));
-        if (!response) {
-            return;
+        });
+        if (!response.ok) {
+            throw new Error(`Could not locate feature (HTTP ${response.status}).`);
         }
         let extRefsResolved = await response.json() as LocateResponse;
         if (!targetIsCurrent()) return;
