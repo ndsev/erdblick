@@ -486,11 +486,7 @@ export class AppState<T> extends Observable<T> {
         return text === "" || text === "[]";
     }
 
-    /**
-     * Serialize current state either for URL parameters (`forUrl=true`) or
-     * for local storage payload (`forUrl=false`).
-     */
-    /** Serializes the state slot into URL or storage key/value pairs. */
+    /** Serializes URL parameters (`forUrl=true`) or deployed local-storage key/value pairs. */
     serialize(forUrl: boolean): Record<string, AppStateSerializedValue> | undefined {
         if (forUrl && !this.isUrlState()) {
             return undefined;
@@ -705,7 +701,9 @@ export class MapViewState<T> {
             schema: z.array(options.schema),
             toStorage: values => this.viewIds().map(id => {
                 const value = values[id] ?? this.defaultValue;
-                return options.toStorage ? options.toStorage(value) : compactBooleans(value);
+                // Per-view storage/snapshot values retain their deployed boolean shape.
+                // URL CSV encoding compacts them separately when required.
+                return options.toStorage ? options.toStorage(value) : value;
             }),
             fromStorage: (payload, current) => Object.fromEntries(this.viewIds().map((id, index) => {
                 const value = (payload as unknown as T[])[index];

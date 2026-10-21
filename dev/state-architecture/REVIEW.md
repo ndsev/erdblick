@@ -63,6 +63,14 @@ Its official gate passed 3 files / 37 tests; lint exits 0 with 0 errors and the 
 8 max-lines warnings. Logs are `locate-error-gate.log` and `lint-locate-final.log`;
 the final rebuilt browser gate remains independent.
 
+The subsequent full official gate passed 125 files / 1,365 tests after restoring
+the baseline per-view boolean codec, making coordinate marker changes atomic and
+capturing async provider destinations before the first await. Lint again exits 0
+with 0 errors / 8 max-lines warnings. Exact logs: `full-suite-codecs-final.log` and
+`lint-codecs-final.log`. Regressions distinguish scalar 0/1 storage from per-view
+boolean arrays, observe one complete marker edit, and check provider reorder plus
+remove/restore rejection. Parent-owned browser fixture corrections are separate.
+
 The parent independently verified earlier checkpoints:
 
 - `d7048247`: 180-test state/URL/identity gate, profiling build and native browser

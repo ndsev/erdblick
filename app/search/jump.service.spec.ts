@@ -32,8 +32,7 @@ class RightClickMenuServiceStub {
 }
 
 class AppStateServiceStub {
-    setMarkerState = vi.fn();
-    setMarkerPosition = vi.fn();
+    setMarker = vi.fn();
     setSelection = vi.fn();
     focusedView = 0;
 }
@@ -264,17 +263,15 @@ describe('JumpTargetService', () => {
         expect(coreLib.parseMapTileKey(key)).toEqual(['m1', 'Metadata-RegistryMetadata', 0]);
     });
 
-    it('forwards latitude, longitude, and altitude to AppStateService in the expected order', () => {
+    it('forwards one atomic marker edit to the coordinate owner in longitude/latitude order', () => {
         const { service, stateService } = createService();
 
         service.markedPosition.next([48.25, 11.75, 125]);
 
-        expect(stateService.setMarkerState).toHaveBeenCalledWith(true);
-        expect(stateService.setMarkerPosition).toHaveBeenCalledTimes(1);
-        const arg = (stateService.setMarkerPosition as any).mock.calls[0][0];
-        expect(arg.longitude).toBeCloseTo(11.75 * Math.PI / 180);
-        expect(arg.latitude).toBeCloseTo(48.25 * Math.PI / 180);
-        expect(arg.height).toBe(125);
+        expect(stateService.setMarker).toHaveBeenCalledExactlyOnceWith({
+            enabled: true,
+            position: { lon: 11.75, lat: 48.25, alt: 125 }
+        });
     });
 
     it('keeps exact marker coordinates when a coordinate jump targets a tile rectangle', () => {

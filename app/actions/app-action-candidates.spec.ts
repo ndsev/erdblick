@@ -35,10 +35,14 @@ function fixture() {
     const actions = new AppActionService(state);
     const moved = vi.fn();
     const views = {
+        generation: 1,
         moveToWgs84PositionTopic: { next: moved }, moveToRectangleTopic: { next: moved },
         showLocationLabelTopic: { next: vi.fn() }, locationBoundaryUnavailableTopic: new Subject<void>(),
-        captureView: (index: number) => ({ viewId: owners.viewSettings.viewIdAt(index), generation: 1 }),
-        resolveCapturedView: (target: { viewId: string }) => owners.viewSettings.viewIds.includes(target.viewId) ? {} : undefined
+        captureView: (index: number): { viewId: string; generation: number } => ({
+            viewId: owners.viewSettings.viewIdAt(index), generation: views.generation
+        }),
+        resolveCapturedView: (target: { viewId: string; generation: number }): object | undefined =>
+            owners.viewSettings.viewIds.includes(target.viewId) && target.generation === views.generation ? {} : undefined
     };
     const parser = { filterFeatureJumpTargets: vi.fn(() => []) };
     const maps = { tileLayerParser: parser, maps: { maps: new Map() }, sourceDataLayerIdForLayerName: vi.fn() };
@@ -51,7 +55,7 @@ function fixture() {
         {} as never, owners.viewSettings, {} as never, {} as never, {} as never);
     const run = vi.spyOn(owners.searchService, 'run').mockReturnValue({ id: 'new-search' } as never);
     for (const owner of [owners.searchService, jumps, external, navigation, owners.inspectionState]) owner.registerActions(actions);
-    return { state, owners, actions, jumps, external, navigation, parser, moved, menu, run };
+    return { state, owners, actions, jumps, external, navigation, parser, views, moved, menu, run };
 }
 
 describe('owner action candidates', () => {
@@ -91,6 +95,49 @@ describe('owner action candidates', () => {
         expect(candidate.enabled).toBe(true);
         expect(await h.actions.execute(candidate.action, candidate.input)).toEqual({ status: 'applied', changed: true });
         expect(h.moved).toHaveBeenCalledOnce();
+    });
+
+    it('publishes coordinate marker position and visibility as one completed owner edit', async () => {
+        const h = fixture();
+        const observations: unknown[] = [];
+        const subscription = h.state.observe(() => h.owners.coordinates.markerControlValue)
+            .subscribe(value => observations.push(value));
+        const candidate = h.actions.getCandidates('11,48').find(candidate => candidate.id === 'j:wgs84-lon-lat')!;
+        await h.actions.execute(candidate.action, candidate.input);
+        expect(observations).toEqual([
+            { enabled: false, position: null },
+            { enabled: true, position: { lon: 11, lat: 48, alt: 0 } }
+        ]);
+        subscription.unsubscribe();
+    });
+
+    it.each(['reorder', 'remove-and-restore'] as const)('retains the async provider destination through %s', async change => {
+        const h = fixture();
+        h.owners.viewSettings.importViews(['a', 'b']);
+        h.owners.viewSettings.focusedView = 1;
+        let resolve!: (value: number[]) => void;
+        const result = new Promise<number[]>(done => { resolve = done; });
+        h.jumps.extJumpTargets = [{
+            id: 'plugin:async', name: 'Async destination', label: 'Async destination', icon: 'pi-map', color: 'green',
+            enabled: true, validate: () => true, jump: () => result
+        }];
+        const candidate = h.actions.getCandidates('route').find(candidate => candidate.id === 'plugin:async')!;
+        const execution = h.actions.execute(candidate.action, candidate.input);
+        if (change === 'reorder') {
+            h.owners.viewSettings.retainViews([1, 0], new Map());
+            h.owners.viewSettings.focusedView = 1; // Focus now points to a, while the intent still targets b.
+            resolve([48, 11, 100]);
+            await execution;
+            expect(h.moved).toHaveBeenCalledExactlyOnceWith({ x: 11, y: 48, z: 100, targetView: 0 });
+        } else {
+            h.owners.viewSettings.retainViews([0], new Map());
+            h.views.generation++; // The runtime owner retires the removed renderer's lifetime.
+            h.owners.viewSettings.importViews(['a', 'b']);
+            resolve([48, 11, 100]);
+            await expect(execution).rejects.toThrow('no longer available');
+            expect(h.moved).not.toHaveBeenCalled();
+            expect(h.owners.coordinates.markerControlValue).toEqual({ enabled: false, position: null });
+        }
     });
 
     it('preserves completion scope when resolving feature search history afresh', () => {

@@ -16,7 +16,7 @@ import { parseWgs84CoordinateString } from "../coords/wgs84-coordinate.util";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
 import { SelectedSourceData, TileFeatureId } from "../inspection/inspection-state.model";
 import { InspectionStateService } from "../inspection/inspection-state.service";
-import { Cartographic, GeoMath, Rectangle } from "../integrations/geo";
+import { GeoMath, Rectangle } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
 import { MapInfoService } from "../mapdata/map-info.service";
 import { MapViewStateService } from "../mapview/map-view-state.service";
@@ -142,12 +142,10 @@ export class JumpTargetService {
         // Forward marked positions to the coordinate owner.
         this.markedPosition.subscribe(position => {
             if (position.length >= 2) {
-                this.coordinates.setMarkerState(true);
-                this.coordinates.setMarkerPosition(Cartographic.fromDegrees(
-                    position[1],
-                    position[0],
-                    position[2] ?? 0
-                ));
+                this.coordinates.setMarker({
+                    enabled: true,
+                    position: { lon: position[1], lat: position[0], alt: position[2] ?? 0 }
+                });
             }
         });
     }
@@ -685,14 +683,13 @@ export class JumpTargetService {
     /**
      * Dispatches the parsed jump target either as a camera move or a rectangle fit request.
      */
-    jumpToLocation(result: SearchJumpResult | undefined, label?: string | null) {
+    jumpToLocation(result: SearchJumpResult | undefined, label?: string | null, targetViewIndex = this.viewSettings.focusedView) {
         if (result === undefined) {
             this.messageService.showError("Could not parse coordinates from the input.");
             return;
         }
         const jump = normalizeSearchJumpResult(result);
         const coordinates = jump.target;
-        const targetViewIndex = this.viewSettings.focusedView;
         if (Array.isArray(coordinates)) {
             let lat = coordinates[0];
             let lon = coordinates[1];
@@ -787,7 +784,13 @@ export class JumpTargetService {
     /** Revalidates a current parser/provider immediately before its ordinary behavior runs. */
     private async executeTarget(target: SearchTarget, query: string, payload?: unknown): Promise<void> {
         if (!target.validate(query) || (!query.trim() && !target.acceptsEmptyInput)) rejectAction("Search action is not valid for this input", "invalid_arguments");
-        if (target.jump) this.jumpToLocation(await target.jump(query, payload));
+        if (target.jump) {
+            const destination = this.views.captureView(this.viewSettings.focusedView);
+            if (!destination) rejectAction("The destination map is unavailable");
+            const result = await target.jump(query, payload);
+            if (!this.views.resolveCapturedView(destination)) rejectAction("The destination map is no longer available", "cancelled");
+            this.jumpToLocation(result, undefined, this.viewSettings.indexOfView(destination.viewId));
+        }
         else if (target.execute) await target.execute(query, payload);
         else rejectAction("Search action has no handler");
     }

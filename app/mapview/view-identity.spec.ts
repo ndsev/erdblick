@@ -29,6 +29,28 @@ describe('logical view identity', () => {
         expect(() => registry.registerState({ name: 'late', defaultValue: false, schema: {} as never })).toThrow('closed');
     });
 
+    it('preserves scalar and per-view boolean storage codecs independently of compact URL encoding', () => {
+        const { registry, owners: { coordinates, viewSettings: views, layerState: layers } } = setup();
+        views.numViews = 2;
+        coordinates.setMarker({ enabled: true, position: null });
+        views.mode2dState.next(0, true);
+        views.mode2dState.next(1, false);
+        layers.layerNames = ['Map/Lane', 'Map/Road'];
+        layers.layerVisibilityState.next(0, [true, false]);
+        layers.layerVisibilityState.next(1, [false, true]);
+        const snapshot = registry.exportSnapshot();
+        expect(snapshot['marker']).toBe(1);
+        expect(snapshot['mode2d']).toEqual([true, false]);
+        expect(snapshot['visibility']).toEqual([[true, false], [false, true]]);
+        expect(coordinates.markerState.serialize(false)).toEqual({ marker: '1' });
+        expect(views.mode2dState.appState.serialize(false)).toEqual({ mode2d: '[true,false]' });
+        expect(layers.layerVisibilityState.appState.serialize(false)).toEqual({ visibility: '[[true,false],[false,true]]' });
+        expect(views.mode2dState.appState.serialize(true)).toEqual({ m2d: '1,0' });
+        expect(layers.layerVisibilityState.appState.serialize(true)).toEqual({ v: '1,0:0,1' });
+        coordinates.setMarkerState(false);
+        expect(registry.exportSnapshot()['marker']).toBe(0);
+    });
+
     it('keeps camera, layers, options, focus and search associations through reorder', () => {
         const { registry, owners: { viewSettings: views, layerState: layers, searchService: searches, inspectionState: inspections, layout } } = setup();
         views.numViews = 2;

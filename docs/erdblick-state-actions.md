@@ -146,6 +146,10 @@ and URL codecs. Search references use live IDs and project old selected-view ind
 at storage/UI boundaries. Newly created views inherit selection from the requested
 source; removed references are pruned. Split proportions remain positional layout.
 
+The deployed scalar codec compacts booleans to `0`/`1`; per-view snapshot and storage
+arrays retain booleans. URL CSV encoding compacts both. Public controls expose their
+typed boolean values independently of these persistence formats.
+
 Share links carry ordered IDs in `vid`: 1–32 unique IDs, each 1–64 ASCII letters,
 digits, underscores or hyphens. Object.prototype property names are reserved.
 Repeated/malformed explicit IDs reject before mutation or navigation. If `n` is

@@ -230,8 +230,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
     toggleMarker() {
         if (!this.isMarkerEnabled) {
             this.isMarkerEnabled = true;
-            this.coordinates.setMarkerState(true);
-            this.coordinates.setMarkerPosition(null);
+            this.coordinates.setMarker({ enabled: true, position: null });
             this.markerButtonIcon = "location_on";
             this.markerButtonTooltip = "Disable marker placement";
         } else if (!this.markerPosition) {
@@ -241,15 +240,13 @@ export class CoordinatesPanelComponent implements OnDestroy {
             this.markerButtonTooltip = "Enable marker placement";
         } else if (this.markerPosition) {
             this.isMarkerEnabled = true;
-            this.coordinates.setMarkerState(true);
-            this.coordinates.setMarkerPosition(null);
+            this.coordinates.setMarker({ enabled: true, position: null });
             this.markerButtonIcon = "location_on";
             this.markerButtonTooltip = "Disable marker placement";
         } else {
             this.isMarkerEnabled = true;
             this.markerPosition = null;
-            this.coordinates.setMarkerState(true);
-            this.coordinates.setMarkerPosition(null);
+            this.coordinates.setMarker({ enabled: true, position: null });
             this.markerButtonIcon = "wrong_location";
             this.markerButtonTooltip = "Reset marker";
         }
