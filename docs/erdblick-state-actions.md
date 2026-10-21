@@ -51,6 +51,10 @@ actions.registerControl(coordinateControls.marker, {
 });
 ```
 
+`ConnectionPreferencesService` exposes transport compression through the separate
+`app.preferences.connection` control; `app.preferences.rendering` covers graphics
+quality, tile budget and worker count.
+
 Actions use the same small registration surface. The inspection owner binds its
 close operation and supplies live omnibar choices:
 

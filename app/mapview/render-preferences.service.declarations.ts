@@ -4,7 +4,7 @@ import { z } from "zod";
 export const renderControls = {
     rendering: {
         name: "app.preferences.rendering",
-        description: "Rendering quality, tile budget, worker count (0=automatic) and transport compression. Only tile budget is included in URLs.",
+        description: "Rendering quality, tile budget and worker count (0=automatic). Only tile budget is included in URLs.",
         selectorSchema: z.strictObject({}),
         valueSchema: z.strictObject({
             antialiasing: z.boolean(),
