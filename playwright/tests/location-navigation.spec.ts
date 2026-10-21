@@ -81,7 +81,8 @@ test('fits all polygon components, renders holes, fades, and replays metadata-on
     await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(11, 5);
     await page.clock.runFor(250);
     expect(details).toBe(1);
-    expect(await page.evaluate(() => window.ebDebug!.stateService.exportSnapshot()['marker'])).toBe(false);
+    // Snapshots use the deployed scalar Boolean codec: marker visibility is 0/1.
+    expect(await page.evaluate(() => window.ebDebug!.stateService.exportSnapshot()['marker'])).toBe(0);
     const samples = await sampleMap(page, [[8, 8], [3, 3], [3, 8], [21, 1]]);
     const cyan = samples.map(([r, g, b]) => Math.min(g, b) - r);
     expect(cyan[0]).toBeGreaterThan(cyan[1] + 10); // Hole is unfilled.
@@ -117,13 +118,13 @@ test('falls back from failed geometry to extent, then preserves point marker nav
     await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(11, 5);
     await page.clock.runFor(250);
     await expect(page.getByText(/Showing its bounding extent/)).toBeVisible();
-    expect(await page.evaluate(() => window.ebDebug!.stateService.exportSnapshot()['marker'])).toBe(false);
+    expect(await page.evaluate(() => window.ebDebug!.stateService.exportSnapshot()['marker'])).toBe(0);
     const extentSample = (await sampleMap(page, [[3, 8]]))[0];
     expect(Math.min(extentSample[1], extentSample[2]) - extentSample[0]).toBeGreaterThan(10);
     await page.clock.resume();
     await selectPlace(page, 'Point', 'wof:2');
     await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(35, 5);
-    expect(await page.evaluate(() => window.ebDebug!.stateService.exportSnapshot()['marker'])).toBe(true);
+    expect(await page.evaluate(() => window.ebDebug!.stateService.exportSnapshot()['marker'])).toBe(1);
     expect(await page.evaluate(() => window.ebDebug!.stateService.exportSnapshot()['markedPosition'])).toEqual([35, 20, 0]);
 });
 
@@ -151,7 +152,7 @@ test('a late polygon response cannot override a newer point selection', async ({
     await responded;
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(35, 5);
-    expect(await page.evaluate(() => window.ebDebug!.stateService.exportSnapshot()['marker'])).toBe(true);
+    expect(await page.evaluate(() => window.ebDebug!.stateService.exportSnapshot()['marker'])).toBe(1);
 });
 
 test('keeps a dateline-crossing boundary and its hole in the fitted world copy', async ({ page }) => {

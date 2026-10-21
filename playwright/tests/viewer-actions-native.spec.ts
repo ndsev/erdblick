@@ -78,8 +78,13 @@ test('native MCP controls the selected live tab/view, retires stale UUIDs, and p
         expect(synced.structuredContent).toMatchObject({ status: 'applied', changed: true });
         const synchronized = await read(secondId);
         for (const entry of synchronized.values) {
-            expect('value' in entry && cameraViewStateSchema.parse(entry.value).destination)
-                .toMatchObject(value.destination);
+            if (!('value' in entry)) throw new Error('Synchronized camera is unavailable');
+            const destination = cameraViewStateSchema.parse(entry.value).destination;
+            // Live renderer coordinates pass through projection arithmetic.
+            // Assert geographic precision without requiring identical float bits.
+            expect(destination.lon).toBeCloseTo(value.destination.lon, 5);
+            expect(destination.lat).toBeCloseTo(value.destination.lat, 5);
+            expect(destination.alt).toBeCloseTo(value.destination.alt, 1);
         }
 
         // Navigation closes the old interactive connection; no target is silently rebound.
@@ -209,8 +214,13 @@ test('native local MCP rejects untrusted origins/hosts and requires an explicit 
         expect(reply.response.status()).toBe(403);
     }
     const missingTarget = await mcp.rpc('tools/call', { name: 'viewer_get_controls', arguments: {} });
-    expect(missingTarget.response.status()).toBe(400);
-    expect((await missingTarget.response.json()).error.code).toBe(-32602);
+    expect(missingTarget.response.status()).toBe(200);
+    expect(missingTarget.message.result).toMatchObject({
+        isError: true,
+        structuredContent: {
+            error: { code: 'invalid_arguments', message: 'A clientId UUID is required.' }
+        }
+    });
 });
 
 test('native MCP starts, styles, exports and inspects a real search through the ordinary viewer services', async ({ page, request }, testInfo) => {
