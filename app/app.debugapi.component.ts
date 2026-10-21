@@ -1,3 +1,4 @@
+import { AppActionService } from "./actions/app-action.service";
 import { Cartographic } from "./integrations/geo";
 import { coreLib, ErdblickCore_ } from "./integrations/wasm";
 import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
@@ -21,8 +22,14 @@ export class ErdblickDebugApi {
         private readonly tileStream: MapTileStreamService,
         private readonly subsetRenderer: TileSubsetLayerRenderService,
         public readonly stateService: AppStateService,
-        public readonly viewSettings: MapViewStateService
+        public readonly viewSettings: MapViewStateService,
+        private readonly actions: AppActionService
     ) {
+    }
+
+    /** Runs a registered owner action for console/tests, including when the remote relay is disabled. */
+    executeAction(name: string, input: unknown): unknown {
+        return this.actions.execute(name, input);
     }
 
     /** Apply one serialized camera state after validating its logical view index. */

@@ -1,6 +1,7 @@
 import { HttpClient } from "@angular/common/http";
 import { AfterViewInit, Component, OnDestroy, ViewContainerRef } from '@angular/core';
 import { Title } from "@angular/platform-browser";
+import { AppActionService } from "./actions/app-action.service";
 import { DebugWindow, ErdblickDebugApi } from "./app.debugapi.component";
 import { DiagnosticsFacadeService } from "./diagnostics/diagnostics.facade.service";
 import { environment } from "./environments/environment";
@@ -103,7 +104,8 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         private configService: AppConfigService,
         private diagnostics: DiagnosticsFacadeService,
         private titleService: Title,
-        public readonly layout: AppLayoutService) {
+        public readonly layout: AppLayoutService,
+        private readonly actions: AppActionService) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
         this.titleService.setTitle(this.capitalizeTitle(this.title));
@@ -112,7 +114,9 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         window.ebDebug = new ErdblickDebugApi(
             this.tileStream,
             this.subsetRenderer,
-            this.stateService, this.mapInfo.viewSettings
+            this.stateService,
+            this.mapInfo.viewSettings,
+            this.actions
         );
 
         this.loadDistributionVersions();
