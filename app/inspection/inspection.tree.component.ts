@@ -1535,7 +1535,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         event.stopPropagation();
         this.jumpService.highlightByJumpTargetFilter(
             rowData["mapId"],
-            rowData["value"]).then();
+            rowData["value"]
+        ).catch(error => this.messageService.showError(error instanceof Error ? error.message : String(error)));
     }
 
     /** Converts the rendered feature-id anchor back into the same value-click behavior. */

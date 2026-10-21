@@ -55,6 +55,18 @@ describe("expandPathToFirstHighlightedRow", () => {
 });
 
 describe("inspection map-hover ownership", () => {
+    it("reports a rejected FeatureId jump through the ordinary inspection UI", async () => {
+        const component = Object.create(InspectionTreeComponent.prototype) as any;
+        component.jumpService = {highlightByJumpTargetFilter: vi.fn().mockRejectedValue(new Error("Locate failed"))};
+        component.messageService = {showError: vi.fn()};
+
+        component.onValueClick({stopPropagation: vi.fn()}, {mapId: "Map", value: "Road.1"});
+        await Promise.resolve();
+
+        expect(component.jumpService.highlightByJumpTargetFilter).toHaveBeenCalledWith("Map", "Road.1");
+        expect(component.messageService.showError).toHaveBeenCalledWith("Locate failed");
+    });
+
     it("does not let a delayed leave clear a re-entered target", async () => {
         const component = Object.create(InspectionTreeComponent.prototype) as any;
         component.destroyed = false;

@@ -3655,19 +3655,22 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         if (mapTileKey && selectedFeatureId) {
             const keepDockedSearchVisible = this.isDocked();
             const lockSelection = !!event?.originalEvent?.ctrlKey;
-            const panelId = this.inspectionState.setSelection(
-                [{mapTileKey, featureId: selectedFeatureId}],
-                undefined,
-                lockSelection,
-                keepDockedSearchVisible
-            );
-            if (lockSelection && panelId !== undefined) {
-                this.inspectionState.setInspectionPanelLockedState(panelId, true);
-            }
+            // A Ctrl-click creates one pinned inspection, including when the search stays docked.
+            this.stateService.transaction(() => {
+                const panelId = this.inspectionState.setSelection(
+                    [{mapTileKey, featureId: selectedFeatureId}],
+                    undefined,
+                    lockSelection,
+                    keepDockedSearchVisible
+                );
+                if (lockSelection && panelId !== undefined) {
+                    this.inspectionState.setInspectionPanelLockedState(panelId, true);
+                }
+            });
             this.inspectionSelection.focusOnFeature(undefined, {
                 mapTileKey,
                 featureId: selectedFeatureId
-            }).then();
+            }).catch(error => this.infoMessageService.showError(error instanceof Error ? error.message : String(error)));
             return;
         }
         if (selected && selected.mapId && selected.featureId) {

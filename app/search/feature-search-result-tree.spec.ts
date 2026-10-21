@@ -3,6 +3,11 @@ import {describe, expect, it, vi} from "vitest";
 
 import {AppModule} from "../app.module";
 import {FeatureSearchComponent} from "./feature.search.component";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {InspectionStateService} from "../inspection/inspection-state.service";
+import {AppLayoutService} from "../shared/app-layout.service";
+import {SEARCH_DOCK_TAB_ID} from "../shared/app-layout.model";
+import {AppStateService} from "../shared/appstate.service";
 
 void AppModule;
 
@@ -27,6 +32,40 @@ function resultTreeFixture() {
 }
 
 describe("Feature Search result-tree completion", () => {
+    it("publishes a Ctrl-click result as one pinned floating panel and reports a failed camera load", async () => {
+        const injector = ownerTestInjector([AppLayoutService, InspectionStateService]);
+        const inspections = injector.get(InspectionStateService);
+        const layout = injector.get(AppLayoutService);
+        layout.isDockOpen = true;
+        layout.dockActiveTab = SEARCH_DOCK_TAB_ID;
+        const component = Object.create(FeatureSearchComponent.prototype) as any;
+        component.inspectionState = inspections;
+        component.stateService = injector.get(AppStateService);
+        component.isDocked = () => true;
+        component.inspectionSelection = {focusOnFeature: vi.fn().mockRejectedValue(new Error("Feature load failed"))};
+        component.infoMessageService = {showError: vi.fn()};
+        const observed: unknown[] = [];
+        const priorPanels = inspections.selectionState.signal();
+        const subscription = inspections.selectionState.subscribe(panels => observed.push({
+            panels: panels.map(panel => ({features: panel.features, locked: panel.locked, undocked: panel.undocked})),
+            dockOpen: layout.isDockOpen,
+            dockTab: layout.dockActiveTab
+        }));
+        const selected = {mapTileKey: "Features:Map:Layer:42", featureId: "Road.1"};
+
+        component.selectResult({node: {data: selected}, originalEvent: {ctrlKey: true}});
+        await Promise.resolve();
+
+        expect(observed).toEqual([
+            {panels: [], dockOpen: true, dockTab: SEARCH_DOCK_TAB_ID},
+            {panels: [{features: [selected], locked: true, undocked: true}],
+                dockOpen: true, dockTab: SEARCH_DOCK_TAB_ID}
+        ]);
+        expect(priorPanels).toEqual([]);
+        expect(component.infoMessageService.showError).toHaveBeenCalledWith("Feature load failed");
+        subscription.unsubscribe();
+    });
+
     it("expands every result group only after completed results have entered the tree", () => {
         const {component, rootGroup, nestedGroup} = resultTreeFixture();
         const session = {
