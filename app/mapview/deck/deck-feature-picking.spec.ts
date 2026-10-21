@@ -26,7 +26,7 @@ function createView() {
         {} as never,
         {} as never,
         {} as never,
-        {} as never
+        {} as never, {} as never
     );
     return view;
 }
@@ -45,7 +45,7 @@ function create3DView() {
         {} as never,
         {} as never,
         {} as never,
-        {} as never
+        {} as never, {} as never
     );
 }
 

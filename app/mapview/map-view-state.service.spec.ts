@@ -45,7 +45,7 @@ function createService(cameras: CameraViewState[], viewSync: string[]) {
         reapplySyncOptionsForAllViews: vi.fn()
     };
     return {
-        service: new MapViewStateService(stateService as never, mapInfo as never),
+        service: new MapViewStateService(stateService as never, mapInfo as never, stateService as never),
         stateService
     };
 }
@@ -203,7 +203,7 @@ describe("MapViewStateService indexed removal", () => {
             layerStateChanged: new Subject<string>(),
             reapplySyncOptionsForAllViews: vi.fn()
         };
-        const service = new MapViewStateService(state as never, mapInfo as never);
+        const service = new MapViewStateService(state as never, mapInfo as never, state as never);
         state.numViewsState.subscribe(() => order.push('tree'));
         vi.spyOn(service, 'requestViewRecalculation').mockImplementation(() => order.push('coverage'));
         const states = [new ViewVisualizationState(), new ViewVisualizationState(), new ViewVisualizationState()];

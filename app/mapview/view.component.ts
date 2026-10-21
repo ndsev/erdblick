@@ -1,3 +1,4 @@
+import {RenderPreferencesService} from "./render-preferences.service";
 import {
     AppStateService,
     type TileFeatureId
@@ -251,7 +252,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 private viewLayerDiagnostics: ViewLayerDiagnosticsService,
                 private styleValidationReports: StyleValidationReportService,
                 private cdr: ChangeDetectorRef,
-                private ngZone: NgZone
+                private ngZone: NgZone,
+        public readonly renderPreferences: RenderPreferencesService
     ) {
         this.subscriptions.push(
             this.stateService.focusedViewState.subscribe(focusedViewIndex => {
@@ -384,8 +386,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.modeSubscription = combineLatest([
             this.stateService.ready.pipe(filter(ready => ready)),
             this.stateService.mode2dState.pipe(this.viewIndex()),
-            this.stateService.deckAntialiasingEnabledState,
-            this.stateService.semanticCompositingEnabledState
+            this.renderPreferences.deckAntialiasingEnabledState,
+            this.renderPreferences.semanticCompositingEnabledState
         ]).subscribe(([_, mode2d, antialiasingEnabled, semanticCompositingEnabled]) => {
             const needsRebuild =
                 this.is2DMode !== mode2d ||
@@ -467,13 +469,13 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
                 this.inspectionSelection, this.featureSearchService,
                 this.menuService, this.coordinatesService, this.stateService, this.configService,
-                this.layerController!
+                this.layerController!, this.renderPreferences
             )
             : new DeckMapView3D(
                 this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
                 this.inspectionSelection, this.featureSearchService,
                 this.menuService, this.coordinatesService, this.stateService, this.configService,
-                this.layerController!
+                this.layerController!, this.renderPreferences
             );
         mapView.setDesktopDrillPickingEnabled(!this.isNarrow);
         this.initializingMapView = mapView;

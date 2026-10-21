@@ -1,3 +1,4 @@
+import {RenderPreferencesService} from "../mapview/render-preferences.service";
 import "@angular/compiler";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {BehaviorSubject, Subject} from "rxjs";
@@ -36,7 +37,7 @@ function setup() {
     state.viewSyncState.next([]);
     state.cameraViewDataState.next(0, camera(10, 40, 500));
     state.cameraViewDataState.next(1, camera(20, 50, 1000));
-    const views = new MapViewStateService(state, maps as never);
+    const views = new MapViewStateService(state, maps as never, new RenderPreferencesService(state));
     const renderers = [0, 1].map(viewIndex => ({
         viewIndex, isAvailable: vi.fn(() => true),
         getLiveCameraState: vi.fn((): CameraViewState | undefined => structuredClone(state.cameraViewDataState.getValue(viewIndex))),
@@ -70,7 +71,7 @@ function setup() {
     const viewDiagnostics = {cameraInteracting$: new BehaviorSubject(false), snapshot: vi.fn()};
     const styleReports = {reports$: new BehaviorSubject<import("../styledata/style-validation.model").StyleValidationIssue[]>([])};
     const service = new ViewerActionService(state, views, maps as never, searches as never, inspections as never, zone as never, stream as never,
-        styles as never, config as never, render as never, diagnostics as never, viewDiagnostics as never, styleReports as never, new ViewerUiService());
+        styles as never, config as never, render as never, diagnostics as never, viewDiagnostics as never, styleReports as never, new ViewerUiService(), new RenderPreferencesService(state));
     return {state, views, maps, renderers, searches, inspections, zone, service, stream, styles, config, render, diagnostics, viewDiagnostics, styleReports};
 }
 

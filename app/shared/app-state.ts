@@ -1,4 +1,4 @@
-import {BehaviorSubject, distinctUntilChanged, map, Observable, OperatorFunction} from "rxjs";
+import {distinctUntilChanged, map, Observable, OperatorFunction, Subject} from "rxjs";
 import {z, ZodTypeAny} from "zod";
 import type {Params} from "@angular/router";
 import {environment} from "../environments/environment";
@@ -262,7 +262,7 @@ export function deepEquals(a: unknown, b: unknown): boolean {
 }
 
 /** Produces a defensive deep copy for state snapshots and change detection. */
-function deepCopy<V>(value: V): V {
+export function deepCopy<V>(value: V): V {
     if (value === null || typeof value !== "object") {
         return value;
     }
@@ -298,7 +298,11 @@ function deepCopy<V>(value: V): V {
  * Represents one persisted application state slot with schema validation and URL/storage
  * serialization helpers.
  */
-export class AppState<T> extends BehaviorSubject<T> {
+export class AppState<T> extends Observable<T> {
+    private currentValue: T;
+    private readonly changes: Subject<T>;
+    /** The persistence registry installs a synchronous publication boundary. */
+    writeValue: ((value: T) => void) | undefined;
     readonly name: string;
     readonly defaultValue: T;
 
@@ -314,7 +318,14 @@ export class AppState<T> extends BehaviorSubject<T> {
 
     /** Registers the state slot in the shared pool and seeds it with the default value. */
     constructor(pool: Map<string, AppState<unknown>>, options: AppStateOptions<T>) {
-        super(deepCopy(options.defaultValue));
+        const changes = new Subject<T>();
+        super(subscriber => {
+            const subscription = changes.subscribe(subscriber);
+            if (!subscriber.closed) subscriber.next(this.currentValue);
+            return subscription;
+        });
+        this.changes = changes;
+        this.currentValue = deepCopy(options.defaultValue);
         this.name = options.name;
         this.defaultValue = deepCopy(options.defaultValue);
 
@@ -332,6 +343,32 @@ export class AppState<T> extends BehaviorSubject<T> {
             console.warn(`[AppState] Duplicate state name detected: ${options.name}. Overwriting previous instance.`);
         }
         pool.set(options.name, this as unknown as AppState<unknown>);
+    }
+
+    /** Reads staged values during a coordinated edit, before observers are notified. */
+    getValue(): T {
+        return this.currentValue;
+    }
+
+    get value(): T { return this.currentValue; }
+
+    /** Publishes immediately for a single edit, or at the enclosing transaction boundary. */
+    next(value: T): void {
+        if (this.writeValue) this.writeValue(value);
+        else {
+            this.stage(value);
+            this.publish();
+        }
+    }
+
+    /** Registry-only phase: install a value before any slot observer is notified. */
+    stage(value: T): void {
+        this.currentValue = value;
+    }
+
+    /** Registry-only phase: notify readers after every participating slot is installed. */
+    publish(): void {
+        this.changes.next(this.currentValue);
     }
 
     /** Restores the state to its configured default value. */

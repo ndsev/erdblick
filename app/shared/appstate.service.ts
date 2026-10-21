@@ -1,9 +1,9 @@
 import {Injectable, OnDestroy} from "@angular/core";
 import {NavigationEnd, NavigationStart, Params, Router} from "@angular/router";
-import {BehaviorSubject, skip, Subject, Subscription, take} from "rxjs";
+import {BehaviorSubject, distinctUntilChanged, map, Observable, skip, Subject, Subscription, take} from "rxjs";
 import {filter} from "rxjs/operators";
 import {Cartographic, GeoMath} from "../integrations/geo";
-import {AppState, AppStateOptions, Boolish, MapViewState, StyleState} from "./app-state";
+import {AppState, AppStateOptions, Boolish, deepCopy, MapViewState, StyleState} from "./app-state";
 import {z} from "zod";
 import {
     PointCloudPolicy, DEFAULT_POINT_CLOUD_POLICY, pointCloudPolicySchema,
@@ -491,6 +491,67 @@ function hashStateValue(value: unknown): string {
  */
 export class AppStateService implements OnDestroy {
 
+    private transactionDepth = 0;
+    private publishing = false;
+    private announcingCommit = false;
+    private readonly deferredWrites: Array<() => void> = [];
+    private readonly pendingPublications = new Map<AppState<unknown>, () => void>();
+    private readonly commits = new BehaviorSubject(0);
+
+    /**
+     * Runs a synchronous coordinated edit. Slot readers see the complete staged values
+     * before the first slot notification. Observers spanning several slots must use
+     * observe(), because combineLatest caches earlier notifications independently.
+     */
+    transaction<T>(edit: () => T): T {
+        if (this.announcingCommit) {
+            throw new Error("A completed-state observer cannot start a synchronous transaction.");
+        }
+        const original = new Map([...this.statePool.values()].map(state => [state, deepCopy(state.value)]));
+        const previousPublications = new Map(this.pendingPublications);
+        ++this.transactionDepth;
+        try {
+            return edit();
+        } catch (error) {
+            original.forEach((value, state) => state.stage(value));
+            this.pendingPublications.clear();
+            previousPublications.forEach((publish, state) => this.pendingPublications.set(state, publish));
+            throw error;
+        } finally {
+            if (--this.transactionDepth === 0) this.publishTransaction();
+        }
+    }
+
+    /** Reads one coherent projection after all slot observers finish the current edit. */
+    observe<T>(read: () => T, equal: (a: T, b: T) => boolean = Object.is): Observable<T> {
+        return this.commits.pipe(map(read), distinctUntilChanged(equal));
+    }
+
+    /** Drains synchronous derived edits before announcing the completed state. */
+    private publishTransaction(): void {
+        if (this.publishing || !this.pendingPublications.size) return;
+        this.publishing = true;
+        try {
+            while (this.pendingPublications.size) {
+                const publications = [...this.pendingPublications.values()];
+                this.pendingPublications.clear();
+                publications.forEach(publish => publish());
+            }
+        } finally {
+            this.publishing = false;
+        }
+        this.announcingCommit = true;
+        try {
+            this.commits.next(this.commits.value + 1);
+        } finally {
+            this.announcingCommit = false;
+        }
+        if (this.deferredWrites.length) {
+            const writes = this.deferredWrites.splice(0);
+            this.transaction(() => writes.forEach(write => write()));
+        }
+    }
+
     private readonly statePool = new Map<string, AppState<unknown>>();
     private readonly mapViewStates: Array<MapViewState<unknown>> = [];
     private readonly inspectionTreeExpansionStates = new Map<number, InspectionTreeExpansionState>();
@@ -541,14 +602,14 @@ export class AppStateService implements OnDestroy {
         return [DEFAULT_EM_WIDTH, DEFAULT_EM_HEIGHT];
     }
 
-    readonly numViewsState = this.createState<number>({
+    readonly numViewsState = this.registerState<number>({
         name: "numberOfViews",
         defaultValue: 1,
         schema: z.coerce.number().positive(),
         urlParamName: "n"
     });
 
-    readonly locationSearchResultLimitState = this.createState<number>({
+    readonly locationSearchResultLimitState = this.registerState<number>({
         name: 'locationSearchResultLimit',
         defaultValue: DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,
         schema: z.coerce.number().int().min(1).max(MAX_LOCATION_SEARCH_RESULT_LIMIT),
@@ -556,7 +617,7 @@ export class AppStateService implements OnDestroy {
         fromStorage: (payload: any): number => clampLocationSearchResultLimit(payload)
     });
 
-    readonly markerState = this.createState<boolean>({
+    readonly markerState = this.registerState<boolean>({
         name: 'marker',
         defaultValue: false,
         schema: Boolish,
@@ -564,7 +625,7 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    readonly markedPositionState = this.createState<number[]>({
+    readonly markedPositionState = this.registerState<number[]>({
         name: 'markedPosition',
         defaultValue: [],
         schema: z.array(z.coerce.number()).max(3),
@@ -577,7 +638,7 @@ export class AppStateService implements OnDestroy {
     // 2~0f~features:map:layer:tile~featureid~layertype:map:layer:tile~featureid~layertype:map:layer:tile~featureid~245:56
     // 1~0~sourcedata:map:layer:tile~address~...features...~size
     // 0~1~...
-    readonly selectionState = this.createState<InspectionPanelModel<TileFeatureId>[]>({
+    readonly selectionState = this.registerState<InspectionPanelModel<TileFeatureId>[]>({
         name: 'selected',
         defaultValue: [],
         schema: z.array(z.string()),
@@ -652,7 +713,7 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    readonly focusedViewState = this.createState<number>({
+    readonly focusedViewState = this.registerState<number>({
         name: 'focus',
         defaultValue: 0,
         schema: z.coerce.number().nonnegative(),
@@ -660,7 +721,7 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    readonly viewSyncState = this.createState<string[]>({
+    readonly viewSyncState = this.registerState<string[]>({
         name: 'viewSync',
         defaultValue: [],
         schema: z.array(z.union([
@@ -731,94 +792,26 @@ export class AppStateService implements OnDestroy {
         urlIncludeInVisualizationOnly: false
     });
 
-    readonly deckAntialiasingEnabledState = this.createState<boolean>({
-        name: 'deckAntialiasingEnabled',
-        defaultValue: true,
-        schema: Boolish
-    });
-
-    readonly semanticCompositingEnabledState = this.createState<boolean>({
-        name: 'semanticCompositingEnabled',
-        defaultValue: true,
-        schema: Boolish
-    });
-
-    readonly contactShadingEnabledState = this.createState<boolean>({
-        name: 'contactShadingEnabled',
-        defaultValue: true,
-        schema: Boolish
-    });
-
-    readonly lod3TileThresholdState = this.createState<number>({
-        name: 'lod3TileThreshold',
-        defaultValue: DEFAULT_LOD3_TILE_THRESHOLD,
-        schema: z.coerce.number().int(),
-        toStorage: value => clampLod3TileThreshold(value, DEFAULT_LOD3_TILE_THRESHOLD),
-        fromStorage: value => clampLod3TileThreshold(value, DEFAULT_LOD3_TILE_THRESHOLD)
-    });
-
-    readonly tileSubsetRenderWorkerCountState = this.createState<number>({
-        name: 'tileSubsetRenderWorkerCount',
-        defaultValue: 0,
-        schema: z.coerce.number().int(),
-        toStorage: value => clampTileSubsetRenderWorkerCount(value),
-        fromStorage: value => clampTileSubsetRenderWorkerCount(value)
-    });
-
-    readonly tilePullCompressionEnabledState = this.createState<boolean>({
+    readonly tilePullCompressionEnabledState = this.registerState<boolean>({
         name: 'tilePullCompressionEnabled',
         defaultValue: false,
         schema: Boolish
     });
 
     private invalidConnectionPolicy = "";
-    readonly pointCloudDownsamplingEnabledState = this.createState<boolean>({
-        name: 'pointCloudDownsamplingEnabled', defaultValue: DEFAULT_POINT_CLOUD_POLICY.enabled, schema: Boolish
-    });
-    readonly pointCloudDetailPixelsState = this.createState<number>({
-        name: 'pointCloudDetailPixels', defaultValue: DEFAULT_POINT_CLOUD_POLICY.detailPixels,
-        schema: pointCloudDetailSchema
-    });
-    readonly pointCloudWorkingMemoryMiBState = this.createState<number>({
-        name: 'pointCloudWorkingMemoryMiB', defaultValue: DEFAULT_POINT_CLOUD_POLICY.workingMemoryMiB,
-        schema: pointCloudWorkingMemorySchema
-    });
-    readonly pointCloudGpuMemoryMiBState = this.createState<number>({
-        name: 'pointCloudGpuMemoryMiB', defaultValue: DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB,
-        schema: pointCloudGpuMemorySchema
-    });
 
-    /** Read the same validated policy for Preferences, rendering and worker admission. */
-    get pointCloudPolicy(): PointCloudPolicy {
-        return {
-            enabled: this.pointCloudDownsamplingEnabledState.getValue(),
-            detailPixels: this.pointCloudDetailPixelsState.getValue(),
-            workingMemoryMiB: this.pointCloudWorkingMemoryMiBState.getValue(),
-            gpuMemoryMiB: this.pointCloudGpuMemoryMiBState.getValue()
-        };
-    }
-
-    /** Validate the whole preference edit before changing any persisted field. */
-    setPointCloudPolicy(policy: PointCloudPolicy): void {
-        const parsed = pointCloudPolicySchema.parse(policy);
-        this.pointCloudDownsamplingEnabledState.next(parsed.enabled);
-        this.pointCloudDetailPixelsState.next(parsed.detailPixels);
-        this.pointCloudWorkingMemoryMiBState.next(parsed.workingMemoryMiB);
-        this.pointCloudGpuMemoryMiBState.next(parsed.gpuMemoryMiB);
-    }
-
-    readonly connectionRetryEnabledState = this.createState<boolean>({
+    readonly connectionRetryEnabledState = this.registerState<boolean>({
         name: 'connectionRetryEnabled', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.enabled, schema: Boolish
     });
-    readonly connectionRetryInitialDelayMsState = this.createState<number>({
+    readonly connectionRetryInitialDelayMsState = this.registerState<number>({
         name: 'connectionRetryInitialDelayMs', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.initialDelayMs,
         schema: retryDelaySchema
     });
-    readonly connectionRetryBackoffMultiplierState = this.createState<number>({
+    readonly connectionRetryBackoffMultiplierState = this.registerState<number>({
         name: 'connectionRetryBackoffMultiplier', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.backoffMultiplier,
         schema: retryMultiplierSchema
     });
-    readonly connectionRetryMaxDelayMsState = this.createState<number>({
+    readonly connectionRetryMaxDelayMsState = this.registerState<number>({
         name: 'connectionRetryMaxDelayMs', defaultValue: DEFAULT_CONNECTION_RETRY_POLICY.maxDelayMs,
         schema: retryDelaySchema
     });
@@ -849,14 +842,14 @@ export class AppStateService implements OnDestroy {
         this.connectionRetryMaxDelayMsState.next(parsed.maxDelayMs);
     }
 
-    readonly mapZoomStepState = this.createState<number>({
+    readonly mapZoomStepState = this.registerState<number>({
         name: 'mapZoomStep',
         defaultValue: DEFAULT_MAP_ZOOM_STEP,
         schema: z.coerce.number(),
         fromStorage: value => clampMapZoomStep(Number(value))
     });
 
-    readonly featureZoomClearanceMetersState = this.createState<number>({
+    readonly featureZoomClearanceMetersState = this.registerState<number>({
         name: 'featureZoomClearanceMeters',
         defaultValue: DEFAULT_FEATURE_ZOOM_CLEARANCE_METERS,
         schema: z.coerce.number(),
@@ -887,7 +880,7 @@ export class AppStateService implements OnDestroy {
         urlParamName: 'bg'
     });
 
-    readonly layerNamesState = this.createState<Array<string>>({
+    readonly layerNamesState = this.registerState<Array<string>>({
         name: "layerNames",
         defaultValue: [],
         schema: z.array(z.string()),
@@ -977,26 +970,19 @@ export class AppStateService implements OnDestroy {
         snapshotPersist: false
     });
 
-    readonly styleVisibilityState = this.createState<Record<string, boolean>>({
+    readonly styleVisibilityState = this.registerState<Record<string, boolean>>({
         name: 'styleVisiblity',
         schema: z.record(z.string(), z.coerce.boolean()),
         defaultValue: {}
     });
 
-    readonly tilesLoadLimitState = this.createState<number>({
-        name: 'tilesLoadLimit',
-        defaultValue: MAX_NUM_TILES_TO_LOAD,
-        schema: z.coerce.number().nonnegative(),
-        urlParamName: 'tll'
-    });
-
-    readonly enabledCoordsTileIdsState = this.createState<string[]>({
+    readonly enabledCoordsTileIdsState = this.registerState<string[]>({
         name: 'enabledCoordsTileIds',
         defaultValue: ["WGS84"],
         schema: z.array(z.string())
     });
 
-    readonly coordinatesEnabledState = this.createState<boolean>({
+    readonly coordinatesEnabledState = this.registerState<boolean>({
         name: "coordinatesEnabled",
         defaultValue: true,
         schema: Boolish,
@@ -1004,14 +990,14 @@ export class AppStateService implements OnDestroy {
         configDefault: true
     });
 
-    readonly coordinatesLegalTermsAcceptedState = this.createState<boolean>({
+    readonly coordinatesLegalTermsAcceptedState = this.registerState<boolean>({
         name: "coordinatesLegalTermsAccepted",
         defaultValue: false,
         schema: Boolish,
         snapshotPersist: false
     });
 
-    readonly diagnosticsLogFilterState = this.createState<DiagnosticsLogFilter>({
+    readonly diagnosticsLogFilterState = this.registerState<DiagnosticsLogFilter>({
         name: 'diagnosticsLogFilter',
         defaultValue: {
             info: true,
@@ -1025,7 +1011,7 @@ export class AppStateService implements OnDestroy {
         })
     });
 
-    readonly diagnosticsExportOptionsState = this.createState<DiagnosticsExportOptions>({
+    readonly diagnosticsExportOptionsState = this.registerState<DiagnosticsExportOptions>({
         name: 'diagnosticsExportOptions',
         defaultValue: {
             includeProgress: true,
@@ -1049,7 +1035,7 @@ export class AppStateService implements OnDestroy {
         })
     });
 
-    readonly featureSearchGroupingState = this.createState<number[]>({
+    readonly featureSearchGroupingState = this.registerState<number[]>({
         name: 'featureSearchGrouping',
         defaultValue: [...DEFAULT_FEATURE_SEARCH_GROUPING],
         schema: z.array(z.coerce.number()),
@@ -1058,7 +1044,7 @@ export class AppStateService implements OnDestroy {
         snapshotPersist: false
     });
 
-    readonly featureSearchState = this.createState<FeatureSearchStateEntry[]>({
+    readonly featureSearchState = this.registerState<FeatureSearchStateEntry[]>({
         name: 'featureSearchState',
         defaultValue: [],
         schema: FeatureSearchStateSchema,
@@ -1067,112 +1053,112 @@ export class AppStateService implements OnDestroy {
         snapshotPersist: false
     });
 
-    readonly mapsOpenState = this.createState<boolean>({
+    readonly mapsOpenState = this.registerState<boolean>({
         name: 'mapsOpenState',
         defaultValue: false,
         schema: Boolish
     });
 
-    readonly styleEditorTargetState = this.createState<string | null>({
+    readonly styleEditorTargetState = this.registerState<string | null>({
         name: 'styleEditorTarget',
         defaultValue: null,
         schema: z.string().nullable()
     });
 
-    readonly dockOpenState = this.createState<boolean>({
+    readonly dockOpenState = this.registerState<boolean>({
         name: 'dockOpenState',
         defaultValue: false,
         schema: Boolish
     });
 
     /** Local layout preferences; deliberately absent from shareable map URLs. */
-    readonly dockWidthState = this.createState<number | null>({
+    readonly dockWidthState = this.registerState<number | null>({
         name: 'dockWidth', defaultValue: null, schema: z.number().min(0).max(32768).nullable()
     });
-    readonly viewPanelSizesState = this.createState<number[]>({
+    readonly viewPanelSizesState = this.registerState<number[]>({
         name: 'viewPanelSizes', defaultValue: [], schema: z.array(z.number().min(0).max(100)).max(2)
     });
 
-    readonly dockActiveTabState = this.createState<string>({
+    readonly dockActiveTabState = this.registerState<string>({
         name: 'dockActiveTabState',
         defaultValue: INSPECTION_DOCK_TAB_ID,
         schema: z.string()
     });
 
-    readonly dockAutoCollapse = this.createState<boolean>({
+    readonly dockAutoCollapse = this.registerState<boolean>({
         name: 'dockAutoCollapse',
         defaultValue: true,
         schema: Boolish
     });
 
-    readonly distributionVersions = this.createState<Versions[]>({
+    readonly distributionVersions = this.registerState<Versions[]>({
         name: 'distributionVersions',
         defaultValue: [],
         schema: z.array(z.record(z.string(), z.string()))
     });
 
-    readonly erdblickVersion = this.createState<string>({
+    readonly erdblickVersion = this.registerState<string>({
         name: 'erdblickVersion',
         defaultValue: "",
         schema: z.string()
     });
 
-    readonly inspectionsLimitState = this.createState<number>({
+    readonly inspectionsLimitState = this.registerState<number>({
         name: 'inspectionsLimitState',
         defaultValue: Math.floor(MAX_SIMULTANEOUS_INSPECTIONS / 2),
         schema: z.coerce.number().int().min(1).max(MAX_SIMULTANEOUS_INSPECTIONS)
     });
 
-    readonly drillPickRadiusState = this.createState<number>({
+    readonly drillPickRadiusState = this.registerState<number>({
         name: 'drillPickRadius',
         defaultValue: DEFAULT_DRILL_PICK_RADIUS,
         schema: z.coerce.number().int().min(MIN_DRILL_PICK_RADIUS).max(MAX_DRILL_PICK_RADIUS)
     });
 
-    readonly inspectionTreeExpandByDefaultState = this.createState<boolean>({
+    readonly inspectionTreeExpandByDefaultState = this.registerState<boolean>({
         name: 'inspectionTreeExpandByDefault',
         defaultValue: false,
         schema: Boolish
     });
 
-    readonly sourceDataInspectionDefaultColumnsState = this.createState<string[]>({
+    readonly sourceDataInspectionDefaultColumnsState = this.registerState<string[]>({
         name: 'sourceDataInspectionDefaultColumns',
         defaultValue: [],
         schema: z.array(z.enum(["displayAddress", "schemaType"]))
     });
 
-    readonly inspectionTreeHiddenColumnsState = this.createState<Record<string, string[]>>({
+    readonly inspectionTreeHiddenColumnsState = this.registerState<Record<string, string[]>>({
         name: 'inspectionTreeHiddenColumns',
         defaultValue: {},
         schema: z.record(z.string(), z.array(z.string())),
         snapshotPersist: false
     });
 
-    readonly inspectionValueVaryColorsState = this.createState<boolean>({
+    readonly inspectionValueVaryColorsState = this.registerState<boolean>({
         name: 'inspectionValueVaryColors',
         defaultValue: true,
         schema: Boolish
     });
 
-    readonly inspectionValueVaryOutlinesState = this.createState<boolean>({
+    readonly inspectionValueVaryOutlinesState = this.registerState<boolean>({
         name: 'inspectionValueVaryOutlines',
         defaultValue: false,
         schema: Boolish
     });
 
-    readonly inspectionValueVaryStripingState = this.createState<boolean>({
+    readonly inspectionValueVaryStripingState = this.registerState<boolean>({
         name: 'inspectionValueVaryStriping',
         defaultValue: false,
         schema: Boolish
     });
 
-    readonly hoverLabelsEnabledState = this.createState<boolean>({
+    readonly hoverLabelsEnabledState = this.registerState<boolean>({
         name: 'hoverLabelsEnabled',
         defaultValue: true,
         schema: Boolish
     });
 
-    readonly hoverLabelFieldsState = this.createState<HoverLabelFieldConfig[]>({
+    readonly hoverLabelFieldsState = this.registerState<HoverLabelFieldConfig[]>({
         name: 'hoverLabelFields',
         defaultValue: DEFAULT_HOVER_LABEL_FIELDS.map(field => ({...field})),
         schema: z.array(z.object({
@@ -1182,7 +1168,7 @@ export class AppStateService implements OnDestroy {
         }))
     });
 
-    readonly inspectionComparisonState = this.createState<InspectionComparisonModel | null>({
+    readonly inspectionComparisonState = this.registerState<InspectionComparisonModel | null>({
         name: 'inspectionComparisonState',
         defaultValue: null,
         schema: z.union([
@@ -1210,7 +1196,7 @@ export class AppStateService implements OnDestroy {
         ])
     });
 
-    readonly dialogLayoutsState = this.createState<Record<string, AppDialogLayout | InspectionDialogLayout>>({
+    readonly dialogLayoutsState = this.registerState<Record<string, AppDialogLayout | InspectionDialogLayout>>({
         name: 'dialogLayouts',
         defaultValue: {},
         schema: z.record(z.string(), z.object({
@@ -1389,13 +1375,29 @@ export class AppStateService implements OnDestroy {
     }
 
     /** Creates an application state entry and registers it for persistence. */
-    private createState<T>(options: AppStateOptions<T>): AppState<T> {
-        return new AppState<T>(this.statePool, options);
+    registerState<T>(options: AppStateOptions<T>): AppState<T> {
+        const state = new AppState<T>(this.statePool, options);
+        this.registerPublication(state);
+        return state;
+    }
+
+    /** Attaches owner-created state to the same publication boundary as persistence. */
+    private registerPublication<T>(state: AppState<T>): void {
+        state.writeValue = value => {
+            if (this.announcingCommit) {
+                this.deferredWrites.push(() => state.next(value));
+                return;
+            }
+            state.stage(value);
+            this.pendingPublications.set(state as AppState<unknown>, () => state.publish());
+            if (!this.transactionDepth) this.publishTransaction();
+        };
     }
 
     /** Creates a state entry scoped to each map view. */
     private createMapViewState<T>(options: AppStateOptions<T>): MapViewState<T> {
         const state = new MapViewState<T>(this.statePool, options);
+        this.registerPublication(state.appState);
         this.mapViewStates.push(state as MapViewState<unknown>);
         return state;
     }
@@ -2025,7 +2027,7 @@ export class AppStateService implements OnDestroy {
         const previous = this.isHydrating;
         this.isHydrating = true;
         try {
-            callback();
+            this.transaction(callback);
         } finally {
             this.isHydrating = previous;
         }
@@ -2477,24 +2479,6 @@ export class AppStateService implements OnDestroy {
         this.seedAdditionalViews(previousViewCount, val);
         this.numViewsState.next(val);
     };
-    get deckAntialiasingEnabled() {return this.deckAntialiasingEnabledState.getValue();}
-    set deckAntialiasingEnabled(val: boolean) {this.deckAntialiasingEnabledState.next(!!val);}
-    get semanticCompositingEnabled() {return this.semanticCompositingEnabledState.getValue();}
-    set semanticCompositingEnabled(val: boolean) {this.semanticCompositingEnabledState.next(!!val);}
-    get contactShadingEnabled() {return this.contactShadingEnabledState.getValue();}
-    set contactShadingEnabled(val: boolean) {this.contactShadingEnabledState.next(!!val);}
-    get lod3TileThreshold() {return this.lod3TileThresholdState.getValue();}
-    set lod3TileThreshold(val: number) {
-        this.lod3TileThresholdState.next(clampLod3TileThreshold(val, DEFAULT_LOD3_TILE_THRESHOLD));
-    }
-    get tileSubsetRenderWorkerCount() {
-        return this.tileSubsetRenderWorkerCountState.getValue();
-    }
-    set tileSubsetRenderWorkerCount(val: number) {
-        this.tileSubsetRenderWorkerCountState.next(
-            clampTileSubsetRenderWorkerCount(val)
-        );
-    }
     get tilePullCompressionEnabled() {return this.tilePullCompressionEnabledState.getValue();}
     set tilePullCompressionEnabled(val: boolean) {this.tilePullCompressionEnabledState.next(val);};
     get mapZoomStep() {return this.mapZoomStepState.getValue();}
@@ -2527,9 +2511,7 @@ export class AppStateService implements OnDestroy {
     set layerNames(val: Array<string>) {this.layerNamesState.next(val);};
     get styles() {return this.stylesState.getValue();}
     get styleVisibility() {return this.styleVisibilityState.getValue();}
-    set styleVisibility(val: Record<string, boolean>) {this.styleVisibilityState.next(val);};
-    get tilesLoadLimit() {return this.tilesLoadLimitState.getValue();}
-    set tilesLoadLimit(val: number) {this.tilesLoadLimitState.next(val);};
+    set styleVisibility(val: Record<string, boolean>) {this.styleVisibilityState.next(val);};;
     get inspectionsLimit() {return this.inspectionsLimitState.getValue();}
     set inspectionsLimit(val: number) {
         const numeric = Number(val);

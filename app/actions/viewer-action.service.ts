@@ -1,3 +1,4 @@
+import {RenderPreferencesService} from "../mapview/render-preferences.service";
 import {Injectable, NgZone, OnDestroy} from "@angular/core";
 import {BehaviorSubject, Subscription} from "rxjs";
 import type {z} from "zod";
@@ -94,7 +95,8 @@ export class ViewerActionService implements OnDestroy {
         private readonly diagnostics: DiagnosticsFacadeService,
         private readonly viewDiagnostics: ViewLayerDiagnosticsService,
         private readonly styleReports: StyleValidationReportService,
-        private readonly ui: ViewerUiService
+        private readonly ui: ViewerUiService,
+        public readonly renderPreferences: RenderPreferencesService
     ) {}
 
     /** Starts the optional control adapter after ordinary app/stream initialization, without delaying the map. */
@@ -1279,9 +1281,9 @@ export class ViewerActionService implements OnDestroy {
             case "app.marker": return {enabled: this.state.marker, position: this.state.markedPosition.length >= 2
                 ? {lon: this.state.markedPosition[0], lat: this.state.markedPosition[1], alt: this.state.markedPosition[2] ?? 0} : null};
             case "app.preferences.rendering": return {
-                antialiasing: this.state.deckAntialiasingEnabled, semanticCompositing: this.state.semanticCompositingEnabled,
-                contactShading: this.state.contactShadingEnabled, tilePullCompression: this.state.tilePullCompressionEnabled,
-                tileLimit: this.state.tilesLoadLimit, renderWorkers: this.state.tileSubsetRenderWorkerCount
+                antialiasing: this.renderPreferences.deckAntialiasingEnabled, semanticCompositing: this.renderPreferences.semanticCompositingEnabled,
+                contactShading: this.renderPreferences.contactShadingEnabled, tilePullCompression: this.state.tilePullCompressionEnabled,
+                tileLimit: this.renderPreferences.tilesLoadLimit, renderWorkers: this.renderPreferences.tileSubsetRenderWorkerCount
             };
             case "app.preferences.navigation": return {zoomStep: this.state.mapZoomStep, featureZoomClearance: this.state.featureZoomClearanceMeters};
             case "app.preferences.inspection": return {
@@ -1384,12 +1386,12 @@ export class ViewerActionService implements OnDestroy {
             }
             case "app.preferences.rendering": {
                 const value = this.arguments(appStateChannels[target.channel].valueSchema, raw);
-                this.state.deckAntialiasingEnabled = value.antialiasing;
-                this.state.semanticCompositingEnabled = value.semanticCompositing;
-                this.state.contactShadingEnabled = value.contactShading;
+                this.renderPreferences.deckAntialiasingEnabled = value.antialiasing;
+                this.renderPreferences.semanticCompositingEnabled = value.semanticCompositing;
+                this.renderPreferences.contactShadingEnabled = value.contactShading;
                 this.state.tilePullCompressionEnabled = value.tilePullCompression;
-                this.state.tilesLoadLimit = value.tileLimit;
-                this.state.tileSubsetRenderWorkerCount = value.renderWorkers;
+                this.renderPreferences.tilesLoadLimit = value.tileLimit;
+                this.renderPreferences.tileSubsetRenderWorkerCount = value.renderWorkers;
                 break;
             }
             case "app.preferences.navigation": {

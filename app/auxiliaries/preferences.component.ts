@@ -1,3 +1,4 @@
+import {RenderPreferencesService} from "../mapview/render-preferences.service";
 import {Component, OnDestroy, OnInit, ViewChild} from '@angular/core';
 import {combineLatest, Subscription} from "rxjs";
 import {DEFAULT_POINT_CLOUD_POLICY, pointCloudPolicySchema, PointCloudPolicy} from "../shared/point-cloud-policy";
@@ -654,17 +655,16 @@ export class PreferencesComponent implements OnInit, OnDestroy {
                 public stateService: AppStateService,
                 public coordinatesPolicy: CoordinatesPolicyService,
                 private searchSchema: FeatureSearchSchemaService,
-                private dialogStack: DialogStackService) {
+                private dialogStack: DialogStackService,
+        public readonly renderPreferences: RenderPreferencesService) {
         this.subscriptions.push(this.stateService.connectionRetryEnabledState.subscribe(value => this.connectionRetryEnabled = value));
-        this.subscriptions.push(combineLatest([this.stateService.pointCloudDownsamplingEnabledState,
-            this.stateService.pointCloudDetailPixelsState, this.stateService.pointCloudWorkingMemoryMiBState,
-            this.stateService.pointCloudGpuMemoryMiBState]).subscribe(() => {
-                this.pointCloudPolicyDraft = {...this.stateService.pointCloudPolicy};
+        this.subscriptions.push(this.renderPreferences.pointCloudPolicyChanges.subscribe(() => {
+                this.pointCloudPolicyDraft = {...this.renderPreferences.pointCloudPolicy};
             }));
         this.subscriptions.push(this.stateService.connectionRetryInitialDelayMsState.subscribe(value => this.connectionInitialSeconds = value / 1000));
         this.subscriptions.push(this.stateService.connectionRetryBackoffMultiplierState.subscribe(value => this.connectionBackoffMultiplier = value));
         this.subscriptions.push(this.stateService.connectionRetryMaxDelayMsState.subscribe(value => this.connectionMaximumSeconds = value / 1000));
-        this.subscriptions.push(this.stateService.tilesLoadLimitState.subscribe(limit => {
+        this.subscriptions.push(this.renderPreferences.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;
         }));
         this.subscriptions.push(this.stateService.inspectionsLimitState.subscribe(limit => {
@@ -679,21 +679,21 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.subscriptions.push(this.stateService.tilePullCompressionEnabledState.subscribe(enabled => {
             this.tilePullCompressionEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.stateService.deckAntialiasingEnabledState.subscribe(enabled => {
+        this.subscriptions.push(this.renderPreferences.deckAntialiasingEnabledState.subscribe(enabled => {
             this.deckAntialiasingEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.stateService.semanticCompositingEnabledState.subscribe(enabled => {
+        this.subscriptions.push(this.renderPreferences.semanticCompositingEnabledState.subscribe(enabled => {
             this.semanticCompositingEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.stateService.contactShadingEnabledState.subscribe(enabled => {
+        this.subscriptions.push(this.renderPreferences.contactShadingEnabledState.subscribe(enabled => {
             this.contactShadingEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.stateService.lod3TileThresholdState.subscribe(threshold => {
+        this.subscriptions.push(this.renderPreferences.lod3TileThresholdState.subscribe(threshold => {
             this.lod3TileThresholdInput = threshold;
             this.updateLod3TileThresholdChangeState();
         }));
         this.subscriptions.push(
-            this.stateService.tileSubsetRenderWorkerCountState.subscribe(
+            this.renderPreferences.tileSubsetRenderWorkerCountState.subscribe(
                 workerCount => {
                     this.renderWorkerCountInput = workerCount;
                     this.updateRenderWorkerCountChangeState();
@@ -806,16 +806,16 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Refreshes dialog fields from current state whenever the preferences dialog opens. */
     onDialogShow() {
-        this.tilesToLoadInput = this.stateService.tilesLoadLimit;
+        this.tilesToLoadInput = this.renderPreferences.tilesLoadLimit;
         this.limitSimultaneousInspectionsInput = this.stateService.inspectionsLimit;
         this.drillPickRadiusInput = this.stateService.drillPickRadius;
         this.locationSearchResultLimitInput = this.stateService.locationSearchResultLimit;
         this.mapZoomStepInput = this.stateService.mapZoomStep;
         this.featureZoomClearanceMetersInput =
             this.stateService.featureZoomClearanceMeters;
-        this.lod3TileThresholdInput = this.stateService.lod3TileThreshold;
+        this.lod3TileThresholdInput = this.renderPreferences.lod3TileThreshold;
         this.renderWorkerCountInput =
-            this.stateService.tileSubsetRenderWorkerCount;
+            this.renderPreferences.tileSubsetRenderWorkerCount;
         this.tilesToLoadChanged = false;
         this.inspectionsLimitChanged = false;
         this.drillPickRadiusChanged = false;
@@ -914,7 +914,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         this.tilesToLoadInput = limit;
-        this.stateService.tilesLoadLimit = limit;
+        this.renderPreferences.tilesLoadLimit = limit;
         this.tilesToLoadChanged = false;
         this.mapService.requestViewRecalculation(ViewRecalculationReason.TileLimit);
         this.messageService.showSuccess("Successfully updated tile limits!");
@@ -963,19 +963,19 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Enables or disables WebGL antialiasing; map views recreate their renderer when this changes. */
     setDeckAntialiasingEnabled(enabled: boolean) {
         this.deckAntialiasingEnabledSetting = enabled;
-        this.stateService.deckAntialiasingEnabled = enabled;
+        this.renderPreferences.deckAntialiasingEnabled = enabled;
     }
 
     /** Recreates map renderers with or without the semantic compositor for diagnosis. */
     setSemanticCompositingEnabled(enabled: boolean) {
         this.semanticCompositingEnabledSetting = enabled;
-        this.stateService.semanticCompositingEnabled = enabled;
+        this.renderPreferences.semanticCompositingEnabled = enabled;
     }
 
     /** Enables or disables the final-depth screen-space contact shading pass. */
     setContactShadingEnabled(enabled: boolean) {
         this.contactShadingEnabledSetting = enabled;
-        this.stateService.contactShadingEnabled = enabled;
+        this.renderPreferences.contactShadingEnabled = enabled;
     }
 
     /** Applies the pending LOD 3 tile threshold after validating the input. */
@@ -992,13 +992,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const normalized = clampLod3TileThreshold(threshold);
         this.lod3TileThresholdInput = normalized;
-        this.stateService.lod3TileThreshold = normalized;
+        this.renderPreferences.lod3TileThreshold = normalized;
         this.lod3TileThresholdChanged = false;
     }
 
     /** Keep numeric drafts out of persisted state until the whole policy is applied. */
     get pointCloudPolicyChanged(): boolean {
-        return JSON.stringify(this.pointCloudPolicyDraft) !== JSON.stringify(this.stateService.pointCloudPolicy);
+        return JSON.stringify(this.pointCloudPolicyDraft) !== JSON.stringify(this.renderPreferences.pointCloudPolicy);
     }
 
     /** Publish one validated point-cloud preference edit through AppState. */
@@ -1008,7 +1008,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.messageService.showError("Point spacing must be 0.5–32 pixels, working memory 32–4096 MiB, and GPU allowance 16–2048 MiB.");
             return;
         }
-        this.stateService.setPointCloudPolicy(parsed.data);
+        this.renderPreferences.setPointCloudPolicy(parsed.data);
     }
 
     /** Applies zero-for-auto or one explicit subset-render worker count. */
@@ -1029,7 +1029,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const normalized = clampTileSubsetRenderWorkerCount(workerCount);
         this.renderWorkerCountInput = normalized;
-        this.stateService.tileSubsetRenderWorkerCount = normalized;
+        this.renderPreferences.tileSubsetRenderWorkerCount = normalized;
         this.renderWorkerCountChanged = false;
     }
 
@@ -1166,7 +1166,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Tracks slider edits for the tile-load limit without applying them immediately. */
     protected onTilesToLoadSliderChange(value: number) {
         this.tilesToLoadInput = value;
-        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.stateService.tilesLoadLimit);
+        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.renderPreferences.tilesLoadLimit);
     }
 
     /** Tracks slider edits for the simultaneous inspection limit. */
@@ -1217,7 +1217,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Tracks free-form edits for the tile-load input. */
     protected onTilesToLoadInputChange(value: number | string) {
         this.tilesToLoadInput = value;
-        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.stateService.tilesLoadLimit);
+        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.renderPreferences.tilesLoadLimit);
     }
 
     /** Tracks free-form edits for the inspection-limit input. */
@@ -1274,7 +1274,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         this.lod3TileThresholdChanged =
-            clampLod3TileThreshold(threshold) !== this.stateService.lod3TileThreshold;
+            clampLod3TileThreshold(threshold) !== this.renderPreferences.lod3TileThreshold;
     }
 
     /** Updates the dirty flag for the subset-render worker control. */
@@ -1288,7 +1288,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         this.renderWorkerCountChanged =
             clampTileSubsetRenderWorkerCount(workerCount) !==
-            this.stateService.tileSubsetRenderWorkerCount;
+            this.renderPreferences.tileSubsetRenderWorkerCount;
     }
 
     /** Determines whether a numeric preference control still has an unapplied change. */

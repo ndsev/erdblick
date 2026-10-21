@@ -3,7 +3,7 @@ import {auditTime, combineLatest, skip, Subject} from "rxjs";
 import {DEFAULT_POINT_CLOUD_POLICY, pointCloudSpacingMeters, type PointCloudRenderPolicy} from "../../shared/point-cloud-policy";
 import {gpuMemoryBudget, type GpuMemoryReservation} from "./gpu-memory-budget";
 import {pointCloudInputBudget} from "../../shared/point-cloud-input-budget";
-import {AppStateService} from "../../shared/appstate.service";
+import {RenderPreferencesService} from "../render-preferences.service";
 import {AUTO_TILE_SUBSET_RENDER_WORKER_COUNT} from
     "../../shared/tile-render-policy";
 import type {
@@ -276,14 +276,13 @@ export class TileSubsetLayerRenderService {
     /** Track runtime worker-count changes when application state is available. */
     constructor(
         @Optional()
-        private readonly appState: AppStateService | null = null
+        private readonly appState: RenderPreferencesService | null = null
     ) {
         if (!appState) {
             return;
         }
         let previousPolicy = this.pointCloudPolicy;
-        combineLatest([appState.pointCloudDownsamplingEnabledState, appState.pointCloudDetailPixelsState,
-            appState.pointCloudWorkingMemoryMiBState, appState.pointCloudGpuMemoryMiBState]).pipe(auditTime(0)).subscribe(() => {
+        appState.pointCloudPolicyChanges.subscribe(() => {
             gpuMemoryBudget.setLimit(this.pointCloudPolicy.gpuMemoryMiB * 1048576);
             pointCloudInputBudget.setWorkingLimit(this.pointCloudPolicy.workingMemoryMiB * 1048576);
             const policy = this.pointCloudPolicy;

@@ -1,3 +1,4 @@
+import {RenderPreferencesService} from "../render-preferences.service";
 import {
     BehaviorSubject,
     combineLatest,
@@ -507,7 +508,8 @@ export abstract class DeckMapView implements IRenderView {
                 protected coordinatesService: CoordinatesService,
                 protected stateService: AppStateService,
                 protected configService: AppConfigService,
-                protected layerController: ViewLayerController) {
+                protected layerController: ViewLayerController,
+        public readonly renderPreferences: RenderPreferencesService) {
         this._viewIndex = id;
         this.canvasId = canvasId;
         this.targetNavigationAdapter = new ErdblickTargetNavigationAdapter({
@@ -579,10 +581,10 @@ export abstract class DeckMapView implements IRenderView {
         this.setCanvasDrawingBufferSize(canvas, container.clientWidth, container.clientHeight);
         this.lastCanvasCssSize = this.normalizedCanvasCssSize(container.clientWidth, container.clientHeight);
         const gl = this.createWebGl2Context(canvas, container);
-        this.contactShadingEnabled = this.stateService.contactShadingEnabled;
+        this.contactShadingEnabled = this.renderPreferences.contactShadingEnabled;
         // Snapshot once: setup awaits the device, while preference changes may
         // already be starting the next renderer generation.
-        const semanticCompositingEnabled = this.stateService.semanticCompositingEnabled;
+        const semanticCompositingEnabled = this.renderPreferences.semanticCompositingEnabled;
 
         this.setViewFromState(this.stateService.cameraViewDataState.getValue(this._viewIndex));
 
@@ -1163,7 +1165,7 @@ export abstract class DeckMapView implements IRenderView {
         };
         const attributes: WebGLContextAttributes = {
             alpha: true,
-            antialias: this.stateService.deckAntialiasingEnabled,
+            antialias: this.renderPreferences.deckAntialiasingEnabled,
             depth: true,
             stencil: false,
             preserveDrawingBuffer: false,
@@ -1937,7 +1939,7 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.stateService.contactShadingEnabledState
+            this.renderPreferences.contactShadingEnabledState
                 .pipe(distinctUntilChanged())
                 .subscribe(enabled => {
                     this.contactShadingEnabled = enabled;
@@ -3776,7 +3778,7 @@ export abstract class DeckMapView implements IRenderView {
     /** Returns the per-view tile budget derived from the global load limit and split-view count. */
     private tileLimitPerView(): number {
         const viewCount = Math.max(1, this.stateService.numViews);
-        return Math.max(1, Math.floor(this.stateService.tilesLoadLimit / viewCount));
+        return Math.max(1, Math.floor(this.renderPreferences.tilesLoadLimit / viewCount));
     }
 
     /** Adds or removes the temporary tile-outline overlay created from context-menu interactions. */

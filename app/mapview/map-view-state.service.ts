@@ -1,3 +1,4 @@
+import {RenderPreferencesService} from "./render-preferences.service";
 import {Injectable} from "@angular/core";
 import {Subject, filter, firstValueFrom, fromEvent, merge, startWith} from "rxjs";
 import {MapInfoService} from "../mapdata/map-info.service";
@@ -88,7 +89,8 @@ export class MapViewStateService {
 
     constructor(
         private readonly stateService: AppStateService,
-        private readonly mapInfo: MapInfoService
+        private readonly mapInfo: MapInfoService,
+        public readonly renderPreferences: RenderPreferencesService
     ) {
         let previousViewCount = this.stateService.numViews;
         this.stateService.numViewsState.subscribe(numViews => {
@@ -111,7 +113,7 @@ export class MapViewStateService {
             this.mapInfo.reapplySyncOptionsForAllViews();
             this.requestViewRecalculation(ViewRecalculationReason.NumViews);
         });
-        this.stateService.lod3TileThresholdState.subscribe(() =>
+        this.renderPreferences.lod3TileThresholdState.subscribe(() =>
             this.requestViewRecalculation(ViewRecalculationReason.LodThreshold));
         this.mapInfo.layerStateChanged.subscribe(reason => this.requestViewRecalculation(reason));
     }
@@ -277,7 +279,7 @@ export class MapViewStateService {
 
     /** Recomputes visible tile ids and render policy for every view. */
     private recalculateVisibleTiles(): void {
-        const tileLimit = this.stateService.tilesLoadLimit / this.stateService.numViews;
+        const tileLimit = this.renderPreferences.tilesLoadLimit / this.stateService.numViews;
         this.viewVisualizationState.forEach((state, viewIndex) => {
             state.recalculateTileIds(
                 tileLimit,
@@ -298,7 +300,7 @@ export class MapViewStateService {
         const tileCount = this.styleVisibleTileCount(viewIndex, level);
         return clampStyleLod(style.lodForVisibleTileCount(
             tileCount,
-            this.stateService.lod3TileThreshold
+            this.renderPreferences.lod3TileThreshold
         ));
     }
 
@@ -310,7 +312,7 @@ export class MapViewStateService {
     ): number {
         return clampPresentationLod(style.presentationLodForVisibleTileCount(
             this.styleVisibleTileCount(viewIndex, level),
-            this.stateService.lod3TileThreshold
+            this.renderPreferences.lod3TileThreshold
         ));
     }
 
@@ -427,7 +429,7 @@ export class MapViewStateService {
         if (cached) {
             return cached;
         }
-        const tileLimit = this.stateService.tilesLoadLimit / Math.max(1, this.stateService.numViews);
+        const tileLimit = this.renderPreferences.tilesLoadLimit / Math.max(1, this.stateService.numViews);
         const visibleTileIds = coreLib.getTileIds(viewState.viewport, normalizedLevel, tileLimit) as number[];
         viewState.visibleTileIdsPerLevel.set(normalizedLevel, visibleTileIds);
         viewState.visibleTileIdSetsPerLevel.set(normalizedLevel, new Set<number>(visibleTileIds));
