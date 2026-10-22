@@ -20,10 +20,10 @@ import { Subscription } from "rxjs";
 import { coreLib } from "../integrations/wasm";
 import { parseMapPartitionKey } from "../mapdata/partition.model";
 import { FeatureSearchService } from "../search/feature.search.service";
-import { JumpTargetService } from "../search/jump.service";
-import { AppStateService } from "../shared/appstate.service";
+import { JumpTargetService } from "../navigation/jump.service";
+import { AppStateService } from "../state/app-state.service";
 import { ClipboardService } from "../shared/clipboard.service";
-import type { FeatureSearchMapLayerRef } from "../shared/feature-search-state";
+import type { FeatureSearchMapLayerRef } from "../search/feature-search-state";
 import { InfoMessageService } from "../shared/info.service";
 import {
     isFeatureInspectionSubTarget,
@@ -37,7 +37,7 @@ import {
 import { inspectionSearchNumberLiteral } from "./inspection-search.util";
 import { InspectionSelectionService } from "./inspection-selection.service";
 import { SelectedSourceData, type InspectionTreeExpansionState } from "./inspection-state.model";
-import { InspectionStateService } from "./inspection-state.service";
+import { InspectionPanelService } from "./inspection-panel.service";
 import { expandPathToFirstHighlightedRow } from "./inspection-tree-highlight";
 import { inspectionValueBubbleClasses } from "./inspection-value-bubble.presentation";
 
@@ -472,7 +472,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         private messageService: InfoMessageService,
         private featureSearchService: FeatureSearchService,
         private sanitizer: DomSanitizer,
-        public readonly inspectionState: InspectionStateService) {
+        public readonly inspectionState: InspectionPanelService) {
         effect(() => {
             const columns = this.columns();
             const savedHiddenColumns = this.inspectionState.getInspectionTreeHiddenColumns(this.panelId());
@@ -528,7 +528,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
             this.scrollToHighlightedIndex(index);
         }));
-        this.subscriptions.push(this.inspectionState.inspectionTreeExpandByDefaultState.subscribe(expandByDefault => {
+        this.subscriptions.push(this.inspectionState.store.inspectionTreeExpandByDefaultState.subscribe(expandByDefault => {
             if (!this.data.length) {
                 return;
             }
@@ -546,9 +546,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.refreshLayout();
             this.cdr.markForCheck();
         }));
-        this.subscriptions.push(this.inspectionState.inspectionValueVaryColorsState.subscribe(() => this.cdr.markForCheck()));
-        this.subscriptions.push(this.inspectionState.inspectionValueVaryOutlinesState.subscribe(() => this.cdr.markForCheck()));
-        this.subscriptions.push(this.inspectionState.inspectionValueVaryStripingState.subscribe(() => this.cdr.markForCheck()));
+        this.subscriptions.push(this.inspectionState.store.inspectionValueVaryColorsState.subscribe(() => this.cdr.markForCheck()));
+        this.subscriptions.push(this.inspectionState.store.inspectionValueVaryOutlinesState.subscribe(() => this.cdr.markForCheck()));
+        this.subscriptions.push(this.inspectionState.store.inspectionValueVaryStripingState.subscribe(() => this.cdr.markForCheck()));
     }
 
     /** Attaches resize observers and window listeners once the PrimeNG tree has been rendered. */
@@ -1064,9 +1064,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Assigns stable kind and color classes so grouped bubbles keep their leaf colors. */
     protected valueBubbleClasses(bubble: any): Record<string, boolean> {
         return inspectionValueBubbleClasses(bubble, {
-            varyColors: this.inspectionState.inspectionValueVaryColors,
-            varyOutlines: this.inspectionState.inspectionValueVaryOutlines,
-            varyStriping: this.inspectionState.inspectionValueVaryStriping
+            varyColors: this.inspectionState.store.inspectionValueVaryColors,
+            varyOutlines: this.inspectionState.store.inspectionValueVaryOutlines,
+            varyStriping: this.inspectionState.store.inspectionValueVaryStriping
         });
     }
 
@@ -1234,7 +1234,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 ? "Relation/Validity"
                 : "Attr/Validity";
             const baseId = stripFeatureInspectionTarget(inspectionTarget);
-            const ownedByPanel = this.inspectionState.selection.find(panel => panel.id === this.panelId())
+            const ownedByPanel = this.inspectionState.store.selection.find(panel => panel.id === this.panelId())
                 ?.features.some(feature => feature.mapTileKey === mapTileKey
                     && stripFeatureInspectionTarget(feature.featureId) === baseId);
             this.inspectionMenuItems.push({
@@ -1276,7 +1276,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Checks whether this panel already highlights the requested attribute/validity target. */
     private isInspectionTargetHighlighted(mapTileKey: string, targetFeatureId: string): boolean {
         const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
-        const panel = this.inspectionState.selection.find(item => item.id === this.panelId());
+        const panel = this.inspectionState.store.selection.find(item => item.id === this.panelId());
         return panel?.features.some(feature =>
             feature.mapTileKey === mapTileKey &&
             stripFeatureInspectionTarget(feature.featureId) === targetBaseFeatureId &&
@@ -1814,7 +1814,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Applies either the global expand-by-default preference or the legacy feature-tree heuristic. */
     private applyInitialExpansion(nodes: TreeTableNode[]): void {
-        if (this.inspectionState.inspectionTreeExpandByDefault) {
+        if (this.inspectionState.store.inspectionTreeExpandByDefault) {
             this.setTreeExpansion(nodes, true, true);
             return;
         }

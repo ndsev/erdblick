@@ -1,3 +1,10 @@
+import { z } from "zod";
+
+/** IDs address persisted records; Object.prototype names are deliberately reserved. */
+export const viewIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)
+    .refine(id => !Object.hasOwn(Object.prototype, id), "This view ID is reserved.")
+    .meta({ not: { enum: Object.getOwnPropertyNames(Object.prototype) } });
+
 export const DEFAULT_MAP_ZOOM_STEP = 0.5;
 
 export const MIN_MAP_ZOOM_STEP = 0.001;

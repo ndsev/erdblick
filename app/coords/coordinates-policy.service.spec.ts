@@ -1,9 +1,10 @@
+import { CoordinatesPolicyStore } from "./coordinates-policy.store";
 import { testPersistence } from "../../test/state-owners";
 import "@angular/compiler";
 import { describe, expect, it, vi } from "vitest";
 import { BehaviorSubject } from "rxjs";
-import type { AppConfigService, CoordinatesConfig } from "../shared/app-config.service";
-import type { AppStateService } from "../shared/appstate.service";
+import type { AppConfigService, CoordinatesConfig } from "../config/app-config.service";
+import type { AppStateService } from "../state/app-state.service";
 import type { InfoMessageService } from "../shared/info.service";
 import { CoordinatesPolicyService } from "./coordinates-policy.service";
 
@@ -22,10 +23,10 @@ function createPolicy(coordinates: Partial<CoordinatesConfig> = {}, enabled = tr
     const policy = new CoordinatesPolicyService(
         configService as unknown as AppConfigService,
         stateService as unknown as AppStateService,
-        messageService as unknown as InfoMessageService
+        messageService as unknown as InfoMessageService, new CoordinatesPolicyStore(stateService as unknown as AppStateService)
     );
-    policy.coordinatesEnabledState.next(enabled);
-    policy.coordinatesLegalTermsAcceptedState.next(accepted);
+    policy.store.coordinatesEnabledState.next(enabled);
+    policy.store.coordinatesLegalTermsAcceptedState.next(accepted);
     return { policy, messageService };
 }
 
@@ -37,7 +38,7 @@ describe("CoordinatesPolicyService", () => {
         expect(policy.effectiveEnabled).toBe(false);
 
         policy.requestEnabled(true);
-        expect(policy.coordinatesEnabledState.getValue()).toBe(true);
+        expect(policy.store.coordinatesEnabledState.getValue()).toBe(true);
         expect(policy.effectiveEnabled).toBe(true);
 
         policy.ngOnDestroy();
@@ -51,13 +52,13 @@ describe("CoordinatesPolicyService", () => {
 
         policy.initialize();
 
-        expect(policy.coordinatesEnabledState.getValue()).toBe(false);
+        expect(policy.store.coordinatesEnabledState.getValue()).toBe(false);
         expect(policy.effectiveEnabled).toBe(false);
         expect(policy.legalDialogVisible).toBe(false);
 
         policy.requestEnabled(true);
         expect(policy.legalDialogVisible).toBe(true);
-        expect(policy.coordinatesEnabledState.getValue()).toBe(false);
+        expect(policy.store.coordinatesEnabledState.getValue()).toBe(false);
 
         policy.ngOnDestroy();
     });
@@ -72,8 +73,8 @@ describe("CoordinatesPolicyService", () => {
 
         policy.accept();
 
-        expect(policy.coordinatesLegalTermsAcceptedState.getValue()).toBe(true);
-        expect(policy.coordinatesEnabledState.getValue()).toBe(true);
+        expect(policy.store.coordinatesLegalTermsAcceptedState.getValue()).toBe(true);
+        expect(policy.store.coordinatesEnabledState.getValue()).toBe(true);
         expect(policy.effectiveEnabled).toBe(true);
         expect(policy.legalDialogVisible).toBe(false);
 
@@ -88,7 +89,7 @@ describe("CoordinatesPolicyService", () => {
 
         policy.initialize();
 
-        expect(policy.coordinatesEnabledState.getValue()).toBe(true);
+        expect(policy.store.coordinatesEnabledState.getValue()).toBe(true);
         expect(policy.effectiveEnabled).toBe(true);
         expect(policy.legalDialogVisible).toBe(false);
 
@@ -105,8 +106,8 @@ describe("CoordinatesPolicyService", () => {
 
         policy.refuse();
 
-        expect(policy.coordinatesLegalTermsAcceptedState.getValue()).toBe(false);
-        expect(policy.coordinatesEnabledState.getValue()).toBe(false);
+        expect(policy.store.coordinatesLegalTermsAcceptedState.getValue()).toBe(false);
+        expect(policy.store.coordinatesEnabledState.getValue()).toBe(false);
         expect(policy.effectiveEnabled).toBe(false);
         expect(policy.legalDialogVisible).toBe(false);
 
@@ -125,7 +126,7 @@ describe("CoordinatesPolicyService", () => {
 
         policy.requestEnabled(true);
 
-        expect(policy.coordinatesEnabledState.getValue()).toBe(false);
+        expect(policy.store.coordinatesEnabledState.getValue()).toBe(false);
         expect(policy.legalDialogVisible).toBe(false);
         expect(messageService.showError).toHaveBeenCalledWith("Could not load coordinate legal terms.");
 

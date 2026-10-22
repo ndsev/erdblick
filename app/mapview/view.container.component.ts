@@ -1,13 +1,13 @@
 import { Component, OnDestroy, signal, ViewChild } from "@angular/core";
 import { Splitter } from "primeng/splitter";
 import { Subscription } from "rxjs";
-import { ViewerUiService } from "../actions/viewer-ui.service";
+import { UiAutomationService } from "../actions/ui-automation.service";
 import { environment } from "../environments/environment";
-import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService } from "../shared/appstate.service";
+import { AppLayoutStore } from "../layout/app-layout.store";
 import { KeyboardService } from "../shared/keyboard.service";
-import { MapViewStateService } from "./map-view-state.service";
+import { AppStateService } from "../state/app-state.service";
 import { MapViewService } from "./map-view.service";
+import { MapViewStore } from "./map-view.store";
 
 @Component({
     selector: 'mapview-container',
@@ -81,9 +81,9 @@ export class MapViewContainerComponent implements OnDestroy {
     constructor(
         private stateService: AppStateService,
         private keyboardService: KeyboardService,
-        private viewerUi: ViewerUiService,
-        public readonly viewSettings: MapViewStateService,
-        public readonly layout: AppLayoutService,
+        private viewerUi: UiAutomationService,
+        public readonly viewSettings: MapViewStore,
+        public readonly layout: AppLayoutStore,
         private readonly mapViews: MapViewService
     ) {
         this.subscriptions.add(this.viewModel$.subscribe(vm => {

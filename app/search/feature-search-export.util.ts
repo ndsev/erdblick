@@ -2,7 +2,7 @@ import {
     type FeatureSearchMapLayerRef,
     type FeatureSearchStateEntry,
     normalizeFeatureSearchStateEntry
-} from "../shared/feature-search-state";
+} from "./feature-search-state";
 import type {FeatureSearchResultEntry} from "./feature.search.service";
 
 export interface FeatureSearchGroupingExportOption {

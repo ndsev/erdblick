@@ -32,11 +32,11 @@ function createContainer() {
             reapplySyncOptionsForAllViews: vi.fn(),
             maps: { maps: new Map() }
         } as never,
-        owners.renderPreferences, owners.viewSettings, owners.configService
+        owners.renderPreferences.store, owners.viewSettings, owners.configService
     );
     const mount = () => {
         const component = new MapViewContainerComponent(
-            persistence, keyboard, {} as never, owners.viewSettings, owners.layout, mapViews
+            persistence, keyboard, {} as never, owners.viewSettings, owners.layout.store, mapViews
         );
         cleanup.push(() => component.ngOnDestroy());
         return component;

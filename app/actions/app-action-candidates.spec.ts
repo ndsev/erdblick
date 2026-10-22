@@ -1,28 +1,29 @@
+import { CoordinatesStore } from "../coords/coordinates.store";
 import '@angular/compiler';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TestBed } from '@angular/core/testing';
-import { SearchPanelComponent } from '../search/search.panel.component';
+import { OmnibarComponent } from './omnibar.component';
 import { CoordinatesService } from '../coords/coordinates.service';
 import { DiagnosticsFacadeService } from '../diagnostics/diagnostics.facade.service';
 import { InspectionSelectionService } from '../inspection/inspection-selection.service';
-import { InspectionStateService } from '../inspection/inspection-state.service';
+import { InspectionPanelService } from '../inspection/inspection-panel.service';
 import { MapInfoService } from '../mapdata/map-info.service';
-import { MapViewStateService } from '../mapview/map-view-state.service';
+import { MapViewStore } from '../mapview/map-view.store';
 import { MapViewService } from '../mapview/map-view.service';
 import { RightClickMenuService } from '../mapview/rightclickmenu.service';
 import { FeatureSearchService } from '../search/feature.search.service';
-import { AppConfigService } from '../shared/app-config.service';
-import { AppStateService } from '../shared/appstate.service';
+import { AppConfigService } from '../config/app-config.service';
+import { AppStateService } from '../state/app-state.service';
 import { InfoMessageService } from '../shared/info.service';
 import { Subject } from 'rxjs';
 import { StateOwners, testPersistence } from '../../test/state-owners';
 import { coreLib, initializeLibrary } from '../integrations/wasm';
-import { JumpTargetService } from '../search/jump.service';
-import { ExternalViewerService } from '../search/external-viewer.service';
-import { LocationNavigationService } from '../search/location-navigation.service';
+import { JumpTargetService } from '../navigation/jump.service';
+import { ExternalViewerService } from '../navigation/external-viewer.service';
+import { LocationNavigationService } from '../navigation/location-navigation.service';
 import { LocationSearchMatch } from '../search/location.search.service';
-import { AppActionService } from './app-action.service';
-import { applicationActions, viewerActionCatalog, viewerActions } from './viewer-action.contract';
+import { ActionRegistry } from './action-registry.service';
+import { applicationActions, viewerActionCatalog, viewerActions } from "../../test/action-contract";
 
 beforeAll(() => initializeLibrary());
 afterEach(() => TestBed.resetTestingModule());
@@ -32,7 +33,7 @@ beforeEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
 function fixture() {
     const state = testPersistence();
     const owners = new StateOwners(state);
-    const actions = new AppActionService(state);
+    const actions = new ActionRegistry(state);
     const moved = vi.fn();
     const views = {
         generation: 1,
@@ -50,11 +51,11 @@ function fixture() {
     const jumps = new JumpTargetService(maps as never, {} as never, { showError: vi.fn() } as never,
         menu as never, owners.configService, owners.coordinates, owners.inspectionState, owners.viewSettings, views as never);
     jumps.initialize();
-    const external = new ExternalViewerService(owners.configService, owners.coordinates, owners.viewSettings);
+    const external = new ExternalViewerService(owners.configService, owners.coordinates.store, owners.viewSettings);
     const navigation = new LocationNavigationService(owners.locationSearch, views as never, state, {} as never, jumps,
         {} as never, owners.viewSettings, {} as never, {} as never, {} as never);
     const run = vi.spyOn(owners.searchService, 'run').mockReturnValue({ id: 'new-search' } as never);
-    for (const owner of [owners.searchService, jumps, external, navigation, owners.inspectionState]) owner.registerActions(actions);
+    actions.registerContributors([owners.searchService, jumps, external, navigation, owners.inspectionState]);
     return { state, owners, actions, jumps, external, navigation, parser, views, moved, menu, run };
 }
 
@@ -68,8 +69,9 @@ describe('owner action candidates', () => {
                 { provide: AppStateService, useValue: state },
                 { provide: AppConfigService, useValue: owners.configService },
                 { provide: CoordinatesService, useValue: owners.coordinates },
-                { provide: MapViewStateService, useValue: owners.viewSettings },
-                { provide: InspectionStateService, useValue: owners.inspectionState },
+                { provide: CoordinatesStore, useValue: owners.coordinates.store },
+                { provide: MapViewStore, useValue: owners.viewSettings },
+                { provide: InspectionPanelService, useValue: owners.inspectionState },
                 { provide: FeatureSearchService, useValue: owners.searchService },
                 { provide: DiagnosticsFacadeService, useValue: owners.diagnostics },
                 { provide: InspectionSelectionService, useValue: {} },
@@ -100,7 +102,7 @@ describe('owner action candidates', () => {
     it('publishes coordinate marker position and visibility as one completed owner edit', async () => {
         const h = fixture();
         const observations: unknown[] = [];
-        const subscription = h.state.observe(() => h.owners.coordinates.markerControlValue)
+        const subscription = h.state.observe(() => h.owners.coordinates.store.markerControlValue)
             .subscribe(value => observations.push(value));
         const candidate = h.actions.getCandidates('11,48').find(candidate => candidate.id === 'j:wgs84-lon-lat')!;
         await h.actions.execute(candidate.action, candidate.input);
@@ -136,7 +138,7 @@ describe('owner action candidates', () => {
             resolve([48, 11, 100]);
             await expect(execution).rejects.toThrow('no longer available');
             expect(h.moved).not.toHaveBeenCalled();
-            expect(h.owners.coordinates.markerControlValue).toEqual({ enabled: false, position: null });
+            expect(h.owners.coordinates.store.markerControlValue).toEqual({ enabled: false, position: null });
         }
     });
 
@@ -151,7 +153,7 @@ describe('owner action candidates', () => {
     it('captures the UI history scope before reorder and rejects a removed saved view', () => {
         const h = fixture();
         h.owners.viewSettings.importViews(['a', 'b']);
-        const panel = Object.create(SearchPanelComponent.prototype) as SearchPanelComponent;
+        const panel = Object.create(OmnibarComponent.prototype) as OmnibarComponent;
         panel.searchService = h.owners.searchService;
         const target = h.actions.getCandidates('true').find(candidate => candidate.id === 'features')!;
         const entry = panel['searchHistoryEntryForTarget']({ ...target, payload: { selectedViewIndices: [1] } }, 'true')!;
@@ -233,7 +235,7 @@ describe('owner action candidates', () => {
             kind === 'network' ? 'locate network request failed' : 'Could not locate feature (HTTP 503).'
         );
         expect(fetch).toHaveBeenCalledExactlyOnceWith('locate', expect.objectContaining({ method: 'POST' }));
-        expect(h.owners.inspectionState.selection).toEqual([]);
+        expect(h.owners.inspectionState.store.selection).toEqual([]);
         expect(h.moved).not.toHaveBeenCalled();
     });
 
@@ -272,7 +274,7 @@ describe('owner action candidates', () => {
         h.owners.inspectionState.setSelection([{ featureId: 'Road.18', mapTileKey: 'Features:Map:Road:1' }]);
         expect(() => h.actions.execute(candidate.action, candidate.input)).toThrow('no longer exists');
         expect(h.actions.getCandidates('close road', { id: candidate.id }).some(choice => choice.id === candidate.id)).toBe(false);
-        expect(h.owners.inspectionState.selection[0].features[0].featureId).toBe('Road.18');
+        expect(h.owners.inspectionState.store.selection[0].features[0].featureId).toBe('Road.18');
     });
 
     it('exports public actions only and keeps runtime plugin/location/provider data out of the artifact', () => {

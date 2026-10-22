@@ -4,8 +4,8 @@ import {beforeAll, describe, expect, it, vi} from "vitest";
 
 import {AppModule} from "../app.module";
 import {initializeLibrary} from "../integrations/wasm";
-import {featureSearchResultFields} from "../mapdata/feature-search-runtime-state.model";
-import {createFeatureSearchStateEntry} from "../shared/feature-search-state";
+import {featureSearchResultFields} from "./feature-search-runtime-state.model";
+import {createFeatureSearchStateEntry} from "./feature-search-state";
 import {FeatureSearchService, type FeatureSearchSession} from "./feature.search.service";
 import {buildFeatureSearchFilterChannels} from "./feature-search-style";
 import {SearchStyleColorComponent} from "./search-style-color.component";

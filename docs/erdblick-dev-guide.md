@@ -369,10 +369,10 @@ stays pending.
 
 ## Optional MCP browser actions
 
-`AppActionService` binds named controls and actions to their owning services.
+`ActionRegistry` binds named controls and actions to their owning services.
 The [state and action architecture](erdblick-state-actions.md) explains owner registration, completed observations, stable view IDs and shared omnibar dispatch.
 
-`ViewerActionService` handles browser relay admission, cancellation and transport. Mapget owns MCP authentication, authorization and session routing; erdblick
+`McpActionService` handles browser relay admission, cancellation and transport. Mapget owns MCP authentication, authorization and session routing; erdblick
 does not grant permissions based on browser-supplied identity claims.
 Optional `/mcp/info` discovery allows up to 30 seconds for source/schema startup.
 Discovery runs asynchronously and does not block ordinary map startup.
@@ -381,9 +381,10 @@ Settings use `viewer_describe_controls`, `viewer_get_controls` and
 `viewer_set_control`; semantic operations use the commands below.
 Mapget adds/removes the routing `clientId` at the MCP
 boundary; it also owns `viewer_list_sessions`. Browser arguments have no routing
-field. Control and action contracts live beside their owners in `.service.declarations.ts`
-files. `app/actions/application-controls.ts` and `viewer-action.contract.ts` compose
-the public catalog.
+field. Control and action declarations live beside their handlers in controller service
+files. `app/application-registration.ts` composes the controllers through Angular
+DI. The Node build flavor runs that same registration and serializes the registry
+into the trusted static catalog; mapget does not run Node.
 
 | Control | Access | Owner/value |
 | --- | --- | --- |
@@ -585,7 +586,7 @@ callbacks and persistence are used, including inspection-tree relayout.
 
 Dock width and split proportions are local layout preferences, persisted after
 completed human/MCP resizing and absent from map URLs. Ratio changes update the
-splitter in place without recreating the map renderers. `ViewerUiService` owns
+splitter in place without recreating the map renderers. `UiAutomationService` owns
 only short-lived DOM references and live resize registrations; components and
 `AppLayoutService` remain the layout owners. No background DOM scan/observer or
 second layout tree is maintained.

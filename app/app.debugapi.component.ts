@@ -1,4 +1,4 @@
-import { AppActionService } from "./actions/app-action.service";
+import { ActionRegistry } from "./actions/action-registry.service";
 import { Cartographic } from "./integrations/geo";
 import { coreLib, ErdblickCore_ } from "./integrations/wasm";
 import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
@@ -7,8 +7,8 @@ import {
     type DeckPresentationDebugSnapshot,
     type TileSubsetLayerRenderDebugSnapshot
 } from "./mapview/deck/tile-subset-layer-render.service";
-import { MapViewStateService } from "./mapview/map-view-state.service";
-import { AppStateService } from "./shared/appstate.service";
+import { MapViewStore } from "./mapview/map-view.store";
+import { AppStateService } from "./state/app-state.service";
 
 /** Browser-console helpers which use only supported S4E2 boundaries. */
 export interface DebugWindow extends Window {
@@ -22,8 +22,8 @@ export class ErdblickDebugApi {
         private readonly tileStream: MapTileStreamService,
         private readonly subsetRenderer: TileSubsetLayerRenderService,
         public readonly stateService: AppStateService,
-        public readonly viewSettings: MapViewStateService,
-        private readonly actions: AppActionService
+        public readonly viewSettings: MapViewStore,
+        private readonly actions: ActionRegistry
     ) {
     }
 

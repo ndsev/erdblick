@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import type {FeatureSearchMapLayerRef, FeatureSearchStateEntry} from "../shared/feature-search-state";
+import type {FeatureSearchMapLayerRef, FeatureSearchStateEntry} from "./feature-search-state";
 import type {FeatureSearchResultEntry} from "./feature.search.service";
 import {
     featureSearchDefinitionFromImportPayload,

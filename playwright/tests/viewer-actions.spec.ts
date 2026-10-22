@@ -1,11 +1,9 @@
+import type { Page, WebSocketRoute } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import type { Page, WebSocketRoute } from '@playwright/test';
-import { expect, test } from '../fixtures/test';
 import type { ViewerActionClientMessage } from '../../app/actions/viewer-action-relay.contract';
-import { viewerActions } from '../../app/actions/viewer-action.contract';
-import { mapViewControls } from '../../app/mapview/map-view.service.declarations';
-const cameraViewStateSchema = mapViewControls.camera.valueSchema;
+import { expect, test } from '../fixtures/test';
+import { cameraViewStateSchema, viewerActions } from "../utils/viewer-contract";
 
 test.use({ stateSnapshot: null });
 

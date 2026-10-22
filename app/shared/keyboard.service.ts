@@ -1,5 +1,12 @@
-import {Directive, ElementRef, HostListener, Injectable, Renderer2, RendererFactory2} from "@angular/core";
-import {DialogStackService} from "./dialog-stack.service";
+import {
+    Directive,
+    ElementRef,
+    HostListener,
+    Injectable,
+    Renderer2,
+    RendererFactory2
+} from "@angular/core";
+import { DialogStackService } from "../layout/dialog-stack.service";
 
 @Directive({
     selector: '[onEnterClick]',

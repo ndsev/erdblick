@@ -10,9 +10,12 @@ import {
     MIN_DRILL_PICK_RADIUS,
     type HoverLabelFieldConfig
 } from "../inspection/inspection-state.model";
-import { InspectionStateService } from "../inspection/inspection-state.service";
+import { InspectionStore } from "../inspection/inspection.store";
+import { AppDialogComponent } from "../layout/app-dialog.component";
+import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, PREFERENCES_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { AppLayoutService } from "../layout/app-layout.service";
+import { DialogStackService } from "../layout/dialog-stack.service";
 import { ConnectionPreferencesService } from "../mapdata/connection-preferences.service";
-import { FeatureSearchSchemaService } from "../mapdata/feature-search-schema.service";
 import type {
     FeatureSearchStyleFieldCandidate
 } from "../mapdata/map-runtime.model";
@@ -29,20 +32,13 @@ import {
     MIN_FEATURE_ZOOM_CLEARANCE_METERS,
     MIN_MAP_ZOOM_STEP
 } from "../mapview/map-view-state.model";
-import { MapViewStateService } from "../mapview/map-view-state.service";
 import { MapViewService, ViewRecalculationReason } from "../mapview/map-view.service";
+import { MapViewStore } from "../mapview/map-view.store";
 import { RenderPreferencesService } from "../mapview/render-preferences.service";
-import {
-    DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,
-    LocationSearchService,
-    MAX_LOCATION_SEARCH_RESULT_LIMIT
-} from "../search/location.search.service";
-import { AppDialogComponent } from "../shared/app-dialog.component";
-import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, PREFERENCES_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
-import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService } from "../shared/appstate.service";
+import { FeatureSearchSchemaService } from "../search/feature-search-schema.service";
+import { DEFAULT_LOCATION_SEARCH_RESULT_LIMIT, MAX_LOCATION_SEARCH_RESULT_LIMIT } from "../search/location-search.model";
+import { LocationSearchStore } from "../search/location-search.store";
 import { connectionRetryPolicySchema } from "../shared/connection-retry-policy";
-import { DialogStackService } from "../shared/dialog-stack.service";
 import { InfoMessageService } from "../shared/info.service";
 import {
     clampLod3TileThreshold,
@@ -61,6 +57,7 @@ import {
     MAX_NUM_TILES_TO_LOAD,
     MAX_TILE_SUBSET_RENDER_WORKER_COUNT
 } from "../shared/tile-render-policy";
+import { AppStateService } from "../state/app-state.service";
 import { StyleService } from "../styledata/style.service";
 
 @Component({
@@ -158,7 +155,7 @@ import { StyleService } from "../styledata/style.service";
                         </div>
                         <div class="button-container">
                             <label>Collapse Dock automatically</label>
-                            <p-toggleswitch [(ngModel)]="layout.isDockAutoCollapsible"></p-toggleswitch>
+                            <p-toggleswitch [(ngModel)]="layout.store.isDockAutoCollapsible"></p-toggleswitch>
                         </div>
                     </p-tabpanel>
 
@@ -674,18 +671,18 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         private dialogStack: DialogStackService,
         public readonly renderPreferences: RenderPreferencesService,
         public readonly layout: AppLayoutService,
-        public readonly inspectionState: InspectionStateService,
+        public readonly inspectionState: InspectionStore,
         public readonly connectionPreferences: ConnectionPreferencesService,
-        public readonly locationSearch: LocationSearchService,
-        public readonly viewSettings: MapViewStateService) {
-        this.subscriptions.push(this.connectionPreferences.connectionRetryEnabledState.subscribe(value => this.connectionRetryEnabled = value));
-        this.subscriptions.push(this.renderPreferences.pointCloudPolicyChanges.subscribe(() => {
-            this.pointCloudPolicyDraft = { ...this.renderPreferences.pointCloudPolicy };
+        public readonly locationSearch: LocationSearchStore,
+        public readonly viewSettings: MapViewStore) {
+        this.subscriptions.push(this.connectionPreferences.store.connectionRetryEnabledState.subscribe(value => this.connectionRetryEnabled = value));
+        this.subscriptions.push(this.renderPreferences.store.pointCloudPolicyChanges.subscribe(() => {
+            this.pointCloudPolicyDraft = { ...this.renderPreferences.store.pointCloudPolicy };
         }));
-        this.subscriptions.push(this.connectionPreferences.connectionRetryInitialDelayMsState.subscribe(value => this.connectionInitialSeconds = value / 1000));
-        this.subscriptions.push(this.connectionPreferences.connectionRetryBackoffMultiplierState.subscribe(value => this.connectionBackoffMultiplier = value));
-        this.subscriptions.push(this.connectionPreferences.connectionRetryMaxDelayMsState.subscribe(value => this.connectionMaximumSeconds = value / 1000));
-        this.subscriptions.push(this.renderPreferences.tilesLoadLimitState.subscribe(limit => {
+        this.subscriptions.push(this.connectionPreferences.store.connectionRetryInitialDelayMsState.subscribe(value => this.connectionInitialSeconds = value / 1000));
+        this.subscriptions.push(this.connectionPreferences.store.connectionRetryBackoffMultiplierState.subscribe(value => this.connectionBackoffMultiplier = value));
+        this.subscriptions.push(this.connectionPreferences.store.connectionRetryMaxDelayMsState.subscribe(value => this.connectionMaximumSeconds = value / 1000));
+        this.subscriptions.push(this.renderPreferences.store.tilesLoadLimitState.subscribe(limit => {
             this.tilesToLoadInput = limit;
         }));
         this.subscriptions.push(this.inspectionState.inspectionsLimitState.subscribe(limit => {
@@ -697,24 +694,24 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.subscriptions.push(this.locationSearch.locationSearchResultLimitState.subscribe(limit => {
             this.locationSearchResultLimitInput = limit;
         }));
-        this.subscriptions.push(this.connectionPreferences.tilePullCompressionEnabledState.subscribe(enabled => {
+        this.subscriptions.push(this.connectionPreferences.store.tilePullCompressionEnabledState.subscribe(enabled => {
             this.tilePullCompressionEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.renderPreferences.deckAntialiasingEnabledState.subscribe(enabled => {
+        this.subscriptions.push(this.renderPreferences.store.deckAntialiasingEnabledState.subscribe(enabled => {
             this.deckAntialiasingEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.renderPreferences.semanticCompositingEnabledState.subscribe(enabled => {
+        this.subscriptions.push(this.renderPreferences.store.semanticCompositingEnabledState.subscribe(enabled => {
             this.semanticCompositingEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.renderPreferences.contactShadingEnabledState.subscribe(enabled => {
+        this.subscriptions.push(this.renderPreferences.store.contactShadingEnabledState.subscribe(enabled => {
             this.contactShadingEnabledSetting = enabled;
         }));
-        this.subscriptions.push(this.renderPreferences.lod3TileThresholdState.subscribe(threshold => {
+        this.subscriptions.push(this.renderPreferences.store.lod3TileThresholdState.subscribe(threshold => {
             this.lod3TileThresholdInput = threshold;
             this.updateLod3TileThresholdChangeState();
         }));
         this.subscriptions.push(
-            this.renderPreferences.tileSubsetRenderWorkerCountState.subscribe(
+            this.renderPreferences.store.tileSubsetRenderWorkerCountState.subscribe(
                 workerCount => {
                     this.renderWorkerCountInput = workerCount;
                     this.updateRenderWorkerCountChangeState();
@@ -827,16 +824,16 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Refreshes dialog fields from current state whenever the preferences dialog opens. */
     onDialogShow() {
-        this.tilesToLoadInput = this.renderPreferences.tilesLoadLimit;
+        this.tilesToLoadInput = this.renderPreferences.store.tilesLoadLimit;
         this.limitSimultaneousInspectionsInput = this.inspectionState.inspectionsLimit;
         this.drillPickRadiusInput = this.inspectionState.drillPickRadius;
         this.locationSearchResultLimitInput = this.locationSearch.locationSearchResultLimit;
         this.mapZoomStepInput = this.viewSettings.mapZoomStep;
         this.featureZoomClearanceMetersInput =
             this.viewSettings.featureZoomClearanceMeters;
-        this.lod3TileThresholdInput = this.renderPreferences.lod3TileThreshold;
+        this.lod3TileThresholdInput = this.renderPreferences.store.lod3TileThreshold;
         this.renderWorkerCountInput =
-            this.renderPreferences.tileSubsetRenderWorkerCount;
+            this.renderPreferences.store.tileSubsetRenderWorkerCount;
         this.tilesToLoadChanged = false;
         this.inspectionsLimitChanged = false;
         this.drillPickRadiusChanged = false;
@@ -935,7 +932,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         this.tilesToLoadInput = limit;
-        this.renderPreferences.tilesLoadLimit = limit;
+        this.renderPreferences.store.tilesLoadLimit = limit;
         this.tilesToLoadChanged = false;
         this.mapService.requestViewRecalculation(ViewRecalculationReason.TileLimit);
         this.messageService.showSuccess("Successfully updated tile limits!");
@@ -978,25 +975,25 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Toggles HTTP compression for `/interactive/payload` pull responses. */
     setTilePullCompressionEnabled(enabled: boolean) {
         this.tilePullCompressionEnabledSetting = enabled;
-        this.connectionPreferences.tilePullCompressionEnabled = enabled;
+        this.connectionPreferences.store.tilePullCompressionEnabled = enabled;
     }
 
     /** Enables or disables WebGL antialiasing; map views recreate their renderer when this changes. */
     setDeckAntialiasingEnabled(enabled: boolean) {
         this.deckAntialiasingEnabledSetting = enabled;
-        this.renderPreferences.deckAntialiasingEnabled = enabled;
+        this.renderPreferences.store.deckAntialiasingEnabled = enabled;
     }
 
     /** Recreates map renderers with or without the semantic compositor for diagnosis. */
     setSemanticCompositingEnabled(enabled: boolean) {
         this.semanticCompositingEnabledSetting = enabled;
-        this.renderPreferences.semanticCompositingEnabled = enabled;
+        this.renderPreferences.store.semanticCompositingEnabled = enabled;
     }
 
     /** Enables or disables the final-depth screen-space contact shading pass. */
     setContactShadingEnabled(enabled: boolean) {
         this.contactShadingEnabledSetting = enabled;
-        this.renderPreferences.contactShadingEnabled = enabled;
+        this.renderPreferences.store.contactShadingEnabled = enabled;
     }
 
     /** Applies the pending LOD 3 tile threshold after validating the input. */
@@ -1013,13 +1010,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const normalized = clampLod3TileThreshold(threshold);
         this.lod3TileThresholdInput = normalized;
-        this.renderPreferences.lod3TileThreshold = normalized;
+        this.renderPreferences.store.lod3TileThreshold = normalized;
         this.lod3TileThresholdChanged = false;
     }
 
     /** Keep numeric drafts out of persisted state until the whole policy is applied. */
     get pointCloudPolicyChanged(): boolean {
-        return JSON.stringify(this.pointCloudPolicyDraft) !== JSON.stringify(this.renderPreferences.pointCloudPolicy);
+        return JSON.stringify(this.pointCloudPolicyDraft) !== JSON.stringify(this.renderPreferences.store.pointCloudPolicy);
     }
 
     /** Publish one validated point-cloud preference edit through AppState. */
@@ -1050,7 +1047,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const normalized = clampTileSubsetRenderWorkerCount(workerCount);
         this.renderWorkerCountInput = normalized;
-        this.renderPreferences.tileSubsetRenderWorkerCount = normalized;
+        this.renderPreferences.store.tileSubsetRenderWorkerCount = normalized;
         this.renderWorkerCountChanged = false;
     }
 
@@ -1187,7 +1184,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Tracks slider edits for the tile-load limit without applying them immediately. */
     protected onTilesToLoadSliderChange(value: number) {
         this.tilesToLoadInput = value;
-        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.renderPreferences.tilesLoadLimit);
+        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.renderPreferences.store.tilesLoadLimit);
     }
 
     /** Tracks slider edits for the simultaneous inspection limit. */
@@ -1238,7 +1235,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Tracks free-form edits for the tile-load input. */
     protected onTilesToLoadInputChange(value: number | string) {
         this.tilesToLoadInput = value;
-        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.renderPreferences.tilesLoadLimit);
+        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.renderPreferences.store.tilesLoadLimit);
     }
 
     /** Tracks free-form edits for the inspection-limit input. */
@@ -1295,7 +1292,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         this.lod3TileThresholdChanged =
-            clampLod3TileThreshold(threshold) !== this.renderPreferences.lod3TileThreshold;
+            clampLod3TileThreshold(threshold) !== this.renderPreferences.store.lod3TileThreshold;
     }
 
     /** Updates the dirty flag for the subset-render worker control. */
@@ -1309,7 +1306,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         this.renderWorkerCountChanged =
             clampTileSubsetRenderWorkerCount(workerCount) !==
-            this.renderPreferences.tileSubsetRenderWorkerCount;
+            this.renderPreferences.store.tileSubsetRenderWorkerCount;
     }
 
     /** Determines whether a numeric preference control still has an unapplied change. */

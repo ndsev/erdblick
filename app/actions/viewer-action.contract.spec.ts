@@ -3,12 +3,12 @@ import fixtures from "../../test/viewer-actions/fixtures.json";
 import {
     canonicalViewerContractJson, viewerActionCatalog, viewerActions,
     type ViewerActionName
-} from "./viewer-action.contract";
+} from "../../test/action-contract";
 import {viewerActionClientMessageSchema, viewerActionServerMessageSchema, viewerMcpInfoSchema} from "./viewer-action-relay.contract";
-import {applicationControls} from "./application-controls";
-import {describeControls} from "./app-action.service.declarations";
+import {applicationControls} from "../../test/control-contract";
+import {describeControls} from "./control-actions";
 import {composeDeclarations} from "./app-action";
-import {mapViewControls} from "../mapview/map-view.service.declarations";
+import {mapViewControls} from "../mapview/map-view.service";
 const cameraViewStateSchema = mapViewControls.camera.valueSchema;
 
 describe("viewer action shared contract fixtures", () => {
@@ -120,7 +120,7 @@ describe("viewer action shared contract fixtures", () => {
             expect(action.inputSchema["$schema"]).toBe("http://json-schema.org/draft-07/schema#");
             expect(action.inputSchema["additionalProperties"]).toBe(false);
         }
-        const channels = describeControls();
+        const channels = describeControls(Object.values(applicationControls));
         expect(channels.find(channel => channel.name === "view.camera")?.valueSchema["type"]).toBe("object");
     });
 

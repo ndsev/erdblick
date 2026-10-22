@@ -5,7 +5,7 @@ import {
     FeatureSearchRuleFilter,
     FeatureSearchStyleRule,
     normalizeFeatureSearchGeometry
-} from "../shared/feature-search-state";
+} from "./feature-search-state";
 import {
     defaultSearchStyleColorDraft,
     DEFAULT_SEARCH_STYLE_SOLID_COLOR,

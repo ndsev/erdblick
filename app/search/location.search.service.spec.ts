@@ -1,9 +1,10 @@
+import { LocationSearchStore } from "./location-search.store";
 import {testPersistence, stateOwners} from '../../test/state-owners';
 import "@angular/compiler";
 import {firstValueFrom, NEVER, of, throwError} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 
-import {LocationSearchProviderConfig} from "../shared/app-config.service";
+import {LocationSearchProviderConfig} from "../config/app-config.service";
 import {
     isSupportedLocationSearchQuery,
     LocationSearchService,
@@ -34,7 +35,7 @@ const createService = (providers: LocationSearchProviderConfig[] = [
         }
     };
     return {
-        service: new LocationSearchService(httpClient as any, configService as any, testPersistence()),
+        service: new LocationSearchService(httpClient as any, configService as any, testPersistence(), new LocationSearchStore(testPersistence())),
         httpClient
     };
 };

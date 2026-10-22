@@ -12,7 +12,7 @@ import {CheckboxModule} from "primeng/checkbox";
 import {InputTextModule} from "primeng/inputtext";
 import {MultiSelectModule} from "primeng/multiselect";
 
-import {AppDialogComponent} from "../shared/app-dialog.component";
+import {AppDialogComponent} from "../layout/app-dialog.component";
 import type {SearchStyleSaveOptions} from "./search-style-sheet.converter";
 
 interface LayerAffinityOption {

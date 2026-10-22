@@ -1,15 +1,15 @@
 import { Injectable, OnDestroy, Optional } from "@angular/core";
 import type { Params } from "@angular/router";
 import { addMetersToLngLat } from "@math.gl/web-mercator";
-import { InspectionStateService } from "../inspection/inspection-state.service";
+import { InspectionStore } from "../inspection/inspection.store";
+import { AppLayoutStore } from "../layout/app-layout.store";
 import type { CameraViewState } from "../mapview/map-view-state.model";
-import { MapViewStateService } from "../mapview/map-view-state.service";
 import { MapViewService } from "../mapview/map-view.service";
+import { MapViewStore } from "../mapview/map-view.store";
 import { featureSearchDefinitionFromImportPayload } from "../search/feature-search-export.util";
 import { FeatureSearchService } from "../search/feature.search.service";
+import { AppStateService } from "../state/app-state.service";
 import { StyleService } from "../styledata/style.service";
-import { AppLayoutService } from "./app-layout.service";
-import { AppStateService } from "./appstate.service";
 
 export const PRESENTATION_BRIDGE_PROTOCOL_VERSION = 2;
 export const PRESENTATION_BRIDGE_READY = "erdblick:presentation:ready";
@@ -76,9 +76,9 @@ export class PresentationStateBridgeService implements OnDestroy {
         private readonly mapViewState: MapViewService,
         private readonly styleService: StyleService,
         @Optional() private readonly searchService: FeatureSearchService | null,
-        public readonly viewSettings: MapViewStateService,
-        public readonly inspectionState: InspectionStateService,
-        public readonly layout: AppLayoutService
+        public readonly viewSettings: MapViewStore,
+        public readonly inspectionState: InspectionStore,
+        public readonly layout: AppLayoutStore
     ) { }
 
     /** Enables the bridge for a framed document carrying the presentation opt-in. */

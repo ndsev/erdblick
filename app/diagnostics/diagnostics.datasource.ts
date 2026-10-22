@@ -8,9 +8,9 @@ import {
     type SubsetDiagnosticsError,
     ViewLayerDiagnosticsService
 } from "../mapview/view-layer-diagnostics.service";
-import { DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
-import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService } from "../shared/appstate.service";
+import { DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { AppLayoutService } from "../layout/app-layout.service";
+import { AppStateService } from "../state/app-state.service";
 import {
     StyleValidationReportService
 } from "../styledata/style-validation-report.service";

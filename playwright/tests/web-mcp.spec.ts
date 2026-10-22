@@ -1,6 +1,6 @@
 import { expect, test } from '../fixtures/test';
 import type { Page } from '@playwright/test';
-import { viewerActions } from '../../app/actions/viewer-action.contract';
+import { viewerActions } from "../utils/viewer-contract";
 
 // Exercise the actual browser implementation, never an injected modelContext polyfill.
 // Chrome 153 supports document.modelContext behind the WebMCP flag and takes stringified input.

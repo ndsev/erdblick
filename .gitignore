@@ -10,9 +10,7 @@ static-visualization-only
 .angular
 app/actions/generated/
 node_modules
-config
-config/*
-config/styles/*
+/config/
 out-tsc
 config/config.json
 dist

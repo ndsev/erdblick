@@ -1,9 +1,9 @@
 import { Component, ViewChild } from '@angular/core';
-import { AppDialogComponent } from '../shared/app-dialog.component';
-import { KEYBOARD_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
-import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService } from "../shared/appstate.service";
-import { DialogStackService } from '../shared/dialog-stack.service';
+import { AppDialogComponent } from '../layout/app-dialog.component';
+import { KEYBOARD_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { AppLayoutService } from "../layout/app-layout.service";
+import { AppStateService } from "../state/app-state.service";
+import { DialogStackService } from '../layout/dialog-stack.service';
 
 @Component({
     selector: 'keyboard-dialog',

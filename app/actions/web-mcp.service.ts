@@ -1,9 +1,10 @@
-import {Injectable, NgZone, OnDestroy} from "@angular/core";
-import {BehaviorSubject} from "rxjs";
-import {z} from "zod";
-import {viewerActions, viewerJsonSchema} from "./viewer-action.contract";
-import {ViewerActionService} from "./viewer-action.service";
-import {ViewerActionFailure} from "./viewer-action-relay.contract";
+import { Injectable, NgZone, OnDestroy } from "@angular/core";
+import { BehaviorSubject } from "rxjs";
+import { z } from "zod";
+import { ActionRegistry } from "./action-registry.service";
+import { McpActionService } from "./mcp-action.service";
+import { ViewerActionFailure } from "./viewer-action-relay.contract";
+import { viewerJsonSchema } from "./viewer-action.contract";
 
 /** The WebMCP document API subset used here; kept local until TypeScript's DOM library includes it. */
 interface ModelContext {
@@ -39,7 +40,7 @@ export class WebMcpService implements OnDestroy {
     private refreshing = false;
     private lastRefresh = -Infinity;
 
-    constructor(private readonly actions: ViewerActionService, private readonly zone: NgZone) {}
+    constructor(private readonly actions: McpActionService, private readonly zone: NgZone, private readonly registry: ActionRegistry) {}
 
     /** Register only after normal app initialization; unsupported browsers do no discovery work. */
     initialize(): void {
@@ -50,7 +51,7 @@ export class WebMcpService implements OnDestroy {
         this.status$.next({...this.status$.value, supported: true, message: "Starting WebMCP"});
         void this.zone.runOutsideAngular(async () => {
             try {
-                for (const [name, action] of Object.entries(viewerActions)) {
+                for (const [name, action] of Object.entries(this.registry.publicActions)) {
                     await this.context!.registerTool({
                         name, description: `${action.description} Acts on this browser tab; no clientId is needed.`,
                         inputSchema: viewerJsonSchema(action.inputSchema),

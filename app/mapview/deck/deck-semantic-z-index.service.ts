@@ -1,24 +1,23 @@
 import {
     Layer,
+    _LayersPass as LayersPass,
     picking,
     type Effect,
     type EffectContext,
     type LayerProps,
     type PickingInfo,
-    type PreRenderOptions,
-    _LayersPass as LayersPass
+    type PreRenderOptions
 } from "@deck.gl/core";
-import {Texture, type Framebuffer, type RenderPipelineParameters} from "@luma.gl/core";
-import {ClipSpace} from "@luma.gl/engine";
-
-import {DeckLayerRegistry} from "./deck-layer-registry";
+import { Texture, type Framebuffer, type RenderPipelineParameters } from "@luma.gl/core";
+import { ClipSpace } from "@luma.gl/engine";
+import { DeckLayerRegistry } from "./deck-layer-registry";
 import {
     ErdblickVectorLayer,
     ErdblickVectorRenderMode,
     NO_POLYGON_OFFSET,
     VECTOR_POLYGON_OFFSET_DEPTH_UNITS
 } from "./erdblick-vector.layer";
-import type {GpuScene} from "./gpu-scene";
+import type { GpuScene } from "./gpu-scene";
 
 const PASS_LAYER_PREFIX = "builtin/semantic-z-index-pass/";
 const COMPOSITE_LAYER_ID = "builtin/semantic-z-index-composite";

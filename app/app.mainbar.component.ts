@@ -3,16 +3,6 @@ import { MenuItem } from "primeng/api";
 import { Subscription } from 'rxjs';
 import { DiagnosticsFacadeService } from './diagnostics/diagnostics.facade.service';
 import { environment } from './environments/environment';
-import { MapInfoService } from './mapdata/map-info.service';
-import {
-    VIEW_SYNC_LAYERS,
-    VIEW_SYNC_MOVEMENT,
-    VIEW_SYNC_POSITION,
-    VIEW_SYNC_PROJECTION
-} from "./mapview/map-view-state.model";
-import { MapViewStateService } from "./mapview/map-view-state.service";
-import { MapViewService } from './mapview/map-view.service';
-import { FeatureSearchService } from "./search/feature.search.service";
 import {
     ABOUT_DIALOG_LAYOUT_ID,
     CACHE_RESET_DIALOG_LAYOUT_ID,
@@ -21,10 +11,21 @@ import {
     LEGAL_INFO_DIALOG_LAYOUT_ID,
     PREFERENCES_DIALOG_LAYOUT_ID,
     STYLES_DIALOG_LAYOUT_ID
-} from "./shared/app-layout.model";
-import { AppLayoutService } from "./shared/app-layout.service";
-import { AppStateService } from "./shared/appstate.service";
+} from "./layout/app-layout.model";
+import { AppLayoutService } from "./layout/app-layout.service";
+import { MapInfoService } from './mapdata/map-info.service';
+import {
+    VIEW_SYNC_LAYERS,
+    VIEW_SYNC_MOVEMENT,
+    VIEW_SYNC_POSITION,
+    VIEW_SYNC_PROJECTION
+} from "./mapview/map-view-state.model";
+import { MapViewService } from './mapview/map-view.service';
+import { MapViewStore } from "./mapview/map-view.store";
+import { FeatureSearchStore } from "./search/feature-search.store";
+import { FeatureSearchService } from "./search/feature.search.service";
 import { InfoMessageService } from "./shared/info.service";
+import { AppStateService } from "./state/app-state.service";
 import { StyleEditorRequestService } from "./styledata/style-editor-request.service";
 import { StyleService } from "./styledata/style.service";
 
@@ -138,7 +139,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     }
 
     get mapsPanelOpen(): boolean {
-        return this.layout.mapsOpenState.getValue();
+        return this.layout.store.mapsOpenState.getValue();
     }
 
     constructor(public mapService: MapInfoService,
@@ -152,8 +153,8 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         private elementRef: ElementRef<HTMLElement>,
         private ngZone: NgZone,
         public readonly layout: AppLayoutService,
-        public readonly viewSettings: MapViewStateService,
-        public readonly searchService: FeatureSearchService) {
+        public readonly viewSettings: MapViewStore,
+        public readonly searchService: FeatureSearchStore) {
         this.setupMobileMenuTracking();
         this.initializeViewerLayoutMobileState();
         this.rebuildMenuItems();
@@ -163,7 +164,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.subscriptions.add(this.viewSettings.viewSyncState.subscribe(() => {
             this.rebuildMenuItems();
         }));
-        this.subscriptions.add(this.layout.dockOpenState.subscribe(() => {
+        this.subscriptions.add(this.layout.store.dockOpenState.subscribe(() => {
             this.scheduleMobileMenubarStateUpdate();
         }));
         this.subscriptions.add(this.featureSearchService.sessionsChanged.subscribe(() => {
@@ -320,12 +321,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the maps panel. */
     protected showMapsPanel() {
-        this.layout.mapsOpenState.next(true);
+        this.layout.store.mapsOpenState.next(true);
     }
 
     /** Closes the maps panel. */
     protected closeMapsPanel() {
-        this.layout.mapsOpenState.next(false);
+        this.layout.store.mapsOpenState.next(false);
     }
 
     /** Schedules tooltip alignment for the maps-panel button tooltip. */

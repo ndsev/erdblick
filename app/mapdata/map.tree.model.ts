@@ -6,8 +6,8 @@ import {
     normalizeTileGridColor,
     TileGridMode
 } from "../mapview/map-view-state.model";
-import { MapViewStateService } from "../mapview/map-view-state.service";
-import { AppStateService } from "../shared/appstate.service";
+import { MapViewStore } from "../mapview/map-view.store";
+import { AppStateService } from "../state/app-state.service";
 import { LayerPresetRef } from "../styledata/layer-preset.model";
 import { MapPresetDefinition, MapPresetLayer } from "../styledata/map-preset.model";
 import {
@@ -17,7 +17,7 @@ import {
 } from "../styledata/map-preset.service";
 import { ErdblickStyle, FeatureStyleOptionWithStringType, StyleService } from "../styledata/style.service";
 import { LayerViewConfig } from "./map-layer-state.model";
-import { MapLayerStateService } from "./map-layer-state.service";
+import { MapLayerStore } from "./map-layer.store";
 
 export type DataSourceCatalogStatus = "initializing" | "ready" | "failed";
 
@@ -518,7 +518,7 @@ export interface ResolvedMapPresetComponent {
 /**
  * Holds the map/layer/style tree shown in the maps panel.
  * The tree owns UI grouping and cached controls. Durable per-view values belong
- * to MapLayerStateService and MapViewStateService.
+ * to MapLayerStore and MapViewStore.
  */
 export class MapLayerTree {
     nodes: (GroupTreeNode | MapTreeNode)[] = [];
@@ -532,8 +532,8 @@ export class MapLayerTree {
         private stateService: AppStateService,
         private styleService: StyleService,
         private mapPresetService: MapPresetService,
-        public readonly viewSettings: MapViewStateService,
-        public readonly layerState: MapLayerStateService) {
+        public readonly viewSettings: MapViewStore,
+        public readonly layerState: MapLayerStore) {
         this.initializeMapGroups(mapInfo);
         this.subscriptions.add(
             this.stateService.ready.pipe(filter(ready => ready), take(1)).subscribe(_ => {

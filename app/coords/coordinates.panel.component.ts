@@ -2,10 +2,10 @@ import { KeyValue } from "@angular/common";
 import { ChangeDetectorRef, Component, Input, OnDestroy } from "@angular/core";
 import { Subscription } from "rxjs";
 import { GeoMath } from "../integrations/geo";
-import { MapViewStateService } from "../mapview/map-view-state.service";
+import { MapViewStore } from "../mapview/map-view.store";
 import { MapViewService } from "../mapview/map-view.service";
-import { deepEquals } from "../shared/app-state";
-import { AppStateService } from "../shared/appstate.service";
+import { deepEquals } from "../state/app-state";
+import { AppStateService } from "../state/app-state.service";
 import { ClipboardService } from "../shared/clipboard.service";
 import { subscribeCoordinateFrames } from "./coordinate-frame-stream";
 import { CoordinatesService } from "./coordinates.service";
@@ -111,11 +111,11 @@ export class CoordinatesPanelComponent implements OnDestroy {
         public stateService: AppStateService,
         private changeDetector: ChangeDetectorRef,
         public readonly coordinates: CoordinatesService,
-        public readonly viewSettings: MapViewStateService) {
+        public readonly viewSettings: MapViewStore) {
         for (let level = 0; level <= 15; level++) {
             this.displayOptions.push({ name: packedTileIdOptionName(level) });
         }
-        this.subscriptions.push(this.stateService.observe(() => [this.coordinates.markerState.value, this.coordinates.markedPositionState.value] as const, deepEquals).subscribe(([markerEnabled, markedPosition]) => {
+        this.subscriptions.push(this.stateService.observe(() => [this.coordinates.store.markerState.value, this.coordinates.store.markedPositionState.value] as const, deepEquals).subscribe(([markerEnabled, markedPosition]) => {
             this.isMarkerEnabled = markerEnabled;
             if (markedPosition.length >= 2) {
                 this.longitude = markedPosition[0];
@@ -140,7 +140,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
             this.restoreSelectedOptions();
         }));
 
-        this.subscriptions.push(this.coordinates.enabledCoordsTileIdsState.subscribe(() => {
+        this.subscriptions.push(this.coordinates.store.enabledCoordsTileIdsState.subscribe(() => {
             this.restoreSelectedOptions();
         }));
 
@@ -166,7 +166,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
 
     /** Reapplies persisted display-option selections after option lists change. */
     private restoreSelectedOptions() {
-        for (const option of this.coordinates.enabledCoordsTileIds) {
+        for (const option of this.coordinates.store.enabledCoordsTileIds) {
             const normalizedOption = normalizeCoordinatePanelOptionName(option);
             if (!this.isSelectedOption(normalizedOption) && this.displayOptions.some(val => val.name == normalizedOption)) {
                 this.selectedOptions.push({ name: normalizedOption });
@@ -264,7 +264,7 @@ export class CoordinatesPanelComponent implements OnDestroy {
 
     /** Persists the currently selected coordinate and tile-id entries. */
     updateSelectedOptions() {
-        this.coordinates.enabledCoordsTileIds = this.selectedOptions.reduce(
+        this.coordinates.store.enabledCoordsTileIds = this.selectedOptions.reduce(
             (array: Array<string>, option) => {
                 array.push(option.name);
                 return array;

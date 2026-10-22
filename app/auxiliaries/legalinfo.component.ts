@@ -1,8 +1,8 @@
 import { Component } from "@angular/core";
 import { MapInfoService } from "../mapdata/map-info.service";
-import { LEGAL_INFO_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
-import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService } from "../shared/appstate.service";
+import { LEGAL_INFO_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { AppLayoutService } from "../layout/app-layout.service";
+import { AppStateService } from "../state/app-state.service";
 
 @Component({
     selector: 'legal-dialog',

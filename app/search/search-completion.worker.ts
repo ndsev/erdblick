@@ -6,7 +6,7 @@ import type {
     FeatureSearchStyleValueKind
 } from "../mapdata/map-runtime.model";
 import type {CompletionCandidate} from "./search.model";
-import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
+import type {FeatureSearchMapLayerRef} from "./feature-search-state";
 import type {
     SearchCompletionRequestMessage,
     SearchCompletionResultMessage,

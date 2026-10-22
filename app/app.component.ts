@@ -1,28 +1,29 @@
 import { HttpClient } from "@angular/common/http";
 import { AfterViewInit, Component, OnDestroy, ViewContainerRef } from '@angular/core';
 import { Title } from "@angular/platform-browser";
-import { AppActionService } from "./actions/app-action.service";
+import { ActionRegistry } from "./actions/action-registry.service";
 import { DebugWindow, ErdblickDebugApi } from "./app.debugapi.component";
+import { AppConfigService } from "./config/app-config.service";
+import type { Versions } from "./config/app-config.store";
 import { DiagnosticsFacadeService } from "./diagnostics/diagnostics.facade.service";
 import { environment } from "./environments/environment";
-import { MapInfoService } from "./mapdata/map-info.service";
-import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
-import {
-    TileSubsetLayerRenderService
-} from "./mapview/deck/tile-subset-layer-render.service";
-import { AppConfigService, Versions } from "./shared/app-config.service";
 import {
     CACHE_RESET_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
     FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID
-} from "./shared/app-layout.model";
-import { AppLayoutService } from "./shared/app-layout.service";
-import { AppStateService } from "./shared/appstate.service";
-import { DialogStackService } from "./shared/dialog-stack.service";
+} from "./layout/app-layout.model";
+import { AppLayoutService } from "./layout/app-layout.service";
+import { DialogStackService } from "./layout/dialog-stack.service";
+import { MapInfoService } from "./mapdata/map-info.service";
+import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
+import {
+    TileSubsetLayerRenderService
+} from "./mapview/deck/tile-subset-layer-render.service";
 import { InfoMessageService } from "./shared/info.service";
 import { KeyboardService } from "./shared/keyboard.service";
+import { AppStateService } from "./state/app-state.service";
 import { StyleService } from "./styledata/style.service";
 
 // Redeclare window with extended interface
@@ -105,7 +106,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         private diagnostics: DiagnosticsFacadeService,
         private titleService: Title,
         public readonly layout: AppLayoutService,
-        private readonly actions: AppActionService) {
+        private readonly actions: ActionRegistry) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
         this.titleService.setTitle(this.capitalizeTitle(this.title));
@@ -197,7 +198,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         import(/* @vite-ignore */ distribVersionsPath)
             .then((plugin) => plugin.default() as Array<Versions>)
             .then((versions: Array<Versions>) => {
-                this.configService.distributionVersions.next(versions);
+                this.configService.store.distributionVersions.next(versions);
                 if (versions[0]?.name.trim()) {
                     this.titleService.setTitle(this.capitalizeTitle(versions[0].name.trim()));
                 } else {
@@ -269,7 +270,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     getBasicVersion() {
         this.httpClient.get('./bundle/VERSION', { responseType: 'text' }).subscribe(
             data => {
-                this.configService.erdblickVersion.next(`${this.title} ${data.toString()}`);
+                this.configService.store.erdblickVersion.next(`${this.title} ${data.toString()}`);
                 this.titleService.setTitle(this.capitalizeTitle(this.title));
             });
     }

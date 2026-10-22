@@ -1,18 +1,36 @@
-
 import { HttpClient } from "@angular/common/http";
 import { Injectable } from "@angular/core";
-import { BehaviorSubject, catchError, firstValueFrom, forkJoin, map, of, Subject } from "rxjs";
+import {
+    BehaviorSubject,
+    catchError,
+    firstValueFrom,
+    forkJoin,
+    map,
+    of,
+    Subject
+} from "rxjs";
 import { filter } from "rxjs/operators";
 import { z } from "zod";
 import { FeatureLayerStyle, FeatureStyleOptionType } from "../../build/libs/core/erdblick-core";
-import { ActionInput, ActionOutput, boundedCollection, catalogPage, rejectAction } from "../actions/app-action";
-import { AppActionService } from "../actions/app-action.service";
+import { ActionRegistry } from "../actions/action-registry.service";
+import {
+    ActionInput,
+    ActionOutput,
+    boundedCollection,
+    catalogPage,
+    discoveryPageShape,
+    discoveryResult,
+    identifierSchema,
+    indexSchema,
+    rejectAction
+} from "../actions/app-action";
+import { AppActionContributor } from "../actions/app-action-contributor";
+import { AppConfigService, StyleConfigEntry } from "../config/app-config.service";
 import { coreLib, uint8ArrayToWasmOrThrow } from "../integrations/wasm";
 import { canonicalSearchStyleFilename } from "../search/search-style-sheet.converter";
-import { AppConfigService, StyleConfigEntry } from "../shared/app-config.service";
-import { AppStateService } from "../shared/appstate.service";
 import { InfoMessageService } from "../shared/info.service";
-import { unicodePrefix } from "../shared/unicode-string";
+import { boundedUnicodeString, unicodePrefix } from "../shared/unicode-string";
+import { AppStateService } from "../state/app-state.service";
 import { shortId4, sipHash64Hex } from "./hash";
 import { LayerPresetDefinition } from "./layer-preset.model";
 import { StyleValidationReportService } from "./style-validation-report.service";
@@ -22,7 +40,7 @@ import {
     StyleValidationIssue,
     StyleValidationReport
 } from "./style-validation.model";
-import { styleActions, styleDiscoveryActions } from "./style.service.declarations";
+import { StyleStore } from "./style.store";
 
 const STATIC_STYLE_URL_PREFIX = "/static-config/styles/";
 
@@ -118,50 +136,7 @@ interface ImportedStyleStoreV2 {
  * grouping for the styles tree, and reapplication of visible styles.
  */
 @Injectable({ providedIn: 'root' })
-export class StyleService {
-
-    readonly styleVisibilityState = this.stateService.registerState<Record<string, boolean>>({
-        name: 'styleVisiblity',
-        schema: z.record(z.string(), z.coerce.boolean()),
-        defaultValue: {}
-    });
-
-    readonly styleEditorTargetState = this.stateService.registerState<string | null>({
-        name: 'styleEditorTarget',
-        defaultValue: null,
-        schema: z.string().nullable()
-    });
-
-    get styleVisibility() { return this.styleVisibilityState.getValue(); }
-
-    set styleVisibility(val: Record<string, boolean>) { this.styleVisibilityState.next(val); }
-
-    get styleEditorTargetId() { return this.styleEditorTargetState.getValue(); }
-
-    set styleEditorTargetId(val: string | null) { this.styleEditorTargetState.next(val); }
-
-    /** Returns whether the style is visible in the persisted style tree. */
-    getStyleVisibility(styleId: string, fallback: boolean = true): boolean {
-        if (this.styleVisibility.hasOwnProperty(styleId)) {
-            return this.styleVisibility[styleId];
-        }
-        return fallback;
-    }
-
-    /** Updates the persisted visibility flag for one style. */
-    setStyleVisibility(styleId: string, val: boolean) {
-        this.styleVisibilityState.next({ ...this.styleVisibility, [styleId]: val });
-    }
-
-    /** Removes stale visibility when a locally imported style identity is deleted. */
-    removeStyleVisibility(styleId: string) {
-        if (!Object.prototype.hasOwnProperty.call(this.styleVisibility, styleId)) {
-            return;
-        }
-        const next = { ...this.styleVisibility };
-        delete next[styleId];
-        this.styleVisibility = next;
-    }
+export class StyleService implements AppActionContributor {
 
     styleHashes: Map<string, StyleLifecycleState> = new Map();
     styleUrls: StyleConfigEntry[] = [];
@@ -184,7 +159,8 @@ export class StyleService {
         private stateService: AppStateService,
         private infoMessageService: InfoMessageService,
         private configService: AppConfigService,
-        private styleValidationReportService: StyleValidationReportService = new StyleValidationReportService()) {
+        private styleValidationReportService: StyleValidationReportService = new StyleValidationReportService(),
+        public readonly store: StyleStore) {
         this.stateService.ready.pipe(filter(state => state)).subscribe((state) => {
             this.reapplyAllStyles();
         });
@@ -238,7 +214,7 @@ export class StyleService {
             return undefined;
         }
         if (initialVisibility !== undefined) {
-            this.setStyleVisibility(importedStyleId, initialVisibility);
+            this.store.setStyleVisibility(importedStyleId, initialVisibility);
             this.styles.get(importedStyleId)!.visible = initialVisibility;
         }
         ++this.importedStylesCount;
@@ -246,7 +222,7 @@ export class StyleService {
             this.saveImportedStyles();
         } catch (error) {
             this.removeActiveStyleEntry(importedStyleId);
-            this.removeStyleVisibility(importedStyleId);
+            this.store.removeStyleVisibility(importedStyleId);
             this.importedStylesCount = Math.max(0, this.importedStylesCount - 1);
             console.error("Could not persist imported style.", error);
             this.infoMessageService.showError(
@@ -374,7 +350,7 @@ export class StyleService {
             this.removeActiveStyleEntry(knownStyleId);
         }
 
-        const isVisible = this.getStyleVisibility(knownStyleId ?? styleId, wasmStyle.defaultEnabled());
+        const isVisible = this.store.getStyleVisibility(knownStyleId ?? styleId, wasmStyle.defaultEnabled());
         const categoryReader = wasmStyle as Partial<Pick<FeatureLayerStyle, "category">>;
         const styleCategory = typeof categoryReader.category === "function"
             && categoryReader.category() === coreLib.StyleCategory.Search
@@ -402,7 +378,7 @@ export class StyleService {
 
         // Ensure that if the style was renamed, its visibility is retained.
         if (this.stateService.ready.getValue()) {
-            this.setStyleVisibility(styleId, isVisible);
+            this.store.setStyleVisibility(styleId, isVisible);
         }
 
         return styleId;
@@ -611,7 +587,7 @@ export class StyleService {
         }
 
         this.removeActiveStyleEntry(styleId);
-        this.removeStyleVisibility(styleId);
+        this.store.removeStyleVisibility(styleId);
         this.importedStylesCount = Math.max(0, this.importedStylesCount - 1);
         this.saveImportedStyles();
         this.styleGroups.next(this.computeStyleGroups());
@@ -649,7 +625,7 @@ export class StyleService {
             return undefined;
         }
         if (newStyleId !== styleId) {
-            this.removeStyleVisibility(styleId);
+            this.store.removeStyleVisibility(styleId);
         }
         this.synchronizeLifecycleForStyle(this.styles.get(newStyleId));
 
@@ -1181,8 +1157,8 @@ export class StyleService {
     reconcilePresentationStyles(): void {
         for (const style of this.styles.values()) {
             if (style.imported) {
-                this.setStyleVisibility(style.id,
-                    this.getStyleVisibility(style.id, false));
+                this.store.setStyleVisibility(style.id,
+                    this.store.getStyleVisibility(style.id, false));
             }
         }
         this.reapplyAllStyles();
@@ -1194,7 +1170,7 @@ export class StyleService {
             return;
         }
         const style = this.styles.get(styleId)!;
-        style.visible = this.getStyleVisibility(styleId, style.featureLayerStyle.defaultEnabled());
+        style.visible = this.store.getStyleVisibility(styleId, style.featureLayerStyle.defaultEnabled());
         this.styleGroups.next(this.computeStyleGroups());
         this.styleRemovedForId.next(styleId);
         if (style.visible) {
@@ -1318,7 +1294,7 @@ export class StyleService {
         }
         const style = this.styles.get(styleId)!;
         style.visible = enabled !== undefined ? enabled : !style.visible;
-        this.setStyleVisibility(styleId, style.visible);
+        this.store.setStyleVisibility(styleId, style.visible);
         if (delayRepaint) {
             this.reapplyStyle(styleId);
         }
@@ -1406,13 +1382,14 @@ export class StyleService {
         );
         return matchedByUrl;
     }
-
-    registerActions(actions: AppActionService): void {
+    /** Registers semantic operations and their live omnibar candidates. */
+    registerActions(actions: ActionRegistry): void {
         actions.registerAction(styleActions.getStyle, input => this.getStyle(input));
         actions.registerAction(styleActions.validateStyle, input => this.validateStyle(input));
         actions.registerAction(styleActions.editStyle, input => this.editStyle(input));
         actions.registerAction(styleDiscoveryActions.listStyles, input => this.listStyles(input));
     }
+
 
     listStyles(input: ActionInput<typeof styleDiscoveryActions.listStyles>): ActionOutput<typeof styleDiscoveryActions.listStyles> {
         const styles = this.styles.values();
@@ -1512,9 +1489,95 @@ export class StyleService {
 
     /** Removes visibility choices only after a complete style catalog has been installed. */
     pruneVisibility(presentStyles: ReadonlyMap<string, ErdblickStyle>): void {
-        const next = { ...this.styleVisibility };
+        const next = { ...this.store.styleVisibility };
         for (const id of Object.keys(next)) if (!presentStyles.has(id)) delete next[id];
-        this.styleVisibility = next;
+        this.store.styleVisibility = next;
     }
 
 }
+
+
+/**
+ * Public actions and controls implemented by this controller. Their schemas stay
+ * beside the handlers; both app startup and the Node catalog build register them.
+ */
+const text = boundedUnicodeString(4096);
+
+const count = indexSchema;
+
+const sourceText = boundedUnicodeString(48000, true);
+
+export const styleActions = {
+    getStyle: {
+        name: "viewer_get_style",
+        description: "Read one style's YAML and browser-local lifecycle flags. A style shows how some fields are drawn; it is not a data inventory. Discover available attributes with mapget_query_schema and actual values with mapget_extract_features. Search-overlay colors, categories and labels belong to viewer_get_search/viewer_set_search, not this base stylesheet. Never returns credentials or source filesystem paths.",
+        mutation: false,
+        inputSchema: z.strictObject({ styleId: identifierSchema.describe("Copy the exact id from viewer_get_catalog kind:styles; do not use the layer ID or display name.") }),
+        outputSchema: z.strictObject({
+            styleId: identifierSchema,
+            source: boundedUnicodeString(180000),
+            imported: z.boolean(),
+            modified: z.boolean(),
+            visible: z.boolean()
+        })
+    },
+    validateStyle: {
+        name: "viewer_validate_style",
+        description: "Validate bounded style YAML structure using the native parser without installing it. valid/loadable do not prove fields, geometry or rendered output exist in a dataset. After applying, use viewer_get_diagnostics sections=[errors] for runtime expression failures. Options are local to each stylesheet: copied option filters require matching options declarations in that stylesheet.",
+        mutation: false,
+        inputSchema: z.strictObject({ source: sourceText }),
+        outputSchema: z.strictObject({
+            valid: z.boolean(),
+            loadable: z.boolean(),
+            runtimeVerified: z.literal(false),
+            guidance: text,
+            issues: z.array(z.strictObject({
+                severity: z.enum(["info", "warning", "error"]),
+                message: text,
+                phase: text,
+                rulePath: text.optional(),
+                property: text.optional(),
+                line: count.optional(),
+                column: count.optional()
+            })).max(100),
+            ...{
+                complete: z.boolean(),
+                reason: z.enum(["item_limit", "byte_limit", "text_limit", "loading"]).optional()
+            }
+        })
+    },
+    editStyle: {
+        name: "viewer_edit_style",
+        description: "Create/update/patch/reset a browser-local YAML style, delete an imported style, or change visibility. Prefer patch for focused changes after viewer_get_style: edits are sequential exact find/replace pairs, each find must occur exactly once in the current source. All edits and final YAML validation succeed before any change is installed. Preserve unrelated rules/options. Missing stock options do not prevent custom rules. Options belong to each stylesheet; declare copied option filters locally. Never writes server files. Create/update require source; patch requires styleId and edits. Reset restores builtin YAML, not visibility or option values.",
+        mutation: true,
+        inputSchema: z.strictObject({
+            operation: z.enum(["create", "update", "patch", "reset", "delete", "visibility"]),
+            styleId: identifierSchema.optional(),
+            source: sourceText.optional(),
+            visible: z.boolean().optional(),
+            edits: z.array(z.strictObject({ find: boundedUnicodeString(16000, true), replace: boundedUnicodeString(32000) })).min(1).max(16).optional()
+        }),
+        outputSchema: z.strictObject({
+            status: z.literal("applied"),
+            styleId: identifierSchema,
+            changed: z.boolean().optional(),
+            editCount: indexSchema.optional()
+        })
+    }
+} as const;
+
+export const styleDiscoveryActions = {
+    listStyles: {
+        name: "viewer_list_styles",
+        mutation: false,
+        description: "List editable styles, including hidden styles and styles without options. Optional layerId filters by native layer affinity. Copy an item id for style read/edit operations.",
+        inputSchema: z.strictObject({ styleId: identifierSchema.optional(), layerId: identifierSchema.optional(), ...discoveryPageShape }),
+        outputSchema: discoveryResult(z.strictObject({
+            id: identifierSchema,
+            kind: boundedUnicodeString(128),
+            visible: z.boolean(),
+            imported: z.boolean(),
+            modified: z.boolean()
+        }))
+    }
+} as const;

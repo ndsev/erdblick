@@ -18,11 +18,11 @@ import {
     RetainedTileExpiryOwner
 } from '../mapdata/map-tile-stream.service';
 import { TileDeliveryError } from "../mapdata/tile-diagnostics";
-import { AppDialogComponent } from '../shared/app-dialog.component';
-import { DEFAULT_EM_HEIGHT, DEFAULT_EM_WIDTH } from "../shared/app-layout.model";
-import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService } from "../shared/appstate.service";
-import { DialogStackService } from '../shared/dialog-stack.service';
+import { AppDialogComponent } from '../layout/app-dialog.component';
+import { DEFAULT_EM_HEIGHT, DEFAULT_EM_WIDTH } from "../layout/app-layout.model";
+import { AppLayoutService } from "../layout/app-layout.service";
+import { AppStateService } from "../state/app-state.service";
+import { DialogStackService } from '../layout/dialog-stack.service';
 import { FeaturePanelComponent } from './feature.panel.component';
 import { InspectionSelectionService } from './inspection-selection.service';
 import {
@@ -31,7 +31,7 @@ import {
     InspectionComparisonOption,
     InspectionPanelModel
 } from "./inspection-state.model";
-import { InspectionStateService } from "./inspection-state.service";
+import { InspectionPanelService } from "./inspection-panel.service";
 
 /** View model for one comparison column in the side-by-side inspection dialog. */
 interface ComparisonColumn {
@@ -172,7 +172,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         private dialogStack: DialogStackService,
         private renderer: Renderer2,
         private readonly cdr: ChangeDetectorRef,
-        public readonly inspectionState: InspectionStateService,
+        public readonly inspectionState: InspectionPanelService,
         public readonly layout: AppLayoutService) {
         effect(() => {
             const model = this.comparison();
@@ -258,7 +258,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
             return;
         }
         this.selectedCompareIds = [nextModel.base.panelId, ...nextModel.others.map(entry => entry.panelId)];
-        this.inspectionState.inspectionComparison = nextModel;
+        this.inspectionState.store.inspectionComparison = nextModel;
     }
 
     /** Drops one column from the comparison, closing the dialog if no entries remain. */
@@ -269,7 +269,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
             this.inspectionState.closeInspectionComparison();
             return;
         }
-        this.inspectionState.inspectionComparison = {
+        this.inspectionState.store.inspectionComparison = {
             base: remainingEntries[0],
             others: remainingEntries.slice(1)
         };
@@ -292,7 +292,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     refreshCompareOptions() {
         const options = this.inspectionState.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue());
         this.compareOptions = options;
-        const model = this.inspectionState.inspectionComparison;
+        const model = this.inspectionState.store.inspectionComparison;
         if (!model) {
             return;
         }
@@ -320,7 +320,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
                 this.inspectionState.closeInspectionComparison();
                 return;
             }
-            this.inspectionState.inspectionComparison = nextModel;
+            this.inspectionState.store.inspectionComparison = nextModel;
             this.selectedCompareIds = [nextModel.base.panelId, ...nextModel.others.map(entry => entry.panelId)];
             return;
         }

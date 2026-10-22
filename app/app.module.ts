@@ -1,5 +1,5 @@
 import { provideHttpClient, withFetch } from "@angular/common/http";
-import { inject, NgModule, provideAppInitializer } from '@angular/core';
+import { inject, Injector, NgModule, provideAppInitializer } from "@angular/core";
 import { FormsModule, ReactiveFormsModule } from "@angular/forms";
 import { BrowserModule } from '@angular/platform-browser';
 import { BrowserAnimationsModule } from "@angular/platform-browser/animations";
@@ -60,17 +60,14 @@ import { TooltipModule } from "primeng/tooltip";
 import { TreeModule } from "primeng/tree";
 import { TreeSelectModule } from "primeng/treeselect";
 import { TreeTableModule } from "primeng/treetable";
-import { AppActionService } from "./actions/app-action.service";
-import { applicationControls } from "./actions/application-controls";
+import { McpActionService } from "./actions/mcp-action.service";
+import { OmnibarComponent } from "./actions/omnibar.component";
 import { ViewerActionStatusComponent } from "./actions/viewer-action-status.component";
-import { applicationActions as declaredActions } from "./actions/viewer-action.contract";
-import { ViewerActionService } from "./actions/viewer-action.service";
-import { ViewerUiService } from "./actions/viewer-ui.service";
 import { WebMcpService } from "./actions/web-mcp.service";
 import { AppComponent } from './app.component';
-import { DockableLayoutComponent } from "./app.dockable.layout.component";
 import { MainBarComponent } from "./app.mainbar.component";
 import { AppRoutingModule } from './app.routing.module';
+import { registerApplication } from "./application-registration";
 import { AboutComponent } from "./auxiliaries/about.component";
 import { AdvancedPreferencesComponent } from "./auxiliaries/advanced-preferences.component";
 import { CacheResetComponent } from "./auxiliaries/cache-reset.component";
@@ -79,6 +76,7 @@ import { KeyboardComponent } from "./auxiliaries/keyboard.component";
 import { LegalInfoDialogComponent } from "./auxiliaries/legalinfo.component";
 import { PreferencesComponent } from "./auxiliaries/preferences.component";
 import { SurveyComponent } from "./auxiliaries/survey.component";
+import { AppConfigService } from "./config/app-config.service";
 import { CoordinatesLegalTermsDialogComponent } from "./coords/coordinates-legal-terms-dialog.component";
 import { CoordinatesPolicyService } from "./coords/coordinates-policy.service";
 import { CoordinatesPanelComponent } from "./coords/coordinates.panel.component";
@@ -94,7 +92,6 @@ import { HighlightSearch } from "./inspection/highlight.pipe";
 import { HighlightRegion } from "./inspection/highlight.region.pipe";
 import { InspectionComparisonDialogComponent } from "./inspection/inspection-comparison.dialog.component";
 import { InspectionSelectionService } from "./inspection/inspection-selection.service";
-import { InspectionStateService } from "./inspection/inspection-state.service";
 import { InspectionContainerComponent } from "./inspection/inspection.container.component";
 import { InspectionPanelDialogComponent } from "./inspection/inspection.dialog.component";
 import { InspectionDialogsComponent } from "./inspection/inspection.dialogs.component";
@@ -104,47 +101,38 @@ import { SourceDataPanelComponent } from "./inspection/sourcedata.panel.componen
 import { SourceDataLayerSelectionDialogComponent } from "./inspection/sourcedata.selection.dialog.component";
 import { TreeTableFilterPatchDirective } from "./inspection/treetablefilter-patch.directive";
 import { initializeLibrary } from "./integrations/wasm";
-import { ConnectionPreferencesService } from "./mapdata/connection-preferences.service";
+import { AppDialogComponent } from "./layout/app-dialog.component";
+import { AppPanelComponent } from "./layout/app-panel.component";
+import { AppSurfaceHeaderComponent } from "./layout/app-surface-header.component";
+import { DockableLayoutComponent } from "./layout/dockable-layout.component";
 import { MapInfoService } from "./mapdata/map-info.service";
-import { MapLayerStateService } from "./mapdata/map-layer-state.service";
 import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
 import { MapPanelComponent } from "./mapdata/map.panel.component";
 import { TileSubsetLayerRenderService } from "./mapview/deck/tile-subset-layer-render.service";
-import { MapViewStateService } from "./mapview/map-view-state.service";
-import { MapViewService } from "./mapview/map-view.service";
-import { RenderPreferencesService } from "./mapview/render-preferences.service";
 import { RightClickMenuService } from "./mapview/rightclickmenu.service";
 import { MapViewComponent } from "./mapview/view.component";
 import { MapViewContainerComponent } from "./mapview/view.container.component";
 import { ErdblickViewUIComponent } from "./mapview/view.ui.component";
-import { ExternalViewerService } from "./search/external-viewer.service";
+import { JumpTargetService } from "./navigation/jump.service";
 import { FeatureSearchExportDialogComponent } from "./search/feature-search-export.dialog.component";
 import { FeatureSearchComponent } from "./search/feature.search.component";
 import { FeatureSearchDialogsComponent } from "./search/feature.search.dialogs.component";
 import { FeatureSearchService } from "./search/feature.search.service";
-import { JumpTargetService } from "./search/jump.service";
-import { LocationNavigationService } from "./search/location-navigation.service";
 import { LocationSearchService } from "./search/location.search.service";
 import { SearchCompletionPopupComponent } from "./search/search-completion-popup.component";
 import { SearchStyleColorComponent } from "./search/search-style-color.component";
 import { SearchStyleRuleEditorComponent } from "./search/search-style-rule-editor.component";
 import { SearchStyleSaveDialogComponent } from "./search/search-style-save.dialog.component";
-import { SearchPanelComponent } from "./search/search.panel.component";
 import { SimfilExpressionInputComponent } from "./search/simfil-expression-input.component";
-import { AppConfigService } from "./shared/app-config.service";
 import { AppConfirmPopupComponent } from "./shared/app-confirm-popup.component";
-import { AppDialogComponent } from "./shared/app-dialog.component";
-import { AppLayoutService } from "./shared/app-layout.service";
-import { AppPanelComponent } from "./shared/app-panel.component";
-import { AppSurfaceHeaderComponent } from "./shared/app-surface-header.component";
-import { AppUrlStateService } from "./shared/app-url-state.service";
-import { AppStateService } from "./shared/appstate.service";
 import { ClipboardService } from "./shared/clipboard.service";
 import { EditorComponent } from "./shared/editor.component";
 import { EditorService } from "./shared/editor.service";
 import { InfoMessageService } from "./shared/info.service";
 import { OnEnterClickDirective } from "./shared/keyboard.service";
 import { PresentationStateBridgeService } from "./shared/presentation-state-bridge.service";
+import { AppStateService } from "./state/app-state.service";
+import { AppUrlStateService } from "./state/app-url-state.service";
 import { MapPresetService } from "./styledata/map-preset.service";
 import { StyleComponent } from "./styledata/style.component";
 import { StyleService } from "./styledata/style.service";
@@ -185,6 +173,7 @@ const updateGlobalSpinner = (message: string) => {
 
 /** App initializer that loads config and then brings up the WASM core, styles, map data, and search state in order. */
 export const initializeServices = () => {
+    registerApplication(inject(Injector));
     const configService = inject(AppConfigService);
     const stateService = inject(AppStateService);
     const styleService = inject(StyleService);
@@ -195,32 +184,13 @@ export const initializeServices = () => {
     const coordinatesPolicy = inject(CoordinatesPolicyService);
     const subsetRenderService = inject(TileSubsetLayerRenderService);
     const presentationBridge = inject(PresentationStateBridgeService);
-    const viewerActions = inject(ViewerActionService);
+    const viewerActions = inject(McpActionService);
     const webMcp = inject(WebMcpService);
     const featureSearch = inject(FeatureSearchService);
     const diagnostics = inject(DiagnosticsFacadeService);
     inject(LocationSearchService);
     const urlState = inject(AppUrlStateService);
-    // Resolve every durable-state owner before config/storage/URL hydration begins.
-    inject(AppLayoutService);
-    inject(MapViewStateService);
-    inject(MapLayerStateService);
-    inject(InspectionStateService);
-    inject(RenderPreferencesService);
-    inject(ConnectionPreferencesService);
-    stateService.sealRegistration();
-
-    // Every public declaration must be bound by its actual owner before either MCP
-    // adapter advertises the build contract. Late registration is rejected.
-    const actions = inject(AppActionService);
     const jumps = inject(JumpTargetService);
-    for (const owner of [
-        configService, styleService, inspectionSelection, featureSearch, diagnostics, coordService, urlState,
-        inject(MapViewService), inject(MapViewStateService), inject(MapInfoService),
-        inject(InspectionStateService), inject(RenderPreferencesService), inject(ConnectionPreferencesService),
-        inject(LocationNavigationService), inject(ViewerUiService), jumps, inject(ExternalViewerService)
-    ]) owner.registerActions(actions);
-    actions.sealRegistration(Object.values(declaredActions), Object.values(applicationControls));
 
     return (async () => {
         updateGlobalSpinner('Loading app config');
@@ -255,7 +225,7 @@ export const initializeServices = () => {
 @NgModule({
     declarations: [
         AppComponent,
-        SearchPanelComponent,
+        OmnibarComponent,
         MapPanelComponent,
         InspectionPanelComponent,
         FeaturePanelComponent,

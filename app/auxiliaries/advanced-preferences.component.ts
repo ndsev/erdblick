@@ -1,10 +1,10 @@
 import { Component, ElementRef, HostListener, ViewChild } from '@angular/core';
 import { Subscription } from 'rxjs';
-import { AppDialogComponent } from '../shared/app-dialog.component';
-import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
-import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService } from "../shared/appstate.service";
-import { DialogStackService } from '../shared/dialog-stack.service';
+import { AppDialogComponent } from '../layout/app-dialog.component';
+import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { AppLayoutService } from "../layout/app-layout.service";
+import { AppStateService } from "../state/app-state.service";
+import { DialogStackService } from '../layout/dialog-stack.service';
 import { EditorService } from '../shared/editor.service';
 
 @Component({

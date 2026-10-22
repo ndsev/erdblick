@@ -1,9 +1,15 @@
 import { Injectable } from "@angular/core";
-import { Subject, filter, firstValueFrom, fromEvent, merge, startWith } from "rxjs";
-import type {
-    FeatureLayerStyle,
-    Viewport
-} from "../../build/libs/core/erdblick-core";
+import {
+    Subject,
+    filter,
+    firstValueFrom,
+    fromEvent,
+    merge,
+    startWith
+} from "rxjs";
+import { z } from "zod";
+import type { FeatureLayerStyle, Viewport } from "../../build/libs/core/erdblick-core";
+import { ActionRegistry } from "../actions/action-registry.service";
 import {
     ActionInput,
     ActionOutput,
@@ -12,34 +18,27 @@ import {
     applied,
     rejectAction
 } from "../actions/app-action";
-import { AppActionService } from "../actions/app-action.service";
+import { AppActionContributor } from "../actions/app-action-contributor";
+import { AppConfigService } from "../config/app-config.service";
 import { Cartographic } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
-import { MapInfoService } from "../mapdata/map-info.service";
-import { mapControls } from "../mapdata/map-info.service.declarations";
-import { AppConfigService } from "../shared/app-config.service";
-import { AppStateService } from "../shared/appstate.service";
-import {
-    clampPresentationLod,
-    clampStyleLod
-} from "../shared/lod-policy";
+import { MapInfoService, mapControls } from "../mapdata/map-info.service";
+import { clampPresentationLod, clampStyleLod } from "../shared/lod-policy";
+import { boundedUnicodeString } from "../shared/unicode-string";
+import { AppStateService } from "../state/app-state.service";
 import {
     CameraViewState,
     TileGridMode,
     VIEW_SYNC_LAYERS,
     VIEW_SYNC_MOVEMENT,
     VIEW_SYNC_POSITION,
-    tileGridMaxLevel
+    tileGridMaxLevel,
+    viewIdSchema
 } from "./map-view-state.model";
-import { MapViewStateService, ViewId } from "./map-view-state.service";
-import { mapViewActions, mapViewControls } from "./map-view.service.declarations";
-import { RenderPreferencesService } from "./render-preferences.service";
+import { MapViewStore, ViewId } from "./map-view.store";
+import { RenderPreferencesStore } from "./render-preferences.store";
 import { IRenderView, LocationArea, RenderRectangle, RenderViewCameraState } from "./render-view.model";
-import {
-    autoTileGridLevel,
-    coarsenedTileLevel,
-    tileGridVisibleCellCount
-} from "./tile-grid-visibility";
+import { autoTileGridLevel, coarsenedTileLevel, tileGridVisibleCellCount } from "./tile-grid-visibility";
 import { ViewVisualizationState } from "./view.visualization.model";
 
 export enum ViewRecalculationReason {
@@ -67,10 +66,12 @@ export interface LiveCameraViewStateUpdate {
 }
 
 /**
- * Owns camera/view state and the unified per-view `ViewVisualizationState` instances.
+ * Coordinates live renderers, navigation and per-view visualization instances.
+ * Durable cameras and view preferences live in MapViewStore. This controller
+ * handles previews, renderer generations and teardown before membership changes.
  */
 @Injectable({ providedIn: "root" })
-export class MapViewService {
+export class MapViewService implements AppActionContributor {
     private static readonly AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES = 64;
     private static readonly SEARCH_COVERAGE_TILE_LIMIT = 1 << 20;
 
@@ -109,8 +110,8 @@ export class MapViewService {
     constructor(
         private readonly stateService: AppStateService,
         private readonly mapInfo: MapInfoService,
-        public readonly renderPreferences: RenderPreferencesService,
-        public readonly viewSettings: MapViewStateService,
+        public readonly renderPreferences: RenderPreferencesStore,
+        public readonly viewSettings: MapViewStore,
         private readonly config: AppConfigService
     ) {
         let previousIds: readonly string[] = [];
@@ -742,9 +743,13 @@ export class MapViewService {
         }
         return clampedLevel;
     }
-
-    registerActions(actions: AppActionService): void {
+    /** Registers semantic operations and their live omnibar candidates. */
+    registerActions(actions: ActionRegistry): void {
         actions.registerAction(mapViewActions.manageView, input => this.manageView(input));
+    }
+
+    /** Registers typed state readers and writers without exposing persistence keys. */
+    registerControls(actions: ActionRegistry): void {
         actions.registerControl(mapViewControls.views, { read: () => this.viewSummary(), defaultTargets: () => [{}] });
         actions.registerControl(mapViewControls.camera, {
             read: ({ viewId }) => this.readCamera(viewId), write: ({ viewId }, value) => this.assignCamera(viewId, value),
@@ -772,7 +777,24 @@ export class MapViewService {
             read: target => this.mapInfo.layerConfiguration(target),
             write: (target, value) => this.assignLayer(target, value)
         });
+
+        actions.registerControl(viewSettingsControls.focus, {
+            read: () => this.viewSettings.focusedViewIdState.value,
+            write: (_selector, id) => { this.viewSettings.focusedView = this.viewSettings.indexOfView(id); }
+        });
+        actions.registerControl(viewSettingsControls.sync, {
+            read: () => [...this.viewSettings.viewSync] as ControlValue<typeof viewSettingsControls.sync>,
+            write: (_selector, value) => {
+                if (value.includes("pos") && value.includes("mov")) rejectAction("Position and movement sync are mutually exclusive", "invalid_arguments");
+                this.viewSettings.updateSelectedSyncOptions(value);
+            }
+        });
+        actions.registerControl(viewSettingsControls.navigation, {
+            read: () => ({ zoomStep: this.viewSettings.mapZoomStep, featureZoomClearance: this.viewSettings.featureZoomClearanceMeters }),
+            write: (_selector, value) => this.setNavigationPreferences(value)
+        });
     }
+
 
     /** Resolve logical scope at the boundary; presentation indices stay internal. */
     requireViewIndex(viewId: string): number {
@@ -887,4 +909,152 @@ export class MapViewService {
         });
     }
 
+
+
+
+    /** Keep movement step and feature clearance coherent for UI and public controls. */
+    setNavigationPreferences(value: ControlValue<typeof viewSettingsControls.navigation>): void {
+        this.stateService.transaction(() => {
+            this.viewSettings.mapZoomStep = value.zoomStep;
+            this.viewSettings.featureZoomClearanceMeters = value.featureZoomClearance;
+        });
+    }
 }
+
+
+/**
+ * Public actions and controls implemented by this controller. Their schemas stay
+ * beside the handlers; both app startup and the Node catalog build register them.
+ */
+export const mapViewActions = {
+    manageView: {
+        name: "viewer_manage_view",
+        description: "Create a comparison view copied from the given source viewId, or remove that view. Cannot remove the last view. Read app.views afterward for current logical IDs.",
+        mutation: true,
+        inputSchema: z.strictObject({ operation: z.enum(["create", "remove"]), viewId: viewIdSchema }),
+        outputSchema: z.strictObject({ status: z.literal("applied"), changed: z.boolean() })
+    }
+} as const;
+
+/** MapViewService combines durable view settings with live renderer navigation and availability. */
+export const mapViewControls = {
+    views: {
+        name: "app.views",
+        description: "Views, focus, synchronization, projection and live navigation availability.",
+        selectorSchema: z.strictObject({}),
+        valueSchema: z.strictObject({
+            focusedViewId: viewIdSchema,
+            sync: z.array(boundedUnicodeString(32)).max(32),
+            views: z.array(z.strictObject({
+                viewId: viewIdSchema,
+                projection: z.enum(["2d", "3d"]),
+                navigationMode: z.enum(["map", "first_person", "unavailable"])
+            })).max(32)
+        }),
+        readable: true,
+        writable: false,
+        persistence: "runtime-summary",
+        synchronization: "none"
+    },
+    camera: {
+        name: "view.camera",
+        description: "Live map camera; assignment focuses the target and honors position/movement synchronization. Unavailable in first-person mode.",
+        selectorSchema: z.strictObject({ viewId: viewIdSchema }),
+        valueSchema: z.strictObject({
+            destination: z.strictObject({
+                lon: z.number().min(-180).max(180).describe("WGS84 longitude in degrees."),
+                lat: z.number().min(-85.05113).max(85.05113).describe("Web Mercator latitude in degrees."),
+                alt: z.number().positive().describe("Viewer scale-height in metres, not physical eye/terrain altitude.")
+            }),
+            orientation: z.strictObject({
+                heading: z.number().min(-2 * Math.PI).max(2 * Math.PI).describe("Clockwise heading from north, in radians."),
+                pitch: z.number().min(-Math.PI / 2).max(-Math.PI / 36).describe("Pitch in radians; -pi/2 is top-down, -pi/36 is the maximum tilt."),
+                roll: z.literal(0).describe("Roll is not implemented; only zero is supported.")
+            }),
+            // Some MCP clients reject tuple schemas; refine to a tuple only after validating the array length.
+            position: z.array(z.number()).length(3).transform(position => position as [number, number, number]).optional()
+                .describe("Local map-centre offset in metres; omitted means [0,0,0].")
+        }),
+        readable: true,
+        writable: true,
+        persistence: "url-and-local-storage",
+        synchronization: "focus-target-and-follow-view-sync"
+    },
+    projection: {
+        name: "view.projection",
+        description: "2D/3D projection, honoring projection sync.",
+        selectorSchema: z.strictObject({ viewId: viewIdSchema }),
+        valueSchema: z.enum(["2d", "3d"]),
+        readable: true,
+        writable: true,
+        synchronization: "focus-target-and-follow-view-sync",
+        persistence: "url-and-local-storage"
+    },
+    background: {
+        name: "view.background",
+        description: "Configured background identity and opacity percentage; no URLs or credentials.",
+        selectorSchema: z.strictObject({ viewId: viewIdSchema }),
+        valueSchema: z.strictObject({ layerId: boundedUnicodeString(4096).nullable(), opacity: z.number().int().min(0).max(100) }),
+        readable: true,
+        writable: true,
+        synchronization: "follow-view-sync",
+        persistence: "url-and-local-storage"
+    },
+    grid: {
+        name: "view.grid",
+        description: "Tile grid appearance; color is six hex digits without #.",
+        selectorSchema: z.strictObject({ viewId: viewIdSchema }),
+        valueSchema: z.strictObject({
+            visible: z.boolean(),
+            mode: z.enum(["nds", "xyz"]),
+            level: z.number().int().min(0).max(30),
+            autoLevel: z.boolean(),
+            color: z.string().regex(/^[0-9a-fA-F]{6}$/),
+            opacity: z.number().int().min(0).max(100)
+        }),
+        readable: true,
+        writable: true,
+        synchronization: "follow-view-sync",
+        persistence: "url-and-local-storage"
+    }
+} as const;
+
+
+
+
+/** MapViewStore owns logical focus, synchronization policy and navigation preferences. */
+export const viewSettingsControls = {
+    focus: {
+        name: "app.focusedView",
+        description: "Focused source view, addressed by its current logical view ID.",
+        selectorSchema: z.strictObject({}),
+        valueSchema: viewIdSchema,
+        readable: true,
+        writable: true,
+        synchronization: "none",
+        persistence: "url-and-local-storage"
+    },
+    sync: {
+        name: "app.viewSync",
+        description: "Cross-view synchronization: pos keeps camera positions equal; mov synchronizes relative camera movement; choose at most one of pos and mov. proj synchronizes projection; lay synchronizes layers. Omit lay to keep different map layers in each view.",
+        selectorSchema: z.strictObject({}),
+        valueSchema: z.array(z.enum(["pos", "mov", "proj", "lay"])).max(4),
+        readable: true,
+        writable: true,
+        synchronization: "none",
+        persistence: "url-and-local-storage"
+    },
+    navigation: {
+        name: "app.preferences.navigation",
+        description: "Zoom step and feature-fit clearance in metres.",
+        selectorSchema: z.strictObject({}),
+        valueSchema: z.strictObject({
+            zoomStep: z.number().min(0.001).max(1),
+            featureZoomClearance: z.number().min(0).max(100)
+        }),
+        readable: true,
+        writable: true,
+        synchronization: "none",
+        persistence: "local-storage"
+    }
+} as const;

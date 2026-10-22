@@ -1,10 +1,10 @@
 import { Component, OnDestroy, ViewChild } from '@angular/core';
 import { Subscription } from 'rxjs';
-import { AppDialogComponent } from '../shared/app-dialog.component';
-import { DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
-import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService } from "../shared/appstate.service";
-import { DialogStackService } from '../shared/dialog-stack.service';
+import { AppDialogComponent } from '../layout/app-dialog.component';
+import { DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { AppLayoutService } from "../layout/app-layout.service";
+import { AppStateService } from "../state/app-state.service";
+import { DialogStackService } from '../layout/dialog-stack.service';
 import { DiagnosticsFacadeService } from './diagnostics.facade.service';
 import type { DiagnosticsExportOptions } from './diagnostics.model';
 
@@ -68,13 +68,13 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
         public readonly stateService: AppStateService,
         private readonly dialogStack: DialogStackService,
         public readonly layout: AppLayoutService) {
-        const options = this.diagnostics.diagnosticsExportOptions;
+        const options = this.diagnostics.store.diagnosticsExportOptions;
         this.exportOptions = {
             ...options,
             logFilter: { ...options.logFilter }
         };
         this.subscriptions.push(
-            this.diagnostics.diagnosticsExportOptionsState.subscribe(options => {
+            this.diagnostics.store.diagnosticsExportOptionsState.subscribe(options => {
                 this.exportOptions = {
                     ...options,
                     logFilter: { ...options.logFilter }
@@ -108,7 +108,7 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
 
     /** Persists the current export-option toggles. */
     updateOptions() {
-        this.diagnostics.diagnosticsExportOptions = {
+        this.diagnostics.store.diagnosticsExportOptions = {
             ...this.exportOptions,
             logFilter: { ...this.exportOptions.logFilter }
         };

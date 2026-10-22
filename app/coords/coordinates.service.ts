@@ -1,63 +1,25 @@
-import { ControlValue } from "../actions/app-action";
-import { AppActionService } from "../actions/app-action.service";
-import { coordinateControls } from "./coordinates.service.declarations";
-
 import { Injectable } from "@angular/core";
 import { BehaviorSubject, skip } from "rxjs";
 import { z } from "zod";
+import { ActionRegistry } from "../actions/action-registry.service";
+import { ControlValue } from "../actions/app-action";
+import { AppActionContributor } from "../actions/app-action-contributor";
+import { AppConfigService } from "../config/app-config.service";
 import { Cartographic, GeoMath } from "../integrations/geo";
-import { AppConfigService } from "../shared/app-config.service";
-import { Boolish } from "../shared/app-state";
-import { AppStateService } from "../shared/appstate.service";
-import { roundCoordinateStateValue } from "./coordinates-state.model";
+import { AppStateService } from "../state/app-state.service";
+import { CoordinatesStore } from "./coordinates.store";
 
 @Injectable({ providedIn: 'root' })
 /**
  * Shared coordinate event service for hover/click coordinates and optional
  * plugin-provided auxiliary coordinate systems.
  */
-export class CoordinatesService {
-
-    readonly markerState = this.stateService.registerState<boolean>({
-        name: 'marker',
-        defaultValue: false,
-        schema: Boolish,
-        urlParamName: 'm',
-        urlIncludeInVisualizationOnly: false
-    });
-
-    readonly markedPositionState = this.stateService.registerState<number[]>({
-        name: 'markedPosition',
-        defaultValue: [],
-        schema: z.array(z.coerce.number()).max(3),
-        toStorage: (value: number[]) => value.map(v => roundCoordinateStateValue(v)),
-        fromStorage: (payload: any): number[] => (payload as number[]).map(v => roundCoordinateStateValue(v)),
-        urlParamName: 'mp',
-        urlIncludeInVisualizationOnly: false
-    });
-
-    readonly enabledCoordsTileIdsState = this.stateService.registerState<string[]>({
-        name: 'enabledCoordsTileIds',
-        defaultValue: ["WGS84"],
-        schema: z.array(z.string())
-    });
-
-    get marker() { return this.markerState.getValue(); }
-
-    set marker(val: boolean) { this.markerState.next(val); }
-
-    get markedPosition() { return this.markedPositionState.getValue(); }
-
-    set markedPosition(val: number[]) { this.markedPositionState.next(val.map(v => roundCoordinateStateValue(v))); }
-
-    get enabledCoordsTileIds() { return this.enabledCoordsTileIdsState.getValue(); }
-
-    set enabledCoordsTileIds(val: string[]) { this.enabledCoordsTileIdsState.next(val); }
+export class CoordinatesService implements AppActionContributor {
 
     /** Enables or disables the explicit location marker overlay. */
     setMarkerState(enabled: boolean) {
         this.stateService.transaction(() => {
-            this.markerState.next(enabled);
+            this.store.markerState.next(enabled);
             if (!enabled) {
                 this.setMarkerPosition(null, false);
             }
@@ -69,9 +31,9 @@ export class CoordinatesService {
         if (position) {
             const longitude = GeoMath.toDegrees(position.longitude);
             const latitude = GeoMath.toDegrees(position.latitude);
-            this.markedPosition = [longitude, latitude, position.height];
+            this.store.markedPosition = [longitude, latitude, position.height];
         } else {
-            this.markedPosition = [];
+            this.store.markedPosition = [];
         }
         if (!delayUpdate) {
             this.stateService.requestHistoryEntry();
@@ -84,7 +46,8 @@ export class CoordinatesService {
     auxiliaryTileIdsFun: ((x: number, y: number, level: number) => Array<[string, bigint | number]>) | null = null;
 
     constructor(public stateService: AppStateService,
-        private configService: AppConfigService) {
+        private configService: AppConfigService,
+        public readonly store: CoordinatesStore) {
         this.mouseClickCoordinates.pipe(
             skip(1)  // Skip the first (null) value from mouseClickCoordinates BehaviorSubject
         ).subscribe(position => {
@@ -118,18 +81,12 @@ export class CoordinatesService {
         });
     }
 
-    registerActions(actions: AppActionService): void {
+    /** Registers typed state readers and writers without exposing persistence keys. */
+    registerControls(actions: ActionRegistry): void {
         actions.registerControl(coordinateControls.marker, {
-            read: () => this.markerControlValue,
+            read: () => this.store.markerControlValue,
             write: (_selector, value) => this.setMarker(value)
         });
-    }
-
-    get markerControlValue(): ControlValue<typeof coordinateControls.marker> {
-        return {
-            enabled: this.marker, position: this.markedPosition.length >= 2
-                ? { lon: this.markedPosition[0], lat: this.markedPosition[1], alt: this.markedPosition[2] ?? 0 } : null
-        };
     }
 
     /** Position and visibility are one marker edit for both UI and external controls. */
@@ -141,3 +98,25 @@ export class CoordinatesService {
     }
 
 }
+
+
+/** CoordinatesService exposes marker position and visibility as one coherent assignment. */
+export const coordinateControls = {
+    marker: {
+        name: "app.marker",
+        description: "Coordinate marker visibility and WGS84 position.",
+        selectorSchema: z.strictObject({}),
+        valueSchema: z.strictObject({
+            enabled: z.boolean(),
+            position: z.strictObject({
+                lon: z.number().min(-180).max(180),
+                lat: z.number().min(-90).max(90),
+                alt: z.number()
+            }).nullable()
+        }),
+        readable: true,
+        writable: true,
+        synchronization: "none",
+        persistence: "url-and-local-storage"
+    }
+} as const;

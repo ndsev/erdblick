@@ -16,7 +16,7 @@ import {Compartment, EditorState, Extension, Prec} from "@codemirror/state";
 import {EditorView, keymap, placeholder, ViewUpdate} from "@codemirror/view";
 import {syntaxHighlighting} from "@codemirror/language";
 import {debounceTime, distinctUntilChanged, Subject, Subscription} from "rxjs";
-import {FeatureSearchMapLayerRef, FeatureSearchScope} from "../shared/feature-search-state";
+import {FeatureSearchMapLayerRef, FeatureSearchScope} from "./feature-search-state";
 import {currentInlineCodeMirrorTheme} from "../shared/codemirror-theme";
 import {CompletionCandidate} from "./search.model";
 import {FeatureSearchService} from "./feature.search.service";

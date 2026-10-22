@@ -13,10 +13,10 @@ import {
 import { toObservable, toSignal } from "@angular/core/rxjs-interop";
 import { Observable, Subscription } from "rxjs";
 import { filter } from "rxjs/operators";
-import { AppModeService } from "../shared/app-mode.service";
-import { AppStateService } from "../shared/appstate.service";
+import { AppModeService } from "../config/app-mode.service";
+import { AppStateService } from "../state/app-state.service";
 import { KeyboardService } from "../shared/keyboard.service";
-import { MapViewStateService } from "./map-view-state.service";
+import { MapViewStore } from "./map-view.store";
 import { IRenderView } from "./render-view.model";
 
 @Component({
@@ -99,7 +99,7 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         public stateService: AppStateService,
         private keyboardService: KeyboardService,
         private ngZone: NgZone,
-        public readonly viewSettings: MapViewStateService) {
+        public readonly viewSettings: MapViewStore) {
         this.numViews = toSignal(this.viewSettings.numViewsState, { initialValue: this.viewSettings.numViewsState.getValue() });
         this.mapView$ = toObservable(this.mapView);
     }

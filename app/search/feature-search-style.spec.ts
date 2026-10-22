@@ -8,7 +8,7 @@ import {
 } from "./feature-search-style";
 
 import {coreLib, initializeLibrary, uint8ArrayToWasmOrThrow} from "../integrations/wasm";
-import {createFeatureSearchStateEntry} from "../shared/feature-search-state";
+import {createFeatureSearchStateEntry} from "./feature-search-state";
 import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
 
 function channel(overrides: Partial<FilterChannelDefinition>): FilterChannelDefinition {

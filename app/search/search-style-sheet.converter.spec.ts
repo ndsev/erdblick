@@ -2,7 +2,7 @@ import {load} from "js-yaml";
 import {beforeAll, describe, expect, it} from "vitest";
 
 import {coreLib, initializeLibrary, uint8ArrayToWasm} from "../integrations/wasm";
-import type {FeatureSearchStyleRule} from "../shared/feature-search-state";
+import type {FeatureSearchStyleRule} from "./feature-search-state";
 import {
     canonicalLayerAffinityExpression,
     canonicalSearchStyleFilename,

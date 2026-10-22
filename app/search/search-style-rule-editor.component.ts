@@ -15,7 +15,7 @@ import {
     FeatureSearchMapLayerRef,
     FeatureSearchScope,
     normalizeFeatureSearchGeometry
-} from "../shared/feature-search-state";
+} from "./feature-search-state";
 import type {SearchValueSummariesState, SearchValueSummary} from "./search.model";
 import {
     isNumericStyleValueKind,

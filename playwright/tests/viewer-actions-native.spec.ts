@@ -1,12 +1,9 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/test';
-import { viewerActions } from '../../app/actions/viewer-action.contract';
-import { applicationControls } from '../../app/actions/application-controls';
-import { mapViewControls } from '../../app/mapview/map-view.service.declarations';
-const cameraViewStateSchema = mapViewControls.camera.valueSchema;
-import { enableMapLayer } from '../utils/ui-helpers';
 import { mcpClient } from '../utils/mcp-client';
 import { TEST_LAYER_NAMES, TEST_MAP_NAMES } from '../utils/test-params';
+import { enableMapLayer } from '../utils/ui-helpers';
+import { applicationControls, cameraViewStateSchema, screenshotMetadataSchema, viewerActions } from "../utils/viewer-contract";
 
 test.use({ stateSnapshot: null });
 test.skip(process.env['EB_MAPGET_MCP_LOCAL'] !== '1', 'Requires the native local MCP fixture, not a mocked relay');
@@ -413,7 +410,7 @@ rules:
     const screenshot = await mcp.call('viewer_screenshot', { clientId, maxWidth: 1280, maxHeight: 960 });
     const captureElapsedMs = Date.now() - captureStarted;
     expect(screenshot.isError, JSON.stringify(screenshot.structuredContent)).not.toBe(true);
-    const metadata = viewerActions.viewer_screenshot.outputSchema.shape.metadata.parse(screenshot.structuredContent);
+    const metadata = screenshotMetadataSchema.parse(screenshot.structuredContent);
     expect(metadata).toMatchObject({ scope: 'application-viewport', readiness: { status: 'unknown' } });
     expect(metadata.width).toBeLessThanOrEqual(1280);
     expect(metadata.height).toBeLessThanOrEqual(960);

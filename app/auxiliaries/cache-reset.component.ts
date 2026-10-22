@@ -3,15 +3,15 @@ import { HttpErrorResponse } from "@angular/common/http";
 import { Component } from "@angular/core";
 import { TooltipModule } from "primeng/tooltip";
 import { map, Observable } from "rxjs";
-import { AppLayoutService } from "../shared/app-layout.service";
+import { AppLayoutService } from "../layout/app-layout.service";
 
 import { CacheResetService } from "../mapdata/cache-reset.service";
 import { MapInfoService } from "../mapdata/map-info.service";
 import { isDataSourceCatalogEntryReady } from "../mapdata/map.tree.model";
-import { AppConfigService } from "../shared/app-config.service";
-import { AppDialogComponent } from "../shared/app-dialog.component";
-import { CACHE_RESET_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
-import { AppStateService } from "../shared/appstate.service";
+import { AppConfigService } from "../config/app-config.service";
+import { AppDialogComponent } from "../layout/app-dialog.component";
+import { CACHE_RESET_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { AppStateService } from "../state/app-state.service";
 import { InfoMessageService } from "../shared/info.service";
 
 @Component({

@@ -1,11 +1,11 @@
 import { Component, OnDestroy, ViewChild } from "@angular/core";
 import { Subscription } from "rxjs";
-import { AppDialogComponent } from "../shared/app-dialog.component";
-import { FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID } from "../shared/app-layout.model";
-import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService } from "../shared/appstate.service";
-import { DialogStackService } from "../shared/dialog-stack.service";
-import type { FeatureSearchMapLayerRef } from "../shared/feature-search-state";
+import { AppDialogComponent } from "../layout/app-dialog.component";
+import { FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { AppLayoutService } from "../layout/app-layout.service";
+import { AppStateService } from "../state/app-state.service";
+import { DialogStackService } from "../layout/dialog-stack.service";
+import type { FeatureSearchMapLayerRef } from "./feature-search-state";
 import { InfoMessageService } from "../shared/info.service";
 import {
     featureSearchExportFilename,

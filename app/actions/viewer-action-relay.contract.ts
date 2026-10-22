@@ -1,5 +1,5 @@
 import {z} from "zod";
-import {boundedUnicodeString} from "../shared/unicode-string.js";
+import {boundedUnicodeString} from "../shared/unicode-string";
 
 export const VIEWER_ACTION_RELAY_VERSION = 1;
 export const VIEWER_ACTION_CONTROL_FRAME_TYPE = 9;

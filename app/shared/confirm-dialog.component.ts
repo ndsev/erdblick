@@ -1,6 +1,6 @@
 import {Component, EventEmitter, input, Output} from "@angular/core";
 import {ButtonModule} from "primeng/button";
-import {AppDialogComponent} from "./app-dialog.component";
+import {AppDialogComponent} from "../layout/app-dialog.component";
 
 @Component({
     selector: "confirm-dialog",

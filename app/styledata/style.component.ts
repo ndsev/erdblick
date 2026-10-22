@@ -34,15 +34,15 @@ import {
     updateStyleSourceFromQuick,
     updateStyleSourceMetadata
 } from "../search/search-style-sheet.converter";
-import { AppDialogComponent } from "../shared/app-dialog.component";
+import { AppDialogComponent } from "../layout/app-dialog.component";
 import {
     STYLE_EDITOR_DIALOG_LAYOUT_ID,
     STYLE_PRESET_EDITOR_DIALOG_LAYOUT_ID,
     STYLES_DIALOG_LAYOUT_ID
-} from "../shared/app-layout.model";
-import { AppLayoutService } from "../shared/app-layout.service";
-import { AppStateService } from "../shared/appstate.service";
-import { DialogStackService } from "../shared/dialog-stack.service";
+} from "../layout/app-layout.model";
+import { AppLayoutService } from "../layout/app-layout.service";
+import { AppStateService } from "../state/app-state.service";
+import { DialogStackService } from "../layout/dialog-stack.service";
 import { EditorService } from "../shared/editor.service";
 import { InfoMessageService } from "../shared/info.service";
 import { MapPresetDefinition, MapPresetIssue } from "./map-preset.model";
@@ -492,7 +492,7 @@ interface QuickPresetOption {
                                     [readOnlyRuleIndices]="quickReadOnlyRuleIndices"
                                     [notesBySourceIndex]="quickWarningsBySourceIndex"
                                     [expandRulesByDefault]="true"
-                                    [expansionContext]="styleService.styleEditorTargetId ?? ''"
+                                    [expansionContext]="styleService.store.styleEditorTargetId ?? ''"
                                     [canRefreshValueSummaries]="false">
                                 </search-style-rule-editor>
                             </div>
@@ -521,8 +521,8 @@ interface QuickPresetOption {
                     </div>
                 </div>
                 <div class="editor-actions-right">
-                    <p-button data-testid="style-editor-export-button" (click)="exportStyle(styleService.styleEditorTargetId ?? '')"
-                              [disabled]="sourceWasModified || !styleService.styleEditorTargetId"
+                    <p-button data-testid="style-editor-export-button" (click)="exportStyle(styleService.store.styleEditorTargetId ?? '')"
+                              [disabled]="sourceWasModified || !styleService.store.styleEditorTargetId"
                               label="Export" icon="pi pi-file-export">
                     </p-button>
                     <p-button data-testid="style-editor-help-button" (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
@@ -1061,7 +1061,7 @@ export class StyleComponent implements OnDestroy {
         if (style === undefined || style === null) {
             return;
         }
-        this.styleService.setStyleVisibility(styleId, style.visible);
+        this.styleService.store.setStyleVisibility(styleId, style.visible);
         if (redraw) {
             this.styleService.reapplyStyle(styleId);
         }
@@ -1126,7 +1126,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Opens or reuses an editor session while preserving unsaved edits in another style. */
     private openStyleEditor(styleId: string): boolean {
-        const currentTargetId = this.styleService.styleEditorTargetId;
+        const currentTargetId = this.styleService.store.styleEditorTargetId;
         const sameEditorSession = this.styleEditorVisible
             && currentTargetId === styleId
             && this.editorService.hasSession(this.styleEditorSessionId);
@@ -1149,7 +1149,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Applies the current editor contents to the selected style. */
     applyEditedStyle(): string | undefined {
-        const styleId = this.styleService.styleEditorTargetId;
+        const styleId = this.styleService.store.styleEditorTargetId;
         const styleData = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, '');
         if (!styleId) {
             this.messageService.showError(`No cached style ID found!`);
@@ -1173,7 +1173,7 @@ export class StyleComponent implements OnDestroy {
         const newStyleId = this.styleService.setStyleSource(styleId, styleData);
         // If there is no style ID returned, then setStyleSource failed.
         if (newStyleId) {
-            this.styleService.styleEditorTargetId = newStyleId;
+            this.styleService.store.styleEditorTargetId = newStyleId;
             this.sourceWasModified = false;
             this.styleEditorOriginalSource = styleData;
             this.editorService.updateSessionSource(this.styleEditorSessionId, styleData);
@@ -1185,7 +1185,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Applies pending editor text and persists the resulting style through the writable source mount. */
     async saveEditedStyleToSource(): Promise<void> {
-        let styleId = this.styleService.styleEditorTargetId ?? undefined;
+        let styleId = this.styleService.store.styleEditorTargetId ?? undefined;
         if (this.sourceWasModified) {
             const appliedStyleId = this.applyEditedStyle();
             if (!appliedStyleId) {
@@ -1223,13 +1223,13 @@ export class StyleComponent implements OnDestroy {
 
     /** Returns whether the current style URL belongs to the writable source-style mount. */
     canSaveCurrentStyleToSource(): boolean {
-        const styleId = this.styleService.styleEditorTargetId;
+        const styleId = this.styleService.store.styleEditorTargetId;
         return !!styleId && this.styleService.canSaveStyleToSource(styleId);
     }
 
     /** Returns whether the editor or applied style differs from its source-file baseline. */
     currentStyleHasSourceChanges(): boolean {
-        const styleId = this.styleService.styleEditorTargetId;
+        const styleId = this.styleService.store.styleEditorTargetId;
         return this.sourceWasModified || (!!styleId && this.styleService.styles.get(styleId)?.modified === true);
     }
 
@@ -1278,7 +1278,7 @@ export class StyleComponent implements OnDestroy {
         this.styleEditorVisible = false;
         this.warningDialogVisible = false;
         this.sourceWasModified = false;
-        this.styleService.styleEditorTargetId = null;
+        this.styleService.store.styleEditorTargetId = null;
         this.styleEditorQuickAvailable = false;
         this.quickProjection = undefined;
         this.quickRuleDrafts = [];
@@ -1300,7 +1300,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Recreates the editor session when a persisted style-editor dialog is restored on startup/import. */
     private ensureStyleEditorSession(): void {
-        const targetStyleId = this.styleService.styleEditorTargetId;
+        const targetStyleId = this.styleService.store.styleEditorTargetId;
         if (this.editorService.hasSession(this.styleEditorSessionId)) {
             return;
         }
@@ -1311,7 +1311,7 @@ export class StyleComponent implements OnDestroy {
         if (!this.prepareStyleEditorSession(targetStyleId)) {
             this.messageService.showError(`Could not restore style editor for ${targetStyleId}.`);
             this.styleEditorVisible = false;
-            this.styleService.styleEditorTargetId = null;
+            this.styleService.store.styleEditorTargetId = null;
         }
     }
 
@@ -1321,7 +1321,7 @@ export class StyleComponent implements OnDestroy {
         if (source === undefined) {
             return false;
         }
-        this.styleService.styleEditorTargetId = styleId;
+        this.styleService.store.styleEditorTargetId = styleId;
         return this.prepareStyleEditorSource(source);
     }
 
@@ -1358,7 +1358,7 @@ export class StyleComponent implements OnDestroy {
             this.saveOrApplyEditedStyle();
         }) ?? new Subscription();
         this.sourceWasModified = false;
-        this.styleEditorQuickAvailable = !!this.styleService.styleEditorTargetId;
+        this.styleEditorQuickAvailable = !!this.styleService.store.styleEditorTargetId;
         this.styleEditorTab = this.styleEditorQuickAvailable ? "quick" : "advanced";
         this.refreshQuickProjection(source);
         return true;
@@ -1444,19 +1444,19 @@ export class StyleComponent implements OnDestroy {
 
     /** Returns the currently persisted style controlled by the editor header. */
     protected currentEditorStyle(): ErdblickStyle | undefined {
-        const styleId = this.styleService.styleEditorTargetId;
+        const styleId = this.styleService.store.styleEditorTargetId;
         return styleId ? this.styleService.styles.get(styleId) : undefined;
     }
 
     /** Builds the shared surface-header title from the currently persisted editor identity. */
     protected styleEditorHeaderTitle(): string {
-        const styleId = this.styleService.styleEditorTargetId;
+        const styleId = this.styleService.store.styleEditorTargetId;
         return styleId ? `Style Editor — ${styleId}` : "Style Editor";
     }
 
     /** Applies header visibility through the ordinary persisted style lifecycle. */
     protected toggleEditorStyle(enabled: boolean): void {
-        const styleId = this.styleService.styleEditorTargetId;
+        const styleId = this.styleService.store.styleEditorTargetId;
         if (styleId) {
             this.styleService.toggleStyle(styleId, enabled, true);
         }
@@ -1468,7 +1468,7 @@ export class StyleComponent implements OnDestroy {
             return "A style name is required.";
         }
         const conflict = this.styleService.styleIdentityConflict(this.quickStyleName);
-        return conflict && conflict.id !== this.styleService.styleEditorTargetId
+        return conflict && conflict.id !== this.styleService.store.styleEditorTargetId
             ? `A style named or resolved by “${this.quickStyleName}” already exists.`
             : "";
     }
@@ -1863,7 +1863,7 @@ export class StyleComponent implements OnDestroy {
             return sameHash || sameName || sameUrl || sameConfig;
         }
         if (source.sourceKind === 'editor') {
-            return sameName && this.styleService.styleEditorTargetId === style.id && this.sourceWasModified;
+            return sameName && this.styleService.store.styleEditorTargetId === style.id && this.sourceWasModified;
         }
         if (source.sourceHash && style.sourceRef?.sourceHash) {
             return sameHash;

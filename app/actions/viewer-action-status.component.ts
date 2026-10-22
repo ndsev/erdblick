@@ -1,6 +1,6 @@
 import {Component} from "@angular/core";
 import {WebMcpService} from "./web-mcp.service";
-import {ViewerActionService} from "./viewer-action.service";
+import {McpActionService} from "./mcp-action.service";
 import {ClipboardService} from "../shared/clipboard.service";
 import {Popover} from "primeng/popover";
 
@@ -76,7 +76,7 @@ import {Popover} from "primeng/popover";
     `]
 })
 export class ViewerActionStatusComponent {
-    constructor(readonly actions: ViewerActionService, private readonly clipboard: ClipboardService, readonly webMcp: WebMcpService) {}
+    constructor(readonly actions: McpActionService, private readonly clipboard: ClipboardService, readonly webMcp: WebMcpService) {}
 
     /** Registration means available, not active; pending viewer calls own the green state. */
     get buttonSeverity(): "secondary" | "success" | "danger" {

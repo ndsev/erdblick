@@ -3,20 +3,17 @@ import { MenuItem } from "primeng/api";
 import { BehaviorSubject, Subject } from "rxjs";
 import { DiagnosticsFacadeService } from "../diagnostics/diagnostics.facade.service";
 import { PerformanceDiagnosticsScope } from "../diagnostics/diagnostics.model";
+import { InspectionPanelService } from "../inspection/inspection-panel.service";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
 import { SelectedSourceData, type TileFeatureId } from "../inspection/inspection-state.model";
-import { InspectionStateService } from "../inspection/inspection-state.service";
 import { Color, HeightReference, Rectangle } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
 import { parseMapPartitionKey } from "../mapdata/partition.model";
-import {
-    ExternalViewerLocation,
-    ExternalViewerService
-} from "../search/external-viewer.service";
+import { ExternalViewerLocation, ExternalViewerService } from "../navigation/external-viewer.service";
+import type { FeatureSearchMapLayerRef } from "../search/feature-search-state";
 import { FeatureSearchService } from "../search/feature.search.service";
-import { AppStateService } from "../shared/appstate.service";
-import type { FeatureSearchMapLayerRef } from "../shared/feature-search-state";
 import { InfoMessageService } from "../shared/info.service";
+import { AppStateService } from "../state/app-state.service";
 import type { RenderNavigationTarget } from "./render-view.model";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
@@ -70,7 +67,7 @@ interface PickedFeatureMenuRow {
     mapIdLabel: string;
 }
 
-@Injectable()
+@Injectable({ providedIn: "root" })
 /**
  * Owns the dynamic right-click menu content for the map view.
  * The service tracks source-data context so the menu can offer quick repeat actions across tiles.
@@ -101,7 +98,7 @@ export class RightClickMenuService {
         private diagnostics: DiagnosticsFacadeService,
         private externalViewerService: ExternalViewerService,
         private inspectionSelection: InspectionSelectionService,
-        public readonly inspectionState: InspectionStateService) {
+        public readonly inspectionState: InspectionPanelService) {
         this.rebuildMenuItems();
         this.tileIdsForSourceData.subscribe(tileIds => {
             this.sourceDataShortcut = null;

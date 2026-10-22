@@ -6,25 +6,18 @@ import {
     type HoverLabelFieldConfig,
     type TileFeatureId
 } from "../inspection/inspection-state.model";
-import { InspectionStateService } from "../inspection/inspection-state.service";
+import { InspectionStore } from "../inspection/inspection.store";
 import { coreLib, uint8ArrayToWasm } from "../integrations/wasm";
-import { AppStateService } from "../shared/appstate.service";
 import { MAX_STYLE_LOD } from "../shared/lod-policy";
 import { stripFeatureInspectionTarget } from "../shared/tile-feature-id";
+import { AppStateService } from "../state/app-state.service";
 import type { ErdblickStyle } from "../styledata/style.service";
 import { MapInfoService } from "./map-info.service";
 import type { SearchResultTileEntry } from "./map-runtime.model";
 import { MapTileStreamService } from "./map-tile-stream.service";
 import type { MapgetLayer } from "./mapget-layer.model";
-import {
-    partitionKey,
-    type PartitionId
-} from "./partition.model";
-import {
-    StyledMapgetLayer,
-    type StyledMapgetLayerEvent,
-    type StyleFilterPlan
-} from "./styled-mapget-layer.model";
+import { partitionKey, type PartitionId } from "./partition.model";
+import { StyledMapgetLayer, type StyledMapgetLayerEvent, type StyleFilterPlan } from "./styled-mapget-layer.model";
 
 export type HoverDetailField = { key: string; value: string; colorKey: string };
 export type HoverFeatureDetails = {
@@ -67,7 +60,7 @@ export class HoverDetailService implements OnDestroy {
         private readonly state: AppStateService,
         private readonly mapInfo: MapInfoService,
         private readonly tileStream: MapTileStreamService,
-        public readonly inspectionState: InspectionStateService
+        public readonly inspectionState: InspectionStore
     ) {
         this.enabled = this.inspectionState.hoverLabelsEnabled;
         this.activeFields = this.normalizeFields(this.inspectionState.hoverLabelFields);

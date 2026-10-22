@@ -2,7 +2,7 @@ import "@angular/compiler";
 import {load} from "js-yaml";
 import {describe, expect, it, vi} from "vitest";
 
-import type {FeatureSearchStyleRule} from "../shared/feature-search-state";
+import type {FeatureSearchStyleRule} from "./feature-search-state";
 import {AppModule} from "../app.module";
 import {FeatureSearchComponent} from "./feature.search.component";
 import type {SearchStyleSaveRequest} from "./search-style-save.dialog.component";

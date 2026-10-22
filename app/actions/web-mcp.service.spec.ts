@@ -1,7 +1,7 @@
 import "@angular/compiler";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebMcpService } from "./web-mcp.service";
-import { viewerActions } from "./viewer-action.contract";
+import { viewerActions } from "../../test/action-contract";
 import { ViewerActionFailure } from "./viewer-action-relay.contract";
 
 type Tool = {
@@ -21,7 +21,7 @@ function fixture(supported = true) {
     Object.defineProperty(document, "modelContext", { value: supported ? { registerTool } : undefined, configurable: true });
     const actions = { invokeLocal: vi.fn().mockResolvedValue({ status: "applied" }) };
     const zone = { run: (fn: () => unknown) => fn(), runOutsideAngular: (fn: () => unknown) => fn() };
-    const service = new WebMcpService(actions as never, zone as never);
+    const service = new WebMcpService(actions as never, zone as never, { publicActions: viewerActions } as never);
     const fetchMock = vi.fn(async (_url: URL, init: RequestInit) => {
         const request = JSON.parse(String(init.body));
         return new Response(JSON.stringify({

@@ -2,7 +2,7 @@ import type {
     FeatureSearchAttributeScopeCandidate,
     FeatureSearchStyleFieldCandidate
 } from "../mapdata/map-runtime.model";
-import type {FeatureSearchMapLayerRef, FeatureSearchScope} from "../shared/feature-search-state";
+import type {FeatureSearchMapLayerRef, FeatureSearchScope} from "./feature-search-state";
 import type {CompletionCandidate} from "./search.model";
 
 /** Parser options needed by the schema-completion worker. */

@@ -1,4 +1,4 @@
-import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
+import type {FeatureSearchMapLayerRef} from "./feature-search-state";
 
 /** Counts of scalar and placeholder value kinds observed in a search value stream. */
 export interface SearchValueKindCounts {

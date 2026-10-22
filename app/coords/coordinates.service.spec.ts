@@ -1,3 +1,4 @@
+import { CoordinatesStore } from "./coordinates.store";
 import "@angular/compiler";
 import { testPersistence } from "../../test/state-owners";
 import { describe, it, expect, vi } from 'vitest';
@@ -10,7 +11,7 @@ class AppConfigServiceStub {
 const createService = () => {
     const stateService = testPersistence();
     const configService = new AppConfigServiceStub();
-    const service = new CoordinatesService(stateService as any, configService as any);
+    const service = new CoordinatesService(stateService as any, configService as any, new CoordinatesStore(stateService as any));
     return { service, stateService, configService };
 };
 

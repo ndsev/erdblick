@@ -20,31 +20,28 @@ import {
     Subscription
 } from "rxjs";
 import { Viewport } from "../../../build/libs/core/erdblick-core";
+import { AppConfigService } from "../../config/app-config.service";
+import { type WmsBackgroundLayerConfig, type XyzBackgroundLayerConfig } from "../../config/background-layer.model";
 import { CoordinatesService } from "../../coords/coordinates.service";
 import { environment } from "../../environments/environment";
+import { InspectionPanelService } from "../../inspection/inspection-panel.service";
 import { InspectionSelectionService } from "../../inspection/inspection-selection.service";
 import { TileFeatureId } from "../../inspection/inspection-state.model";
-import { InspectionStateService } from "../../inspection/inspection-state.service";
 import { type TileLayerProps, WMSLayer } from "../../integrations/deckgl";
 import { Cartographic, Color, GeoMath, SceneMode } from "../../integrations/geo";
 import { coreLib } from "../../integrations/wasm";
 import { featureSetsEqual } from "../../mapdata/feature-inspection.model";
 import { MapInfoService } from "../../mapdata/map-info.service";
-import { MapLayerStateService } from "../../mapdata/map-layer-state.service";
+import { MapLayerStore } from "../../mapdata/map-layer.store";
 import { MapTileStreamService } from "../../mapdata/map-tile-stream.service";
+import { featureSearchVisibleInView } from "../../search/feature-search-state";
 import {
     type FeatureSearchOverlayLayer,
     FeatureSearchService
 } from "../../search/feature.search.service";
 import type { SearchResultDensityMarker, SearchResultPoint } from "../../search/search-result-density.model";
-import {
-    AppConfigService,
-    type WmsBackgroundLayerConfig,
-    type XyzBackgroundLayerConfig
-} from "../../shared/app-config.service";
-import { deepEquals } from "../../shared/app-state";
-import { AppStateService } from "../../shared/appstate.service";
-import { featureSearchVisibleInView } from "../../shared/feature-search-state";
+import { deepEquals } from "../../state/app-state";
+import { AppStateService } from "../../state/app-state.service";
 import {
     CameraViewState,
     DEFAULT_MAP_ZOOM_STEP,
@@ -56,9 +53,9 @@ import {
     VIEW_SYNC_MOVEMENT,
     VIEW_SYNC_POSITION
 } from "../map-view-state.model";
-import { MapViewStateService } from "../map-view-state.service";
 import { MapViewService } from "../map-view.service";
-import { RenderPreferencesService } from "../render-preferences.service";
+import { MapViewStore } from "../map-view.store";
+import { RenderPreferencesStore } from "../render-preferences.store";
 import {
     IRenderSceneHandle,
     IRenderView,
@@ -512,10 +509,10 @@ export abstract class DeckMapView implements IRenderView {
         protected stateService: AppStateService,
         protected configService: AppConfigService,
         protected layerController: ViewLayerController,
-        public readonly renderPreferences: RenderPreferencesService,
-        public readonly viewSettings: MapViewStateService,
-        public readonly inspectionState: InspectionStateService,
-        public readonly layerState: MapLayerStateService) {
+        public readonly renderPreferences: RenderPreferencesStore,
+        public readonly viewSettings: MapViewStore,
+        public readonly inspectionState: InspectionPanelService,
+        public readonly layerState: MapLayerStore) {
         this.viewId = viewSettings.viewIdAt(id);
         this.canvasId = canvasId;
         this.targetNavigationAdapter = new ErdblickTargetNavigationAdapter({
@@ -1293,7 +1290,7 @@ export abstract class DeckMapView implements IRenderView {
                     firstId.mapTileKey === secondId.mapTileKey
                     && firstId.featureId === secondId.featureId
                 )),
-            this.inspectionState.drillPickRadius,
+            this.inspectionState.store.drillPickRadius,
             layerIds.length ? layerIds : undefined
         );
         if (picked) {
@@ -1335,7 +1332,7 @@ export abstract class DeckMapView implements IRenderView {
         if (!this.deck || !layerIds.length) {
             return null;
         }
-        const radius = Math.max(0, Math.trunc(this.inspectionState.drillPickRadius));
+        const radius = Math.max(0, Math.trunc(this.inspectionState.store.drillPickRadius));
         const canvasPosition = [
             context.viewport.x + screenPosition[0],
             context.viewport.y + screenPosition[1]
@@ -1955,7 +1952,7 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.stateService.observe(() => [this.coordinatesService.markerState.value, this.coordinatesService.markedPositionState.value], deepEquals).subscribe(() => {
+            this.stateService.observe(() => [this.coordinatesService.store.markerState.value, this.coordinatesService.store.markedPositionState.value], deepEquals).subscribe(() => {
                 this.updateLocationMarkerOverlay();
             })
         );
@@ -2356,7 +2353,7 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
         const generation = this.hoverPickGeneration;
-        const radius = Math.max(0, Math.trunc(this.inspectionState.drillPickRadius));
+        const radius = Math.max(0, Math.trunc(this.inspectionState.store.drillPickRadius));
         const navigationLayerIds = this.navigationPickLayerIds();
         this.hoverPickInFlight = true;
         try {
@@ -2447,7 +2444,7 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
         const generation = this.hoverPickGeneration;
-        const radius = Math.max(0, Math.trunc(this.inspectionState.drillPickRadius));
+        const radius = Math.max(0, Math.trunc(this.inspectionState.store.drillPickRadius));
         const canvas = deck.getCanvas();
         const left = Math.max(0, position.x - radius);
         const top = Math.max(0, position.y - radius);
@@ -2569,8 +2566,8 @@ export abstract class DeckMapView implements IRenderView {
         let featureIds = useDesktopDrillPick
             ? this.drillPickFeatures(
                 screenPosition,
-                this.inspectionState.drillPickRadius,
-                this.inspectionState.inspectionsLimit
+                this.inspectionState.store.drillPickRadius,
+                this.inspectionState.store.inspectionsLimit
             ).topFeatureIds
             : this.featurePickResultFromPickingInfos([info]).topFeatureIds;
         // Deck's speculative pointer-down picker is intentionally disabled. Touch taps therefore
@@ -2578,7 +2575,7 @@ export abstract class DeckMapView implements IRenderView {
         if (!featureIds.length && !useDesktopDrillPick) {
             featureIds = this.drillPickFeatures(
                 screenPosition,
-                this.inspectionState.drillPickRadius,
+                this.inspectionState.store.drillPickRadius,
                 1
             ).topFeatureIds;
         }
@@ -2591,11 +2588,11 @@ export abstract class DeckMapView implements IRenderView {
                 info,
                 screenPosition,
                 featureIds[0],
-                this.inspectionState.drillPickRadius,
-                this.inspectionState.inspectionsLimit
+                this.inspectionState.store.drillPickRadius,
+                this.inspectionState.store.inspectionsLimit
             )
             : null;
-        const markerPosition = this.coordinatesService.marker ? featurePosition : null;
+        const markerPosition = this.coordinatesService.store.marker ? featurePosition : null;
         const cartographic = markerPosition
             ? { lon: markerPosition[0], lat: markerPosition[1], alt: markerPosition[2] }
             : this.pickCartographic(screenPosition);
@@ -3467,8 +3464,8 @@ export abstract class DeckMapView implements IRenderView {
      * Mirrors the legacy Cesium single-location pin as a dedicated deck IconLayer.
      */
     private updateLocationMarkerOverlay(): void {
-        const markerEnabled = this.coordinatesService.markerState.getValue();
-        const markedPosition = this.coordinatesService.markedPositionState.getValue();
+        const markerEnabled = this.coordinatesService.store.markerState.getValue();
+        const markedPosition = this.coordinatesService.store.markedPositionState.getValue();
         if (!this.deck || !markerEnabled || markedPosition.length < 2) {
             this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
             this.lastLocationMarkerSignature = "";

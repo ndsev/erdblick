@@ -34,10 +34,10 @@ interface DeckViewTestInternals {
 }
 
 interface MarkerTestInternals extends DeckViewTestInternals {
-    coordinatesService: {
+    coordinatesService: { store: {
         markerState: { getValue: () => boolean };
         markedPositionState: { getValue: () => number[] };
-    };
+    } };
     featureSearchService: { markerGraphics: () => string };
     layerRegistry: { upsert: (...args: unknown[]) => void };
     updateLocationMarkerOverlay(): void;
@@ -204,8 +204,10 @@ describe("Deck navigation target and layout", () => {
         const view = createView();
         const internals = view as unknown as MarkerTestInternals;
         installDeckMock(view, 1000, 700);
-        internals.coordinatesService.markerState = { getValue: () => true };
-        internals.coordinatesService.markedPositionState = { getValue: () => [11, 48, 120] };
+        internals.coordinatesService.store = {
+            markerState: { getValue: () => true },
+            markedPositionState: { getValue: () => [11, 48, 120] }
+        };
         internals.featureSearchService.markerGraphics = () => "marker.svg";
         const upsert = vi.spyOn(internals.layerRegistry, "upsert");
 

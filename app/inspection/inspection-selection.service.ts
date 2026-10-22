@@ -1,33 +1,35 @@
 import { Injectable, NgZone } from "@angular/core";
 import { BehaviorSubject } from "rxjs";
+import { z } from "zod";
 import { Feature } from "../../build/libs/core/erdblick-core";
+import { ActionRegistry } from "../actions/action-registry.service";
 import type { ActionInput, ActionOutput } from "../actions/app-action";
-import { ControlReadContext, ControlValue, rejectAction } from "../actions/app-action";
-import { AppActionService } from "../actions/app-action.service";
+import {
+    colorSchema,
+    ControlReadContext,
+    ControlValue,
+    identifierSchema,
+    indexSchema,
+    rejectAction
+} from "../actions/app-action";
+import { AppActionContributor } from "../actions/app-action-contributor";
 import { Cartesian3 } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
-import {
-    featureSetsEqual,
-    FeatureWrapper
-} from "../mapdata/feature-inspection.model";
-import {
-    MapTileStreamService,
-    RetainedTileExpiryOwner
-} from "../mapdata/map-tile-stream.service";
+import { featureSetsEqual, FeatureWrapper } from "../mapdata/feature-inspection.model";
+import { MapTileStreamService, RetainedTileExpiryOwner } from "../mapdata/map-tile-stream.service";
 import { parsePartition, partitionKeySuffix } from "../mapdata/partition.model";
 import { TileDeliveryError } from "../mapdata/tile-diagnostics";
-import { MapViewStateService } from "../mapview/map-view-state.service";
 import { MapViewService } from "../mapview/map-view.service";
-import { deepEquals } from "../shared/app-state";
-import { AppStateService } from "../shared/appstate.service";
+import { MapViewStore } from "../mapview/map-view.store";
 import { InfoMessageService } from "../shared/info.service";
 import { KeyboardService } from "../shared/keyboard.service";
-import {
-    tileFeatureInteractionTargetsEqual
-} from "../shared/tile-feature-id";
-import { inspectionActions, inspectionControls } from "./inspection-selection.service.declarations";
+import { tileFeatureInteractionTargetsEqual } from "../shared/tile-feature-id";
+import { boundedUnicodeString } from "../shared/unicode-string";
+import { deepEquals } from "../state/app-state";
+import { AppStateService } from "../state/app-state.service";
+import { featureIdentitySchema } from "./feature-identity";
+import { InspectionPanelService } from "./inspection-panel.service";
 import { InspectionPanelModel, SelectedSourceData, TileFeatureId } from "./inspection-state.model";
-import { InspectionStateService } from "./inspection-state.service";
 
 interface Wgs84Point {
     x: number;
@@ -53,7 +55,7 @@ interface InspectionExpiryOwner extends RetainedTileExpiryOwner {
  * Owns selected and hovered feature interaction state, including focus/zoom navigation.
  */
 @Injectable({ providedIn: "root" })
-export class InspectionSelectionService {
+export class InspectionSelectionService implements AppActionContributor {
     readonly selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
     readonly hoverIdsTopic = new BehaviorSubject<TileFeatureId[]>([]);
     readonly selectionIdsTopic =
@@ -74,15 +76,15 @@ export class InspectionSelectionService {
         private readonly keyboardService: KeyboardService,
         private readonly messageService: InfoMessageService,
         private readonly ngZone: NgZone,
-        public readonly inspectionState: InspectionStateService,
-        public readonly viewSettings: MapViewStateService
+        public readonly inspectionState: InspectionPanelService,
+        public readonly viewSettings: MapViewStore
     ) {
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFocusedInspectionPanel.bind(this));
     }
 
     /** Wires app-state selection projection once the tile stream can serve feature loads. */
     initialize(): void {
-        this.inspectionState.selectionState.subscribe(selected => {
+        this.inspectionState.store.selectionState.subscribe(selected => {
             this.ngZone.run(() => this.selectionIdsTopic.next(selected));
             const revision = ++this.selectionConversionRevision;
             const demanded = new Set(selected.map(panel => this.featureLoadKey(panel.features)));
@@ -291,14 +293,14 @@ export class InspectionSelectionService {
 
         this.stateService.transaction(() => {
             if (foundFeatureCount === 1) {
-                const currentPanels = this.inspectionState.selection;
+                const currentPanels = this.inspectionState.store.selection;
                 const featureAlreadyInspected = this.panelsContainFeature(currentPanels, featureIds[0]);
                 const reusableFeaturePanel = currentPanels.some(panel =>
                     panel.sourceData === undefined && !panel.locked
                 );
                 if (featureAlreadyInspected
                     || reusableFeaturePanel
-                    || currentPanels.length < this.inspectionState.inspectionsLimit) {
+                    || currentPanels.length < this.inspectionState.store.inspectionsLimit) {
                     const panelId = this.inspectionState.setSelection(
                         [featureIds[0]],
                         undefined,
@@ -314,10 +316,10 @@ export class InspectionSelectionService {
                 this.inspectionState.unsetUnlockedSelections();
                 let remainingSlots = Math.max(
                     0,
-                    this.inspectionState.inspectionsLimit - this.inspectionState.selection.length
+                    this.inspectionState.store.inspectionsLimit - this.inspectionState.store.selection.length
                 );
                 for (const featureId of featureIds) {
-                    if (this.panelsContainFeature(this.inspectionState.selection, featureId)) {
+                    if (this.panelsContainFeature(this.inspectionState.store.selection, featureId)) {
                         continue;
                     }
                     if (remainingSlots <= 0) {
@@ -335,7 +337,7 @@ export class InspectionSelectionService {
         });
 
         const inspectedFeatureCount = featureIds.filter(featureId =>
-            this.panelsContainFeature(this.inspectionState.selection, featureId)
+            this.panelsContainFeature(this.inspectionState.store.selection, featureId)
         ).length;
         if (inspectedFeatureCount < foundFeatureCount) {
             this.messageService.showWarning(
@@ -382,7 +384,7 @@ export class InspectionSelectionService {
     ): void {
         const requestedTargets = tileFeatureIds
             .filter((id): id is TileFeatureId => !!id);
-        const selectedTargets = this.inspectionState.selectionState.getValue()
+        const selectedTargets = this.inspectionState.store.selectionState.getValue()
             .flatMap(panel => panel.features);
         const hoverTargets = requestedTargets.filter(id =>
             !selectedTargets.some(selected =>
@@ -695,18 +697,23 @@ export class InspectionSelectionService {
     private showErrorMessage(message: string) {
         this.messageService.showError(message);
     }
-
-    registerActions(actions: AppActionService): void {
+    /** Registers semantic operations and their live omnibar candidates. */
+    registerActions(actions: ActionRegistry): void {
         actions.registerAction(inspectionActions.inspect, (input, signal) => this.inspect(input, signal));
         actions.registerAction(inspectionActions.openSourceData, input => this.openSourceData(input));
+    }
+
+    /** Registers typed state readers and writers without exposing persistence keys. */
+    registerControls(actions: ActionRegistry): void {
         actions.registerControl(inspectionControls.selections, {
             read: (selector, context) => this.inspectionSummary(selector.panelId, context), defaultTargets: () => [{}]
         });
     }
 
+
     /** Inspection identities and loading flags, without loading features or traversing trees. */
     inspectionSummary(panelId: number | undefined, context: ControlReadContext): ControlValue<typeof inspectionControls.selections> {
-        const panels = this.inspectionState.selection;
+        const panels = this.inspectionState.store.selection;
         if (panelId !== undefined && !panels.some(panel => panel.id === panelId)) rejectAction("The inspection no longer exists");
         const runtime = new Map(this.selectionTopic.value.map(panel => [panel.id, panel]));
         const stream = this.tileStream;
@@ -758,12 +765,12 @@ export class InspectionSelectionService {
         if (input.color !== undefined && !input.newPanel) rejectAction("color requires newPanel:true; use the inspection.panel control to recolor an existing panel", "invalid_arguments");
         if (input.panelId !== undefined && input.newPanel) rejectAction("panelId and newPanel are mutually exclusive", "invalid_arguments");
         if (input.panelId !== undefined) {
-            const panel = this.inspectionState.selection.find(panel => panel.id === input.panelId);
+            const panel = this.inspectionState.store.selection.find(panel => panel.id === input.panelId);
             if (!panel || panel.locked || panel.sourceData) rejectAction("An explicit target must be an existing unlocked feature panel");
         }
         // Reject a stale intent if any selection edit completes while identities are being located.
         let changed: boolean;
-        const guard = this.inspectionState.selectionState.subscribe(() => { changed = true; });
+        const guard = this.inspectionState.store.selectionState.subscribe(() => { changed = true; });
         changed = false;
         let features: TileFeatureId[];
         try {
@@ -777,7 +784,7 @@ export class InspectionSelectionService {
             if (input.panelId !== undefined || input.newPanel) {
                 newPanelId = this.inspectionState.setSelection(features, input.panelId, input.newPanel ?? false);
             } else this.inspectFeatureIds(features, input.lock ?? false);
-            const panels = this.inspectionState.selection.filter(panel => !panel.sourceData && (!input.newPanel || panel.id === newPanelId) && panel.features.some(candidate =>
+            const panels = this.inspectionState.store.selection.filter(panel => !panel.sourceData && (!input.newPanel || panel.id === newPanelId) && panel.features.some(candidate =>
                 features.some(feature => candidate.mapTileKey === feature.mapTileKey && candidate.featureId === feature.featureId)));
             if (input.lock) panels.forEach(panel => this.inspectionState.setInspectionPanelLockedState(panel.id, true));
             if (input.color !== undefined) panels.forEach(panel => this.inspectionState.setInspectionPanelColor(panel.id, input.color!));
@@ -792,3 +799,92 @@ export class InspectionSelectionService {
     }
 
 }
+
+
+/**
+ * Public actions and controls implemented by this controller. Their schemas stay
+ * beside the handlers; both app startup and the Node catalog build register them.
+ */
+export const inspectionActions = {
+    inspect: {
+        name: "viewer_inspect",
+        description: "Open feature/entity inspections in the ordinary UI. For an attribute validity, copy the base featureId plus attributeIndex and validityIndex from native extraction or search results. relationIndex similarly addresses a relation. Existing suffixed IDs remain supported; do not combine a suffix with numeric selectors. Returns panel IDs immediately; loading remains observable via app.selections. panelId must address an unlocked feature panel; newPanel opens one grouped panel. To distinguish groups (e.g. predecessors versus successors), call separately with newPanel:true and different color values. color requires newPanel:true and colors only that new panel. lock=true pins the resulting panels. Use mapget extraction for model content.",
+        mutation: true,
+        inputSchema: z.strictObject({
+            features: z.array(featureIdentitySchema).min(1).max(50),
+            lock: z.boolean().optional(),
+            panelId: indexSchema.optional(),
+            newPanel: z.boolean().optional(),
+            color: colorSchema.optional()
+        }),
+        outputSchema: z.strictObject({
+            status: z.literal("applied"),
+            panelIds: z.array(indexSchema).max(50),
+            features: z.array(z.strictObject({ mapTileKey: identifierSchema, featureId: identifierSchema })).max(50),
+            ...{
+                complete: z.boolean(),
+                reason: z.enum(["item_limit", "byte_limit", "text_limit", "loading"]).optional()
+            }
+        })
+    },
+    openSourceData: {
+        name: "viewer_open_source_data",
+        description: "Open a source-data inspection at a lossless uint64 address. Use a native SourceData mapTileKey, or map/partition and a mapget-native source reference returned by extraction. The existing panel owns loading and reveals the reference.",
+        mutation: true,
+        inputSchema: z.strictObject({
+            source: z.union([
+                z.strictObject({ mapTileKey: identifierSchema, address: z.string().regex(/^[0-9]+$/).max(20).optional() }),
+                z.strictObject({
+                    mapId: identifierSchema,
+                    partition: z.union([
+                        z.strictObject({ kind: z.literal("tile"), id: z.number().int().min(-2147483648).max(2147483647) }),
+                        z.strictObject({ kind: z.literal("object"), id: z.string().regex(/^(0|[1-9][0-9]*)$/).max(20) })
+                    ]),
+                    reference: z.strictObject({
+                        layerId: identifierSchema,
+                        address: z.string().regex(/^[0-9]+$/).max(20),
+                        qualifier: boundedUnicodeString(4096).optional()
+                    })
+                })
+            ]),
+            newPanel: z.boolean().optional()
+        }),
+        outputSchema: z.strictObject({ status: z.literal("applied"), panelId: indexSchema, mapTileKey: identifierSchema })
+    }
+} as const;
+
+/** InspectionSelectionService exposes resolved selections alongside their durable panel identities. */
+export const inspectionControls = {
+    selections: {
+        name: "app.selections",
+        description: "Inspection identities and panel/loading state, including undocked panels; never inspection trees.",
+        selectorSchema: z.strictObject({ panelId: indexSchema.optional() }),
+        valueSchema: z.array(z.strictObject({
+            panelId: indexSchema,
+            lifetime: indexSchema.describe("Current panel lifetime; supply it to viewer_close_inspection to reject a reused panel identity."),
+            locked: z.boolean(),
+            undocked: z.boolean(),
+            loading: z.boolean().nullable().describe("Feature resolution state; null when owned by a source-data panel."),
+            features: z.array(z.strictObject({
+                mapTileKey: identifierSchema,
+                featureId: identifierSchema,
+                mapId: identifierSchema.optional(),
+                layerId: identifierSchema.optional(),
+                partition: z.union([
+                    z.strictObject({ kind: z.literal("tile"), id: z.number().int().min(-2147483648).max(2147483647) }),
+                    z.strictObject({ kind: z.literal("object"), id: z.string().regex(/^[0-9]{1,20}$/) })
+                ]).optional()
+            }))
+                .max(100),
+            sourceData: z.strictObject({
+                mapTileKey: identifierSchema,
+                address: z.string().regex(/^[0-9]+$/).max(20).optional()
+                    .describe("Unsigned 64-bit address as a lossless decimal string.")
+            }).optional()
+        })).max(100),
+        readable: true,
+        writable: false,
+        persistence: "runtime-summary",
+        synchronization: "none"
+    }
+} as const;

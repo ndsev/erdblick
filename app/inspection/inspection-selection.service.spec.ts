@@ -17,8 +17,8 @@ function createHarness(
     const persistence = testPersistence();
     const owners = stateOwners(persistence);
     const stateService = owners.inspectionState;
-    stateService.inspectionsLimit = limit;
-    stateService.selection = initialPanels;
+    stateService.store.inspectionsLimit = limit;
+    stateService.store.selection = initialPanels;
     vi.spyOn(stateService, 'setSelection');
     vi.spyOn(stateService, 'unsetUnlockedSelections');
     vi.spyOn(stateService, 'setInspectionPanelLockedState');
@@ -42,7 +42,7 @@ function createHarness(
         stateService,
         infoMessageService,
         loadFeatures,
-        panels: () => stateService.selection
+        panels: () => stateService.store.selection
     };
 }
 
@@ -182,7 +182,7 @@ describe("InspectionSelectionService multi-inspection", () => {
                 feature: panel.features[0].featureId,
                 locked: panel.locked
             })),
-            dockOpen: layout.isDockOpen
+            dockOpen: layout.store.isDockOpen
         })).subscribe(value => observed.push(value));
 
         const result = service.inspectFeatureIds([
@@ -212,7 +212,7 @@ describe("InspectionSelectionService multi-inspection", () => {
                 locked: panel.locked,
                 color: panel.color
             })),
-            dockOpen: layout.isDockOpen
+            dockOpen: layout.store.isDockOpen
         })).subscribe(value => observed.push(value));
 
         const result = await service.inspect({

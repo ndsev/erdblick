@@ -2,9 +2,9 @@ import {describe, expect, it, vi} from "vitest";
 
 import type {DiagnosticsFacadeService} from "../diagnostics/diagnostics.facade.service";
 import type {FeatureSearchService} from "../search/feature.search.service";
-import type {AppStateService} from "../shared/appstate.service";
+import type {AppStateService} from "../state/app-state.service";
 import type {InfoMessageService} from "../shared/info.service";
-import type {ExternalViewerService} from "../search/external-viewer.service";
+import type {ExternalViewerService} from "../navigation/external-viewer.service";
 import type {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {coreLib} from "../integrations/wasm";
 import {RightClickMenuService} from "./rightclickmenu.service";

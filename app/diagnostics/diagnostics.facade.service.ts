@@ -1,28 +1,28 @@
 import { Injectable, NgZone, OnDestroy } from "@angular/core";
 import { BehaviorSubject } from "rxjs";
 import { z } from "zod";
+import { ActionRegistry } from "../actions/action-registry.service";
 import type { ActionInput, ActionOutput } from "../actions/app-action";
-import { boundedCollection, rejectAction } from "../actions/app-action";
-import { AppActionService } from "../actions/app-action.service";
-import { MapInfoService } from "../mapdata/map-info.service";
-import { MapTileStreamService } from '../mapdata/map-tile-stream.service';
-import { TileSubsetLayerRenderService } from '../mapview/deck/tile-subset-layer-render.service';
-import { MapViewStateService } from "../mapview/map-view-state.service";
-import { ViewLayerDiagnosticsService } from '../mapview/view-layer-diagnostics.service';
-import { FeatureSearchService } from "../search/feature.search.service";
-import { AppConfigService } from "../shared/app-config.service";
+import { boundedCollection, identifierSchema, rejectAction } from "../actions/app-action";
+import { AppActionContributor } from "../actions/app-action-contributor";
+import { AppConfigStore } from "../config/app-config.store";
 import {
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
-} from "../shared/app-layout.model";
-import { AppLayoutService } from "../shared/app-layout.service";
-import { Boolish } from "../shared/app-state";
-import { AppStateService } from "../shared/appstate.service";
-import { unicodePrefix } from "../shared/unicode-string";
+} from "../layout/app-layout.model";
+import { AppLayoutService } from "../layout/app-layout.service";
+import { MapInfoService } from "../mapdata/map-info.service";
+import { MapTileStreamService } from '../mapdata/map-tile-stream.service';
+import { TileSubsetLayerRenderService } from '../mapview/deck/tile-subset-layer-render.service';
+import { viewIdSchema } from "../mapview/map-view-state.model";
+import { MapViewStore } from "../mapview/map-view.store";
+import { ViewLayerDiagnosticsService } from '../mapview/view-layer-diagnostics.service';
+import { FeatureSearchService } from "../search/feature.search.service";
+import { boundedUnicodeString, unicodePrefix } from "../shared/unicode-string";
+import { AppStateService } from "../state/app-state.service";
 import { StyleValidationReportService } from '../styledata/style-validation-report.service';
 import { DiagnosticsDatasource } from './diagnostics.datasource';
-import { diagnosticActions } from "./diagnostics.facade.service.declarations";
 import type { DiagnosticsExportOptions, DiagnosticsLogFilter } from "./diagnostics.model";
 import {
     DiagnosticsExportBundle,
@@ -30,6 +30,7 @@ import {
     PerformanceDiagnosticsScope,
     TileSizeDistribution
 } from './diagnostics.model';
+import { DiagnosticsStore } from "./diagnostics.store";
 
 interface MapgetStatusDataResponse {
     timestampMs?: unknown;
@@ -48,60 +49,7 @@ interface MapgetStatusDataResponse {
  *
  * It extends the datasource with dialog-opening helpers and export bundling.
  */
-export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy {
-
-    readonly diagnosticsLogFilterState = this.stateService.registerState<DiagnosticsLogFilter>({
-        name: 'diagnosticsLogFilter',
-        defaultValue: {
-            info: true,
-            warn: true,
-            error: true
-        },
-        schema: z.object({
-            info: Boolish,
-            warn: Boolish,
-            error: Boolish
-        })
-    });
-
-    readonly diagnosticsExportOptionsState = this.stateService.registerState<DiagnosticsExportOptions>({
-        name: 'diagnosticsExportOptions',
-        defaultValue: {
-            includeProgress: true,
-            includePerformance: true,
-            includeLogs: true,
-            logFilter: {
-                info: true,
-                warn: true,
-                error: true
-            }
-        },
-        schema: z.object({
-            includeProgress: Boolish,
-            includePerformance: Boolish,
-            includeLogs: Boolish,
-            logFilter: z.object({
-                info: Boolish,
-                warn: Boolish,
-                error: Boolish
-            })
-        })
-    });
-
-    get diagnosticsLogFilter() { return this.diagnosticsLogFilterState.getValue(); }
-
-    set diagnosticsLogFilter(val: DiagnosticsLogFilter) {
-        this.diagnosticsLogFilterState.next({ ...val });
-    }
-
-    get diagnosticsExportOptions() { return this.diagnosticsExportOptionsState.getValue(); }
-
-    set diagnosticsExportOptions(val: DiagnosticsExportOptions) {
-        this.diagnosticsExportOptionsState.next({
-            ...val,
-            logFilter: { ...val.logFilter }
-        });
-    }
+export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy, AppActionContributor {
 
     readonly performanceScope$ = new BehaviorSubject<PerformanceDiagnosticsScope | null>(null);
     private nextPerformanceScopeRequestId = 1;
@@ -113,10 +61,11 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         styleValidationReportService: StyleValidationReportService,
         ngZone: NgZone,
         public override readonly layout: AppLayoutService,
-        public readonly configService: AppConfigService,
+        public readonly configService: AppConfigStore,
         private readonly maps: MapInfoService,
         private readonly searches: FeatureSearchService,
-        private readonly viewSettings: MapViewStateService) {
+        private readonly viewSettings: MapViewStore,
+        public readonly store: DiagnosticsStore) {
         super(mapService, renderService, viewDiagnostics, stateService,
             styleValidationReportService, ngZone, layout);
     }
@@ -136,7 +85,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         this.refreshLogs();
         this.layout.openDialog(DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID);
         if (errorsOnly) {
-            this.diagnosticsLogFilter = { info: false, warn: false, error: true };
+            this.store.diagnosticsLogFilter = { info: false, warn: false, error: true };
         }
     }
 
@@ -144,8 +93,8 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     openExportDialog(options?: Partial<DiagnosticsExportOptions>) {
         this.refreshPerfStats();
         this.refreshLogs();
-        const base = this.diagnosticsExportOptionsState.defaultValue;
-        this.diagnosticsExportOptions = {
+        const base = this.store.diagnosticsExportOptionsState.defaultValue;
+        this.store.diagnosticsExportOptions = {
             ...base,
             ...options,
             logFilter: { ...(options?.logFilter ?? base.logFilter) }
@@ -268,10 +217,11 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     override ngOnDestroy(): void {
         super.ngOnDestroy();
     }
-
-    registerActions(actions: AppActionService): void {
+    /** Registers semantic operations and their live omnibar candidates. */
+    registerActions(actions: ActionRegistry): void {
         actions.registerAction(diagnosticActions.getDiagnostics, input => this.getDiagnostics(input));
     }
+
 
     /** Samples fixed-size counters and existing caches only, never the per-tile diagnostics/export path. */
     getDiagnostics(input: ActionInput<typeof diagnosticActions.getDiagnostics>): ActionOutput<typeof diagnosticActions.getDiagnostics> {
@@ -354,3 +304,55 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     }
 
 }
+
+
+/**
+ * Public actions and controls implemented by this controller. Their schemas stay
+ * beside the handlers; both app startup and the Node catalog build register them.
+ */
+const text = boundedUnicodeString(4096);
+
+export const diagnosticActions = {
+    getDiagnostics: {
+        name: "viewer_get_diagnostics",
+        description: "Read BROWSER transport, render-worker queues, frame-time metrics, cached loading, GPU allocation and style/search errors without resetting the view. Native BACKEND workers/cache/memory require the separately privileged mapget_get_diagnostics tool. Call it only when it appears in your tool catalog; otherwise explain the permission limit. Browser workers and observed transport latency are not backend queue statistics. No scene/tile scan or GPU readback. Cached and unavailable metrics are explicit.",
+        mutation: false,
+        inputSchema: z.strictObject({
+            viewId: viewIdSchema.optional(),
+            mapId: identifierSchema.optional(),
+            layerId: identifierSchema.optional(),
+            sections: z.array(z.enum(["transport", "workers", "loading", "gpu", "errors"])).max(5).optional(),
+            limit: z.number().int().min(1).max(100).optional()
+        }),
+        outputSchema: z.strictObject({
+            ...{ observedAt: z.string() },
+            ...{
+                complete: z.boolean(),
+                reason: z.enum(["item_limit", "byte_limit", "text_limit", "loading"]).optional()
+            },
+            executionContext: z.literal("browser"),
+            interpretation: text,
+            metrics: z.array(z.strictObject({
+                section: text,
+                name: text,
+                value: z.union([z.number(), z.boolean(), z.null()]),
+                scope: z.enum(["tab", "view"]),
+                viewId: viewIdSchema.optional(),
+                cached: z.boolean().optional()
+            })).max(100),
+            errors: z.array(z.strictObject({
+                source: text,
+                message: text,
+                severity: z.enum(["warning", "error"]).optional(),
+                phase: text.optional(),
+                property: text.optional(),
+                expression: text.optional(),
+                rulePath: text.optional(),
+                mapId: identifierSchema.optional(),
+                layerId: identifierSchema.optional(),
+                featureId: identifierSchema.optional()
+            })).max(100),
+            unavailable: z.array(text).max(20)
+        })
+    }
+} as const;

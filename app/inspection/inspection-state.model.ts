@@ -1,4 +1,4 @@
-import type { AppDialogLayout } from "../shared/app-layout.model";
+import type { AppDialogLayout } from "../layout/app-layout.model";
 
 export const MAX_SIMULTANEOUS_INSPECTIONS = 50;
 

@@ -1,5 +1,5 @@
 import type {FeatureSearchAttributeScopeCandidate} from "../mapdata/map-runtime.model";
-import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
+import type {FeatureSearchMapLayerRef} from "./feature-search-state";
 import type {SearchStyleFieldOption} from "./search-style-color.util";
 
 export interface FeatureSearchAutoStyleOption extends SearchStyleFieldOption {

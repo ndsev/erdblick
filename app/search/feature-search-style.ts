@@ -1,8 +1,8 @@
 import type {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import type {ErdblickStyle} from "../styledata/style.service";
-import type {FeatureSearchStyleRule} from "../shared/feature-search-state";
-import type {FeatureSearchResolvedDefinition} from "../mapdata/feature-search-runtime-state.model";
+import type {FeatureSearchStyleRule} from "./feature-search-state";
+import type {FeatureSearchResolvedDefinition} from "./feature-search-runtime-state.model";
 import type {MapgetLayer} from "../mapdata/mapget-layer.model";
 import type {MapInfoService} from "../mapdata/map-info.service";
 import type {FilterChannelDefinition} from "../mapdata/filter-subscription.model";

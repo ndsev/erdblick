@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 import { bearer, proxyBrowserAuthority } from '../utils/mcp-auth';
 import { expect, test } from '../fixtures/test';
 import { mcpClient } from '../utils/mcp-client';
-import { viewerActions } from '../../app/actions/viewer-action.contract';
+import { viewerActions } from "../utils/viewer-contract";
 
 test.use({ stateSnapshot: null });
 test.skip(process.env['EB_MAPGET_MCP_TEST_OAUTH'] !== '1', 'Requires the disposable native OAuth fixture');

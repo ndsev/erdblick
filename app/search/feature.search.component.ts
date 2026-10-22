@@ -19,30 +19,30 @@ import { Tree } from "primeng/tree";
 import type { MeterItem } from "primeng/types/metergroup";
 import { Subscription } from "rxjs";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
-import { InspectionStateService } from "../inspection/inspection-state.service";
+import { InspectionPanelService } from "../inspection/inspection-panel.service";
 import { coreLib } from "../integrations/wasm";
-import { FeatureSearchSchemaService } from "../mapdata/feature-search-schema.service";
+import { FeatureSearchSchemaService } from "./feature-search-schema.service";
 import { MapInfoService } from "../mapdata/map-info.service";
 import type {
     FeatureSearchAttributeScopeCandidate,
     FeatureSearchStyleFieldCandidate
 } from "../mapdata/map-runtime.model";
 import { GroupTreeNode, LayerTreeNode, MapTreeNode, removeGroupPrefix } from "../mapdata/map.tree.model";
-import { MapViewStateService } from "../mapview/map-view-state.service";
+import { MapViewStore } from "../mapview/map-view.store";
 import { AppConfirmPopupService } from "../shared/app-confirm-popup.service";
-import { AppDialogComponent } from "../shared/app-dialog.component";
-import { SEARCH_DOCK_TAB_ID } from "../shared/app-layout.model";
-import { AppLayoutService } from "../shared/app-layout.service";
-import { AppPanelComponent } from "../shared/app-panel.component";
-import type { AppSurfaceHeaderAction } from "../shared/app-surface-header.component";
-import { AppStateService } from "../shared/appstate.service";
-import { DialogStackService } from "../shared/dialog-stack.service";
+import { AppDialogComponent } from "../layout/app-dialog.component";
+import { SEARCH_DOCK_TAB_ID } from "../layout/app-layout.model";
+import { AppLayoutService } from "../layout/app-layout.service";
+import { AppPanelComponent } from "../layout/app-panel.component";
+import type { AppSurfaceHeaderAction } from "../layout/app-surface-header.component";
+import { AppStateService } from "../state/app-state.service";
+import { DialogStackService } from "../layout/dialog-stack.service";
 import type {
     FeatureSearchMapLayerRef,
     FeatureSearchRenderStrategy,
     FeatureSearchScope,
     FeatureSearchStyleRule
-} from "../shared/feature-search-state";
+} from "./feature-search-state";
 import {
     DEFAULT_FEATURE_SEARCH_LABEL_BACKGROUND_COLOR,
     DEFAULT_FEATURE_SEARCH_RENDER_STRATEGY,
@@ -50,7 +50,7 @@ import {
     MAX_FEATURE_SEARCH_TILE_LEVEL,
     MIN_FEATURE_SEARCH_TILE_LEVEL,
     normalizeFeatureSearchFeatureTypes
-} from "../shared/feature-search-state";
+} from "./feature-search-state";
 import { InfoMessageService } from "../shared/info.service";
 import { StyleEditorRequestService } from "../styledata/style-editor-request.service";
 import { ErdblickStyle, StyleService } from "../styledata/style.service";
@@ -69,7 +69,7 @@ import {
     FeatureSearchService,
     FeatureSearchSession
 } from "./feature.search.service";
-import { JumpTargetService } from "./jump.service";
+import { JumpTargetService } from "../navigation/jump.service";
 import {
     autoInitializeSearchStyleColorDraft,
     DEFAULT_SEARCH_STYLE_SOLID_COLOR,
@@ -922,11 +922,11 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         private readonly changeDetector: ChangeDetectorRef,
         private readonly ngZone: NgZone,
         public readonly layout: AppLayoutService,
-        public readonly viewSettings: MapViewStateService,
-        public readonly inspectionState: InspectionStateService) {
-        this.selectedGroupingOptions = this.groupingOptionsFromValues(this.searchService.featureSearchGrouping);
+        public readonly viewSettings: MapViewStore,
+        public readonly inspectionState: InspectionPanelService) {
+        this.selectedGroupingOptions = this.groupingOptionsFromValues(this.searchService.store.featureSearchGrouping);
         this.subscriptions.add(this.styleService.styleGroups.subscribe(() => this.refreshSearchStyleOptions()));
-        this.subscriptions.add(this.searchService.featureSearchGroupingState.subscribe(groupingValues => {
+        this.subscriptions.add(this.searchService.store.featureSearchGroupingState.subscribe(groupingValues => {
             const nextOptions = this.groupingOptionsFromValues(groupingValues);
             if (this.sameGroupingOptions(this.selectedGroupingOptions, nextOptions)) {
                 return;
@@ -1546,7 +1546,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.searchStyleApplicationWarning = false;
         }
         this.selectedSearchStyleId = null;
-        this.searchService.patchFeatureSearch(session.id, { searchStyleRules });
+        this.searchService.store.patchFeatureSearch(session.id, { searchStyleRules });
     }
 
     /** Accepts detached drafts emitted by the reusable rule editor. */
@@ -1624,7 +1624,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         const detachedRules = structuredClone(projection.rules);
         this.styleRuleDrafts = this.styleRuleDraftCodec.toDrafts(detachedRules);
         this.styleRulesStateSignature = JSON.stringify(detachedRules);
-        this.searchService.patchFeatureSearch(this.session.id, { searchStyleRules: detachedRules });
+        this.searchService.store.patchFeatureSearch(this.session.id, { searchStyleRules: detachedRules });
         this.selectedSearchStyleId = styleId;
         this.searchStyleApplicationWarning = projection.omissions.length > 0;
         this.searchStyleApplicationMessage = projection.omissions.length
@@ -1714,7 +1714,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         if (key === "showHighFiGeometry" && nextValue === false) {
             renderStrategy.showHighFiResultDots = false;
         }
-        this.searchService.patchFeatureSearch(session.id, {
+        this.searchService.store.patchFeatureSearch(session.id, {
             renderStrategy
         });
     }
@@ -3091,8 +3091,8 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
             this.requestDiagnosticsValueSummaries();
         }
         this.syncStreamingResults(session);
-        if (this.isDocked() && this.layout.isDockOpen && this.surfacedDockedSearchId !== session.id) {
-            this.layout.dockActiveTab = SEARCH_DOCK_TAB_ID;
+        if (this.isDocked() && this.layout.store.isDockOpen && this.surfacedDockedSearchId !== session.id) {
+            this.layout.store.dockActiveTab = SEARCH_DOCK_TAB_ID;
             this.surfacedDockedSearchId = session.id;
         }
         if (session.complete) {
@@ -3358,7 +3358,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         }
         if (this.session && this.searchEnabled() && this.session.definition.scope !== scope) {
             this.styleAttributeOptionsSessionSignature = "";
-            this.searchService.patchFeatureSearch(this.session.id, { scope });
+            this.searchService.store.patchFeatureSearch(this.session.id, { scope });
         }
     }
 
@@ -3831,7 +3831,7 @@ export class FeatureSearchComponent implements AfterViewInit, OnChanges, OnDestr
         this.selectedGroupingOptions = groupingValues
             .map(value => this.grouping.find(option => option.value === value))
             .filter((option): option is FeatureSearchGroupingOption => !!option);
-        this.searchService.featureSearchGrouping = groupingValues;
+        this.searchService.store.featureSearchGrouping = groupingValues;
         this.rebuildResultsTreeIncrementally();
     }
 

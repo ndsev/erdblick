@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { boundedUnicodeString, unicodePrefix } from "../shared/unicode-string.js";
-import { ViewerActionError, ViewerActionFailure } from "./viewer-action-relay.contract.js";
+import { boundedUnicodeString, unicodePrefix } from "../shared/unicode-string";
+import { ViewerActionError, ViewerActionFailure } from "./viewer-action-relay.contract";
 
 /** Explicit action metadata. Registration never exposes an owner's other methods. */
 export interface AppAction<Input extends z.ZodType = z.ZodType, Output extends z.ZodType = z.ZodType> {

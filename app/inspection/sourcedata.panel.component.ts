@@ -27,9 +27,9 @@ import { TileDeliveryError } from "../mapdata/tile-diagnostics";
 import {
     MapTileStreamClientTiles,
 } from "../mapdata/tilestream";
-import { AppStateService } from "../shared/appstate.service";
+import { AppStateService } from "../state/app-state.service";
 import { InspectionPanelModel } from "./inspection-state.model";
-import { InspectionStateService } from "./inspection-state.service";
+import { InspectionPanelService } from "./inspection-panel.service";
 import { Column, InspectionTreeComponent } from "./inspection.tree.component";
 import {
     expandSingleChildSourceDataPaths,
@@ -67,7 +67,7 @@ interface LoadedSourceDataLayer {
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
                              [showFilter]="showFilter()"
-                             [defaultVisibleColumnKeys]="inspectionState.sourceDataInspectionDefaultColumns"
+                             [defaultVisibleColumnKeys]="inspectionState.store.sourceDataInspectionDefaultColumns"
                              [firstHighlightedItemIndex]="firstHighlightedItemIndex">
             </inspection-tree>
         }
@@ -122,7 +122,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         public stateService: AppStateService,
         private tileStream: MapTileStreamService,
         private readonly cdr: ChangeDetectorRef,
-        public readonly inspectionState: InspectionStateService) {
+        public readonly inspectionState: InspectionPanelService) {
         effect(() => {
             const sourceData = this.panel().sourceData;
             const revision = ++this.loadRevision;

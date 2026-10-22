@@ -8,7 +8,7 @@ import {
     SimpleChanges
 } from "@angular/core";
 import {OverlayOptions} from "primeng/api";
-import {FeatureSearchMapLayerRef, FeatureSearchScope} from "../shared/feature-search-state";
+import {FeatureSearchMapLayerRef, FeatureSearchScope} from "./feature-search-state";
 import type {SearchValueSummariesState, SearchValueSummary} from "./search.model";
 import {
     autoInitializeSearchStyleColorDraft,

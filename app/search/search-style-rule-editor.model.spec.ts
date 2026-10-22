@@ -1,6 +1,6 @@
 import {describe, expect, it} from "vitest";
 
-import type {FeatureSearchStyleRule} from "../shared/feature-search-state";
+import type {FeatureSearchStyleRule} from "./feature-search-state";
 import {SearchStyleRuleDraftCodec} from "./search-style-rule-editor.model";
 
 describe("SearchStyleRuleDraftCodec", () => {

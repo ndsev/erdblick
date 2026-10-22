@@ -21,7 +21,7 @@ During an active split-view gesture, `DeckMapView` coalesces the newest camera
 pose to one preview per animation frame. `MapViewService` applies the
 selected position or movement synchronization policy and routes that preview
 directly to sibling Deck renderers. Preview consumers update only their
-controlled Deck camera. The settled gesture calls `MapViewStateService.setView`
+controlled Deck camera. The settled gesture calls `MapViewStore.setView`
 to commit synchronized cameras atomically. `MapViewService` derives tile coverage;
 `AppStateService` coordinates completed notifications, storage and URL persistence.
 

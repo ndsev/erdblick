@@ -1,18 +1,11 @@
-import {Injectable} from "@angular/core";
-import {HttpClient, HttpErrorResponse, HttpHeaders} from "@angular/common/http";
-import {BehaviorSubject, Observable, firstValueFrom} from "rxjs";
+import { HttpClient, HttpErrorResponse, HttpHeaders } from "@angular/common/http";
+import { Injectable } from "@angular/core";
 import * as jsyaml from "js-yaml";
-import {AppConfigService} from "../shared/app-config.service";
-import {
-    LayerPresetDefinition,
-    LayerPresetRef
-} from "./layer-preset.model";
-import {
-    MapPresetDefinition,
-    MapPresetIssue,
-    parseMapPresetDefinitions
-} from "./map-preset.model";
-import {StyleService} from "./style.service";
+import { BehaviorSubject, Observable, firstValueFrom } from "rxjs";
+import { AppConfigService } from "../config/app-config.service";
+import { LayerPresetDefinition, LayerPresetRef } from "./layer-preset.model";
+import { MapPresetDefinition, MapPresetIssue, parseMapPresetDefinitions } from "./map-preset.model";
+import { StyleService } from "./style.service";
 
 const MAP_PRESETS_CONFIGURATION_DISABLED_MESSAGE =
     "Configuring map presets is not allowed. Modify the server configuration to allow access";

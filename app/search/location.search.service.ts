@@ -1,19 +1,24 @@
 import { HttpClient, HttpHeaders, HttpParams } from "@angular/common/http";
 import { Injectable } from "@angular/core";
-import { catchError, forkJoin, map, Observable, of, timeout } from "rxjs";
-import { z } from "zod";
-
-import { AppStateService } from "../shared/appstate.service";
-
-import type { LocationArea } from "../mapview/render-view.model";
+import {
+    catchError,
+    forkJoin,
+    map,
+    Observable,
+    of,
+    timeout
+} from "rxjs";
 import {
     AppConfigService,
     LocationSearchAdapterConfig,
     LocationSearchFieldSelector,
     LocationSearchProviderConfig
-} from "../shared/app-config.service";
-import { SearchTarget } from "./jump.service";
+} from "../config/app-config.service";
+import type { LocationArea } from "../mapview/render-view.model";
+import { SearchTarget } from "../navigation/jump.service";
+import { AppStateService } from "../state/app-state.service";
 import { locationExtent, locationGeometryExtent, locationPoint, locationPolygons } from "./location-geometry";
+import { LocationSearchStore } from "./location-search.store";
 
 export type LocationPoint = [number, number];
 export type LocationAabb = [LocationPoint, LocationPoint];
@@ -275,22 +280,11 @@ function arrayNumbers(value: unknown): number[] | null {
 @Injectable({ providedIn: "root" })
 export class LocationSearchService {
 
-    readonly locationSearchResultLimitState = this.persistence.registerState<number>({
-        name: 'locationSearchResultLimit',
-        defaultValue: DEFAULT_LOCATION_SEARCH_RESULT_LIMIT,
-        schema: z.coerce.number().int().min(1).max(MAX_LOCATION_SEARCH_RESULT_LIMIT),
-        toStorage: (value: number) => clampLocationSearchResultLimit(value),
-        fromStorage: (payload: any): number => clampLocationSearchResultLimit(payload)
-    });
-
-    get locationSearchResultLimit() { return this.locationSearchResultLimitState.getValue(); }
-
-    set locationSearchResultLimit(val: number) { this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val)); }
-
     constructor(
         private readonly httpClient: HttpClient,
         private readonly configService: AppConfigService,
-        private readonly persistence: AppStateService) {
+        private readonly persistence: AppStateService,
+        public readonly store: LocationSearchStore) {
     }
 
     get debounceMs(): number {
@@ -559,17 +553,4 @@ export class LocationSearchService {
             + (credit?.url ? ` | <a href="${escapeHtml(credit.url)}" target="_blank" rel="noopener noreferrer">Source</a>` : "")
             + (credit?.licenseUrl ? ` | <a href="${escapeHtml(credit.licenseUrl)}" target="_blank" rel="noopener noreferrer">License</a>` : "");
     }
-}
-
-export const DEFAULT_LOCATION_SEARCH_RESULT_LIMIT = 10;
-
-export const MAX_LOCATION_SEARCH_RESULT_LIMIT = 50;
-
-/** Clamps location-search hit limits from persisted state and preferences UI. */
-export function clampLocationSearchResultLimit(value: unknown): number {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) {
-        return DEFAULT_LOCATION_SEARCH_RESULT_LIMIT;
-    }
-    return Math.min(MAX_LOCATION_SEARCH_RESULT_LIMIT, Math.max(1, Math.trunc(numeric)));
 }

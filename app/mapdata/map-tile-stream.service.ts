@@ -2,13 +2,9 @@ import { Injectable, NgZone, OnDestroy } from "@angular/core";
 import { BehaviorSubject, Subject, Subscription } from "rxjs";
 import { z } from "zod";
 import { rejectAction } from "../actions/app-action";
-import { featureIdentitySchema } from "../inspection/inspection-selection.service.declarations";
+import { featureIdentitySchema } from "../inspection/feature-identity";
 import { TileFeatureId } from "../inspection/inspection-state.model";
-import {
-    coreLib,
-    uint8ArrayToWasmOrThrow
-} from "../integrations/wasm";
-import { AppStateService } from "../shared/appstate.service";
+import { coreLib, uint8ArrayToWasmOrThrow } from "../integrations/wasm";
 import {
     ConnectionRetryAttempt,
     connectionRetryDeadline,
@@ -22,11 +18,9 @@ import {
     stripFeatureInspectionTarget
 } from "../shared/tile-feature-id";
 import { MAX_NUM_TILES_TO_LOAD } from "../shared/tile-render-policy";
-import { ConnectionPreferencesService } from "./connection-preferences.service";
-import {
-    FeatureWrapper,
-    InspectionFeatureTile
-} from "./feature-inspection.model";
+import { AppStateService } from "../state/app-state.service";
+import { ConnectionPreferencesStore } from "./connection-preferences.store";
+import { FeatureWrapper, InspectionFeatureTile } from "./feature-inspection.model";
 import {
     FilterSubscriptionCallbacks,
     FilterSubscriptionCoverage,
@@ -188,7 +182,7 @@ export class MapTileStreamService implements OnDestroy {
         private readonly mapInfo: MapInfoService,
         private readonly messageService: InfoMessageService,
         private readonly ngZone: NgZone,
-        public readonly connectionPreferences: ConnectionPreferencesService
+        public readonly connectionPreferences: ConnectionPreferencesStore
     ) {
         this.retryPolicy = this.connectionPreferences.connectionRetryPolicy;
         this.stateSubscriptions.add(this.connectionPreferences.connectionRetryPolicyChanges.subscribe(() => this.applyRetryPolicy()));

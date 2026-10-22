@@ -6,7 +6,7 @@ import { BehaviorSubject, Subject } from "rxjs";
 import type { HttpClient } from "@angular/common/http";
 import { MapInfoService } from "./map-info.service";
 import { layerStyleOptions, MapLayerTree, type MapInfoItem } from "./map.tree.model";
-import type { AppStateService } from "../shared/appstate.service";
+import type { AppStateService } from "../state/app-state.service";
 import type { ErdblickStyle, StyleService } from "../styledata/style.service";
 import type { MapPresetService } from "../styledata/map-preset.service";
 import type { InfoMessageService } from "../shared/info.service";

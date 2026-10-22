@@ -1,11 +1,13 @@
+import { InspectionStore } from "../inspection/inspection.store";
+import { AppLayoutStore } from "../layout/app-layout.store";
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 
 import {AppModule} from "../app.module";
 import {FeatureSearchComponent} from "./feature.search.component";
 import {testPersistence} from "../../test/state-owners";
-import {AppLayoutService} from "../shared/app-layout.service";
-import {InspectionStateService} from "../inspection/inspection-state.service";
+import {AppLayoutService} from "../layout/app-layout.service";
+import {InspectionPanelService} from "../inspection/inspection-panel.service";
 
 void AppModule;
 
@@ -73,8 +75,8 @@ describe("Feature Search result-tree completion", () => {
 
 function inspectionSelectionFixture() {
     const persistence = testPersistence();
-    const layout = new AppLayoutService(persistence);
-    const inspectionState = new InspectionStateService(persistence, layout, {} as never);
+    const layout = new AppLayoutService(persistence, new AppLayoutStore(persistence));
+    const inspectionState = new InspectionPanelService(persistence, layout, {} as never, new InspectionStore(persistence));
     const focusOnFeature = vi.fn().mockResolvedValue(undefined);
     const showError = vi.fn();
     const component = Object.create(FeatureSearchComponent.prototype) as FeatureSearchComponent;
@@ -93,10 +95,10 @@ describe("Feature Search result inspection", () => {
         const {component, persistence, layout, inspectionState, focusOnFeature} = inspectionSelectionFixture();
         const observed: unknown[] = [];
         const subscription = persistence.observe(() => ({
-            panels: inspectionState.selection.map(panel => ({
+            panels: inspectionState.store.selection.map(panel => ({
                 featureId: panel.features[0].featureId, locked: panel.locked, undocked: panel.undocked
             })),
-            dockOpen: layout.isDockOpen
+            dockOpen: layout.store.isDockOpen
         })).subscribe(value => observed.push(value));
 
         component.selectResult({
@@ -122,6 +124,6 @@ describe("Feature Search result inspection", () => {
         await Promise.resolve();
 
         expect(showError).toHaveBeenCalledExactlyOnceWith("Feature load failed");
-        expect(inspectionState.selection[0].features[0].featureId).toBe("Road.1");
+        expect(inspectionState.store.selection[0].features[0].featureId).toBe("Road.1");
     });
 });

@@ -7,17 +7,17 @@ import {
     parseMapPartitionKey,
     partitionKeySuffix
 } from "../mapdata/partition.model";
-import { AppPanelComponent } from "../shared/app-panel.component";
+import { AppPanelComponent } from "../layout/app-panel.component";
 import type {
     AppSurfaceHeaderAction,
     AppSurfaceHeaderActionCommandEvent
-} from "../shared/app-surface-header.component";
-import { AppStateService } from "../shared/appstate.service";
+} from "../layout/app-surface-header.component";
+import { AppStateService } from "../state/app-state.service";
 import { displayFeatureId } from "../shared/tile-feature-id";
 import { FeaturePanelComponent } from "./feature.panel.component";
 import { InspectionSelectionService } from "./inspection-selection.service";
 import { InspectionComparisonOption, InspectionPanelModel } from "./inspection-state.model";
-import { InspectionStateService } from "./inspection-state.service";
+import { InspectionPanelService } from "./inspection-panel.service";
 import { SourceDataPanelComponent } from "./sourcedata.panel.component";
 
 /** Select option for switching between source-data layers within one inspected tile. */
@@ -172,7 +172,7 @@ export class InspectionPanelComponent {
     constructor(private mapService: MapInfoService,
         private inspectionSelection: InspectionSelectionService,
         public stateService: AppStateService,
-        public readonly inspectionState: InspectionStateService) {
+        public readonly inspectionState: InspectionPanelService) {
         effect(() => {
             this.title = "";
             this.errorMessage = "";

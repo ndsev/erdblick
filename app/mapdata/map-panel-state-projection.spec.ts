@@ -40,7 +40,7 @@ function fixture() {
     );
     // The runtime coordinator exists before the network catalog installs its
     // replacement tree. Its completed observer must still see refreshed caches.
-    const views = new MapViewService(persistence, maps, owners.renderPreferences, owners.viewSettings, owners.configService);
+    const views = new MapViewService(persistence, maps, owners.renderPreferences.store, owners.viewSettings, owners.configService);
     const metadata: MapInfoItem = {
         mapId: "Map", sourceId: "Map", stringPoolId: "Map", maxParallelJobs: 0,
         extraJsonAttachment: {}, addOn: false,
@@ -62,7 +62,7 @@ function fixture() {
     const panel = new MapPanelComponent(
         maps, views, {} as never, persistence, { registerShortcut: vi.fn() } as never,
         owners.configService, {} as never, owners.searchService, {} as never, {} as never,
-        presets, styles, owners.layerState, owners.layout, owners.inspectionState, owners.viewSettings
+        presets, styles, owners.layerState, owners.layout.store, owners.inspectionState, owners.viewSettings
     );
     cleanup.push(() => panel.subscriptions.forEach(subscription => subscription.unsubscribe()));
     const projections: MapTreeViewNode[][][] = [];

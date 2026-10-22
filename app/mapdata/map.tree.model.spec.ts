@@ -19,7 +19,7 @@ import {
     StyleOptionNode,
     sortDataSourceCatalogEntries
 } from './map.tree.model';
-import type { AppStateService } from "../shared/appstate.service";
+import type { AppStateService } from "../state/app-state.service";
 import type {
     ErdblickStyle,
     FeatureStyleOptionWithStringType,

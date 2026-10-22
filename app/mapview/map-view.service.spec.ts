@@ -37,7 +37,7 @@ function createService(cameras: CameraViewState[], viewSync: string[]) {
     cameras.forEach((value, index) => stateService.cameraViewDataState.next(index, value));
     const mapInfo = { layerStateChanged: new Subject<string>(), reapplySyncOptionsForAllViews: vi.fn(), maps: { maps: new Map() } };
     return {
-        service: new MapViewService(persistence, mapInfo as never, owners.renderPreferences, stateService, owners.configService),
+        service: new MapViewService(persistence, mapInfo as never, owners.renderPreferences.store, stateService, owners.configService),
         stateService, mapInfo
     };
 }
