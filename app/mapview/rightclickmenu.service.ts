@@ -1,3 +1,4 @@
+import {AppStore} from "../shared/app.store";
 import {inject, Injectable} from "@angular/core";
 import {MenuItem} from "primeng/api";
 import {BehaviorSubject, Subject} from "rxjs";
@@ -5,7 +6,7 @@ import {DiagnosticsFacadeService} from "../diagnostics/diagnostics.facade.servic
 import {PerformanceDiagnosticsScope} from "../diagnostics/diagnostics.model";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {SelectedSourceData, type TileFeatureId} from "../inspection/inspection-state.model";
-import {InspectionStateService} from "../inspection/inspection-state.service";
+
 import {Color, HeightReference, Rectangle} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
 import {parseMapPartitionKey} from "../mapdata/partition.model";
@@ -73,7 +74,7 @@ interface PickedFeatureMenuRow {
  * The service tracks source-data context so the menu can offer quick repeat actions across tiles.
  */
 export class RightClickMenuService {
-    readonly inspectionState = inject(InspectionStateService);
+    readonly store = inject(AppStore);
 
     menuItems: BehaviorSubject<MenuItem[]> = new BehaviorSubject<MenuItem[]>([]);
     preferredTileIdForSourceData: number | null = null;
@@ -350,7 +351,7 @@ export class RightClickMenuService {
             label: "Inspect Source Data with Last Layer",
             icon: "pi pi-database",
             command: () => {
-                this.inspectionState.setSelection({
+                this.store.setSelection({
                     mapTileKey: coreLib.getSourceDataLayerKey(
                         sourceDataParams.mapId,
                         sourceDataParams.layerId,

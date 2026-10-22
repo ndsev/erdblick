@@ -1,3 +1,5 @@
+import {effect, untracked} from "@angular/core";
+import {AppStore} from "../shared/app.store";
 import {Component, inject, OnDestroy, OnInit, ViewChild} from "@angular/core";
 import {combineLatest, Subscription} from "rxjs";
 import {CoordinatesPolicyService} from "../coords/coordinates-policy.service";
@@ -10,7 +12,7 @@ import {
     MIN_DRILL_PICK_RADIUS,
     type HoverLabelFieldConfig
 } from "../inspection/inspection-state.model";
-import {InspectionStateService} from "../inspection/inspection-state.service";
+
 import {FeatureSearchSchemaService} from "../mapdata/feature-search-schema.service";
 import type {FeatureSearchStyleFieldCandidate} from "../mapdata/map-runtime.model";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
@@ -26,13 +28,13 @@ import {
     MIN_FEATURE_ZOOM_CLEARANCE_METERS,
     MIN_MAP_ZOOM_STEP
 } from "../mapview/map-view-state.model";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+
 import {MapViewService, ViewRecalculationReason} from "../mapview/map-view.service";
 import {DEFAULT_LOCATION_SEARCH_RESULT_LIMIT, MAX_LOCATION_SEARCH_RESULT_LIMIT} from "../search/location-search-limits";
 import {LocationSearchService} from "../search/location.search.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, PREFERENCES_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
-import {AppLayoutService} from "../shared/app-layout.service";
+
 import {AppStateService} from "../shared/appstate.service";
 import {connectionRetryPolicySchema} from "../shared/connection-retry-policy";
 import {DialogStackService} from "../shared/dialog-stack.service";
@@ -56,7 +58,7 @@ import {StyleService} from "../styledata/style.service";
     template: `
         <app-dialog
             header="Preferences"
-            [(visible)]="dialogVisible"
+            [visible]="store.isDialogOpen(dialogLayoutId)" (visibleChange)="store.setDialogOpen(dialogLayoutId, $event)"
             [position]="'center'"
             [resizable]="false"
             [modal]="false"
@@ -176,7 +178,7 @@ import {StyleService} from "../styledata/style.service";
                         </div>
                         <div class="button-container">
                             <label>Collapse Dock automatically</label>
-                            <p-toggleswitch [(ngModel)]="layoutState.isDockAutoCollapsible"></p-toggleswitch>
+                            <p-toggleswitch [ngModel]="store.layout.dockAutoCollapse()" (ngModelChange)="store.setDockAutoCollapse($event)"></p-toggleswitch>
                         </div>
                     </p-tabpanel>
 
@@ -252,7 +254,7 @@ import {StyleService} from "../styledata/style.service";
                         <div class="button-container">
                             <label>Expand inspection trees by default</label>
                             <p-toggleswitch
-                                [(ngModel)]="inspectionState.inspectionTreeExpandByDefault"
+                                [ngModel]="store.inspection.inspectionTreeExpandByDefault()" (ngModelChange)="store.setInspectionTreeExpandByDefault($event)"
                             ></p-toggleswitch>
                         </div>
                         <div class="button-container value-presentation-container">
@@ -331,7 +333,7 @@ import {StyleService} from "../styledata/style.service";
                                 <p-toggleswitch
                                     inputId="hover-labels-enabled"
                                     data-testid="hover-labels-enabled"
-                                    [(ngModel)]="inspectionState.hoverLabelsEnabled"
+                                    [ngModel]="store.inspection.hoverLabelsEnabled()" (ngModelChange)="store.setHoverLabelsEnabled($event)"
                                 >
                                 </p-toggleswitch>
                             </div>
@@ -758,10 +760,10 @@ import {StyleService} from "../styledata/style.service";
  */
 export class PreferencesComponent implements OnInit, OnDestroy {
     readonly connectionState = inject(MapTileStreamService);
-    readonly viewStateOwner = inject(MapViewStateService);
-    readonly inspectionState = inject(InspectionStateService);
+    readonly store = inject(AppStore);
+
     readonly locationSearch = inject(LocationSearchService);
-    readonly layoutState = inject(AppLayoutService);
+
     readonly dialogLayoutId = PREFERENCES_DIALOG_LAYOUT_ID;
     readonly advancedPreferencesDialogLayoutId = ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID;
 
@@ -842,127 +844,144 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         private searchSchema: FeatureSearchSchemaService,
         private dialogStack: DialogStackService
     ) {
-        this.subscriptions.push(
-            this.connectionState.connectionRetryEnabledState.subscribe((value) => (this.connectionRetryEnabled = value))
-        );
-        this.subscriptions.push(
-            combineLatest([
-                this.viewStateOwner.pointCloudDownsamplingEnabledState,
-                this.viewStateOwner.pointCloudDetailPixelsState,
-                this.viewStateOwner.pointCloudWorkingMemoryMiBState,
-                this.viewStateOwner.pointCloudGpuMemoryMiBState
-            ]).subscribe(() => {
-                this.pointCloudPolicyDraft = {...this.viewStateOwner.pointCloudPolicy};
-            })
-        );
-        this.subscriptions.push(
-            this.connectionState.connectionRetryInitialDelayMsState.subscribe(
-                (value) => (this.connectionInitialSeconds = value / 1000)
-            )
-        );
-        this.subscriptions.push(
-            this.connectionState.connectionRetryBackoffMultiplierState.subscribe(
-                (value) => (this.connectionBackoffMultiplier = value)
-            )
-        );
-        this.subscriptions.push(
-            this.connectionState.connectionRetryMaxDelayMsState.subscribe(
-                (value) => (this.connectionMaximumSeconds = value / 1000)
-            )
-        );
-        this.subscriptions.push(
-            this.viewStateOwner.tilesLoadLimitState.subscribe((limit) => {
-            this.tilesToLoadInput = limit;
-            })
-        );
-        this.subscriptions.push(
-            this.inspectionState.inspectionsLimitState.subscribe((limit) => {
-            this.limitSimultaneousInspectionsInput = limit;
-            })
-        );
-        this.subscriptions.push(
-            this.inspectionState.drillPickRadiusState.subscribe((radius) => {
-            this.drillPickRadiusInput = radius;
-            })
-        );
-        this.subscriptions.push(
-            this.locationSearch.locationSearchResultLimitState.subscribe((limit) => {
-            this.locationSearchResultLimitInput = limit;
-            })
-        );
-        this.subscriptions.push(
-            this.connectionState.tilePullCompressionEnabledState.subscribe((enabled) => {
-            this.tilePullCompressionEnabledSetting = enabled;
-            })
-        );
-        this.subscriptions.push(
-            this.viewStateOwner.deckAntialiasingEnabledState.subscribe((enabled) => {
-            this.deckAntialiasingEnabledSetting = enabled;
-            })
-        );
-        this.subscriptions.push(
-            this.viewStateOwner.semanticCompositingEnabledState.subscribe((enabled) => {
-            this.semanticCompositingEnabledSetting = enabled;
-            })
-        );
-        this.subscriptions.push(
-            this.viewStateOwner.contactShadingEnabledState.subscribe((enabled) => {
-            this.contactShadingEnabledSetting = enabled;
-            })
-        );
-        this.subscriptions.push(
-            this.viewStateOwner.lod3TileThresholdState.subscribe((threshold) => {
-            this.lod3TileThresholdInput = threshold;
+        effect(() => {
+            const value = this.store.connection.connectionRetryEnabled();
+            untracked(() => {
+                (this.connectionRetryEnabled = value);
+            });
+        });
+        effect(() => {
+            const policy = this.store.pointCloudPolicy();
+            untracked(() => {
+                this.pointCloudPolicyDraft = {...policy};
+            });
+        });
+        effect(() => {
+            const value = this.store.connection.connectionRetryInitialDelayMs();
+            untracked(() => {
+                (this.connectionInitialSeconds = value / 1000);
+            });
+        });
+        effect(() => {
+            const value = this.store.connection.connectionRetryBackoffMultiplier();
+            untracked(() => {
+                (this.connectionBackoffMultiplier = value);
+            });
+        });
+        effect(() => {
+            const value = this.store.connection.connectionRetryMaxDelayMs();
+            untracked(() => {
+                (this.connectionMaximumSeconds = value / 1000);
+            });
+        });
+        effect(() => {
+            const limit = this.store.views.tilesLoadLimit();
+            untracked(() => {
+                this.tilesToLoadInput = limit;
+            });
+        });
+        effect(() => {
+            const limit = this.store.inspection.inspectionsLimit();
+            untracked(() => {
+                this.limitSimultaneousInspectionsInput = limit;
+            });
+        });
+        effect(() => {
+            const radius = this.store.inspection.drillPickRadius();
+            untracked(() => {
+                this.drillPickRadiusInput = radius;
+            });
+        });
+        effect(() => {
+            const limit = this.store.location.locationSearchResultLimit();
+            untracked(() => {
+                this.locationSearchResultLimitInput = limit;
+            });
+        });
+        effect(() => {
+            const enabled = this.store.connection.tilePullCompressionEnabled();
+            untracked(() => {
+                this.tilePullCompressionEnabledSetting = enabled;
+            });
+        });
+        effect(() => {
+            const enabled = this.store.views.deckAntialiasingEnabled();
+            untracked(() => {
+                this.deckAntialiasingEnabledSetting = enabled;
+            });
+        });
+        effect(() => {
+            const enabled = this.store.views.semanticCompositingEnabled();
+            untracked(() => {
+                this.semanticCompositingEnabledSetting = enabled;
+            });
+        });
+        effect(() => {
+            const enabled = this.store.views.contactShadingEnabled();
+            untracked(() => {
+                this.contactShadingEnabledSetting = enabled;
+            });
+        });
+        effect(() => {
+            const threshold = this.store.views.lod3TileThreshold();
+            untracked(() => {
+                this.lod3TileThresholdInput = threshold;
             this.updateLod3TileThresholdChangeState();
-            })
-        );
-        this.subscriptions.push(
-            this.viewStateOwner.tileSubsetRenderWorkerCountState.subscribe((workerCount) => {
-                    this.renderWorkerCountInput = workerCount;
+            });
+        });
+        effect(() => {
+            const workerCount = this.store.views.tileSubsetRenderWorkerCount();
+            untracked(() => {
+                this.renderWorkerCountInput = workerCount;
                     this.updateRenderWorkerCountChangeState();
-            })
-        );
-        this.subscriptions.push(
-            this.viewStateOwner.mapZoomStepState.subscribe((step) => {
-            this.mapZoomStepInput = step;
-            })
-        );
-        this.subscriptions.push(
-            this.viewStateOwner.featureZoomClearanceMetersState.subscribe((clearance) => {
+            });
+        });
+        effect(() => {
+            const step = this.store.views.mapZoomStep();
+            untracked(() => {
+                this.mapZoomStepInput = step;
+            });
+        });
+        effect(() => {
+            const clearance = this.store.views.featureZoomClearanceMeters();
+            untracked(() => {
                 this.featureZoomClearanceMetersInput = clearance;
-            })
-        );
-        this.subscriptions.push(
-            this.inspectionState.inspectionValueVaryColorsState.subscribe(() => {
-            this.syncInspectionValuePresentationSelection();
-            })
-        );
-        this.subscriptions.push(
-            this.inspectionState.inspectionValueVaryOutlinesState.subscribe(() => {
-            this.syncInspectionValuePresentationSelection();
-            })
-        );
-        this.subscriptions.push(
-            this.inspectionState.inspectionValueVaryStripingState.subscribe(() => {
-            this.syncInspectionValuePresentationSelection();
-            })
-        );
-        this.subscriptions.push(
-            this.inspectionState.sourceDataInspectionDefaultColumnsState.subscribe((columns) => {
-            this.sourceDataColumnSelection = [...columns];
-            })
-        );
-        this.subscriptions.push(
-            this.inspectionState.hoverLabelFieldsState.subscribe((fields) => {
-            this.hoverLabelFields = fields.map(field => ({...field}));
-            })
-        );
+            });
+        });
+        effect(() => {
+            this.store.inspection.inspectionValueVaryColors();
+            untracked(() => {
+                this.syncInspectionValuePresentationSelection();
+            });
+        });
+        effect(() => {
+            this.store.inspection.inspectionValueVaryOutlines();
+            untracked(() => {
+                this.syncInspectionValuePresentationSelection();
+            });
+        });
+        effect(() => {
+            this.store.inspection.inspectionValueVaryStriping();
+            untracked(() => {
+                this.syncInspectionValuePresentationSelection();
+            });
+        });
+        effect(() => {
+            const columns = this.store.inspection.sourceDataInspectionDefaultColumns();
+            untracked(() => {
+                this.sourceDataColumnSelection = [...columns];
+            });
+        });
+        effect(() => {
+            const fields = this.store.inspection.hoverLabelFields();
+            untracked(() => {
+                this.hoverLabelFields = fields.map(field => ({...field}));
+            });
+        });
         this.syncInspectionValuePresentationSelection();
     }
 
-    get dialogVisible(): boolean {
-        return this.layoutState.isDialogOpen(this.dialogLayoutId);
-    }
+
 
     /** Applies one complete, validated connection policy without restarting healthy requests. */
     applyConnectionPreferences(): void {
@@ -973,12 +992,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             maxDelayMs: this.connectionMaximumSeconds * 1000
         });
         this.connectionValidationMessage = result.success ? "" : result.error.issues.map(issue => issue.message).join(" ");
-        if (result.success) this.connectionState.setConnectionRetryPolicy(result.data);
+        if (result.success) this.store.setConnectionRetryPolicy(result.data);
     }
 
-    set dialogVisible(visible: boolean) {
-        this.layoutState.setDialogOpen(this.dialogLayoutId, visible);
-    }
+
 
     get renderWorkerCountDescription(): string {
         const configured = clampTileSubsetRenderWorkerCount(
@@ -992,13 +1009,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Keeps the multiselect value stable between change-detection passes. */
     private syncInspectionValuePresentationSelection(): void {
         const selection: string[] = [];
-        if (this.inspectionState.inspectionValueVaryColors) {
+        if (this.store.inspection.inspectionValueVaryColors()) {
             selection.push("colors");
         }
-        if (this.inspectionState.inspectionValueVaryOutlines) {
+        if (this.store.inspection.inspectionValueVaryOutlines()) {
             selection.push("outlines");
         }
-        if (this.inspectionState.inspectionValueVaryStriping) {
+        if (this.store.inspection.inspectionValueVaryStriping()) {
             selection.push("striping");
         }
         if (selection.join("|") !== this.inspectionValuePresentationSelection.join("|")) {
@@ -1014,15 +1031,18 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         this.inspectionValuePresentationSelection = [...nextValues];
         const selection = new Set(values ?? []);
-        this.inspectionState.inspectionValueVaryColors = selection.has("colors");
-        this.inspectionState.inspectionValueVaryOutlines = selection.has("outlines");
-        this.inspectionState.inspectionValueVaryStriping = selection.has("striping");
+        this.store.setInspectionPreferences({
+            ...this.store.inspectionPreferences(),
+            varyColors: selection.has("colors"),
+            varyOutlines: selection.has("outlines"),
+            varyStriping: selection.has("striping")
+        });
     }
 
     /** Applies which optional SourceData columns new inspection panels show initially. */
     onSourceDataColumnSelectionChange(values: string[] | null | undefined): void {
         this.sourceDataColumnSelection = [...(values ?? [])];
-        this.inspectionState.sourceDataInspectionDefaultColumns = this.sourceDataColumnSelection;
+        this.store.setSourceDataInspectionDefaultColumns(this.sourceDataColumnSelection);
     }
 
     /** Restores the persisted dark-mode preference during component startup. */
@@ -1040,14 +1060,14 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Refreshes dialog fields from current state whenever the preferences dialog opens. */
     onDialogShow() {
-        this.tilesToLoadInput = this.viewStateOwner.tilesLoadLimit;
-        this.limitSimultaneousInspectionsInput = this.inspectionState.inspectionsLimit;
-        this.drillPickRadiusInput = this.inspectionState.drillPickRadius;
-        this.locationSearchResultLimitInput = this.locationSearch.locationSearchResultLimit;
-        this.mapZoomStepInput = this.viewStateOwner.mapZoomStep;
-        this.featureZoomClearanceMetersInput = this.viewStateOwner.featureZoomClearanceMeters;
-        this.lod3TileThresholdInput = this.viewStateOwner.lod3TileThreshold;
-        this.renderWorkerCountInput = this.viewStateOwner.tileSubsetRenderWorkerCount;
+        this.tilesToLoadInput = this.store.views.tilesLoadLimit();
+        this.limitSimultaneousInspectionsInput = this.store.inspection.inspectionsLimit();
+        this.drillPickRadiusInput = this.store.inspection.drillPickRadius();
+        this.locationSearchResultLimitInput = this.store.location.locationSearchResultLimit();
+        this.mapZoomStepInput = this.store.views.mapZoomStep();
+        this.featureZoomClearanceMetersInput = this.store.views.featureZoomClearanceMeters();
+        this.lod3TileThresholdInput = this.store.views.lod3TileThreshold();
+        this.renderWorkerCountInput = this.store.views.tileSubsetRenderWorkerCount();
         this.tilesToLoadChanged = false;
         this.inspectionsLimitChanged = false;
         this.drillPickRadiusChanged = false;
@@ -1065,35 +1085,35 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         const selected = new Set(this.hoverLabelFields.map(field => field.expression));
         const expression = this.hoverLabelFieldOptions.find(option =>
             !selected.has(option.value))?.value ?? "";
-        this.inspectionState.hoverLabelFields = [...this.hoverLabelFields, {expression, customExpression: false}];
+        this.store.setHoverLabelFields([...this.hoverLabelFields, {expression, customExpression: false}]);
     }
 
     /** Removes one ordered field from the map-hover overlay. */
     removeHoverLabelField(index: number): void {
-        this.inspectionState.hoverLabelFields = this.hoverLabelFields.filter(
+        this.store.setHoverLabelFields(this.hoverLabelFields.filter(
             (_field, fieldIndex) => fieldIndex !== index
-        );
+        ));
     }
 
     /** Switches one field between the schema picker and free-form SIMFIL editor. */
     toggleHoverLabelExpressionMode(index: number): void {
-        this.inspectionState.hoverLabelFields = this.hoverLabelFields.map((field, fieldIndex) =>
+        this.store.setHoverLabelFields(this.hoverLabelFields.map((field, fieldIndex) =>
             fieldIndex === index ? {...field, customExpression: !field.customExpression} : field
-        );
+        ));
     }
 
     /** Updates one hover-field expression while preserving row order and editor mode. */
     setHoverLabelExpression(index: number, expression: string): void {
-        this.inspectionState.hoverLabelFields = this.hoverLabelFields.map((field, fieldIndex) =>
+        this.store.setHoverLabelFields(this.hoverLabelFields.map((field, fieldIndex) =>
             fieldIndex === index ? {...field, expression: expression ?? ""} : field
-        );
+        ));
     }
 
     /** Updates or clears the optional short key displayed beside one hover value. */
     setHoverLabelDisplayKey(index: number, displayKey: string): void {
-        this.inspectionState.hoverLabelFields = this.hoverLabelFields.map((field, fieldIndex) =>
+        this.store.setHoverLabelFields(this.hoverLabelFields.map((field, fieldIndex) =>
             fieldIndex === index ? {...field, displayKey: displayKey || undefined} : field
-        );
+        ));
     }
 
     protected readonly defaultHoverLabelFieldKey = defaultHoverLabelFieldKey;
@@ -1141,7 +1161,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         this.tilesToLoadInput = limit;
-        this.viewStateOwner.tilesLoadLimit = limit;
+        this.store.setTilesLoadLimit(limit);
         this.tilesToLoadChanged = false;
         this.mapService.requestViewRecalculation(ViewRecalculationReason.TileLimit);
         this.messageService.showSuccess("Successfully updated tile limits!");
@@ -1178,31 +1198,31 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         if (environment.visualizationOnly) {
             return;
         }
-        this.layoutState.openDialog(this.advancedPreferencesDialogLayoutId);
+        this.store.setDialogOpen(this.advancedPreferencesDialogLayoutId, true);
     }
 
     /** Toggles HTTP compression for `/interactive/payload` pull responses. */
     setTilePullCompressionEnabled(enabled: boolean) {
         this.tilePullCompressionEnabledSetting = enabled;
-        this.connectionState.tilePullCompressionEnabled = enabled;
+        this.store.setTilePullCompressionEnabled(enabled);
     }
 
     /** Enables or disables WebGL antialiasing; map views recreate their renderer when this changes. */
     setDeckAntialiasingEnabled(enabled: boolean) {
         this.deckAntialiasingEnabledSetting = enabled;
-        this.viewStateOwner.deckAntialiasingEnabled = enabled;
+        this.store.setDeckAntialiasingEnabled(enabled);
     }
 
     /** Recreates map renderers with or without the semantic compositor for diagnosis. */
     setSemanticCompositingEnabled(enabled: boolean) {
         this.semanticCompositingEnabledSetting = enabled;
-        this.viewStateOwner.semanticCompositingEnabled = enabled;
+        this.store.setSemanticCompositingEnabled(enabled);
     }
 
     /** Enables or disables the final-depth screen-space contact shading pass. */
     setContactShadingEnabled(enabled: boolean) {
         this.contactShadingEnabledSetting = enabled;
-        this.viewStateOwner.contactShadingEnabled = enabled;
+        this.store.setContactShadingEnabled(enabled);
     }
 
     /** Applies the pending LOD 3 tile threshold after validating the input. */
@@ -1219,23 +1239,23 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const normalized = clampLod3TileThreshold(threshold);
         this.lod3TileThresholdInput = normalized;
-        this.viewStateOwner.lod3TileThreshold = normalized;
+        this.store.setLod3TileThreshold(normalized);
         this.lod3TileThresholdChanged = false;
     }
 
     /** Keep numeric drafts out of persisted state until the whole policy is applied. */
     get pointCloudPolicyChanged(): boolean {
-        return JSON.stringify(this.pointCloudPolicyDraft) !== JSON.stringify(this.viewStateOwner.pointCloudPolicy);
+        return JSON.stringify(this.pointCloudPolicyDraft) !== JSON.stringify(this.store.pointCloudPolicy());
     }
 
-    /** Publish one validated point-cloud preference edit through AppState. */
+    /** Publish the complete validated point-cloud policy in one native state patch. */
     applyPointCloudPolicy(): void {
         const parsed = pointCloudPolicySchema.safeParse(this.pointCloudPolicyDraft);
         if (!parsed.success) {
             this.messageService.showError("Point spacing must be 0.5–32 pixels, working memory 32–4096 MiB, and GPU allowance 16–2048 MiB.");
             return;
         }
-        this.viewStateOwner.setPointCloudPolicy(parsed.data);
+        this.store.setPointCloudPolicy(parsed.data);
     }
 
     /** Applies zero-for-auto or one explicit subset-render worker count. */
@@ -1256,7 +1276,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const normalized = clampTileSubsetRenderWorkerCount(workerCount);
         this.renderWorkerCountInput = normalized;
-        this.viewStateOwner.tileSubsetRenderWorkerCount = normalized;
+        this.store.setTileSubsetRenderWorkerCount(normalized);
         this.renderWorkerCountChanged = false;
     }
 
@@ -1272,7 +1292,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const clampedStep = clampMapZoomStep(step);
         this.mapZoomStepInput = clampedStep;
-        this.viewStateOwner.mapZoomStep = clampedStep;
+        this.store.setMapZoomStep(clampedStep);
         this.mapZoomStepChanged = false;
     }
 
@@ -1294,7 +1314,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         }
         const clampedClearance = clampFeatureZoomClearanceMeters(clearance);
         this.featureZoomClearanceMetersInput = clampedClearance;
-        this.viewStateOwner.featureZoomClearanceMeters = clampedClearance;
+        this.store.setFeatureZoomClearanceMeters(clampedClearance);
         this.featureZoomClearanceMetersChanged = false;
     }
 
@@ -1354,7 +1374,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.messageService.showError(`Please enter a valid inspections limit (1-${MAX_SIMULTANEOUS_INSPECTIONS})!`);
             return;
         }
-        this.inspectionState.inspectionsLimit = limit;
+        this.store.setInspectionsLimit(limit);
         this.inspectionsLimitChanged = false;
         this.messageService.showSuccess("Successfully updated inspections limit!");
     }
@@ -1372,7 +1392,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             );
             return;
         }
-        this.inspectionState.drillPickRadius = radius;
+        this.store.setDrillPickRadius(radius);
         this.drillPickRadiusChanged = false;
     }
 
@@ -1386,26 +1406,26 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.messageService.showError(`Please enter a valid location match limit (1-${MAX_LOCATION_SEARCH_RESULT_LIMIT})!`);
             return;
         }
-        this.locationSearch.locationSearchResultLimit = limit;
+        this.store.setLocationSearchResultLimit(limit);
         this.locationSearchResultLimitChanged = false;
     }
 
     /** Tracks slider edits for the tile-load limit without applying them immediately. */
     protected onTilesToLoadSliderChange(value: number) {
         this.tilesToLoadInput = value;
-        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.viewStateOwner.tilesLoadLimit);
+        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.store.views.tilesLoadLimit());
     }
 
     /** Tracks slider edits for the simultaneous inspection limit. */
     protected onInspectionsLimitSliderChange(value: number) {
         this.limitSimultaneousInspectionsInput = value;
-        this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.inspectionState.inspectionsLimit);
+        this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.store.inspection.inspectionsLimit());
     }
 
     /** Tracks slider edits for the point drill-pick radius. */
     protected onDrillPickRadiusSliderChange(value: number) {
         this.drillPickRadiusInput = value;
-        this.drillPickRadiusChanged = this.hasPendingNumericChange(value, this.inspectionState.drillPickRadius);
+        this.drillPickRadiusChanged = this.hasPendingNumericChange(value, this.store.inspection.drillPickRadius());
     }
 
     /** Tracks slider edits for the location-search result limit. */
@@ -1413,14 +1433,14 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.locationSearchResultLimitInput = value;
         this.locationSearchResultLimitChanged = this.hasPendingNumericChange(
             value,
-            this.locationSearch.locationSearchResultLimit
+            this.store.location.locationSearchResultLimit()
         );
     }
 
     /** Tracks slider edits for the map zoom-step preference. */
     protected onMapZoomStepSliderChange(value: number) {
         this.mapZoomStepInput = value;
-        this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.viewStateOwner.mapZoomStep);
+        this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.store.views.mapZoomStep());
     }
 
     /** Tracks slider edits for the 3D feature zoom clearance. */
@@ -1428,7 +1448,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.featureZoomClearanceMetersInput = value;
         this.featureZoomClearanceMetersChanged = this.hasPendingNumericChange(
             value,
-            this.viewStateOwner.featureZoomClearanceMeters
+            this.store.views.featureZoomClearanceMeters()
         );
     }
 
@@ -1447,19 +1467,19 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Tracks free-form edits for the tile-load input. */
     protected onTilesToLoadInputChange(value: number | string) {
         this.tilesToLoadInput = value;
-        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.viewStateOwner.tilesLoadLimit);
+        this.tilesToLoadChanged = this.hasPendingNumericChange(value, this.store.views.tilesLoadLimit());
     }
 
     /** Tracks free-form edits for the inspection-limit input. */
     protected onInspectionsLimitInputChange(value: number | string) {
         this.limitSimultaneousInspectionsInput = value;
-        this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.inspectionState.inspectionsLimit);
+        this.inspectionsLimitChanged = this.hasPendingNumericChange(value, this.store.inspection.inspectionsLimit());
     }
 
     /** Tracks free-form edits for the point drill-pick radius. */
     protected onDrillPickRadiusInputChange(value: number | string) {
         this.drillPickRadiusInput = value;
-        this.drillPickRadiusChanged = this.hasPendingNumericChange(value, this.inspectionState.drillPickRadius);
+        this.drillPickRadiusChanged = this.hasPendingNumericChange(value, this.store.inspection.drillPickRadius());
     }
 
     /** Tracks free-form edits for the location-search result limit. */
@@ -1467,14 +1487,14 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.locationSearchResultLimitInput = value;
         this.locationSearchResultLimitChanged = this.hasPendingNumericChange(
             value,
-            this.locationSearch.locationSearchResultLimit
+            this.store.location.locationSearchResultLimit()
         );
     }
 
     /** Tracks free-form edits for the map zoom-step input. */
     protected onMapZoomStepInputChange(value: number | string) {
         this.mapZoomStepInput = value;
-        this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.viewStateOwner.mapZoomStep);
+        this.mapZoomStepChanged = this.hasPendingNumericChange(value, this.store.views.mapZoomStep());
     }
 
     /** Tracks free-form edits for the 3D feature zoom clearance. */
@@ -1482,7 +1502,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.featureZoomClearanceMetersInput = value;
         this.featureZoomClearanceMetersChanged = this.hasPendingNumericChange(
             value,
-            this.viewStateOwner.featureZoomClearanceMeters
+            this.store.views.featureZoomClearanceMeters()
         );
     }
 
@@ -1506,7 +1526,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             this.lod3TileThresholdChanged = true;
             return;
         }
-        this.lod3TileThresholdChanged = clampLod3TileThreshold(threshold) !== this.viewStateOwner.lod3TileThreshold;
+        this.lod3TileThresholdChanged = clampLod3TileThreshold(threshold) !== this.store.views.lod3TileThreshold();
     }
 
     /** Updates the dirty flag for the subset-render worker control. */
@@ -1519,7 +1539,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
             return;
         }
         this.renderWorkerCountChanged =
-            clampTileSubsetRenderWorkerCount(workerCount) !== this.viewStateOwner.tileSubsetRenderWorkerCount;
+            clampTileSubsetRenderWorkerCount(workerCount) !== this.store.views.tileSubsetRenderWorkerCount();
     }
 
     /** Determines whether a numeric preference control still has an unapplied change. */

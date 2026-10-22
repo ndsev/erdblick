@@ -1,4 +1,5 @@
-import {MapViewStateService} from "./mapview/map-view-state.service";
+import {AppStore} from "./shared/app.store";
+
 import {inject} from "@angular/core";
 import {coreLib, ErdblickCore_} from "./integrations/wasm";
 import {Cartographic} from "./integrations/geo";
@@ -9,7 +10,6 @@ import {
     type TileSubsetLayerRenderDebugSnapshot
 } from "./mapview/deck/tile-subset-layer-render.service";
 import {AppStateService} from "./shared/appstate.service";
-import {AppActionService} from "./actions/app-action.service";
 
 /** Browser-console helpers which use only supported S4E2 boundaries. */
 export interface DebugWindow extends Window {
@@ -18,13 +18,14 @@ export interface DebugWindow extends Window {
 
 /** Stable browser-console facade for renderer, camera, and transport diagnostics. */
 export class ErdblickDebugApi {
-    readonly viewStateOwner = inject(MapViewStateService);
+    readonly store = inject(AppStore);
+    private readonly actions = this.store.actionCatalog;
     /** Bind supported debug operations without exposing service internals directly. */
     constructor(
         private readonly tileStream: MapTileStreamService,
         private readonly subsetRenderer: TileSubsetLayerRenderService,
         public readonly stateService: AppStateService,
-        private readonly actions: AppActionService
+
     ) {
     }
 
@@ -35,9 +36,9 @@ export class ErdblickDebugApi {
 
     /** Apply one serialized camera state after validating its logical view index. */
     setCamera(viewIndex: number, cameraInfoStr: string): void {
-        if (viewIndex >= this.viewStateOwner.numViews) {
+        if (viewIndex >= this.store.numViews()) {
             console.error(
-                `Expected viewIndex < ${this.viewStateOwner.numViews}, got ${viewIndex}!`
+                `Expected viewIndex < ${this.store.numViews()}, got ${viewIndex}!`
             );
             return;
         }
@@ -47,7 +48,7 @@ export class ErdblickDebugApi {
         }
         const cameraInfo = JSON.parse(cameraInfoStr);
         const [longitude, latitude, height] = cameraInfo.position;
-        this.viewStateOwner.setView(
+        this.store.setView(
             viewIndex,
             Cartographic.fromRadians(longitude, latitude, height),
             {
@@ -60,19 +61,19 @@ export class ErdblickDebugApi {
 
     /** Serialize one logical view's camera in the format accepted by `setCamera`. */
     getCamera(viewIndex: number): string | undefined {
-        if (viewIndex >= this.viewStateOwner.numViews) {
+        if (viewIndex >= this.store.numViews()) {
             console.error(
-                `Expected viewIndex < ${this.viewStateOwner.numViews}, got ${viewIndex}!`
+                `Expected viewIndex < ${this.store.numViews()}, got ${viewIndex}!`
             );
             return undefined;
         }
-        const destination = this.viewStateOwner.getCameraPosition(viewIndex);
+        const destination = this.store.getCameraPosition(viewIndex);
         const position = [
             destination.longitude,
             destination.latitude,
             destination.height
         ];
-        const orientation = this.viewStateOwner.getCameraOrientation(viewIndex);
+        const orientation = this.store.getCameraOrientation(viewIndex);
         return JSON.stringify({position, orientation});
     }
 

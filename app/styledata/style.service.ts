@@ -1,13 +1,10 @@
-import {inject} from "@angular/core";
 import {collectActionItems, pageActionItems, rejectAction} from "../actions/action-utils";
-import {AppActionService} from "../actions/app-action.service";
-import type {ViewerActionInput, ViewerActionOutput} from "../actions/viewer-action.contract";
 import {unicodePrefix} from "../shared/unicode-string";
-import {styleActions, styleDiscoveryActions} from "./style.service.declarations";
-import {ownerState} from "./style.service.state";
+import type {StyleActionInput, StyleActionOutput} from "./style-actions.store-feature";
 
 import {HttpClient} from "@angular/common/http";
-import {Injectable} from "@angular/core";
+import {inject, Injectable} from "@angular/core";
+import {AppStore} from "../shared/app.store";
 import {BehaviorSubject, catchError, firstValueFrom, forkJoin, map, of, Subject} from "rxjs";
 import {filter} from "rxjs/operators";
 import {FeatureLayerStyle, FeatureStyleOptionType} from "../../build/libs/core/erdblick-core";
@@ -116,40 +113,7 @@ interface ImportedStyleStoreV2 {
  */
 @Injectable({providedIn: "root"})
 export class StyleService {
-    static readonly actions = {...styleActions, ...styleDiscoveryActions};
-
-    readonly styleVisibilityState = this.stateService.register(ownerState.styleVisibility, "styles", "styleVisibility");
-
-    get styleVisibility() {
-        return this.styleVisibilityState.getValue();
-    }
-
-    set styleVisibility(val: Record<string, boolean>) {
-        this.styleVisibilityState.next(val);
-    }
-
-    /** Returns whether the style is visible in the persisted style tree. */
-    getStyleVisibility(styleId: string, fallback: boolean = true): boolean {
-        if (this.styleVisibility.hasOwnProperty(styleId)) {
-            return this.styleVisibility[styleId];
-        }
-        return fallback;
-    }
-
-    /** Updates the persisted visibility flag for one style. */
-    setStyleVisibility(styleId: string, val: boolean) {
-        this.styleVisibilityState.next({...this.styleVisibility, [styleId]: val});
-    }
-
-    /** Removes stale visibility when a locally imported style identity is deleted. */
-    removeStyleVisibility(styleId: string) {
-        if (!Object.prototype.hasOwnProperty.call(this.styleVisibility, styleId)) {
-            return;
-        }
-        const next = {...this.styleVisibility};
-        delete next[styleId];
-        this.styleVisibility = next;
-    }
+    private readonly store = inject(AppStore);
 
     styleHashes: Map<string, StyleLifecycleState> = new Map();
     styleUrls: StyleConfigEntry[] = [];
@@ -170,14 +134,6 @@ export class StyleService {
     >([]);
     private readonly builtinStyleBaselines = new Map<string, BuiltinStyleBaseline>();
 
-    /** Removes visibility preferences for styles no longer present in a complete catalog. */
-    pruneVisibility(presentStyles: ReadonlyMap<string, ErdblickStyle>): void {
-        this.stateService.withSystemStateMutation(() => {
-            this.styleVisibility = Object.fromEntries(Object.entries(this.styleVisibility)
-                .filter(([id]) => presentStyles.has(id)));
-        });
-    }
-
     constructor(
         private httpClient: HttpClient,
         private stateService: AppStateService,
@@ -185,14 +141,6 @@ export class StyleService {
         private configService: AppConfigService,
         private styleValidationReportService: StyleValidationReportService = new StyleValidationReportService()
     ) {
-        const actions = inject(AppActionService);
-        actions.registerAction(StyleService.actions.listStyles, (input) => this.listStyles(input));
-        actions.registerAction(StyleService.actions.viewer_get_style, (input, context) => this.getStyle(input));
-        actions.registerAction(StyleService.actions.viewer_validate_style, (input, context) =>
-            this.validateStyle(input)
-        );
-        actions.registerAction(StyleService.actions.viewer_edit_style, (input, context) => this.editStyle(input));
-
         this.stateService.ready.pipe(filter((state) => state)).subscribe((state) => {
             this.reapplyAllStyles();
         });
@@ -248,7 +196,7 @@ export class StyleService {
             return undefined;
         }
         if (initialVisibility !== undefined) {
-            this.setStyleVisibility(importedStyleId, initialVisibility);
+            this.store.setStyleVisible(importedStyleId, initialVisibility);
             this.styles.get(importedStyleId)!.visible = initialVisibility;
         }
         ++this.importedStylesCount;
@@ -256,7 +204,7 @@ export class StyleService {
             this.saveImportedStyles();
         } catch (error) {
             this.removeActiveStyleEntry(importedStyleId);
-            this.removeStyleVisibility(importedStyleId);
+            this.store.removeStyleVisibility(importedStyleId);
             this.importedStylesCount = Math.max(0, this.importedStylesCount - 1);
             console.error("Could not persist imported style.", error);
             this.infoMessageService.showError(
@@ -396,7 +344,7 @@ export class StyleService {
             this.removeActiveStyleEntry(knownStyleId);
         }
 
-        const isVisible = this.getStyleVisibility(knownStyleId ?? styleId, wasmStyle.defaultEnabled());
+        const isVisible = this.store.isStyleVisible(knownStyleId ?? styleId, wasmStyle.defaultEnabled());
         const categoryReader = wasmStyle as Partial<Pick<FeatureLayerStyle, "category">>;
         const styleCategory =
             typeof categoryReader.category === "function" && categoryReader.category() === coreLib.StyleCategory.Search
@@ -424,7 +372,7 @@ export class StyleService {
 
         // Ensure that if the style was renamed, its visibility is retained.
         if (this.stateService.ready.getValue()) {
-            this.setStyleVisibility(styleId, isVisible);
+            this.store.setStyleVisible(styleId, isVisible);
         }
 
         return styleId;
@@ -642,7 +590,7 @@ export class StyleService {
         }
 
         this.removeActiveStyleEntry(styleId);
-        this.removeStyleVisibility(styleId);
+        this.store.removeStyleVisibility(styleId);
         this.importedStylesCount = Math.max(0, this.importedStylesCount - 1);
         this.saveImportedStyles();
         this.styleGroups.next(this.computeStyleGroups());
@@ -696,7 +644,7 @@ export class StyleService {
             return undefined;
         }
         if (newStyleId !== styleId) {
-            this.removeStyleVisibility(styleId);
+            this.store.removeStyleVisibility(styleId);
         }
         this.synchronizeLifecycleForStyle(this.styles.get(newStyleId));
 
@@ -1230,7 +1178,7 @@ export class StyleService {
     reconcilePresentationStyles(): void {
         for (const style of this.styles.values()) {
             if (style.imported) {
-                this.setStyleVisibility(style.id, this.getStyleVisibility(style.id, false));
+                this.store.setStyleVisible(style.id, this.store.isStyleVisible(style.id, false));
             }
         }
         this.reapplyAllStyles();
@@ -1242,7 +1190,7 @@ export class StyleService {
             return;
         }
         const style = this.styles.get(styleId)!;
-        style.visible = this.getStyleVisibility(styleId, style.featureLayerStyle.defaultEnabled());
+        style.visible = this.store.isStyleVisible(styleId, style.featureLayerStyle.defaultEnabled());
         this.styleGroups.next(this.computeStyleGroups());
         this.styleRemovedForId.next(styleId);
         if (style.visible) {
@@ -1366,7 +1314,7 @@ export class StyleService {
         }
         const style = this.styles.get(styleId)!;
         style.visible = enabled !== undefined ? enabled : !style.visible;
-        this.setStyleVisibility(styleId, style.visible);
+        this.store.setStyleVisible(styleId, style.visible);
         if (delayRepaint) {
             this.reapplyStyle(styleId);
         }
@@ -1456,7 +1404,7 @@ export class StyleService {
     }
 
     /** Returns bounded source text from the style owner, not server filesystem metadata. */
-    getStyle(input: ViewerActionInput<"viewer_get_style">): ViewerActionOutput<"viewer_get_style"> {
+    getStyle(input: StyleActionInput<"viewer_get_style">): StyleActionOutput<"viewer_get_style"> {
         const style = this.styles.get(input.styleId);
         if (!style)
             rejectAction(
@@ -1474,7 +1422,7 @@ export class StyleService {
     }
 
     /** Copies only bounded structured parser issues; installing the style remains a separate operation. */
-    validateStyle(input: ViewerActionInput<"viewer_validate_style">): ViewerActionOutput<"viewer_validate_style"> {
+    validateStyle(input: StyleActionInput<"viewer_validate_style">): StyleActionOutput<"viewer_validate_style"> {
         const report = this.validateStyleSource(input.source, this.createEditorSourceRef("mcp-draft", input.source));
         const candidates = function* () {
             for (const issue of report.issues)
@@ -1517,7 +1465,7 @@ export class StyleService {
     }
 
     /** Edits normal browser-local styles only; no server write capability is implied by viewer-control. */
-    editStyle(input: ViewerActionInput<"viewer_edit_style">): ViewerActionOutput<"viewer_edit_style"> {
+    editStyle(input: StyleActionInput<"viewer_edit_style">): StyleActionOutput<"viewer_edit_style"> {
         const writesSource = input.operation === "create" || input.operation === "update";
         if (writesSource !== (input.source !== undefined))
             rejectAction("Create/update require source; other operations do not accept source", "invalid_arguments");
@@ -1567,7 +1515,7 @@ export class StyleService {
     }
 
     /** Builds a bounded candidate without mutating the style; ambiguous or stale matches fail atomically. */
-    patchStyleSource(source: string, edits: NonNullable<ViewerActionInput<"viewer_edit_style">["edits"]>): string {
+    patchStyleSource(source: string, edits: NonNullable<StyleActionInput<"viewer_edit_style">["edits"]>): string {
         for (const [index, edit] of edits.entries()) {
             const start = source.indexOf(edit.find);
             if (start < 0)
@@ -1587,7 +1535,7 @@ export class StyleService {
         return source;
     }
 
-    listStyles(input: ViewerActionInput<"viewer_list_styles">): ViewerActionOutput<"viewer_list_styles"> {
+    listStyles(input: StyleActionInput<"listStyles">): StyleActionOutput<"listStyles"> {
         const styles = function* (this: StyleService) {
             for (const style of this.styles.values()) {
                 if (

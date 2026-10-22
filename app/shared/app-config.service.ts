@@ -1,19 +1,17 @@
 import {HttpClient} from "@angular/common/http";
-import {Injectable, inject} from "@angular/core";
+import {Injectable} from "@angular/core";
 import * as jsyaml from "js-yaml";
 import {BehaviorSubject, Observable, firstValueFrom} from "rxjs";
 import {z} from "zod";
 import {identifierSchema, pageInput, pageOutput, text} from "../actions/action-schema";
 import {pageActionItems} from "../actions/action-utils";
-import {AppActionService} from "../actions/app-action.service";
+import {appActions} from "./app-actions.store-feature";
 import {
     DEFAULT_BACKGROUND_LAYER_ID,
     DEFAULT_BACKGROUND_OPACITY,
     clampBackgroundOpacity
 } from "../mapdata/background-layer.model";
-import {AppStateService} from "../shared/appstate.service";
 import {MapPresetDefinition, MapPresetIssue, parseMapPresetDefinitions} from "../styledata/map-preset.model";
-import {ownerState} from "./app-config.service.state";
 export {
     DEFAULT_BACKGROUND_LAYER_ID,
     DEFAULT_BACKGROUND_OPACITY,
@@ -554,38 +552,12 @@ function mergeMeaningfulObjectValues(
 /** Loads and normalizes `config.json` once, then exposes it as a shared application service. */
 @Injectable({providedIn: "root"})
 export class AppConfigService {
-    static readonly actions = {
-        listBackgrounds: {
-            name: "viewer_list_backgrounds",
-            mutation: false,
-            description: "List configured background identities and labels without exposing URLs or credentials.",
-            inputSchema: z.strictObject({...pageInput}),
-            outputSchema: z.strictObject({
-                ...pageOutput,
-                items: z.array(z.strictObject({id: identifierSchema, name: text, kind: text})).max(100)
-            })
-        }
-    } as const;
-
-    private readonly stateService = inject(AppStateService);
-
-    readonly distributionVersions = this.stateService.register(
-        ownerState.distributionVersions,
-        "config",
-        "distributionVersions"
-    );
-
-    readonly erdblickVersion = this.stateService.register(ownerState.erdblickVersion, "config", "erdblickVersion");
-
     private readonly configSubject = new BehaviorSubject<AppConfig>(DEFAULT_APP_CONFIG);
     private loadPromise: Promise<AppConfig> | null = null;
     private staticRawConfig: RawAppConfig = {};
 
     /** Creates the shared config loader used by styles, plugins, and background-layer UI. */
     constructor(private readonly httpClient: HttpClient) {
-        inject(AppActionService).registerAction(AppConfigService.actions.listBackgrounds, (input) =>
-            this.listBackgrounds(input)
-        );
     }
 
     /** Returns the latest normalized config value, starting with the built-in fallback defaults. */

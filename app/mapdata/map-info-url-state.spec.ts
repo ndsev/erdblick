@@ -1,37 +1,19 @@
 import {runInInjectionContext} from "@angular/core";
 import {ownerTestInjector} from "../../test/owner-test-injector";
-import {MapLayerStateService} from "./map-layer-state.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {InspectionStateService} from "../inspection/inspection-state.service";
+import {AppStore} from "../shared/app.store";
 import {AppStateService} from "../shared/appstate.service";
 import type {HttpClient} from "@angular/common/http";
 import "@angular/compiler";
-import {BehaviorSubject, Subject} from "rxjs";
+import {BehaviorSubject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 import type {InfoMessageService} from "../shared/info.service";
 import type {MapPresetService} from "../styledata/map-preset.service";
 import type {ErdblickStyle, StyleService} from "../styledata/style.service";
 import {MapInfoService} from "./map-info.service";
-import {layerStyleOptions, MapLayerTree, type MapInfoItem} from "./map.tree.model";
+import {layerStyleOptions, type MapInfoItem} from "./map.tree.model";
 
 describe("MapInfoService external-state reconciliation", () => {
     it("reapplies layer and style state without relying on a view-count change", () => {
-        const stateApplied = new Subject<void>();
-        let visible = true;
-        let level = 13;
-        let optionValue = false;
-        const layerState = {
-            ready: new BehaviorSubject(true),
-            numViewsState: new BehaviorSubject(1),
-            stateApplied,
-            initializeMapLayerConfig: vi.fn(() => [{autoLevel: false, level, visible}]),
-            initializeStyleOptionValues: vi.fn(() => [optionValue]),
-            getLayerPresetSelection: vi.fn(() => null),
-            setLayerPresetSelection: vi.fn(),
-            getMapPresetSelection: vi.fn(() => null),
-            setMapPresetSelection: vi.fn(),
-            prune: vi.fn()
-        };
         const style = {
             id: "Style",
             shortId: "Style",
@@ -58,11 +40,11 @@ describe("MapInfoService external-state reconciliation", () => {
             presetsForLayer: () => [],
             matchesPresetValues: () => false
         } as unknown as MapPresetService;
-        const injector = ownerTestInjector([MapViewStateService,
-            {provide: MapLayerStateService, useValue: layerState},
-            {provide: InspectionStateService, useValue: {prune() {}}}]);
+        const injector = ownerTestInjector();
         const persistence = injector.get(AppStateService);
-        const views = injector.get(MapViewStateService);
+        const store = injector.get(AppStore);
+        store.setMapLayerConfig("Map", "Layer", [{autoLevel: false, level: 13, visible: true}]);
+        store.setStyleOptionValues("Map", "Layer", "Style", "details", [false]);
         persistence.ready.next(true);
         const service = runInInjectionContext(injector, () => new MapInfoService(
             {} as HttpClient,
@@ -92,15 +74,8 @@ describe("MapInfoService external-state reconciliation", () => {
             protocolVersion: {major: 1, minor: 0, patch: 0},
             addOn: false
         };
-        const tree = new MapLayerTree(
-            [mapInfo],
-            persistence,
-            styleService,
-            mapPresetService, layerState as never, views,
-            undefined
-        );
-        service.maps$.getValue().destroy();
-        service.maps$.next(tree);
+        Reflect.get(service, "publishSourceCatalogTree").call(service, [mapInfo]);
+        const tree = service.maps;
         const layer = tree.maps.get("Map")!.layers.get("Layer")!;
         const option = layerStyleOptions(layer)[0]!;
         expect(layer.viewConfig[0]).toEqual({autoLevel: false, level: 13, visible: true});
@@ -108,12 +83,11 @@ describe("MapInfoService external-state reconciliation", () => {
 
         const reasons: string[] = [];
         service.layerStateChanged.subscribe(reason => reasons.push(reason));
-        visible = false;
-        level = 9;
-        optionValue = true;
+        store.setMapLayerConfig("Map", "Layer", [{autoLevel: false, level: 9, visible: false}]);
+        store.setStyleOptionValues("Map", "Layer", "Style", "details", [true]);
         persistence.stateApplied.next();
 
-        expect(views.numViewsState.getValue()).toBe(1);
+        expect(store.numViews()).toBe(1);
         expect(layer.viewConfig[0]).toEqual({autoLevel: false, level: 9, visible: false});
         expect(option.value).toEqual([true]);
         expect(reasons).toEqual(["external-state"]);

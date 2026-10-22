@@ -1,9 +1,6 @@
 import {HttpClient, HttpHeaders, HttpParams} from "@angular/common/http";
-import {inject, Injectable} from "@angular/core";
+import {Injectable} from "@angular/core";
 import {catchError, forkJoin, map, Observable, of, timeout} from "rxjs";
-import {AppStateService} from "../shared/appstate.service";
-import {clampLocationSearchResultLimit} from "./location-search-limits";
-import {ownerState} from "./location.search.service.state";
 
 import type {SearchTarget} from "../actions/omnibar";
 import type {LocationArea} from "../mapview/render-view.model";
@@ -288,22 +285,6 @@ function arrayNumbers(value: unknown): number[] | null {
 
 @Injectable({providedIn: "root"})
 export class LocationSearchService {
-    private readonly stateService = inject(AppStateService);
-
-    readonly locationSearchResultLimitState = this.stateService.register(
-        ownerState.locationSearchResultLimit,
-        "location",
-        "locationSearchResultLimit"
-    );
-
-    get locationSearchResultLimit() {
-        return this.locationSearchResultLimitState.getValue();
-    }
-
-    set locationSearchResultLimit(val: number) {
-        this.locationSearchResultLimitState.next(clampLocationSearchResultLimit(val));
-    }
-
     constructor(
         private readonly httpClient: HttpClient,
         private readonly configService: AppConfigService

@@ -1,8 +1,11 @@
+import {effect, untracked} from "@angular/core";
+import {observeStore} from "../shared/persisted-state";
+import {AppStore} from "../shared/app.store";
 import {Component, inject, OnDestroy, ViewChild} from "@angular/core";
 import {BehaviorSubject, combineLatest, map, Subscription} from "rxjs";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
-import {AppLayoutService} from "../shared/app-layout.service";
+
 import {AppStateService} from "../shared/appstate.service";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {DiagnosticsFacadeService} from "./diagnostics.facade.service";
@@ -15,7 +18,7 @@ import type {DiagnosticsLogFilter} from "./diagnostics.model";
             #dialog
             header="Diagnostics Log"
             class="diagnostics-log-dialog"
-            [(visible)]="dialogVisible"
+            [visible]="store.isDialogOpen(layoutId)" (visibleChange)="store.setDialogOpen(layoutId, $event)"
             [modal]="false"
             [persistLayout]="true"
             [layoutId]="layoutId"
@@ -47,7 +50,7 @@ import type {DiagnosticsLogFilter} from "./diagnostics.model";
                     <label for="diag-log-error">Errors</label>
                 </div>
                 <div class="diagnostics-log-actions">
-                    @if (diagnostics.logFilter(); as filterState) {
+                    @if (store.diagnostics.logFilter(); as filterState) {
                         @if (filterState.error && !filterState.warn && !filterState.info) {
                             <p-button size="small" label="Show all" (click)="unsetAllFilter()" />
                         } @else {
@@ -126,7 +129,7 @@ import type {DiagnosticsLogFilter} from "./diagnostics.model";
 })
 /** Dialog that filters, sorts, and exports captured diagnostics log entries. */
 export class DiagnosticsLogDialogComponent implements OnDestroy {
-    readonly layoutState = inject(AppLayoutService);
+    readonly store = inject(AppStore);
     readonly layoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
     @ViewChild("dialog") dialog?: AppDialogComponent;
     readonly dialogStyle: {[key: string]: string} = {
@@ -140,7 +143,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
     private readonly sortOrder$ = new BehaviorSubject<"asc" | "desc">(this.sortOrder);
     readonly filteredLogs$ = combineLatest([
         this.diagnostics.logs$,
-        this.diagnostics.diagnosticsLogFilterState,
+        observeStore(this.store, state => state.diagnostics.logFilter),
         this.sortOrder$
     ]).pipe(
         map(([logs, filter, sortOrder]) => {
@@ -162,20 +165,17 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
         public readonly stateService: AppStateService,
         private readonly dialogStack: DialogStackService
     ) {
-        this.subscriptions.push(
-            this.diagnostics.diagnosticsLogFilterState.subscribe((filter) => {
+        effect(() => {
+            const filter = this.store.diagnostics.logFilter();
+            untracked(() => {
                 this.logFilter = {...filter};
-            })
-        );
+            });
+        });
     }
 
-    get dialogVisible(): boolean {
-        return this.layoutState.isDialogOpen(this.layoutId);
-    }
 
-    set dialogVisible(visible: boolean) {
-        this.layoutState.setDialogOpen(this.layoutId, visible);
-    }
+
+
 
     /** Releases dialog-local subscriptions. */
     ngOnDestroy() {
@@ -190,7 +190,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
 
     /** Persists the log-level filter toggles. */
     updateFilter() {
-        this.diagnostics.diagnosticsLogFilter = {...this.logFilter};
+        this.store.setDiagnosticsLogFilter({...this.logFilter});
     }
 
     /** Updates the sort order used by the reactive filtered-log stream. */
@@ -206,7 +206,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
 
     /** Convenience action that leaves only error logs enabled. */
     setErrorsOnly() {
-        this.diagnostics.diagnosticsLogFilter = {info: false, warn: false, error: true};
+        this.store.setDiagnosticsLogFilter({info: false, warn: false, error: true});
     }
 
     /** Opens the export dialog preconfigured to export only the visible logs. */
@@ -221,6 +221,6 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
 
     /** Restores all log levels in the filter. */
     unsetAllFilter() {
-        this.diagnostics.diagnosticsLogFilter = {info: true, warn: true, error: true};
+        this.store.setDiagnosticsLogFilter({info: true, warn: true, error: true});
     }
 }

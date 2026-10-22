@@ -1,7 +1,8 @@
+import {AppStore} from "../shared/app.store";
 import {Component, inject} from "@angular/core";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {LEGAL_INFO_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
-import {AppLayoutService} from "../shared/app-layout.service";
+
 import {AppStateService} from "../shared/appstate.service";
 
 @Component({
@@ -9,7 +10,7 @@ import {AppStateService} from "../shared/appstate.service";
     template: `
         <app-dialog
             header="Copyright and Legal Information"
-            [(visible)]="dialogVisible"
+            [visible]="store.isDialogOpen(dialogLayoutId)" (visibleChange)="store.setDialogOpen(dialogLayoutId, $event)"
             [modal]="false"
             [style]="{'min-height': '10em', 'min-width': '40em'}"
             [persistLayout]="false"
@@ -38,7 +39,7 @@ import {AppStateService} from "../shared/appstate.service";
 })
 /** Dialog that aggregates map-level legal and copyright notices. */
 export class LegalInfoDialogComponent {
-    readonly layoutState = inject(AppLayoutService);
+    readonly store = inject(AppStore);
     readonly dialogLayoutId = LEGAL_INFO_DIALOG_LAYOUT_ID;
     public aggregatedLegalInfo: {mapName: string; entry: string}[] = [];
 
@@ -59,16 +60,12 @@ export class LegalInfoDialogComponent {
         });
     }
 
-    get dialogVisible(): boolean {
-        return this.layoutState.isDialogOpen(this.dialogLayoutId);
-    }
 
-    set dialogVisible(visible: boolean) {
-        this.layoutState.setDialogOpen(this.dialogLayoutId, visible);
-    }
+
+
 
     /** Closes the legal-information dialog. */
     close() {
-        this.dialogVisible = false;
+        this.store.setDialogOpen(this.dialogLayoutId, false);
     }
 }

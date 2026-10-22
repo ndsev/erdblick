@@ -1,6 +1,5 @@
 import {runInInjectionContext} from "@angular/core";
 import {ownerTestInjector} from "../../test/owner-test-injector";
-import {AppLayoutService} from "../shared/app-layout.service";
 import "@angular/compiler";
 import {HttpErrorResponse} from "@angular/common/http";
 import {BehaviorSubject, firstValueFrom} from "rxjs";
@@ -24,7 +23,7 @@ const createComponent = (enabled = true) => {
         isDialogOpen: vi.fn(() => true),
         setDialogOpen: vi.fn()
     };
-    const injector = ownerTestInjector([{provide: AppLayoutService, useValue: state}]);
+    const injector = ownerTestInjector();
     const component = runInInjectionContext(injector, () => new CacheResetComponent(
         mapInfo as any,
         cacheReset as any,

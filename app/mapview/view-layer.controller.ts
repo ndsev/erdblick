@@ -117,7 +117,7 @@ export class ViewLayerController {
     /** Bind one logical view to catalog, style, search, inspection, and worker state. */
     private readonly identity: ViewIdentity;
     get viewIndex(): number {
-        return this.viewState.viewStateOwner.indexOf(this.identity.id);
+        return this.viewState.store.indexOf(this.identity.id);
     }
 
     constructor(
@@ -134,7 +134,7 @@ export class ViewLayerController {
         private readonly styleValidationReports: StyleValidationReportService,
         private readonly ngZone: NgZone
     ) {
-        const identity = this.viewState.viewStateOwner.captureView(viewIndex);
+        const identity = this.viewState.store.captureView(viewIndex);
         if (!identity) throw new Error("Cannot attach layers to an unavailable view");
         this.identity = identity;
         this.unregisterDiagnostics = diagnostics.register(

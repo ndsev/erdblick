@@ -1,16 +1,25 @@
-import {describe, expect, it} from "vitest";
+import "@angular/compiler";
+import {Injector, runInInjectionContext} from "@angular/core";
+import {afterAll, describe, expect, it} from "vitest";
+import {AppStore} from "../shared/app.store";
 import fixtures from "../../test/viewer-actions/fixtures.json";
 import {
-    canonicalViewerContractJson, controlDeclarations, viewerActionCatalog, viewerActions,
-    type ViewerActionName
+    canonicalViewerContractJson, viewerActionCatalog
 } from "./viewer-action.contract";
 import {viewerActionClientMessageSchema, viewerActionServerMessageSchema, viewerMcpInfoSchema} from "./viewer-action-relay.contract";
-import {cameraViewStateSchema} from "../mapview/map-view.service.declarations";
+import {cameraViewStateSchema} from "../mapview/map-view-actions.store-feature";
 
 describe("viewer action shared contract fixtures", () => {
+    // Construct the same feature graph used by Angular and the build exporter.
+    // An empty injector proves that discovery never starts a runtime resource.
+    const injector = Injector.create({providers: []});
+    const store = runInInjectionContext(injector, () => new AppStore());
+    const viewerActions = store.actionCatalog.publicActions;
+    const controlDeclarations = store.actionCatalog.controlDeclarations;
+    afterAll(() => injector.destroy());
     for (const fixture of fixtures.actions) {
         it(fixture.name, () => {
-            const action = viewerActions[fixture.action as ViewerActionName];
+            const action = viewerActions[fixture.action];
             expect(action.inputSchema.safeParse(fixture.arguments).success).toBe(fixture.valid);
         });
     }
@@ -30,12 +39,12 @@ describe("viewer action shared contract fixtures", () => {
     }
     for (const fixture of fixtures.results) {
         it(fixture.name, () => {
-            expect(viewerActions[fixture.action as ViewerActionName].outputSchema.safeParse(fixture.value).success).toBe(fixture.valid);
+            expect(viewerActions[fixture.action].outputSchema.safeParse(fixture.value).success).toBe(fixture.valid);
         });
     }
 
     it("bounds target work before any application access", () => {
-        expect(viewerActions.viewer_get_controls.inputSchema.safeParse({
+        expect(viewerActions["viewer_get_controls"].inputSchema.safeParse({
             targets: Array.from({length: 33}, () => ({control: "app.searches"}))
         }).success).toBe(false);
     });
@@ -56,7 +65,7 @@ describe("viewer action shared contract fixtures", () => {
     });
 
     it("exports camera offsets as fixed-size homogeneous arrays for MCP clients", () => {
-        const catalog = viewerActionCatalog();
+        const catalog = viewerActionCatalog(store.actionCatalog);
         const cameraSchema = {
             properties: {position: {type: "array", items: {type: "number"}, minItems: 3, maxItems: 3}},
             required: ["destination", "orientation"]
@@ -73,11 +82,11 @@ describe("viewer action shared contract fixtures", () => {
     });
 
     it("does not accept a runtime value for the wrong channel", () => {
-        expect(viewerActions.viewer_get_controls.outputSchema.safeParse({
+        expect(viewerActions["viewer_get_controls"].outputSchema.safeParse({
             observedAt: "2026-09-29T00:00:00Z",
             values: [{target: {control: "view.camera", viewId: "view-0"}, value: []}], complete: true, omissions: []
         }).success).toBe(false);
-        const input = viewerActions.viewer_set_control.inputSchema;
+        const input = viewerActions["viewer_set_control"].inputSchema;
         const target = {control: "view.projection", viewId: "view-0"};
         expect(input.safeParse({target, value: "2d"}).success).toBe(true);
         expect(input.safeParse({target, value: []}).success).toBe(false);
@@ -86,7 +95,7 @@ describe("viewer action shared contract fixtures", () => {
     });
 
     it("publishes only explicit actions/channels with consistent permissions", () => {
-        const catalog = viewerActionCatalog();
+        const catalog = viewerActionCatalog(store.actionCatalog);
         expect(catalog.actions.map(action => action.name)).toEqual(Object.keys(viewerActions));
         expect(new Set(catalog.actions.map(action => action.name)).size).toBe(catalog.actions.length);
         expect(new Set(catalog.channels.map(channel => channel.name)).size).toBe(catalog.channels.length);
@@ -99,16 +108,16 @@ describe("viewer action shared contract fixtures", () => {
     });
 
     it("exports deterministic self-contained Draft-07 schemas without format-only validators", () => {
-        const serialized = canonicalViewerContractJson(viewerActionCatalog());
-        expect(serialized).toBe(canonicalViewerContractJson(viewerActionCatalog()));
+        const serialized = canonicalViewerContractJson(viewerActionCatalog(store.actionCatalog));
+        expect(serialized).toBe(canonicalViewerContractJson(viewerActionCatalog(store.actionCatalog)));
         expect(serialized).not.toContain('"format":');
         expect(serialized).not.toContain('"$ref":');
         expect(serialized).not.toContain("catalogId");
-        for (const action of viewerActionCatalog().actions) {
+        for (const action of viewerActionCatalog(store.actionCatalog).actions) {
             expect(action.inputSchema["$schema"]).toBe("http://json-schema.org/draft-07/schema#");
             expect(action.inputSchema["additionalProperties"]).toBe(false);
         }
-        const channels = viewerActionCatalog().channels;
+        const channels = viewerActionCatalog(store.actionCatalog).channels;
         expect(channels.find(channel => channel.name === "view.camera")?.valueSchema["type"]).toBe("object");
     });
 

@@ -1,17 +1,19 @@
+import {effect, untracked} from "@angular/core";
+import {AppStore} from "./shared/app.store";
 import {AfterViewInit, Component, ElementRef, inject, NgZone, OnDestroy, ViewChild} from "@angular/core";
 import {MenuItem} from "primeng/api";
 import {Subscription} from "rxjs";
 import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
 import {environment} from "./environments/environment";
 import {MapInfoService} from "./mapdata/map-info.service";
-import {MapLayerStateService} from "./mapdata/map-layer-state.service";
+
 import {
     VIEW_SYNC_LAYERS,
     VIEW_SYNC_MOVEMENT,
     VIEW_SYNC_POSITION,
     VIEW_SYNC_PROJECTION
 } from "./mapview/map-view-state.model";
-import {MapViewStateService} from "./mapview/map-view-state.service";
+
 import {MapViewService} from "./mapview/map-view.service";
 import {FeatureSearchService} from "./search/feature.search.service";
 import {
@@ -23,7 +25,7 @@ import {
     PREFERENCES_DIALOG_LAYOUT_ID,
     STYLES_DIALOG_LAYOUT_ID
 } from "./shared/app-layout.model";
-import {AppLayoutService} from "./shared/app-layout.service";
+
 import {AppStateService} from "./shared/appstate.service";
 import {InfoMessageService} from "./shared/info.service";
 import {StyleEditorRequestService} from "./styledata/style-editor-request.service";
@@ -134,9 +136,9 @@ interface StyleSheetMenuNode {
  * the actual width of the viewer layout.
  */
 export class MainBarComponent implements AfterViewInit, OnDestroy {
-    readonly layerState = inject(MapLayerStateService);
-    readonly viewStateOwner = inject(MapViewStateService);
-    readonly layoutState = inject(AppLayoutService);
+    readonly store = inject(AppStore);
+
+
     private readonly subscriptions = new Subscription();
     private mediaQueryList?: MediaQueryList;
     private mediaQueryChangeListener?: (event: MediaQueryListEvent) => void;
@@ -164,7 +166,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     }
 
     get mapsPanelOpen(): boolean {
-        return this.layerState.mapsOpenState.getValue();
+        return this.store.layers.mapsOpen();
     }
 
     constructor(
@@ -182,29 +184,31 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.setupMobileMenuTracking();
         this.initializeViewerLayoutMobileState();
         this.rebuildMenuItems();
-        this.subscriptions.add(
-            this.viewStateOwner.numViewsState.subscribe((numViews) => {
-            this.rebuildMenuItems(numViews);
-            })
-        );
-        this.subscriptions.add(
-            this.viewStateOwner.viewSyncState.subscribe(() => {
-            this.rebuildMenuItems();
-            })
-        );
-        this.subscriptions.add(
-            this.layoutState.dockOpenState.subscribe(() => {
-            this.scheduleMobileMenubarStateUpdate();
-            })
-        );
+        effect(() => {
+            const numViews = this.store.viewIds().length;
+            untracked(() => {
+                this.rebuildMenuItems(numViews);
+            });
+        });
+        effect(() => {
+            this.store.views.viewSync();
+            untracked(() => {
+                this.rebuildMenuItems();
+            });
+        });
+        effect(() => {
+            this.store.layout.dockOpen();
+            untracked(() => {
+                this.scheduleMobileMenubarStateUpdate();
+            });
+        });
         this.subscriptions.add(this.featureSearchService.sessionsChanged.subscribe(() => {
             this.rebuildMenuItems();
         }));
-        this.subscriptions.add(
-            this.featureSearchService.featureSearchState.subscribe(() => {
-            this.rebuildMenuItems();
-            })
-        );
+        effect(() => {
+            this.store.searches.featureSearch();
+            untracked(() => this.rebuildMenuItems());
+        });
         this.subscriptions.add(this.styleService.styleGroups.subscribe(() => {
             this.rebuildMenuItems();
         }));
@@ -242,12 +246,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the preferences dialog from the menu. */
     showPreferencesDialog() {
-        this.layoutState.openDialog(PREFERENCES_DIALOG_LAYOUT_ID);
+        this.store.setDialogOpen(PREFERENCES_DIALOG_LAYOUT_ID, true);
     }
 
     /** Opens the keyboard-help dialog from the menu. */
     showControlsDialog() {
-        this.layoutState.openDialog(KEYBOARD_DIALOG_LAYOUT_ID);
+        this.store.setDialogOpen(KEYBOARD_DIALOG_LAYOUT_ID, true);
     }
 
     /** Opens the diagnostics performance dialog from the menu. */
@@ -276,17 +280,17 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the About dialog. */
     openAboutDialog() {
-        this.layoutState.openDialog(ABOUT_DIALOG_LAYOUT_ID);
+        this.store.setDialogOpen(ABOUT_DIALOG_LAYOUT_ID, true);
     }
 
     /** Opens the datasource editor dialog. */
     private openDatasources() {
-        this.layoutState.openDialog(DATASOURCES_EDITOR_DIALOG_LAYOUT_ID);
+        this.store.setDialogOpen(DATASOURCES_EDITOR_DIALOG_LAYOUT_ID, true);
     }
 
     /** Opens the styles dialog. */
     private openStylesDialog() {
-        this.layoutState.openDialog(STYLES_DIALOG_LAYOUT_ID);
+        this.store.setDialogOpen(STYLES_DIALOG_LAYOUT_ID, true);
     }
 
     /** Opens the hidden file input used to import feature-search JSON. */
@@ -353,12 +357,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the maps panel. */
     protected showMapsPanel() {
-        this.layerState.mapsOpenState.next(true);
+        this.store.setMapsOpen(true);
     }
 
     /** Closes the maps panel. */
     protected closeMapsPanel() {
-        this.layerState.mapsOpenState.next(false);
+        this.store.setMapsOpen(false);
     }
 
     /** Schedules tooltip alignment for the maps-panel button tooltip. */
@@ -384,7 +388,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the legal-information dialog. */
     protected openLegalInfo() {
-        this.layoutState.openDialog(LEGAL_INFO_DIALOG_LAYOUT_ID);
+        this.store.setDialogOpen(LEGAL_INFO_DIALOG_LAYOUT_ID, true);
     }
 
     /** Aligns the maps-panel tooltip under the triggering button and keeps it on-screen. */
@@ -531,7 +535,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     }
 
     /** Rebuilds the current menu model using the latest view count and layout mode. */
-    private rebuildMenuItems(numViews: number = this.viewStateOwner.numViews): void {
+    private rebuildMenuItems(numViews: number = this.store.numViews()): void {
         this.mobileMapsMenuIncluded = this.viewportMobileMenubar;
         this.menuItems = this.buildMenuItems(numViews, this.mobileMapsMenuIncluded);
     }
@@ -626,7 +630,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         icon: "add_column_right",
                         visible: numViews <= 1,
                         command: () => {
-                            this.viewStateOwner.numViews = 2;
+                            this.store.setNumViews(2);
                         }
                     },
                     {
@@ -683,7 +687,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                         name: "Cache Reset",
                         icon: "cycle",
                         command: () => {
-                            this.layoutState.openDialog(CACHE_RESET_DIALOG_LAYOUT_ID);
+                            this.store.setDialogOpen(CACHE_RESET_DIALOG_LAYOUT_ID, true);
                         }
                     },
                     {
@@ -836,10 +840,10 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Toggles one synchronized-view option and mirrors the change into state. */
     private toggleSyncOption(code: string): void {
-        const nextSelection = this.viewStateOwner.viewSync.includes(code)
-            ? this.viewStateOwner.viewSync.filter((currentCode) => currentCode !== code)
-            : [...this.viewStateOwner.viewSync, code];
-        this.viewStateOwner.updateSelectedSyncOptions(nextSelection);
+        const nextSelection = this.store.views.viewSync().includes(code)
+            ? this.store.views.viewSync().filter((currentCode) => currentCode !== code)
+            : [...this.store.views.viewSync(), code];
+        this.store.updateSelectedSyncOptions(nextSelection);
     }
 
     /** Returns whether a menu item corresponds to an active synchronized-view option. */
@@ -847,13 +851,13 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         const itemName = item['name'];
         switch (itemName) {
             case "Position":
-                return this.viewStateOwner.viewSync.includes(VIEW_SYNC_POSITION);
+                return this.store.views.viewSync().includes(VIEW_SYNC_POSITION);
             case "Movement":
-                return this.viewStateOwner.viewSync.includes(VIEW_SYNC_MOVEMENT);
+                return this.store.views.viewSync().includes(VIEW_SYNC_MOVEMENT);
             case "Projection":
-                return this.viewStateOwner.viewSync.includes(VIEW_SYNC_PROJECTION);
+                return this.store.views.viewSync().includes(VIEW_SYNC_PROJECTION);
             case "Layers":
-                return this.viewStateOwner.viewSync.includes(VIEW_SYNC_LAYERS);
+                return this.store.views.viewSync().includes(VIEW_SYNC_LAYERS);
             default:
                 return false;
         }

@@ -1,7 +1,9 @@
 import {runInInjectionContext} from "@angular/core";
 import {ownerTestInjector} from "../../test/owner-test-injector";
-import {AppLayoutService} from "../shared/app-layout.service";
-import {InspectionStateService} from "./inspection-state.service";
+import {AppStore} from "../shared/app.store";
+import {AppStateService} from "../shared/appstate.service";
+import {TestBed} from "@angular/core/testing";
+import {Component, Input} from "@angular/core";
 import "@angular/compiler";
 import {ChangeDetectorRef, Renderer2} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
@@ -12,6 +14,17 @@ import {InspectionSelectionService} from "./inspection-selection.service";
 import {InspectionComparisonModel, InspectionPanelModel, TileFeatureId} from "./inspection-state.model";
 import {InspectionContainerComponent} from "./inspection.container.component";
 import {InspectionDialogsComponent} from "./inspection.dialogs.component";
+
+@Component({selector: "inspection-panel-dialog", template: ""})
+class TestInspectionDialog {
+    @Input() panel: unknown;
+    @Input() dialogIndex: unknown;
+}
+
+@Component({selector: "inspection-comparison-dialog", template: `<span class="comparison-base">{{comparison?.base?.panelId}}</span>`})
+class TestComparisonDialog {
+    @Input() comparison: InspectionComparisonModel | null = null;
+}
 
 const loadingPanel = (
     undocked: boolean
@@ -46,8 +59,7 @@ describe("inspection host render notifications", () => {
             reorderInspectionPanels: vi.fn()
         };
         const cdr = changeDetector();
-        const injector = ownerTestInjector([{provide: AppLayoutService, useValue: stateService},
-            {provide: InspectionStateService, useValue: {reorderInspectionPanels: stateService.reorderInspectionPanels}}]);
+        const injector = ownerTestInjector();
         const component = runInInjectionContext(injector, () => new InspectionContainerComponent(
             (stateService) as never,
             mapService,
@@ -64,13 +76,12 @@ describe("inspection host render notifications", () => {
         component.ngOnDestroy();
     });
 
-    it("marks floating inspection and comparison hosts dirty on subject emissions", () => {
+    it("marks the floating inspection host dirty on async shell emissions", () => {
         const selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
-        const inspectionComparisonState = new BehaviorSubject<InspectionComparisonModel | null>(null);
         const mapService = {selectionTopic} as unknown as InspectionSelectionService;
-        const stateService = {inspectionComparisonState};
+        const stateService = {};
         const cdr = changeDetector();
-        const injector = ownerTestInjector([{provide: InspectionStateService, useValue: stateService}]);
+        const injector = ownerTestInjector();
         const component = runInInjectionContext(injector, () =>
             new InspectionDialogsComponent(mapService, stateService as never, cdr));
         vi.mocked(cdr.markForCheck).mockClear();
@@ -81,12 +92,36 @@ describe("inspection host render notifications", () => {
         expect(component.undockedPanels[0].loading).toBe(true);
         expect(cdr.markForCheck).toHaveBeenCalledOnce();
 
-        inspectionComparisonState.next({
-            base: {panelId: 7, mapId: "Map", label: "Feature 7", featureIds: []},
-            others: []
-        });
-        expect(component.comparison?.base.panelId).toBe(7);
-        expect(cdr.markForCheck).toHaveBeenCalledTimes(2);
         component.ngOnDestroy();
+    });
+
+    it("renders comparison changes directly from the native signal without a resource emission", async () => {
+        const selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
+        const injector = ownerTestInjector();
+        const store = injector.get(AppStore);
+        const panelId = store.setSelection([{mapTileKey: "Features:Map:Layer:42", featureId: "Way.7"}])!;
+        await TestBed.configureTestingModule({
+            declarations: [InspectionDialogsComponent],
+            imports: [TestInspectionDialog, TestComparisonDialog],
+            providers: [
+                {provide: AppStore, useValue: store},
+                {provide: AppStateService, useValue: injector.get(AppStateService)},
+                {provide: InspectionSelectionService, useValue: {selectionTopic}}
+            ]
+        }).compileComponents();
+        const fixture = TestBed.createComponent(InspectionDialogsComponent);
+        try {
+            fixture.detectChanges();
+            expect(fixture.nativeElement.querySelector(".comparison-base")).toBeNull();
+            store.setInspectionComparison({base: {panelId, mapId: "Map", label: "Feature 7", featureIds: []}, others: []});
+            fixture.detectChanges();
+            expect(fixture.nativeElement.querySelector(".comparison-base")?.textContent).toBe(String(panelId));
+            store.setInspectionComparison(null);
+            fixture.detectChanges();
+            expect(fixture.nativeElement.querySelector(".comparison-base")).toBeNull();
+        } finally {
+            fixture.destroy();
+            TestBed.resetTestingModule();
+        }
     });
 });

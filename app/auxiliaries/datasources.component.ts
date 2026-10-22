@@ -1,3 +1,4 @@
+import {AppStore} from "../shared/app.store";
 import {HttpClient} from "@angular/common/http";
 import {Component, HostListener, inject, ViewChild} from "@angular/core";
 import {JSONSchema7} from "json-schema";
@@ -5,7 +6,7 @@ import {Subscription} from "rxjs";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {DATASOURCES_EDITOR_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
-import {AppLayoutService} from "../shared/app-layout.service";
+
 import {AppStateService} from "../shared/appstate.service";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {EditorService} from "../shared/editor.service";
@@ -16,7 +17,7 @@ import {InfoMessageService} from "../shared/info.service";
     template: `
         <app-dialog
             header="DataSource Configuration Editor"
-            [(visible)]="dialogVisible"
+            [visible]="store.isDialogOpen(dialogLayoutId)" (visibleChange)="store.setDialogOpen(dialogLayoutId, $event)"
             [modal]="false"
             #editorDialog
             (onShow)="onEditorDialogShow()"
@@ -103,7 +104,7 @@ import {InfoMessageService} from "../shared/info.service";
  * backend datasource configuration without leaving the viewer.
  */
 export class DatasourcesComponent {
-    readonly layoutState = inject(AppLayoutService);
+    readonly store = inject(AppStore);
     readonly dialogLayoutId = DATASOURCES_EDITOR_DIALOG_LAYOUT_ID;
     readonly datasourcesEditorSessionId = "datasources-editor";
     warningDialogVisible = false;
@@ -132,13 +133,9 @@ export class DatasourcesComponent {
         private readonly dialogStack: DialogStackService
     ) {}
 
-    get dialogVisible(): boolean {
-        return this.layoutState.isDialogOpen(this.dialogLayoutId);
-    }
 
-    set dialogVisible(visible: boolean) {
-        this.layoutState.setDialogOpen(this.dialogLayoutId, visible);
-    }
+
+
 
     /** Initializes the editor session whenever the datasource dialog becomes visible. */
     onEditorDialogShow() {
@@ -267,7 +264,7 @@ export class DatasourcesComponent {
             return;
         }
         this.warningDialogVisible = false;
-        this.dialogVisible = false;
+        this.store.setDialogOpen(this.dialogLayoutId, false);
     }
 
     /** Discards pending edits and then closes the editor dialog. */
@@ -279,7 +276,7 @@ export class DatasourcesComponent {
     @HostListener("window:keydown", ["$event"])
     /** Handles the shared Escape behavior for the datasource editor and its discard warning. */
     onWindowKeydown(event: KeyboardEvent) {
-        if (event.key !== "Escape" || !this.dialogVisible) {
+        if (event.key !== "Escape" || !this.store.isDialogOpen(this.dialogLayoutId)) {
             return;
         }
         event.preventDefault();

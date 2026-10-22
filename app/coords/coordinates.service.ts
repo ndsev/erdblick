@@ -1,12 +1,8 @@
-import {inject} from "@angular/core";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {ownerState} from "./coordinates.service.state";
-
-import {Injectable} from "@angular/core";
+import {AppStore} from "../shared/app.store";
+import {inject, Injectable} from "@angular/core";
 import {BehaviorSubject, skip} from "rxjs";
 import {Cartographic} from "../integrations/geo";
 import {AppConfigService} from "../shared/app-config.service";
-import {AppStateService} from "../shared/appstate.service";
 
 @Injectable({providedIn: "root"})
 /**
@@ -14,37 +10,20 @@ import {AppStateService} from "../shared/appstate.service";
  * plugin-provided auxiliary coordinate systems.
  */
 export class CoordinatesService {
-    readonly viewStateOwner = inject(MapViewStateService);
-
-    readonly enabledCoordsTileIdsState = this.stateService.register(
-        ownerState.enabledCoordsTileIds,
-        "coordinates",
-        "enabledCoordsTileIds"
-    );
-
-    get enabledCoordsTileIds() {
-        return this.enabledCoordsTileIdsState.getValue();
-    }
-
-    set enabledCoordsTileIds(val: string[]) {
-        this.enabledCoordsTileIdsState.next(val);
-    }
+    readonly store = inject(AppStore);
 
     mouseMoveCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     mouseClickCoordinates: BehaviorSubject<Cartographic | null> = new BehaviorSubject<Cartographic | null>(null);
     auxiliaryCoordinatesFun: ((x: number, y: number) => Array<[string, Array<number>]>) | null = null;
     auxiliaryTileIdsFun: ((x: number, y: number, level: number) => Array<[string, bigint | number]>) | null = null;
 
-    constructor(
-        public stateService: AppStateService,
-        private configService: AppConfigService
-    ) {
+    constructor(private configService: AppConfigService) {
         this.mouseClickCoordinates
             .pipe(
                 skip(1) // Skip the first (null) value from mouseClickCoordinates BehaviorSubject
             )
             .subscribe((position) => {
-                this.viewStateOwner.setMarkerPosition(position);
+                this.store.setMarkerPosition(position);
             });
     }
 

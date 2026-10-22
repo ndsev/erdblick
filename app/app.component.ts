@@ -1,3 +1,4 @@
+import {AppStore} from "./shared/app.store";
 import {HttpClient} from "@angular/common/http";
 import {AfterViewInit, Component, inject, OnDestroy, ViewContainerRef} from "@angular/core";
 import {Title} from "@angular/platform-browser";
@@ -15,13 +16,12 @@ import {
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
     FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID
 } from "./shared/app-layout.model";
-import {AppLayoutService} from "./shared/app-layout.service";
+
 import {AppStateService} from "./shared/appstate.service";
 import {DialogStackService} from "./shared/dialog-stack.service";
 import {InfoMessageService} from "./shared/info.service";
 import {KeyboardService} from "./shared/keyboard.service";
 import {StyleService} from "./styledata/style.service";
-import {AppActionService} from "./actions/app-action.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -34,22 +34,22 @@ declare let window: DebugWindow;
             <datasources></datasources>
             <advanced-preferences></advanced-preferences>
             <map-panel></map-panel>
-            @if (layoutState.isDialogOpen(cacheResetDialogLayoutId)) {
+            @if (store.isDialogOpen(cacheResetDialogLayoutId)) {
                 <cache-reset-dialog></cache-reset-dialog>
             }
-            @if (layoutState.isDialogOpen(diagnosticsPerformanceDialogLayoutId)) {
+            @if (store.isDialogOpen(diagnosticsPerformanceDialogLayoutId)) {
                 <diagnostics-performance-dialog></diagnostics-performance-dialog>
             }
-            @if (layoutState.isDialogOpen(diagnosticsLogDialogLayoutId)) {
+            @if (store.isDialogOpen(diagnosticsLogDialogLayoutId)) {
                 <diagnostics-log-dialog></diagnostics-log-dialog>
             }
-            @if (layoutState.isDialogOpen(diagnosticsExportDialogLayoutId)) {
+            @if (store.isDialogOpen(diagnosticsExportDialogLayoutId)) {
                 <diagnostics-export-dialog></diagnostics-export-dialog>
             }
             <style-panel></style-panel>
             <inspection-dialogs></inspection-dialogs>
             <feature-search-dialogs></feature-search-dialogs>
-            @if (layoutState.isDialogOpen(featureSearchExportDialogLayoutId)) {
+            @if (store.isDialogOpen(featureSearchExportDialogLayoutId)) {
                 <feature-search-export-dialog></feature-search-export-dialog>
             }
             <keyboard-dialog></keyboard-dialog>
@@ -75,7 +75,7 @@ declare let window: DebugWindow;
  * and startup version loading.
  */
 export class AppComponent implements AfterViewInit, OnDestroy {
-    readonly layoutState = inject(AppLayoutService);
+    readonly store = inject(AppStore);
     protected readonly cacheResetDialogLayoutId = CACHE_RESET_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsPerformanceDialogLayoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsLogDialogLayoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
@@ -103,14 +103,14 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         private configService: AppConfigService,
         private diagnostics: DiagnosticsFacadeService,
         private titleService: Title,
-        private actions: AppActionService
+
     ) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
         this.titleService.setTitle(this.capitalizeTitle(this.title));
         this.bindDialogFocusStacking();
         this.bindDialogDragSelectionGuard();
-        window.ebDebug = new ErdblickDebugApi(this.tileStream, this.subsetRenderer, this.stateService, this.actions);
+        window.ebDebug = new ErdblickDebugApi(this.tileStream, this.subsetRenderer, this.stateService);
 
         this.loadDistributionVersions();
 
@@ -189,7 +189,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         import(/* @vite-ignore */ distribVersionsPath)
             .then((plugin) => plugin.default() as Array<Versions>)
             .then((versions: Array<Versions>) => {
-                this.configService.distributionVersions.next(versions);
+                this.store.setDistributionVersions(versions);
                 if (versions[0]?.name.trim()) {
                     this.titleService.setTitle(this.capitalizeTitle(versions[0].name.trim()));
                 } else {
@@ -260,7 +260,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     /** Loads the bundled fallback version string when distribution metadata is unavailable. */
     getBasicVersion() {
         this.httpClient.get("./bundle/VERSION", {responseType: "text"}).subscribe((data) => {
-            this.configService.erdblickVersion.next(`${this.title} ${data.toString()}`);
+            this.store.setErdblickVersion(`${this.title} ${data.toString()}`);
             this.titleService.setTitle(this.capitalizeTitle(this.title));
         });
     }

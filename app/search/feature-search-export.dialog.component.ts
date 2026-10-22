@@ -1,8 +1,9 @@
+import {AppStore} from "../shared/app.store";
 import {Component, inject, OnDestroy, ViewChild} from "@angular/core";
 import {Subscription} from "rxjs";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
-import {AppLayoutService} from "../shared/app-layout.service";
+
 import {AppStateService} from "../shared/appstate.service";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
@@ -33,7 +34,7 @@ interface FeatureSearchExportMapLayerOption extends FeatureSearchMapLayerRef {
             #dialog
             header="Export Feature Search"
             class="feature-search-export-dialog"
-            [(visible)]="dialogVisible"
+            [visible]="store.isDialogOpen(layoutId)" (visibleChange)="onVisibleChange($event)"
             [modal]="false"
             [layoutId]="layoutId"
             (onShow)="onDialogShow()"
@@ -89,7 +90,7 @@ interface FeatureSearchExportMapLayerOption extends FeatureSearchMapLayerRef {
 })
 /** Dialog that configures and launches feature-search JSON exports. */
 export class FeatureSearchExportDialogComponent implements OnDestroy {
-    readonly layoutState = inject(AppLayoutService);
+    readonly store = inject(AppStore);
     readonly layoutId = FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID;
     @ViewChild("dialog") dialog?: AppDialogComponent;
     exporting = false;
@@ -119,12 +120,8 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
         });
     }
 
-    get dialogVisible(): boolean {
-        return this.layoutState.isDialogOpen(this.layoutId);
-    }
-
-    set dialogVisible(visible: boolean) {
-        this.layoutState.setDialogOpen(this.layoutId, visible);
+    onVisibleChange(visible: boolean): void {
+        this.store.setDialogOpen(this.layoutId, visible);
         if (!visible) {
             this.searchService.clearExportDialogRequest();
         }
@@ -172,7 +169,7 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
             this.infoMessageService.showSuccess("Feature search JSON export started");
             if (this.exportOptions.closeAfterExport) {
                 this.searchService.closeSearch(session.id);
-                this.dialogVisible = false;
+                this.onVisibleChange(false);
             }
         } finally {
             this.exporting = false;

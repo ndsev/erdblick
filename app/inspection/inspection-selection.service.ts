@@ -1,13 +1,15 @@
+import {DestroyRef} from "@angular/core";
+import {takeUntilDestroyed} from "@angular/core/rxjs-interop";
+import {observeStore} from "../shared/persisted-state";
+import {AppStore} from "../shared/app.store";
 import {inject, Injectable, NgZone} from "@angular/core";
 import {BehaviorSubject, Subscription} from "rxjs";
 import {z} from "zod";
 import {Feature} from "../../build/libs/core/erdblick-core";
 import {appliedAction, rejectAction} from "../actions/action-utils";
-import {AppActionService} from "../actions/app-action.service";
 import {ControlReadContext} from "../actions/control";
 import {ViewerActionFailure} from "../actions/viewer-action-relay.contract";
-import type {ViewerActionInput, ViewerActionOutput} from "../actions/viewer-action.contract";
-import {featureIdentitySchema} from "../inspection/inspection-selection.service.declarations";
+import {featureIdentitySchema} from "../inspection/inspection-actions.store-feature";
 import {Cartesian3} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
 import {featureSetsEqual, FeatureWrapper} from "../mapdata/feature-inspection.model";
@@ -15,12 +17,11 @@ import {MapTileStreamService, RetainedTileExpiryOwner} from "../mapdata/map-tile
 import {parsePartition, partitionKeySuffix} from "../mapdata/partition.model";
 import {TileDeliveryError} from "../mapdata/tile-diagnostics";
 import {VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION} from "../mapview/map-view-state.model";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+
 import {MapViewService} from "../mapview/map-view.service";
 import type {ViewIdentity} from "../mapview/view-id";
 import {ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
-import {deepEquals} from "../shared/app-state";
-import {AppStateService} from "../shared/appstate.service";
+import {deepEquals} from "../shared/state-value";
 import {InfoMessageService} from "../shared/info.service";
 import {KeyboardService} from "../shared/keyboard.service";
 import {
@@ -28,9 +29,9 @@ import {
     parseFeatureInspectionTarget,
     tileFeatureInteractionTargetsEqual
 } from "../shared/tile-feature-id";
-import {inspectionActions, inspectionControls} from "./inspection-selection.service.declarations";
+import {inspectionActions, inspectionControls} from "./inspection-actions.store-feature";
 import {InspectionPanelModel, SelectedSourceData, TileFeatureId} from "./inspection-state.model";
-import {InspectionStateService} from "./inspection-state.service";
+
 
 interface Wgs84Point {
     x: number;
@@ -53,16 +54,17 @@ interface InspectionExpiryOwner extends RetainedTileExpiryOwner {
 }
 
 /**
- * Owns selected and hovered feature interaction state, including focus/zoom navigation.
+ * Loads selected feature models and owns hover/focus navigation resources.
+ * AppStore owns the canonical panel selection; this service provides synchronous
+ * loading shells and replaces them only while that selection's lifetime is current.
  */
 @Injectable({providedIn: "root"})
 export class InspectionSelectionService {
-    static readonly controls = inspectionControls;
-    static readonly actions = inspectionActions;
     private readonly viewDiagnostics = inject(ViewLayerDiagnosticsService);
 
-    readonly inspectionState = inject(InspectionStateService);
-    readonly viewStateOwner = inject(MapViewStateService);
+    private readonly destroyRef = inject(DestroyRef);
+    readonly store = inject(AppStore);
+
     readonly selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
     readonly hoverIdsTopic = new BehaviorSubject<TileFeatureId[]>([]);
     readonly selectionIdsTopic = new BehaviorSubject<InspectionPanelModel<TileFeatureId>[]>([]);
@@ -75,139 +77,42 @@ export class InspectionSelectionService {
     private readonly inspectionExpiryOwners = new Map<string, InspectionExpiryOwner>();
 
     constructor(
-        private readonly stateService: AppStateService,
         private readonly tileStream: MapTileStreamService,
         private readonly viewState: MapViewService,
         private readonly keyboardService: KeyboardService,
         private readonly messageService: InfoMessageService,
         private readonly ngZone: NgZone
     ) {
-        this.registerControls();
-
-        const actions = inject(AppActionService);
-        actions.registerAction(InspectionSelectionService.actions.viewer_navigate, (input, context) =>
-            this.navigate(input, context.signal)
-        );
-        actions.registerAction(InspectionSelectionService.actions.viewer_inspect, (input, context) =>
-            this.inspect(input, context.signal)
-        );
-        actions.registerAction(InspectionSelectionService.actions.viewer_open_source_data, (input, context) =>
-            this.openSourceData(input)
-        );
-
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFocusedInspectionPanel.bind(this));
     }
 
-    /** Wires app-state selection projection once the tile stream can serve feature loads. */
+    /** Retire pending loads and retained-tile leases when this resource injector is destroyed. */
+    ngOnDestroy(): void {
+        ++this.selectionConversionRevision;
+        this.pendingFeatureLoadControllers.forEach(controller => controller.abort());
+        this.pendingFeatureLoadControllers.clear();
+        this.pendingFeatureLoads.clear();
+        for (const owner of this.inspectionExpiryOwners.values()) {
+            this.tileStream.cancelRetainedTileExpiries?.(owner);
+        }
+        this.inspectionExpiryOwners.clear();
+        this.selectionTopic.complete();
+        this.selectionIdsTopic.complete();
+        this.hoverIdsTopic.complete();
+    }
+
+    private initialized = false;
+
+    /** Start native selection observation once the tile stream can serve feature loads. */
     initialize(): void {
-        this.inspectionState.selectionState.subscribe((selected) => {
-            this.ngZone.run(() => this.selectionIdsTopic.next(selected));
-            const revision = ++this.selectionConversionRevision;
-            const demanded = new Set(selected.map((panel) => this.featureLoadKey(panel.features)));
-            for (const [key, controller] of this.pendingFeatureLoadControllers) {
-                if (!demanded.has(key)) {
-                    controller.abort();
-                    this.pendingFeatureLoadControllers.delete(key);
-                    this.pendingFeatureLoads.delete(key);
-                }
-            }
-            const pendingSelections: InspectionPanelModel<FeatureWrapper>[] = [];
-            const pendingPanelUpdates: Array<{
-                panel: InspectionPanelModel<FeatureWrapper>;
-                selection: InspectionPanelModel<TileFeatureId>;
-            }> = [];
-            const existingPanels = new Map(this.selectionTopic.getValue().map((panel) => [panel.id, panel]));
-            const featureLoads: Array<
-                Promise<{
-                    selection: InspectionPanelModel<TileFeatureId>;
-                    features: FeatureWrapper[];
-                } | null>
-            > = [];
-            for (const selection of selected) {
-                const existing = existingPanels.get(selection.id);
-                if (
-                    existing &&
-                    featureSetsEqual(selection.features, existing.features) &&
-                    deepEquals(existing.sourceData, selection.sourceData)
-                ) {
-                    pendingSelections.push(existing);
-                    pendingPanelUpdates.push({panel: existing, selection});
-                    continue;
-                }
-
-                if (selection.sourceData || !selection.features.length) {
-                    pendingSelections.push(this.runtimePanel(selection, []));
-                    continue;
-                }
-
-                pendingSelections.push(this.runtimePanel(selection, [], true));
-                featureLoads.push(
-                    this.loadFeaturesOnce(selection.features)
-                        .then((features) => ({selection, features}))
-                        .catch((error) => {
-                            console.error(`Failed to resolve inspection selection for panel ${selection.id}.`, error);
-                            return null;
-                        })
-                );
-            }
-
-            // Publish panel shells before restricted feature loads finish so
-            // docked and floating hosts can show progress immediately.
-            this.ngZone.run(() => {
-                pendingPanelUpdates.forEach((update) => {
-                    update.panel.locked = update.selection.locked;
-                    update.panel.focused = update.selection.focused;
-                    update.panel.color = update.selection.color;
-                    update.panel.size = update.selection.size;
-                    update.panel.undocked = update.selection.undocked ?? false;
-                });
-                this.selectionIdsTopic.next(this.selectionIdsForRuntime(selected, pendingSelections));
-                this.selectionTopic.next(pendingSelections);
-            });
-
-            if (!featureLoads.length) {
-                return;
-            }
-            void Promise.all(featureLoads).then((results) => {
-                if (revision !== this.selectionConversionRevision) {
-                    return;
-                }
-                const resolvedByPanelId = new Map(
-                    results
-                        .filter((result): result is NonNullable<typeof result> => result !== null)
-                        .map((result) => [result.selection.id, result])
-                );
-                const convertedSelections: InspectionPanelModel<FeatureWrapper>[] = [];
-                for (const selection of selected) {
-                    const existing = existingPanels.get(selection.id);
-                    if (
-                        existing &&
-                        featureSetsEqual(selection.features, existing.features) &&
-                        deepEquals(existing.sourceData, selection.sourceData)
-                    ) {
-                        convertedSelections.push(existing);
-                        continue;
-                    }
-                    if (selection.sourceData || !selection.features.length) {
-                        convertedSelections.push(this.runtimePanel(selection, []));
-                        continue;
-                    }
-                    const resolved = resolvedByPanelId.get(selection.id);
-                    if (resolved?.features.length) {
-                        convertedSelections.push(this.runtimePanel(selection, resolved.features));
-                    }
-                }
-
-                // Restricted feature loading can complete from a transport
-                // callback outside Angular. Publish the resolved model in-zone
-                // so both docked and floating inspection views are checked.
-                this.ngZone.run(() => {
-                    this.selectionIdsTopic.next(this.selectionIdsForRuntime(selected, convertedSelections));
-                    this.selectionTopic.next(convertedSelections);
-                });
-            });
-        });
-        this.selectionTopic.subscribe((selectedPanels) => {
+        if (this.initialized) {
+            return;
+        }
+        this.initialized = true;
+        observeStore(this.store, state => state.inspection.selection)
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe(() => this.reconcileSelection());
+        this.selectionTopic.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((selectedPanels) => {
             this.reconcileInspectionExpiries(
                 selectedPanels.flatMap((panel) =>
                     panel.features.map((feature) => ({
@@ -229,6 +134,125 @@ export class InspectionSelectionService {
                 }
                 this.hoverIdsTopic.next(hoverIds);
             }
+        });
+    }
+
+    private lastProjectedSelection: InspectionPanelModel<TileFeatureId>[] | undefined;
+
+    /**
+     * Establish the loading models synchronously before a dock host mounts/measures
+     * them. Both the native-state observer and the dock call this idempotent boundary,
+     * so observer registration order cannot expose selection IDs without their shells.
+     */
+    reconcileSelection(): void {
+        const selected = this.store.inspection.selection();
+        if (selected === this.lastProjectedSelection) return;
+        this.lastProjectedSelection = selected;
+        this.ngZone.run(() => this.selectionIdsTopic.next(selected));
+        const revision = ++this.selectionConversionRevision;
+        const demanded = new Set(selected.map((panel) => this.featureLoadKey(panel.features)));
+        for (const [key, controller] of this.pendingFeatureLoadControllers) {
+            if (!demanded.has(key)) {
+                controller.abort();
+                this.pendingFeatureLoadControllers.delete(key);
+                this.pendingFeatureLoads.delete(key);
+            }
+        }
+        const pendingSelections: InspectionPanelModel<FeatureWrapper>[] = [];
+        const pendingPanelUpdates: Array<{
+            panel: InspectionPanelModel<FeatureWrapper>;
+            selection: InspectionPanelModel<TileFeatureId>;
+        }> = [];
+        const existingPanels = new Map(this.selectionTopic.getValue().map((panel) => [panel.id, panel]));
+        const featureLoads: Array<
+            Promise<{
+                selection: InspectionPanelModel<TileFeatureId>;
+                features: FeatureWrapper[];
+            } | null>
+        > = [];
+        for (const selection of selected) {
+            const existing = existingPanels.get(selection.id);
+            if (
+                existing &&
+                featureSetsEqual(selection.features, existing.features) &&
+                deepEquals(existing.sourceData, selection.sourceData)
+            ) {
+                pendingSelections.push(existing);
+                pendingPanelUpdates.push({panel: existing, selection});
+                continue;
+            }
+
+            if (selection.sourceData || !selection.features.length) {
+                pendingSelections.push(this.runtimePanel(selection, []));
+                continue;
+            }
+
+            pendingSelections.push(this.runtimePanel(selection, [], true));
+            featureLoads.push(
+                this.loadFeaturesOnce(selection.features)
+                    .then((features) => ({selection, features}))
+                    .catch((error) => {
+                        console.error(`Failed to resolve inspection selection for panel ${selection.id}.`, error);
+                        return null;
+                    })
+            );
+        }
+
+        // Publish panel shells before restricted feature loads finish so
+        // docked and floating hosts can show progress immediately.
+        this.ngZone.run(() => {
+            pendingPanelUpdates.forEach((update) => {
+                update.panel.locked = update.selection.locked;
+                update.panel.focused = update.selection.focused;
+                update.panel.color = update.selection.color;
+                update.panel.size = update.selection.size;
+                update.panel.undocked = update.selection.undocked ?? false;
+            });
+            this.selectionIdsTopic.next(this.selectionIdsForRuntime(selected, pendingSelections));
+            this.selectionTopic.next(pendingSelections);
+        });
+
+        if (!featureLoads.length) {
+            return;
+        }
+        void Promise.all(featureLoads).then((results) => {
+            if (revision !== this.selectionConversionRevision) {
+                return;
+            }
+            const resolvedByPanelId = new Map(
+                results
+                    .filter((result): result is NonNullable<typeof result> => result !== null)
+                    .map((result) => [result.selection.id, result])
+            );
+            const convertedSelections: InspectionPanelModel<FeatureWrapper>[] = [];
+            for (const selection of selected) {
+                const existing = existingPanels.get(selection.id);
+                if (
+                    existing &&
+                    featureSetsEqual(selection.features, existing.features) &&
+                    deepEquals(existing.sourceData, selection.sourceData)
+                ) {
+                    convertedSelections.push(existing);
+                    continue;
+                }
+                if (selection.sourceData || !selection.features.length) {
+                    convertedSelections.push(this.runtimePanel(selection, []));
+                    continue;
+                }
+                const resolved = resolvedByPanelId.get(selection.id);
+                if (resolved?.features.length) {
+                    convertedSelections.push(this.runtimePanel(selection, resolved.features));
+                }
+            }
+
+            // Restricted feature loading can complete from a transport
+            // callback outside Angular. Publish the resolved model in-zone
+            // so both docked and floating inspection views are checked.
+            this.ngZone.run(() => {
+                this.store.completeInspectionLoading(selected, convertedSelections.map(panel => panel.id));
+                this.selectionIdsTopic.next(this.selectionIdsForRuntime(selected, convertedSelections));
+                this.selectionTopic.next(convertedSelections);
+            });
         });
     }
 
@@ -311,63 +335,14 @@ export class InspectionSelectionService {
      * The warning reports logical features after merged-object expansion, not raw render objects.
      */
     inspectFeatureIds(tileFeatureIds: TileFeatureId[], lockNewPanels = false): MultiInspectionResult {
-        return this.stateService.transaction(() => {
-            const featureIds = this.uniqueTileFeatureIds(tileFeatureIds);
-            const foundFeatureCount = featureIds.length;
-            if (!foundFeatureCount) {
-                return {foundFeatureCount: 0, inspectedFeatureCount: 0};
-            }
-
-            if (foundFeatureCount === 1) {
-                const currentPanels = this.inspectionState.selection;
-                const featureAlreadyInspected = this.panelsContainFeature(currentPanels, featureIds[0]);
-                const reusableFeaturePanel = currentPanels.some((panel) => panel.sourceData === undefined && !panel.locked);
-                if (
-                    featureAlreadyInspected ||
-                    reusableFeaturePanel ||
-                    currentPanels.length < this.inspectionState.inspectionsLimit
-                ) {
-                    const panelId = this.inspectionState.setSelection([featureIds[0]], undefined, lockNewPanels);
-                    if (lockNewPanels && panelId !== undefined) {
-                        this.inspectionState.setInspectionPanelLockedState(panelId, true);
-                    }
-                }
-            } else {
-                // Match the existing merged-feature flow: preserve pinned/source-data panels and
-                // create one new inspection panel for each candidate that still fits.
-                this.inspectionState.unsetUnlockedSelections();
-                let remainingSlots = Math.max(
-                    0,
-                    this.inspectionState.inspectionsLimit - this.inspectionState.selection.length
-                );
-                for (const featureId of featureIds) {
-                    if (this.panelsContainFeature(this.inspectionState.selection, featureId)) {
-                        continue;
-                    }
-                    if (remainingSlots <= 0) {
-                        break;
-                    }
-                    const panelId = this.inspectionState.setSelection([featureId], undefined, true);
-                    if (panelId !== undefined) {
-                        remainingSlots -= 1;
-                        if (lockNewPanels) {
-                            this.inspectionState.setInspectionPanelLockedState(panelId, true);
-                        }
-                    }
-                }
-            }
-
-            const inspectedFeatureCount = featureIds.filter((featureId) =>
-                this.panelsContainFeature(this.inspectionState.selection, featureId)
-            ).length;
-            if (inspectedFeatureCount < foundFeatureCount) {
-                this.messageService.showWarning(
-                    `Inspecting ${inspectedFeatureCount} features out of ${foundFeatureCount} found features. ` +
-                        "Decrease the selection or increase your max inspections limit to see more."
-                );
-            }
-            return {foundFeatureCount, inspectedFeatureCount};
-        });
+        const features = this.uniqueTileFeatureIds(tileFeatureIds);
+        const panels = this.store.applyInspectionFeatures(features, {lock: lockNewPanels});
+        const foundFeatureCount = features.length;
+        const inspectedFeatureCount = features.filter(feature => this.panelsContainFeature(panels, feature)).length;
+        if (inspectedFeatureCount < foundFeatureCount) this.messageService.showWarning(
+            `Inspecting ${inspectedFeatureCount} features out of ${foundFeatureCount} found features. ` +
+            "Decrease the selection or increase your max inspections limit to see more.");
+        return {foundFeatureCount, inspectedFeatureCount};
     }
 
     /** Deduplicates full map-tile/feature identities without changing traversal order. */
@@ -400,7 +375,7 @@ export class InspectionSelectionService {
     /** Publishes hover ids without loading feature data; inspection hovers may opt into remote styles. */
     setHoveredFeatures(tileFeatureIds: (TileFeatureId | null)[], allowRemoteHighlight = false): void {
         const requestedTargets = tileFeatureIds.filter((id): id is TileFeatureId => !!id);
-        const selectedTargets = this.inspectionState.selectionState.getValue().flatMap((panel) => panel.features);
+        const selectedTargets = this.store.inspection.selection().flatMap((panel) => panel.features);
         const hoverTargets = requestedTargets.filter(
             (id) => !selectedTargets.some((selected) => tileFeatureInteractionTargetsEqual(id, selected))
         );
@@ -533,15 +508,15 @@ export class InspectionSelectionService {
 
     /** Loads a feature and centers the target view on its reported center point. */
     async focusOnFeature(viewIndex: number | undefined, tileFeatureId: TileFeatureId) {
-        const focused = this.viewStateOwner.captureView(this.viewStateOwner.focusedView);
+        const focused = this.store.captureView(this.store.focusedView());
         const candidates =
             viewIndex === undefined
-                ? this.viewStateOwner.identities()
-                : [this.viewStateOwner.captureView(viewIndex)].filter((view): view is ViewIdentity => !!view);
+                ? this.store.viewEntities()
+                : [this.store.captureView(viewIndex)].filter((view): view is ViewIdentity => !!view);
         if (!candidates.length) return;
         this.viewState.navigationStarted.next();
         const features = await this.tileStream.loadFeatures([tileFeatureId]);
-        if (!candidates.some((view) => this.viewStateOwner.isCurrent(view))) return;
+        if (!candidates.some((view) => this.store.isCurrent(view))) return;
         if (!features.length) {
             this.showErrorMessage(
                 `Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`
@@ -549,15 +524,15 @@ export class InspectionSelectionService {
             return;
         }
         const current = candidates
-            .filter((view) => this.viewStateOwner.isCurrent(view))
-            .map((view) => this.viewStateOwner.indexOf(view.id));
+            .filter((view) => this.store.isCurrent(view))
+            .map((view) => this.store.indexOf(view.id));
         const targets =
             viewIndex === undefined
                 ? this.targetViewsForFeatureZoom(
                       undefined,
                       features[0].featureTile,
                       current,
-                      focused && this.viewStateOwner.isCurrent(focused) ? this.viewStateOwner.indexOf(focused.id) : -1
+                      focused && this.store.isCurrent(focused) ? this.store.indexOf(focused.id) : -1
                   )
                 : current;
         const target = this.featureSetZoomTarget(features.slice(0, 1));
@@ -567,7 +542,7 @@ export class InspectionSelectionService {
 
     /** Moves the focused view to the inspection panel most recently focused by the user. */
     zoomToFocusedInspectionPanel() {
-        const focusedPanelId = this.inspectionState.focusedInspectionPanelId;
+        const focusedPanelId = this.store.focusedInspectionPanelId();
         if (focusedPanelId === undefined) {
             return;
         }
@@ -575,7 +550,7 @@ export class InspectionSelectionService {
         if (!panel) {
             return;
         }
-        const targetView = this.viewStateOwner.focusedView;
+        const targetView = this.store.focusedView();
         if (panel.features.length) {
             this.zoomToFeature(targetView, panel.features[0]);
             return;
@@ -635,11 +610,11 @@ export class InspectionSelectionService {
     private targetViewsForFeatureZoom(
         viewIndex: number | undefined,
         featureTile: FeatureWrapper["featureTile"],
-        candidates = Array.from({length: this.viewStateOwner.numViews}, (_, index) => index),
-        fallback = this.viewStateOwner.focusedView
+        candidates = Array.from({length: this.store.numViews()}, (_, index) => index),
+        fallback = this.store.focusedView()
     ): number[] {
         if (viewIndex !== undefined) {
-            return viewIndex >= 0 && viewIndex < this.viewStateOwner.numViews ? [viewIndex] : [];
+            return viewIndex >= 0 && viewIndex < this.store.numViews() ? [viewIndex] : [];
         }
 
         const targetViews: number[] = [];
@@ -661,7 +636,7 @@ export class InspectionSelectionService {
 
     /** Fits the target view to the tile represented by a focused source-data inspection. */
     private zoomToSourceDataSelection(viewIndex: number, sourceData: SelectedSourceData) {
-        if (viewIndex < 0 || viewIndex >= this.viewStateOwner.numViews) {
+        if (viewIndex < 0 || viewIndex >= this.store.numViews()) {
             return;
         }
         const parsedKey = this.tileStream.parseMapTileKeySafe(sourceData.mapTileKey);
@@ -715,12 +690,20 @@ export class InspectionSelectionService {
         this.messageService.showError(message);
     }
 
+    /** Destroying the owning injector retires pending commands as well as loaded shells. */
+    private throwIfDestroyed(): void {
+        if (this.destroyRef.destroyed) {
+            rejectAction("The inspection resource was destroyed", "cancelled");
+        }
+    }
+
     /** Resolves only explicitly requested identities; never guesses between ambiguous backend matches. */
     async resolveFeatures(
         features: Array<z.infer<typeof featureIdentitySchema>>,
         signal?: AbortSignal
     ): Promise<TileFeatureId[]> {
         const result: TileFeatureId[] = [];
+        this.throwIfDestroyed();
         for (const feature of features) {
             signal?.throwIfAborted();
             let featureId = feature.featureId;
@@ -764,6 +747,7 @@ export class InspectionSelectionService {
                 result.push({mapTileKey: feature.mapTileKey, featureId});
             } else {
                 const matches = await this.tileStream.locateFeature(feature.mapId, featureId, feature.layerId, signal);
+                this.throwIfDestroyed();
                 signal?.throwIfAborted();
                 if (matches.length !== 1)
                     rejectAction(
@@ -788,9 +772,10 @@ export class InspectionSelectionService {
 
     /** Publishes inspection shells after locate only; the existing selection owner performs asynchronous feature loading. */
     async inspect(
-        input: ViewerActionInput<"viewer_inspect">,
+        input: z.output<typeof inspectionActions.viewer_inspect.inputSchema>,
         signal?: AbortSignal
-    ): Promise<ViewerActionOutput<"viewer_inspect">> {
+    ): Promise<z.output<typeof inspectionActions.viewer_inspect.outputSchema>> {
+        this.throwIfDestroyed();
         if (input.color !== undefined && !input.newPanel)
             rejectAction(
                 "color requires newPanel:true; use inspection.panel control to recolor an existing panel",
@@ -799,44 +784,40 @@ export class InspectionSelectionService {
         if (input.panelId !== undefined && input.newPanel)
             rejectAction("panelId and newPanel are mutually exclusive", "invalid_arguments");
         if (input.panelId !== undefined) {
-            const panel = this.inspectionState.selection.find((panel) => panel.id === input.panelId);
+            const panel = this.store.inspection.selection().find((panel) => panel.id === input.panelId);
             if (!panel || panel.locked || panel.sourceData)
                 rejectAction("An explicit target must be an existing unlocked feature panel");
         }
         // Any panel edit during feature resolution invalidates this pending inspection intent.
+        const controller = new AbortController();
+        const abort = () => controller.abort(new ViewerActionFailure({
+            code: "cancelled", message: "Inspection was interrupted", outcome: "not_applied"
+        }));
+        const unregisterDestroy = this.destroyRef.onDestroy(abort);
+        signal?.addEventListener("abort", abort, {once: true});
+        if (signal?.aborted) abort();
         let changed: boolean;
-        const guard = this.inspectionState.selectionState.subscribe(() => {
+        const guard = observeStore(this.store, state => state.inspection.selection).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
             changed = true;
         });
         changed = false;
         let features: TileFeatureId[];
         try {
-            features = await this.resolveFeatures(input.features, signal);
-            signal?.throwIfAborted();
+            features = await this.resolveFeatures(input.features, controller.signal);
+            this.throwIfDestroyed();
+            controller.signal.throwIfAborted();
             if (changed) rejectAction("Inspections changed while locating the feature", "cancelled");
         } finally {
             guard.unsubscribe();
+            unregisterDestroy();
+            signal?.removeEventListener("abort", abort);
         }
-        return this.ngZone.run(() => this.stateService.transaction(() => {
-            let newPanelId: number | undefined;
-            if (input.panelId !== undefined || input.newPanel) {
-                newPanelId = this.inspectionState.setSelection(features, input.panelId, input.newPanel ?? false);
-            } else this.inspectFeatureIds(features, input.lock ?? false);
-            const panels = this.inspectionState.selection.filter(
-                (panel) =>
-                    !panel.sourceData &&
-                    (!input.newPanel || panel.id === newPanelId) &&
-                    panel.features.some((candidate) =>
-                        features.some(
-                            (feature) =>
-                                candidate.mapTileKey === feature.mapTileKey && candidate.featureId === feature.featureId
-                        )
-                    )
-            );
-            if (input.lock)
-                panels.forEach((panel) => this.inspectionState.setInspectionPanelLockedState(panel.id, true));
-            if (input.color !== undefined)
-                panels.forEach((panel) => this.inspectionState.setInspectionPanelColor(panel.id, input.color!));
+        return this.ngZone.run(() => {
+            this.throwIfDestroyed();
+            controller.signal.throwIfAborted();
+            const panels = this.store.applyInspectionFeatures(features, {
+                panelId: input.panelId, newPanel: input.newPanel, lock: input.lock, color: input.color,
+            });
             const represented = features.filter((feature) =>
                 panels.some((panel) =>
                     panel.features.some(
@@ -852,20 +833,21 @@ export class InspectionSelectionService {
                 complete: represented.length === features.length,
                 ...(represented.length < features.length ? {reason: "item_limit" as const} : {})
             };
-        }));
+        });
     }
 
     /** Owns cancellation only until the camera commit; human edits, layout changes and retired renderers win. */
     async navigate(
-        input: ViewerActionInput<"viewer_navigate">,
+        input: z.output<typeof inspectionActions.viewer_navigate.inputSchema>,
         signal?: AbortSignal
-    ): Promise<ViewerActionOutput<"viewer_navigate">> {
-        const intended = this.viewStateOwner.requireView(input.viewId);
+    ): Promise<z.output<typeof inspectionActions.viewer_navigate.outputSchema>> {
+        this.throwIfDestroyed();
+        const intended = this.store.requireView(input.viewId);
         const sync =
-            this.viewStateOwner.viewSync.includes(VIEW_SYNC_POSITION) ||
-            this.viewStateOwner.viewSync.includes(VIEW_SYNC_MOVEMENT);
-        const affected = sync ? this.viewStateOwner.identities() : [intended];
-        const renderers = affected.map((view) => this.viewState.renderViewFor(this.viewStateOwner.indexOf(view.id)));
+            this.store.views.viewSync().includes(VIEW_SYNC_POSITION) ||
+            this.store.views.viewSync().includes(VIEW_SYNC_MOVEMENT);
+        const affected = sync ? this.store.viewEntities() : [intended];
+        const renderers = affected.map((view) => this.viewState.renderViewFor(this.store.indexOf(view.id)));
         if (renderers.some((view) => !view || view.isFirstPersonViewActive()))
             rejectAction("Map navigation requires an available map camera");
         if (renderers.some((view) => view!.isCameraInteractionActive()))
@@ -880,23 +862,24 @@ export class InspectionSelectionService {
                     outcome: "not_applied"
                 })
             );
+        const unregisterDestroy = this.destroyRef.onDestroy(abort);
         signal?.addEventListener("abort", abort, {once: true});
         if (signal?.aborted) abort();
         const guards = new Subscription();
         guards.add(this.viewState.navigationStarted.subscribe(abort));
         const poses = renderers.map((view) => view!.getLiveCameraState());
-        const syncBefore = this.viewStateOwner.viewSync;
+        const syncBefore = this.store.views.viewSync();
         guards.add(
             this.viewDiagnostics.cameraInteracting$.subscribe((active) => {
                 if (active && renderers.some((view) => view!.isCameraInteractionActive())) abort();
             })
         );
         guards.add(
-            this.viewStateOwner.cameraViewDataState.appState.subscribe(() => {
+            observeStore(this.store, state => state.views.cameraViewData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
                 if (
                     affected.some(
                         (view, offset) =>
-                            !this.viewStateOwner.isCurrent(view) ||
+                            !this.store.isCurrent(view) ||
                             !deepEquals(renderers[offset]?.getLiveCameraState(), poses[offset])
                     )
                 )
@@ -904,16 +887,16 @@ export class InspectionSelectionService {
             })
         );
         guards.add(
-            this.viewStateOwner.viewIdsState.subscribe((ids) => {
+            observeStore(this.store, state => state.viewIds).pipe(takeUntilDestroyed(this.destroyRef)).subscribe((ids) => {
                 if (
-                    affected.some((view) => !this.viewStateOwner.isCurrent(view)) ||
+                    affected.some((view) => !this.store.isCurrent(view)) ||
                     (sync && ids.length !== affected.length)
                 )
                     abort();
             })
         );
         guards.add(
-            this.viewStateOwner.viewSyncState.subscribe((value) => {
+            observeStore(this.store, state => state.views.viewSync).pipe(takeUntilDestroyed(this.destroyRef)).subscribe((value) => {
                 if (!deepEquals(value, syncBefore)) abort();
             })
         );
@@ -926,14 +909,16 @@ export class InspectionSelectionService {
             const target = input.target;
             const features =
                 "features" in target ? await this.resolveFeatures(target.features, controller.signal) : undefined;
+            controller.signal.throwIfAborted();
             const loaded = features ? await this.tileStream.loadFeatures(features, controller.signal) : undefined;
+            this.throwIfDestroyed();
             if (affected.some((view, index) =>
-                this.viewState.renderViewFor(this.viewStateOwner.indexOf(view.id)) !== renderers[index]
+                this.viewState.renderViewFor(this.store.indexOf(view.id)) !== renderers[index]
             )) {
                 abort();
             }
             controller.signal.throwIfAborted();
-            const viewIndex = this.viewStateOwner.requireCurrentView(intended);
+            const viewIndex = this.store.requireCurrentView(intended);
             if (features && loaded?.length !== features.length)
                 rejectAction("Some requested features could not be loaded");
             const position = loaded ? this.featureSetZoomTarget(loaded) : undefined;
@@ -953,19 +938,20 @@ export class InspectionSelectionService {
             guards.unsubscribe();
             return this.ngZone.run(() => {
                 controller.signal.throwIfAborted();
-                this.viewStateOwner.focusedView = viewIndex;
+                this.store.setFocusedView(viewIndex);
                 if (position) this.viewState.moveToWgs84PositionTopic.next({targetView: viewIndex, ...position});
                 else this.viewState.moveToRectangleTopic.next({targetView: viewIndex, rectangle: bounds!});
                 return appliedAction();
             });
         } finally {
             guards.unsubscribe();
+            unregisterDestroy();
             signal?.removeEventListener("abort", abort);
         }
     }
 
     /** Uses the native key factory for backend-returned source references; the panel owns address resolution. */
-    openSourceData(input: ViewerActionInput<"viewer_open_source_data">): ViewerActionOutput<"viewer_open_source_data"> {
+    openSourceData(input: z.output<typeof inspectionActions.viewer_open_source_data.inputSchema>): z.output<typeof inspectionActions.viewer_open_source_data.outputSchema> {
         const source = input.source;
         if (
             !("mapTileKey" in source) &&
@@ -989,7 +975,7 @@ export class InspectionSelectionService {
         const address = "mapTileKey" in source ? source.address : source.reference.address;
         if (address !== undefined && BigInt(address) > 18446744073709551615n)
             rejectAction("Address exceeds uint64", "invalid_arguments");
-        const panelId = this.inspectionState.setSelection(
+        const panelId = this.store.setSelection(
             {mapTileKey, ...(address === undefined ? {} : {address: BigInt(address)})},
             undefined,
             input.newPanel ?? false
@@ -998,15 +984,9 @@ export class InspectionSelectionService {
         return {status: "applied", panelId, mapTileKey};
     }
 
-    private registerControls(): void {
-        inject(AppActionService).registerControl(InspectionSelectionService.controls.selections, {
-            read: (selector, context) => this.selectionSummary(selector.panelId, context),
-            overview: () => [{}]
-        });
-    }
 
     selectionSummary(panelId: number | undefined, context: ControlReadContext) {
-        const panels = this.inspectionState.selection;
+        const panels = this.store.inspection.selection();
         if (panelId !== undefined && !panels.some((panel) => panel.id === panelId))
             rejectAction("The inspection is unavailable");
         const runtime = new Map(this.selectionTopic.getValue().map((panel) => [panel.id, panel]));

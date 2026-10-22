@@ -1,8 +1,8 @@
 import "@angular/compiler";
 import {BehaviorSubject, Observable, Subject, of} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
-import {ownerTestInjector} from "../../test/owner-test-injector";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {ownerTestInjector, setTestViewIds} from "../../test/owner-test-injector";
+import {AppStore} from "../shared/app.store";
 import {MapViewService} from "../mapview/map-view.service";
 import {ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
 import {AppStateService} from "../shared/appstate.service";
@@ -33,20 +33,20 @@ function setup() {
     const diagnostics = {cameraInteracting: false, cameraInteracting$: new BehaviorSubject(false)};
     const jumps = {markedPosition: new Subject()};
     const messages = {showError: vi.fn(), showInfo: vi.fn()};
-    const injector = ownerTestInjector([LocationNavigationService, MapViewStateService,
+    const injector = ownerTestInjector([LocationNavigationService,
         {provide: LocationSearchService, useValue: locations}, {provide: MapViewService, useValue: views},
         {provide: ViewLayerDiagnosticsService, useValue: diagnostics},
         {provide: JumpTargetService, useValue: jumps}, {provide: InfoMessageService, useValue: messages}]);
     const persistence = injector.get(AppStateService);
-    const viewState = injector.get(MapViewStateService);
-    viewState.viewIdsState.next(["left", "right"]);
-    viewState.cameraViewDataState.next(0, {...camera, position: [0, 0, 0]});
+    const store = injector.get(AppStore);
+    setTestViewIds(store, ["left", "right"]);
+    store.setCameraViewData(0, {...camera, position: [0, 0, 0]});
     const service = injector.get(LocationNavigationService);
     const area = vi.fn(), point = vi.fn(), marker = vi.fn();
     views.moveToLocationAreaTopic.subscribe(area);
     views.moveToWgs84PositionTopic.subscribe(point);
     jumps.markedPosition.subscribe(marker);
-    return {service, response, locations, renderer, views, viewState, persistence, diagnostics, jumps, messages, area, point, marker};
+    return {service, response, locations, renderer, views, store, persistence, diagnostics, jumps, messages, area, point, marker};
 }
 
 
@@ -57,14 +57,28 @@ describe("Location navigation ownership", () => {
         const candidate = h.service.createTarget(match);
         await candidate.execute!("Place");
         expect(h.locations.resolveNavigation).toHaveBeenCalledWith("loc:mapget-offline:wof:1", match);
-        h.viewState.viewIdsState.next(["right"]);
-        h.viewState.viewIdsState.next(["left", "right"]);
+        setTestViewIds(h.store, ["right"]);
+        setTestViewIds(h.store, ["left", "right"]);
         h.response.next(areaResult);
         expect(h.area).not.toHaveBeenCalled();
         await expect(candidate.execute!("Place")).rejects.toThrow("no longer available");
         h.locations.resolveNavigation.mockReturnValueOnce(of(areaResult));
-        h.viewState.focusedView = 0;
+        h.store.setFocusedView(0);
         h.service.runFromHistory(candidate.id, match);
+        expect(h.area).toHaveBeenCalledExactlyOnceWith({targetView: 0, area: areaResult.area});
+    });
+
+    it("rejects a retired candidate before cancelling the current lookup", () => {
+        const h = setup();
+        const retired = h.store.captureView(0)!;
+        setTestViewIds(h.store, ["right"]);
+        setTestViewIds(h.store, ["left", "right"]);
+        h.store.setFocusedView(0);
+        h.service.navigate("loc:mapget-offline:current");
+
+        expect(() => h.service.navigate("loc:mapget-offline:old", undefined, retired)).toThrow();
+        expect(h.response.observed).toBe(true);
+        h.response.next(areaResult);
         expect(h.area).toHaveBeenCalledExactlyOnceWith({targetView: 0, area: areaResult.area});
     });
 
@@ -91,12 +105,12 @@ describe("Location navigation ownership", () => {
         "discards delayed responses after %s, without fallback notices", event => {
             const h = setup();
             h.service.navigate("area");
-            if (event === "focus") { h.viewState.focusedView = 1; }
+            if (event === "focus") { h.store.setFocusedView(1); }
             if (event === "gesture") h.diagnostics.cameraInteracting$.next(true);
             if (event === "renderer") h.renderer.rendererInvalidated.next();
             if (event === "renderer teardown") h.renderer.rendererInvalidated.complete();
-            if (event === "layout") h.viewState.retainViews([1], new Map());
-            if (event === "camera") { h.renderer.getLiveCameraState = () => ({destination: {lon: 3, lat: 4, alt: 500}, orientation: {heading: 0, pitch: -90, roll: 0}}); h.viewState.cameraViewDataState.next(0, {...h.viewState.cameraViewDataState.getValue(0), destination: {lon: 3, lat: 4, alt: 500}}); }
+            if (event === "layout") h.store.retainViews([1], new Map());
+            if (event === "camera") { h.renderer.getLiveCameraState = () => ({destination: {lon: 3, lat: 4, alt: 500}, orientation: {heading: 0, pitch: -90, roll: 0}}); h.store.setCameraViewData(0, {...h.store.views.cameraViewData()[h.store.idAt(0)!], destination: {lon: 3, lat: 4, alt: 500}}); }
             if (event === "reset") h.persistence.stateApplied.next();
             if (event === "point") h.views.moveToWgs84PositionTopic.next({});
             if (event === "rectangle") h.views.moveToRectangleTopic.next({});

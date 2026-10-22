@@ -1,7 +1,8 @@
 import "@angular/compiler";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {WebMcpService} from "./web-mcp.service";
-import {viewerActions} from "./viewer-action.contract";
+import {Injector, runInInjectionContext} from "@angular/core";
+import {AppStore} from "../shared/app.store";
 import {ViewerActionFailure} from "./viewer-action-relay.contract";
 
 type Tool = {
@@ -21,7 +22,9 @@ function fixture(supported = true) {
     Object.defineProperty(document, "modelContext", {value: supported ? {registerTool} : undefined, configurable: true});
     const actions = {invokeLocal: vi.fn().mockResolvedValue({status: "applied"})};
     const zone = {run: (fn: () => unknown) => fn(), runOutsideAngular: (fn: () => unknown) => fn()};
-    const service = new WebMcpService(actions as never, zone as never);
+    const injector = Injector.create({providers: [AppStore]});
+    const store = injector.get(AppStore);
+    const service = runInInjectionContext(injector, () => new WebMcpService(actions as never, zone as never));
     const fetchMock = vi.fn(async (_url: URL, init: RequestInit) => {
         const request = JSON.parse(String(init.body));
         return new Response(JSON.stringify({jsonrpc: "2.0", id: request.id, result: {tools: [{
@@ -29,13 +32,16 @@ function fixture(supported = true) {
         }]}}), {headers: {"Content-Type": "application/json"}});
     });
     vi.stubGlobal("fetch", fetchMock);
-    return {service, tools, actions, registerTool, fetchMock};
+    return {service, tools, actions, registerTool, fetchMock, injector, viewerActions: store.actionCatalog.publicActions};
 }
 
 describe("WebMcpService", () => {
-    const services: WebMcpService[] = [];
+    const fixtures: ReturnType<typeof fixture>[] = [];
     afterEach(() => {
-        services.splice(0).forEach(service => service.ngOnDestroy());
+        fixtures.splice(0).forEach(({service, injector}) => {
+            service.ngOnDestroy();
+            injector.destroy();
+        });
         Reflect.deleteProperty(document, "modelContext");
         vi.unstubAllGlobals();
         vi.restoreAllMocks();
@@ -44,13 +50,13 @@ describe("WebMcpService", () => {
     /** Start a fresh document owner and ensure cleanup even when assertions fail. */
     function start(supported = true) {
         const value = fixture(supported);
-        services.push(value.service);
+        fixtures.push(value);
         value.service.initialize();
         return value;
     }
 
     it("registers every current-tab action and native tool without session routing", async () => {
-        const {service, tools, actions, fetchMock} = start();
+        const {service, tools, actions, fetchMock, viewerActions} = start();
         await vi.waitFor(() => expect(service.status$.value.mapgetTools).toBe(1));
         expect([...tools.keys()].sort()).toEqual([...Object.keys(viewerActions), "mapget_list_sources"].sort());
         expect(tools.has("viewer_list_sessions")).toBe(false);
@@ -74,8 +80,9 @@ describe("WebMcpService", () => {
     });
 
     it("preserves current-tab tools when backend discovery is denied", async () => {
-        const {service, fetchMock, tools} = fixture();
-        services.push(service);
+        const value = fixture();
+        fixtures.push(value);
+        const {service, fetchMock, tools, viewerActions} = value;
         fetchMock.mockResolvedValue(new Response("", {status: 403}));
         service.initialize();
         await vi.waitFor(() => expect(service.status$.value.message).toContain("login required"));
@@ -121,8 +128,9 @@ describe("WebMcpService", () => {
     });
 
     it("cleans up a partial registration failure without clearing another owner's tools", async () => {
-        const {service, tools, registerTool} = fixture();
-        services.push(service);
+        const value = fixture();
+        fixtures.push(value);
+        const {service, tools, registerTool} = value;
         tools.set("other_app_tool", {name: "other_app_tool", inputSchema: {}, execute: async () => 1});
         registerTool.mockRejectedValueOnce(new Error("Registration denied"));
         service.initialize();

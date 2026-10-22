@@ -1,3 +1,4 @@
+import {AppStore} from "../shared/app.store";
 import {Component, effect, inject, input, output, ViewChild} from "@angular/core";
 import {Popover} from "primeng/popover";
 import {coreLib} from "../integrations/wasm";
@@ -11,7 +12,7 @@ import {displayFeatureId} from "../shared/tile-feature-id";
 import {FeaturePanelComponent} from "./feature.panel.component";
 import {InspectionSelectionService} from "./inspection-selection.service";
 import {InspectionComparisonOption, InspectionPanelModel} from "./inspection-state.model";
-import {InspectionStateService} from "./inspection-state.service";
+
 import {SourceDataPanelComponent} from "./sourcedata.panel.component";
 
 /** Select option for switching between source-data layers within one inspected tile. */
@@ -155,7 +156,7 @@ interface InspectionPanelContentAdapter {
 })
 /** Docked accordion variant of an inspection panel. */
 export class InspectionPanelComponent {
-    readonly inspectionState = inject(InspectionStateService);
+    readonly store = inject(AppStore);
     title = "";
     isExpanded: boolean = false;
     errorMessage: string = "";
@@ -222,7 +223,7 @@ export class InspectionPanelComponent {
                                         partitionKeySuffix(partition)
                                     );
                                     sourceData.address = undefined;
-                                    this.inspectionState.setSelection(sourceData, this.panel().id);
+                                    this.store.setSelection(sourceData, this.panel().id);
                                 }
                             } as SourceLayerMenuItem;
                         })
@@ -269,24 +270,24 @@ export class InspectionPanelComponent {
     protected toggleLockedState(event: MouseEvent) {
         event.stopPropagation();
         const p = this.panel();
-        this.inspectionState.setInspectionPanelLockedState(p.id, !p.locked);
+        this.store.setInspectionPanelLockedState(p.id, !p.locked);
     }
 
     /** Marks this docked panel as the active target for inspection shortcuts. */
     protected focusPanel() {
-        this.inspectionState.setFocusedInspectionPanel(this.panel().id);
+        this.store.setFocusedInspectionPanel(this.panel().id);
     }
 
     /** Persists the highlight color selected from the shared surface header. */
     protected onPanelColorChange(color: string) {
         const panel = this.panel();
         panel.color = color;
-        this.inspectionState.setInspectionPanelColor(panel.id, color);
+        this.store.setInspectionPanelColor(panel.id, color);
     }
 
     /** Removes this docked inspection panel from the selection set. */
     protected unsetPanel() {
-        this.inspectionState.unsetPanel(this.panel().id);
+        this.store.unsetPanel(this.panel().id);
     }
 
     /** Moves the panel into a floating dialog. */
@@ -441,7 +442,7 @@ export class InspectionPanelComponent {
 
     /** Refreshes compare candidates and drops ids that are no longer valid. */
     protected refreshCompareOptions() {
-        this.compareOptions = this.inspectionState.buildCompareOptions(
+        this.compareOptions = this.store.buildCompareOptions(
             this.inspectionSelection.selectionTopic.getValue(),
             this.panel().id
         );
@@ -456,7 +457,7 @@ export class InspectionPanelComponent {
         if (!this.selectedCompareIds.length) {
             return;
         }
-        const model = this.inspectionState.createComparisonModel(
+        const model = this.store.createComparisonModel(
             this.panel().id,
             this.selectedCompareIds,
             this.inspectionSelection.selectionTopic.getValue()
@@ -464,7 +465,7 @@ export class InspectionPanelComponent {
         if (!model) {
             return;
         }
-        this.inspectionState.openInspectionComparison(model);
+        this.store.openInspectionComparison(model);
         this.selectedCompareIds = [];
         this.comparePopover.hide();
     }

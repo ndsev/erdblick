@@ -1,11 +1,11 @@
+import {AppStore} from "../shared/app.store";
 import {inject, Injectable, NgZone, OnDestroy} from "@angular/core";
 import {BehaviorSubject, interval, Subscription} from "rxjs";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {TileSubsetLayerRenderService} from "../mapview/deck/tile-subset-layer-render.service";
 import {type SubsetDiagnosticsError, ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
 import {DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
-import {AppLayoutService} from "../shared/app-layout.service";
-import {AppStateService} from "../shared/appstate.service";
+
 import {StyleValidationReportService} from "../styledata/style-validation-report.service";
 import type {StyleValidationIssue} from "../styledata/style-validation.model";
 import {
@@ -32,7 +32,7 @@ import {buildAggregatedPerfStats} from "./diagnostics.perf-aggregation";
  */
 @Injectable()
 export class DiagnosticsDatasource implements OnDestroy {
-    readonly layoutState = inject(AppLayoutService);
+    readonly store = inject(AppStore);
     readonly snapshot$ = new BehaviorSubject<DiagnosticsSnapshot>(this.buildSnapshot());
     readonly perfStats$ = new BehaviorSubject<PerfStat[]>([]);
     readonly logs$ = new BehaviorSubject<LogEntry[]>([]);
@@ -51,7 +51,6 @@ export class DiagnosticsDatasource implements OnDestroy {
         private readonly mapService: MapTileStreamService,
         private readonly renderService: TileSubsetLayerRenderService,
         private readonly viewDiagnostics: ViewLayerDiagnosticsService,
-        private readonly appStateService: AppStateService,
         private readonly styleValidationReportService: StyleValidationReportService,
         private readonly ngZone: NgZone
     ) {
@@ -206,7 +205,7 @@ export class DiagnosticsDatasource implements OnDestroy {
 
     /** Avoid expensive aggregation while the performance dialog is closed. */
     refreshPerfStatsIfVisible(): void {
-        if (this.layoutState.isDialogOpen(DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID)) {
+        if (this.store.isDialogOpen(DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID)) {
             this.refreshPerfStats();
         }
     }

@@ -1,9 +1,11 @@
-import {Injectable, Optional} from "@angular/core";
-import {auditTime, combineLatest, skip, Subject} from "rxjs";
+import {observeStore} from "../../shared/persisted-state";
+import {AppStore} from "../../shared/app.store";
+import {Injectable, OnDestroy, Optional} from "@angular/core";
+import {auditTime, skip, Subject, Subscription} from "rxjs";
 import {DEFAULT_POINT_CLOUD_POLICY, pointCloudSpacingMeters, type PointCloudRenderPolicy} from "../../shared/point-cloud-policy";
 import {gpuMemoryBudget, type GpuMemoryReservation} from "./gpu-memory-budget";
 import {pointCloudInputBudget} from "../../shared/point-cloud-input-budget";
-import {MapViewStateService} from "../map-view-state.service";
+
 import {AUTO_TILE_SUBSET_RENDER_WORKER_COUNT} from
     "../../shared/tile-render-policy";
 import type {
@@ -182,7 +184,8 @@ export class StaleSubsetRenderError extends Error {
  * visualizations, view state, and Deck layers remain consumer-owned.
  */
 @Injectable({providedIn: "root"})
-export class TileSubsetLayerRenderService {
+export class TileSubsetLayerRenderService implements OnDestroy {
+    private readonly subscriptions = new Subscription();
     /** Fires after worker progress may have made another render slot available. */
     readonly capacityChanged = new Subject<void>();
     private readonly workers: Array<Worker | null> = [];
@@ -231,7 +234,7 @@ export class TileSubsetLayerRenderService {
     private gpuRetirementWait: Promise<void> | null = null;
 
     /** Current persisted limits, also usable by isolated renderer tests. */
-    get pointCloudPolicy() { return this.appState?.pointCloudPolicy ?? DEFAULT_POINT_CLOUD_POLICY; }
+    get pointCloudPolicy() { return this.store?.pointCloudPolicy() ?? DEFAULT_POINT_CLOUD_POLICY; }
 
     /** Include retained input and view demand in the shared allocation. */
     registerPointCloud(id: string, view: number, bytes: number): void {
@@ -276,14 +279,17 @@ export class TileSubsetLayerRenderService {
     /** Track runtime worker-count changes when application state is available. */
     constructor(
         @Optional()
-        private readonly appState: MapViewStateService | null = null
+        private readonly store: AppStore | null = null
     ) {
-        if (!appState) {
+        if (!store) {
             return;
         }
         let previousPolicy = this.pointCloudPolicy;
-        combineLatest([appState.pointCloudDownsamplingEnabledState, appState.pointCloudDetailPixelsState,
-            appState.pointCloudWorkingMemoryMiBState, appState.pointCloudGpuMemoryMiBState]).pipe(auditTime(0)).subscribe(() => {
+        this.subscriptions.add(observeStore(store, state => [state.views.pointCloudDownsamplingEnabled,
+            state.views.pointCloudDetailPixels, state.views.pointCloudWorkingMemoryMiB,
+            state.views.pointCloudGpuMemoryMiB] as const,
+            (previous, current) => previous.every((value, index) => value === current[index]))
+            .pipe(auditTime(0)).subscribe(() => {
             gpuMemoryBudget.setLimit(this.pointCloudPolicy.gpuMemoryMiB * 1048576);
             pointCloudInputBudget.setWorkingLimit(this.pointCloudPolicy.workingMemoryMiB * 1048576);
             const policy = this.pointCloudPolicy;
@@ -294,8 +300,8 @@ export class TileSubsetLayerRenderService {
                 for (const index of [...this.idleWorkers]) this.retireWorker(index);
             }
             this.pointCloudPolicyChanged.next(reclaim);
-        });
-        appState.tileSubsetRenderWorkerCountState.pipe(skip(1)).subscribe(() => {
+        }));
+        this.subscriptions.add(observeStore(store, state => state.views.tileSubsetRenderWorkerCount).pipe(skip(1)).subscribe(() => {
             this.ensureWorkers()
                 .then(() => {
                     this.capacityChanged.next();
@@ -304,7 +310,12 @@ export class TileSubsetLayerRenderService {
                 .catch(error =>
                     console.error("Could not resize subset render workers.", error)
                 );
-        });
+        }));
+    }
+
+    /** Stop native state watchers when the owning Angular injector is retired. */
+    ngOnDestroy(): void {
+        this.subscriptions.unsubscribe();
     }
 
     /**
@@ -324,7 +335,7 @@ export class TileSubsetLayerRenderService {
     /** Return the currently configured worker-credit ceiling. */
     activeWorkerCount(): number {
         return resolveTileSubsetLayerRenderWorkerCount(
-            this.appState?.tileSubsetRenderWorkerCount ??
+            this.store?.views.tileSubsetRenderWorkerCount() ??
                 AUTO_TILE_SUBSET_RENDER_WORKER_COUNT
         );
     }

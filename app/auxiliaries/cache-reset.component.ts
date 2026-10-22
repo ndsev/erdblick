@@ -1,9 +1,10 @@
+import {AppStore} from "../shared/app.store";
 import {AsyncPipe} from "@angular/common";
 import {HttpErrorResponse} from "@angular/common/http";
 import {Component, inject} from "@angular/core";
 import {TooltipModule} from "primeng/tooltip";
 import {map, Observable} from "rxjs";
-import {AppLayoutService} from "../shared/app-layout.service";
+
 
 import {CacheResetService} from "../mapdata/cache-reset.service";
 import {MapInfoService} from "../mapdata/map-info.service";
@@ -21,7 +22,7 @@ import {InfoMessageService} from "../shared/info.service";
             header="Cache Reset"
             styleClass="app-dialog-compact cache-reset-dialog"
             data-testid="cache-reset-dialog"
-            [(visible)]="dialogVisible"
+            [visible]="store.isDialogOpen(dialogLayoutId)" (visibleChange)="store.setDialogOpen(dialogLayoutId, $event)"
             [modal]="false"
             [persistLayout]="true"
             [layoutId]="dialogLayoutId"
@@ -121,7 +122,7 @@ import {InfoMessageService} from "../shared/info.service";
 })
 /** Lists caller-visible primary maps and runs one guarded reset at a time per row. */
 export class CacheResetComponent {
-    readonly layoutState = inject(AppLayoutService);
+    readonly store = inject(AppStore);
     readonly dialogLayoutId = CACHE_RESET_DIALOG_LAYOUT_ID;
     readonly mapIds$: Observable<string[]> = this.mapInfo.maps$.pipe(
         map((tree) =>
@@ -144,13 +145,9 @@ export class CacheResetComponent {
         return this.config.snapshot.serverConfig.cacheReset;
     }
 
-    get dialogVisible(): boolean {
-        return this.layoutState.isDialogOpen(this.dialogLayoutId);
-    }
 
-    set dialogVisible(visible: boolean) {
-        this.layoutState.setDialogOpen(this.dialogLayoutId, visible);
-    }
+
+
 
     isPending(mapId: string): boolean {
         return this.pendingMapIds.has(mapId);

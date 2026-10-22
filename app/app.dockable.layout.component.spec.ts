@@ -1,10 +1,8 @@
+import {AppStore} from "./shared/app.store";
 import {ElementRef, runInInjectionContext} from "@angular/core";
 import {ownerTestInjector} from "../test/owner-test-injector";
-import {AppLayoutService} from "./shared/app-layout.service";
-import {InspectionStateService} from "./inspection/inspection-state.service";
 import {InspectionSelectionService} from "./inspection/inspection-selection.service";
 import {InspectionContainerComponent} from "./inspection/inspection.container.component";
-import {MapViewStateService} from "./mapview/map-view-state.service";
 import {ViewLayerDiagnosticsService} from "./mapview/view-layer-diagnostics.service";
 import {AppStateService} from "./shared/appstate.service";
 import type {FeatureWrapper} from "./mapdata/feature-inspection.model";
@@ -21,7 +19,7 @@ describe("Map attribution", () => {
             legalInformationUpdated: new Subject<boolean>()
         };
         if (alreadyLoaded) mapInfo.legalInformationPerMap.set("Example map", new Set([notice]));
-        const injector = ownerTestInjector([AppLayoutService, InspectionStateService]);
+        const injector = ownerTestInjector([{provide: InspectionSelectionService, useValue: {reconcileSelection() {}}}]);
         const layout = runInInjectionContext(injector, () => new DockableLayoutComponent(
             injector.get(AppStateService),
             {} as never,
@@ -47,22 +45,23 @@ describe("Map attribution", () => {
 
 describe("inspection dock publication", () => {
     it.each(["empty", "failed", "cleared"])("mounts pending inspection content coherently and collapses after %s loading", async outcome => {
+        let bridge!: InspectionSelectionService;
         const injector = ownerTestInjector([
-            AppLayoutService, InspectionStateService, MapViewStateService,
+            {provide: InspectionSelectionService, useFactory: () => bridge},
             {provide: ViewLayerDiagnosticsService, useValue: {}}
         ]);
         const persistence = injector.get(AppStateService);
-        const inspections = injector.get(InspectionStateService);
-        const layoutState = injector.get(AppLayoutService);
-        layoutState.isDockAutoCollapsible = true;
+        const inspections = injector.get(AppStore);
+        const layoutState = injector.get(AppStore);
+        layoutState.setDockAutoCollapse(true);
         let resolveLoad!: (features: FeatureWrapper[]) => void;
         let rejectLoad!: (error: Error) => void;
         const load = new Promise<FeatureWrapper[]>((resolve, reject) => {
             resolveLoad = resolve;
             rejectLoad = reject;
         });
-        const bridge = runInInjectionContext(injector, () => new InspectionSelectionService(
-            persistence, {loadFeatures: () => load} as never, {} as never,
+        bridge = runInInjectionContext(injector, () => new InspectionSelectionService(
+            {loadFeatures: () => load} as never, {} as never,
             {registerShortcut() {}} as never, {showWarning() {}} as never,
             {run: (operation: () => unknown) => operation()} as never
         ));
@@ -71,12 +70,12 @@ describe("inspection dock publication", () => {
         const cdr = {
             markForCheck: vi.fn(),
             detectChanges: () => {
-                if (layoutState.isDockOpen && !container) {
+                if (layoutState.layout.dockOpen() && !container) {
                     mountedWithLoadingShell.push(bridge.selectionTopic.getValue().some(panel => panel.loading));
                     container = runInInjectionContext(injector, () => new InspectionContainerComponent(
                         persistence, bridge, {} as never, {markForCheck() {}} as never
                     ));
-                } else if (!layoutState.isDockOpen) {
+                } else if (!layoutState.layout.dockOpen()) {
                     container?.ngOnDestroy();
                     container = undefined;
                 }
@@ -96,16 +95,16 @@ describe("inspection dock publication", () => {
         try {
             const panelId = inspections.setSelection([{mapTileKey: "Features:Map:Layer:42", featureId: "Way.0"}])!;
             expect(mountedWithLoadingShell).toEqual([true]);
-            expect(layoutState.isDockOpen).toBe(true);
+            expect(layoutState.layout.dockOpen()).toBe(true);
             expect(container?.dockedPanels).toEqual([expect.objectContaining({id: panelId, loading: true})]);
 
             if (outcome === "cleared") inspections.unsetPanel(panelId);
             if (outcome === "failed") rejectLoad(new Error("restricted load failed"));
             else resolveLoad([]);
             await vi.waitFor(() => expect(bridge.selectionTopic.getValue()).toEqual([]));
-            expect(layoutState.isDockOpen).toBe(false);
+            expect(layoutState.layout.dockOpen()).toBe(false);
             expect(bridge.selectionIdsTopic.getValue()).toEqual([]);
-            expect(inspections.selection).toHaveLength(outcome === "cleared" ? 0 : 1);
+            expect(inspections.inspection.selection()).toHaveLength(outcome === "cleared" ? 0 : 1);
             expect(errors).toHaveBeenCalledTimes(outcome === "failed" ? 1 : 0);
         } finally {
             resolveLoad([]);

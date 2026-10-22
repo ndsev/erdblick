@@ -2,7 +2,7 @@ import {inject, Injectable, NgZone, OnDestroy} from "@angular/core";
 import {BehaviorSubject, Subscription} from "rxjs";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {unicodePrefix} from "../shared/unicode-string";
-import {AppActionService} from "./app-action.service";
+import {AppStore} from "../shared/app.store";
 import {VIEWER_ACTION_CATALOG_ID} from "./generated/catalog-id";
 import {
     ViewerActionFailure,
@@ -14,10 +14,7 @@ import {
 } from "./viewer-action-relay.contract";
 import {
     VIEWER_ACTION_INVOCATION_BYTES,
-    VIEWER_ACTION_RESULT_BYTES,
-    viewerActions,
-    type ViewerActionName,
-    type ViewerActionOutput
+    VIEWER_ACTION_RESULT_BYTES
 } from "./viewer-action.contract";
 import {ViewerUiService} from "./viewer-ui.service";
 
@@ -30,9 +27,9 @@ export interface ViewerActionActivity {
 interface PendingViewerAction {
     callId: string;
     clientId: string | null;
-    localComplete?: (result?: ViewerActionOutput<ViewerActionName>, error?: ViewerActionError) => void;
+    localComplete?: (result?: unknown, error?: ViewerActionError) => void;
     removeAbortListener?: () => void;
-    action: ViewerActionName;
+    action: string;
     arguments: unknown;
     mutation: boolean;
     deadline: number;
@@ -41,10 +38,15 @@ interface PendingViewerAction {
     activity: ViewerActionActivity;
 }
 
-/** Binds the explicit action allowlist to existing owners; it stores no replica of application state. */
+/**
+ * Adapts the store's public actions to the browser relay and local WebMCP calls.
+ * Admission limits, cancellation and wire budgets belong here; the store's catalog
+ * validates and dispatches each operation to its domain implementation.
+ */
 @Injectable({providedIn: "root"})
 export class ViewerActionService implements OnDestroy {
-    private readonly actions = inject(AppActionService);
+    private readonly actions = inject(AppStore).actionCatalog;
+    private readonly viewerActions = this.actions.publicActions;
     private readonly encoder = new TextEncoder();
     readonly activity$ = new BehaviorSubject<readonly ViewerActionActivity[]>([]);
     readonly availability$ = new BehaviorSubject({enabled: false, ready: false, message: "MCP is not enabled"});
@@ -145,7 +147,7 @@ export class ViewerActionService implements OnDestroy {
                 type: "mapget.actions.update",
                 version: 1,
                 catalogId: VIEWER_ACTION_CATALOG_ID,
-                actions: Object.keys(viewerActions),
+                actions: Object.keys(this.viewerActions),
                 label: this.sessionLabel
             });
     }
@@ -189,7 +191,7 @@ export class ViewerActionService implements OnDestroy {
             type: "mapget.actions.register",
             version: 1,
             catalogId: VIEWER_ACTION_CATALOG_ID,
-            actions: Object.keys(viewerActions),
+            actions: Object.keys(this.viewerActions),
             label: this.sessionLabel
         });
     }
@@ -237,7 +239,7 @@ export class ViewerActionService implements OnDestroy {
         action: string,
         input: Record<string, unknown>,
         signal: AbortSignal
-    ): Promise<ViewerActionOutput<ViewerActionName>> {
+    ): Promise<unknown> {
         signal.throwIfAborted();
         if (this.encoder.encode(JSON.stringify(input)).length > VIEWER_ACTION_INVOCATION_BYTES) {
             this.reject("Viewer arguments exceed the request budget", "invalid_arguments");
@@ -276,8 +278,8 @@ export class ViewerActionService implements OnDestroy {
         )
             return;
         let error: ViewerActionError | undefined;
-        const known = Object.hasOwn(viewerActions, message.action);
-        const name = message.action as ViewerActionName;
+        const known = Object.hasOwn(this.viewerActions, message.action);
+        const name = message.action;
         if (!localComplete && !this.registered)
             error = {
                 code: "not_available",
@@ -288,7 +290,7 @@ export class ViewerActionService implements OnDestroy {
             error = {code: "unsupported_action", message: "Unsupported viewer action", outcome: "not_applied"};
         else if (
             this.pending.size >= 4 ||
-            (viewerActions[name].mutation && [...this.pending.values()].some((call) => call.mutation))
+            (this.viewerActions[name].mutation && [...this.pending.values()].some((call) => call.mutation))
         ) {
             error = {code: "busy", message: "Viewer action capacity is busy", outcome: "not_applied"};
         }
@@ -310,7 +312,7 @@ export class ViewerActionService implements OnDestroy {
             localComplete,
             action: name,
             arguments: message.arguments,
-            mutation: viewerActions[name].mutation,
+            mutation: this.viewerActions[name].mutation,
             deadline,
             controller: new AbortController(),
             timer: setTimeout(
@@ -361,10 +363,10 @@ export class ViewerActionService implements OnDestroy {
     }
 
     /** Validates every synchronous/asynchronous result at the same trusted wire boundary. */
-    private completeResult(call: PendingViewerAction, result: ViewerActionOutput<ViewerActionName>): void {
+    private completeResult(call: PendingViewerAction, result: unknown): void {
         if (this.pending.get(call.callId) !== call) return;
         try {
-            const validated = viewerActions[call.action].outputSchema.parse(result);
+            const validated = this.viewerActions[call.action].outputSchema.parse(result);
             if (this.encoder.encode(JSON.stringify(validated)).length > VIEWER_ACTION_RESULT_BYTES - 1024) {
                 throw new Error("Viewer result exceeds the wire budget");
             }
@@ -398,7 +400,7 @@ export class ViewerActionService implements OnDestroy {
     /** Completes once, releases the admission slot on every path, and never replies through a replacement socket. */
     private finish(
         call: PendingViewerAction,
-        result?: ViewerActionOutput<ViewerActionName>,
+        result?: unknown,
         error?: ViewerActionError,
         send = true
     ): void {
@@ -430,13 +432,13 @@ export class ViewerActionService implements OnDestroy {
         name: string,
         input: unknown,
         signal?: AbortSignal
-    ): ViewerActionOutput<ViewerActionName> | Promise<ViewerActionOutput<ViewerActionName>> {
+    ): unknown {
         const execute = () => this.actions.execute(name, input, {signal});
         return (
-            viewerActions[name as ViewerActionName]?.mutation
+            this.viewerActions[name]?.mutation
                 ? this.zone.run(execute)
                 : this.zone.runOutsideAngular(execute)
-        ) as ViewerActionOutput<ViewerActionName> | Promise<ViewerActionOutput<ViewerActionName>>;
+        );
     }
 
     private reject(message: string, code: ViewerActionError["code"] = "not_available"): never {

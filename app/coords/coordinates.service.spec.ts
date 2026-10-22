@@ -1,7 +1,6 @@
 import {runInInjectionContext} from "@angular/core";
 import {ownerTestInjector} from "../../test/owner-test-injector";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStore} from "../shared/app.store";
 import {describe, it, expect, vi} from 'vitest';
 import {CoordinatesService} from './coordinates.service';
 
@@ -9,30 +8,27 @@ class AppConfigServiceStub {
     getExtensionModuleId = vi.fn().mockReturnValue(null);
 }
 
-class MapViewStateStub {
-    setMarkerPosition = vi.fn();
-}
-
 const createService = () => {
-    const viewState = new MapViewStateStub();
-    const injector = ownerTestInjector([{provide: MapViewStateService, useValue: viewState}]);
+    const injector = ownerTestInjector();
+    const store = injector.get(AppStore);
+    vi.spyOn(store, "setMarkerPosition");
     const configService = new AppConfigServiceStub();
     const service = runInInjectionContext(injector, () =>
-        new CoordinatesService(injector.get(AppStateService), configService as any));
-    return {service, viewState, configService};
+        new CoordinatesService(configService as any));
+    return {service, store, configService};
 };
 
 describe('CoordinatesService', () => {
     it('forwards mouse click coordinates to the view owner, skipping the initial null', () => {
-        const {service, viewState} = createService();
+        const {service, store} = createService();
 
-        expect(viewState.setMarkerPosition).not.toHaveBeenCalled();
+        expect(store.setMarkerPosition).not.toHaveBeenCalled();
 
         const position = {longitude: 1, latitude: 2, height: 3} as any;
         service.mouseClickCoordinates.next(position);
 
-        expect(viewState.setMarkerPosition).toHaveBeenCalledTimes(1);
-        expect(viewState.setMarkerPosition).toHaveBeenCalledWith(position);
+        expect(store.setMarkerPosition).toHaveBeenCalledTimes(1);
+        expect(store.setMarkerPosition).toHaveBeenCalledWith(position);
     });
 
     it('loads the auxiliary plugin when a jump-target extension module is configured', async () => {

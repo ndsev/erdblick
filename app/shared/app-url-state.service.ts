@@ -1,19 +1,16 @@
-import {Injectable, inject} from "@angular/core";
+import {Injectable, inject, Injector} from "@angular/core";
 import {Params} from "@angular/router";
 import {z} from "zod";
-import {bounded, identifierSchema, observed} from "../actions/action-schema";
+import {getState} from "@ngrx/signals";
+import {StyleOptionsCodec} from "./state-codec";
 import {collectActionItems, rejectAction} from "../actions/action-utils";
-import {AppActionService} from "../actions/app-action.service";
+import {appActions} from "./app-actions.store-feature";
+import {AppStore, AppStoreValues} from "./app.store";
 import {DEFAULT_HIGHLIGHT_COLORS} from "../inspection/inspection-state.model";
-import {InspectionStateService} from "../inspection/inspection-state.service";
 import {coreLib} from "../integrations/wasm";
-import {MapLayerStateService} from "../mapdata/map-layer-state.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {FeatureSearchService} from "../search/feature.search.service";
 import {StyleService} from "../styledata/style.service";
-import {MapViewState} from "./app-state";
-import {AppStateService} from "./appstate.service";
-import {boundedUnicodeString, unicodePrefix} from "./unicode-string";
+import {persistenceDescriptors} from "./persisted-state";
+import {unicodePrefix} from "./unicode-string";
 import type {UrlV2MapTileKeyFactory} from "./url-state-codec";
 import {
     compressUrlCsvRuns,
@@ -29,52 +26,34 @@ import {
     sourceDataSelectionMapIds
 } from "./url-state-codec";
 
-/** Builds shareable URL state and explains the local data a recipient also needs. */
+/**
+ * Projects the native store into erdblick's released URL formats. Like browser
+ * persistence, it discovers the domain codecs from AppStore itself. It has no
+ * registration callback or dependency on AppStateService: that service asks this
+ * owner to prepare complete URL imports and to serialize scheduled URL updates.
+ *
+ * Constructing the codec does not start resource engines. Share-link diagnostics
+ * resolve StyleService only when the user actually requests a link.
+ */
 @Injectable({providedIn: "root"})
 export class AppUrlStateService {
-    static readonly actions = {
-        getShareLink: {
-            name: "viewer_get_share_link",
-            description:
-                "Return a link for the current URL-backed cameras, layers, style options and selections using the viewer's normal URL codec. Does not copy unknown/authentication URL parameters, modify the tab, publish anything or contact another person. Browser-local search overlays and YAML styles are not embedded; localSearchIds and localStyleIds identify dependencies the recipient would also need. Export searches separately with viewer_export_search and styles with viewer_get_style. localOnly means the hostname is loopback: recipients need an accessible address for the same configured viewer.",
-            mutation: false,
-            inputSchema: z.strictObject({}),
-            outputSchema: z.strictObject({
-                ...observed,
-                ...bounded,
-                url: boundedUnicodeString(48000, true),
-                localOnly: z.boolean(),
-                localStyleIds: z.array(identifierSchema).max(100),
-                localSearchIds: z.array(identifierSchema).max(100)
-            })
-        }
-    } as const;
-
-    private readonly state = inject(AppStateService);
-    private readonly styles = inject(StyleService);
-    private readonly searches = inject(FeatureSearchService);
-    private readonly layers = inject(MapLayerStateService);
-    private readonly views = inject(MapViewStateService);
-    private readonly inspections = inject(InspectionStateService);
+    private readonly injector = inject(Injector);
+    private readonly store = inject(AppStore);
+    private readonly fields = persistenceDescriptors(this.store);
+    private readonly styleOptions = this.fields.find(field => field.name === "styleOptions")!;
+    private readonly selection = this.fields.find(field => field.name === "selected")!;
     private readonly actionEncoder = new TextEncoder();
 
-    constructor() {
-        this.state.registerUrlCodec({
-            serialize: (params) => this.serializeUrlV2(true, params),
-            hydrate: (params) => this.hydrate(params)
-        });
-        inject(AppActionService).registerAction(AppUrlStateService.actions.getShareLink, () => this.getShareLink());
-    }
-
     /** Exports the normal URL projection without browser navigation or credentials. */
-    getShareLink(): z.output<typeof AppUrlStateService.actions.getShareLink.outputSchema> {
+    getShareLink(): z.output<typeof appActions.getShareLink.outputSchema> {
         const url = this.shareableUrl();
-        if (this.actionEncoder.encode(url).length > 48000)
+        if (this.actionEncoder.encode(url).length > 48000) {
             rejectAction("The share link exceeds the response budget; reduce URL-backed state first");
+        }
         const hostname = new URL(url).hostname;
         const styles = collectActionItems(
             function* (this: AppUrlStateService) {
-                for (const style of this.styles.styles.values()) {
+                for (const style of this.injector.get(StyleService).styles.values()) {
                     if (style.visible && (style.imported || style.modified)) yield unicodePrefix(style.id, 4096);
                 }
             }.call(this),
@@ -83,7 +62,7 @@ export class AppUrlStateService {
         );
         const searches = collectActionItems(
             function* (this: AppUrlStateService) {
-                for (const search of this.searches.featureSearches) {
+                for (const search of this.store.featureSearchEntries()) {
                     if (search.enabled && search.showResultsOnMap) yield unicodePrefix(search.id, 4096);
                 }
             }.call(this),
@@ -112,24 +91,25 @@ export class AppUrlStateService {
 
     /** Builds a complete v2 query-param set so all layer-indexed params share one order. */
     serializeUrlV2(includeUnknownParams = true, currentParams: Params = {}): Record<string, string | string[]> {
+        const current = getState(this.store);
         const params = includeUnknownParams ? this.preservedUnknownUrlParams(currentParams) : {};
         params["v2"] = "1";
 
         const urlLayerNames = this.urlLayerNamesForSerialization();
 
-        for (const state of this.state.registeredStates) {
+        for (const state of this.fields) {
             if (
-                state === this.layers.layerNamesState ||
-                state === this.inspections.selectionState ||
-                state === this.layers.stylesState ||
+                state.name === "layerNames" ||
+                state.name === "selected" ||
+                state.name === "styleOptions" ||
                 this.isLayerIndexedMapViewState(state)
             ) {
                 continue;
             }
-            if (!state.isUrlState()) {
+            if (!state.codec.isUrlState()) {
                 continue;
             }
-            const serialized = state.serialize(true);
+            const serialized = state.serialize(current, true);
             if (serialized === undefined) {
                 continue;
             }
@@ -140,7 +120,7 @@ export class AppUrlStateService {
             }
         }
 
-        const layerEncoding = encodeLayerNamesV2(urlLayerNames, sourceDataSelectionMapIds(this.inspections.selection));
+        const layerEncoding = encodeLayerNamesV2(urlLayerNames, sourceDataSelectionMapIds(this.store.inspection.selection()));
         if (layerEncoding.map) {
             params["map"] = layerEncoding.map;
         }
@@ -152,7 +132,7 @@ export class AppUrlStateService {
         this.serializeLayerIndexedMapViewParam(
             params,
             "v",
-            this.layers.layerVisibilityState,
+            this.store.layers.layerVisibility(),
             urlLayerNames,
             false,
             (value) => (value ? "1" : "0")
@@ -160,7 +140,7 @@ export class AppUrlStateService {
         this.serializeLayerIndexedMapViewParam(
             params,
             "z",
-            this.layers.layerZoomLevelState,
+            this.store.layers.layerZoomLevel(),
             urlLayerNames,
             13,
             (value) => String(value)
@@ -168,14 +148,14 @@ export class AppUrlStateService {
         this.serializeLayerIndexedMapViewParam(
             params,
             "az",
-            this.layers.layerAutoZoomLevelState,
+            this.store.layers.layerAutoZoomLevel(),
             urlLayerNames,
             true,
             (value) => (value ? "1" : "0")
         );
 
         const selection = encodeSelectionsV2(
-            this.inspections.selection,
+            this.store.inspection.selection(),
             urlLayerNames,
             layerEncoding.mapNames,
             DEFAULT_HIGHLIGHT_COLORS
@@ -185,7 +165,7 @@ export class AppUrlStateService {
         }
 
         for (const [key, value] of Object.entries(
-            encodeStyleOptionsV2(this.layers.styles, urlLayerNames, this.views.numViews)
+            encodeStyleOptionsV2(this.styleOptions.read(current), urlLayerNames, current.viewIds.length)
         )) {
             params[key] = value;
         }
@@ -195,7 +175,7 @@ export class AppUrlStateService {
 
     /** Returns URL layers that are currently visible or required by feature selections. */
     private urlLayerNamesForSerialization(): string[] {
-        const selectedLayerNames = new Set(featureSelectionLayerNames(this.inspections.selection));
+        const selectedLayerNames = new Set(featureSelectionLayerNames(this.store.inspection.selection()));
         const urlLayerNames: string[] = [];
         const addLayerName = (layerName: string) => {
             if (!urlLayerNames.includes(layerName)) {
@@ -203,7 +183,7 @@ export class AppUrlStateService {
             }
         };
 
-        this.layers.layerNames.forEach((layerName, layerIndex) => {
+        this.store.layers.layerNames().forEach((layerName, layerIndex) => {
             if (selectedLayerNames.has(layerName) || this.isLayerVisibleInAnyView(layerIndex)) {
                 addLayerName(layerName);
             }
@@ -214,28 +194,24 @@ export class AppUrlStateService {
 
     /** Returns whether a layer slot is active in at least one configured map view. */
     private isLayerVisibleInAnyView(layerIndex: number): boolean {
-        for (let viewIndex = 0; viewIndex < Math.max(1, this.views.numViews); viewIndex++) {
-            if (this.layers.layerVisibilityState.getValue(viewIndex)[layerIndex]) {
+        for (let viewIndex = 0; viewIndex < Math.max(1, this.store.viewIds().length); viewIndex++) {
+            if (this.store.layers.layerVisibility()[this.store.viewIds()[viewIndex]][layerIndex]) {
                 return true;
             }
         }
         return false;
     }
 
-    /** Returns true for per-view arrays whose entries are indexed by `layerNames`. */
-    private isLayerIndexedMapViewState(state: unknown): boolean {
-        return (
-            state === this.layers.layerVisibilityState.appState ||
-            state === this.layers.layerZoomLevelState.appState ||
-            state === this.layers.layerAutoZoomLevelState.appState
-        );
+    /** Layer arrays share the v2 dictionary built from visible/selected layer names. */
+    private isLayerIndexedMapViewState(state: {name: string}): boolean {
+        return ["visibility", "zoomLevel", "autoZoomLevel"].includes(state.name);
     }
 
     /** Serializes one layer-indexed per-view state against the finalized v2 URL layer order. */
     private serializeLayerIndexedMapViewParam<T>(
         params: Record<string, string | string[]>,
         key: string,
-        state: MapViewState<T[]>,
+        state: Record<string, T[]>,
         urlLayerNames: readonly string[],
         fallback: T,
         encode: (value: T) => string
@@ -243,10 +219,10 @@ export class AppUrlStateService {
         if (!urlLayerNames.length) {
             return;
         }
-        const currentLayerIndexByName = new Map(this.layers.layerNames.map((layerName, index) => [layerName, index]));
+        const currentLayerIndexByName = new Map(this.store.layers.layerNames().map((layerName, index) => [layerName, index]));
         const groups: string[] = [];
-        for (let viewIndex = 0; viewIndex < Math.max(1, this.views.numViews); viewIndex++) {
-            const currentValues = state.getValue(viewIndex);
+        for (let viewIndex = 0; viewIndex < Math.max(1, this.store.viewIds().length); viewIndex++) {
+            const currentValues = state[this.store.viewIds()[viewIndex]] ?? [];
             groups.push(
                 urlLayerNames
                     .map((layerName) => {
@@ -268,7 +244,9 @@ export class AppUrlStateService {
         const managedKeys = this.managedUrlParamKeys();
         const params: Record<string, string | string[]> = {};
         for (const [key, value] of Object.entries(currentParams)) {
-            if (managedKeys.has(key) || this.layers.stylesState.isStyleOptionUrlParamKey(key)) {
+            const styleOptionKey = this.styleOptions.codec instanceof StyleOptionsCodec &&
+                this.styleOptions.codec.isStyleOptionUrlParamKey(key);
+            if (managedKeys.has(key) || styleOptionKey) {
                 continue;
             }
             params[key] = Array.isArray(value) ? value.map((entry) => String(entry)) : String(value);
@@ -278,13 +256,14 @@ export class AppUrlStateService {
 
     /** Returns query-param keys owned by Erdblick URL state. */
     private managedUrlParamKeys(): Set<string> {
+        const current = getState(this.store);
         const keys = new Set<string>(["v2", "map", "osm"]);
         keys.add("s");
-        for (const state of this.state.registeredStates) {
-            if (state === this.layers.stylesState || !state.isUrlState()) {
+        for (const state of this.fields) {
+            if (state.name === "styleOptions" || !state.codec.isUrlState()) {
                 continue;
             }
-            const serialized = state.serialize(true);
+            const serialized = state.serialize(current, true);
             if (serialized === undefined) {
                 continue;
             }
@@ -305,94 +284,95 @@ export class AppUrlStateService {
         return coreLib.createMapTileKey(layerType, mapId, layerId, tileId);
     };
 
-    /** Restores v2 URL params through a coordinated layer-indexed decode path. */
-    private hydrateFromUrlV2(params: Params): void {
+    /**
+     * Decode dictionaries into a local root value. The persistence owner installs
+     * the completed result once, after the view layout and all selection keys pass
+     * their ordinary codecs. No intermediate dictionary can reach a renderer.
+     */
+    prepare(state: AppStoreValues, params: Params): AppStoreValues {
+        if (!Object.keys(params).length) {
+            return state;
+        }
+        const v2 = firstParamValue(params, "v2") === "1";
+        let next = {
+            ...state,
+            layers: {
+                ...state.layers,
+                authoritativeUrlLayers: v2 && firstParamValue(params, "l") !== undefined
+            }
+        };
+        if (!v2) {
+            for (const field of this.fields) {
+                // The persistence owner resolves membership first, before any
+                // positional field such as cameraView or visibility is decoded.
+                if (field.name === "viewIds" || field.name === "numberOfViews") {
+                    continue;
+                }
+                next = field.deserialize(next, params);
+            }
+            return next;
+        }
+
         const mapParam = firstParamValue(params, "map");
         const layerParam = firstParamValue(params, "l");
-
-        const decodedLayerNames = decodeLayerNamesV2(mapParam, layerParam);
-        if (decodedLayerNames.length) {
-            this.layers.layerNamesState.next(decodedLayerNames);
+        const names = decodeLayerNamesV2(mapParam, layerParam);
+        if (layerParam !== undefined) {
+            // An explicit empty dictionary clears the layers. An omitted dictionary
+            // leaves existing layer order available to a partial link. Preserve
+            // each retained layer's settings by name before applying URL overrides.
+            const positions = names.map(name => next.layers.layerNames.indexOf(name));
+            const project = <Value>(records: Record<string, Value[]>, fallback: Value) =>
+                Object.fromEntries(next.viewIds.map(id => [
+                    id,
+                    positions.map(index => records[id]?.[index] ?? fallback)
+                ]));
+            next = {
+                ...next,
+                layers: {
+                    ...next.layers,
+                    layerNames: names,
+                    layerVisibility: project(next.layers.layerVisibility, false),
+                    layerZoomLevel: project(next.layers.layerZoomLevel, 13),
+                    layerAutoZoomLevel: project(next.layers.layerAutoZoomLevel, true)
+                }
+            };
         }
 
-        for (const state of this.state.registeredStates) {
-            if (
-                state === this.layers.layerNamesState ||
-                state === this.inspections.selectionState ||
-                state === this.layers.stylesState
-            ) {
+        for (const field of this.fields) {
+            if (["viewIds", "numberOfViews", "layerNames", "selected", "styleOptions"].includes(field.name)) {
                 continue;
             }
-            try {
-                state.deserialize(params);
-            } catch (error) {
-                console.error(`[AppStateService] Failed to hydrate v2 state '${state.name}'`, error);
-            }
+            next = field.deserialize(next, params);
         }
 
-        if (this.hasStyleOptionParams(params)) {
-            const decodedStyles = decodeStyleOptionsV2(
+        const styles = this.styleOptions;
+        if (Object.keys(params).some(key => (styles.codec as StyleOptionsCodec).isStyleOptionUrlParamKey(key))) {
+            next = styles.replace(next, decodeStyleOptionsV2(
                 params,
-                this.layers.layerNames,
-                this.views.numViews,
-                this.layers.stylesState.getValue()
-            );
-            this.layers.stylesState.next(decodedStyles);
+                next.layers.layerNames,
+                next.viewIds.length,
+                styles.read(next)
+            ));
         }
 
+        // Selection is a scene replacement: an omitted v2 sel means no panels.
+        // Invalid native keys reject the candidate before AppStateService publishes it.
         const selectionParam = firstParamValue(params, "sel");
-        if (selectionParam !== undefined) {
-            try {
-                const mapNames = mapParam ? decodeMapNamesV2(mapParam) : [];
-                const panels = decodeSelectionsV2(
-                    selectionParam,
-                    this.layers.layerNames,
-                    mapNames,
-                    DEFAULT_HIGHLIGHT_COLORS,
-                    this.createMapTileKeyFromUrlComponents
-                );
-                if (panels.length || !this.looksLikeLegacySelectionParam(selectionParam)) {
-                    this.inspections.selectionState.next(panels);
-                } else {
-                    this.inspections.selectionState.next([]);
-                    this.deserializeStateSafely(this.inspections.selectionState, {sel: selectionParam});
-                }
-            } catch (error) {
-                console.error("[AppStateService] Failed to hydrate v2 selection state", error);
-            }
-        } else {
-            this.inspections.selectionState.next([]);
+        if (selectionParam === undefined) {
+            return {...next, inspection: {...next.inspection, selection: []}};
         }
-    }
-
-    /** Detects pre-v2 `sel` payloads that may still be attached to a v2 URL during upgrades or shared-link reuse. */
-    private looksLikeLegacySelectionParam(selectionParam: string): boolean {
-        if (!selectionParam.trim()) {
-            return false;
+        const mapNames = mapParam ? decodeMapNamesV2(mapParam) : [];
+        const panels = decodeSelectionsV2(
+            selectionParam,
+            next.layers.layerNames,
+            mapNames,
+            DEFAULT_HIGHLIGHT_COLORS,
+            this.createMapTileKeyFromUrlComponents
+        );
+        next = {...next, inspection: {...next.inspection, selection: panels}};
+        if (!panels.length && (selectionParam.includes("Features:") || selectionParam.includes("SourceData:"))) {
+            next = this.selection.deserialize(next, {sel: selectionParam});
         }
-        return selectionParam.includes("Features:") || selectionParam.includes("SourceData:");
-    }
-
-    /** Returns whether the params contain compact style-option entries. */
-    private hasStyleOptionParams(params: Params): boolean {
-        return Object.keys(params).some((key) => this.layers.stylesState.isStyleOptionUrlParamKey(key));
-    }
-
-    /** Keeps one malformed persisted state entry from aborting startup hydration. */
-    private deserializeStateSafely(
-        state: {name: string; deserialize(raw: string | Params): void},
-        raw: string | Params
-    ): void {
-        try {
-            state.deserialize(raw);
-        } catch (error) {
-            console.error(`[AppStateService] Failed to hydrate ${state.name}.`, error);
-        }
-    }
-    /** Owners share one decoded dictionary; persistence supplies the enclosing hydration transaction. */
-    private hydrate(params: Params): void {
-        if (!Object.keys(params).length) return;
-        if (firstParamValue(params, "v2") === "1") this.hydrateFromUrlV2(params);
-        else for (const state of this.state.registeredStates) this.deserializeStateSafely(state, params);
+        return next;
     }
 }

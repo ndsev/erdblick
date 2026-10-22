@@ -1,10 +1,11 @@
+import {AppStore} from "../shared/app.store";
 import {ChangeDetectorRef, Component, inject, OnDestroy} from "@angular/core";
 import {Subscription} from "rxjs";
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
 import {AppStateService} from "../shared/appstate.service";
 import {InspectionSelectionService} from "./inspection-selection.service";
 import {InspectionComparisonModel, InspectionPanelModel} from "./inspection-state.model";
-import {InspectionStateService} from "./inspection-state.service";
+
 
 @Component({
     selector: "inspection-dialogs",
@@ -14,7 +15,7 @@ import {InspectionStateService} from "./inspection-state.service";
                 <inspection-panel-dialog [panel]="panel" [dialogIndex]="i"></inspection-panel-dialog>
             }
         }
-        @if (comparison) {
+        @if (store.inspection.inspectionComparison(); as comparison) {
             <inspection-comparison-dialog [comparison]="comparison"></inspection-comparison-dialog>
         }
     `,
@@ -22,9 +23,8 @@ import {InspectionStateService} from "./inspection-state.service";
 })
 /** Hosts floating inspection dialogs independently from the dock tab lifecycle. */
 export class InspectionDialogsComponent implements OnDestroy {
-    readonly inspectionState = inject(InspectionStateService);
+    readonly store = inject(AppStore);
     undockedPanels: InspectionPanelModel<FeatureWrapper>[] = [];
-    comparison: InspectionComparisonModel | null = null;
 
     private readonly subscriptions = new Subscription();
 
@@ -36,12 +36,6 @@ export class InspectionDialogsComponent implements OnDestroy {
         this.subscriptions.add(
             this.mapService.selectionTopic.subscribe((panels) => {
                 this.undockedPanels = panels.filter((panel) => panel.undocked);
-                this.cdr.markForCheck();
-            })
-        );
-        this.subscriptions.add(
-            this.inspectionState.inspectionComparisonState.subscribe((comparison) => {
-                this.comparison = comparison;
                 this.cdr.markForCheck();
             })
         );

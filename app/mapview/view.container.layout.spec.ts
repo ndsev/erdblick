@@ -1,3 +1,4 @@
+import {AppStore} from "../shared/app.store";
 import "@angular/compiler";
 import {Component, input, OnDestroy} from "@angular/core";
 import {TestBed} from "@angular/core/testing";
@@ -9,9 +10,7 @@ import {ViewerUiService} from "../actions/viewer-ui.service";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {AppConfigService} from "../shared/app-config.service";
-import {AppLayoutService} from "../shared/app-layout.service";
 import {KeyboardService} from "../shared/keyboard.service";
-import {MapViewStateService} from "./map-view-state.service";
 import {MapViewService} from "./map-view.service";
 import {MapViewContainerComponent} from "./view.container.component";
 
@@ -38,24 +37,23 @@ describe("map splitter view membership", () => {
     it("displays the new ID order and retires old panels on same-count reorder", async () => {
         destroyedInstances.length = 0;
         const owners = ownerTestInjector([
-            MapViewStateService, MapViewService, AppLayoutService,
+            AppStore, MapViewService, AppStore,
             {provide: AppConfigService, useValue: {}},
             {provide: MapTileStreamService, useValue: {}},
             {provide: MapInfoService, useValue: {
                 maps: {maps: new Map()}, layerStateChanged: new Subject<string>(),
-                reapplySyncOptionsForAllViews: vi.fn()
+                configureTreeParameters: vi.fn(), reapplySyncOptionsForAllViews: vi.fn()
             }}
         ]);
-        const views = owners.get(MapViewStateService);
-        views.numViews = 2;
-        const [left, right] = views.viewIds();
+        const views = owners.get(AppStore);
+        views.setNumViews(2);
+        const [left, right] = views.viewEntities().map(view => view.id);
         await TestBed.configureTestingModule({
             declarations: [MapViewContainerComponent],
             imports: [SplitterModule, TestMapViewComponent],
             providers: [
-                {provide: MapViewStateService, useValue: views},
+                {provide: AppStore, useValue: views},
                 {provide: MapViewService, useValue: owners.get(MapViewService)},
-                {provide: AppLayoutService, useValue: owners.get(AppLayoutService)},
                 {provide: KeyboardService, useValue: {registerShortcut() {}, unregisterShortcut() {}}},
                 {provide: ViewerUiService, useValue: {registerResizeTarget: () => () => {}}}
             ]
@@ -65,6 +63,11 @@ describe("map splitter view membership", () => {
         const panels = () => Array.from(component.nativeElement.querySelectorAll(".test-view")) as HTMLElement[];
         expect(panels().map(panel => panel.dataset["viewId"])).toEqual([left, right]);
         const instances = panels().map(panel => Number(panel.dataset["instance"]));
+
+        views.setViewPanelSizes([60, 40]);
+        component.detectChanges();
+        expect(panels().map(panel => Number(panel.dataset["instance"]))).toEqual(instances);
+        expect(destroyedInstances).toEqual([]);
 
         views.reorderViews([right, left]);
         component.detectChanges();

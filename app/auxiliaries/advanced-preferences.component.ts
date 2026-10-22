@@ -1,8 +1,9 @@
+import {AppStore} from "../shared/app.store";
 import {Component, ElementRef, HostListener, inject, ViewChild} from "@angular/core";
 import {Subscription} from "rxjs";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
-import {AppLayoutService} from "../shared/app-layout.service";
+
 import {AppStateService} from "../shared/appstate.service";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {EditorService} from "../shared/editor.service";
@@ -13,7 +14,7 @@ import {EditorService} from "../shared/editor.service";
         <app-dialog
             header="Advanced Preferences"
             class="editor-dialog advanced-preferences-dialog"
-            [(visible)]="dialogVisible"
+            [visible]="store.isDialogOpen(dialogLayoutId)" (visibleChange)="store.setDialogOpen(dialogLayoutId, $event)"
             [modal]="false"
             [closable]="false"
             [closeOnEscape]="false"
@@ -67,7 +68,7 @@ import {EditorService} from "../shared/editor.service";
 })
 /** Provides the advanced preferences JSON editor dialog. */
 export class AdvancedPreferencesComponent {
-    readonly layoutState = inject(AppLayoutService);
+    readonly store = inject(AppStore);
     readonly dialogLayoutId = ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID;
     readonly advancedPreferencesEditorSessionId = "advanced-preferences-editor";
     dirty = false;
@@ -88,13 +89,9 @@ export class AdvancedPreferencesComponent {
         private readonly dialogStack: DialogStackService
     ) {}
 
-    get dialogVisible(): boolean {
-        return this.layoutState.isDialogOpen(this.dialogLayoutId);
-    }
 
-    set dialogVisible(visible: boolean) {
-        this.layoutState.setDialogOpen(this.dialogLayoutId, visible);
-    }
+
+
 
     onDialogShow() {
         const snapshotText = JSON.stringify(this.stateService.exportSnapshot(), null, 2);
@@ -139,7 +136,7 @@ export class AdvancedPreferencesComponent {
             this.discardWarningVisible = true;
             return;
         }
-        this.dialogVisible = false;
+        this.store.setDialogOpen(this.dialogLayoutId, false);
     }
 
     /** Validates and imports the edited application-state snapshot. */
@@ -166,7 +163,7 @@ export class AdvancedPreferencesComponent {
         this.dirty = false;
         this.discardWarningVisible = false;
         if (closeAfterSave) {
-            this.dialogVisible = false;
+            this.store.setDialogOpen(this.dialogLayoutId, false);
         }
     }
 
@@ -208,12 +205,12 @@ export class AdvancedPreferencesComponent {
     discardAndClose() {
         this.discardWarningVisible = false;
         this.validationError = "";
-        this.dialogVisible = false;
+        this.store.setDialogOpen(this.dialogLayoutId, false);
     }
 
     @HostListener("window:keydown", ["$event"])
     onWindowKeyDown(event: KeyboardEvent) {
-        if (event.key !== "Escape" || !this.dialogVisible) {
+        if (event.key !== "Escape" || !this.store.isDialogOpen(this.dialogLayoutId)) {
             return;
         }
         event.preventDefault();

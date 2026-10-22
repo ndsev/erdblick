@@ -1,11 +1,9 @@
 import "@angular/compiler";
-import {runInInjectionContext} from "@angular/core";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {ownerTestInjector} from "../../test/owner-test-injector";
-import {AppActionService} from "../actions/app-action.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {AppStore} from "../shared/app.store";
 import {MapViewService} from "../mapview/map-view.service";
-import type {AppConfigService, ExternalViewerConfig} from "../shared/app-config.service";
+import {AppConfigService, type ExternalViewerConfig} from "../shared/app-config.service";
 import {CoordinateJumpService} from "./coordinate-jump.service";
 import {ExternalViewerService} from "./external-viewer.service";
 
@@ -36,30 +34,20 @@ const PROVIDERS: ExternalViewerConfig[] = [
 
 /** Builds the service with mutable marker, focus, and camera state. */
 function createService() {
-    const state = {
-        marker: false,
-        markedPosition: [] as number[],
-        focusedView: 0,
-        captureView: () => ({id: "test", generation: 1}),
-        isCurrent: () => true,
-        cameraViewDataState: {
-            getValue: vi.fn((viewIndex: number) => ({
-                destination: viewIndex === 1
-                    ? {lon: 11.5, lat: 48.1, alt: 1000}
-                    : {lon: -3.2, lat: 52.4, alt: 900}
-            }))
-        }
-    };
     const configService = {
         snapshot: {externalViewers: PROVIDERS}
     };
-    const injector = ownerTestInjector([CoordinateJumpService, {provide: MapViewService, useValue: {}}, {provide: MapViewStateService, useValue: state}]);
-    return {
-        service: runInInjectionContext(injector, () => new ExternalViewerService(
-            configService as unknown as AppConfigService
-        )),
-        state, configService, actions: injector.get(AppActionService)
-    };
+    const injector = ownerTestInjector([
+        CoordinateJumpService, ExternalViewerService,
+        {provide: MapViewService, useValue: {}},
+        {provide: AppConfigService, useValue: configService}
+    ]);
+    const store = injector.get(AppStore);
+    store.setNumViews(2);
+    const camera = store.views.cameraViewData()[store.idAt(0)!];
+    store.setCameraViewData(0, {...camera, destination: {lon: -3.2, lat: 52.4, alt: 900}});
+    store.setCameraViewData(1, {...camera, destination: {lon: 11.5, lat: 48.1, alt: 1000}});
+    return {service: injector.get(ExternalViewerService), store, configService};
 }
 
 describe("ExternalViewerService", () => {
@@ -80,9 +68,8 @@ describe("ExternalViewerService", () => {
     });
 
     it("resolves explicit input before the enabled marker", () => {
-        const {service, state} = createService();
-        state.marker = true;
-        state.markedPosition = [8.4, 49.0, 125];
+        const {service, store} = createService();
+        store.setMarkerControl({enabled: true, position: {lon: 8.4, lat: 49, alt: 125}});
 
         expect(service.resolveLocation({lon: 7.1, lat: 50.2})).toEqual({
             lon: 7.1,
@@ -92,33 +79,29 @@ describe("ExternalViewerService", () => {
     });
 
     it("uses a valid enabled marker before the focused viewport", () => {
-        const {service, state} = createService();
-        state.marker = true;
-        state.markedPosition = [8.4, 49.0];
-        state.focusedView = 1;
+        const {service, store} = createService();
+        store.setMarkerControl({enabled: true, position: {lon: 8.4, lat: 49, alt: 0}});
+        store.setFocusedView(1);
 
         expect(service.resolveLocation()).toEqual({lon: 8.4, lat: 49.0, source: "marker"});
-        expect(state.cameraViewDataState.getValue).not.toHaveBeenCalled();
     });
 
     it("uses the focused viewport when the marker is disabled or invalid", () => {
-        const {service, state} = createService();
-        state.focusedView = 1;
-        state.marker = true;
-        state.markedPosition = [181, 20];
+        const {service, store} = createService();
+        store.setFocusedView(1);
+        store.setMarkerControl({enabled: true, position: {lon: 181, lat: 20, alt: 0}});
 
         expect(service.resolveLocation()).toEqual({lon: 11.5, lat: 48.1, source: "viewport"});
-        expect(state.cameraViewDataState.getValue).toHaveBeenCalledWith(1);
     });
 
     it("dispatches a candidate synchronously and rejects invalid arguments or a replaced provider", async () => {
-        const {actions, configService} = createService();
+        const {service, store, configService} = createService();
         const open = vi.spyOn(window, "open").mockReturnValue(null);
-        const candidate = actions.omnibarTargets("48, 11").find(target => target.id === "e:gm")!;
+        const candidate = service.targets("48, 11").find(target => target.id === "e:gm")!;
         const pending = candidate.execute!("48, 11");
         expect(open).toHaveBeenCalledOnce();
         await pending;
-        expect(() => actions.execute("omnibar_external_viewer", {providerId: "e:gm", location: {lat: 100, lon: 11}}))
+        expect(() => store.openExternalViewer( {providerId: "e:gm", location: {lat: 100, lon: 11}}))
             .toThrow("Arguments do not match");
         configService.snapshot = {externalViewers: PROVIDERS.map(provider => ({...provider}))};
         expect(candidate.validate("48, 11")).toBe(false);

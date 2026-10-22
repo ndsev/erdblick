@@ -1,10 +1,11 @@
+import {AppStore} from "../shared/app.store";
 import {Component, inject, OnDestroy, ViewChild} from "@angular/core";
 import {TreeTableNode} from "primeng/api";
 import {Subscription} from "rxjs";
 import {SubsetDiagnosticsTile, ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
-import {AppLayoutService} from "../shared/app-layout.service";
+
 import {AppStateService} from "../shared/appstate.service";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {
@@ -83,7 +84,7 @@ interface PerfTileScopeCounts {
             #dialog
             header="Performance Statistics"
             class="diagnostics-performance-dialog"
-            [(visible)]="dialogVisible"
+            [visible]="store.isDialogOpen(layoutId)" (visibleChange)="store.setDialogOpen(layoutId, $event)"
             [modal]="false"
             [persistLayout]="true"
             [layoutId]="layoutId"
@@ -242,7 +243,7 @@ interface PerfTileScopeCounts {
  * raw stats, and highlights unusually expensive timing rows.
  */
 export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
-    readonly layoutState = inject(AppLayoutService);
+    readonly store = inject(AppStore);
     readonly layoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
     @ViewChild("dialog") dialog?: AppDialogComponent;
     readonly dialogStyle: {[key: string]: string} = {
@@ -282,13 +283,9 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         );
     }
 
-    get dialogVisible(): boolean {
-        return this.layoutState.isDialogOpen(this.layoutId);
-    }
 
-    set dialogVisible(visible: boolean) {
-        this.layoutState.setDialogOpen(this.layoutId, visible);
-    }
+
+
 
     /** Releases subscriptions feeding the filter options and tree state. */
     ngOnDestroy() {

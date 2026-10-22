@@ -1,27 +1,22 @@
 import {inject, Injectable, NgZone, OnDestroy} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
 import {collectActionItems, rejectAction} from "../actions/action-utils";
-import {AppActionService} from "../actions/app-action.service";
-import type {ViewerActionInput, ViewerActionOutput} from "../actions/viewer-action.contract";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {TileSubsetLayerRenderService} from "../mapview/deck/tile-subset-layer-render.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
 import {MapViewService} from "../mapview/map-view.service";
 import {ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
 import {FeatureSearchService} from "../search/feature.search.service";
-import {AppConfigService} from "../shared/app-config.service";
 import {
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
 } from "../shared/app-layout.model";
-import {AppStateService} from "../shared/appstate.service";
 import {unicodePrefix} from "../shared/unicode-string";
 import {StyleValidationReportService} from "../styledata/style-validation-report.service";
 import {DiagnosticsDatasource} from "./diagnostics.datasource";
-import {diagnosticsActions} from "./diagnostics.facade.service.declarations";
-import {diagnosticsExportOptions, diagnosticsLogFilter} from "./diagnostics.facade.service.state";
+import type {DiagnosticsInput, DiagnosticsOutput} from "./diagnostics-actions.store-feature";
+import {diagnosticsExportOptions} from "./diagnostics.store-feature";
 import {
     DiagnosticsExportBundle,
     DiagnosticsExportOptions,
@@ -49,37 +44,12 @@ interface MapgetStatusDataResponse {
  * It extends the datasource with dialog-opening helpers and export bundling.
  */
 export class DiagnosticsFacadeService extends DiagnosticsDatasource implements OnDestroy {
-    static readonly actions = diagnosticsActions;
     private readonly stream = inject(MapTileStreamService);
     private readonly render = inject(TileSubsetLayerRenderService);
     private readonly maps = inject(MapInfoService);
     private readonly views = inject(MapViewService);
-    private readonly viewStateOwner = inject(MapViewStateService);
     private readonly searches = inject(FeatureSearchService);
     private readonly styleReports = inject(StyleValidationReportService);
-
-    readonly versionState = inject(AppConfigService);
-    readonly diagnosticsLogFilterState = this.stateService.register(diagnosticsLogFilter, "diagnostics", "logFilter");
-    readonly diagnosticsExportOptionsState = this.stateService.register(
-        diagnosticsExportOptions,
-        "diagnostics",
-        "exportOptions"
-    );
-    readonly logFilter = this.diagnosticsLogFilterState.signal;
-    readonly exportOptions = this.diagnosticsExportOptionsState.signal;
-
-    get diagnosticsLogFilter(): DiagnosticsLogFilter {
-        return this.logFilter();
-    }
-    set diagnosticsLogFilter(value: DiagnosticsLogFilter) {
-        this.diagnosticsLogFilterState.next({...value});
-    }
-    get diagnosticsExportOptions(): DiagnosticsExportOptions {
-        return this.exportOptions();
-    }
-    set diagnosticsExportOptions(value: DiagnosticsExportOptions) {
-        this.diagnosticsExportOptionsState.next({...value, logFilter: {...value.logFilter}});
-    }
 
     readonly performanceScope$ = new BehaviorSubject<PerformanceDiagnosticsScope | null>(null);
     private nextPerformanceScopeRequestId = 1;
@@ -88,15 +58,10 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         mapService: MapTileStreamService,
         renderService: TileSubsetLayerRenderService,
         viewDiagnostics: ViewLayerDiagnosticsService,
-        private readonly stateService: AppStateService,
         styleValidationReportService: StyleValidationReportService,
         ngZone: NgZone
     ) {
-        super(mapService, renderService, viewDiagnostics, stateService, styleValidationReportService, ngZone);
-        const actions = inject(AppActionService);
-        actions.registerAction(DiagnosticsFacadeService.actions.viewer_get_diagnostics, (input, context) =>
-            this.getDiagnostics(input)
-        );
+        super(mapService, renderService, viewDiagnostics, styleValidationReportService, ngZone);
     }
 
     /** Opens the performance dialog after refreshing the current aggregated stats. */
@@ -110,15 +75,15 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
                 : null
         );
         this.refreshPerfStats();
-        this.layoutState.openDialog(DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID);
+        this.store.setDialogOpen(DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID, true);
     }
 
     /** Opens the log dialog and optionally prefilters it to errors only. */
     openLogDialog(errorsOnly: boolean = false) {
         this.refreshLogs();
-        this.layoutState.openDialog(DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID);
+        this.store.setDialogOpen(DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID, true);
         if (errorsOnly) {
-            this.diagnosticsLogFilter = {info: false, warn: false, error: true};
+            this.store.setDiagnosticsLogFilter({info: false, warn: false, error: true});
         }
     }
 
@@ -126,13 +91,13 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     openExportDialog(options?: Partial<DiagnosticsExportOptions>) {
         this.refreshPerfStats();
         this.refreshLogs();
-        const base = this.diagnosticsExportOptionsState.defaultValue;
-        this.diagnosticsExportOptions = {
+        const base = diagnosticsExportOptions.defaultValue;
+        this.store.setDiagnosticsExportOptions({
             ...base,
             ...options,
             logFilter: {...(options?.logFilter ?? base.logFilter)}
-        };
-        this.layoutState.openDialog(DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID);
+        });
+        this.store.setDialogOpen(DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID, true);
     }
 
     /** Builds the export bundle from the currently cached diagnostics data. */
@@ -141,8 +106,8 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         const perfStats = this.perfStats$.getValue();
         const logs = this.logs$.getValue();
         const metadata = {
-            erdblickVersion: this.versionState.erdblickVersion.getValue() || undefined,
-            distributionVersions: this.versionState.distributionVersions.getValue() || undefined,
+            erdblickVersion: this.store.config.erdblickVersion() || undefined,
+            distributionVersions: this.store.config.distributionVersions() || undefined,
             userAgent: navigator.userAgent,
             url: window.location.href
         };
@@ -259,16 +224,16 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     }
 
     /** Samples fixed-size counters and existing caches only, never the per-tile diagnostics/export path. */
-    getDiagnostics(input: ViewerActionInput<"viewer_get_diagnostics">): ViewerActionOutput<"viewer_get_diagnostics"> {
+    getDiagnostics(input: DiagnosticsInput): DiagnosticsOutput {
         const viewIndex =
             input.viewId === undefined
                 ? undefined
-                : this.viewStateOwner.indexOf(this.viewStateOwner.requireView(input.viewId).id);
+                : this.store.indexOf(this.store.requireView(input.viewId).id);
         if (input.layerId && !input.mapId) rejectAction("layerId requires mapId", "invalid_arguments");
         if (input.mapId && !this.maps.maps.maps.has(input.mapId)) rejectAction("The requested map is unavailable");
         if (input.mapId && input.layerId) this.maps.requireLayer(input.mapId, input.layerId);
         const sections = input.sections ?? ["transport", "workers", "loading", "gpu", "errors"];
-        const metrics: ViewerActionOutput<"viewer_get_diagnostics">["metrics"] = [];
+        const metrics: DiagnosticsOutput["metrics"] = [];
         const unavailable: string[] = [];
         const add = (section: string, values: Record<string, number | boolean | null>, cached = false) => {
             for (const [name, value] of Object.entries(values))

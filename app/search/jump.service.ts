@@ -1,24 +1,19 @@
 import {inject, Injectable} from "@angular/core";
 import {HighlightMode} from "build/libs/core/erdblick-core";
 import {BehaviorSubject, Subject} from "rxjs";
-import {z} from "zod";
 import {rejectAction} from "../actions/action-utils";
-import {ActionDeclaration, AppActionService} from "../actions/app-action.service";
 import type {SearchTarget} from "../actions/omnibar";
 import {parsePackedTileId} from "../coords/nds-coordinate.util";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {SelectedSourceData, TileFeatureId} from "../inspection/inspection-state.model";
-import {InspectionStateService} from "../inspection/inspection-state.service";
 import {coreLib} from "../integrations/wasm";
 import {MapInfoService} from "../mapdata/map-info.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
-import {viewIdentitySchema} from "../mapview/view-id";
 import {AppConfigService} from "../shared/app-config.service";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStore} from "../shared/app.store";
 import {InfoMessageService} from "../shared/info.service";
 import {CoordinateJumpService} from "./coordinate-jump.service";
-import {FeatureSearchService} from "./feature.search.service";
+import type {NavigationActionInput} from "./navigation-actions.store-feature";
 export {normalizeSearchJumpResult} from "../actions/omnibar";
 export type {SearchJump, SearchJumpResult, SearchTarget} from "../actions/omnibar";
 
@@ -56,50 +51,9 @@ interface FeatureJumpAction {
  * and the temporary map-selection flow used when a feature can exist in multiple maps.
  */
 export class JumpTargetService {
-    static readonly actions = {
-        inspectSource: {
-            name: "omnibar_source_data",
-            description: "Inspect a packed tile's source data using the current map catalog.",
-            mutation: true,
-            exposure: "omnibar",
-            inputSchema: z.object({query: z.string().min(1).max(8192)}).strict(),
-            outputSchema: z.void()
-        },
-        jumpFeature: {
-            name: "omnibar_feature_jump",
-            description: "Locate a current feature composition and navigate to the captured view.",
-            mutation: true,
-            exposure: "omnibar",
-            inputSchema: z
-                .object({
-                    compositionId: z.string().min(1),
-                    query: z.string().min(1).max(8192),
-                    target: viewIdentitySchema
-                })
-                .strict(),
-            outputSchema: z.void()
-        },
-        runPlugin: {
-            name: "omnibar_jump_plugin",
-            description: "Run a currently configured jump provider after revalidating its input and view.",
-            mutation: true,
-            exposure: "omnibar",
-            inputSchema: z
-                .object({
-                    pluginId: z.string().min(1),
-                    query: z.string().max(8192),
-                    payload: z.unknown().optional(),
-                    target: viewIdentitySchema
-                })
-                .strict(),
-            outputSchema: z.void()
-        }
-    } as const satisfies Record<string, ActionDeclaration>;
-    private readonly actions = inject(AppActionService);
+    private readonly store = inject(AppStore);
     private readonly coordinates = inject(CoordinateJumpService);
 
-    readonly viewStateOwner = inject(MapViewStateService);
-    readonly inspectionState = inject(InspectionStateService);
 
     markedPosition: Subject<Array<number>> = new Subject<Array<number>>();
     targetValueSubject = new BehaviorSubject<string>("");
@@ -123,49 +77,51 @@ export class JumpTargetService {
         private inspectionSelection: InspectionSelectionService,
         private messageService: InfoMessageService,
         private menuService: RightClickMenuService,
-        private stateService: AppStateService,
-        private searchService: FeatureSearchService,
         private configService: AppConfigService
     ) {
-        this.actions.registerAction(JumpTargetService.actions.inspectSource, ({query}) => {
-            if (!this.getInspectTileSourceDataTarget(query).validate(query))
-                rejectAction("Source-data input is no longer valid", "not_available");
-            this.inspectTileSourceData(query);
-        });
-        this.actions.registerAction(JumpTargetService.actions.jumpFeature, async ({compositionId, query, target}) => {
-            const current = (
-                this.mapService.tileLayerParser.filterFeatureJumpTargets(query) as FeatureJumpAction[]
-            ).find((candidate) => candidate.id === compositionId && !candidate.error);
-            if (!current) rejectAction("Feature jump is no longer available", "not_available");
-            const index = this.viewStateOwner.requireCurrentView(target);
-            await this.highlightByJumpTarget(current, null, coreLib.HighlightMode.SELECTION_HIGHLIGHT, index);
-        });
-        this.actions.registerAction(JumpTargetService.actions.runPlugin, async ({pluginId, query, payload, target}) => {
-            this.viewStateOwner.requireCurrentView(target);
-            const provider = this.extJumpTargets.find((candidate) => candidate.id === pluginId);
-            if (!provider || !provider.validate(query))
-                rejectAction("Jump provider is no longer available", "not_available");
-            if (provider.jump) {
-                const result = await provider.jump(query, payload);
-                this.viewStateOwner.requireCurrentView(target);
-                if (!this.extJumpTargets.includes(provider))
-                    rejectAction("Jump provider is no longer available", "not_available");
-                this.coordinates.navigate(result, target);
-            } else {
-                await provider.execute?.(query, payload);
-            }
-        });
-        this.actions.registerOmnibar("feature-and-plugin-jumps", (query) => this.getJumpTargetsForValue(query), 10);
-
         // Forward point selections to the persisted marker owner.
         this.markedPosition.subscribe((position) => {
             if (position.length >= 2) {
-                this.viewStateOwner.setMarkerControl({
+                this.store.setMarkerControl({
                     enabled: true,
                     position: {lon: position[1], lat: position[0], alt: position[2] ?? 0}
                 });
             }
         });
+    }
+
+    /** Revalidates source-data choices against the current catalog before starting inspection. */
+    inspectSourceFromOmnibar({query}: NavigationActionInput<"inspectSourceFromOmnibar">): void {
+        if (!this.getInspectTileSourceDataTarget(query).validate(query))
+            rejectAction("Source-data input is no longer valid", "not_available");
+        this.inspectTileSourceData(query);
+    }
+
+    /** Resolves the selected composition again so a stale omnibar choice cannot use an old map catalog. */
+    async jumpToFeature({compositionId, query, target}: NavigationActionInput<"jumpToFeature">): Promise<void> {
+        const current = (
+            this.mapService.tileLayerParser.filterFeatureJumpTargets(query) as FeatureJumpAction[]
+        ).find((candidate) => candidate.id === compositionId && !candidate.error);
+        if (!current) rejectAction("Feature jump is no longer available", "not_available");
+        const index = this.store.requireCurrentView(target);
+        await this.highlightByJumpTarget(current, null, coreLib.HighlightMode.SELECTION_HIGHLIGHT, index);
+    }
+
+    /** Retains the configured provider and target view across asynchronous plugin work. */
+    async runJumpPlugin({pluginId, query, payload, target}: NavigationActionInput<"runJumpPlugin">): Promise<void> {
+        this.store.requireCurrentView(target);
+        const provider = this.extJumpTargets.find((candidate) => candidate.id === pluginId);
+        if (!provider || !provider.validate(query))
+            rejectAction("Jump provider is no longer available", "not_available");
+        if (provider.jump) {
+            const result = await provider.jump(query, payload);
+            this.store.requireCurrentView(target);
+            if (!this.extJumpTargets.includes(provider))
+                rejectAction("Jump provider is no longer available", "not_available");
+            this.coordinates.navigate(result, target);
+        } else {
+            await provider.execute?.(query, payload);
+        }
     }
 
     /** The parser and configured plugins become available after core and map data startup. */
@@ -229,8 +185,8 @@ export class JumpTargetService {
         if (simfilError) {
             label += `<br><span class="search-option-warning">${simfilError}</span>`;
         }
-        const target = this.viewStateOwner.captureView(this.viewStateOwner.focusedView)!;
-        return this.actions.candidate(FeatureSearchService.omnibarActions.run, {
+        const target = this.store.captureView(this.store.focusedView())!;
+        return this.store.actionCatalog.candidate(this.store.runSearchFromOmnibar, {
             id: FEATURE_SEARCH_TARGET_ID,
             icon: "pi-bolt",
             color: "blue",
@@ -238,7 +194,7 @@ export class JumpTargetService {
             label: label,
             enabled: false,
             arguments: (query, payload) => ({query, payload, target}),
-            isCurrent: () => this.viewStateOwner.isCurrent(target),
+            isCurrent: () => this.store.isCurrent(target),
             saveToHistory: () => true,
             validate: (_: string) => {
                 return !simfilError;
@@ -294,7 +250,7 @@ export class JumpTargetService {
             valid = false;
         }
 
-        return this.actions.candidate(JumpTargetService.actions.inspectSource, {
+        return this.store.actionCatalog.candidate(this.store.inspectSourceFromOmnibar, {
             id: "source-data",
             icon: "pi-database",
             color: "red",
@@ -361,7 +317,7 @@ export class JumpTargetService {
                         if (sourceLayerId) {
                             sourceLayerId = this.mapService.sourceDataLayerIdForLayerName(sourceLayerId) || "";
                             if (sourceLayerId) {
-                                this.inspectionState.setSelection({
+                                this.store.setSelection({
                                     mapTileKey: coreLib.getSourceDataLayerKey(mapId, sourceLayerId, tileId)
                                 } as SelectedSourceData);
                             } else {
@@ -391,12 +347,12 @@ export class JumpTargetService {
      * Recomputes the active search targets whenever the query string or plugin state changes.
      */
     getJumpTargetsForValue(value: string): Array<SearchTarget> {
-        const target = this.viewStateOwner.captureView(this.viewStateOwner.focusedView)!;
+        const target = this.store.captureView(this.store.focusedView())!;
         const compositions = this.mapService.tileLayerParser.filterFeatureJumpTargets(value) as FeatureJumpAction[];
         const featureTargets = (compositions ?? []).map((composition) => {
             let label = composition.idParts.map((part) => `${part.key}=${part.value}`).join(" | ");
             if (composition.error) label += `<br><span class="search-option-warning">${composition.error}</span>`;
-            return this.actions.candidate(JumpTargetService.actions.jumpFeature, {
+            return this.store.actionCatalog.candidate(this.store.jumpToFeature, {
                 id: `fj:${composition.id}`,
                 icon: "pi-arrow-down-left-and-arrow-up-right-to-center",
                 color: "orange",
@@ -405,16 +361,16 @@ export class JumpTargetService {
                 enabled: !composition.error,
                 arguments: (query) => ({compositionId: composition.id, query, target}),
                 validate: () => !composition.error,
-                isCurrent: () => this.viewStateOwner.isCurrent(target),
+                isCurrent: () => this.store.isCurrent(target),
                 saveToHistory: () => true
             });
         });
         const plugins = this.extJumpTargets.map((provider) => {
             const {execute, jump, ...presentation} = provider;
-            return this.actions.candidate(JumpTargetService.actions.runPlugin, {
+            return this.store.actionCatalog.candidate(this.store.runJumpPlugin, {
                 ...presentation,
                 arguments: (query, payload) => ({pluginId: provider.id, query, payload, target}),
-                isCurrent: () => this.viewStateOwner.isCurrent(target) && this.extJumpTargets.includes(provider),
+                isCurrent: () => this.store.isCurrent(target) && this.extJumpTargets.includes(provider),
                 saveToHistory: provider.saveToHistory ?? (() => true)
             });
         });
@@ -462,7 +418,7 @@ export class JumpTargetService {
         cameraMoveViewIndex?: number
     ) {
         const target =
-            cameraMoveViewIndex === undefined ? undefined : this.viewStateOwner.captureView(cameraMoveViewIndex);
+            cameraMoveViewIndex === undefined ? undefined : this.store.captureView(cameraMoveViewIndex);
         if (cameraMoveViewIndex !== undefined && !target) return;
         // Select the map.
         if (!mapId) {
@@ -476,7 +432,7 @@ export class JumpTargetService {
                 mapId = action.maps[0];
             }
         }
-        if (!mapId || (target && !this.viewStateOwner.isCurrent(target))) {
+        if (!mapId || (target && !this.store.isCurrent(target))) {
             return;
         }
 
@@ -500,13 +456,13 @@ export class JumpTargetService {
             this.messageService.showError("Could not locate feature!");
             return;
         }
-        if (target && !this.viewStateOwner.isCurrent(target)) return;
+        if (target && !this.store.isCurrent(target)) return;
         let selectThisFeature = extRefsResolved.responses[0][0];
 
         // Set feature-to-select on MapService.
         const featureId = `${selectThisFeature.typeId}.${selectThisFeature.featureId.filter((_, index) => index % 2 === 1).join(".")}`;
         if (mode === coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
-            this.inspectionState.setSelection([
+            this.store.setSelection([
                 {
                     mapTileKey: selectThisFeature.tileId,
                     featureId: featureId
@@ -527,7 +483,7 @@ export class JumpTargetService {
         // Center the camera on the feature if a view index was passed.
         if (cameraMoveViewIndex !== undefined) {
             await this.inspectionSelection.focusOnFeature(
-                target ? this.viewStateOwner.indexOf(target.id) : cameraMoveViewIndex,
+                target ? this.store.indexOf(target.id) : cameraMoveViewIndex,
                 {
                     featureId: featureId,
                     mapTileKey: selectThisFeature.tileId

@@ -1,3 +1,4 @@
+import {AppStore} from "../shared/app.store";
 import {ChangeDetectorRef, Component, effect, inject, input, OnDestroy, output, ViewChild} from "@angular/core";
 import {SourceDataAddressFormat} from "build/libs/core/erdblick-core";
 import {TreeTableNode} from "primeng/api";
@@ -11,7 +12,7 @@ import {TileDeliveryError} from "../mapdata/tile-diagnostics";
 import {MapTileStreamClientTiles} from "../mapdata/tilestream";
 import {AppStateService} from "../shared/appstate.service";
 import {InspectionPanelModel} from "./inspection-state.model";
-import {InspectionStateService} from "./inspection-state.service";
+
 import {Column, InspectionTreeComponent} from "./inspection.tree.component";
 import {expandSingleChildSourceDataPaths, sourceDataTreePresentation} from "./sourcedata-tree.presentation";
 
@@ -46,7 +47,7 @@ interface LoadedSourceDataLayer {
                 [filterText]="filterText()"
                 (filterTextChange)="filterTextChange.emit($event)"
                 [showFilter]="showFilter()"
-                [defaultVisibleColumnKeys]="inspectionState.sourceDataInspectionDefaultColumns"
+                [defaultVisibleColumnKeys]="store.inspection.sourceDataInspectionDefaultColumns()"
                 [firstHighlightedItemIndex]="firstHighlightedItemIndex"
             >
             </inspection-tree>
@@ -56,7 +57,7 @@ interface LoadedSourceDataLayer {
 })
 /** Loads one source-data tile on demand and renders it through the shared inspection tree. */
 export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOwner {
-    readonly inspectionState = inject(InspectionStateService);
+    readonly store = inject(AppStore);
 
     panel = input.required<InspectionPanelModel<FeatureWrapper>>();
     filterText = input<string | undefined>();

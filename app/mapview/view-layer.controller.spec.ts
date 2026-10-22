@@ -1,5 +1,7 @@
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
+import {ownerTestInjector, setTestViewIds} from "../../test/owner-test-injector";
+import {AppStore} from "../shared/app.store";
 import {ViewLayerController} from "./view-layer.controller";
 import {TileSubsetLayerVisualization} from
     "./deck/tile-subset-layer.visualization";
@@ -15,9 +17,12 @@ import {
 const tileKey = (id: number) => partitionKey(tilePartition(id));
 
 /** Install the logical view identity without creating a renderer or stream. */
-function controllerFixture(): any {
+function controllerFixture(viewIndex = 0): any {
+    const store = ownerTestInjector().get(AppStore);
+    setTestViewIds(store, Array.from({length: viewIndex + 1}, (_, index) => `view-${index}`));
     const controller = Object.create(ViewLayerController.prototype);
-    controller.identity = {id: "view-0", generation: 1};
+    controller.identity = store.captureView(viewIndex)!;
+    controller.viewState = {store};
     return controller;
 }
 
@@ -31,13 +36,12 @@ describe("ViewLayerController", () => {
         ];
         const mapgetLayer = {key: "Map/Lane", mapId: "Map", layerId: "Lane"};
         const style = {id: "DrivePaths", source: "style", sourceRef: {}};
-        controller.identity = {id: "view-0", generation: 1};
         controller.inspection = {
             selectionIdsTopic: {getValue: () => [{id: 1, features}]},
             hoverIdsTopic: {getValue: () => []}
         };
         controller.mapInfo = {maps: {getLayerStyleOptions: () => ({})}};
-        controller.viewState = {viewStateOwner: {indexOf: (id: string) => Number(id.slice(5))}, styleLod: () => 7};
+        controller.viewState = {...controller.viewState, styleLod: () => 7};
         controller.resolveInteractionTargetLayer = () => ({
             mapgetLayer, partition
         });
@@ -123,7 +127,7 @@ describe("ViewLayerController", () => {
         controller.presentationStillDemanded = vi.fn(() => true);
         controller.presentationLod = vi.fn(() => 3);
         controller.lineSimplificationToleranceMeters = vi.fn(() => 2);
-        controller.viewState = {viewStateOwner: {indexOf: (id: string) => Number(id.slice(5))}, viewStateFor: () => ({metersPerPixel: 1})};
+        controller.viewState = {...controller.viewState, viewStateFor: () => ({metersPerPixel: 1})};
         controller.shouldVisualize = vi.fn(() => true);
         controller.replaceVisualization = vi.fn();
         controller.queueVisualizationRender = vi.fn();
@@ -218,7 +222,7 @@ describe("ViewLayerController", () => {
                 issues: []
             }))
         };
-        controller.viewState = {viewStateOwner: {indexOf: (id: string) => Number(id.slice(5))}, 
+        controller.viewState = {...controller.viewState,
             getEffectiveMapLayerLevel: () => 13,
             visibleTileIdsForLevel: () => [7],
             styleLod: () => 2
@@ -642,7 +646,6 @@ describe("ViewLayerController", () => {
             mapId: "Islands/Island-6-Local",
             layerId: "Lane"
         };
-        controller.identity = {id: "view-0", generation: 1};
         controller.parseFeaturePartition = vi.fn(() => ({
             mapId: mapgetLayer.mapId,
             layerId: mapgetLayer.layerId,
@@ -654,7 +657,7 @@ describe("ViewLayerController", () => {
                 getMapLayerVisibility: vi.fn(() => false)
             }
         };
-        controller.viewState = {viewStateOwner: {indexOf: (id: string) => Number(id.slice(5))}, 
+        controller.viewState = {...controller.viewState,
             getEffectiveMapLayerLevel: vi.fn(() => 12)
         };
 
@@ -775,7 +778,7 @@ describe("ViewLayerController", () => {
     });
 
     it("discovers object coverage at the advertised association level", async () => {
-        const controller = controllerFixture() as any;
+        const controller = controllerFixture(3) as any;
         const layer = {
             key: "SmartMap/Road",
             tileAssociationLevel: 13
@@ -785,9 +788,8 @@ describe("ViewLayerController", () => {
             objectPartition("18446744073709551615")
         ];
         controller.disposed = false;
-        controller.identity = {id: "view-3", generation: 1};
         controller.objectCoverageByLayer = new Map();
-        controller.viewState = {viewStateOwner: {indexOf: (id: string) => Number(id.slice(5))}, 
+        controller.viewState = {...controller.viewState,
             visibleTileIdsForLevel: vi.fn(() => [101, 102])
         };
         controller.tileStream = {

@@ -1,14 +1,12 @@
+import {AppStore} from "./app.store";
 import {inject, Injectable, OnDestroy, Optional} from "@angular/core";
 import type {Params} from "@angular/router";
 import {addMetersToLngLat} from "@math.gl/web-mercator";
-import {InspectionStateService} from "../inspection/inspection-state.service";
 import type {CameraViewState} from "../mapview/map-view-state.model";
-import {MapViewStateService} from "../mapview/map-view-state.service";
 import {MapViewService} from "../mapview/map-view.service";
 import {featureSearchDefinitionFromImportPayload} from "../search/feature-search-export.util";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {StyleService} from "../styledata/style.service";
-import {AppLayoutService} from "./app-layout.service";
 import {AppStateService} from "./appstate.service";
 
 export const PRESENTATION_BRIDGE_PROTOCOL_VERSION = 2;
@@ -66,9 +64,8 @@ type PresentationBridgeError =
 /** Applies native state snapshots requested by an explicitly embedded presentation parent. */
 @Injectable({providedIn: "root"})
 export class PresentationStateBridgeService implements OnDestroy {
-    readonly viewStateOwner = inject(MapViewStateService);
-    readonly inspectionState = inject(InspectionStateService);
-    readonly layoutState = inject(AppLayoutService);
+    readonly store = inject(AppStore);
+
     private browserWindow?: Window;
     private parentOrigin?: string;
     private applying = false;
@@ -327,7 +324,7 @@ export class PresentationStateBridgeService implements OnDestroy {
                 const from =
                     duration > 0
                         ? ((request.kind === "url" ? request.fromCamera : undefined) ??
-                          structuredClone(this.viewStateOwner.cameraViewDataState.getValue(0)))
+                          structuredClone(this.store.views.cameraViewData()[String(this.store.viewIds()[0])]))
                         : undefined;
                 const errors =
                     request.kind === "snapshot"
@@ -364,7 +361,7 @@ export class PresentationStateBridgeService implements OnDestroy {
                     if (from && !this.queuedRequest && motionGeneration === this.motionGeneration) {
                         this.transitionCamera(
                             from,
-                            structuredClone(this.viewStateOwner.cameraViewDataState.getValue(0)),
+                            structuredClone(this.store.views.cameraViewData()[String(this.store.viewIds()[0])]),
                             duration
                         );
                     }
@@ -383,13 +380,9 @@ export class PresentationStateBridgeService implements OnDestroy {
 
     /** Keeps query-authored presentation scenes compatible with native-snapshot scenes. */
     private async applyUrlState(params: Params, reset: boolean): Promise<string[]> {
-        await this.stateService.replaceUrlState(params, reset);
         // A URL encodes whether each inspection is docked, but not the dock's
-        // open state. Make authored docked selections visible after replacement.
-        if (this.inspectionState.selection?.some((panel) => !panel.undocked && panel.features.length > 0)) {
-            this.layoutState.dockActiveTab = "inspection";
-            this.layoutState.isDockOpen = true;
-        }
+        // open state. Publish both parts of the authored scene in the import.
+        await this.stateService.replaceUrlState(params, reset, {revealDockedInspection: true});
         return [];
     }
 

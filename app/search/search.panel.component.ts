@@ -1,3 +1,5 @@
+import {effect, untracked} from "@angular/core";
+import {AppStore} from "../shared/app.store";
 import {
     AfterViewInit,
     ChangeDetectorRef,
@@ -10,8 +12,7 @@ import {
     ViewChild
 } from "@angular/core";
 import {debounce, debounceTime, distinctUntilChanged, Subject, Subscription, switchMap, timer} from "rxjs";
-import {AppActionService} from "../actions/app-action.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+
 import {MapViewService} from "../mapview/map-view.service";
 import {RightClickMenuService} from "../mapview/rightclickmenu.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
@@ -221,10 +222,10 @@ interface SearchResizeSession {
  * Implements the omnibox-style search panel used for jumping, searching loaded features, and query completion.
  */
 export class SearchPanelComponent implements AfterViewInit, OnDestroy {
-    private readonly actions = inject(AppActionService);
     private readonly coordinates = inject(CoordinateJumpService);
 
-    readonly viewStateOwner = inject(MapViewStateService);
+    readonly store = inject(AppStore);
+    private readonly actions = this.store.actionCatalog;
     private static readonly SEARCH_ACTIONS_BASE_Z_INDEX = 130000;
     readonly searchActionsBaseZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX;
     searchResizeHandleZIndex = SearchPanelComponent.SEARCH_ACTIONS_BASE_Z_INDEX + 1;
@@ -344,12 +345,13 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
                 })
         );
 
-        this.subscriptions.add(
-            this.locationSearchService.locationSearchResultLimitState.subscribe(() => {
-            this.updateLocationSearchQuery(this.searchInputValue);
+        effect(() => {
+            this.store.location.locationSearchResultLimit();
+            untracked(() => {
+                this.updateLocationSearchQuery(this.searchInputValue);
             this.refreshSearchMenu();
-            })
-        );
+            });
+        });
 
         // TODO: Get rid of map selection, as soon as we support
         //  multi-selection from different maps. Then we can
@@ -597,7 +599,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
 
     /** Finds the current search target represented by a history entry. */
     private resolveTargetForEntry(entry: SearchHistoryEntry): SearchTarget | undefined {
-        if (entry.viewId !== undefined && this.viewStateOwner.indexOf(entry.viewId) < 0) return undefined;
+        if (entry.viewId !== undefined && this.store.indexOf(entry.viewId) < 0) return undefined;
         const locationPayload = normalizeLocationSearchPayload(entry.payload);
         if (locationPayload) {
             const locationTarget = this.locationNavigation.createTarget(locationPayload);
@@ -626,7 +628,7 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
             actionId: target.id,
             input: trimmedInput,
             actionName: target.name,
-            viewId: this.viewStateOwner.focusedViewId(),
+            viewId: this.store.focusedViewId(),
             ...(payload !== undefined ? {payload} : {}),
             savedAt: Date.now()
         };
@@ -960,12 +962,12 @@ export class SearchPanelComponent implements AfterViewInit, OnDestroy {
     /** Resolve the logical target just before dispatch; a removed view never falls back to its old index. */
     private focusHistoryView(entry: SearchHistoryEntry): boolean {
         if (entry.viewId === undefined) return true; // Legacy unscoped entries use current focus.
-        const index = this.viewStateOwner.indexOf(entry.viewId);
+        const index = this.store.indexOf(entry.viewId);
         if (index < 0) {
             this.messageService.showError("The map view saved with this search is no longer available");
             return false;
         }
-        this.viewStateOwner.focusedView = index;
+        this.store.setFocusedView(index);
         return true;
     }
 

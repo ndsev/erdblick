@@ -1,13 +1,14 @@
 import {runInInjectionContext} from "@angular/core";
 import {ownerTestInjector} from "../../test/owner-test-injector";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {InspectionStateService} from "../inspection/inspection-state.service";
-import {AppLayoutService} from "./app-layout.service";
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import type {MapViewService} from "../mapview/map-view.service";
 import type {FeatureSearchService} from "../search/feature.search.service";
 import type {StyleService} from "../styledata/style.service";
+import {AppStateService} from "./appstate.service";
+import {AppStore, AppStoreValues} from "./app.store";
+import {AppUrlStateService} from "./app-url-state.service";
+import {observeStore} from "./persisted-state";
 import {
     PRESENTATION_BRIDGE_APPLY,
     PRESENTATION_BRIDGE_APPLY_URL_STATE,
@@ -21,7 +22,7 @@ import {
 
 /** Use real persisted owners while controlling the bridge's asynchronous state-application boundary. */
 function createBridge(...dependencies: ConstructorParameters<typeof PresentationStateBridgeService>): PresentationStateBridgeService {
-    const injector = ownerTestInjector([MapViewStateService, AppLayoutService, InspectionStateService]);
+    const injector = ownerTestInjector();
     return runInInjectionContext(injector, () => new PresentationStateBridgeService(...dependencies));
 }
 
@@ -224,7 +225,7 @@ describe("PresentationStateBridgeService", () => {
         fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
             requestId: 20, search: "?embed=presentation&v2=1", reset: false});
         await flushMicrotasks();
-        expect(replaceUrlState).toHaveBeenCalledWith(expect.anything(), false);
+        expect(replaceUrlState).toHaveBeenCalledWith(expect.anything(), false, {revealDockedInspection: true});
         replaceUrlState.mockClear();
         fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
             requestId: 21, search: "?embed=presentation&v2=1", reset: "false"});
@@ -239,7 +240,7 @@ describe("PresentationStateBridgeService", () => {
         const state = {replaceUrlState: () => new Promise<void>(resolve => {complete = resolve;})};
         const view = mapViewStateFixture();
         const bridge = createBridge((state) as never, view, styleServiceFixture());
-        vi.spyOn(bridge.viewStateOwner.cameraViewDataState, "getValue").mockImplementation(() => camera as never);
+        bridge.store.setCameraViewData(0, camera);
         bridge.initialize(fixture.host);
         fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2, requestId: 1,
             search: '?embed=presentation&v2=1', transitionMs: 2000});
@@ -249,25 +250,49 @@ describe("PresentationStateBridgeService", () => {
         expect(view.presentationCameraViewStateTopic.next).not.toHaveBeenCalled();
         bridge.ngOnDestroy();
     });
-    it("opens an authored docked selection even alongside a floating source-data panel", async () => {
+    it("publishes authored docked selection and dock visibility together alongside a floating source-data panel", async () => {
         const fixture = framedWindow();
-        const state = {replaceUrlState: vi.fn(async () => {})};
-        const bridge = createBridge(state as never, mapViewStateFixture(), styleServiceFixture());
-        bridge.layoutState.isDockOpen = false;
-        bridge.layoutState.dockActiveTab = "search";
-        bridge.inspectionState.selection = [
-            {id: 1, features: [{featureId: "Road.1", mapTileKey: "Features:map:Road:1"}],
+        const injector = ownerTestInjector();
+        const store = injector.get(AppStore);
+        const state = injector.get(AppStateService);
+        state.initializePersistence();
+        const bridge = runInInjectionContext(injector, () => new PresentationStateBridgeService(
+            state, mapViewStateFixture(), styleServiceFixture()
+        ));
+        store.setSelectionValue([
+            {id: 1, features: [{featureId: "Road.1", mapTileKey: "Features:map:Road:545555209"}],
                 undocked: false, locked: true, focused: true, size: [30, 20], color: "#fff"},
-            {id: 2, features: [], sourceData: {mapTileKey: "SourceData:map:layer:1", address: 0n},
+            {id: 2, features: [], sourceData: {mapTileKey: "SourceData:map:layer:545555209", address: 0n},
                 undocked: true, locked: true, focused: false, size: [30, 20], color: "#fff"}
-        ];
+        ]);
+        const params = injector.get(AppUrlStateService).serializeUrlV2(false);
+        const query = new URLSearchParams();
+        for (const [key, value] of Object.entries(params)) {
+            for (const item of Array.isArray(value) ? value : [value]) query.append(key, item);
+        }
+        store.setSelectionValue([]);
+        store.setDockOpen(false);
+        store.setDockActiveTab("search");
+        const publications: AppStoreValues[] = [];
+        const observer = observeStore(store, value => value).subscribe(value => publications.push(value));
+        publications.length = 0;
         bridge.initialize(fixture.host);
-        fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2, requestId: 1,
-            search: '?embed=presentation&v2=1&sel=fixture'});
-        await flushMicrotasks();
-        expect(bridge.layoutState.isDockOpen).toBe(true);
-        expect(bridge.layoutState.dockActiveTab).toBe('inspection');
-        bridge.ngOnDestroy();
+        try {
+            fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2, requestId: 1,
+                search: `?embed=presentation&${query}`});
+            await flushMicrotasks();
+            expect(publications).toHaveLength(1);
+            expect(publications[0].inspection.selection.map(panel => panel.id)).toEqual([1, 2]);
+            expect(publications[0].layout.dockOpen).toBe(true);
+            expect(publications[0].layout.dockActiveTab).toBe('inspection');
+            expect(fixture.parentPostMessage).toHaveBeenLastCalledWith({
+                type: PRESENTATION_BRIDGE_RESULT, version: 2, requestId: 1, ok: true
+            }, "http://deck.test");
+        } finally {
+            observer.unsubscribe();
+            bridge.ngOnDestroy();
+            localStorage.clear();
+        }
     });
     it("interpolates a keyframe once, takes the short heading route, and keeps the authored destination", async () => {
         const fixture = framedWindow();
@@ -277,11 +302,11 @@ describe("PresentationStateBridgeService", () => {
         const from = {destination: {lon: 11, lat: 48, alt: 100}, orientation: {heading: 6.2, pitch: -1, roll: 0}};
         const to = {destination: {lon: 12, lat: 49, alt: 10000}, orientation: {heading: 0.1, pitch: -0.5, roll: 0}};
         let camera = from;
-        const state = {replaceUrlState: vi.fn(async () => { camera = to; })};
+        const state = {replaceUrlState: vi.fn(async () => { camera = to; bridge.store.setCameraViewData(0, to); })};
         const view = mapViewStateFixture();
         const next = vi.mocked(view.presentationCameraViewStateTopic.next);
         const bridge = createBridge((state) as never, view, styleServiceFixture());
-        vi.spyOn(bridge.viewStateOwner.cameraViewDataState, "getValue").mockImplementation(() => camera as never);
+        bridge.store.setCameraViewData(0, camera);
         bridge.initialize(fixture.host);
         fixture.dispatch({type: PRESENTATION_BRIDGE_APPLY_URL_STATE, version: 2, requestId: 1,
             search: '?embed=presentation&v2=1&alt=10000', transitionMs: 2000});
@@ -407,7 +432,7 @@ describe("PresentationStateBridgeService", () => {
             embed: "presentation",
             map: "Provider/Sample San Francisco",
             v2: "1"
-        }), true);
+        }), true, {revealDockedInspection: true});
         expect(fixture.parentPostMessage).toHaveBeenCalledWith({
             type: PRESENTATION_BRIDGE_RESULT,
             version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,

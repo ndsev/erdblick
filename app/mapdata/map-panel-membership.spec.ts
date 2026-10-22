@@ -1,19 +1,18 @@
+import {TestBed} from "@angular/core/testing";
+import {AppStore, AppStoreValues} from "../shared/app.store";
+import {observeStore} from "../shared/persisted-state";
 import "@angular/compiler";
 import {HttpHeaders, HttpResponse} from "@angular/common/http";
-import {runInInjectionContext} from "@angular/core";
+import {Injector, runInInjectionContext} from "@angular/core";
 import {BehaviorSubject, of} from "rxjs";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {ownerTestInjector} from "../../test/owner-test-injector";
-import {InspectionStateService} from "../inspection/inspection-state.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
 import {MapViewService} from "../mapview/map-view.service";
 import {AppConfigService} from "../shared/app-config.service";
-import {AppLayoutService} from "../shared/app-layout.service";
 import {AppStateService} from "../shared/appstate.service";
 import type {ErdblickStyle, StyleService} from "../styledata/style.service";
 import type {MapPresetService} from "../styledata/map-preset.service";
 import {MapInfoService} from "./map-info.service";
-import {MapLayerStateService} from "./map-layer-state.service";
 import {MapTileStreamService} from "./map-tile-stream.service";
 import {MapPanelComponent} from "./map.panel.component";
 import {layerStyleOptions, type MapInfoItem, type MapTreeViewNode} from "./map.tree.model";
@@ -22,14 +21,11 @@ import {layerStyleOptions, type MapInfoItem, type MapTreeViewNode} from "./map.t
 async function fixture() {
     const config = {config$: new BehaviorSubject({}), getBackgroundLayers: () => [], getDefaultBackgroundLayerId: () => null};
     const injector = ownerTestInjector([
-        MapViewStateService, MapLayerStateService, AppLayoutService, InspectionStateService,
-        {provide: AppConfigService, useValue: config}, {provide: MapTileStreamService, useValue: {}}
-    ]);
+        AppStore, {provide: AppConfigService, useValue: config}, {provide: MapTileStreamService, useValue: {}}
+    ], TestBed.inject(Injector));
     const persistence = injector.get(AppStateService);
-    // Snapshot tests exercise real persistence; URL projection is outside this fixture.
-    persistence.registerUrlCodec({serialize: params => params, hydrate() {}});
-    const views = injector.get(MapViewStateService);
-    const layers = injector.get(MapLayerStateService);
+    const views = injector.get(AppStore);
+    const layers = injector.get(AppStore);
     const styles = {
         styles: new Map([["Style", {
             id: "Style", shortId: "style", visible: true, presets: [],
@@ -63,7 +59,7 @@ async function fixture() {
     };
     await reload();
     const panel = runInInjectionContext(injector, () => new MapPanelComponent(
-        maps, renderers, {} as never, persistence, {registerShortcut() {}} as never,
+        maps, renderers, {} as never, persistence, {registerShortcut() {}, unregisterShortcut() {}} as never,
         config as never, {} as never, {} as never, {} as never, {} as never, presets, styles
     ));
     let nodesByView: MapTreeViewNode[][] = [];
@@ -74,7 +70,7 @@ async function fixture() {
         layer: (view: number) => nodesByView[view][0].children!.find(node => node.id === "Road")!,
         dispose() {
             subscription.unsubscribe();
-            panel.subscriptions.forEach(item => item.unsubscribe());
+            panel.ngOnDestroy();
             maps.maps.destroy();
             maps.tileLayerParser.delete();
         }
@@ -88,7 +84,7 @@ describe("map panel membership projections", () => {
         const test = await fixture();
         try {
             await test.reload();
-            test.views.createView(test.views.viewIds()[0]);
+            test.views.createView(test.views.viewEntities().map(view => view.id)[0]);
             expect(test.nodes()).toHaveLength(2);
             expect(test.layer(1).viewConfig).toHaveLength(2);
             expect(test.layer(1).viewConfig![1]).toEqual(test.layers.mapLayerConfig("Map", "Road")[1]);
@@ -98,10 +94,10 @@ describe("map panel membership projections", () => {
         }
     });
 
-    it("projects reordered layer settings and style values before synchronization reads the tree", async () => {
+    it("projects reordered layer settings before the next explicit synchronization", async () => {
         const test = await fixture();
         try {
-            test.views.createView(test.views.viewIds()[0]);
+            test.views.createView(test.views.viewEntities().map(view => view.id)[0]);
             test.layers.setMapLayerConfig("Map", "Road", [
                 {visible: false, level: 10, autoLevel: false},
                 {visible: true, level: 15, autoLevel: true}
@@ -109,25 +105,28 @@ describe("map panel membership projections", () => {
             test.layers.setStyleOptionValues("Map", "Road", "style", "details", [false, true]);
             test.layers.setLayerSyncOption(0, true);
             await test.reload();
-            const [left, right] = test.views.viewIds();
-            const observedSync: Array<{view: number; options: unknown[]}> = [];
-            const originalSync = test.maps.applySyncOptionsForView.bind(test.maps);
-            vi.spyOn(test.maps, "applySyncOptionsForView").mockImplementation(view => {
-                const layer = test.maps.maps.maps.get("Map")!.layers.get("Road")!;
-                observedSync.push({view, options: [...layerStyleOptions(layer)[0].value]});
-                originalSync(view);
-            });
-
-            test.views.reorderViews([right, left]);
-
-            expect(observedSync).toEqual([{view: 1, options: [true, false]}]);
+            const [left, right] = test.views.viewEntities().map(view => view.id);
+            const publications: AppStoreValues[] = [];
+            const observer = observeStore(test.views, state => state).subscribe(state => publications.push(state));
+            publications.length = 0;
+            try {
+                test.views.reorderViews([right, left]);
+                expect(publications).toHaveLength(1);
+                expect(publications[0].viewIds).toEqual([right, left]);
+                expect(publications[0].layers.layerVisibility).toEqual({[left]: [false], [right]: [true]});
+                expect(publications[0].layers.layerSyncOptions).toEqual({[left]: true, [right]: false});
+            } finally { observer.unsubscribe(); }
+            const layer = test.maps.maps.maps.get("Map")!.layers.get("Road")!;
+            expect(layerStyleOptions(layer)[0].value).toEqual([true, false]);
+            test.maps.applySyncOptionsForView(1);
+            expect(layerStyleOptions(layer)[0].value).toEqual([true, false]);
             expect(test.layer(0).viewConfig).toEqual([
                 {visible: true, level: 15, autoLevel: true},
                 {visible: false, level: 10, autoLevel: false}
             ]);
             expect(test.layer(0).children!.find(node => node.id === "details")!.value).toEqual([true, false]);
             const current = test.nodes();
-            test.views.marker = true;
+            test.views.setMarkerState(true);
             expect(test.nodes()).toBe(current);
         } finally {
             test.dispose();

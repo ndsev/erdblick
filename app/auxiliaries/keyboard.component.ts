@@ -1,7 +1,8 @@
+import {AppStore} from "../shared/app.store";
 import {Component, inject, ViewChild} from "@angular/core";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {KEYBOARD_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
-import {AppLayoutService} from "../shared/app-layout.service";
+
 import {AppStateService} from "../shared/appstate.service";
 import {DialogStackService} from "../shared/dialog-stack.service";
 
@@ -10,7 +11,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
     template: `
         <app-dialog
             header="Keyboard Controls"
-            [(visible)]="dialogVisible"
+            [visible]="store.isDialogOpen(dialogLayoutId)" (visibleChange)="store.setDialogOpen(dialogLayoutId, $event)"
             [position]="'center'"
             [resizable]="false"
             [modal]="false"
@@ -106,7 +107,7 @@ import {DialogStackService} from "../shared/dialog-stack.service";
 })
 /** Static keyboard shortcut reference dialog. */
 export class KeyboardComponent {
-    readonly layoutState = inject(AppLayoutService);
+    readonly store = inject(AppStore);
     readonly dialogLayoutId = KEYBOARD_DIALOG_LAYOUT_ID;
 
     @ViewChild("keyboardDialog") keyboardDialog?: AppDialogComponent;
@@ -116,13 +117,9 @@ export class KeyboardComponent {
         private dialogStack: DialogStackService
     ) {}
 
-    get dialogVisible(): boolean {
-        return this.layoutState.isDialogOpen(this.dialogLayoutId);
-    }
 
-    set dialogVisible(visible: boolean) {
-        this.layoutState.setDialogOpen(this.dialogLayoutId, visible);
-    }
+
+
 
     /** Promotes the keyboard-help dialog above other overlays. */
     onDialogShow() {
@@ -131,6 +128,6 @@ export class KeyboardComponent {
 
     /** Closes the keyboard-help dialog. */
     close() {
-        this.dialogVisible = false;
+        this.store.setDialogOpen(this.dialogLayoutId, false);
     }
 }

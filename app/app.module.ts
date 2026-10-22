@@ -60,9 +60,7 @@ import {TooltipModule} from "primeng/tooltip";
 import {TreeModule} from "primeng/tree";
 import {TreeSelectModule} from "primeng/treeselect";
 import {TreeTableModule} from "primeng/treetable";
-import {AppActionService} from "./actions/app-action.service";
 import {ViewerActionStatusComponent} from "./actions/viewer-action-status.component";
-import {actionDeclarations, controlActions, controlDeclarations, omnibarActionDeclarations} from "./actions/viewer-action.contract";
 import {ViewerActionService} from "./actions/viewer-action.service";
 import {WebMcpService} from "./actions/web-mcp.service";
 import {AppComponent} from "./app.component";
@@ -92,7 +90,6 @@ import {HighlightSearch} from "./inspection/highlight.pipe";
 import {HighlightRegion} from "./inspection/highlight.region.pipe";
 import {InspectionComparisonDialogComponent} from "./inspection/inspection-comparison.dialog.component";
 import {InspectionSelectionService} from "./inspection/inspection-selection.service";
-import {InspectionStateService} from "./inspection/inspection-state.service";
 import {InspectionContainerComponent} from "./inspection/inspection.container.component";
 import {InspectionPanelDialogComponent} from "./inspection/inspection.dialog.component";
 import {InspectionDialogsComponent} from "./inspection/inspection.dialogs.component";
@@ -103,11 +100,9 @@ import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedata.s
 import {TreeTableFilterPatchDirective} from "./inspection/treetablefilter-patch.directive";
 import {initializeLibrary} from "./integrations/wasm";
 import {MapInfoService} from "./mapdata/map-info.service";
-import {MapLayerStateService} from "./mapdata/map-layer-state.service";
 import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
 import {MapPanelComponent} from "./mapdata/map.panel.component";
 import {TileSubsetLayerRenderService} from "./mapview/deck/tile-subset-layer-render.service";
-import {MapViewStateService} from "./mapview/map-view-state.service";
 import {RightClickMenuService} from "./mapview/rightclickmenu.service";
 import {MapViewComponent} from "./mapview/view.component";
 import {MapViewContainerComponent} from "./mapview/view.container.component";
@@ -130,11 +125,10 @@ import {SimfilExpressionInputComponent} from "./search/simfil-expression-input.c
 import {AppConfigService} from "./shared/app-config.service";
 import {AppConfirmPopupComponent} from "./shared/app-confirm-popup.component";
 import {AppDialogComponent} from "./shared/app-dialog.component";
-import {AppLayoutService} from "./shared/app-layout.service";
 import {AppPanelComponent} from "./shared/app-panel.component";
 import {AppSurfaceHeaderComponent} from "./shared/app-surface-header.component";
-import {AppUrlStateService} from "./shared/app-url-state.service";
 import {AppStateService} from "./shared/appstate.service";
+import {AppStore} from "./shared/app.store";
 import {ClipboardService} from "./shared/clipboard.service";
 import {EditorComponent} from "./shared/editor.component";
 import {EditorService} from "./shared/editor.service";
@@ -182,6 +176,8 @@ const updateGlobalSpinner = (message: string) => {
 
 /** App initializer that loads config and then brings up the WASM core, styles, map data, and search state in order. */
 export const initializeServices = () => {
+    const store = inject(AppStore);
+    store.initializeViews();
     const configService = inject(AppConfigService);
     const stateService = inject(AppStateService);
     const styleService = inject(StyleService);
@@ -197,22 +193,12 @@ export const initializeServices = () => {
     const jumpTargets = inject(JumpTargetService);
     inject(FeatureSearchService);
     inject(DiagnosticsFacadeService);
-    // Complete owner registration before config, storage or URL hydration starts.
-    inject(MapViewStateService);
-    inject(MapLayerStateService);
-    inject(InspectionStateService);
-    inject(AppLayoutService);
+    // Resource engines are constructed here; their I/O startup remains explicit below.
     inject(LocationSearchService);
     inject(StyleEditorRequestService);
     inject(CoordinateJumpService);
     inject(ExternalViewerService);
     inject(LocationNavigationService);
-    stateService.sealRegistration();
-    inject(AppUrlStateService);
-    const actions = inject(AppActionService);
-    actions.registerControlActions(controlActions);
-    actions.assertComplete([...actionDeclarations, ...omnibarActionDeclarations]);
-    actions.assertControlsComplete(controlDeclarations);
 
     return (async () => {
         updateGlobalSpinner("Loading app config");

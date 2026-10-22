@@ -1,3 +1,5 @@
+import {untracked} from "@angular/core";
+import {AppStore} from "../shared/app.store";
 import {
     AfterViewInit,
     ChangeDetectionStrategy,
@@ -34,7 +36,7 @@ import {inspectionHtmlPresentation, type InspectionHtmlPresentation} from "./ins
 import {inspectionSearchNumberLiteral} from "./inspection-search.util";
 import {InspectionSelectionService} from "./inspection-selection.service";
 import {SelectedSourceData, type InspectionTreeExpansionState} from "./inspection-state.model";
-import {InspectionStateService} from "./inspection-state.service";
+
 import {expandPathToFirstHighlightedRow} from "./inspection-tree-highlight";
 import {inspectionValueBubbleClasses} from "./inspection-value-bubble.presentation";
 
@@ -546,7 +548,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         } else {
             this.hiddenColumnKeys.add(column.key);
         }
-        this.inspectionState.setInspectionTreeHiddenColumns(this.panelId(), this.hiddenColumnKeys);
+        this.store.setInspectionTreeHiddenColumns(this.panelId(), this.hiddenColumnKeys);
         this.refreshLayout();
         this.cdr.markForCheck();
     }
@@ -603,14 +605,14 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         public mapService: InspectionSelectionService,
         private jumpService: JumpTargetService,
         public stateService: AppStateService,
-        public inspectionState: InspectionStateService,
+        public store: AppStore,
         private messageService: InfoMessageService,
         private featureSearchService: FeatureSearchService,
         private sanitizer: DomSanitizer
     ) {
         effect(() => {
             const columns = this.columns();
-            const savedHiddenColumns = this.inspectionState.getInspectionTreeHiddenColumns(this.panelId());
+            const savedHiddenColumns = this.store.getInspectionTreeHiddenColumns(this.panelId());
             const defaultVisibleColumns = this.defaultVisibleColumnKeys();
             const visibleByDefault = defaultVisibleColumns === undefined
                 ? undefined
@@ -632,66 +634,84 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.cdr.markForCheck();
         });
         effect(() => {
-            this.savePanelExpansionState();
-            this.data = this.treeData();
-            this.fullExpansionActive = false;
-            this.expansionSnapshotBeforeFullExpand = undefined;
-            this.fullCollapseActive = false;
-            this.expansionSnapshotBeforeFullCollapse = undefined;
-            this.applyInitialExpansion(this.data);
-            this.restorePanelExpansionState(this.data);
-            const targetedHighlightIndex = expandPathToFirstHighlightedRow(this.data);
+            const nextData = this.treeData();
+            this.panelId();
+            // Rebuild for new input only. Saving/restoring expansion reads native
+            // state, but must not subscribe this effect to every panel edit.
+            untracked(() => {
+                this.savePanelExpansionState();
+                this.data = nextData;
+                this.fullExpansionActive = false;
+                this.expansionSnapshotBeforeFullExpand = undefined;
+                this.fullCollapseActive = false;
+                this.expansionSnapshotBeforeFullCollapse = undefined;
+                this.applyInitialExpansion(this.data);
+                this.restorePanelExpansionState(this.data);
+                const targetedHighlightIndex = expandPathToFirstHighlightedRow(this.data);
 
-            this.refreshLayout();
-            this.scrollToHighlightedIndex(
-                targetedHighlightIndex ?? this.firstHighlightedItemIndex()
-            );
-            this.cdr.markForCheck();
+                this.refreshLayout();
+                this.scrollToHighlightedIndex(
+                    targetedHighlightIndex ?? this.firstHighlightedItemIndex()
+                );
+                this.cdr.markForCheck();
+            });
         });
         effect(() => {
             const sharedFilter = this.filterText();
             if (sharedFilter === undefined || sharedFilter === this.filterString) {
                 return;
             }
-            this.suppressFilterEmit = true;
-            this.filterString = sharedFilter;
-            this.filterTree(sharedFilter);
-            this.lastEmittedFilterText = sharedFilter;
-            this.suppressFilterEmit = false;
-            this.cdr.markForCheck();
+            untracked(() => {
+                this.suppressFilterEmit = true;
+                this.filterString = sharedFilter;
+                this.filterTree(sharedFilter);
+                this.lastEmittedFilterText = sharedFilter;
+                this.suppressFilterEmit = false;
+                this.cdr.markForCheck();
+            });
         });
         this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
             this.scrollToHighlightedIndex(index);
         }));
-        this.subscriptions.push(
-            this.inspectionState.inspectionTreeExpandByDefaultState.subscribe((expandByDefault) => {
-            if (!this.data.length) {
-                return;
-            }
-            if (expandByDefault) {
-                this.setTreeExpansion(this.data, true, true);
-            } else if (this.isFeatureInspectionTree(this.data)) {
-                this.expandTreeNodes(this.data);
-            }
-            this.fullExpansionActive = false;
-            this.expansionSnapshotBeforeFullExpand = undefined;
-            this.fullCollapseActive = false;
-            this.expansionSnapshotBeforeFullCollapse = undefined;
-            this.data = [...this.data];
-            this.savePanelExpansionState();
-            this.refreshLayout();
-            this.cdr.markForCheck();
-            })
-        );
-        this.subscriptions.push(
-            this.inspectionState.inspectionValueVaryColorsState.subscribe(() => this.cdr.markForCheck())
-        );
-        this.subscriptions.push(
-            this.inspectionState.inspectionValueVaryOutlinesState.subscribe(() => this.cdr.markForCheck())
-        );
-        this.subscriptions.push(
-            this.inspectionState.inspectionValueVaryStripingState.subscribe(() => this.cdr.markForCheck())
-        );
+        effect(() => {
+            const expandByDefault = this.store.inspection.inspectionTreeExpandByDefault();
+            untracked(() => {
+                if (!this.data.length) {
+                    return;
+                }
+                if (expandByDefault) {
+                    this.setTreeExpansion(this.data, true, true);
+                } else if (this.isFeatureInspectionTree(this.data)) {
+                    this.expandTreeNodes(this.data);
+                }
+                this.fullExpansionActive = false;
+                this.expansionSnapshotBeforeFullExpand = undefined;
+                this.fullCollapseActive = false;
+                this.expansionSnapshotBeforeFullCollapse = undefined;
+                this.data = [...this.data];
+
+                this.refreshLayout();
+                this.cdr.markForCheck();
+            });
+        });
+        effect(() => {
+            this.store.inspection.inspectionValueVaryColors();
+            untracked(() => {
+                this.cdr.markForCheck();
+            });
+        });
+        effect(() => {
+            this.store.inspection.inspectionValueVaryOutlines();
+            untracked(() => {
+                this.cdr.markForCheck();
+            });
+        });
+        effect(() => {
+            this.store.inspection.inspectionValueVaryStriping();
+            untracked(() => {
+                this.cdr.markForCheck();
+            });
+        });
     }
 
     /** Attaches resize observers and window listeners once the PrimeNG tree has been rendered. */
@@ -1207,9 +1227,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Assigns stable kind and color classes so grouped bubbles keep their leaf colors. */
     protected valueBubbleClasses(bubble: any): Record<string, boolean> {
         return inspectionValueBubbleClasses(bubble, {
-            varyColors: this.inspectionState.inspectionValueVaryColors,
-            varyOutlines: this.inspectionState.inspectionValueVaryOutlines,
-            varyStriping: this.inspectionState.inspectionValueVaryStriping
+            varyColors: this.store.inspection.inspectionValueVaryColors(),
+            varyOutlines: this.store.inspection.inspectionValueVaryOutlines(),
+            varyStriping: this.store.inspection.inspectionValueVaryStriping()
         });
     }
 
@@ -1377,7 +1397,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 ? "Relation/Validity"
                 : "Attr/Validity";
             const baseId = stripFeatureInspectionTarget(inspectionTarget);
-            const ownedByPanel = this.inspectionState.selection
+            const ownedByPanel = this.store.inspection.selection()
                 .find((panel) => panel.id === this.panelId())
                 ?.features.some(
                     (feature) =>
@@ -1392,13 +1412,13 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 icon: "pi pi-bullseye",
                 command: () => {
                     if (ownedByPanel) {
-                        this.inspectionState.toggleInspectionFeatureHighlight(
+                        this.store.toggleInspectionFeatureHighlight(
                             this.panelId(),
                             mapTileKey,
                             inspectionTarget
                         );
                     } else {
-                        this.inspectionState.setSelection([{mapTileKey, featureId: inspectionTarget}]);
+                        this.store.setSelection([{mapTileKey, featureId: inspectionTarget}]);
                     }
                 }
             });
@@ -1428,7 +1448,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Checks whether this panel already highlights the requested attribute/validity target. */
     private isInspectionTargetHighlighted(mapTileKey: string, targetFeatureId: string): boolean {
         const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
-        const panel = this.inspectionState.selection.find((item) => item.id === this.panelId());
+        const panel = this.store.inspection.selection().find((item) => item.id === this.panelId());
         return panel?.features.some(feature =>
             feature.mapTileKey === mapTileKey &&
             stripFeatureInspectionTarget(feature.featureId) === targetBaseFeatureId &&
@@ -1756,7 +1776,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             return;
         }
         try {
-            this.inspectionState.setSelection({
+            this.store.setSelection({
                 mapTileKey: sourceDataRef.mapTileKey,
                 address: sourceDataRef.address
             } as SelectedSourceData);
@@ -1966,7 +1986,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Applies either the global expand-by-default preference or the legacy feature-tree heuristic. */
     private applyInitialExpansion(nodes: TreeTableNode[]): void {
-        if (this.inspectionState.inspectionTreeExpandByDefault) {
+        if (this.store.inspection.inspectionTreeExpandByDefault()) {
             this.setTreeExpansion(nodes, true, true);
             return;
         }
@@ -2032,12 +2052,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (this.expansionSnapshotBeforeFullCollapse) {
             state.expansionSnapshotBeforeFullCollapse = this.expansionSnapshotBeforeFullCollapse;
         }
-        this.inspectionState.setInspectionTreeExpansionState(this.panelId(), state);
+        this.store.setInspectionTreeExpansionState(this.panelId(), state);
     }
 
     /** Restores expansion state captured by a previous component instance for the same panel. */
     private restorePanelExpansionState(nodes: TreeNode[]): void {
-        const state = this.inspectionState.getInspectionTreeExpansionState(this.panelId());
+        const state = this.store.getInspectionTreeExpansionState(this.panelId());
         if (!state) {
             return;
         }

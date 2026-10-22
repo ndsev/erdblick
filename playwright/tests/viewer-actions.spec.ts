@@ -3,8 +3,10 @@ import {readFileSync} from 'node:fs';
 import type {Page, WebSocketRoute} from '@playwright/test';
 import {expect, test} from '../fixtures/test';
 import type {ViewerActionClientMessage} from '../../app/actions/viewer-action-relay.contract';
-import {viewerResult, availableValue, type ViewerActionName} from '../utils/viewer-catalog';
-import {cameraViewStateSchema} from '../../app/mapview/map-view.service.declarations';
+import {viewerResult, availableValue, viewerControlSchema, type ViewerActionName} from '../utils/viewer-catalog';
+import type {CameraViewState} from '../../app/mapview/map-view-state.model';
+
+const cameraViewStateSchema = viewerControlSchema<CameraViewState>('view.camera');
 
 test.use({stateSnapshot: null});
 

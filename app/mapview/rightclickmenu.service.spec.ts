@@ -1,6 +1,5 @@
 import {runInInjectionContext} from "@angular/core";
 import {ownerTestInjector} from "../../test/owner-test-injector";
-import {InspectionStateService} from "../inspection/inspection-state.service";
 import {describe, expect, it, vi} from "vitest";
 
 import type {DiagnosticsFacadeService} from "../diagnostics/diagnostics.facade.service";
@@ -23,7 +22,7 @@ function createRightClickMenuService() {
     const inspectionSelection = {
         inspectFeatureIds: vi.fn()
     };
-    const injector = ownerTestInjector([{provide: InspectionStateService, useValue: {}}]);
+    const injector = ownerTestInjector();
     const service = runInInjectionContext(injector, () => new RightClickMenuService(
         ({}) as never,
         {} as FeatureSearchService,

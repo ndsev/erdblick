@@ -1,3 +1,5 @@
+import {observeStore} from "../shared/persisted-state";
+import {AppStore} from "../shared/app.store";
 import {
     AfterViewInit,
     ChangeDetectorRef,
@@ -19,13 +21,13 @@ import {CoordinatesService} from "../coords/coordinates.service";
 import {environment} from "../environments/environment";
 import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {type TileFeatureId} from "../inspection/inspection-state.model";
-import {InspectionStateService} from "../inspection/inspection-state.service";
+
 import {inspectionValueBubbleClasses} from "../inspection/inspection-value-bubble.presentation";
 import {coreLib} from "../integrations/wasm";
 import {CacheResetService} from "../mapdata/cache-reset.service";
 import {HoverDetailService, type HoverDetailField, type HoverFeatureDetails} from "../mapdata/hover-detail.service";
 import {MapInfoService} from "../mapdata/map-info.service";
-import {MapLayerStateService} from "../mapdata/map-layer-state.service";
+
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {FeatureSearchService} from "../search/feature.search.service";
 import {JumpTargetService} from "../search/jump.service";
@@ -38,7 +40,7 @@ import {StyleService} from "../styledata/style.service";
 import {DeckMapView2D} from "./deck/deck-view2d";
 import {DeckMapView3D} from "./deck/deck-view3d";
 import {TileSubsetLayerRenderService} from "./deck/tile-subset-layer-render.service";
-import {MapViewStateService} from "./map-view-state.service";
+
 import {MapViewService, ViewRecalculationReason} from "./map-view.service";
 import {IRenderView, MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT, RenderNavigationTarget} from "./render-view.model";
 import {
@@ -62,7 +64,7 @@ interface PreparedContextMenuPosition {
     template: `
         <div
             #viewer
-            [ngClass]="{border: outlined}"
+            [ngClass]="{border: outlined()}"
             [id]="canvasId"
             [attr.data-testid]="canvasId"
             class="mapviewer-renderlayer"
@@ -93,7 +95,7 @@ interface PreparedContextMenuPosition {
         }
         @if (!environment.visualizationOnly && showSyncMenu) {
             <p-buttonGroup class="viewsync-select" data-testid="viewsync-select">
-                @for (option of viewStateOwner.syncOptions; track option.code) {
+                @for (option of store.syncOptions; track option.code) {
                     <p-toggleButton
                         onIcon=""
                         offIcon=""
@@ -184,16 +186,16 @@ interface PreparedContextMenuPosition {
  * It owns renderer creation, hover details, right-click context-menu preparation, and view-local mode toggles.
  */
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
-    readonly viewStateOwner = inject(MapViewStateService);
-    readonly inspectionState = inject(InspectionStateService);
-    readonly layerState = inject(MapLayerStateService);
+    readonly store = inject(AppStore);
+
+
     private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 4;
     private static readonly SOURCE_DATA_TILE_LEVEL_COUNT = 16;
     private static readonly WEBGL_SETUP_HINT =
         "Ensure WebGL2 is available and browser hardware acceleration is enabled. " +
         "If hardware acceleration is unavailable, switch the browser to a supported software WebGL renderer " +
         "(this is controlled by the browser). Reload the page afterwards.";
-    protected readonly isSyncOptionSelected = (code: string) => this.viewStateOwner.viewSync.includes(code);
+    protected readonly isSyncOptionSelected = (code: string) => this.store.views.viewSync().includes(code);
 
     subscriptions: Subscription[] = [];
     menuItems: MenuItem[] = [];
@@ -201,8 +203,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     mapView?: IRenderView;
     viewerInitError = "";
     viewId = input.required<string>();
-    readonly viewIndex = computed(() => this.viewStateOwner.viewIds().indexOf(this.viewId()));
-    outlined: boolean = false;
+    readonly viewIndex = computed(() => this.store.viewIds().indexOf(this.viewId()));
+    readonly outlined = computed(() => this.store.numViews() > 1 && this.viewId() === this.store.focusedViewId());
     showSyncMenu: boolean = false;
     isNarrow: boolean = false;
     @ViewChild('viewer', { static: true }) viewerElement!: ElementRef<HTMLDivElement>;
@@ -267,19 +269,15 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         private cdr: ChangeDetectorRef,
         private ngZone: NgZone
     ) {
-        this.subscriptions.push(
-            this.viewStateOwner.focusedViewState.subscribe((focusedViewIndex) => {
-                this.outlined = this.viewStateOwner.numViews > 1 && this.mapView?.viewIndex === focusedViewIndex;
-            })
-        );
+
     }
 
     /** Mirrors one sync toggle button back into the canonical view-sync selection. */
     onSyncOptionToggle(code: string, enabled: boolean): void {
         const nextSelection = enabled
-            ? [...this.viewStateOwner.viewSync, code]
-            : this.viewStateOwner.viewSync.filter((currentCode) => currentCode !== code);
-        this.viewStateOwner.updateSelectedSyncOptions(nextSelection);
+            ? [...this.store.views.viewSync(), code]
+            : this.store.views.viewSync().filter((currentCode) => currentCode !== code);
+        this.store.updateSelectedSyncOptions(nextSelection);
     }
 
     /** Registers menu subscriptions and viewport-size listeners once the component inputs are available. */
@@ -314,12 +312,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             }),
             this.menuService.menuItems.subscribe((items) => {
                 this.menuItems = [...items];
-                if (this.viewStateOwner.numViews === 1) {
+                if (this.store.numViews() === 1) {
                     this.menuItems.push({
                         label: "Split View",
                         icon: "pi pi-plus",
                         command: () => {
-                            this.viewStateOwner.numViews += 1;
+                            this.store.setNumViews(this.store.numViews() + 1);
                         }
                     });
                 } else {
@@ -397,10 +395,15 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.setupViewerContextMenuHandling();
         this.modeSubscription = combineLatest([
             this.stateService.ready.pipe(filter((ready) => ready)),
-            this.viewStateOwner.mode2dState.pipe(this.viewIndex()),
-            this.viewStateOwner.deckAntialiasingEnabledState,
-            this.viewStateOwner.semanticCompositingEnabledState
-        ]).subscribe(([_, mode2d, antialiasingEnabled, semanticCompositingEnabled]) => {
+            // One native selector observes the complete renderer configuration in a
+            // publication, so a combined projection/preference edit creates one canvas.
+            observeStore(this.store, state => [
+                state.views.mode2d[this.viewId()],
+                state.views.deckAntialiasingEnabled,
+                state.views.semanticCompositingEnabled
+            ] as const, (previous, current) => previous.every((value, index) => value === current[index]))
+                .pipe(filter(([mode2d]) => mode2d !== undefined))
+        ]).subscribe(([_, [mode2d, antialiasingEnabled, semanticCompositingEnabled]]) => {
             const needsRebuild =
                 this.is2DMode !== mode2d ||
                 this.deckAntialiasingEnabled !== antialiasingEnabled ||
@@ -490,9 +493,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                   this.stateService,
                   this.configService,
                   this.layerController!,
-                  this.viewStateOwner,
-                  this.inspectionState,
-                  this.layerState
+                  this.store
               )
             : new DeckMapView3D(
                   this.viewIndex(),
@@ -507,9 +508,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                   this.stateService,
                   this.configService,
                   this.layerController!,
-                  this.viewStateOwner,
-                  this.inspectionState,
-                  this.layerState
+                  this.store
               );
         mapView.setDesktopDrillPickingEnabled(!this.isNarrow);
         this.initializingMapView = mapView;
@@ -613,11 +612,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                         spinner.style.display = 'none';
                     }
                     const mapView = this.mapView;
-                    this.outlined = this.viewStateOwner.numViews > 1 && mapView?.identity.id === this.viewStateOwner.focusedViewId();
                     if (!mapView) {
                         this.cdr.markForCheck();
                     } else {
-                        this.showSyncMenu = this.viewStateOwner.numViews > 1 && mapView.viewIndex > 0;
+                        this.showSyncMenu = this.store.numViews() > 1 && mapView.viewIndex > 0;
                         this.firstPersonViewActiveSubscription = mapView.firstPersonViewActive.subscribe(() => {
                             this.cdr.markForCheck();
                         });
@@ -655,9 +653,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 label: field.key
             },
             {
-                varyColors: this.inspectionState.inspectionValueVaryColors,
-                varyOutlines: this.inspectionState.inspectionValueVaryOutlines,
-                varyStriping: this.inspectionState.inspectionValueVaryStriping
+                varyColors: this.store.inspection.inspectionValueVaryColors(),
+                varyOutlines: this.store.inspection.inspectionValueVaryOutlines(),
+                varyStriping: this.store.inspection.inspectionValueVaryStriping()
             }
         );
     }
@@ -798,8 +796,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             screenPos && this.mapView
                 ? this.mapView.drillPickFeatures(
                       screenPos,
-                      this.inspectionState.drillPickRadius,
-                      this.inspectionState.inspectionsLimit
+                      this.store.inspection.drillPickRadius(),
+                      this.store.inspection.inspectionsLimit()
                   ).featureIds
                 : [];
         this.menuService.setPickedFeatures(featureIds);
@@ -832,7 +830,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         if (!this.mapView) {
             return null;
         }
-        this.viewStateOwner.focusedView = this.viewIndex();
+        this.store.setFocusedView(this.viewIndex());
         const canvasRect = this.mapView.getCanvasClientRect();
         return {
             x: event.clientX - canvasRect.left,

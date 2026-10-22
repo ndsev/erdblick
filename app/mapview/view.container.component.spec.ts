@@ -1,15 +1,14 @@
+import {AppStore} from "../shared/app.store";
 import "@angular/compiler";
 import {runInInjectionContext} from "@angular/core";
 import {Subject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
-import {ownerTestInjector} from "../../test/owner-test-injector";
+import {ownerTestInjector, setTestViewIds} from "../../test/owner-test-injector";
 import {ViewerUiService} from "../actions/viewer-ui.service";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {AppConfigService} from "../shared/app-config.service";
-import {AppLayoutService} from "../shared/app-layout.service";
 import {KeyboardService} from "../shared/keyboard.service";
-import {MapViewStateService} from "./map-view-state.service";
 import {MapViewService} from "./map-view.service";
 import {MapViewContainerComponent} from "./view.container.component";
 
@@ -23,15 +22,15 @@ function fixture() {
         }})
     } as never, {closeTopDialog: vi.fn()} as never);
     const injector = ownerTestInjector([
-        MapViewStateService, MapViewService, AppLayoutService,
+        AppStore, MapViewService, AppStore,
         {provide: AppConfigService, useValue: {}},
         {provide: MapTileStreamService, useValue: {}},
         {provide: MapInfoService, useValue: {
             maps: {maps: new Map()}, layerStateChanged: new Subject<string>(),
-            reapplySyncOptionsForAllViews: vi.fn()
+            configureTreeParameters: vi.fn(), reapplySyncOptionsForAllViews: vi.fn()
         }}
     ]);
-    const views = injector.get(MapViewStateService);
+    const views = injector.get(AppStore);
     const renderers = injector.get(MapViewService);
     const createContainer = () => runInInjectionContext(injector, () =>
         new MapViewContainerComponent(renderers, keyboard, {} as ViewerUiService));
@@ -68,12 +67,12 @@ describe("focused view keyboard commands", () => {
 
     it("follows the focused identity through reorder/removal and rejects retired lifetimes", () => {
         const {views, renderers, container, renderer, press} = fixture();
-        views.numViews = 2;
+        views.setNumViews(2);
         const left = renderer(0);
         const right = renderer(1);
         renderers.registerRenderView(left as never);
         renderers.registerRenderView(right as never);
-        views.focusedView = 1;
+        views.setFocusedView(1);
         press("e");
         expect(right.zoomOut).toHaveBeenCalledOnce();
 
@@ -85,7 +84,7 @@ describe("focused view keyboard commands", () => {
         press("e");
         expect(right.zoomOut).toHaveBeenCalledTimes(2);
 
-        views.viewIdsState.next([left.identity.id]);
+        setTestViewIds(views, [left.identity.id]);
         press("e");
         expect(left.zoomOut).not.toHaveBeenCalled();
         const restored = renderer(0);

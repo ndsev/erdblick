@@ -1,8 +1,7 @@
 import {ownerTestInjector} from "../../test/owner-test-injector";
 import {runInInjectionContext} from "@angular/core";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStore} from "../shared/app.store";
 import "@angular/compiler";
-import {BehaviorSubject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 import type {AppConfigService, CoordinatesConfig} from "../shared/app-config.service";
 import type {InfoMessageService} from "../shared/info.service";
@@ -22,49 +21,47 @@ function createPolicy(coordinates: Partial<CoordinatesConfig> = {}, enabled = tr
     const injector = ownerTestInjector();
     const policy = runInInjectionContext(injector, () => new CoordinatesPolicyService(
         configService as unknown as AppConfigService,
-        injector.get(AppStateService),
         messageService as unknown as InfoMessageService
     ));
-    policy.coordinatesEnabledState.next(enabled);
-    policy.coordinatesLegalTermsAcceptedState.next(accepted);
-    return {policy, messageService};
+    const store = injector.get(AppStore);
+    store.setCoordinatesEnabled(enabled);
+    store.setCoordinatesLegalTermsAccepted(accepted);
+    return {policy, store, messageService};
 }
 
 describe("CoordinatesPolicyService", () => {
     it("uses the local preference immediately when no legal document is configured", () => {
-        const {policy} = createPolicy({}, false);
+        const {policy, store} = createPolicy({}, false);
 
         policy.initialize();
         expect(policy.effectiveEnabled).toBe(false);
 
         policy.requestEnabled(true);
-        expect(policy.coordinatesEnabledState.getValue()).toBe(true);
+        expect(store.coordinatePolicy.coordinatesEnabled()).toBe(true);
         expect(policy.effectiveEnabled).toBe(true);
 
-        policy.ngOnDestroy();
     });
 
     it("forces a previously enabled preference off until configured terms are accepted", () => {
-        const {policy} = createPolicy({
+        const {policy, store} = createPolicy({
             legalTermsUrl: "/coordinates-legal-terms/terms.yaml",
             legalTerms: "Terms"
         });
 
         policy.initialize();
 
-        expect(policy.coordinatesEnabledState.getValue()).toBe(false);
+        expect(store.coordinatePolicy.coordinatesEnabled()).toBe(false);
         expect(policy.effectiveEnabled).toBe(false);
         expect(policy.legalDialogVisible).toBe(false);
 
         policy.requestEnabled(true);
         expect(policy.legalDialogVisible).toBe(true);
-        expect(policy.coordinatesEnabledState.getValue()).toBe(false);
+        expect(store.coordinatePolicy.coordinatesEnabled()).toBe(false);
 
-        policy.ngOnDestroy();
     });
 
     it("accepts terms, persists acceptance, and enables the panel", () => {
-        const {policy} = createPolicy({
+        const {policy, store} = createPolicy({
             legalTermsUrl: "/coordinates-legal-terms/terms.json",
             legalTerms: "Legal text"
         });
@@ -73,31 +70,29 @@ describe("CoordinatesPolicyService", () => {
 
         policy.accept();
 
-        expect(policy.coordinatesLegalTermsAcceptedState.getValue()).toBe(true);
-        expect(policy.coordinatesEnabledState.getValue()).toBe(true);
+        expect(store.coordinatePolicy.coordinatesLegalTermsAccepted()).toBe(true);
+        expect(store.coordinatePolicy.coordinatesEnabled()).toBe(true);
         expect(policy.effectiveEnabled).toBe(true);
         expect(policy.legalDialogVisible).toBe(false);
 
-        policy.ngOnDestroy();
     });
 
     it("restores an enabled preference when the configured terms were already accepted", () => {
-        const {policy} = createPolicy({
+        const {policy, store} = createPolicy({
             legalTermsUrl: "/coordinates-legal-terms/terms.json",
             legalTerms: "Legal text"
         }, true, true);
 
         policy.initialize();
 
-        expect(policy.coordinatesEnabledState.getValue()).toBe(true);
+        expect(store.coordinatePolicy.coordinatesEnabled()).toBe(true);
         expect(policy.effectiveEnabled).toBe(true);
         expect(policy.legalDialogVisible).toBe(false);
 
-        policy.ngOnDestroy();
     });
 
     it("refuses without recording acceptance and prompts again on the next enable", () => {
-        const {policy} = createPolicy({
+        const {policy, store} = createPolicy({
             legalTermsUrl: "/coordinates-legal-terms/terms.yaml",
             legalTerms: "Legal text"
         });
@@ -106,19 +101,18 @@ describe("CoordinatesPolicyService", () => {
 
         policy.refuse();
 
-        expect(policy.coordinatesLegalTermsAcceptedState.getValue()).toBe(false);
-        expect(policy.coordinatesEnabledState.getValue()).toBe(false);
+        expect(store.coordinatePolicy.coordinatesLegalTermsAccepted()).toBe(false);
+        expect(store.coordinatePolicy.coordinatesEnabled()).toBe(false);
         expect(policy.effectiveEnabled).toBe(false);
         expect(policy.legalDialogVisible).toBe(false);
 
         policy.requestEnabled(true);
         expect(policy.legalDialogVisible).toBe(true);
 
-        policy.ngOnDestroy();
     });
 
     it("fails closed and reports the configured document load error", () => {
-        const {policy, messageService} = createPolicy({
+        const {policy, store, messageService} = createPolicy({
             legalTermsUrl: "/coordinates-legal-terms/missing.yaml",
             legalTermsError: "Could not load coordinate legal terms."
         });
@@ -126,10 +120,9 @@ describe("CoordinatesPolicyService", () => {
 
         policy.requestEnabled(true);
 
-        expect(policy.coordinatesEnabledState.getValue()).toBe(false);
+        expect(store.coordinatePolicy.coordinatesEnabled()).toBe(false);
         expect(policy.legalDialogVisible).toBe(false);
         expect(messageService.showError).toHaveBeenCalledWith("Could not load coordinate legal terms.");
 
-        policy.ngOnDestroy();
     });
 });

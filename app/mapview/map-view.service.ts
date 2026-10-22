@@ -1,21 +1,21 @@
+import {DestroyRef} from "@angular/core";
+import {takeUntilDestroyed} from "@angular/core/rxjs-interop";
+import {observeStore} from "../shared/persisted-state";
+import {AppStore} from "../shared/app.store";
 import {Injectable, inject} from "@angular/core";
 import {Subject, distinctUntilChanged, filter, firstValueFrom, fromEvent, map, merge, startWith} from "rxjs";
 import {z} from "zod";
 import type {FeatureLayerStyle, Viewport} from "../../build/libs/core/erdblick-core";
 import {appliedAction, rejectAction} from "../actions/action-utils";
-import {AppActionService} from "../actions/app-action.service";
-import type {ViewerActionInput, ViewerActionOutput} from "../actions/viewer-action.contract";
 import {Cartographic} from "../integrations/geo";
 import {coreLib} from "../integrations/wasm";
 import {MapInfoService} from "../mapdata/map-info.service";
 import {TileGridMode, tileGridMaxLevel} from "../mapdata/map-layer-state.model";
-import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import {AppConfigService} from "../shared/app-config.service";
-import {AppStateService} from "../shared/appstate.service";
 import {clampPresentationLod, clampStyleLod} from "../shared/lod-policy";
 import {CameraViewState, VIEW_SYNC_LAYERS, VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION} from "./map-view-state.model";
-import {MapViewStateService} from "./map-view-state.service";
-import {mapViewActions, mapViewControls} from "./map-view.service.declarations";
+
+import {mapViewActions, mapViewControls} from "./map-view-actions.store-feature";
 import {IRenderView, LocationArea, RenderRectangle, RenderViewCameraState} from "./render-view.model";
 import {autoTileGridLevel, coarsenedTileLevel, tileGridVisibleCellCount} from "./tile-grid-visibility";
 import type {ViewId} from "./view-id";
@@ -46,16 +46,14 @@ export interface LiveCameraViewStateUpdate {
 }
 
 /**
- * Owns camera/view state and the unified per-view `ViewVisualizationState` instances.
+ * Owns live renderer/visualization lifetimes, camera navigation and view coverage.
+ * AppStore holds persisted camera and view values; this service manages the live
+ * resources that realize those values for each logical view identity.
  */
 @Injectable({providedIn: "root"})
 export class MapViewService {
-    private readonly persistence = inject(AppStateService);
+    private readonly destroyRef = inject(DestroyRef);
     private readonly config = inject(AppConfigService);
-    private readonly stream = inject(MapTileStreamService);
-
-    static readonly controls = mapViewControls;
-    static readonly actions = mapViewActions;
 
     private static readonly AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES = 64;
     private static readonly SEARCH_COVERAGE_TILE_LIMIT = 1 << 20;
@@ -77,7 +75,7 @@ export class MapViewService {
     }>();
     private readonly visualizationByView = new Map<ViewId, {generation: number; state: ViewVisualizationState}>();
     get viewVisualizationState(): ViewVisualizationState[] {
-        return this.viewStateOwner.viewIds().map((id) => this.visualizationByView.get(id)!.state);
+        return this.store.viewIds().map((id) => this.visualizationByView.get(String(id))!.state);
     }
     /** Retiring components synchronously capture cameras and dispose before reindexing. */
     readonly beforeViewRemoval = new Subject<{
@@ -94,16 +92,13 @@ export class MapViewService {
     }
 
     constructor(
-        readonly viewStateOwner: MapViewStateService,
+        readonly store: AppStore,
         private readonly mapInfo: MapInfoService
     ) {
-        this.registerControls();
 
-        const actions = inject(AppActionService);
-        actions.registerAction(MapViewService.actions.viewer_manage_view, (input, context) => this.manageView(input));
 
-        let previousOrder = this.viewStateOwner.viewIds();
-        this.viewStateOwner.viewIdsState.subscribe((ids) => {
+        let previousOrder = this.store.viewIds();
+        observeStore(this.store, state => state.viewIds).pipe(takeUntilDestroyed(this.destroyRef)).subscribe((ids) => {
             if (ids !== previousOrder) {
                 ++this.layoutRevision;
                 previousOrder = ids;
@@ -111,7 +106,7 @@ export class MapViewService {
             for (const id of [...this.visualizationByView.keys()]) {
                 if (!ids.includes(id)) this.visualizationByView.delete(id);
             }
-            for (const target of this.viewStateOwner.identities()) {
+            for (const target of this.store.viewEntities()) {
                 if (this.visualizationByView.get(target.id)?.generation !== target.generation) {
                     this.visualizationByView.set(target.id, {
                         generation: target.generation,
@@ -121,28 +116,20 @@ export class MapViewService {
             }
         });
 
-        // A catalog replacement installs a newer MapLayerTree after this service.
-        // Wait for every slot consumer to refresh its positional caches before
-        // synchronization and coverage read those caches for the new view order.
-        this.persistence.afterStatePublication.pipe(
-            startWith(undefined),
-            map(() => this.viewStateOwner.viewIds()),
-            distinctUntilChanged()
-        ).subscribe(() => {
-            if (!this.removingView) {
-                this.mapInfo.reapplySyncOptionsForAllViews();
-                this.requestViewRecalculation(ViewRecalculationReason.NumViews);
-            }
+        // A catalog can replace its tree after this engine was constructed. Refresh
+        // that read-only projection explicitly before coverage reads positional data.
+        observeStore(this.store, state => state.viewIds).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+            this.mapInfo.configureTreeParameters();
+            if (!this.removingView) this.requestViewRecalculation(ViewRecalculationReason.NumViews);
         });
-        this.viewStateOwner.lod3TileThresholdState.subscribe(() =>
-            this.requestViewRecalculation(ViewRecalculationReason.LodThreshold)
-        );
-        this.mapInfo.layerStateChanged.subscribe((reason) => this.requestViewRecalculation(reason));
+        observeStore(this.store, state => state.views.lod3TileThreshold).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() =>
+            this.requestViewRecalculation(ViewRecalculationReason.LodThreshold));
+        this.mapInfo.layerStateChanged.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((reason) => this.requestViewRecalculation(reason));
     }
 
     /** Registers a renderer reference, not a second camera-state store; teardown is generation-safe. */
     registerRenderView(view: IRenderView): () => void {
-        if (!this.viewStateOwner.isCurrent(view.identity)) throw new Error("Renderer view lifetime is stale");
+        if (!this.store.isCurrent(view.identity)) throw new Error("Renderer view lifetime is stale");
         this.renderViews.set(view.identity.id, view);
         this.viewStateChanged.next(ViewRecalculationReason.RenderViewReady);
         return () => {
@@ -154,10 +141,10 @@ export class MapViewService {
 
     /** Looks up a live renderer without touching the view's scene or tile collections. */
     renderViewFor(viewIndex: number): IRenderView | undefined {
-        if (viewIndex < 0 || viewIndex >= this.viewStateOwner.numViews) return undefined;
-        const id = this.viewStateOwner.idAt(viewIndex);
+        if (viewIndex < 0 || viewIndex >= this.store.numViews()) return undefined;
+        const id = this.store.idAt(viewIndex);
         const view = id ? this.renderViews.get(id) : undefined;
-        return view && this.viewStateOwner.isCurrent(view.identity) && view.isAvailable() ? view : undefined;
+        return view && this.store.isCurrent(view.identity) && view.isAvailable() ? view : undefined;
     }
 
     /** Waits for live renderers to publish their current camera footprints, including after projection changes. */
@@ -167,7 +154,7 @@ export class MapViewService {
                 startWith(null),
                 filter(() => {
                     signal.throwIfAborted();
-                    for (let index = 0; index < this.viewStateOwner.numViews; index++) {
+                    for (let index = 0; index < this.store.numViews(); index++) {
                         const viewport = this.renderViewFor(index)?.computeViewport();
                         const published = this.viewStateFor(index)?.viewport;
                         if (
@@ -188,13 +175,13 @@ export class MapViewService {
 
     /** Returns the mutable visualization state for one view, if it exists. */
     viewStateFor(viewIndex: number): ViewVisualizationState | undefined {
-        const id = this.viewStateOwner.idAt(viewIndex);
+        const id = this.store.idAt(viewIndex);
         return id ? this.visualizationByView.get(id)?.state : undefined;
     }
 
     /** Removes either comparison view without applying synchronization to its survivor. */
     removeView(viewIndex: number): void {
-        const count = this.viewStateOwner.numViews;
+        const count = this.store.numViews();
         if (this.removingView || count <= 1 || !Number.isInteger(viewIndex) || viewIndex < 0 || viewIndex >= count) {
             return;
         }
@@ -203,17 +190,17 @@ export class MapViewService {
         try {
             // Include an unconsumed handoff if another close happens during setup.
             const cameras = new Map(
-                [...this.retainedCameras].map(([id, camera]) => [this.viewStateOwner.indexOf(id), camera])
+                [...this.retainedCameras].map(([id, camera]) => [this.store.indexOf(id), camera])
             );
             this.beforeViewRemoval.next({retainedIndices, cameras});
             this.retainedCameras.clear();
             retainedIndices.forEach((index, target) => {
                 const camera = cameras.get(index);
                 if (camera) {
-                    this.retainedCameras.set(this.viewStateOwner.idAt(index)!, camera);
+                    this.retainedCameras.set(this.store.idAt(index)!, camera);
                 }
             });
-            this.viewStateOwner.retainViews(
+            this.store.retainViews(
                 retainedIndices,
                 new Map([...cameras].map(([index, state]) => [index, state.camera]))
             );
@@ -226,7 +213,7 @@ export class MapViewService {
 
     /** Consumes a camera handoff only after the replacement renderer is ready. */
     takeRetainedCamera(viewIndex: number): RenderViewCameraState | undefined {
-        const id = this.viewStateOwner.idAt(viewIndex);
+        const id = this.store.idAt(viewIndex);
         if (!id) return undefined;
         const camera = this.retainedCameras.get(id);
         this.retainedCameras.delete(id);
@@ -239,29 +226,29 @@ export class MapViewService {
      */
     publishLiveCameraViewState(sourceView: number, sourceState: CameraViewState): void {
         if (
-            this.viewStateOwner.numViews < 2 ||
-            sourceView !== this.viewStateOwner.focusedView ||
+            this.store.numViews() < 2 ||
+            sourceView !== this.store.focusedView() ||
             sourceView < 0 ||
-            sourceView >= this.viewStateOwner.numViews
+            sourceView >= this.store.numViews()
         ) {
             return;
         }
 
-        const syncPosition = this.viewStateOwner.viewSync.includes(VIEW_SYNC_POSITION);
-        const syncMovement = this.viewStateOwner.viewSync.includes(VIEW_SYNC_MOVEMENT);
+        const syncPosition = this.store.views.viewSync().includes(VIEW_SYNC_POSITION);
+        const syncMovement = this.store.views.viewSync().includes(VIEW_SYNC_MOVEMENT);
         if (!syncPosition && !syncMovement) {
             return;
         }
 
-        const persistedSource = this.viewStateOwner.cameraViewDataState.getValue(sourceView);
+        const persistedSource = this.store.views.cameraViewData()[String(this.store.viewIds()[sourceView])];
         const longitudeDelta = sourceState.destination.lon - persistedSource.destination.lon;
         const latitudeDelta = sourceState.destination.lat - persistedSource.destination.lat;
 
-        for (let targetView = 0; targetView < this.viewStateOwner.numViews; targetView++) {
+        for (let targetView = 0; targetView < this.store.numViews(); targetView++) {
             if (targetView === sourceView) {
                 continue;
             }
-            const targetState = this.viewStateOwner.cameraViewDataState.getValue(targetView);
+            const targetState = this.store.views.cameraViewData()[String(this.store.viewIds()[targetView])];
             const cameraViewData: CameraViewState = syncPosition
                 ? {
                       destination: {...sourceState.destination},
@@ -315,13 +302,13 @@ export class MapViewService {
 
     /** Recomputes visible tile ids and render policy for every view. */
     private recalculateVisibleTiles(): void {
-        const tileLimit = this.viewStateOwner.tilesLoadLimit / this.viewStateOwner.numViews;
+        const tileLimit = this.store.views.tilesLoadLimit() / this.store.numViews();
         this.viewVisualizationState.forEach((state, viewIndex) => {
             state.recalculateTileIds(
                 tileLimit,
                 this.visibleFeatureLevelsInView(viewIndex),
                 state.canonicalCameraAltitudeMeters ??
-                    this.viewStateOwner.cameraViewDataState.getValue(viewIndex).destination.alt
+                    this.store.views.cameraViewData()[String(this.store.viewIds()[viewIndex])].destination.alt
             );
         });
     }
@@ -329,7 +316,7 @@ export class MapViewService {
     /** Resolve one stylesheet's LOD from canonical viewport density at a tile level. */
     styleLod(viewIndex: number, level: number, style: FeatureLayerStyle): number {
         const tileCount = this.styleVisibleTileCount(viewIndex, level);
-        return clampStyleLod(style.lodForVisibleTileCount(tileCount, this.viewStateOwner.lod3TileThreshold));
+        return clampStyleLod(style.lodForVisibleTileCount(tileCount, this.store.views.lod3TileThreshold()));
     }
 
     /** Resolve the continuous GPU LOD used to fade retained style records. */
@@ -337,7 +324,7 @@ export class MapViewService {
         return clampPresentationLod(
             style.presentationLodForVisibleTileCount(
                 this.styleVisibleTileCount(viewIndex, level),
-                this.viewStateOwner.lod3TileThreshold
+                this.store.views.lod3TileThreshold()
             )
         );
     }
@@ -347,7 +334,7 @@ export class MapViewService {
         const state = this.viewVisualizationState[viewIndex];
         const altitude =
             state?.canonicalCameraAltitudeMeters ??
-            this.viewStateOwner.cameraViewDataState.getValue(viewIndex).destination.alt;
+            this.store.views.cameraViewData()[String(this.store.viewIds()[viewIndex])].destination.alt;
         return (
             state?.canonicalVisibleTileCountPerLevel.get(level) ??
             Number(coreLib.getNumTileIdsForCanonicalCamera(altitude, level))
@@ -464,7 +451,7 @@ export class MapViewService {
         if (cached) {
             return cached;
         }
-        const tileLimit = this.viewStateOwner.tilesLoadLimit / Math.max(1, this.viewStateOwner.numViews);
+        const tileLimit = this.store.views.tilesLoadLimit() / Math.max(1, this.store.numViews());
         const visibleTileIds = coreLib.getTileIds(viewState.viewport, normalizedLevel, tileLimit) as number[];
         viewState.visibleTileIdsPerLevel.set(normalizedLevel, visibleTileIds);
         viewState.visibleTileIdSetsPerLevel.set(normalizedLevel, new Set<number>(visibleTileIds));
@@ -529,46 +516,39 @@ export class MapViewService {
     /** Persists map/layer visibility changes and requests the resulting viewport refresh. */
     setMapLayerVisibility(viewIndex: number, mapOrGroupId: string, layerId: string = "", state: boolean) {
         this.mapInfo.setMapLayerVisibility(viewIndex, mapOrGroupId, layerId, state);
-        this.mapInfo.syncViewsIfEnabled(viewIndex);
         this.requestViewRecalculation(ViewRecalculationReason.Visibility);
     }
 
     /** Toggles the diagnostic tile-border overlay in one view. */
     toggleViewTileBorderVisibility(viewIndex: number) {
         this.mapInfo.toggleViewTileBorderVisibility(viewIndex);
-        this.mapInfo.syncViewsIfEnabled(viewIndex);
         this.requestViewRecalculation(ViewRecalculationReason.TileBorder);
     }
 
     /** Sets diagnostic tile-border overlay visibility in one view. */
     setViewTileBorderVisibility(viewIndex: number, enabled: boolean) {
         this.mapInfo.setViewTileBorderVisibility(viewIndex, enabled);
-        this.mapInfo.syncViewsIfEnabled(viewIndex);
         this.requestViewRecalculation(ViewRecalculationReason.TileBorder);
     }
 
     /** Sets the tile-grid coordinate mode and refreshes affected overlays. */
     setViewTileGridMode(viewIndex: number, mode: TileGridMode) {
         this.mapInfo.setViewTileGridMode(viewIndex, mode);
-        this.mapInfo.syncViewsIfEnabled(viewIndex);
         this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
     }
 
     /** Sets the independent tile-grid level and refreshes affected overlays. */
     setViewTileGridLevel(viewIndex: number, level: number): void {
         this.mapInfo.setViewTileGridLevel(viewIndex, level);
-        this.mapInfo.syncViewsIfEnabled(viewIndex);
         this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
     }
 
     /** Enables or disables viewport-based automatic tile-grid level selection. */
     setViewTileGridAutoLevel(viewIndex: number, autoLevel: boolean): void {
-        if (autoLevel) {
-            const configuredLevel = this.mapInfo.maps.getViewTileGridLevel(viewIndex);
-            this.mapInfo.setViewTileGridLevel(viewIndex, this.autoSelectedTileGridLevel(viewIndex, configuredLevel));
-        }
-        this.mapInfo.setViewTileGridAutoLevel(viewIndex, autoLevel);
-        this.mapInfo.syncViewsIfEnabled(viewIndex);
+        const configuredLevel = this.mapInfo.maps.getViewTileGridLevel(viewIndex);
+        this.store.setGridPresentation(viewIndex, {autoLevel,
+            level: autoLevel ? this.autoSelectedTileGridLevel(viewIndex, configuredLevel) : configuredLevel
+        }, this.store.views.viewSync().includes(VIEW_SYNC_LAYERS));
         this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
     }
 
@@ -589,33 +569,26 @@ export class MapViewService {
     /** Sets the tile-grid line colour and refreshes affected overlays. */
     setViewTileGridColor(viewIndex: number, color: string): void {
         this.mapInfo.setViewTileGridColor(viewIndex, color);
-        this.mapInfo.syncViewsIfEnabled(viewIndex);
         this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
     }
 
     /** Sets the tile-grid opacity percentage and refreshes affected overlays. */
     setViewTileGridOpacity(viewIndex: number, opacity: number): void {
         this.mapInfo.setViewTileGridOpacity(viewIndex, opacity);
-        this.mapInfo.syncViewsIfEnabled(viewIndex);
         this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
     }
 
     /** Persists an explicit layer level for one view and refreshes visible tiles. */
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
         this.mapInfo.setMapLayerLevel(viewIndex, mapId, layerId, level);
-        this.mapInfo.syncViewsIfEnabled(viewIndex);
         this.requestViewRecalculation(ViewRecalculationReason.LayerLevel);
     }
 
     /** Enables or disables auto-level, normalizing the stored level when auto mode is turned on. */
     setMapLayerAutoLevel(viewIndex: number, mapId: string, layerId: string, autoLevel: boolean) {
-        if (autoLevel) {
-            const configuredLevel = this.mapInfo.maps.getMapLayerLevel(viewIndex, mapId, layerId);
-            const normalizedLevel = this.autoSelectedMapLayerLevel(viewIndex, mapId, layerId, configuredLevel);
-            this.mapInfo.setMapLayerLevel(viewIndex, mapId, layerId, normalizedLevel);
-        }
-        this.mapInfo.setMapLayerAutoLevel(viewIndex, mapId, layerId, autoLevel);
-        this.mapInfo.syncViewsIfEnabled(viewIndex);
+        const configuredLevel = this.mapInfo.maps.getMapLayerLevel(viewIndex, mapId, layerId);
+        const level = autoLevel ? this.autoSelectedMapLayerLevel(viewIndex, mapId, layerId, configuredLevel) : configuredLevel;
+        this.mapInfo.setLayerPresentation(viewIndex, mapId, layerId, {autoLevel, level});
         this.requestViewRecalculation(ViewRecalculationReason.AutoLevel);
     }
 
@@ -637,7 +610,6 @@ export class MapViewService {
     setSyncOptionsForView(viewIndex: number, enabled: boolean) {
         this.mapInfo.setSyncOptionsForView(viewIndex, enabled);
         if (enabled) {
-            this.mapInfo.applySyncOptionsForView(viewIndex);
             this.requestViewRecalculation(ViewRecalculationReason.SyncOptions);
         }
     }
@@ -649,7 +621,7 @@ export class MapViewService {
 
     /** Public entry point that syncs background-layer settings only when layer sync is globally active. */
     syncBackgroundSettings(viewIndex: number) {
-        if (!this.viewStateOwner.viewSync.includes(VIEW_SYNC_LAYERS)) {
+        if (!this.store.views.viewSync().includes(VIEW_SYNC_LAYERS)) {
             return;
         }
         if (this.mapInfo.syncBackgroundSettingsFromView(viewIndex)) {
@@ -729,66 +701,32 @@ export class MapViewService {
     }
 
     /** Creates/removes comparison views using the same retained-camera/layout path as the UI. */
-    manageView(input: ViewerActionInput<"viewer_manage_view">): ViewerActionOutput<"viewer_manage_view"> {
+    manageView(input: z.output<typeof mapViewActions.viewer_manage_view.inputSchema>): z.output<typeof mapViewActions.viewer_manage_view.outputSchema> {
         const viewIndex = this.controlViewIndex(input.viewId);
         if (input.operation === "remove") {
-            if (this.viewStateOwner.numViews === 1) rejectAction("Cannot remove the last view", "invalid_arguments");
+            if (this.store.numViews() === 1) rejectAction("Cannot remove the last view", "invalid_arguments");
             this.removeView(viewIndex);
         } else {
-            if (this.viewStateOwner.numViews >= 32) rejectAction("The layout already has 32 views");
-            this.viewStateOwner.createView(input.viewId);
+            if (this.store.numViews() >= 32) rejectAction("The layout already has 32 views");
+            this.store.createView(input.viewId);
         }
         return appliedAction();
     }
 
-    private registerControls(): void {
-        const actions = inject(AppActionService),
-            controls = MapViewService.controls;
-        actions.registerControl(controls.views, {read: () => this.viewSummary(), overview: () => [{}]});
-        actions.registerControl(controls.camera, {
-            read: ({viewId}) => MapViewService.controls.camera.valueSchema.parse(this.cameraControl(viewId)),
-            write: ({viewId}, value) => this.setCameraControl(viewId, value),
-            overview: () => this.viewStateOwner.viewIds().map((viewId) => ({viewId}))
-        });
-        actions.registerControl(controls.projection, {
-            read: ({viewId}) => (this.viewStateOwner.mode2dState.getValue(this.controlViewIndex(viewId)) ? "2d" : "3d"),
-            write: ({viewId}, value) => this.setProjectionControl(viewId, value)
-        });
-        actions.registerControl(controls.background, {
-            read: ({viewId}) => this.mapInfo.layerState.getBackgroundState(this.controlViewIndex(viewId)),
-            write: ({viewId}, value) => this.setBackgroundControl(viewId, value)
-        });
-        actions.registerControl(controls.grid, {
-            read: ({viewId}) => this.gridControl(viewId),
-            write: ({viewId}, value) => this.setGridControl(viewId, value)
-        });
-        actions.registerControl(controls.layer, {
-            read: (selector) => ({
-                ...this.mapInfo.requireLayer(selector.mapId, selector.layerId).viewConfig[
-                    this.controlViewIndex(selector.viewId)
-                ]
-            }),
-            write: (selector, value) => this.setLayerControl(selector, value)
-        });
-        actions.registerControl(controls.rendering, {
-            read: () => this.renderingPreferences(),
-            write: (_, value) => this.setRenderingPreferences(value)
-        });
-    }
 
     private controlViewIndex(viewId: string): number {
-        return this.viewStateOwner.indexOf(this.viewStateOwner.requireView(viewId).id);
+        return this.store.indexOf(this.store.requireView(viewId).id);
     }
 
     viewSummary() {
         return {
-            focusedViewId: this.viewStateOwner.focusedViewId(),
-            sync: [...this.viewStateOwner.viewSync],
-            views: this.viewStateOwner.viewIds().map((viewId, index) => {
+            focusedViewId: this.store.focusedViewId(),
+            sync: [...this.store.views.viewSync()],
+            views: this.store.viewEntities().map(({id: viewId}, index) => {
                 const view = this.renderViewFor(index);
                 return {
                     viewId,
-                    projection: this.viewStateOwner.mode2dState.getValue(index) ? ("2d" as const) : ("3d" as const),
+                    projection: this.store.views.mode2d()[String(this.store.viewIds()[index])] ? ("2d" as const) : ("3d" as const),
                     navigationMode: !view
                         ? ("unavailable" as const)
                         : view.isFirstPersonViewActive()
@@ -816,50 +754,43 @@ export class MapViewService {
         }
     }
 
-    setCameraControl(viewId: string, value: z.infer<typeof MapViewService.controls.camera.valueSchema>): void {
+    setCameraControl(viewId: string, value: z.infer<typeof mapViewControls.camera.valueSchema>): void {
         const index = this.controlViewIndex(viewId);
         const synced =
-            this.viewStateOwner.viewSync.includes(VIEW_SYNC_POSITION) ||
-            this.viewStateOwner.viewSync.includes(VIEW_SYNC_MOVEMENT);
-        this.requireIdleCameras(synced ? this.viewStateOwner.viewIds().map((_, i) => i) : [index]);
+            this.store.views.viewSync().includes(VIEW_SYNC_POSITION) ||
+            this.store.views.viewSync().includes(VIEW_SYNC_MOVEMENT);
+        this.requireIdleCameras(synced ? this.store.viewIds().map((_, i) => i) : [index]);
         if (
-            this.viewStateOwner.mode2dState.getValue(index) &&
+            this.store.views.mode2d()[String(this.store.viewIds()[index])] &&
             (value.orientation.heading !== 0 ||
                 value.orientation.pitch !== -Math.PI / 2 ||
                 value.position?.some((component) => component !== 0))
         ) {
             rejectAction("2D camera requires heading 0, top-down pitch and zero offset", "invalid_arguments");
         }
-        this.persistence.transaction(() => {
-            this.viewStateOwner.focusedView = index;
-            this.viewStateOwner.setView(
-                index,
-                Cartographic.fromDegrees(value.destination.lon, value.destination.lat, value.destination.alt),
-                value.orientation,
-                value.position ?? [0, 0, 0]
-            );
-        });
+        this.store.setView(
+            index,
+            Cartographic.fromDegrees(value.destination.lon, value.destination.lat, value.destination.alt),
+            value.orientation,
+            value.position ?? [0, 0, 0],
+            true
+        );
     }
 
     setProjectionControl(viewId: string, value: "2d" | "3d"): void {
         const index = this.controlViewIndex(viewId);
         this.requireIdleCameras(
-            this.viewStateOwner.viewSync.includes("proj") ? this.viewStateOwner.viewIds().map((_, i) => i) : [index]
+            this.store.views.viewSync().includes("proj") ? this.store.viewIds().map((_, i) => i) : [index]
         );
-        this.persistence.transaction(() => {
-            this.viewStateOwner.focusedView = index;
-            this.viewStateOwner.setProjectionMode(index, value === "2d");
-        });
+        this.store.setProjectionMode(index, value === "2d", true);
     }
 
-    setBackgroundControl(viewId: string, value: z.infer<typeof MapViewService.controls.background.valueSchema>): void {
+    setBackgroundControl(viewId: string, value: z.infer<typeof mapViewControls.background.valueSchema>): void {
         const index = this.controlViewIndex(viewId);
         if (value.layerId && !this.config.getBackgroundLayers().some((layer) => layer.id === value.layerId))
             rejectAction("Unknown background", "invalid_arguments");
-        this.persistence.transaction(() => {
-            this.mapInfo.layerState.setBackgroundState(index, value.layerId, value.opacity);
-            this.syncBackgroundSettings(index);
-        });
+        this.store.setBackgroundState(index, value.layerId, value.opacity, this.store.views.viewSync().includes(VIEW_SYNC_LAYERS));
+        this.requestViewRecalculation(ViewRecalculationReason.BackgroundSync);
     }
 
     gridControl(viewId: string) {
@@ -875,52 +806,38 @@ export class MapViewService {
         };
     }
 
-    setGridControl(viewId: string, value: z.infer<typeof MapViewService.controls.grid.valueSchema>): void {
+    setGridControl(viewId: string, value: z.infer<typeof mapViewControls.grid.valueSchema>): void {
         const index = this.controlViewIndex(viewId);
         if (value.level > tileGridMaxLevel(value.mode))
             rejectAction("Grid level exceeds its coordinate system's range", "invalid_arguments");
-        this.persistence.transaction(() => {
-            this.setViewTileGridMode(index, value.mode);
-            this.setViewTileGridLevel(index, value.level);
-            this.setViewTileGridAutoLevel(index, value.autoLevel);
-            this.setViewTileGridColor(index, value.color);
-            this.setViewTileGridOpacity(index, value.opacity);
-            this.setViewTileBorderVisibility(index, value.visible);
-        });
+        const level = value.autoLevel ? this.autoSelectedTileGridLevel(index, value.level) : value.level;
+        this.store.setGridPresentation(index, {...value, level}, this.store.views.viewSync().includes(VIEW_SYNC_LAYERS));
+        this.requestViewRecalculation(ViewRecalculationReason.TileGrid);
     }
 
     setLayerControl(
-        selector: z.infer<typeof MapViewService.controls.layer.selectorSchema>,
-        value: z.infer<typeof MapViewService.controls.layer.valueSchema>
+        selector: z.infer<typeof mapViewControls.layer.selectorSchema>,
+        value: z.infer<typeof mapViewControls.layer.valueSchema>
     ): void {
         const index = this.controlViewIndex(selector.viewId);
         this.mapInfo.requireLayer(selector.mapId, selector.layerId);
-        this.persistence.transaction(() => {
-            this.setMapLayerLevel(index, selector.mapId, selector.layerId, value.level);
-            this.setMapLayerAutoLevel(index, selector.mapId, selector.layerId, value.autoLevel);
-            this.setMapLayerVisibility(index, selector.mapId, selector.layerId, value.visible);
-        });
+        const level = value.autoLevel ? this.autoSelectedMapLayerLevel(index, selector.mapId, selector.layerId, value.level) : value.level;
+        this.mapInfo.setLayerPresentation(index, selector.mapId, selector.layerId, {...value, level});
+        this.requestViewRecalculation(ViewRecalculationReason.LayerLevel);
     }
 
     renderingPreferences() {
         return {
-            antialiasing: this.viewStateOwner.deckAntialiasingEnabled,
-            semanticCompositing: this.viewStateOwner.semanticCompositingEnabled,
-            contactShading: this.viewStateOwner.contactShadingEnabled,
-            tilePullCompression: this.stream.tilePullCompressionEnabled,
-            tileLimit: this.viewStateOwner.tilesLoadLimit,
-            renderWorkers: this.viewStateOwner.tileSubsetRenderWorkerCount
+            antialiasing: this.store.views.deckAntialiasingEnabled(),
+            semanticCompositing: this.store.views.semanticCompositingEnabled(),
+            contactShading: this.store.views.contactShadingEnabled(),
+            tilePullCompression: this.store.connection.tilePullCompressionEnabled(),
+            tileLimit: this.store.views.tilesLoadLimit(),
+            renderWorkers: this.store.views.tileSubsetRenderWorkerCount()
         };
     }
 
-    setRenderingPreferences(value: z.infer<typeof MapViewService.controls.rendering.valueSchema>): void {
-        this.persistence.transaction(() => {
-            this.viewStateOwner.deckAntialiasingEnabled = value.antialiasing;
-            this.viewStateOwner.semanticCompositingEnabled = value.semanticCompositing;
-            this.viewStateOwner.contactShadingEnabled = value.contactShading;
-            this.stream.tilePullCompressionEnabled = value.tilePullCompression;
-            this.viewStateOwner.tilesLoadLimit = value.tileLimit;
-            this.viewStateOwner.tileSubsetRenderWorkerCount = value.renderWorkers;
-        });
+    setRenderingPreferences(value: z.infer<typeof mapViewControls.rendering.valueSchema>): void {
+        this.store.setRenderingPreferences(value);
     }
 }

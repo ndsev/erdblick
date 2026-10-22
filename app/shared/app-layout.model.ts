@@ -4,6 +4,11 @@ export const DEFAULT_EM_HEIGHT = 40;
 
 export const DEFAULT_DOCKED_EM_HEIGHT = 20;
 
+/** Reads a DOM measurement at the component boundary; the layout store contains only values. */
+export function getBaseFontSize(): number {
+    return parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+}
+
 export const ABOUT_DIALOG_LAYOUT_ID = "about-dialog";
 
 export const LEGAL_INFO_DIALOG_LAYOUT_ID = "legal-info-dialog";

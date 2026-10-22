@@ -1,7 +1,7 @@
-// Collect static declarations by importing the actual owner classes, without creating
-// Angular services, loading WASM, or accessing browser storage. Bundling resolves their
-// Angular/module imports for Node. createRequire supports CommonJS dependencies inside
-// the ESM bundle; it does not bootstrap an application or start a discovery server.
+// Compile the application's actual SignalStore composition for Node, then inspect
+// its action metadata without invoking handlers or starting browser resources.
+// Node is needed only for this build step; mapget consumes the generated manifest.
+// createRequire supports CommonJS dependencies inside the ESM bundle.
 const {buildSync} = require("esbuild");
 const path = require("node:path");
 const {pathToFileURL} = require("node:url");

@@ -1,11 +1,18 @@
 import "@angular/compiler";
+import {Injector, runInInjectionContext} from "@angular/core";
+import {AppStore} from "../app/shared/app.store.js";
 import {createHash} from "node:crypto";
 import {mkdirSync, writeFileSync} from "node:fs";
 import {canonicalViewerContractJson, viewerActionCatalog, viewerJsonSchema} from "../app/actions/viewer-action.contract.js";
 import {viewerActionClientMessageSchema, viewerActionServerMessageSchema, viewerMcpInfoSchema} from "../app/actions/viewer-action-relay.contract.js";
 
-// Bundle and import actual owner classes; static declarations need no service construction or browser globals.
-const catalog = viewerActionCatalog();
+// Construct the same feature graph used by the browser, without application startup.
+// Operation features capture the injector but resolve resource services only when
+// called. This empty injector deliberately cannot supply HTTP, renderers or WASM.
+const injector = Injector.create({providers: []});
+const store = runInInjectionContext(injector, () => new AppStore());
+const catalog = viewerActionCatalog(store.actionCatalog);
+injector.destroy();
 const canonical = canonicalViewerContractJson(catalog);
 const catalogId = `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
 const output = "app/actions/generated";

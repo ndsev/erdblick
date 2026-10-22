@@ -1,12 +1,12 @@
-import {connectionRetryPolicySchema, DEFAULT_CONNECTION_RETRY_POLICY} from "../shared/connection-retry-policy";
-import {ownerState} from "./map-tile-stream.service.state";
+import {connectionRetryPolicySchema} from "../shared/connection-retry-policy";
 
-import {Injectable, NgZone, OnDestroy} from "@angular/core";
-import {auditTime, BehaviorSubject, combineLatest, Subject, Subscription} from "rxjs";
+import {inject, Injectable, NgZone, OnDestroy} from "@angular/core";
+import {BehaviorSubject, Subject, Subscription} from "rxjs";
 import {TileFeatureId} from "../inspection/inspection-state.model";
 import {coreLib, uint8ArrayToWasmOrThrow} from "../integrations/wasm";
 import {MAX_NUM_TILES_TO_LOAD} from "../mapview/map-view-state.model";
-import {AppStateService} from "../shared/appstate.service";
+import {AppStore} from "../shared/app.store";
+import {observeStore} from "../shared/persisted-state";
 import {
     ConnectionRetryAttempt,
     connectionRetryDeadline,
@@ -98,71 +98,9 @@ const MAX_OBJECT_DISCOVERY_CACHE_TILES = 4096;
  */
 @Injectable({providedIn: "root"})
 export class MapTileStreamService implements OnDestroy {
-    readonly tilePullCompressionEnabledState = this.stateService.register(
-        ownerState.tilePullCompressionEnabled,
-        "connection",
-        "tilePullCompressionEnabled"
-    );
-
+    private readonly store = inject(AppStore);
     private invalidConnectionPolicy = "";
 
-    readonly connectionRetryEnabledState = this.stateService.register(
-        ownerState.connectionRetryEnabled,
-        "connection",
-        "connectionRetryEnabled"
-    );
-
-    readonly connectionRetryInitialDelayMsState = this.stateService.register(
-        ownerState.connectionRetryInitialDelayMs,
-        "connection",
-        "connectionRetryInitialDelayMs"
-    );
-
-    readonly connectionRetryBackoffMultiplierState = this.stateService.register(
-        ownerState.connectionRetryBackoffMultiplier,
-        "connection",
-        "connectionRetryBackoffMultiplier"
-    );
-
-    readonly connectionRetryMaxDelayMsState = this.stateService.register(
-        ownerState.connectionRetryMaxDelayMs,
-        "connection",
-        "connectionRetryMaxDelayMs"
-    );
-
-    /** Combines validated slots; inconsistent imported bounds fall back without disabling an explicit opt-out. */
-    get connectionRetryPolicy(): ConnectionRetryPolicy {
-        const policy = {
-            enabled: this.connectionRetryEnabledState.getValue(),
-            initialDelayMs: this.connectionRetryInitialDelayMsState.getValue(),
-            backoffMultiplier: this.connectionRetryBackoffMultiplierState.getValue(),
-            maxDelayMs: this.connectionRetryMaxDelayMsState.getValue()
-        };
-        const result = connectionRetryPolicySchema.safeParse(policy);
-        const invalid = result.success ? "" : JSON.stringify(policy);
-        if (invalid && invalid !== this.invalidConnectionPolicy) {
-            console.warn("Ignoring inconsistent connection retry settings; using default timing.");
-        }
-        this.invalidConnectionPolicy = invalid;
-        return result.success ? result.data : {...DEFAULT_CONNECTION_RETRY_POLICY, enabled: policy.enabled};
-    }
-
-    /** Validate the complete preference edit before publishing any persisted values. */
-    setConnectionRetryPolicy(policy: ConnectionRetryPolicy): void {
-        const parsed = connectionRetryPolicySchema.parse(policy);
-        this.connectionRetryEnabledState.next(parsed.enabled);
-        this.connectionRetryInitialDelayMsState.next(parsed.initialDelayMs);
-        this.connectionRetryBackoffMultiplierState.next(parsed.backoffMultiplier);
-        this.connectionRetryMaxDelayMsState.next(parsed.maxDelayMs);
-    }
-
-    get tilePullCompressionEnabled() {
-        return this.tilePullCompressionEnabledState.getValue();
-    }
-
-    set tilePullCompressionEnabled(val: boolean) {
-        this.tilePullCompressionEnabledState.next(val);
-    }
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
     readonly actionClientId$ = new BehaviorSubject<string | null>(null);
     readonly actionControlReceived = new Subject<{payload: unknown; receivedAt: number}>();
@@ -236,31 +174,27 @@ export class MapTileStreamService implements OnDestroy {
         new WeakMap<MapgetLayer, Map<number, ObjectDiscoveryCacheEntry>>();
 
     constructor(
-        private readonly stateService: AppStateService,
         private readonly mapInfo: MapInfoService,
         private readonly messageService: InfoMessageService,
         private readonly ngZone: NgZone
     ) {
-        this.retryPolicy = this.connectionRetryPolicy;
+        this.retryPolicy = this.store.connectionRetryPolicy();
         this.stateSubscriptions.add(
-            combineLatest([
-                this.connectionRetryEnabledState,
-                this.connectionRetryInitialDelayMsState,
-                this.connectionRetryBackoffMultiplierState,
-                this.connectionRetryMaxDelayMsState
-            ])
-                .pipe(auditTime(0))
+            observeStore(this.store, () => this.store.connectionRetryPolicy())
                 .subscribe(() => this.applyRetryPolicy())
         );
-        this.tilePullCompressionEnabledState.subscribe((enabled) =>
-            this.tileStream?.setPullCompressionEnabled(enabled)
+        this.stateSubscriptions.add(
+            observeStore(this.store, state => state.connection.tilePullCompressionEnabled)
+                .subscribe(enabled => this.tileStream?.setPullCompressionEnabled(enabled))
         );
-        this.mapInfo.dataSourceInfoChanged.subscribe(() => {
-            this.ngZone.runOutsideAngular(() => {
-                this.tileStream?.resetAfterDataSourceInfoChange();
-                this.scheduleUpdate();
-            });
-        });
+        this.stateSubscriptions.add(
+            this.mapInfo.dataSourceInfoChanged.subscribe(() => {
+                this.ngZone.runOutsideAngular(() => {
+                    this.tileStream?.resetAfterDataSourceInfoChange();
+                    this.scheduleUpdate();
+                });
+            })
+        );
     }
 
     async initialize(): Promise<void> {
@@ -270,7 +204,7 @@ export class MapTileStreamService implements OnDestroy {
         );
         this.tileStream.onClientId = clientId => this.actionClientId$.next(clientId);
         this.tileStream.onActionControl = (payload, receivedAt) => this.actionControlReceived.next({payload, receivedAt});
-        this.tileStream.setPullCompressionEnabled(this.tilePullCompressionEnabled);
+        this.tileStream.setPullCompressionEnabled(this.store.connection.tilePullCompressionEnabled());
         this.tileStream.setFrameProcessingPaused(this.tilePipelinePaused);
         this.tileStream.onSubsets = payload =>
             this.ngZone.runOutsideAngular(() => this.acceptSubset(payload));
@@ -1217,7 +1151,18 @@ export class MapTileStreamService implements OnDestroy {
 
     /** Recomputes waiting deadlines when preferences change, retaining attempts and live work. */
     private applyRetryPolicy(): void {
-        this.retryPolicy = this.connectionRetryPolicy;
+        const rawPolicy = {
+            enabled: this.store.connection.connectionRetryEnabled(),
+            initialDelayMs: this.store.connection.connectionRetryInitialDelayMs(),
+            backoffMultiplier: this.store.connection.connectionRetryBackoffMultiplier(),
+            maxDelayMs: this.store.connection.connectionRetryMaxDelayMs()
+        };
+        const invalid = connectionRetryPolicySchema.safeParse(rawPolicy).success ? "" : JSON.stringify(rawPolicy);
+        if (invalid && invalid !== this.invalidConnectionPolicy) {
+            console.warn("Ignoring inconsistent connection retry settings; using default timing.");
+        }
+        this.invalidConnectionPolicy = invalid;
+        this.retryPolicy = this.store.connectionRetryPolicy();
         if (this.connectionRetry && this.connectionRetry.at > 0) {
             this.connectionRetry.at = connectionRetryDeadline(this.retryPolicy, this.connectionRetry);
             this.connectionRetryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);

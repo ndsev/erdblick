@@ -1,16 +1,14 @@
-import {runInInjectionContext} from "@angular/core";
+import {AppStore} from "../shared/app.store";
+import {observeStore} from "../shared/persisted-state";
+import {InfoMessageService} from "../shared/info.service";
+import {Injector, runInInjectionContext} from "@angular/core";
 import {ownerTestInjector} from "../../test/owner-test-injector";
-import {InspectionStateService} from "./inspection-state.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
 import {ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
-import {AppStateService} from "../shared/appstate.service";
-import {AppLayoutService} from "../shared/app-layout.service";
 import "@angular/compiler";
-import {BehaviorSubject} from "rxjs";
+import {BehaviorSubject, Subject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
-import type {InfoMessageService} from "../shared/info.service";
 import {InspectionSelectionService} from "./inspection-selection.service";
 import type {InspectionPanelModel, TileFeatureId} from "./inspection-state.model";
 
@@ -19,14 +17,10 @@ const feature = (featureId: string, mapTileKey: string): TileFeatureId => ({feat
 /** Actual persisted owners for assertions about one complete inspection publication. */
 function coherentInspectionHarness() {
     const injector = ownerTestInjector([
-        MapViewStateService, AppLayoutService, InspectionStateService,
         {provide: ViewLayerDiagnosticsService, useValue: {}}
     ]);
-    injector.get(MapViewStateService);
-    const inspections = injector.get(InspectionStateService);
-    const layout = injector.get(AppLayoutService);
+    const inspections = injector.get(AppStore);
     const service = runInInjectionContext(injector, () => new InspectionSelectionService(
-        injector.get(AppStateService),
         {parseMapPartitionKeySafe: () => ["Map", "Layer", 42]} as never,
         {} as never,
         {registerShortcut() {}} as never,
@@ -34,11 +28,11 @@ function coherentInspectionHarness() {
         {run: (callback: () => unknown) => callback()} as never
     ));
     const observed: unknown[] = [];
-    const subscription = inspections.selectionState.subscribe(panels => observed.push({
+    const subscription = observeStore(inspections, state => state.inspection.selection).subscribe(panels => observed.push({
         features: panels.map(panel => panel.features.map(item => item.featureId)),
         locked: panels.map(panel => panel.locked),
         colors: panels.map(panel => panel.color),
-        dockOpen: layout.isDockOpen
+        dockOpen: inspections.layout.dockOpen()
     }));
     return {service, inspections, observed, subscription};
 }
@@ -48,84 +42,31 @@ function createHarness(
     initialPanels: InspectionPanelModel<TileFeatureId>[] = [],
     loadFeatures = vi.fn(async () => [] as FeatureWrapper[])
 ) {
-    let panels = [...initialPanels];
-    let nextPanelId = 1 + Math.max(-1, ...panels.map(panel => panel.id));
-    const stateService = {
-        inspectionsLimit: limit,
-        selectionState: new BehaviorSubject(initialPanels),
-        get selection() {
-            return panels;
-        },
-        setSelection: vi.fn((features: TileFeatureId[], _id?: number, forceNewPanel = false) => {
-            if (!forceNewPanel) {
-                const duplicate = panels.find(panel =>
-                    panel.sourceData === undefined &&
-                    panel.features.some(existing =>
-                        existing.mapTileKey === features[0].mapTileKey &&
-                        existing.featureId === features[0].featureId
-                    )
-                );
-                if (duplicate) {
-                    return undefined;
-                }
-                const reusable = [...panels].reverse().find(panel =>
-                    panel.sourceData === undefined && !panel.locked
-                );
-                if (reusable) {
-                    reusable.features = [...features];
-                    return reusable.id;
-                }
-            }
-            if (panels.length >= limit) {
-                return undefined;
-            }
-            const id = nextPanelId++;
-            panels.push({
-                id,
-                features: [...features],
-                locked: false,
-                focused: true,
-                size: [30, 20],
-                color: "#fff",
-                undocked: false
-            });
-            return id;
-        }),
-        unsetUnlockedSelections: vi.fn(() => {
-            panels = panels.filter(panel => panel.locked || panel.sourceData !== undefined);
-        }),
-        setInspectionPanelLockedState: vi.fn((panelId: number, locked: boolean) => {
-            const panel = panels.find(candidate => candidate.id === panelId);
-            if (panel) {
-                panel.locked = locked;
-            }
-        })
-    };
     const infoMessageService = {showWarning: vi.fn()} as unknown as InfoMessageService;
-    const injector = ownerTestInjector([MapViewStateService,
-        {provide: InspectionStateService, useValue: stateService},
-        {provide: ViewLayerDiagnosticsService, useValue: {}}]);
+    const injector = ownerTestInjector([
+        {provide: InfoMessageService, useValue: infoMessageService},
+        {provide: ViewLayerDiagnosticsService, useValue: {}}
+    ]);
+    const store = injector.get(AppStore);
+    store.setInspectionsLimit(limit);
+    store.setSelectionValue(initialPanels);
     const service = runInInjectionContext(injector, () => new InspectionSelectionService(
-        injector.get(AppStateService),
-        {loadFeatures} as never,
-        {} as never,
-        {registerShortcut: vi.fn()} as never,
-        infoMessageService,
-        {run: (callback: () => unknown) => callback()} as never
+        {loadFeatures} as never, {} as never, {registerShortcut: vi.fn()} as never,
+        infoMessageService, {run: (callback: () => unknown) => callback()} as never
     ));
     return {
         service,
-        stateService,
+        stateService: store,
         infoMessageService,
         loadFeatures,
-        panels: () => panels
+        panels: () => store.inspection.selection()
     };
 }
 
 describe("InspectionSelectionService multi-inspection", () => {
     it("publishes a direct multi-inspection with all requested locks and the dock together", () => {
         const {service, inspections, observed, subscription} = coherentInspectionHarness();
-        const priorPanels = inspections.selectionState.signal();
+        const priorPanels = inspections.inspection.selection();
 
         service.inspectFeatureIds([
             feature("first", "Features:Map:Layer:42"),
@@ -247,7 +188,7 @@ describe("InspectionSelectionService multi-inspection", () => {
         const result = service.inspectFeatureIds([feature("new", "map/tile")]);
 
         expect(result).toEqual({foundFeatureCount: 1, inspectedFeatureCount: 0});
-        expect(stateService.setSelection).not.toHaveBeenCalled();
+        expect(stateService.inspection.selection()).toHaveLength(1);
         expect(infoMessageService.showWarning).toHaveBeenCalledWith(
             "Inspecting 0 features out of 1 found features. " +
             "Decrease the selection or increase your max inspections limit to see more."
@@ -285,7 +226,7 @@ describe("InspectionSelectionService multi-inspection", () => {
 
         expect(result).toEqual({foundFeatureCount: 2, inspectedFeatureCount: 2});
         expect(panels().map(panel => panel.locked)).toEqual([true, true]);
-        expect(stateService.setInspectionPanelLockedState).toHaveBeenCalledTimes(2);
+        expect(stateService.inspection.selection().every(panel => panel.locked)).toBe(true);
     });
 
     it("retains a validity hover without loading its selected host feature", () => {
@@ -331,5 +272,75 @@ describe("InspectionSelectionService multi-inspection", () => {
         service.setHoveredFeatures([second, first]);
 
         expect(emissions).toEqual([[], [first, second]]);
+    });
+});
+
+
+describe("InspectionSelectionService resource lifetime", () => {
+    it("aborts pending feature resolution and cannot publish panels after injector destruction", async () => {
+        let resolveLocate!: (features: TileFeatureId[]) => void;
+        const pending = new Promise<TileFeatureId[]>(resolve => { resolveLocate = resolve; });
+        let signal: AbortSignal | undefined;
+        const injector = Injector.create({providers: [AppStore,
+            {provide: ViewLayerDiagnosticsService, useValue: {}}
+        ]});
+        const store = injector.get(AppStore);
+        store.initializeViews();
+        const service = runInInjectionContext(injector, () => new InspectionSelectionService({
+            locateFeature: (_map: string, _feature: string, _layer: string, operationSignal: AbortSignal) => {
+                signal = operationSignal;
+                return pending;
+            }
+        } as never, {} as never, {registerShortcut() {}} as never, {} as never,
+        {run: (callback: () => unknown) => callback()} as never));
+        const operation = service.inspect({features: [{mapId: "Map", featureId: "Road.1"}]});
+        const rejected = expect(operation).rejects.toMatchObject({detail: {code: "cancelled"}});
+        injector.destroy();
+        expect(signal?.aborted).toBe(true);
+        resolveLocate([feature("Road.1", "Features:Map:Layer:42")]);
+        await rejected;
+        expect(store.inspection.selection()).toEqual([]);
+        expect(store.layout.dockOpen()).toBe(false);
+    });
+
+    it("aborts a pending navigation without focusing or moving a camera after destruction", async () => {
+        let resolveLoad!: (features: FeatureWrapper[]) => void;
+        const pending = new Promise<FeatureWrapper[]>(resolve => { resolveLoad = resolve; });
+        let signal: AbortSignal | undefined;
+        const renderer = {
+            rendererInvalidated: new Subject<void>(), isFirstPersonViewActive: () => false,
+            isCameraInteractionActive: () => false, getLiveCameraState: () => ({camera: "unchanged"})
+        };
+        const moves = new Subject();
+        const moved = vi.fn();
+        moves.subscribe(moved);
+        const injector = Injector.create({providers: [AppStore,
+            {provide: ViewLayerDiagnosticsService, useValue: {cameraInteracting$: new BehaviorSubject(false)}}
+        ]});
+        const store = injector.get(AppStore);
+        store.initializeViews();
+        store.setNumViews(2);
+        const previousFocus = store.focusedViewId();
+        const service = runInInjectionContext(injector, () => new InspectionSelectionService({
+            parseMapPartitionKeySafe: () => ["Map", "Layer", 42],
+            loadFeatures: (_features: TileFeatureId[], operationSignal: AbortSignal) => {
+                signal = operationSignal;
+                return pending;
+            }
+        } as never, {navigationStarted: new Subject<void>(), renderViewFor: () => renderer,
+            moveToWgs84PositionTopic: moves, moveToRectangleTopic: moves} as never,
+        {registerShortcut() {}} as never, {} as never,
+        {run: (callback: () => unknown) => callback()} as never));
+        const operation = service.navigate({viewId: store.idAt(1)!,
+            target: {features: [feature("Road.1", "Features:Map:Layer:42")]}});
+        const rejected = expect(operation).rejects.toMatchObject({detail: {code: "cancelled"}});
+        await Promise.resolve();
+        expect(signal).toBeDefined();
+        injector.destroy();
+        expect(signal?.aborted).toBe(true);
+        resolveLoad([]);
+        await rejected;
+        expect(store.focusedViewId()).toBe(previousFocus);
+        expect(moved).not.toHaveBeenCalled();
     });
 });

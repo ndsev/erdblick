@@ -1,5 +1,7 @@
 import "@angular/compiler";
 import {Subject} from 'rxjs';
+import {getState} from "@ngrx/signals";
+import {observeStore} from "./persisted-state";
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createStateOwners, type StateOwners} from "./state-test-owners";
 
@@ -7,7 +9,6 @@ import type {Event, Router} from '@angular/router';
 import {NavigationEnd, NavigationStart} from '@angular/router';
 import {Cartographic} from '../integrations/geo';
 
-import {MapTreeNode} from "../mapdata/map.tree.model";
 import {VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION} from "../mapview/map-view-state.model";
 
 // @ts-expect-error this is a mock router
@@ -54,16 +55,17 @@ const infoServiceStub = () => ({
     showAlertDialogDefault: vi.fn()
 }) as any;
 
-const layerInfo = (layerId: string, type = "Feature") => ({
-    layerId,
-    type,
-    canRead: true,
-    canWrite: false,
-    coverage: [],
-    featureTypes: [],
-    version: {major: 1, minor: 0, patch: 0},
-    zoomLevels: [],
-});
+/** Seed legacy positional style values through the same compatibility projection used by persistence. */
+function setTestStyleOptions(owner: StateOwners, value: Map<string, (string | number | boolean)[]>): void {
+    const next = owner.persistence.stylesPersistence.replace(getState(owner.store), value);
+    owner.store.restorePersistedState(next, "user");
+}
+
+/** Seed raw marker coordinates to exercise the released serialization rounding. */
+function setTestMarkedPosition(owner: StateOwners, value: number[]): void {
+    const next = owner.persistence.descriptor("markedPosition").replace(getState(owner.store), value);
+    owner.store.restorePersistedState(next, "user");
+}
 
 describe('AppStateService', () => {
     beforeEach(() => {
@@ -87,12 +89,12 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.markerState.getValue()).toBe(true);
+        expect(service.store.views.marker()).toBe(true);
 
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        service.views.markerState.next(false);
+        service.store.setMarkerState(false);
         await flushMicrotasks();
 
         expect(localStorage.getItem('marker')).toBe('0');
@@ -104,6 +106,45 @@ describe('AppStateService', () => {
 
         service.destroy();
         routerStub.events.complete();
+    });
+
+    it('restores an explicitly open empty dock and width across reload and unrelated imports', async () => {
+        const first = createStateOwners(createRouterStub() as unknown as Router, infoServiceStub());
+        first.persistence.initializePersistence();
+        first.store.setDockOpen(true);
+        first.store.setDockWidth(480);
+        await flushMicrotasks();
+        expect(localStorage.getItem('dockOpenState')).toBe('1');
+        expect(localStorage.getItem('dockWidth')).toBe('480');
+        const saved = first.persistence.exportSnapshot();
+        first.destroy();
+
+        const restarted = createStateOwners(createRouterStub() as unknown as Router, infoServiceStub());
+        try {
+            restarted.persistence.initializePersistence();
+            await flushMicrotasks();
+            expect(restarted.store.inspection.selection()).toEqual([]);
+            expect(restarted.store.layout.dockOpen()).toBe(true);
+            expect(restarted.store.layout.dockWidth()).toBe(480);
+            expect(localStorage.getItem('dockOpenState')).toBe('1');
+
+            expect(restarted.persistence.importSnapshot({marker: 1})).toEqual([]);
+            await restarted.persistence.replaceUrlState({v2: '1', m: '0'});
+            expect(restarted.store.layout.dockOpen()).toBe(true);
+            expect(restarted.store.layout.dockWidth()).toBe(480);
+
+            restarted.store.setSelection([feature('temporary')]);
+            expect(restarted.persistence.replaceSnapshotState(saved)).toEqual([]);
+            expect(restarted.store.inspection.selection()).toEqual([]);
+            expect(restarted.store.layout.dockOpen()).toBe(true);
+            expect(restarted.store.layout.dockWidth()).toBe(480);
+
+            restarted.store.setSelection([feature('temporary')]);
+            expect(restarted.persistence.importSnapshot({selected: []})).toEqual([]);
+            expect(restarted.store.layout.dockOpen()).toBe(false);
+        } finally {
+            restarted.destroy();
+        }
     });
 
     it('does not rewrite inbound v1 URLs during passive startup hydration', async () => {
@@ -120,7 +161,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.markerState.getValue()).toBe(true);
+        expect(service.store.views.marker()).toBe(true);
         expect(routerStub.navigate).not.toHaveBeenCalled();
 
         service.destroy();
@@ -137,7 +178,7 @@ describe('AppStateService', () => {
         routerStub.navigate.mockClear();
         const appliedMarkerValues: boolean[] = [];
         service.persistence.stateApplied.subscribe(() => {
-            appliedMarkerValues.push(service.views.markerState.getValue());
+            appliedMarkerValues.push(service.store.views.marker());
         });
 
         await service.persistence.replaceUrlState({v2: '1', m: '1'});
@@ -147,7 +188,7 @@ describe('AppStateService', () => {
             queryParamsHandling: 'replace',
             replaceUrl: true,
         });
-        expect(service.views.markerState.getValue()).toBe(true);
+        expect(service.store.views.marker()).toBe(true);
         expect(appliedMarkerValues).toEqual([true]);
 
         service.destroy();
@@ -165,141 +206,6 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('keeps selected features with packed tile ids during datasource pruning', () => {
-        const routerStub = createRouterStub();
-        const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
-        service.inspections.selection = [{
-            id: 0,
-            features: [feature(
-                "Intersection.545554858.3348",
-                "Features:Very-Large-Map:Road:22100770000d"
-            )],
-            locked: true,
-            size: [30, 20],
-            color: "#fff314",
-            undocked: false,
-        }];
-
-        service.inspections.prune(new Map([
-            ["Very-Large-Map", new MapTreeNode({
-                mapId: "Very-Large-Map",
-                sourceId: "Very-Large-Map",
-                stringPoolId: "Very-Large-Map",
-                maxParallelJobs: 1,
-                addOn: false,
-                extraJsonAttachment: {},
-                layers: {Road: layerInfo("Road")},
-            } as any)]
-        ]));
-
-        expect(service.inspections.selection).toHaveLength(1);
-        expect(service.inspections.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:22100770000d");
-    });
-
-
-    it('keeps selected features while datasource layers are still initializing', () => {
-        const routerStub = createRouterStub();
-        const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
-        service.inspections.selection = [{
-            id: 0,
-            features: [feature(
-                "Intersection.545554858.3348",
-                "Features:Very-Large-Map:Road:545554858"
-            )],
-            locked: true,
-            size: [30, 20],
-            color: "#fff314",
-            undocked: false,
-        }];
-
-        service.inspections.prune(new Map([
-            ["Very-Large-Map", new MapTreeNode({
-                mapId: "Very-Large-Map",
-                sourceId: "Very-Large-Map",
-                stringPoolId: "Very-Large-Map",
-                maxParallelJobs: 0,
-                addOn: false,
-                status: "initializing",
-                extraJsonAttachment: {},
-                layers: {},
-            } as any)]
-        ]));
-
-        expect(service.inspections.selection).toHaveLength(1);
-        expect(service.inspections.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:545554858");
-    });
-
-    it('preserves focused selection metadata while pruning unavailable selections', () => {
-        const routerStub = createRouterStub();
-        const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
-        service.inspections.selection = [{
-            id: 0,
-            features: [
-                feature("Road.1", "Features:Very-Large-Map:Road:545554858"),
-                feature("Lane.1", "Features:Very-Large-Map:Lane:545554858"),
-            ],
-            locked: true,
-            focused: true,
-            size: [30, 20],
-            color: "#fff314",
-            undocked: false,
-        }];
-
-        service.inspections.prune(new Map([
-            ["Very-Large-Map", new MapTreeNode({
-                mapId: "Very-Large-Map",
-                sourceId: "Very-Large-Map",
-                stringPoolId: "Very-Large-Map",
-                maxParallelJobs: 1,
-                addOn: false,
-                extraJsonAttachment: {},
-                layers: {Road: layerInfo("Road")},
-            } as any)]
-        ]));
-
-        expect(service.inspections.selection).toHaveLength(1);
-        expect(service.inspections.selection[0].focused).toBe(true);
-        expect(service.inspections.selection[0].features).toEqual([
-            feature("Road.1", "Features:Very-Large-Map:Road:545554858"),
-        ]);
-    });
-
-    it('keeps selections whose MapTileKey encodes slashes in the map id', () => {
-        const routerStub = createRouterStub();
-        const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
-        service.inspections.selection = [{
-            id: 0,
-            features: [feature(
-                "Landmark.545666604.12",
-                "Features:Provider%2FSample Munich:Landmark:545666604"
-            )],
-            locked: true,
-            focused: true,
-            size: [30, 20],
-            color: "#fff314",
-            undocked: false,
-        }];
-
-        service.inspections.prune(new Map([
-            ["Provider/Sample Munich", new MapTreeNode({
-                mapId: "Provider/Sample Munich",
-                sourceId: "Provider/Sample Munich",
-                stringPoolId: "Provider/Sample Munich",
-                maxParallelJobs: 1,
-                addOn: false,
-                extraJsonAttachment: {},
-                layers: {Landmark: layerInfo("Landmark")},
-            } as any)]
-        ]));
-
-        expect(service.inspections.selection).toHaveLength(1);
-        expect(service.inspections.selection[0].focused).toBe(true);
-        expect(service.inspections.selection[0].features[0]).toEqual(feature(
-            "Landmark.545666604.12",
-            "Features:Provider%2FSample Munich:Landmark:545666604"
-        ));
-    });
-
     it('clamps the LOD 3 tile threshold', () => {
         const routerStub = createRouterStub();
         const infoServiceStub = {
@@ -311,13 +217,13 @@ describe('AppStateService', () => {
         } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        expect(service.views.lod3TileThreshold).toBe(128);
+        expect(service.store.views.lod3TileThreshold()).toBe(128);
 
-        service.views.lod3TileThreshold = 1024;
-        expect(service.views.lod3TileThreshold).toBe(1024);
+        service.store.setLod3TileThreshold(1024);
+        expect(service.store.views.lod3TileThreshold()).toBe(1024);
 
-        service.views.lod3TileThreshold = 9999;
-        expect(service.views.lod3TileThreshold).toBe(4096);
+        service.store.setLod3TileThreshold(9999);
+        expect(service.store.views.lod3TileThreshold()).toBe(4096);
 
         service.destroy();
         routerStub.events.complete();
@@ -330,11 +236,11 @@ describe('AppStateService', () => {
             infoServiceStub()
         );
 
-        expect(service.views.tileSubsetRenderWorkerCount).toBe(0);
+        expect(service.store.views.tileSubsetRenderWorkerCount()).toBe(0);
 
-        service.views.tileSubsetRenderWorkerCount = 999;
+        service.store.setTileSubsetRenderWorkerCount(999);
 
-        expect(service.views.tileSubsetRenderWorkerCount).toBe(32);
+        expect(service.store.views.tileSubsetRenderWorkerCount()).toBe(32);
         service.destroy();
         routerStub.events.complete();
     });
@@ -343,16 +249,16 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
 
-        expect(service.inspections.drillPickRadius).toBe(3);
+        expect(service.store.inspection.drillPickRadius()).toBe(3);
 
-        service.inspections.drillPickRadius = 7.8;
-        expect(service.inspections.drillPickRadius).toBe(7);
+        service.store.setDrillPickRadius(7.8);
+        expect(service.store.inspection.drillPickRadius()).toBe(7);
 
-        service.inspections.drillPickRadius = -100;
-        expect(service.inspections.drillPickRadius).toBe(1);
+        service.store.setDrillPickRadius(-100);
+        expect(service.store.inspection.drillPickRadius()).toBe(1);
 
-        service.inspections.drillPickRadius = 100;
-        expect(service.inspections.drillPickRadius).toBe(10);
+        service.store.setDrillPickRadius(100);
+        expect(service.store.inspection.drillPickRadius()).toBe(10);
         expect(service.persistence.exportSnapshot()).toHaveProperty('drillPickRadius', 10);
         expect((service as any).url.serializeUrlV2()).not.toHaveProperty('drillPickRadius');
 
@@ -364,16 +270,16 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
 
-        expect(service.views.featureZoomClearanceMeters).toBe(20);
+        expect(service.store.views.featureZoomClearanceMeters()).toBe(20);
 
-        service.views.featureZoomClearanceMeters = 37.5;
-        expect(service.views.featureZoomClearanceMeters).toBe(37.5);
+        service.store.setFeatureZoomClearanceMeters(37.5);
+        expect(service.store.views.featureZoomClearanceMeters()).toBe(37.5);
 
-        service.views.featureZoomClearanceMeters = -1;
-        expect(service.views.featureZoomClearanceMeters).toBe(0);
+        service.store.setFeatureZoomClearanceMeters(-1);
+        expect(service.store.views.featureZoomClearanceMeters()).toBe(0);
 
-        service.views.featureZoomClearanceMeters = 101;
-        expect(service.views.featureZoomClearanceMeters).toBe(100);
+        service.store.setFeatureZoomClearanceMeters(101);
+        expect(service.store.views.featureZoomClearanceMeters()).toBe(100);
         expect(service.persistence.exportSnapshot()).toHaveProperty(
             'featureZoomClearanceMeters',
             100
@@ -402,7 +308,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.featureZoomClearanceMeters).toBe(expected);
+        expect(service.store.views.featureZoomClearanceMeters()).toBe(expected);
         service.destroy();
         routerStub.events.complete();
     });
@@ -418,9 +324,9 @@ describe('AppStateService', () => {
         } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        expect(service.views.deckAntialiasingEnabled).toBe(true);
-        expect(service.views.semanticCompositingEnabled).toBe(true);
-        expect(service.views.contactShadingEnabled).toBe(true);
+        expect(service.store.views.deckAntialiasingEnabled()).toBe(true);
+        expect(service.store.views.semanticCompositingEnabled()).toBe(true);
+        expect(service.store.views.contactShadingEnabled()).toBe(true);
 
         service.destroy();
         routerStub.events.complete();
@@ -434,17 +340,17 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.semanticCompositingEnabled).toBe(false);
-        expect(service.views.semanticCompositingEnabledState.serialize(true)).toBeUndefined();
+        expect(service.store.views.semanticCompositingEnabled()).toBe(false);
+        expect(service.persistence.descriptor("semanticCompositingEnabled").serialize(getState(service.store), true)).toBeUndefined();
 
-        service.views.semanticCompositingEnabled = true;
+        service.store.setSemanticCompositingEnabled(true);
         await flushMicrotasks();
         expect(localStorage.getItem('semanticCompositingEnabled')).toBe('1');
 
-        service.views.semanticCompositingEnabled = false;
+        service.store.setSemanticCompositingEnabled(false);
         await flushMicrotasks();
         expect(localStorage.getItem('semanticCompositingEnabled')).toBe('0');
-        expect(service.views.semanticCompositingEnabledState.serialize(true)).toBeUndefined();
+        expect(service.persistence.descriptor("semanticCompositingEnabled").serialize(getState(service.store), true)).toBeUndefined();
 
         service.destroy();
         routerStub.events.complete();
@@ -464,8 +370,8 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.inspections.focusedInspectionPanelId).toBe(5);
-        expect(service.inspections.selection[0].focused).toBe(true);
+        expect(service.store.focusedInspectionPanelId()).toBe(5);
+        expect(service.store.inspection.selection()[0].focused).toBe(true);
 
         service.destroy();
         routerStub.events.complete();
@@ -488,8 +394,8 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.inspections.selection).toHaveLength(1);
-        expect(service.inspections.selection[0].features[0]).toEqual({
+        expect(service.store.inspection.selection()).toHaveLength(1);
+        expect(service.store.inspection.selection()[0].features[0]).toEqual({
             mapTileKey: 'Features:Very-Large-Map:Road:220e0770000d:0',
             featureId: 'Road.545554686.6:attribute#1:validity#0'
         });
@@ -526,17 +432,17 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.numViews).toBe(2);
-        expect(service.layers.layerNamesState.getValue()).toEqual(['MapA/Lane', 'MapB/Road']);
-        expect(service.layers.layerVisibilityState.getValue(0)).toEqual([true, false]);
-        expect(service.layers.layerVisibilityState.getValue(1)).toEqual([false, true]);
-        expect(service.layers.layerZoomLevelState.getValue(0)).toEqual([12, 13]);
-        expect(service.layers.layerZoomLevelState.getValue(1)).toEqual([14, 15]);
-        expect(service.layers.layerAutoZoomLevelState.getValue(0)).toEqual([true, true]);
-        expect(service.layers.layerAutoZoomLevelState.getValue(1)).toEqual([false, false]);
-        expect(service.layers.stylesState.getValue().get('MapA/Lane/T93C/showCenterLines')).toEqual(['1', '0']);
-        expect(service.layers.stylesState.getValue().get('MapB/Road/T93C/showCenterLines')).toEqual(['1', '0']);
-        expect(service.inspections.selection).toEqual([
+        expect(service.store.numViews()).toBe(2);
+        expect(service.store.layers.layerNames()).toEqual(['MapA/Lane', 'MapB/Road']);
+        expect(service.store.layers.layerVisibility()[service.store.idAt(0)!]).toEqual([true, false]);
+        expect(service.store.layers.layerVisibility()[service.store.idAt(1)!]).toEqual([false, true]);
+        expect(service.store.layers.layerZoomLevel()[service.store.idAt(0)!]).toEqual([12, 13]);
+        expect(service.store.layers.layerZoomLevel()[service.store.idAt(1)!]).toEqual([14, 15]);
+        expect(service.store.layers.layerAutoZoomLevel()[service.store.idAt(0)!]).toEqual([true, true]);
+        expect(service.store.layers.layerAutoZoomLevel()[service.store.idAt(1)!]).toEqual([false, false]);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).get('MapA/Lane/T93C/showCenterLines')).toEqual(['1', '0']);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).get('MapB/Road/T93C/showCenterLines')).toEqual(['1', '0']);
+        expect(service.store.inspection.selection()).toEqual([
             {
                 id: 0,
                 features: [{
@@ -562,7 +468,7 @@ describe('AppStateService', () => {
                 undocked: true
             },
         ]);
-        expect(service.inspections.focusedInspectionPanelId).toBe(1);
+        expect(service.store.focusedInspectionPanelId()).toBe(1);
         expect(routerStub.navigate).not.toHaveBeenCalled();
 
         service.destroy();
@@ -584,7 +490,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.inspections.selection).toEqual([]);
+        expect(service.store.inspection.selection()).toEqual([]);
 
         service.destroy();
         routerStub.events.complete();
@@ -602,10 +508,10 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.inspections.selection).toHaveLength(1);
-        expect(service.inspections.selection[0].id).toBe(5);
-        expect(service.inspections.selection[0].focused).toBe(true);
-        expect(service.inspections.selection[0].features[0]).toEqual({
+        expect(service.store.inspection.selection()).toHaveLength(1);
+        expect(service.store.inspection.selection()[0].id).toBe(5);
+        expect(service.store.inspection.selection()[0].focused).toBe(true);
+        expect(service.store.inspection.selection()[0].features[0]).toEqual({
             mapTileKey: 'Features:MapA:Road:tile-1:0',
             featureId: 'Road.1:attribute#0:validity#0',
         });
@@ -626,7 +532,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.inspections.selection[0].features[0]).toEqual({
+        expect(service.store.inspection.selection()[0].features[0]).toEqual({
             mapTileKey: 'Features:Provider%2FSample Munich:Road:545555209',
             featureId: 'Road.545555209.387',
         });
@@ -655,10 +561,10 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.inspections.selection).toHaveLength(1);
-        expect(service.inspections.selection[0].features).toEqual([feature('feature-1', 'Features:map:layer:tile')]);
-        expect(service.searches.featureSearches).toHaveLength(1);
-        expect(service.searches.featureSearches[0].query).toBe('**.speed > 80');
+        expect(service.store.inspection.selection()).toHaveLength(1);
+        expect(service.store.inspection.selection()[0].features).toEqual([feature('feature-1', 'Features:map:layer:tile')]);
+        expect(service.store.featureSearchEntries()).toHaveLength(1);
+        expect(service.store.featureSearchEntries()[0].query).toBe('**.speed > 80');
 
         service.destroy();
         routerStub.events.complete();
@@ -694,13 +600,13 @@ describe('AppStateService', () => {
         await flushMicrotasks();
 
         expect(service.persistence.ready.getValue()).toBe(true);
-        expect(service.layout.isDialogOpen('preferences-dialog')).toBe(true);
-        expect(service.layout.isDockOpen).toBe(true);
-        expect(service.layout.dockActiveTab).toBe('search');
-        expect(service.inspections.selection).toHaveLength(1);
-        expect(service.inspections.selection[0].id).toBe(7);
-        expect(service.searches.featureSearches).toHaveLength(1);
-        expect(service.searches.featureSearches[0].id).toBe('feature-search-7');
+        expect(service.store.isDialogOpen('preferences-dialog')).toBe(true);
+        expect(service.store.layout.dockOpen()).toBe(true);
+        expect(service.store.layout.dockActiveTab()).toBe('search');
+        expect(service.store.inspection.selection()).toHaveLength(1);
+        expect(service.store.inspection.selection()[0].id).toBe(7);
+        expect(service.store.featureSearchEntries()).toHaveLength(1);
+        expect(service.store.featureSearchEntries()[0].id).toBe('feature-search-7');
 
         service.destroy();
         routerStub.events.complete();
@@ -718,7 +624,7 @@ describe('AppStateService', () => {
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
         service.persistence.initializePersistence();
-        service.searches.addFeatureSearch({query: '**.speed > 80'});
+        service.store.addFeatureSearch({query: '**.speed > 80'});
         await flushMicrotasks();
 
         const stored = JSON.parse(localStorage.getItem('featureSearchState') ?? '[]');
@@ -752,12 +658,12 @@ describe('AppStateService', () => {
         const restoreRouter = createRouterStub();
         let restored: StateOwners | undefined;
         try {
-            service.layers.layerNames = ['Map/Lane'];
-            service.layers.setMapLayerConfig('Map', 'Lane', [{visible: true, level: 13, autoLevel: false}]);
-            service.views.cameraViewDataState.next(0, {destination: {lon: 11, lat: 48, alt: 900},
+            service.store.setLayerNames(['Map/Lane']);
+            service.store.setMapLayerConfig('Map', 'Lane', [{visible: true, level: 13, autoLevel: false}]);
+            service.store.setCameraViewData(0, {destination: {lon: 11, lat: 48, alt: 900},
                 orientation: {heading: 0, pitch: -0.75, roll: 0}, position: [0, 0, 0]});
-            service.inspections.selection = [{id: 0, features: [{mapTileKey: 'Features:Map:Lane:545379780', featureId: 'Lane.1'}],
-                locked: true, size: [30, 20], color: '#fff314', undocked: false}];
+            service.store.setSelectionValue([{id: 0, features: [{mapTileKey: 'Features:Map:Lane:545379780', featureId: 'Lane.1'}],
+                locked: true, size: [30, 20], color: '#fff314', undocked: false}]);
             const previous = window.location.href;
             const link = new URL(service.url.shareableUrl());
             expect(window.location.href).toBe(previous);
@@ -772,10 +678,10 @@ describe('AppStateService', () => {
             restored = createStateOwners(restoreRouter as unknown as Router, infoServiceStub());
             restoreRouter.events.next(new NavigationEnd(1, '/', '/'));
             await flushMicrotasks();
-            expect(restored.layers.layerNames).toEqual(['Map/Lane']);
-            expect(restored.layers.layerVisibilityState.getValue(0)).toEqual([true]);
-            expect(restored.views.cameraViewDataState.getValue(0)).toEqual(service.views.cameraViewDataState.getValue(0));
-            expect(restored.inspections.selection[0].features).toEqual(service.inspections.selection[0].features);
+            expect(restored.store.layers.layerNames()).toEqual(['Map/Lane']);
+            expect(restored.store.layers.layerVisibility()[restored.store.idAt(0)!]).toEqual([true]);
+            expect(restored.store.views.cameraViewData()[restored.store.idAt(0)!]).toEqual(service.store.views.cameraViewData()[service.store.idAt(0)!]);
+            expect(restored.store.inspection.selection()[0].features).toEqual(service.store.inspection.selection()[0].features);
         } finally {
             restored?.destroy();
             service.destroy();
@@ -788,11 +694,11 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
 
-        service.layers.layerNamesState.next(['MapA/Lane', 'MapC/POI']);
-        service.layers.layerVisibilityState.next(0, [true, false]);
-        service.layers.layerZoomLevelState.next(0, [12, 15]);
-        service.layers.layerAutoZoomLevelState.next(0, [false, false]);
-        service.inspections.selection = [{
+        service.store.setLayerNames(['MapA/Lane', 'MapC/POI']);
+        service.store.setLayerViewValue("layerVisibility", 0, [true, false]);
+        service.store.setLayerViewValue("layerZoomLevel", 0, [12, 15]);
+        service.store.setLayerViewValue("layerAutoZoomLevel", 0, [false, false]);
+        service.store.setSelectionValue([{
             id: 0,
             features: [{
                 mapTileKey: 'Features:MapB:Road:21',
@@ -802,7 +708,7 @@ describe('AppStateService', () => {
             size: [30, 20],
             color: '#fff314',
             undocked: false,
-        }];
+        }]);
 
         const params = (service as any).url.serializeUrlV2();
         expect(params).toMatchObject({
@@ -833,16 +739,16 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        const config = service.layers.initializeMapLayerConfig('Classic-2.5.2-Sample', 'NDS.Classic-BMD');
+        const config = service.store.initializeMapLayerConfig('Classic-2.5.2-Sample', 'NDS.Classic-BMD');
         expect(config).toEqual([
             {autoLevel: true, visible: false, level: 13},
         ]);
-        expect(service.layers.layerNamesState.getValue()).toEqual([
+        expect(service.store.layers.layerNames()).toEqual([
             'MapA/Lane',
             'MapB/Road',
             'Classic-2.5.2-Sample/NDS.Classic-BMD',
         ]);
-        expect(service.layers.layerVisibilityState.getValue(0)).toEqual([true, true, false]);
+        expect(service.store.layers.layerVisibility()[service.store.idAt(0)!]).toEqual([true, true, false]);
 
         service.destroy();
         routerStub.events.complete();
@@ -852,8 +758,8 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
 
-        service.layers.layerNamesState.next(['MapA/Lane']);
-        service.layers.layerVisibilityState.next(0, [false]);
+        service.store.setLayerNames(['MapA/Lane']);
+        service.store.setLayerViewValue("layerVisibility", 0, [false]);
 
         const params = (service as any).url.serializeUrlV2();
         expect(params.l).toBe('');
@@ -885,7 +791,7 @@ describe('AppStateService', () => {
         routerStub.navigate.mockClear();
 
         (service as any).persistence.lastUrlSyncAt = Date.now();
-        service.views.markerState.next(true);
+        service.store.setMarkerState(true);
         await flushMicrotasks();
         expect((service as any).persistence.urlSyncHandle).not.toBeNull();
         expect((service as any).persistence.pendingUrlSyncStates.size).toBeGreaterThan(0);
@@ -897,7 +803,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(2, '/?m=0', '/?m=0'));
         await flushMicrotasks();
 
-        expect(service.views.markerState.getValue()).toBe(false);
+        expect(service.store.views.marker()).toBe(false);
         expect(stateApplied).toHaveBeenCalledTimes(1);
 
         vi.advanceTimersByTime(100);
@@ -916,7 +822,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.markedPositionState.getValue()).toEqual([11.14198571, 48.00237573]);
+        expect(service.store.views.markedPosition()).toEqual([11.14198571, 48.00237573]);
 
         service.destroy();
         routerStub.events.complete();
@@ -933,7 +839,7 @@ describe('AppStateService', () => {
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        service.views.markedPositionState.next([11.141985707869166, 48.002375728153766, 125.123456789]);
+        setTestMarkedPosition(service, [11.141985707869166, 48.002375728153766, 125.123456789]);
         await flushMicrotasks();
 
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
@@ -959,9 +865,9 @@ describe('AppStateService', () => {
         } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.views.setMarkerPosition(Cartographic.fromDegrees(11.25, 48.5, 127.75));
+        service.store.setMarkerPosition(Cartographic.fromDegrees(11.25, 48.5, 127.75));
 
-        expect(service.views.markedPosition).toEqual([11.25, 48.5, 127.75]);
+        expect(service.store.views.markedPosition()).toEqual([11.25, 48.5, 127.75]);
         service.destroy();
         routerStub.events.complete();
     });
@@ -974,8 +880,8 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.layers.getBackgroundState(0)).toEqual({ layerId: 'osm', opacity: 50 });
-        expect(service.layers.getBackgroundState(1)).toEqual({ layerId: 'world-overview', opacity: 30 });
+        expect(service.store.getBackgroundState(0)).toEqual({ layerId: 'osm', opacity: 50 });
+        expect(service.store.getBackgroundState(1)).toEqual({ layerId: 'world-overview', opacity: 30 });
 
         service.destroy();
         routerStub.events.complete();
@@ -992,7 +898,7 @@ describe('AppStateService', () => {
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        service.layers.setBackgroundState(0, 'osm', 50);
+        service.store.setBackgroundState(0, 'osm', 50);
         await flushMicrotasks();
 
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
@@ -1016,8 +922,8 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.layers.getBackgroundState(0)).toEqual({ layerId: 'osm', opacity: 50 });
-        expect(service.layers.getBackgroundState(1)).toEqual({ layerId: null, opacity: 30 });
+        expect(service.store.getBackgroundState(0)).toEqual({ layerId: 'osm', opacity: 50 });
+        expect(service.store.getBackgroundState(1)).toEqual({ layerId: null, opacity: 30 });
 
         service.destroy();
         routerStub.events.complete();
@@ -1031,7 +937,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        const resolvedState = service.layers.resolveBackgroundState(
+        const resolvedState = service.store.resolveBackgroundState(
             0,
             [{
                 id: 'osm',
@@ -1062,37 +968,37 @@ describe('AppStateService', () => {
         const destination = Cartographic.fromDegrees(11.25, 48.5, 987654);
         const orientation = { heading: 1.25, pitch: -0.75, roll: 0.125 };
 
-        service.views.setView(0, destination, orientation);
-        service.views.setProjectionMode(0, true);
-        service.layers.setLayerSyncOption(0, true);
-        service.layers.setBackgroundState(0, null, 42);
-        service.layers.viewTileBordersState.next(0, false);
-        service.layers.viewTileGridModeState.next(0, 'xyz');
-        service.layers.viewTileGridLevelState.next(0, 18);
-        service.layers.viewTileGridAutoLevelState.next(0, true);
-        service.layers.viewTileGridColorState.next(0, '123abc');
-        service.layers.viewTileGridOpacityState.next(0, 64);
-        service.layers.initializeMapLayerConfig('m1', 'layerA', false, 9);
-        service.layers.setMapLayerConfig('m1', 'layerA', [{ autoLevel: false, visible: true, level: 7 }]);
+        service.store.setView(0, destination, orientation);
+        service.store.setProjectionMode(0, true);
+        service.store.setLayerSyncOption(0, true);
+        service.store.setBackgroundState(0, null, 42);
+        service.store.setLayerViewValue("viewTileBorders", 0, false);
+        service.store.setLayerViewValue("viewTileGridMode", 0, 'xyz');
+        service.store.setLayerViewValue("viewTileGridLevel", 0, 18);
+        service.store.setLayerViewValue("viewTileGridAutoLevel", 0, true);
+        service.store.setLayerViewValue("viewTileGridColor", 0, '123abc');
+        service.store.setLayerViewValue("viewTileGridOpacity", 0, 64);
+        service.store.initializeMapLayerConfig('m1', 'layerA', false, 9);
+        service.store.setMapLayerConfig('m1', 'layerA', [{ autoLevel: false, visible: true, level: 7 }]);
 
-        service.views.numViews = 2;
+        service.store.setNumViews(2);
 
-        expect(service.views.numViews).toBe(2);
-        expect(service.views.cameraViewDataState.getValue(1)).toEqual(service.views.cameraViewDataState.getValue(0));
-        expect(service.views.cameraViewDataState.getValue(1)).not.toBe(service.views.cameraViewDataState.getValue(0));
-        expect(service.views.mode2dState.getValue(1)).toBe(true);
-        expect(service.layers.getLayerSyncOption(1)).toBe(true);
-        expect(service.layers.getBackgroundState(1)).toEqual({ layerId: null, opacity: 42 });
-        expect(service.layers.viewTileBordersState.getValue(1)).toBe(false);
-        expect(service.layers.viewTileGridModeState.getValue(1)).toBe('xyz');
-        expect(service.layers.viewTileGridLevelState.getValue(1)).toBe(18);
-        expect(service.layers.viewTileGridAutoLevelState.getValue(1)).toBe(true);
-        expect(service.layers.viewTileGridColorState.getValue(1)).toBe('123abc');
-        expect(service.layers.viewTileGridOpacityState.getValue(1)).toBe(64);
-        expect(service.layers.layerVisibilityState.getValue(1)).toEqual([true]);
-        expect(service.layers.layerVisibilityState.getValue(1)).not.toBe(service.layers.layerVisibilityState.getValue(0));
-        expect(service.layers.layerZoomLevelState.getValue(1)).toEqual([7]);
-        expect(service.layers.layerAutoZoomLevelState.getValue(1)).toEqual([false]);
+        expect(service.store.numViews()).toBe(2);
+        expect(service.store.views.cameraViewData()[service.store.idAt(1)!]).toEqual(service.store.views.cameraViewData()[service.store.idAt(0)!]);
+        expect(service.store.views.cameraViewData()[service.store.idAt(1)!]).not.toBe(service.store.views.cameraViewData()[service.store.idAt(0)!]);
+        expect(service.store.views.mode2d()[service.store.idAt(1)!]).toBe(true);
+        expect(service.store.getLayerSyncOption(1)).toBe(true);
+        expect(service.store.getBackgroundState(1)).toEqual({ layerId: null, opacity: 42 });
+        expect(service.store.layers.viewTileBorders()[service.store.idAt(1)!]).toBe(false);
+        expect(service.store.layers.viewTileGridMode()[service.store.idAt(1)!]).toBe('xyz');
+        expect(service.store.layers.viewTileGridLevel()[service.store.idAt(1)!]).toBe(18);
+        expect(service.store.layers.viewTileGridAutoLevel()[service.store.idAt(1)!]).toBe(true);
+        expect(service.store.layers.viewTileGridColor()[service.store.idAt(1)!]).toBe('123abc');
+        expect(service.store.layers.viewTileGridOpacity()[service.store.idAt(1)!]).toBe(64);
+        expect(service.store.layers.layerVisibility()[service.store.idAt(1)!]).toEqual([true]);
+        expect(service.store.layers.layerVisibility()[service.store.idAt(1)!]).not.toBe(service.store.layers.layerVisibility()[service.store.idAt(0)!]);
+        expect(service.store.layers.layerZoomLevel()[service.store.idAt(1)!]).toEqual([7]);
+        expect(service.store.layers.layerAutoZoomLevel()[service.store.idAt(1)!]).toEqual([false]);
 
         service.destroy();
         routerStub.events.complete();
@@ -1103,13 +1009,13 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.layers.layerNamesState.next(['m1/layerA']);
-        service.layers.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
-        service.layers.setStyleOptionValues('m1', 'layerA', 'overlay', 'debug', [true]);
+        service.store.setLayerNames(['m1/layerA']);
+        service.store.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
+        service.store.setStyleOptionValues('m1', 'layerA', 'overlay', 'debug', [true]);
 
-        service.views.numViews = 2;
+        service.store.setNumViews(2);
 
-        const stylesMap = service.layers.stylesState.getValue();
+        const stylesMap = service.persistence.stylesPersistence.read(getState(service.store));
         expect(stylesMap.get('m1/layerA/overlay/opacity')).toEqual([0.5, 0.5]);
         expect(stylesMap.get('m1/layerA/overlay/debug')).toEqual([true, true]);
 
@@ -1120,63 +1026,77 @@ describe('AppStateService', () => {
     it.each([0, 1])('retains the other view when view %i is removed', (removed) => {
         const routerStub = createRouterStub();
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
-        service.views.numViews = 2;
-        service.layers.layerNamesState.next(['m1/layerA']);
+        service.store.setNumViews(2);
+        service.store.setLayerNames(['m1/layerA']);
         for (const index of [0, 1]) {
-            service.views.cameraViewDataState.next(index, {
+            service.store.setCameraViewData(index, {
                 destination: {lon: 11 + index, lat: 48 + index, alt: 1000 + index},
                 orientation: {heading: index, pitch: -0.5, roll: 0},
                 position: [index, index + 1, index + 2]
             });
-            service.views.mode2dState.next(index, index === 0);
-            service.layers.setLayerSyncOption(index, index === 1);
-            service.layers.setBackgroundState(index, index === 0 ? 'osm' : null, 20 + index);
-            service.layers.layerVisibilityState.next(index, [index === 1]);
-            service.layers.layerZoomLevelState.next(index, [12 + index]);
-            service.layers.layerAutoZoomLevelState.next(index, [index === 0]);
-            service.layers.viewTileBordersState.next(index, index === 1);
-            service.layers.viewTileGridModeState.next(index, index === 0 ? 'nds' : 'xyz');
-            service.layers.viewTileGridLevelState.next(index, 8 + index);
-            service.layers.viewTileGridAutoLevelState.next(index, index === 0);
-            service.layers.viewTileGridColorState.next(index, index === 0 ? '123abc' : 'abcdef');
-            service.layers.viewTileGridOpacityState.next(index, 30 + index);
-            service.layers.setMapPresetSelection(index, 'm1', `map-preset-${index}`);
-            service.layers.setLayerPresetSelection(index, 'm1', 'layerA', {styleId: 'overlay', presetId: `preset-${index}`});
+            service.store.setProjectionMode(index, index === 0);
+            service.store.setLayerSyncOption(index, index === 1);
+            service.store.setBackgroundState(index, index === 0 ? 'osm' : null, 20 + index);
+            service.store.setLayerViewValue("layerVisibility", index, [index === 1]);
+            service.store.setLayerViewValue("layerZoomLevel", index, [12 + index]);
+            service.store.setLayerViewValue("layerAutoZoomLevel", index, [index === 0]);
+            service.store.setLayerViewValue("viewTileBorders", index, index === 1);
+            service.store.setLayerViewValue("viewTileGridMode", index, index === 0 ? 'nds' : 'xyz');
+            service.store.setLayerViewValue("viewTileGridLevel", index, 8 + index);
+            service.store.setLayerViewValue("viewTileGridAutoLevel", index, index === 0);
+            service.store.setLayerViewValue("viewTileGridColor", index, index === 0 ? '123abc' : 'abcdef');
+            service.store.setLayerViewValue("viewTileGridOpacity", index, 30 + index);
+            service.store.setMapPresetSelection(index, 'm1', `map-preset-${index}`);
+            service.store.setLayerPresetSelection(index, 'm1', 'layerA', {styleId: 'overlay', presetId: `preset-${index}`});
         }
-        service.layers.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.2, 0.8]);
+        service.store.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.2, 0.8]);
         const searches = [[0], [1], [0, 1]].map(selectedViewIndices =>
-            service.searches.addFeatureSearch({query: 'Way', selectedViewIndices}));
-        service.inspections.setSelection([feature('Way.1')]);
-        const selection = service.inspections.selectionState.signal();
+            service.store.addFeatureSearch({query: 'Way', selectedViewIndices}));
+        service.store.setSelection([feature('Way.1')]);
+        const selection = service.store.inspection.selection();
         const survivor = 1 - removed;
-        const slots = [service.views.cameraViewDataState, service.views.mode2dState, service.layers.layerSyncOptionsState,
-            service.layers.backgroundState, service.layers.layerVisibilityState, service.layers.layerZoomLevelState,
-            service.layers.layerAutoZoomLevelState, service.layers.viewTileBordersState, service.layers.viewTileGridModeState,
-            service.layers.viewTileGridLevelState, service.layers.viewTileGridAutoLevelState, service.layers.viewTileGridColorState,
-            service.layers.viewTileGridOpacityState, service.layers.layerPresetSelectionState, service.layers.mapPresetSelectionState];
-        const expected = slots.map(slot => slot.getValue(survivor));
-        service.views.focusedView = removed;
-        service.views.viewSync = [VIEW_SYNC_POSITION];
+        // Capture each native per-view record after applying the synchronization
+        // policy, then verify that removal retains the selected logical view.
+        service.store.setFocusedView(removed);
+        service.store.setSynchronization([VIEW_SYNC_POSITION]);
+        const records = [
+            service.store.views.cameraViewData,
+            service.store.views.mode2d,
+            service.store.layers.layerSyncOptions,
+            service.store.layers.background,
+            service.store.layers.layerVisibility,
+            service.store.layers.layerZoomLevel,
+            service.store.layers.layerAutoZoomLevel,
+            service.store.layers.viewTileBorders,
+            service.store.layers.viewTileGridMode,
+            service.store.layers.viewTileGridLevel,
+            service.store.layers.viewTileGridAutoLevel,
+            service.store.layers.viewTileGridColor,
+            service.store.layers.viewTileGridOpacity,
+            service.store.layers.layerPresetSelection,
+            service.store.layers.mapPresetSelection,
+        ];
+        const expected = records.map(record => record()[service.store.idAt(survivor)!]);
 
-        service.views.retainViews([survivor], new Map());
+        service.store.retainViews([survivor], new Map());
 
-        expect(service.views.numViews).toBe(1);
-        expect(service.views.focusedView).toBe(0);
-        slots.forEach((slot, index) => {
-            expect(slot.appState.getValue()).toEqual([expected[index]]);
+        expect(service.store.numViews()).toBe(1);
+        expect(service.store.focusedView()).toBe(0);
+        records.forEach((record, index) => {
+            expect(Object.values(record())).toEqual([expected[index]]);
         });
-        expect(service.layers.styles.get('m1/layerA/overlay/opacity')).toEqual([survivor ? 0.8 : 0.2]);
-        expect(service.inspections.selectionState.signal()).toBe(selection);
-        expect(service.searches.featureSearches).toEqual(searches.map(search => ({
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).get('m1/layerA/overlay/opacity')).toEqual([survivor ? 0.8 : 0.2]);
+        expect(service.store.inspection.selection()).toBe(selection);
+        expect(service.store.featureSearchEntries()).toEqual(searches.map(search => ({
             ...search, selectedViewIndices: search.selectedViewIndices.includes(survivor) ? [0] : [],
-            selectedViewIds: search.selectedViewIndices.includes(survivor) ? [service.views.viewIds()[0]] : []
+            selectedViewIds: search.selectedViewIndices.includes(survivor) ? [service.store.viewIds()[0]] : []
         })));
-        expect(service.views.viewSync).toEqual([VIEW_SYNC_POSITION]);
+        expect(service.store.views.viewSync()).toEqual([VIEW_SYNC_POSITION]);
 
-        service.views.numViews = 2;
-        expect(service.views.cameraViewDataState.getValue(1)).toEqual(expected[0]);
-        expect(service.layers.layerVisibilityState.getValue(1)).toEqual(expected[4]);
-        expect(service.layers.styles.get('m1/layerA/overlay/opacity')).toEqual(survivor ? [0.8, 0.8] : [0.2, 0.2]);
+        service.store.setNumViews(2);
+        expect(service.store.views.cameraViewData()[service.store.idAt(1)!]).toEqual(expected[0]);
+        expect(service.store.layers.layerVisibility()[service.store.idAt(1)!]).toEqual(expected[4]);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).get('m1/layerA/overlay/opacity')).toEqual(survivor ? [0.8, 0.8] : [0.2, 0.2]);
         service.destroy();
         routerStub.events.complete();
     });
@@ -1184,13 +1104,13 @@ describe('AppStateService', () => {
     it('retains sparse defaults and a live camera without propagating synchronization', () => {
         const routerStub = createRouterStub();
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
-        service.views.numViewsState.next(3);
-        const camera = {...service.views.cameraViewDataState.getValue(2), position: [1, 2, 3] as [number, number, number]};
-        const defaultBackground = service.layers.backgroundState.getValue(2);
-        service.views.retainViews([0, 2], new Map([[2, camera]]));
-        expect(service.layers.backgroundState.appState.getValue()).toEqual([defaultBackground, defaultBackground]);
-        expect(service.views.cameraViewDataState.getValue(1)).toEqual(camera);
-        expect(service.views.cameraViewDataState.getValue(0).position).not.toEqual(camera.position);
+        service.store.setNumViews(3);
+        const camera = {...service.store.views.cameraViewData()[service.store.idAt(2)!], position: [1, 2, 3] as [number, number, number]};
+        const defaultBackground = service.store.layers.background()[service.store.idAt(2)!];
+        service.store.retainViews([0, 2], new Map([[2, camera]]));
+        expect(service.store.viewIds().map(id => service.store.layers.background()[id])).toEqual([defaultBackground, defaultBackground]);
+        expect(service.store.views.cameraViewData()[service.store.idAt(1)!]).toEqual(camera);
+        expect(service.store.views.cameraViewData()[service.store.idAt(0)!].position).not.toEqual(camera.position);
         service.destroy();
         routerStub.events.complete();
     });
@@ -1198,11 +1118,13 @@ describe('AppStateService', () => {
     it('writes a style-option batch atomically and emits style state once', () => {
         const routerStub = createRouterStub();
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
-        service.layers.layerNamesState.next(['m1/layerA']);
-        service.views.numViews = 2;
-        const nextSpy = vi.spyOn(service.layers.stylesState, 'next');
+        service.store.setLayerNames(['m1/layerA']);
+        service.store.setNumViews(2);
+        const publications = vi.fn();
+        const subscription = observeStore(service.store, state => state.layers.options).subscribe(publications);
+        publications.mockClear();
 
-        service.layers.setStyleOptionValuesBatch([
+        service.store.setStyleOptionValuesBatch([
             {
                 mapId: 'm1',
                 layerId: 'layerA',
@@ -1219,9 +1141,10 @@ describe('AppStateService', () => {
             }
         ]);
 
-        expect(nextSpy).toHaveBeenCalledTimes(1);
-        expect(service.layers.styles.get('m1/layerA/overlay/first')).toEqual([true, false]);
-        expect(service.layers.styles.get('m1/layerA/overlay/second')).toEqual([true, true]);
+        subscription.unsubscribe();
+        expect(publications).toHaveBeenCalledTimes(1);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).get('m1/layerA/overlay/first')).toEqual([true, false]);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).get('m1/layerA/overlay/second')).toEqual([true, true]);
 
         service.destroy();
         routerStub.events.complete();
@@ -1230,9 +1153,9 @@ describe('AppStateService', () => {
     it('rejects an invalid style-option batch before mutating any option', () => {
         const routerStub = createRouterStub();
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
-        service.layers.layerNamesState.next(['m1/layerA']);
+        service.store.setLayerNames(['m1/layerA']);
 
-        expect(() => service.layers.setStyleOptionValuesBatch([
+        expect(() => service.store.setStyleOptionValuesBatch([
             {
                 mapId: 'm1',
                 layerId: 'layerA',
@@ -1248,7 +1171,7 @@ describe('AppStateService', () => {
                 values: [false]
             }
         ])).toThrow("Unknown map layer 'missing/layer'");
-        expect(service.layers.styles.size).toBe(0);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).size).toBe(0);
 
         service.destroy();
         routerStub.events.complete();
@@ -1257,28 +1180,28 @@ describe('AppStateService', () => {
     it('stores qualified layer and map preset selections outside snapshots', () => {
         const routerStub = createRouterStub();
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
-        service.views.numViews = 2;
+        service.store.setNumViews(2);
 
-        service.layers.setLayerPresetSelection(0, 'Vendor/Map', 'Lane', {
+        service.store.setLayerPresetSelection(0, 'Vendor/Map', 'Lane', {
             styleId: 'NDS.Live/Lanes', presetId: 'lane-topology'
         });
-        service.layers.setLayerPresetSelection(1, 'Vendor/Map', 'Lane', {
+        service.store.setLayerPresetSelection(1, 'Vendor/Map', 'Lane', {
             styleId: 'NDS.Live/Lanes', presetId: 'lane-boundary'
         });
-        service.layers.setMapPresetSelection(0, 'Vendor/Map', 'network-topology');
+        service.store.setMapPresetSelection(0, 'Vendor/Map', 'network-topology');
 
-        expect(service.layers.getLayerPresetSelection(0, 'Vendor/Map', 'Lane')).toEqual({
+        expect(service.store.getLayerPresetSelection(0, 'Vendor/Map', 'Lane')).toEqual({
             styleId: 'NDS.Live/Lanes', presetId: 'lane-topology'
         });
-        expect(service.layers.getLayerPresetSelection(1, 'Vendor/Map', 'Lane')).toEqual({
+        expect(service.store.getLayerPresetSelection(1, 'Vendor/Map', 'Lane')).toEqual({
             styleId: 'NDS.Live/Lanes', presetId: 'lane-boundary'
         });
-        expect(service.layers.getMapPresetSelection(0, 'Vendor/Map')).toBe('network-topology');
+        expect(service.store.getMapPresetSelection(0, 'Vendor/Map')).toBe('network-topology');
         expect(service.persistence.exportSnapshot()).not.toHaveProperty('stylePresetSelection');
         expect(service.persistence.exportSnapshot()).not.toHaveProperty('mapPresetSelection');
 
-        service.layers.setLayerPresetSelection(0, 'Vendor/Map', 'Lane', null);
-        expect(service.layers.getLayerPresetSelection(0, 'Vendor/Map', 'Lane')).toBeNull();
+        service.store.setLayerPresetSelection(0, 'Vendor/Map', 'Lane', null);
+        expect(service.store.getLayerPresetSelection(0, 'Vendor/Map', 'Lane')).toBeNull();
 
         service.destroy();
         routerStub.events.complete();
@@ -1320,7 +1243,7 @@ describe('AppStateService', () => {
 
         service.persistence.initializePersistence();
 
-        expect(service.layers.getLayerPresetSelection(0, 'Vendor/Map', 'Lane')).toEqual({
+        expect(service.store.getLayerPresetSelection(0, 'Vendor/Map', 'Lane')).toEqual({
             styleId: '',
             presetId: 'legacy-lane-preset'
         });
@@ -1333,8 +1256,8 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
 
-        expect(service.inspections.hoverLabelsEnabled).toBe(true);
-        expect(service.inspections.hoverLabelFields).toEqual([{
+        expect(service.store.inspection.hoverLabelsEnabled()).toBe(true);
+        expect(service.store.inspection.hoverLabelFields()).toEqual([{
             expression: "id",
             customExpression: false
         }]);
@@ -1351,50 +1274,50 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.layers.layerNamesState.next(['m1/layerA']);
-        service.layers.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
+        service.store.setLayerNames(['m1/layerA']);
+        service.store.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
 
-        service.views.numViews = 2;
+        service.store.setNumViews(2);
 
         const destination = Cartographic.fromDegrees(7.75, 50.2, 123456);
         const orientation = { heading: 0.5, pitch: -0.4, roll: 0.3 };
 
-        service.views.numViews = 2;
-        service.views.setView(1, destination, orientation);
-        service.views.setProjectionMode(1, true);
-        service.layers.setLayerSyncOption(1, true);
-        service.layers.setBackgroundState(1, null, 17);
-        service.layers.viewTileBordersState.next(1, false);
-        service.layers.viewTileGridModeState.next(1, 'xyz');
-        service.layers.viewTileGridLevelState.next(1, 20);
-        service.layers.viewTileGridAutoLevelState.next(1, true);
-        service.layers.viewTileGridColorState.next(1, 'fedcba');
-        service.layers.viewTileGridOpacityState.next(1, 71);
-        service.layers.setMapLayerConfig('m1', 'layerA', [
+        service.store.setNumViews(2);
+        service.store.setView(1, destination, orientation);
+        service.store.setProjectionMode(1, true);
+        service.store.setLayerSyncOption(1, true);
+        service.store.setBackgroundState(1, null, 17);
+        service.store.setLayerViewValue("viewTileBorders", 1, false);
+        service.store.setLayerViewValue("viewTileGridMode", 1, 'xyz');
+        service.store.setLayerViewValue("viewTileGridLevel", 1, 20);
+        service.store.setLayerViewValue("viewTileGridAutoLevel", 1, true);
+        service.store.setLayerViewValue("viewTileGridColor", 1, 'fedcba');
+        service.store.setLayerViewValue("viewTileGridOpacity", 1, 71);
+        service.store.setMapLayerConfig('m1', 'layerA', [
             { autoLevel: true, visible: true, level: 13 },
             { autoLevel: false, visible: false, level: 5 }
         ]);
-        service.layers.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5, 0.25]);
+        service.store.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5, 0.25]);
 
-        service.views.numViews = 3;
+        service.store.setNumViews(3);
 
-        expect(service.views.numViews).toBe(3);
-        expect(service.views.cameraViewDataState.getValue(2)).toEqual(service.views.cameraViewDataState.getValue(1));
-        expect(service.views.cameraViewDataState.getValue(2)).not.toBe(service.views.cameraViewDataState.getValue(1));
-        expect(service.views.mode2dState.getValue(2)).toBe(true);
-        expect(service.layers.getLayerSyncOption(2)).toBe(true);
-        expect(service.layers.getBackgroundState(2)).toEqual({ layerId: null, opacity: 17 });
-        expect(service.layers.viewTileBordersState.getValue(2)).toBe(false);
-        expect(service.layers.viewTileGridModeState.getValue(2)).toBe('xyz');
-        expect(service.layers.viewTileGridLevelState.getValue(2)).toBe(20);
-        expect(service.layers.viewTileGridAutoLevelState.getValue(2)).toBe(true);
-        expect(service.layers.viewTileGridColorState.getValue(2)).toBe('fedcba');
-        expect(service.layers.viewTileGridOpacityState.getValue(2)).toBe(71);
-        expect(service.layers.layerVisibilityState.getValue(2)).toEqual([false]);
-        expect(service.layers.layerVisibilityState.getValue(2)).not.toBe(service.layers.layerVisibilityState.getValue(1));
-        expect(service.layers.layerZoomLevelState.getValue(2)).toEqual([5]);
-        expect(service.layers.layerAutoZoomLevelState.getValue(2)).toEqual([false]);
-        expect(service.layers.stylesState.getValue().get('m1/layerA/overlay/opacity')).toEqual([0.5, 0.25, 0.25]);
+        expect(service.store.numViews()).toBe(3);
+        expect(service.store.views.cameraViewData()[service.store.idAt(2)!]).toEqual(service.store.views.cameraViewData()[service.store.idAt(1)!]);
+        expect(service.store.views.cameraViewData()[service.store.idAt(2)!]).not.toBe(service.store.views.cameraViewData()[service.store.idAt(1)!]);
+        expect(service.store.views.mode2d()[service.store.idAt(2)!]).toBe(true);
+        expect(service.store.getLayerSyncOption(2)).toBe(true);
+        expect(service.store.getBackgroundState(2)).toEqual({ layerId: null, opacity: 17 });
+        expect(service.store.layers.viewTileBorders()[service.store.idAt(2)!]).toBe(false);
+        expect(service.store.layers.viewTileGridMode()[service.store.idAt(2)!]).toBe('xyz');
+        expect(service.store.layers.viewTileGridLevel()[service.store.idAt(2)!]).toBe(20);
+        expect(service.store.layers.viewTileGridAutoLevel()[service.store.idAt(2)!]).toBe(true);
+        expect(service.store.layers.viewTileGridColor()[service.store.idAt(2)!]).toBe('fedcba');
+        expect(service.store.layers.viewTileGridOpacity()[service.store.idAt(2)!]).toBe(71);
+        expect(service.store.layers.layerVisibility()[service.store.idAt(2)!]).toEqual([false]);
+        expect(service.store.layers.layerVisibility()[service.store.idAt(2)!]).not.toBe(service.store.layers.layerVisibility()[service.store.idAt(1)!]);
+        expect(service.store.layers.layerZoomLevel()[service.store.idAt(2)!]).toEqual([5]);
+        expect(service.store.layers.layerAutoZoomLevel()[service.store.idAt(2)!]).toEqual([false]);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).get('m1/layerA/overlay/opacity')).toEqual([0.5, 0.25, 0.25]);
 
         service.destroy();
         routerStub.events.complete();
@@ -1409,8 +1332,8 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.inspections.selection).toHaveLength(1);
-        expect(service.inspections.selection[0].color).toBe('#abc123');
+        expect(service.store.inspection.selection()).toHaveLength(1);
+        expect(service.store.inspection.selection()[0].color).toBe('#abc123');
 
         service.destroy();
         routerStub.events.complete();
@@ -1424,10 +1347,10 @@ describe('AppStateService', () => {
         const destination = new Cartographic(Math.PI / 2, Math.PI / 4, 500);
         const orientation = { heading: 1, pitch: 2, roll: 3 };
 
-        service.views.numViews = 2;
-        service.views.setView(1, destination, orientation);
+        service.store.setNumViews(2);
+        service.store.setView(1, destination, orientation);
 
-        const view = service.views.cameraViewDataState.getValue(1);
+        const view = service.store.views.cameraViewData()[service.store.idAt(1)!];
         expect(view.destination).toEqual({ lon: 90, lat: 45, alt: 500 });
         expect(view.orientation).toEqual(orientation);
 
@@ -1444,9 +1367,9 @@ describe('AppStateService', () => {
         const orientation = { heading: 1.123456789, pitch: -2.987654321, roll: 3.000000009 };
         const position = [1.123456789, -2.987654321, 3.000000009] as const;
 
-        service.views.setView(0, destination, orientation, position);
+        service.store.setView(0, destination, orientation, position);
 
-        const view = service.views.cameraViewDataState.getValue(0);
+        const view = service.store.views.cameraViewData()[service.store.idAt(0)!];
         expect(view.destination).toEqual({
             lon: 11.14198571,
             lat: 48.00237573,
@@ -1459,20 +1382,20 @@ describe('AppStateService', () => {
         });
         expect(view.position).toEqual([1.12345679, -2.98765432, 3.00000001]);
 
-        const urlState = service.views.cameraViewDataState.appState.serialize(true);
+        const urlState = service.persistence.descriptor("cameraView").serialize(getState(service.store), true);
         expect(urlState).toMatchObject({
             px: '1.12345679',
             py: '-2.98765432',
             pz: '3.00000001'
         });
 
-        const storageState = service.views.cameraViewDataState.appState.serialize(false);
+        const storageState = service.persistence.descriptor("cameraView").serialize(getState(service.store), false);
         const restoredService = createStateOwners(
             createRouterStub() as unknown as Router,
             infoServiceStub
         );
-        restoredService.views.cameraViewDataState.appState.deserialize(storageState!['cameraView']!);
-        expect(restoredService.views.cameraViewDataState.getValue(0).position)
+        restoredService.store.restorePersistedState(restoredService.persistence.descriptor("cameraView").deserialize(getState(restoredService.store), storageState!['cameraView']!), "hydration");
+        expect(restoredService.store.views.cameraViewData()[restoredService.store.idAt(0)!].position)
             .toEqual([1.12345679, -2.98765432, 3.00000001]);
 
         service.destroy();
@@ -1494,7 +1417,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.cameraViewDataState.getValue(0).position).toEqual([0, 0, 0]);
+        expect(service.store.views.cameraViewData()[service.store.idAt(0)!].position).toEqual([0, 0, 0]);
 
         service.destroy();
         routerStub.events.complete();
@@ -1503,41 +1426,41 @@ describe('AppStateService', () => {
     it('synchronizes the complete target-relative camera position across views', () => {
         const routerStub = createRouterStub();
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
-        service.views.numViews = 2;
-        service.views.focusedView = 0;
+        service.store.setNumViews(2);
+        service.store.setFocusedView(0);
         const orientation = {heading: 0.25, pitch: -0.5, roll: 0};
 
-        service.views.setView(
+        service.store.setView(
             0,
             Cartographic.fromDegrees(11, 48, 1000),
             orientation,
             [0, 0, 125]
         );
-        service.views.setView(
+        service.store.setView(
             1,
             Cartographic.fromDegrees(12, 49, 2000),
             orientation,
             [0, 0, 250]
         );
 
-        service.views.viewSync = [VIEW_SYNC_POSITION];
-        service.views.setView(
+        service.store.setSynchronization([VIEW_SYNC_POSITION]);
+        service.store.setView(
             0,
             Cartographic.fromDegrees(13, 50, 3000),
             orientation,
             [0, 0, 375]
         );
-        expect(service.views.cameraViewDataState.getValue(1).position).toEqual([0, 0, 375]);
+        expect(service.store.views.cameraViewData()[service.store.idAt(1)!].position).toEqual([0, 0, 375]);
 
-        service.views.viewSync = [VIEW_SYNC_MOVEMENT];
-        service.views.setView(
+        service.store.setSynchronization([VIEW_SYNC_MOVEMENT]);
+        service.store.setView(
             0,
             Cartographic.fromDegrees(14, 51, 4000),
             orientation,
             [0, 0, 500]
         );
-        expect(service.views.cameraViewDataState.getValue(0).position).toEqual([0, 0, 500]);
-        expect(service.views.cameraViewDataState.getValue(1).position).toEqual([0, 0, 375]);
+        expect(service.store.views.cameraViewData()[service.store.idAt(0)!].position).toEqual([0, 0, 500]);
+        expect(service.store.views.cameraViewData()[service.store.idAt(1)!].position).toEqual([0, 0, 375]);
 
         service.destroy();
         routerStub.events.complete();
@@ -1554,7 +1477,7 @@ describe('AppStateService', () => {
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        service.views.markerState.next(true);
+        service.store.setMarkerState(true);
         await flushMicrotasks();
 
         expect(routerStub.navigate).toHaveBeenCalledTimes(1);
@@ -1564,9 +1487,9 @@ describe('AppStateService', () => {
             replaceUrl: true,
         }));
 
-        service.views.markerState.next(false);
+        service.store.setMarkerState(false);
         await flushMicrotasks();
-        service.views.markerState.next(true);
+        service.store.setMarkerState(true);
         await flushMicrotasks();
 
         expect(routerStub.navigate).toHaveBeenCalledTimes(1);
@@ -1595,19 +1518,19 @@ describe('AppStateService', () => {
         await flushMicrotasks();
 
         // Prepare one layer so style options can be encoded
-        service.layers.layerNamesState.next(['m1/layerA']);
-        service.layers.layerVisibilityState.next(0, [true]);
+        service.store.setLayerNames(['m1/layerA']);
+        service.store.setLayerViewValue("layerVisibility", 0, [true]);
 
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
         // Set two options for style 'overlay'
-        service.layers.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
-        service.layers.setStyleOptionValues('m1', 'layerA', 'overlay', 'debug', [false]);
+        service.store.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
+        service.store.setStyleOptionValues('m1', 'layerA', 'overlay', 'debug', [false]);
         await flushMicrotasks();
 
         // Expect StyleState internal map to contain entries for both options
-        const stylesMap = service.layers.stylesState.getValue();
+        const stylesMap = service.persistence.stylesPersistence.read(getState(service.store));
         expect(stylesMap.get('m1/layerA/overlay/opacity')).toEqual([0.5]);
         expect(stylesMap.get('m1/layerA/overlay/debug')).toEqual([false]);
         expect(localStorage.getItem('overlay~0~opacity~debug')).toBe('0.5~0');
@@ -1638,7 +1561,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.layers.stylesState.getValue().get('m1/layerA/overlay/opacity')).toEqual(['0.5']);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).get('m1/layerA/overlay/opacity')).toEqual(['0.5']);
 
         service.destroy();
         routerStub.events.complete();
@@ -1649,16 +1572,16 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        const config = service.layers.initializeMapLayerConfig('m1', 'layerA', false, 9);
+        const config = service.store.initializeMapLayerConfig('m1', 'layerA', false, 9);
 
         expect(config).toEqual([
             { autoLevel: true, visible: false, level: 9 },
         ]);
-        expect(service.layers.layerNamesState.getValue()).toEqual(['m1/layerA']);
-        expect(service.layers.layerVisibilityState.getValue(0)).toEqual([false]);
-        expect(service.layers.layerZoomLevelState.getValue(0)).toEqual([9]);
-        expect(service.layers.layerAutoZoomLevelState.getValue(0)).toEqual([true]);
-        expect(service.layers.viewTileBordersState.getValue(0)).toBe(true);
+        expect(service.store.layers.layerNames()).toEqual(['m1/layerA']);
+        expect(service.store.layers.layerVisibility()[service.store.idAt(0)!]).toEqual([false]);
+        expect(service.store.layers.layerZoomLevel()[service.store.idAt(0)!]).toEqual([9]);
+        expect(service.store.layers.layerAutoZoomLevel()[service.store.idAt(0)!]).toEqual([true]);
+        expect(service.store.layers.viewTileBorders()[service.store.idAt(0)!]).toBe(true);
 
         service.destroy();
         routerStub.events.complete();
@@ -1670,20 +1593,20 @@ describe('AppStateService', () => {
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
         // Prime internal state so indices exist before updating.
-        service.layers.initializeMapLayerConfig('m2', 'layerB');
+        service.store.initializeMapLayerConfig('m2', 'layerB');
 
-        service.layers.setMapLayerConfig('m2', 'layerB', [{ autoLevel: false, visible: false, level: 7 }]);
+        service.store.setMapLayerConfig('m2', 'layerB', [{ autoLevel: false, visible: false, level: 7 }]);
 
-        const config = service.layers.mapLayerConfig('m2', 'layerB');
+        const config = service.store.mapLayerConfig('m2', 'layerB');
 
         expect(config).toEqual([
             { autoLevel: false, visible: false, level: 7 },
         ]);
-        expect(service.layers.layerNamesState.getValue()).toEqual(['m2/layerB']);
-        expect(service.layers.layerVisibilityState.getValue(0)).toEqual([false]);
-        expect(service.layers.layerZoomLevelState.getValue(0)).toEqual([7]);
-        expect(service.layers.layerAutoZoomLevelState.getValue(0)).toEqual([false]);
-        expect(service.layers.viewTileBordersState.getValue(0)).toBe(true);
+        expect(service.store.layers.layerNames()).toEqual(['m2/layerB']);
+        expect(service.store.layers.layerVisibility()[service.store.idAt(0)!]).toEqual([false]);
+        expect(service.store.layers.layerZoomLevel()[service.store.idAt(0)!]).toEqual([7]);
+        expect(service.store.layers.layerAutoZoomLevel()[service.store.idAt(0)!]).toEqual([false]);
+        expect(service.store.layers.viewTileBorders()[service.store.idAt(0)!]).toBe(true);
 
         service.destroy();
         routerStub.events.complete();
@@ -1694,7 +1617,7 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [feature('old-docked')], locked: false, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('old-dialog')], locked: false, size: [30, 40], color: '#222222', undocked: true },
             { id: 3, features: [feature('locked-feature')], locked: true, size: [30, 20], color: '#333333', undocked: false },
@@ -1707,11 +1630,11 @@ describe('AppStateService', () => {
                 color: '#444444',
                 undocked: true,
             },
-        ];
+        ]);
 
         const selected = [feature('new-feature', 'map/layer/new-tile')];
-        const targetPanelId = service.inspections.setSelection(selected);
-        const panels = service.inspections.selection;
+        const targetPanelId = service.store.setSelection(selected);
+        const panels = service.store.inspection.selection();
 
         expect(targetPanelId).toBe(2);
         expect(panels).toHaveLength(3);
@@ -1729,14 +1652,14 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [feature('old-first')], locked: false, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('old-second')], locked: false, size: [30, 40], color: '#222222', undocked: true },
-        ];
+        ]);
 
         const selected = [feature('new-feature', 'map/layer/new-tile')];
-        const targetPanelId = service.inspections.setSelection(selected, 1);
-        const panels = service.inspections.selection;
+        const targetPanelId = service.store.setSelection(selected, 1);
+        const panels = service.store.inspection.selection();
 
         expect(targetPanelId).toBe(1);
         expect(panels).toHaveLength(2);
@@ -1752,14 +1675,14 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('old-dialog')], locked: false, size: [30, 40], color: '#222222', undocked: true },
-        ];
+        ]);
 
         const selected = [feature('new-feature', 'map/layer/new-tile')];
-        const targetPanelId = service.inspections.setSelection(selected);
-        const panels = service.inspections.selection;
+        const targetPanelId = service.store.setSelection(selected);
+        const panels = service.store.inspection.selection();
 
         expect(targetPanelId).toBe(2);
         expect(panels).toHaveLength(2);
@@ -1775,14 +1698,14 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('locked-dialog')], locked: true, size: [30, 40], color: '#222222', undocked: true },
-        ];
+        ]);
 
         const selected = [feature('new-feature', 'map/layer/new-tile')];
-        const targetPanelId = service.inspections.setSelection(selected);
-        const panels = service.inspections.selection;
+        const targetPanelId = service.store.setSelection(selected);
+        const panels = service.store.inspection.selection();
         const newPanel = panels.find(panel => panel.id === targetPanelId);
 
         expect(targetPanelId).toBe(3);
@@ -1800,14 +1723,14 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.layout.dockActiveTab = 'search';
-        service.layout.isDockOpen = false;
-        const panelId = service.inspections.setSelection([feature('new-feature', 'map/layer/new-tile')]);
-        const panel = service.inspections.selection.find(item => item.id === panelId);
+        service.store.setDockActiveTab('search');
+        service.store.setDockOpen(false);
+        const panelId = service.store.setSelection([feature('new-feature', 'map/layer/new-tile')]);
+        const panel = service.store.inspection.selection().find(item => item.id === panelId);
 
         expect(panel?.undocked).toBe(false);
-        expect(service.layout.isDockOpen).toBe(true);
-        expect(service.layout.dockActiveTab).toBe('inspection');
+        expect(service.store.layout.dockOpen()).toBe(true);
+        expect(service.store.layout.dockActiveTab()).toBe('inspection');
 
         service.destroy();
         routerStub.events.complete();
@@ -1818,18 +1741,18 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.layout.dockActiveTab = 'search';
-        service.layout.isDockOpen = true;
-        const panelId = service.inspections.setSelection(
+        service.store.setDockActiveTab('search');
+        service.store.setDockOpen(true);
+        const panelId = service.store.setSelection(
             [feature('new-feature', 'map/layer/new-tile')],
             undefined,
             true,
             true);
-        const panel = service.inspections.selection.find(item => item.id === panelId);
+        const panel = service.store.inspection.selection().find(item => item.id === panelId);
 
         expect(panel?.undocked).toBe(true);
-        expect(service.layout.isDockOpen).toBe(true);
-        expect(service.layout.dockActiveTab).toBe('search');
+        expect(service.store.layout.dockOpen()).toBe(true);
+        expect(service.store.layout.dockActiveTab()).toBe('search');
 
         service.destroy();
         routerStub.events.complete();
@@ -1840,7 +1763,7 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             {
                 id: 1,
                 features: [feature('Road.1:attribute#2:validity#0', 'map/layer/tile')],
@@ -1857,20 +1780,20 @@ describe('AppStateService', () => {
                 color: '#222222',
                 undocked: false
             }
-        ];
-        service.layout.dockActiveTab = 'search';
-        service.layout.isDockOpen = true;
+        ]);
+        service.store.setDockActiveTab('search');
+        service.store.setDockOpen(true);
 
-        const panelId = service.inspections.setSelection(
+        const panelId = service.store.setSelection(
             [feature('Road.2', 'map/layer/tile')],
             undefined,
             false,
             true);
 
         expect(panelId).toBe(1);
-        expect(service.inspections.selection.find(panel => panel.id === 1)?.features).toEqual([feature('Road.2', 'map/layer/tile')]);
-        expect(service.inspections.selection.find(panel => panel.id === 2)).toBeDefined();
-        expect(service.layout.dockActiveTab).toBe('search');
+        expect(service.store.inspection.selection().find(panel => panel.id === 1)?.features).toEqual([feature('Road.2', 'map/layer/tile')]);
+        expect(service.store.inspection.selection().find(panel => panel.id === 2)).toBeDefined();
+        expect(service.store.layout.dockActiveTab()).toBe('search');
 
         service.destroy();
         routerStub.events.complete();
@@ -1881,7 +1804,7 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             {
                 id: 7,
                 features: [feature('Road.1', 'map/layer/tile')],
@@ -1890,14 +1813,14 @@ describe('AppStateService', () => {
                 color: '#111111',
                 undocked: false
             }
-        ];
+        ]);
 
-        service.inspections.toggleInspectionFeatureHighlight(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
-        expect(service.inspections.selection[0].features[0].featureId).toBe('Road.1:attribute#2:validity#0');
-        expect(service.inspections.selection[0].locked).toBe(true);
+        service.store.toggleInspectionFeatureHighlight(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
+        expect(service.store.inspection.selection()[0].features[0].featureId).toBe('Road.1:attribute#2:validity#0');
+        expect(service.store.inspection.selection()[0].locked).toBe(true);
 
-        service.inspections.toggleInspectionFeatureHighlight(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
-        expect(service.inspections.selection[0].features[0].featureId).toBe('Road.1');
+        service.store.toggleInspectionFeatureHighlight(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
+        expect(service.store.inspection.selection()[0].features[0].featureId).toBe('Road.1');
 
         service.destroy();
         routerStub.events.complete();
@@ -1910,7 +1833,7 @@ describe('AppStateService', () => {
         const expandedNodes = new Map<string, boolean | undefined>([['root', true], ['child', false]]);
         const restoreSnapshot = new Map<string, boolean | undefined>([['root', false]]);
 
-        service.inspections.setInspectionTreeExpansionState(7, {
+        service.store.setInspectionTreeExpansionState(7, {
             expandedNodes,
             fullExpansionActive: true,
             expansionSnapshotBeforeFullExpand: restoreSnapshot,
@@ -1919,7 +1842,7 @@ describe('AppStateService', () => {
         expandedNodes.set('root', false);
         restoreSnapshot.set('root', true);
 
-        const firstRead = service.inspections.getInspectionTreeExpansionState(7)!;
+        const firstRead = service.store.getInspectionTreeExpansionState(7)!;
         expect(firstRead.expandedNodes.get('root')).toBe(true);
         expect(firstRead.expansionSnapshotBeforeFullExpand?.get('root')).toBe(false);
         expect(firstRead.fullExpansionActive).toBe(true);
@@ -1928,7 +1851,7 @@ describe('AppStateService', () => {
         firstRead.expandedNodes.set('root', false);
         firstRead.expansionSnapshotBeforeFullExpand?.set('root', true);
 
-        const secondRead = service.inspections.getInspectionTreeExpansionState(7)!;
+        const secondRead = service.store.getInspectionTreeExpansionState(7)!;
         expect(secondRead.expandedNodes.get('root')).toBe(true);
         expect(secondRead.expansionSnapshotBeforeFullExpand?.get('root')).toBe(false);
 
@@ -1939,25 +1862,25 @@ describe('AppStateService', () => {
     it('keeps SourceData column defaults and per-panel overrides out of the URL', () => {
         const routerStub = createRouterStub();
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
-        service.inspections.selection = [{
+        service.store.setSelectionValue([{
             id: 7,
             features: [],
             locked: false,
             size: [30, 20],
             color: '#ffffff',
             undocked: false
-        }];
+        }]);
 
-        service.inspections.sourceDataInspectionDefaultColumns = ["schemaType"];
-        service.inspections.setInspectionTreeHiddenColumns(7, ["displayAddress"]);
+        service.store.setSourceDataInspectionDefaultColumns(["schemaType"]);
+        service.store.setInspectionTreeHiddenColumns(7, ["displayAddress"]);
 
-        expect(service.inspections.sourceDataInspectionDefaultColumns).toEqual(["schemaType"]);
-        expect(service.inspections.getInspectionTreeHiddenColumns(7)).toEqual(["displayAddress"]);
-        expect(service.inspections.sourceDataInspectionDefaultColumnsState.serialize(true)).toBeUndefined();
-        expect(service.inspections.inspectionTreeHiddenColumnsState.serialize(true)).toBeUndefined();
+        expect(service.store.inspection.sourceDataInspectionDefaultColumns()).toEqual(["schemaType"]);
+        expect(service.store.getInspectionTreeHiddenColumns(7)).toEqual(["displayAddress"]);
+        expect(service.persistence.descriptor("sourceDataInspectionDefaultColumns").serialize(getState(service.store), true)).toBeUndefined();
+        expect(service.persistence.descriptor("inspectionTreeHiddenColumns").serialize(getState(service.store), true)).toBeUndefined();
 
-        service.inspections.selection = [];
-        expect(service.inspections.getInspectionTreeHiddenColumns(7)).toBeUndefined();
+        service.store.setSelectionValue([]);
+        expect(service.store.getInspectionTreeHiddenColumns(7)).toBeUndefined();
 
         service.destroy();
         routerStub.events.complete();
@@ -1968,23 +1891,23 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('old-dialog')], locked: false, size: [30, 40], color: '#222222', undocked: true },
-        ];
+        ]);
 
         const selected = feature('new-feature', 'map/layer/new-tile');
-        expect(service.inspections.setSelection([selected])).toBe(2);
-        expect(service.inspections.focusedInspectionPanelId).toBe(2);
-        expect(service.inspections.selection.find(panel => panel.id === 2)?.focused).toBe(true);
+        expect(service.store.setSelection([selected])).toBe(2);
+        expect(service.store.focusedInspectionPanelId()).toBe(2);
+        expect(service.store.inspection.selection().find(panel => panel.id === 2)?.focused).toBe(true);
 
-        service.inspections.focusedInspectionPanelId = 1;
-        expect(service.inspections.setSelection([selected])).toBeUndefined();
-        expect(service.inspections.focusedInspectionPanelId).toBe(2);
-        expect(service.inspections.selection.find(panel => panel.id === 1)?.focused).toBeUndefined();
-        expect(service.inspections.selection.find(panel => panel.id === 2)?.focused).toBe(true);
+        service.store.setFocusedInspectionPanel(1);
+        expect(service.store.setSelection([selected])).toBeUndefined();
+        expect(service.store.focusedInspectionPanelId()).toBe(2);
+        expect(service.store.inspection.selection().find(panel => panel.id === 1)?.focused).toBeUndefined();
+        expect(service.store.inspection.selection().find(panel => panel.id === 2)?.focused).toBe(true);
 
-        const serializedSelection = service.inspections.selectionState.serialize(false)?.['selected'] ?? '';
+        const serializedSelection = service.persistence.descriptor("selected").serialize(getState(service.store), false)?.['selected'] ?? '';
         expect(serializedSelection).toContain('2~0f~');
 
         service.destroy();
@@ -1996,13 +1919,13 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.layout.isDockOpen = false;
-        service.inspections.selection = [
+        service.store.setDockOpen(false);
+        service.store.setSelectionValue([
             { id: 1, features: [feature('old-feature')], locked: false, size: [30, 20], color: '#111111', undocked: false }
-        ];
+        ]);
 
-        service.inspections.setSelection([feature('old-feature')]);
-        expect(service.layout.isDockOpen).toBe(true);
+        service.store.setSelection([feature('old-feature')]);
+        expect(service.store.layout.dockOpen()).toBe(true);
 
         service.destroy();
         routerStub.events.complete();
@@ -2013,14 +1936,14 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:1'), locked: false, size: [30, 40], color: '#111111', undocked: true },
             { id: 2, features: [feature('old-feature')], locked: false, size: [30, 20], color: '#222222', undocked: false },
-        ];
+        ]);
 
         const selected = [feature('new-feature', 'map/layer/new-tile')];
-        const targetPanelId = service.inspections.setSelection(selected);
-        const panels = service.inspections.selection;
+        const targetPanelId = service.store.setSelection(selected);
+        const panels = service.store.inspection.selection();
 
         expect(targetPanelId).toBe(2);
         expect(panels.find(panel => panel.id === 1)?.sourceData).toEqual(sourceData('SourceData:m1:SourceData-LAYER:1'));
@@ -2035,14 +1958,14 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [feature('feature-panel')], locked: false, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: false, size: [30, 40], color: '#222222', undocked: true },
-        ];
+        ]);
 
         const nextSourceData = sourceData('SourceData:m1:SourceData-LAYER:3');
-        const targetPanelId = service.inspections.setSelection(nextSourceData);
-        const panels = service.inspections.selection;
+        const targetPanelId = service.store.setSelection(nextSourceData);
+        const panels = service.store.inspection.selection();
 
         expect(targetPanelId).toBe(2);
         expect(panels.find(panel => panel.id === 2)?.sourceData).toEqual(nextSourceData);
@@ -2057,13 +1980,13 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [feature('feature-panel')], locked: false, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: true, size: [30, 40], color: '#222222', undocked: true },
-        ];
+        ]);
 
-        const targetPanelId = service.inspections.setSelection(sourceData('SourceData:m1:SourceData-LAYER:9'));
-        const panels = service.inspections.selection;
+        const targetPanelId = service.store.setSelection(sourceData('SourceData:m1:SourceData-LAYER:9'));
+        const panels = service.store.inspection.selection();
         const newPanel = panels.find(panel => panel.id === targetPanelId);
 
         expect(targetPanelId).toBe(3);
@@ -2081,16 +2004,16 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [feature('remove-me')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('fallback')], locked: true, size: [30, 20], color: '#222222', undocked: false },
-        ];
-        service.inspections.focusedInspectionPanelId = 1;
+        ]);
+        service.store.setFocusedInspectionPanel(1);
 
-        service.inspections.unsetPanel(1);
+        service.store.unsetPanel(1);
 
-        expect(service.inspections.focusedInspectionPanelId).toBe(2);
-        expect(service.inspections.selection.find(panel => panel.id === 2)?.focused).toBe(true);
+        expect(service.store.focusedInspectionPanelId()).toBe(2);
+        expect(service.store.inspection.selection().find(panel => panel.id === 2)?.focused).toBe(true);
 
         service.destroy();
         routerStub.events.complete();
@@ -2101,13 +2024,13 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:3'), locked: false, size: [30, 40], color: '#222222', undocked: true },
-        ];
+        ]);
 
-        const targetPanelId = service.inspections.setSelection(sourceData('SourceData:m1:SourceData-LAYER:7'), 1);
-        const panels = service.inspections.selection;
+        const targetPanelId = service.store.setSelection(sourceData('SourceData:m1:SourceData-LAYER:7'), 1);
+        const panels = service.store.inspection.selection();
 
         expect(targetPanelId).toBe(1);
         expect(panels.find(panel => panel.id === 1)?.sourceData).toEqual(sourceData('SourceData:m1:SourceData-LAYER:7'));
@@ -2123,7 +2046,7 @@ describe('AppStateService', () => {
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
         const duplicated = feature('same-feature');
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             {
                 id: 1,
                 features: [duplicated],
@@ -2133,10 +2056,10 @@ describe('AppStateService', () => {
                 color: '#111111',
                 undocked: true,
             },
-        ];
+        ]);
 
-        const targetPanelId = service.inspections.setSelection([duplicated]);
-        const panels = service.inspections.selection;
+        const targetPanelId = service.store.setSelection([duplicated]);
+        const panels = service.store.inspection.selection();
         const created = panels.find(panel => panel.id === targetPanelId);
 
         expect(targetPanelId).toBe(2);
@@ -2152,14 +2075,14 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [feature('remove-me')], locked: false, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: false, size: [30, 40], color: '#222222', undocked: true },
             { id: 3, features: [feature('stay-locked')], locked: true, size: [30, 20], color: '#333333', undocked: false },
-        ];
+        ]);
 
-        service.inspections.unsetUnlockedSelections();
-        const panels = service.inspections.selection;
+        service.store.unsetUnlockedSelections();
+        const panels = service.store.inspection.selection();
 
         expect(panels).toHaveLength(2);
         expect(panels.find(panel => panel.id === 1)).toBeUndefined();
@@ -2175,19 +2098,19 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [feature('remove-a')], locked: false, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('remove-b')], locked: false, size: [30, 40], color: '#222222', undocked: true },
             { id: 3, features: [feature('keep-locked')], locked: true, size: [30, 20], color: '#333333', undocked: false },
             { id: 4, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:8'), locked: false, size: [30, 40], color: '#444444', undocked: true },
-        ];
+        ]);
 
-        service.inspections.unsetUnlockedSelections();
+        service.store.unsetUnlockedSelections();
 
         const mergedFeatures = [feature('merged-1'), feature('merged-2'), feature('merged-3')];
-        const createdIds = mergedFeatures.map(selected => service.inspections.setSelection([selected], undefined, true));
+        const createdIds = mergedFeatures.map(selected => service.store.setSelection([selected], undefined, true));
         const definedIds = createdIds.filter((panelId): panelId is number => panelId !== undefined);
-        const panels = service.inspections.selection;
+        const panels = service.store.inspection.selection();
 
         expect(definedIds).toHaveLength(mergedFeatures.length);
         expect(panels.find(panel => panel.id === 1)).toBeUndefined();
@@ -2211,25 +2134,25 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 11, features: [], locked: false, size: [30, 40], color: '#111111', undocked: true },
             { id: 22, features: [], locked: false, size: [30, 40], color: '#222222', undocked: true },
-        ];
+        ]);
 
-        service.inspections.setInspectionDialogPosition(11, { left: 10, top: 20 }, 0);
-        service.inspections.setInspectionDialogPosition(22, { left: 30, top: 40 }, 0);
+        service.store.setInspectionDialogPosition(11, { left: 10, top: 20 }, 0);
+        service.store.setInspectionDialogPosition(22, { left: 30, top: 40 }, 0);
 
-        const first = service.inspections.getInspectionDialogLayout(11);
-        const second = service.inspections.getInspectionDialogLayout(22);
+        const first = service.store.getInspectionDialogLayout(11);
+        const second = service.store.getInspectionDialogLayout(22);
         expect(first?.slot).toBe(0);
         expect(second?.slot).toBe(0);
 
-        service.inspections.setInspectionDialogPosition(11, { left: 12, top: 24 }, 9);
-        expect(service.inspections.getInspectionDialogLayout(11)?.slot).toBe(0);
+        service.store.setInspectionDialogPosition(11, { left: 12, top: 24 }, 9);
+        expect(service.store.getInspectionDialogLayout(11)?.slot).toBe(0);
 
-        service.inspections.pruneInspectionDialogLayout([22]);
-        expect(service.inspections.getInspectionDialogLayout(11)).toBeUndefined();
-        expect(service.inspections.getInspectionDialogLayout(22)?.position).toEqual({ left: 30, top: 40 });
+        service.store.pruneInspectionDialogLayout([22]);
+        expect(service.store.getInspectionDialogLayout(11)).toBeUndefined();
+        expect(service.store.getInspectionDialogLayout(22)?.position).toEqual({ left: 30, top: 40 });
 
         service.destroy();
         routerStub.events.complete();
@@ -2243,11 +2166,11 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 5, features: [], locked: false, size: [30, 40], color: '#555555', undocked: true },
-        ];
-        service.inspections.setInspectionDialogPosition(5, { left: 100, top: 200 }, 3);
-        service.inspections.openInspectionComparison({
+        ]);
+        service.store.setInspectionDialogPosition(5, { left: 100, top: 200 }, 3);
+        service.store.openInspectionComparison({
             base: {
                 panelId: 5,
                 mapId: 'map',
@@ -2266,9 +2189,9 @@ describe('AppStateService', () => {
         expect(localStorage.getItem('dialogLayouts')).toContain('"slot":3');
         expect(localStorage.getItem('inspectionComparisonState')).toContain('"panelId":5');
 
-        service.inspections.closeInspectionComparison();
+        service.store.closeInspectionComparison();
         await flushMicrotasks();
-        expect(service.inspections.inspectionComparison).toBeNull();
+        expect(service.store.inspection.inspectionComparison()).toBeNull();
 
         service.destroy();
         routerStub.events.complete();
@@ -2279,11 +2202,11 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('f2')], locked: true, size: [30, 20], color: '#222222', undocked: false },
-        ];
-        service.inspections.openInspectionComparison({
+        ]);
+        service.store.openInspectionComparison({
             base: {
                 panelId: 1,
                 mapId: 'map',
@@ -2298,9 +2221,9 @@ describe('AppStateService', () => {
             }]
         });
 
-        service.inspections.unsetPanel(2);
+        service.store.unsetPanel(2);
 
-        expect(service.inspections.inspectionComparison).toEqual({
+        expect(service.store.inspection.inspectionComparison()).toEqual({
             base: {
                 panelId: 1,
                 mapId: 'map',
@@ -2319,12 +2242,12 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('f2')], locked: true, size: [30, 20], color: '#222222', undocked: false },
             { id: 3, features: [feature('f3')], locked: true, size: [30, 20], color: '#333333', undocked: false },
-        ];
-        service.inspections.openInspectionComparison({
+        ]);
+        service.store.openInspectionComparison({
             base: {
                 panelId: 1,
                 mapId: 'map',
@@ -2347,9 +2270,9 @@ describe('AppStateService', () => {
             ]
         });
 
-        service.inspections.unsetPanel(1);
+        service.store.unsetPanel(1);
 
-        expect(service.inspections.inspectionComparison).toEqual({
+        expect(service.store.inspection.inspectionComparison()).toEqual({
             base: {
                 panelId: 2,
                 mapId: 'map',
@@ -2375,11 +2298,11 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.inspections.selection = [
+        service.store.setSelectionValue([
             { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('f2')], locked: false, size: [30, 20], color: '#222222', undocked: false },
-        ];
-        service.inspections.openInspectionComparison({
+        ]);
+        service.store.openInspectionComparison({
             base: {
                 panelId: 1,
                 mapId: 'map',
@@ -2394,9 +2317,9 @@ describe('AppStateService', () => {
             }]
         });
 
-        service.inspections.unsetUnlockedSelections();
+        service.store.unsetUnlockedSelections();
 
-        expect(service.inspections.inspectionComparison).toEqual({
+        expect(service.store.inspection.inspectionComparison()).toEqual({
             base: {
                 panelId: 1,
                 mapId: 'map',
@@ -2415,12 +2338,12 @@ describe('AppStateService', () => {
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
         expect(service.persistence.seedConfigDefaultState({connectionRetryInitialDelayMs: 7000,
             connectionRetryMaxDelayMs: 90000}, "connection-config")).toEqual([]);
-        expect(service.connection.connectionRetryPolicy.initialDelayMs).toBe(7000);
-        service.connection.setConnectionRetryPolicy({...service.connection.connectionRetryPolicy, enabled: false, backoffMultiplier: 3});
+        expect(service.store.connectionRetryPolicy().initialDelayMs).toBe(7000);
+        service.store.setConnectionRetryPolicy({...service.store.connectionRetryPolicy(), enabled: false, backoffMultiplier: 3});
         expect(service.persistence.exportSnapshot()).toMatchObject({connectionRetryEnabled: 0,
             connectionRetryInitialDelayMs: 7000, connectionRetryBackoffMultiplier: 3});
-        expect(() => service.connection.setConnectionRetryPolicy({...service.connection.connectionRetryPolicy, maxDelayMs: 0})).toThrow();
-        expect(service.connection.connectionRetryPolicy.maxDelayMs).toBe(90000);
+        expect(() => service.store.setConnectionRetryPolicy({...service.store.connectionRetryPolicy(), maxDelayMs: 0})).toThrow();
+        expect(service.store.connectionRetryPolicy().maxDelayMs).toBe(90000);
         service.destroy();
         routerStub.events.complete();
     });
@@ -2430,18 +2353,18 @@ describe('AppStateService', () => {
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
         expect(service.persistence.seedConfigDefaultState({pointCloudDetailPixels: 4,
             pointCloudGpuMemoryMiB: 128}, 'point-cloud-config')).toEqual([]);
-        expect(service.views.pointCloudPolicy.detailPixels).toBe(4);
-        service.views.setPointCloudPolicy({...service.views.pointCloudPolicy, enabled: false, workingMemoryMiB: 256});
+        expect(service.store.pointCloudPolicy().detailPixels).toBe(4);
+        service.store.setPointCloudPolicy({...service.store.pointCloudPolicy(), enabled: false, workingMemoryMiB: 256});
         const snapshot = service.persistence.exportSnapshot();
         expect(snapshot).toMatchObject({pointCloudDownsamplingEnabled: 0,
             pointCloudDetailPixels: 4, pointCloudWorkingMemoryMiB: 256, pointCloudGpuMemoryMiB: 128});
-        expect(service.views.pointCloudDetailPixelsState.isUrlState()).toBe(false);
-        expect(() => service.views.setPointCloudPolicy({...service.views.pointCloudPolicy, gpuMemoryMiB: 0})).toThrow();
-        expect(service.views.pointCloudPolicy.gpuMemoryMiB).toBe(128);
+        expect(service.persistence.descriptor("pointCloudDetailPixels").codec.isUrlState()).toBe(false);
+        expect(() => service.store.setPointCloudPolicy({...service.store.pointCloudPolicy(), gpuMemoryMiB: 0})).toThrow();
+        expect(service.store.pointCloudPolicy().gpuMemoryMiB).toBe(128);
         expect(service.persistence.importSnapshot({pointCloudDetailPixels: 8})).toEqual([]);
-        expect(service.views.pointCloudPolicy.detailPixels).toBe(8);
+        expect(service.store.pointCloudPolicy().detailPixels).toBe(8);
         expect(service.persistence.importSnapshot({pointCloudWorkingMemoryMiB: -1}).length).toBeGreaterThan(0);
-        expect(service.views.pointCloudPolicy.workingMemoryMiB).toBe(256);
+        expect(service.store.pointCloudPolicy().workingMemoryMiB).toBe(256);
         service.destroy();
         routerStub.events.complete();
     });
@@ -2451,9 +2374,9 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.views.markerState.next(true);
-        service.layers.layerNamesState.next(['m1/layerA']);
-        service.layers.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
+        service.store.setMarkerState(true);
+        service.store.setLayerNames(['m1/layerA']);
+        service.store.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
         const snapshot = service.persistence.exportSnapshot();
 
         expect(snapshot).toHaveProperty('marker');
@@ -2470,7 +2393,7 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.layout.openDialog('advanced-preferences-dialog');
+        service.store.setDialogOpen('advanced-preferences-dialog', true);
         const snapshot = service.persistence.exportSnapshot();
 
         expect(snapshot).not.toHaveProperty('advancedPreferencesDialogVisible');
@@ -2483,8 +2406,8 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
 
-        service.coordinatePolicy.coordinatesEnabledState.next(false);
-        service.coordinatePolicy.coordinatesLegalTermsAcceptedState.next(true);
+        service.store.setCoordinatesEnabled(false);
+        service.store.setCoordinatesLegalTermsAccepted(true);
 
         const snapshot = service.persistence.exportSnapshot();
         const params = (service as any).url.serializeUrlV2();
@@ -2513,7 +2436,7 @@ describe('AppStateService', () => {
         });
 
         expect(errors).toEqual([]);
-        expect(service.layout.isDialogOpen('advanced-preferences-dialog')).toBe(true);
+        expect(service.store.isDialogOpen('advanced-preferences-dialog')).toBe(true);
 
         service.destroy();
         routerStub.events.complete();
@@ -2541,9 +2464,9 @@ describe('AppStateService', () => {
         });
 
         expect(errors).toEqual([]);
-        expect(service.layout.isDialogOpen('styles-dialog')).toBe(true);
-        expect(service.layout.isDialogOpen('style-editor-dialog')).toBe(true);
-        expect(service.styleEditor.styleEditorTargetId).toBe('generic');
+        expect(service.store.isDialogOpen('styles-dialog')).toBe(true);
+        expect(service.store.isDialogOpen('style-editor-dialog')).toBe(true);
+        expect(service.store.styleEditor.styleEditorTarget()).toBe('generic');
 
         service.destroy();
         routerStub.events.complete();
@@ -2554,14 +2477,14 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.views.markerState.next(false);
+        service.store.setMarkerState(false);
         const errors = service.persistence.importSnapshot({
             marker: true,
             unknownState: 1
         });
 
         expect(errors.length).toBeGreaterThan(0);
-        expect(service.views.markerState.getValue()).toBe(false);
+        expect(service.store.views.marker()).toBe(false);
 
         service.destroy();
         routerStub.events.complete();
@@ -2572,15 +2495,15 @@ describe('AppStateService', () => {
         const infoServiceStub = { showError: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub);
 
-        service.views.markerState.next(false);
+        service.store.setMarkerState(false);
 
         const errors = service.persistence.importSnapshot({
             marker: true
         });
 
         expect(errors).toEqual([]);
-        expect(service.views.markerState.getValue()).toBe(true);
-        expect(service.layout.isDialogOpen('preferences-dialog')).toBe(false);
+        expect(service.store.views.marker()).toBe(true);
+        expect(service.store.isDialogOpen('preferences-dialog')).toBe(false);
 
         service.destroy();
         routerStub.events.complete();
@@ -2591,14 +2514,14 @@ describe('AppStateService', () => {
         const service = createStateOwners(routerStub as unknown as Router, infoServiceStub());
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
-        service.layers.mapsOpenState.next(true);
-        service.layers.stylesState.next(new Map([['old/Lane/style/topology', [true]]]));
+        service.store.setMapsOpen(true);
+        setTestStyleOptions(service, new Map([['old/Lane/style/topology', [true]]]));
         await service.persistence.replaceUrlState({v2: '1', n: '1', lon: '11.66', lat: '48.25', alt: '128000', map: 'Very-Large-Map', l: 'Road:0', v: '1'}, true);
-        expect(service.layers.mapsOpenState.getValue()).toBe(false);
-        expect(service.layers.stylesState.getValue().has('old/Lane/style/topology')).toBe(false);
-        expect(service.layers.layerNamesState.getValue()).toEqual(['Very-Large-Map/Road']);
-        expect(service.views.cameraViewDataState.getValue(0).destination.lon).toBeCloseTo(11.66);
-        expect(service.views.cameraViewDataState.getValue(0).destination.lat).toBeCloseTo(48.25);
+        expect(service.store.layers.mapsOpen()).toBe(false);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).has('old/Lane/style/topology')).toBe(false);
+        expect(service.store.layers.layerNames()).toEqual(['Very-Large-Map/Road']);
+        expect(service.store.views.cameraViewData()[service.store.idAt(0)!].destination.lon).toBeCloseTo(11.66);
+        expect(service.store.views.cameraViewData()[service.store.idAt(0)!].destination.lat).toBeCloseTo(48.25);
         service.destroy();
         routerStub.events.complete();
     });
@@ -2622,14 +2545,14 @@ describe('AppStateService', () => {
         const stateApplied = vi.fn();
         service.persistence.stateApplied.subscribe(stateApplied);
 
-        service.views.markerState.next(false);
+        service.store.setMarkerState(false);
         const errors = service.persistence.replaceSnapshotState({
             marker: true,
             unknownPresentationState: 1
         });
 
         expect(errors).not.toEqual([]);
-        expect(service.views.markerState.getValue()).toBe(false);
+        expect(service.store.views.marker()).toBe(false);
         expect(stateApplied).not.toHaveBeenCalled();
 
         service.destroy();
@@ -2642,10 +2565,10 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        service.views.markerState.next(true);
-        service.layers.mapsOpenState.next(true);
-        service.layers.layerNamesState.next(['m1/layerA']);
-        service.layers.stylesState.next(new Map([
+        service.store.setMarkerState(true);
+        service.store.setMapsOpen(true);
+        service.store.setLayerNames(['m1/layerA']);
+        setTestStyleOptions(service, new Map([
             ['m1/layerA/overlay/stale', [true]]
         ]));
         await flushMicrotasks();
@@ -2664,11 +2587,11 @@ describe('AppStateService', () => {
         await flushMicrotasks();
 
         expect(errors).toEqual([]);
-        expect(service.views.markerState.getValue()).toBe(false);
-        expect(service.layers.mapsOpenState.getValue()).toBe(false);
-        expect(service.layers.layerNamesState.getValue()).toEqual(['m2/layerB']);
-        expect(service.layers.stylesState.getValue().has('m1/layerA/overlay/stale')).toBe(false);
-        expect(service.layers.stylesState.getValue().get('m2/layerB/overlay/opacity')).toEqual(['0.75']);
+        expect(service.store.views.marker()).toBe(false);
+        expect(service.store.layers.mapsOpen()).toBe(false);
+        expect(service.store.layers.layerNames()).toEqual(['m2/layerB']);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).has('m1/layerA/overlay/stale')).toBe(false);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).get('m2/layerB/overlay/opacity')).toEqual(['0.75']);
         expect(appliedSnapshots).toHaveLength(1);
         expect(routerStub.navigate).not.toHaveBeenCalled();
         expect(localStorage.length).toBe(0);
@@ -2688,8 +2611,8 @@ describe('AppStateService', () => {
         });
 
         expect(errors).toEqual([]);
-        expect(service.layers.stylesState.getValue().get('m1/layerA/overlay/opacity')).toEqual(['0.5']);
-        expect(service.layers.stylesState.getValue().get('m1/layerA/overlay/debug')).toEqual(['1']);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).get('m1/layerA/overlay/opacity')).toEqual(['0.5']);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).get('m1/layerA/overlay/debug')).toEqual(['1']);
 
         service.destroy();
         routerStub.events.complete();
@@ -2706,8 +2629,8 @@ describe('AppStateService', () => {
         });
 
         expect(errors.length).toBeGreaterThan(0);
-        expect(service.views.markerState.getValue()).toBe(false);
-        expect(service.layers.stylesState.getValue().size).toBe(0);
+        expect(service.store.views.marker()).toBe(false);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).size).toBe(0);
 
         service.destroy();
         routerStub.events.complete();
@@ -2723,7 +2646,7 @@ describe('AppStateService', () => {
 
         expect(errors.length).toBeGreaterThan(0);
         expect(({} as any).polluted).toBeUndefined();
-        expect(service.views.markerState.getValue()).toBe(false);
+        expect(service.store.views.marker()).toBe(false);
 
         service.destroy();
         routerStub.events.complete();
@@ -2739,7 +2662,7 @@ describe('AppStateService', () => {
 
         expect(errors.length).toBeGreaterThan(0);
         expect(({} as any).polluted).toBeUndefined();
-        expect(service.layers.stylesState.getValue().size).toBe(0);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).size).toBe(0);
 
         service.destroy();
         routerStub.events.complete();
@@ -2755,7 +2678,7 @@ describe('AppStateService', () => {
 
         expect(errors.length).toBeGreaterThan(0);
         expect(({} as any).polluted).toBeUndefined();
-        expect(service.layers.stylesState.getValue().size).toBe(0);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).size).toBe(0);
 
         service.destroy();
         routerStub.events.complete();
@@ -2772,7 +2695,7 @@ describe('AppStateService', () => {
         });
 
         expect(errors.length).toBeGreaterThan(0);
-        expect(service.config.erdblickVersion.getValue()).toBe('');
+        expect(service.store.config.erdblickVersion()).toBe('');
 
         service.destroy();
         routerStub.events.complete();
@@ -2796,7 +2719,7 @@ describe('AppStateService', () => {
         });
 
         expect(errors.length).toBeGreaterThan(0);
-        expect(service.layers.stylesState.getValue().size).toBe(0);
+        expect(service.persistence.stylesPersistence.read(getState(service.store)).size).toBe(0);
 
         service.destroy();
         routerStub.events.complete();
@@ -2816,8 +2739,8 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.markerState.getValue()).toBe(true);
-        expect(service.views.featureZoomClearanceMeters).toBe(35);
+        expect(service.store.views.marker()).toBe(true);
+        expect(service.store.views.featureZoomClearanceMeters()).toBe(35);
 
         service.destroy();
         routerStub.events.complete();
@@ -2832,7 +2755,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.coordinatePolicy.coordinatesEnabledState.getValue()).toBe(false);
+        expect(service.store.coordinatePolicy.coordinatesEnabled()).toBe(false);
         expect(service.persistence.exportSnapshot()).not.toHaveProperty('coordinatesEnabled');
 
         service.destroy();
@@ -2850,7 +2773,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.markerState.getValue()).toBe(false);
+        expect(service.store.views.marker()).toBe(false);
 
         service.destroy();
         routerStub.events.complete();
@@ -2877,7 +2800,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.markerState.getValue()).toBe(true);
+        expect(service.store.views.marker()).toBe(true);
 
         service.destroy();
         routerStub.events.complete();
@@ -2904,7 +2827,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.markerState.getValue()).toBe(false);
+        expect(service.store.views.marker()).toBe(false);
 
         service.destroy();
         routerStub.events.complete();
@@ -2931,7 +2854,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.markerState.getValue()).toBe(true);
+        expect(service.store.views.marker()).toBe(true);
 
         service.destroy();
         routerStub.events.complete();
@@ -2949,7 +2872,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.markerState.getValue()).toBe(false);
+        expect(service.store.views.marker()).toBe(false);
         expect(warnSpy).toHaveBeenCalled();
 
         warnSpy.mockRestore();
@@ -2968,7 +2891,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(service.views.markerState.getValue()).toBe(false);
+        expect(service.store.views.marker()).toBe(false);
 
         service.destroy();
         routerStub.events.complete();

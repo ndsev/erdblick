@@ -1,11 +1,10 @@
 import {inject, Injectable} from "@angular/core";
-import {z} from "zod";
 import {rejectAction} from "../actions/action-utils";
-import {ActionDeclaration, AppActionService} from "../actions/app-action.service";
 import type {SearchTarget} from "../actions/omnibar";
-import {MapViewStateService} from "../mapview/map-view-state.service";
 import {AppConfigService, type ExternalViewerConfig} from "../shared/app-config.service";
+import {AppStore} from "../shared/app.store";
 import {CoordinateJumpService} from "./coordinate-jump.service";
+import type {NavigationActionInput} from "./navigation-actions.store-feature";
 
 /** A validated WGS84 point used by external map viewers. */
 export interface ExternalViewerLocation {
@@ -36,43 +35,21 @@ function isValidExternalViewerLocation(location: ExternalViewerLocation): boolea
 @Injectable({providedIn: "root"})
 /** Owns configured external-viewer URLs and the omnibox marker/viewport fallback policy. */
 export class ExternalViewerService {
-    static readonly actions = {
-        open: {
-            name: "omnibar_external_viewer",
-            description: "Open a currently configured external viewer at a validated location.",
-            mutation: true,
-            exposure: "omnibar",
-            inputSchema: z
-                .object({
-                    providerId: z.string().min(1),
-                    location: z
-                        .object({
-                            lat: z.number().min(-90).max(90),
-                            lon: z.number().min(-180).max(180)
-                        })
-                        .strict()
-                })
-                .strict(),
-            outputSchema: z.void()
-        }
-    } as const satisfies Record<string, ActionDeclaration>;
-    private readonly actions = inject(AppActionService);
-    readonly viewStateOwner = inject(MapViewStateService);
+    private readonly store = inject(AppStore);
     private readonly coordinates = inject(CoordinateJumpService);
-    constructor(private readonly configService: AppConfigService) {
-        this.actions.registerAction(ExternalViewerService.actions.open, ({providerId, location}) => {
-            const provider = this.providers.find((current) => current.id === providerId);
-            if (!provider) rejectAction("External viewer is no longer configured", "not_available");
-            this.open(provider, location);
-        });
-        this.actions.registerOmnibar(
-            "external-viewers",
-            (query) => {
-                const location = this.externalViewerLocation(query);
-                return this.providers.map((provider) => this.externalViewerTarget(provider, location));
-            },
-            40
-        );
+    constructor(private readonly configService: AppConfigService) {}
+
+    /** Rechecks that the requested provider is still configured before opening its URL. */
+    openExternalViewer({providerId, location}: NavigationActionInput<"openExternalViewer">): void {
+        const provider = this.providers.find((current) => current.id === providerId);
+        if (!provider) rejectAction("External viewer is no longer configured", "not_available");
+        this.open(provider, location);
+    }
+
+    /** Resolves one current input location for the configured external-viewer choices. */
+    targets(query: string): SearchTarget[] {
+        const location = this.externalViewerLocation(query);
+        return this.providers.map((provider) => this.externalViewerTarget(provider, location));
     }
 
     /** Returns the current ordered configuration shared by every external-viewer UI. */
@@ -85,14 +62,12 @@ export class ExternalViewerService {
         if (explicit) {
             return {...explicit, source: "input"};
         }
-        const marker = this.viewStateOwner.markedPosition;
+        const marker = this.store.views.markedPosition();
         const markerLocation = {lon: marker[0], lat: marker[1]};
-        if (this.viewStateOwner.marker && marker.length >= 2 && isValidExternalViewerLocation(markerLocation)) {
+        if (this.store.views.marker() && marker.length >= 2 && isValidExternalViewerLocation(markerLocation)) {
             return {...markerLocation, source: "marker"};
         }
-        const destination = this.viewStateOwner.cameraViewDataState.getValue(
-            this.viewStateOwner.focusedView
-        ).destination;
+        const destination = this.store.views.cameraViewData()[this.store.focusedViewId()].destination;
         return {lon: destination.lon, lat: destination.lat, source: "viewport"};
     }
 
@@ -116,7 +91,7 @@ export class ExternalViewerService {
         provider: ExternalViewerProvider,
         location: ResolvedExternalViewerLocation | undefined
     ): SearchTarget {
-        return this.actions.candidate(ExternalViewerService.actions.open, {
+        return this.store.actionCatalog.candidate(this.store.openExternalViewer, {
             id: provider.id,
             icon: "pi-map-marker",
             color: "green",

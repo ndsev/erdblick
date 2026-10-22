@@ -1,11 +1,15 @@
 import type {Page} from '@playwright/test';
 import {expect, test} from '../fixtures/test';
-import {viewerActionNames, viewerResult, availableValue, type ViewerActionName} from '../utils/viewer-catalog';
-import {cameraViewStateSchema} from '../../app/mapview/map-view.service.declarations';
-import {inspectionStateControls} from '../../app/inspection/inspection-state.service.declarations';
+import {viewerActionNames, viewerResult, availableValue, viewerControlSchema, type ViewerActionName} from '../utils/viewer-catalog';
+import type {z} from 'zod';
+import type {CameraViewState} from '../../app/mapview/map-view-state.model';
+import type {inspectionStateControls} from '../../app/inspection/inspection.store-feature';
 import {enableMapLayer} from '../utils/ui-helpers';
 import {mcpClient} from '../utils/mcp-client';
 import {TEST_LAYER_NAMES, TEST_MAP_NAMES} from '../utils/test-params';
+
+const cameraViewStateSchema = viewerControlSchema<CameraViewState>('view.camera');
+const inspectionPanelSchema = viewerControlSchema<z.output<typeof inspectionStateControls.panel.valueSchema>>('inspection.panel');
 
 test.use({stateSnapshot: null});
 test.skip(process.env['EB_MAPGET_MCP_LOCAL'] !== '1', 'Requires the native local MCP fixture, not a mocked relay');
@@ -343,7 +347,7 @@ rules:
     // Exercise the same persisted resize callbacks as floating and stacked inspection UI.
     const panelTarget = {control: 'inspection.panel', panelId};
     const panelState = viewerResult('viewer_get_controls', await call('viewer_get_controls', {targets: [panelTarget]}));
-    const presentation = inspectionStateControls.panel.valueSchema.parse(availableValue(panelState.values[0]));
+    const presentation = inspectionPanelSchema.parse(availableValue(panelState.values[0]));
     expect(presentation.color).toBe('#aa33cc');
     async function layoutTarget(kind: 'dialog' | 'panel', id: number) {
         let offset = 0;

@@ -1,12 +1,14 @@
+import {getBaseFontSize} from "../shared/app-layout.model";
+import {AppStore} from "../shared/app.store";
 import {ChangeDetectorRef, Component, ElementRef, inject, OnDestroy, Renderer2, ViewChild} from "@angular/core";
 import {Subscription} from "rxjs";
 import {FeatureWrapper} from "../mapdata/feature-inspection.model";
-import {AppLayoutService} from "../shared/app-layout.service";
+
 import {AppStateService} from "../shared/appstate.service";
 import {DockedPanelDragController, DockedPanelDragOffset} from "../shared/docked-panel-drag.controller";
 import {InspectionSelectionService} from "./inspection-selection.service";
 import {InspectionPanelModel} from "./inspection-state.model";
-import {InspectionStateService} from "./inspection-state.service";
+
 
 @Component({
     selector: "inspection-container",
@@ -68,8 +70,8 @@ import {InspectionStateService} from "./inspection-state.service";
 })
 /** Hosts docked inspection panels and manages drag-based docking/reordering. */
 export class InspectionContainerComponent implements OnDestroy {
-    readonly layoutState = inject(AppLayoutService);
-    readonly inspectionState = inject(InspectionStateService);
+    readonly store = inject(AppStore);
+
     dockedPanels: InspectionPanelModel<FeatureWrapper>[] = [];
     dockFilterText = "";
     protected readonly dockDrag: DockedPanelDragController<number>;
@@ -86,7 +88,7 @@ export class InspectionContainerComponent implements OnDestroy {
     ) {
         this.dockDrag = new DockedPanelDragController<number>({
             renderer: this.renderer,
-            baseFontSize: () => this.layoutState.baseFontSize,
+            baseFontSize: () => getBaseFontSize(),
             container: () => this.dockContainerRef?.nativeElement,
             itemSelector: "inspection-panel",
             readId: (element) => {
@@ -96,24 +98,15 @@ export class InspectionContainerComponent implements OnDestroy {
             previewClass: "inspection-drag-preview",
             previewHeaderClass: "inspection-drag-preview-header",
             previewFillClass: "inspection-drag-preview-fill",
-            applyReorder: (nextDisplayOrder) => this.inspectionState.reorderInspectionPanels(nextDisplayOrder),
+            applyReorder: (nextDisplayOrder) => this.store.reorderInspectionPanels(nextDisplayOrder),
             undock: (panelId, event, offset) => this.queueUndock(panelId, event, offset)
         });
         this.subscriptions.add(
             this.mapService.selectionTopic.subscribe((panels) => {
                 const allPanels = panels.slice();
                 this.dockedPanels = allPanels.filter((panel) => !panel.undocked).toReversed();
-                // Restricted feature loading is asynchronous. Keep the dock open
-                // while a docked id selection is waiting for its FeatureWrapper;
-                // otherwise the selectionTopic's initial empty value immediately
-                // auto-collapses the dock opened by setSelection().
-                const hasPendingDockedPanels = this.mapService.selectionIdsTopic
-                    .getValue()
-                    .some((panel) => !panel.undocked);
-                const hasDockedPanels =
-                    this.dockedPanels.length > 0 || hasPendingDockedPanels || this.layoutState.hasDockedSurface();
-                this.layoutState.isDockOpen =
-                    this.layoutState.isDockOpen && (!this.layoutState.isDockAutoCollapsible || hasDockedPanels);
+                // Selection operations already publish dock visibility with their
+                // canonical panel ids. Loading/failed runtime shells only affect rendering.
                 // Angular 21 bootstraps NgModules with zoneless change detection.
                 // RxJS emissions therefore need an explicit render notification;
                 // NgZone.run() in the publisher is not one.
@@ -130,7 +123,7 @@ export class InspectionContainerComponent implements OnDestroy {
 
     /** Turns a docked panel into a floating dialog. */
     onEject(panel: InspectionPanelModel<FeatureWrapper>) {
-        this.inspectionState.setInspectionPanelUndockedState(panel.id, true);
+        this.store.setInspectionPanelUndockedState(panel.id, true);
     }
 
     /** Starts dock drag tracking for a docked inspection header. */
@@ -142,7 +135,7 @@ export class InspectionContainerComponent implements OnDestroy {
     private queueUndock(panelId: number, event: PointerEvent, offset: DockedPanelDragOffset) {
         const left = Math.max(0, Math.round(event.clientX - offset.x));
         const top = Math.max(0, Math.round(event.clientY - offset.y));
-        this.inspectionState.setInspectionDialogPosition(panelId, {left, top});
-        this.inspectionState.setInspectionPanelUndockedState(panelId, true);
+        this.store.setInspectionDialogPosition(panelId, {left, top});
+        this.store.setInspectionPanelUndockedState(panelId, true);
     }
 }

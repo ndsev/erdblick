@@ -1,18 +1,16 @@
-import {runInInjectionContext} from "@angular/core";
 import {ownerTestInjector} from "../../test/owner-test-injector";
-import {MapViewStateService} from "../mapview/map-view-state.service";
 import {MapViewService} from "../mapview/map-view.service";
 import "@angular/compiler";
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import {ViewerUiService} from "./viewer-ui.service";
-import {viewerUiActions} from "./viewer-ui.contract";
+import {viewerUiActions} from "./viewer-ui-actions.store-feature";
 
 describe("bounded viewer UI actions", () => {
     let ui: ViewerUiService;
     let root: HTMLDivElement;
 
     beforeEach(() => {
-        const injector = ownerTestInjector([ViewerUiService, MapViewStateService,
+        const injector = ownerTestInjector([ViewerUiService,
             {provide: MapViewService, useValue: {}}]);
         ui = injector.get(ViewerUiService);
         root = document.createElement("div");

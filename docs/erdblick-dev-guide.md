@@ -369,9 +369,10 @@ stays pending.
 
 ## Optional MCP browser actions
 
-`AppActionService` binds named owner controls and actions. `ViewerActionService`
-adapts those operations to the browser relay. See [State Owners and Actions](erdblick-state-actions.md)
-for field/codec declarations, native signals, RxJS and omnibar registration. Mapget owns MCP authentication, authorization and session routing; erdblick
+`AppStore` features contribute annotated operations and explicit controls.
+`store.actionCatalog` discovers them; `ViewerActionService` adapts the same catalog
+to the browser relay. See [Application State and Actions](erdblick-state-actions.md)
+for feature/codec declarations, native signal reads and omnibar candidates. Mapget owns MCP authentication, authorization and session routing; erdblick
 does not grant permissions based on browser-supplied identity claims.
 Optional `/mcp/info` discovery allows up to 30 seconds for source/schema startup.
 Discovery runs asynchronously and does not block ordinary map startup.
@@ -380,8 +381,9 @@ Settings use `viewer_describe_controls`, `viewer_get_controls` and
 `viewer_set_control`; semantic operations use the commands below.
 Mapget adds/removes the routing `clientId` at the MCP
 boundary; it also owns `viewer_list_sessions`. Browser arguments have no routing
-field. Each owner declares its controls beside its service;
-`app/actions/viewer-action.contract.ts` collects the exact static declarations.
+field. Domain features declare their controls beside their operations. The build
+instantiates the same `AppStore` composition in Node and serializes its discovered
+catalog through `app/actions/viewer-action.contract.ts`.
 
 | Control | Access | Owner/value |
 | --- | --- | --- |
@@ -585,8 +587,8 @@ callbacks and persistence are used, including inspection-tree relayout.
 Dock width and split proportions are local layout preferences, persisted after
 completed human/MCP resizing and absent from map URLs. Ratio changes update the
 splitter in place without recreating the map renderers. `ViewerUiService` owns
-only short-lived DOM references and live resize registrations; components and
-`AppLayoutService` remain the layout owners. No background DOM scan/observer or
+only short-lived DOM references and live resize registrations. Components measure
+the layout; the `withAppLayout` store feature owns its values and operations. No background DOM scan/observer or
 second layout tree is maintained.
 
 ### Application screenshots

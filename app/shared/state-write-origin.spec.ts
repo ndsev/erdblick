@@ -1,6 +1,10 @@
+import {getState, WritableStateSource} from "@ngrx/signals";
 import {Subject} from "rxjs";
 import {afterEach, describe, expect, it} from "vitest";
 import releasedStateKeys from "../../test/persisted-state-keys.json";
+import {prepareViewMembership} from "../mapview/map-view.store-feature";
+import type {AppStoreValues} from "./app.store";
+import {patchAppState, persistenceDescriptors} from "./persisted-state";
 import {createStateOwners, StateOwners} from "./state-test-owners";
 
 const fixtures: StateOwners[] = [];
@@ -25,9 +29,9 @@ async function metadata(owners: StateOwners) {
 }
 
 describe("persistence write ownership", () => {
-    it("registers every released key exactly once through the complete actual-owner fixture", () => {
+    it("discovers every released key exactly once from the actual composed store", () => {
         const owners = fixture();
-        const names = owners.persistence.registeredStateNames;
+        const names = owners.persistence.persistedStateNames;
         expect(releasedStateKeys).toHaveLength(70);
         expect(new Set(names).size).toBe(names.length);
         expect([...names].sort()).toEqual([...releasedStateKeys, "viewIds"].sort());
@@ -35,63 +39,49 @@ describe("persistence write ownership", () => {
 
     it("keeps discovery reads pure and catalog materialization system-owned", async () => {
         const owners = fixture();
+        const store = owners.store;
         const before = owners.persistence.exportSnapshot();
-        expect(owners.layers.mapLayerConfig("Map", "Layer")).toEqual([{visible: true, level: 13, autoLevel: true}]);
-        expect(owners.layers.styleOptionValues("Map", "Layer", "Style", "enabled", "Bool", true)).toEqual([true]);
+        expect(store.mapLayerConfig("Map", "Layer")).toEqual([{visible: true, level: 13, autoLevel: true}]);
+        expect(store.styleOptionValues("Map", "Layer", "Style", "enabled", "Bool", true)).toEqual([true]);
         expect(owners.persistence.exportSnapshot()).toEqual(before);
-        owners.layers.initializeMapLayerConfig("Map", "Layer");
-        owners.layers.initializeStyleOptionValues("Map", "Layer", "Style", "enabled", "Bool", true);
+        store.applyLayerPresentation({
+            configs: [{mapId: "Map", layerId: "Layer", viewConfigs: [{visible: true, level: 13, autoLevel: true}]}],
+            options: [{mapId: "Map", layerId: "Layer", shortStyleId: "Style", optionId: "enabled", values: [true]}],
+            layerPresets: [], mapPresets: []
+        }, {origin: "system"});
         const entries = await metadata(owners);
         for (const key of ["layerNames", "visibility", "zoomLevel", "autoZoomLevel", "Style~0~enabled"]) {
             expect(entries[key]?.owner, key).not.toBe("user");
         }
-        expect(owners.layers.styles.get("Map/Layer/Style/enabled")).toEqual([true]);
+        expect(store.layers.options().get("Map/Layer/Style/enabled")).toEqual({[store.idAt(0)!]: true});
     });
 
-    it("retains a system write's origin after an observer queues another commit", async () => {
+    it("keeps per-field origins for one prepared mixed publication", async () => {
         const owners = fixture();
-        const subscription = owners.views.markerState.subscribe(marker => {
-            if (marker) owners.persistence.withSystemStateMutation(() => {
-                owners.diagnostics.diagnosticsLogFilter = {info: false, warn: true, error: true};
-            });
-        });
-        owners.views.marker = true;
-        const entries = await metadata(owners);
-        expect(entries["marker"]?.owner).toBe("user");
-        expect(entries["diagnosticsLogFilter"]?.owner).not.toBe("user");
-        expect(owners.diagnostics.diagnosticsLogFilter.info).toBe(false);
-        subscription.unsubscribe();
-    });
-
-    it("keeps per-slot origins inside a mixed transaction and forgets reverted edits", async () => {
-        const owners = fixture();
-        owners.persistence.transaction(() => {
-            owners.views.marker = true;
-            owners.persistence.withSystemStateMutation(() => {
-                owners.diagnostics.diagnosticsLogFilter = {info: false, warn: true, error: true};
-            });
-            const original = owners.diagnostics.diagnosticsExportOptions;
-            owners.diagnostics.diagnosticsExportOptions = {...original, includeLogs: false};
-            owners.diagnostics.diagnosticsExportOptions = original;
-        });
+        const current = getState(owners.store);
+        // Exercise the same publication primitive used inside native features;
+        // protected application consumers cannot call patchState directly.
+        patchAppState(owners.store as unknown as WritableStateSource<AppStoreValues>, {
+            views: {...current.views, marker: true},
+            diagnostics: {...current.diagnostics, logFilter: {info: false, warn: true, error: true}}
+        }, {marker: "user", diagnosticsLogFilter: "system"});
         const entries = await metadata(owners);
         expect(entries["marker"]?.owner).toBe("user");
         expect(entries["diagnosticsLogFilter"]?.owner).not.toBe("user");
         expect(entries["diagnosticsExportOptions"]?.owner).not.toBe("user");
+        // Origin belongs only to that synchronous publication.
+        owners.store.setDiagnosticsLogFilter({info: true, warn: false, error: true});
+        expect((await metadata(owners))["diagnosticsLogFilter"]?.owner).toBe("user");
     });
 
-    it("propagates system membership origin to count, focus and per-view preparation", async () => {
+    it("propagates system membership origin to count, focus and keyed preparation", async () => {
         const owners = fixture();
-        owners.views.markerState.subscribe(marker => {
-            if (marker) owners.persistence.withSystemStateMutation(() => { owners.views.numViews = 2; });
-        });
-        owners.views.marker = true;
+        const next = prepareViewMembership(getState(owners.store), [owners.store.idAt(0)!, "new"], persistenceDescriptors(owners.store));
+        owners.store.restorePersistedState(next, "system");
         const entries = await metadata(owners);
-        for (const name of [owners.views.viewIdsState.name, owners.views.numViewsState.name,
-            owners.views.focusedViewState.name, owners.views.cameraViewDataState.appState.name,
-            owners.layers.layerVisibilityState.appState.name, owners.layers.stylesState.name]) {
+        for (const name of ["viewIds", "numberOfViews", "focus", "cameraView", "visibility", "styleOptions"]) {
             expect(entries[name]?.owner, name).not.toBe("user");
         }
-        expect(owners.views.numViews).toBe(2);
+        expect(owners.store.numViews()).toBe(2);
     });
 });

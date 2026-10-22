@@ -1,9 +1,19 @@
-import {Injectable, OnDestroy, Signal, computed} from "@angular/core";
+import {Injectable, OnDestroy} from "@angular/core";
 import {NavigationEnd, NavigationStart, Params, Router} from "@angular/router";
-import {BehaviorSubject, Subject, Subscription, skip, take} from "rxjs";
+import {getState} from "@ngrx/signals";
+import {BehaviorSubject, Subject, Subscription, take} from "rxjs";
 import {filter} from "rxjs/operators";
 import {coreLib} from "../integrations/wasm";
-import {AppState, AppStateOptions, MapViewState, StyleState, deepCopy} from "./app-state";
+import {prepareLegacyOsmState} from "../mapdata/map-layer.store-feature";
+import {normalizeSearchLayouts} from "../search/feature-search.store-feature";
+import {normalizeInspections} from "../inspection/inspection.store-feature";
+import {
+    normalizeViewSnapshot,
+    normalizeViewUrl,
+    prepareViewMembership
+} from "../mapview/map-view.store-feature";
+import {AppUrlStateService} from "./app-url-state.service";
+import {AppStore, AppStoreValues} from "./app.store";
 import {
     ConfigDefaultStateMeta,
     ConfigDefaultStateMetaEntry,
@@ -11,283 +21,43 @@ import {
     SnapshotNormalizationResult,
     hashStateValue
 } from "./app-state-persistence.model";
+import {INSPECTION_DOCK_TAB_ID} from "./app-layout.model";
 import {InfoMessageService} from "./info.service";
-import {ViewerState, type StateBinding, type StateWriteOrigin, type ViewerValues} from "./viewer-state";
+import {
+    observeStore,
+    persistenceDescriptors,
+    PersistenceDescriptor,
+    stateWriteOrigin
+} from "./persisted-state";
+import {StyleOptionsCodec} from "./state-codec";
 
-type OwnerSlice = Exclude<keyof ViewerValues, "viewIds" | "viewEntityMap">;
-
-@Injectable({providedIn: "root"})
 /**
- * Registers owner codecs and coordinates storage, hydration timing, snapshots and config ownership.
- * Domain URL dictionaries are supplied by AppUrlStateService after owner registration.
+ * Browser integration for the one injected AppStore. Features supply codecs as
+ * metadata, so adding a persisted field needs no owner-construction registration.
+ * Every import calculates a complete next value before calling the store once;
+ * normal feature operations never call back into this persistence service.
  */
+@Injectable({providedIn: "root"})
 export class AppStateService implements OnDestroy {
-    private url: {serialize(params: Params): Params; hydrate(params: Params): void} | undefined;
-    registerUrlCodec(codec: {serialize(params: Params): Params; hydrate(params: Params): void}): void {
-        if (this.url) throw new Error("URL state owner was already registered");
-        this.url = codec;
-    }
-    private urlCodec() {
-        if (!this.url) throw new Error("URL state owner was not registered");
-        return this.url;
-    }
-    get registeredStates(): Iterable<AppState<unknown>> {
-        return this.statePool.values();
-    }
-
-    private registrationClosed = false;
-    get registeredStateNames(): readonly string[] {
-        return [...this.statePool.keys()];
-    }
-    sealRegistration(): void {
-        this.registrationClosed = true;
-    }
-
-    private readonly statePool = new Map<string, AppState<unknown>>();
-    readonly values = new ViewerState();
-    readonly store = this.values.store;
-    /** Runs after synchronous codec consumers, before any queued reentrant write is published. */
-    readonly afterStatePublication = this.values.afterPublication;
-
-    /** Register a persisted codec against its owner's named SignalStore value. */
-    register<S extends OwnerSlice, K extends keyof ViewerValues[S]>(
-        options: AppStateOptions<ViewerValues[S][K]>,
-        slice: S,
-        key: K
-    ): AppState<ViewerValues[S][K]> {
-        if (this.registrationClosed || this.isReady) throw new Error(`Late state registration: ${options.name}`);
-        const binding = this.bind(slice, key);
-        binding.write(options.defaultValue);
-        return new AppState(this.statePool, options, binding);
-    }
-
-    /** Register a codec supplied by an owner when its persisted shape differs from its stored shape. */
-    registerCodec<T>(options: AppStateOptions<T>, binding: StateBinding<T>): AppState<T> {
-        if (this.registrationClosed || this.isReady) throw new Error(`Late state registration: ${options.name}`);
-        return new AppState(this.statePool, options, binding);
-    }
-
-    registerView<S extends OwnerSlice, K extends keyof ViewerValues[S]>(
-        options: AppStateOptions<ViewerValues[S][K] extends Record<string, infer T> ? T : never>,
-        slice: S,
-        key: K
-    ): MapViewState<ViewerValues[S][K] extends Record<string, infer T> ? T : never> {
-        if (this.registrationClosed || this.isReady) throw new Error(`Late state registration: ${options.name}`);
-        type Value = ViewerValues[S][K] extends Record<string, infer T> ? T : never;
-        const records = this.bind(slice, key) as unknown as StateBinding<Record<string, Value>>;
-        const ids = () => this.values.read((state) => state.viewIds, this.store.viewIds).map(String);
-        records.write(Object.fromEntries(ids().map((id) => [id, options.defaultValue])));
-        // Legacy arrays are projected only for codecs and positional UI adapters.
-        // The record and its native per-ID selectors are the authoritative value.
-        const binding: StateBinding<Value[]> = {
-            signal: computed(() => this.store.viewIds().map((id) => records.signal()[id] ?? options.defaultValue)),
-            commits: records.commits,
-            writeOrigin: () => records.writeOrigin?.() ?? this.persisted("viewIds").writeOrigin,
-            read: () =>
-                ids().map(
-                    (id, index) =>
-                        records.read()[id] ??
-                        records.read()[String(this.store.viewIds()[index])] ??
-                        options.defaultValue
-                ),
-            write: (values) =>
-                records.write(Object.fromEntries(ids().map((id, index) => [id, values[index] ?? options.defaultValue])))
-        };
-        this.values.beforeCommit(
-            () => {
-                if (this.values.read((state) => state.viewIds, this.store.viewIds) === this.store.viewIds()) return;
-                const currentIds = ids();
-                const values = records.read();
-                const previousIds = this.store.viewIds().map(String);
-                if (currentIds.length === Object.keys(values).length && currentIds.every((id) => id in values)) return;
-                const sourceId = previousIds.at(-1);
-                const source = sourceId ? (values[sourceId] ?? options.defaultValue) : options.defaultValue;
-                records.write(
-                    Object.fromEntries(
-                        currentIds.map((id, index) => [
-                            id,
-                            values[id] ??
-                                deepCopy(
-                                    values[
-                                        this.values.read(
-                                            (state) => state.viewEntityMap[id]?.copySourceId,
-                                            () => this.store.viewEntityMap()[id]?.copySourceId
-                                        ) ?? previousIds[index]
-                                    ] ?? source
-                                )
-                        ])
-                    )
-                );
-            },
-            () => this.persisted("viewIds").writeOrigin
-        );
-        const state = new MapViewState<Value>(this.statePool, options, binding, {
-            idAt: (index) => ids()[index],
-            read: (id) =>
-                records.read()[id] ??
-                records.read()[String(this.store.viewIds()[ids().indexOf(id)])] ??
-                options.defaultValue,
-            write: (id, value) => {
-                if (!ids().includes(id)) throw new Error(`View ${id} is unavailable`);
-                records.write({...records.read(), [id]: value});
-            },
-            select: (id) =>
-                computed(() => {
-                    const slots = this.store[slice] as unknown as Record<string, Record<string, Signal<Value>>>;
-                    return slots[String(key)][id]?.() ?? options.defaultValue;
-                })
-        });
-        this.mapViewStates.push(state as MapViewState<unknown>);
-        return state;
-    }
-
-    registerStyles(records: StateBinding<Map<string, Record<string, string | number | boolean>>>): StyleState {
-        if (this.registrationClosed || this.isReady) throw new Error("Late state registration: styleOptions");
-        type Option = string | number | boolean;
-        records.write(new Map());
-        const ids = () => this.values.read((state) => state.viewIds, this.store.viewIds).map(String);
-        const project = (
-            values: Map<string, Record<string, Option>>,
-            order: readonly string[],
-            fallback: readonly string[] = []
-        ) =>
-            new Map(
-                [...values].map(([key, byId]) => [key, order.map((id, index) => byId[id] ?? byId[fallback[index]])])
-            );
-        const binding: StateBinding<Map<string, Option[]>> = {
-            signal: computed(() => project(records.signal(), this.store.viewIds().map(String))),
-            commits: records.commits,
-            writeOrigin: () => records.writeOrigin?.() ?? this.persisted("viewIds").writeOrigin,
-            read: () => project(records.read(), ids(), this.store.viewIds().map(String)),
-            write: (values) =>
-                records.write(
-                    new Map(
-                        [...values].map(([key, array]) => [
-                            key,
-                            Object.fromEntries(ids().map((id, index) => [id, array[index]]))
-                        ])
-                    )
-                )
-        };
-        this.values.beforeCommit(
-            () => {
-                if (this.values.read((state) => state.viewIds, this.store.viewIds) === this.store.viewIds()) return;
-                const order = ids();
-                const values = records.read();
-                const sourceId = this.store.viewIds().at(-1);
-                const next = new Map(values);
-                let changed = false;
-                for (const [key, byId] of values) {
-                    if (Object.keys(byId).length === order.length && order.every((id) => id in byId)) continue;
-                    changed = true;
-                    next.set(
-                        key,
-                        Object.fromEntries(
-                            order.map((id, index) => [
-                                id,
-                                byId[id] ??
-                                    byId[
-                                        this.values.read(
-                                            (state) => state.viewEntityMap[id]?.copySourceId,
-                                            () => this.store.viewEntityMap()[id]?.copySourceId
-                                        ) ?? this.store.viewIds()[index]
-                                    ] ??
-                                    (sourceId ? byId[sourceId] : false)
-                            ])
-                        )
-                    );
-                }
-                if (changed) records.write(next);
-            },
-            () => this.persisted("viewIds").writeOrigin
-        );
-        return new StyleState(this.statePool, binding);
-    }
-
-    /** Binds an owner's codec to its native SignalStore field, including specialized codecs. */
-    bind<S extends OwnerSlice, K extends keyof ViewerValues[S]>(
-        slice: S,
-        key: K
-    ): StateBinding<ViewerValues[S][K]> {
-        return this.values.bind<ViewerValues[S][K]>(
-            (state) => state[slice][key],
-            (state, value) => ({[slice]: {...state[slice], [key]: value}}),
-            () => {
-                const signals = this.store[slice] as unknown as {
-                    [P in keyof ViewerValues[S]]: Signal<ViewerValues[S][P]>;
-                };
-                return (signals[key] as Signal<ViewerValues[S][K]>)();
-            }
-        );
-    }
-
-    /** URL codecs share positional dictionaries; these accessors never own domain behavior. */
-    private persisted<T>(name: string): AppState<T> {
-        const state = this.statePool.get(name);
-        if (!state) throw new Error(`State owner was not registered: ${name}`);
-        return state as AppState<T>;
-    }
-    private readonly urlNormalizers: Array<(params: Params, resetMissing: boolean) => Params> = [];
-    registerUrlNormalizer(normalize: (params: Params, resetMissing: boolean) => Params): void {
-        this.urlNormalizers.push(normalize);
-    }
-    private prepareUrl(params: Params, resetMissing = false): Params {
-        return this.urlNormalizers.reduce((value, normalize) => normalize(value, resetMissing), params);
-    }
-
-    private readonly snapshotNormalizers: Array<
-        (snapshot: Record<string, unknown>, replaceMissing: boolean) => Record<string, unknown>
-    > = [];
-
-    /** Owners validate relationships between persisted projections before any import writes. */
-    registerSnapshotNormalizer(
-        normalize: (snapshot: Record<string, unknown>, replaceMissing: boolean) => Record<string, unknown>
-    ): void {
-        this.snapshotNormalizers.push(normalize);
-    }
-
-    readonly importingUrl = new Subject<Params>();
-    readonly importedStartupUrl = new Subject<Params>();
-    readonly importedSnapshot = new Subject<void>();
-    pushNextUrl(): void {
-        this._replaceUrl = false;
-    }
-
-    private get stylesState(): StyleState {
-        return this.persisted("styleOptions") as StyleState;
-    }
-
-    /** Owners prepare related invariants inside the same patch, including imported values. */
-    beforeCommit(prepare: () => void, origin?: () => StateWriteOrigin | undefined): () => void {
-        return this.values.beforeCommit(prepare, origin);
-    }
-
-    transaction<T>(operation: () => T): T {
-        return this.values.transaction(operation);
-    }
-
-    private readonly mapViewStates: Array<MapViewState<unknown>> = [];
-    readonly ready = new BehaviorSubject<boolean>(false);
-    /** Emits synchronously after an externally supplied state replacement has completed. */
+    private readonly statePool: Map<string, PersistenceDescriptor>;
+    private readonly styleCodec = new StyleOptionsCodec();
+    // These announce integration lifecycle events, not copies of persisted state.
+    // Render/search resources use readiness to start after config, storage and URL
+    // hydration have all been folded into the native store.
+    readonly ready = new BehaviorSubject(false);
     readonly stateApplied = new Subject<void>();
-
-    private readonly stateSubscriptions: Subscription[] = [];
-
+    readonly importedSnapshot = new Subject<void>();
+    readonly importedStartupUrl = new Subject<Params>();
+    private readonly subscriptions: Subscription[] = [];
     private _replaceUrl = true;
-
-    private isHydrating = false;
-    private isSeedingConfigDefaults = false;
-    private isSystemStateMutation = false;
     private isReady = false;
-    private subscriptionsSetup = false;
-    private pendingUrlSyncStates = new Set<AppState<any>>();
-    private pendingStorageSyncStates = new Set<AppState<any>>();
-    private pendingUserOwnershipStates = new Set<string>();
     private pendingPopstateHydration = false;
+    private readonly pendingUrlSyncStates = new Set<PersistenceDescriptor>();
+    private readonly pendingStorageSyncStates = new Set<PersistenceDescriptor>();
+    private readonly pendingUserOwnershipStates = new Set<string>();
     private flushHandle: Promise<void> | null = null;
     private urlSyncHandle: ReturnType<typeof setTimeout> | null = null;
     private lastUrlSyncAt = 0;
-    // One-shot guard used to keep inbound links stable during passive startup.
     private skipNextUrlSync = false;
     private readonly STYLE_OPTIONS_STORAGE_KEY = "styleOptions";
     private readonly CONFIG_DEFAULT_STATE_META_KEY = "erdblickConfigDefaultStateMeta";
@@ -299,212 +69,479 @@ export class AppStateService implements OnDestroy {
         sourceHash: "",
         entries: Object.create(null)
     };
-    private configDefaultValueHashes = new Map<string, string>();
-    private currentConfigDefaultKeys = new Set<string>();
+    private readonly configDefaultValueHashes = new Map<string, string>();
+    private readonly currentConfigDefaultKeys = new Set<string>();
 
-    /** Registers all persisted state slots and wires startup hydration/persistence flow. */
     constructor(
         private readonly router: Router,
-        private readonly infoMessageService: InfoMessageService
+        private readonly infoMessageService: InfoMessageService,
+        readonly store: AppStore,
+        private readonly urlState: AppUrlStateService
     ) {
-        this.values.setOriginProvider(() =>
-            this.isHydrating
-                ? "hydration"
-                : this.isSeedingConfigDefaults
-                  ? "config"
-                  : this.isSystemStateMutation
-                    ? "system"
-                    : "user"
-        );
+        const fields = persistenceDescriptors(store);
+        // Released camera/layer codecs use positional arrays. Resolve the ordered
+        // identity list and count first; only then can their values be keyed by ID.
+        const priority = (name: string) =>
+            name === "viewIds" ? 0 : name === "numberOfViews" ? 1 : name === "focus" ? 2 : 3;
+        fields.sort((left, right) => priority(left.name) - priority(right.name));
+        this.statePool = new Map(fields.map((field) => [field.name, field]));
+        if (fields.length !== this.statePool.size) {
+            throw new Error("Duplicate persisted state declaration");
+        }
         this.retireMapPresetDefinitionStorage();
-        // Perform initial hydration after the initial NavigationEnd event arrives.
-        this.router.events
-            .pipe(
-                filter((event) => event instanceof NavigationEnd),
-                take(1)
-            )
-            .subscribe(() => {
-                this.initializePersistence();
-            });
-
-        // Subsequently, Navigation events may come from usage of the browser back/forward-buttons.
-        this.router.events.subscribe((event) => {
-            if (event instanceof NavigationStart) {
-                const nav = this.router.getCurrentNavigation();
-                this.pendingPopstateHydration = nav?.trigger === "popstate";
-                if (this.pendingPopstateHydration) {
-                    this.cancelPendingStateSync();
+        // Native watchState runs synchronously during patchState. Capture write
+        // provenance here, while the originating operation is still on the stack;
+        // actual browser I/O is coalesced into the microtask below.
+        let previous = getState(store);
+        this.subscriptions.push(
+            observeStore(store, (state) => state).subscribe((current) => {
+                if (
+                    current.views.pushUrlRevision > previous.views.pushUrlRevision ||
+                    current.inspection.pushUrlRevision > previous.inspection.pushUrlRevision
+                ) {
+                    this.pushNextUrl();
                 }
-            } else if (event instanceof NavigationEnd) {
-                if (!this.pendingPopstateHydration) {
-                    return;
+                for (const field of fields) {
+                    if (field.hasChanged(previous, current)) {
+                        this.onStateChanged(field);
+                    }
                 }
-                this.pendingPopstateHydration = false;
-                if (!this.isReady) {
-                    return;
+                previous = current;
+            })
+        );
+        this.subscriptions.push(
+            router.events
+                .pipe(
+                    filter((event) => event instanceof NavigationEnd),
+                    take(1)
+                )
+                .subscribe(() => this.initializePersistence())
+        );
+        this.subscriptions.push(
+            router.events.subscribe((event) => {
+                if (event instanceof NavigationStart) {
+                    this.pendingPopstateHydration = router.getCurrentNavigation()?.trigger === "popstate";
+                    if (this.pendingPopstateHydration) {
+                        this.cancelPendingStateSync();
+                    }
+                } else if (event instanceof NavigationEnd && this.pendingPopstateHydration) {
+                    this.pendingPopstateHydration = false;
+                    if (!this.isReady) {
+                        return;
+                    }
+                    try {
+                        this.applyHydratedUrlState(this.currentBrowserQueryParams());
+                    } catch (error) {
+                        this.infoMessageService.showError(`Could not import view link: ${String(error)}`);
+                    }
                 }
-                try {
-                    this.applyHydratedUrlState(this.currentBrowserQueryParams());
-                } catch (error) {
-                    this.infoMessageService.showError(`Could not import view link: ${String(error)}`);
-                }
-            }
-        });
+            })
+        );
     }
 
-    /** Hydrates persisted state once config defaults are known and marks the service ready. */
+    /** Persisted field names discovered from the composed feature graph. */
+    get persistedStateNames(): readonly string[] {
+        return [...this.statePool.keys()];
+    }
+
+    /** A plain native snapshot for codecs; consumers read AppStore signals directly. */
+    get currentValues(): AppStoreValues {
+        return getState(this.store);
+    }
+
+    get stylesPersistence(): PersistenceDescriptor {
+        return this.statePool.get("styleOptions")!;
+    }
+
+    descriptor(name: string): PersistenceDescriptor {
+        const field = this.statePool.get(name);
+        if (!field) {
+            throw new Error(`Unknown persisted state '${name}'`);
+        }
+        return field;
+    }
+
+    /** Feature selection and marker jumps create history entries; continuous camera motion replaces them. */
+    pushNextUrl(): void {
+        this._replaceUrl = false;
+    }
+    get replaceUrl(): boolean {
+        const value = this._replaceUrl;
+        this._replaceUrl = true;
+        return value;
+    }
+
+    /**
+     * Restore the initial browser state after config and WASM startup. Config has
+     * already seeded defaults. Saved user values override those defaults, and URL
+     * fields override the resulting saved state. Only the final candidate is
+     * published, so a renderer cannot observe a saved camera with URL layer data.
+     */
     initializePersistence(): void {
-        if (this.isReady) {
+        if (this.isReady || !coreLib) {
             return;
         }
-        if (!coreLib) {
-            return;
-        }
-        this.sealRegistration();
-        this.setupStateSubscriptions();
-        const queryParams = this.currentBrowserQueryParams();
-        this.hydrateFromStorage();
-        let acceptedQueryParams: Params = {};
+        this.store.initializeViews();
+        const params = this.currentBrowserQueryParams();
+        let next = this.prepareStorage(this.currentValues);
+        let accepted: Params = {};
         try {
-            this.hydrateFromUrl(this.prepareUrl(queryParams));
-            acceptedQueryParams = queryParams;
+            next = this.prepareUrlState(next, params);
+            accepted = params;
         } catch (error) {
             this.infoMessageService.showError(`Could not import view link: ${String(error)}`);
         }
-        // Legacy owners may still migrate saved state after a rejected URL, but must not consume its fields.
-        this.importedStartupUrl.next(acceptedQueryParams);
-        this.isHydrating = false;
-        // Keep inbound links stable during passive startup hydration.
+        next = prepareLegacyOsmState(next, accepted, localStorage);
+        this.store.restorePersistedState(next, "hydration");
+        this.importedStartupUrl.next(accepted);
         this.skipNextUrlSync = true;
-
-        // Ensure that the merged app state after hydration is reflected in local storage and URL.
         this.syncAllStates();
-
         this.isReady = true;
         this.ready.next(true);
     }
 
-    /** Replaces the current query and hydrates it without navigating the browser document. */
-    async replaceUrlState(params: Params, resetMissing = false): Promise<void> {
+    /** Prepare URL state without mutating the current value or notifying runtime consumers. */
+    private prepareUrlState(
+        current: AppStoreValues,
+        params: Params,
+        resetMissing = false,
+        revealDockedInspection = false
+    ): AppStoreValues {
+        const prepared = normalizeViewUrl(params, current.viewIds, resetMissing);
+        let next = current;
+        if (resetMissing) {
+            next = this.prepareSnapshotValues(next, normalizeViewSnapshot({}, next.viewIds, true), true);
+        }
+        if (!Object.keys(prepared).length) {
+            return next;
+        }
+        // Membership is resolved before positional camera/layer/style codecs consume the query.
+        const ids =
+            prepared["vid"] === undefined ? next.viewIds.map(String) : String(prepared["vid"]).split(",");
+        next = prepareViewMembership(next, ids, [...this.statePool.values()], undefined, true);
+        next = normalizeInspections(
+            normalizeSearchLayouts(this.urlState.prepare(next, prepared)),
+            current.inspection.selection
+        );
+        // Query-authored presentation scenes encode each panel's docking mode,
+        // but have no separate field for the visible dock. Resolve that intent
+        // in the import candidate so selection and dock appear together.
+        if (
+            revealDockedInspection &&
+            next.inspection.selection.some((panel) => !panel.undocked && panel.features.length > 0)
+        ) {
+            next = {...next, layout: {...next.layout, dockActiveTab: INSPECTION_DOCK_TAB_ID, dockOpen: true}};
+        }
+        return next;
+    }
+
+    /** Validate before navigation, then apply against the latest state after the router settles. */
+    async replaceUrlState(
+        params: Params,
+        resetMissing = false,
+        options: {revealDockedInspection?: boolean} = {}
+    ): Promise<void> {
         if (!this.isReady) {
             throw new Error("URL state cannot be replaced before AppStateService is ready.");
         }
-
-        const prepared = this.prepareUrl(params, resetMissing);
+        this.prepareUrlState(this.currentValues, params, resetMissing, options.revealDockedInspection);
         this.cancelPendingStateSync();
         await this.router.navigate([], {
             queryParams: params,
             queryParamsHandling: "replace",
             replaceUrl: true
         });
-        this.withHydration(() => {
-            if (resetMissing) this.applyNormalizedSnapshot({}, true);
-            this.hydrateFromUrl(prepared);
-        });
+        const next = this.prepareUrlState(
+            this.currentValues,
+            params,
+            resetMissing,
+            options.revealDockedInspection
+        );
+        this.store.restorePersistedState(next, "hydration");
         this.stateApplied.next();
     }
 
-    /**
-     * Atomically replaces presentation-controlled state from a native snapshot.
-     * Unlike the user-facing snapshot import, omitted persisted states are reset so
-     * every presentation slide describes a complete and repeatable viewer state.
-     */
+    private applyHydratedUrlState(params: Params): void {
+        const next = this.prepareUrlState(this.currentValues, params);
+        this.cancelPendingStateSync();
+        this.store.restorePersistedState(next, "hydration");
+        this.stateApplied.next();
+    }
+
+    /** Replace a presentation scene, resetting omitted snapshot fields in the same publication. */
     replaceSnapshotState(snapshot: unknown): string[] {
         if (!this.isReady) {
             throw new Error("Snapshot state cannot be replaced before AppStateService is ready.");
         }
-
-        const normalizedResult = this.normalizeSnapshot(snapshot, false, true);
-        if (normalizedResult.errors.length) {
-            return normalizedResult.errors;
+        const result = this.normalizeSnapshot(snapshot, false, true);
+        if (result.errors.length) {
+            return result.errors;
         }
-
+        const next = this.prepareSnapshotValues(this.currentValues, result.normalized!, true);
         this.cancelPendingStateSync();
-        this.withHydration(() => {
-            this.applyNormalizedSnapshot(normalizedResult.normalized!, true);
-        });
+        this.store.restorePersistedState(next, "hydration");
+        this.importedSnapshot.next();
         this.stateApplied.next();
         return [];
     }
 
-    /** Flushes all state slots to storage and URL after a batch update. */
-    syncAllStates() {
-        this.statePool.values().forEach((state) => this.onStateChanged(state, true));
-    }
-
-    /** Cancels pending persistence work when the service is destroyed. */
-    ngOnDestroy(): void {
-        this.values.destroy();
-        this.stateSubscriptions.forEach((subscription) => subscription.unsubscribe());
-        if (this.urlSyncHandle !== null) {
-            clearTimeout(this.urlSyncHandle);
-            this.urlSyncHandle = null;
+    /** Apply a user-imported partial snapshot; fields omitted by the file keep their current values. */
+    importSnapshot(snapshot: unknown): string[] {
+        const result = this.normalizeSnapshot(snapshot);
+        if (result.errors.length) {
+            return result.errors;
         }
+        const next = this.prepareSnapshotValues(this.currentValues, result.normalized!, false);
+        this.store.restorePersistedState(next, "user");
+        this.importedSnapshot.next();
+        return [];
     }
 
-    /** Returns whether state updates should replace the current URL. */
-    get replaceUrl() {
-        const currentValue = this._replaceUrl;
-        this._replaceUrl = true;
-        return currentValue;
-    }
-
-    /** Subscribes to all persisted state slots so storage and URL remain in sync. */
-    private setupStateSubscriptions() {
-        if (this.subscriptionsSetup) return;
-        // NOTE: Is this the best way to implement the internal subscription mechanism?
-        for (const state of this.statePool.values()) {
-            const subscription = (state as AppState<unknown>).pipe(skip(1)).subscribe((value) => {
-                this.onStateChanged(state as AppState<unknown>);
-            });
-            this.stateSubscriptions.push(subscription);
+    /** Export the deployed formats, projecting ID-keyed state into each codec's positional view order. */
+    exportSnapshot(): Record<string, unknown> {
+        const current = this.currentValues;
+        const snapshot: Record<string, unknown> = Object.create(null);
+        for (const field of this.statePool.values()) {
+            if (field.codec.isSnapshotState()) {
+                snapshot[field.name] = field.snapshot(current);
+            }
         }
-        this.subscriptionsSetup = true;
+        return Object.assign(snapshot, this.stylesPersistence.serialize(current, false));
     }
 
-    /** Handles one state-slot change and schedules the required persistence work. */
-    private onStateChanged(state: AppState<any>, force: boolean = false): void {
-        const origin = state.writeOrigin;
-        const markUserOwned =
-            !force &&
-            this.isReady &&
-            (origin === "user" ||
-                (!origin && !this.isHydrating && !this.isSeedingConfigDefaults && !this.isSystemStateMutation));
-        if (markUserOwned) {
-            this.pendingUserOwnershipStates.add(state.name);
-        }
+    validateSnapshot(snapshot: unknown): string[] {
+        return this.normalizeSnapshot(snapshot).errors;
+    }
 
+    /** Decode all ordinary fields against a locally prepared membership before publishing anything. */
+    private prepareSnapshotValues(
+        current: AppStoreValues,
+        snapshot: Record<string, unknown>,
+        replaceMissing: boolean,
+        configOnly = false
+    ): AppStoreValues {
+        let next = current;
+        if (snapshot["viewIds"] !== undefined) {
+            next = prepareViewMembership(
+                next,
+                snapshot["viewIds"] as string[],
+                [...this.statePool.values()],
+                undefined,
+                true
+            );
+        }
+        for (const field of this.statePool.values()) {
+            if (field.name === "viewIds" || field.name === "numberOfViews") {
+                continue;
+            }
+            if (!(configOnly ? field.codec.isConfigDefaultState() : field.codec.isSnapshotState())) {
+                continue;
+            }
+            if (Object.prototype.hasOwnProperty.call(snapshot, field.name)) {
+                next = field.importSnapshot(next, snapshot[field.name]);
+            } else if (replaceMissing) {
+                next = field.reset(next);
+            }
+        }
+        if (replaceMissing) {
+            next = this.stylesPersistence.reset(next);
+            next = {...next, layout: {...next.layout, pendingOpenDialogs: []}};
+        }
+        const styles = this.extractStyleOptionSnapshotEntries(snapshot);
+        if (Object.keys(styles).length) {
+            next = this.stylesPersistence.deserialize(next, styles);
+        }
+        // An explicitly saved dock preference is authoritative, including an
+        // intentionally empty open dock. A partial selection-only import can
+        // still collapse the dock when it removes its final existing panel.
+        const previousSelection = Object.prototype.hasOwnProperty.call(snapshot, "dockOpenState")
+            ? undefined
+            : current.inspection.selection;
+        return normalizeInspections(normalizeSearchLayouts(next), previousSelection);
+    }
+
+    /**
+     * Seed server-provided defaults before browser hydration. Ownership is tracked
+     * per released storage key: later server changes may replace an old configured
+     * default, while a value explicitly changed by the user remains theirs.
+     */
+    seedConfigDefaultState(snapshot: unknown, sourceHash: string): string[] {
+        this.store.initializeViews();
+        this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
+        this.configDefaultStateMeta.sourceHash = sourceHash || "";
+        this.configDefaultValueHashes.clear();
+        this.currentConfigDefaultKeys.clear();
         if (
-            !force &&
-            (origin === "hydration" ||
-                origin === "config" ||
-                this.isHydrating ||
-                !this.isReady ||
-                this.isSeedingConfigDefaults)
+            snapshot === null ||
+            snapshot === undefined ||
+            (typeof snapshot === "object" && !Array.isArray(snapshot) && !Object.keys(snapshot).length)
         ) {
+            this.persistConfigDefaultStateMeta();
+            return [];
+        }
+        const result = this.normalizeSnapshot(snapshot, true);
+        if (result.errors.length) {
+            result.errors.forEach((error) =>
+                console.warn(`[AppStateService] Ignoring invalid config state: ${error}`)
+            );
+            return result.errors;
+        }
+        const normalized = result.normalized!;
+        const next = this.prepareSnapshotValues(this.currentValues, normalized, false, true);
+        this.store.restorePersistedState(next, "config");
+        for (const [key, field] of this.statePool) {
+            if (
+                !field.codec.isConfigDefaultState() ||
+                !Object.prototype.hasOwnProperty.call(normalized, key)
+            ) {
+                continue;
+            }
+            // Normalization derives identities for a count-only config. Those are
+            // runtime defaults, not configured identities: saved IDs must survive
+            // a restart even when the configured number of panes changes.
+            if (key === "viewIds" && !Object.prototype.hasOwnProperty.call(snapshot, key)) {
+                continue;
+            }
+            const hash = this.stateValueHashForMeta(field);
+            this.currentConfigDefaultKeys.add(key);
+            this.configDefaultValueHashes.set(key, hash);
+            if (this.configDefaultMayOwnStorageKey(key)) {
+                this.setMetaOwner(key, "config", hash);
+            }
+        }
+        const styleEntries = this.extractStyleOptionSnapshotEntries(normalized);
+        for (const [key, value] of Object.entries(this.stylesPersistence.serialize(next, false) ?? {})) {
+            if (!this.styleCodec.isStyleOptionUrlParamKey(key) || !(key in styleEntries)) {
+                continue;
+            }
+            const hash = hashStateValue(value);
+            this.currentConfigDefaultKeys.add(key);
+            this.configDefaultValueHashes.set(key, hash);
+            if (this.configDefaultMayOwnStorageKey(key)) {
+                this.setMetaOwner(key, "config", hash);
+            }
+        }
+        this.persistConfigDefaultStateMeta();
+        return [];
+    }
+
+    /**
+     * Decode storage into a candidate. Config-owned entries follow the current
+     * config (or reset when removed); user and legacy unowned entries use storage.
+     * Style options keep their historical individual compact storage keys, so
+     * the same ownership decision is made for each option rather than the Map.
+     */
+    private prepareStorage(current: AppStoreValues): AppStoreValues {
+        this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
+        const configured = new Map(
+            [...this.currentConfigDefaultKeys].flatMap((name) => {
+                const field = this.statePool.get(name);
+                return field ? [[name, field.snapshot(current)] as const] : [];
+            })
+        );
+        let next = current;
+        for (const field of this.statePool.values()) {
+            if (field === this.stylesPersistence) {
+                continue;
+            }
+            const raw = localStorage.getItem(field.name);
+            if (raw === null) {
+                continue;
+            }
+            const entry = this.configDefaultStateMeta.entries[field.name];
+            if (entry?.owner === "config") {
+                if (this.currentConfigDefaultKeys.has(field.name)) {
+                    next = field.importSnapshot(next, configured.get(field.name));
+                } else {
+                    next = field.reset(next);
+                    localStorage.removeItem(field.name);
+                    delete this.configDefaultStateMeta.entries[field.name];
+                }
+            } else {
+                next = field.deserialize(next, raw);
+            }
+            if (field.name === "numberOfViews") {
+                next = prepareViewMembership(
+                    next,
+                    next.viewIds.map(String),
+                    [...this.statePool.values()],
+                    undefined,
+                    true,
+                    current.viewIds
+                );
+            }
+        }
+        // An identity-only saved entry also needs native entity lifetimes and keyed defaults.
+        if (!next.viewIds.length) {
+            next = {...next, viewIds: current.viewIds};
+        }
+        next = prepareViewMembership(
+            next,
+            next.viewIds.map(String),
+            [...this.statePool.values()],
+            undefined,
+            true,
+            current.viewIds
+        );
+        const styles = this.collectStyleOptionStorageEntries();
+        const filtered: Record<string, string> = Object.create(null);
+        for (const [key, value] of Object.entries(styles)) {
+            if (this.configDefaultStateMeta.entries[key]?.owner === "config") {
+                if (!this.currentConfigDefaultKeys.has(key)) {
+                    localStorage.removeItem(key);
+                    delete this.configDefaultStateMeta.entries[key];
+                }
+            } else {
+                filtered[key] = value;
+            }
+        }
+        if (Object.keys(filtered).length) {
+            next = this.stylesPersistence.deserialize(next, filtered);
+        }
+        this.persistConfigDefaultStateMeta();
+        return normalizeInspections(normalizeSearchLayouts(next));
+    }
+
+    syncAllStates(): void {
+        this.statePool.values().forEach((field) => this.onStateChanged(field, true));
+    }
+
+    /** Record persistence work without changing state or making runtime observers reenter the store. */
+    private onStateChanged(field: PersistenceDescriptor, force = false): void {
+        const origin = stateWriteOrigin(this.store, field.name);
+        if (!force && this.isReady && origin === "user") {
+            this.pendingUserOwnershipStates.add(field.name);
+        }
+        if (!force && (!this.isReady || origin === "hydration" || origin === "config")) {
             return;
         }
-
-        this.pendingStorageSyncStates.add(state);
-        if (state.isUrlState()) {
-            this.pendingUrlSyncStates.add(state);
+        this.pendingStorageSyncStates.add(field);
+        if (field.codec.isUrlState()) {
+            this.pendingUrlSyncStates.add(field);
         }
-
         this.scheduleFlush();
     }
 
-    /** Schedules the batched storage flush used after state changes. */
+    private stateValueHashForMeta(field: PersistenceDescriptor): string {
+        return hashStateValue(field.snapshot(this.currentValues));
+    }
+
+    ngOnDestroy(): void {
+        this.subscriptions.forEach((subscription) => subscription.unsubscribe());
+        this.cancelPendingStateSync();
+        this.ready.complete();
+        this.stateApplied.complete();
+        this.importedSnapshot.complete();
+        this.importedStartupUrl.complete();
+    }
+
+    /** Schedules browser I/O after the complete semantic operation has been published. */
     private scheduleFlush(): void {
         if (this.flushHandle) {
             return;
         }
         this.flushHandle = Promise.resolve().then(() => {
             this.flushHandle = null;
-            if (this.isHydrating) {
-                this.pendingStorageSyncStates.clear();
-                this.pendingUrlSyncStates.clear();
-                return;
-            }
             this.syncStorage();
             this.scheduleUrlSync();
         });
@@ -526,11 +563,11 @@ export class AppStateService implements OnDestroy {
         for (const state of this.pendingStorageSyncStates) {
             const markUserOwned = this.pendingUserOwnershipStates.has(state.name);
             try {
-                const serialized = state.serialize(false);
+                const serialized = state.serialize(this.currentValues, false);
                 if (serialized === undefined) {
                     continue;
                 }
-                if (state === this.stylesState) {
+                if (state === this.stylesPersistence) {
                     localStorage.removeItem(this.STYLE_OPTIONS_STORAGE_KEY);
                     this.clearStyleOptionStorageEntries();
                 }
@@ -551,20 +588,21 @@ export class AppStateService implements OnDestroy {
                     this.configDefaultStateMeta.entries[state.name].valueHash = stateHash;
                 }
 
-                if (state === this.stylesState) {
-                    const serializedStyleEntries = this.stylesState.serialize(false) ?? {};
+                if (state === this.stylesPersistence) {
+                    const serializedStyleEntries =
+                        this.stylesPersistence.serialize(this.currentValues, false) ?? {};
                     const serializedStyleKeys = new Set(
                         Object.keys(serializedStyleEntries).filter((key) =>
-                            this.stylesState.isStyleOptionUrlParamKey(key)
+                            this.styleCodec.isStyleOptionUrlParamKey(key)
                         )
                     );
                     for (const key of Object.keys(this.configDefaultStateMeta.entries)) {
-                        if (this.stylesState.isStyleOptionUrlParamKey(key) && !serializedStyleKeys.has(key)) {
+                        if (this.styleCodec.isStyleOptionUrlParamKey(key) && !serializedStyleKeys.has(key)) {
                             delete this.configDefaultStateMeta.entries[key];
                         }
                     }
                     for (const [key, value] of Object.entries(serializedStyleEntries)) {
-                        if (!this.stylesState.isStyleOptionUrlParamKey(key)) {
+                        if (!this.styleCodec.isStyleOptionUrlParamKey(key)) {
                             continue;
                         }
                         const valueHash = hashStateValue(value);
@@ -610,10 +648,6 @@ export class AppStateService implements OnDestroy {
 
     /** Executes the debounced URL synchronization immediately. */
     private flushUrlSync(): void {
-        if (this.isHydrating) {
-            this.pendingUrlSyncStates.clear();
-            return;
-        }
         if (!this.pendingUrlSyncStates.size) {
             return;
         }
@@ -631,7 +665,7 @@ export class AppStateService implements OnDestroy {
 
     /** Serializes URL-backed state and updates router query params accordingly. */
     private syncUrl(): void {
-        const params = this.urlCodec().serialize(this.currentBrowserQueryParams());
+        const params = this.urlState.serializeUrlV2(true, this.currentBrowserQueryParams());
         this.pendingUrlSyncStates.clear();
         this.router
             .navigate([], {
@@ -642,94 +676,6 @@ export class AppStateService implements OnDestroy {
             .catch((error) => {
                 console.error("[AppStateService] Failed to sync URL parameters", error);
             });
-    }
-
-    /** Restores storage-backed state slots from local storage during startup. */
-    private hydrateFromStorage(): void {
-        this.withHydration(() => {
-            this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
-            // A stored identity list can change a projection that config already seeded
-            // (for example numberOfViews). Reapply that config value at its normal
-            // registration position before hydrating the corresponding per-view data.
-            const configured = new Map(
-                [...this.currentConfigDefaultKeys].flatMap((name) => {
-                    const state = this.statePool.get(name);
-                    return state ? [[name, state.toSnapshotValue()] as const] : [];
-                })
-            );
-            for (const state of this.statePool.values()) {
-                if (state === this.stylesState) {
-                    continue;
-                }
-                const raw = localStorage.getItem(state.name);
-                if (raw === null) {
-                    continue;
-                }
-
-                const metaEntry = this.configDefaultStateMeta.entries[state.name];
-                if (metaEntry?.owner === "config") {
-                    if (this.currentConfigDefaultKeys.has(state.name)) {
-                        state.applySnapshotValue(configured.get(state.name));
-                        continue;
-                    }
-
-                    // Config-owned storage without current config default should be dropped.
-                    state.resetToDefault();
-                    localStorage.removeItem(state.name);
-                    delete this.configDefaultStateMeta.entries[state.name];
-                    continue;
-                }
-
-                this.deserializeStateSafely(state, raw);
-            }
-
-            const styleOptionEntries = this.collectStyleOptionStorageEntries();
-            const filteredStyleOptionEntries: Record<string, string> = Object.create(null);
-            for (const [key, value] of Object.entries(styleOptionEntries)) {
-                const metaEntry = this.configDefaultStateMeta.entries[key];
-                if (metaEntry?.owner === "config") {
-                    if (this.currentConfigDefaultKeys.has(key)) {
-                        continue;
-                    }
-                    localStorage.removeItem(key);
-                    delete this.configDefaultStateMeta.entries[key];
-                    continue;
-                }
-                filteredStyleOptionEntries[key] = value;
-            }
-
-            if (Object.keys(filteredStyleOptionEntries).length) {
-                this.deserializeStateSafely(this.stylesState, filteredStyleOptionEntries);
-            }
-            this.persistConfigDefaultStateMeta();
-        });
-    }
-
-    /** Restores URL-backed state slots from the current route query params. */
-    private hydrateFromUrl(params: Params): void {
-        this.withHydration(() => {
-            this.importingUrl.next(params);
-            this.urlCodec().hydrate(params);
-        });
-    }
-
-    /** Applies one runtime URL state and notifies derived projections after hydration. */
-    private applyHydratedUrlState(params: Params): void {
-        this.cancelPendingStateSync();
-        this.hydrateFromUrl(this.prepareUrl(params));
-        this.stateApplied.next();
-    }
-
-    /** Keeps one malformed persisted state entry from aborting startup hydration. */
-    private deserializeStateSafely(
-        state: {name: string; deserialize(raw: string | Params): void},
-        raw: string | Params
-    ): void {
-        try {
-            state.deserialize(raw);
-        } catch (error) {
-            console.error(`[AppStateService] Failed to hydrate ${state.name}.`, error);
-        }
     }
 
     /**
@@ -754,17 +700,6 @@ export class AppStateService implements OnDestroy {
         return params;
     }
 
-    /** Runs a callback while suppressing persistence side effects during hydration. */
-    private withHydration(callback: () => void): void {
-        const previous = this.isHydrating;
-        this.isHydrating = true;
-        try {
-            this.transaction(callback);
-        } finally {
-            this.isHydrating = previous;
-        }
-    }
-
     /** Returns the current limits applied when importing a snapshot. */
     getSnapshotImportLimits(): SnapshotImportLimits {
         const stateCount = this.statePool.size;
@@ -782,151 +717,6 @@ export class AppStateService implements OnDestroy {
         };
     }
 
-    /** Exports the current persisted state into a snapshot object. */
-    exportSnapshot(): Record<string, unknown> {
-        const snapshot: Record<string, unknown> = Object.create(null);
-        for (const [name, state] of this.statePool.entries()) {
-            if (!state.isSnapshotState()) {
-                continue;
-            }
-            snapshot[name] = state.toSnapshotValue();
-        }
-        for (const [name, value] of Object.entries(this.stylesState.serialize(false) ?? {})) {
-            snapshot[name] = value;
-        }
-        return snapshot;
-    }
-
-    /** Validates a snapshot without mutating the current application state. */
-    validateSnapshot(snapshot: unknown): string[] {
-        return this.normalizeSnapshot(snapshot).errors;
-    }
-
-    /** Seeds config-provided default snapshot values before storage and URL hydration. */
-    seedConfigDefaultState(snapshot: unknown, sourceHash: string): string[] {
-        if (snapshot === null || snapshot === undefined) {
-            this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
-            this.configDefaultStateMeta.sourceHash = sourceHash || "";
-            this.configDefaultValueHashes.clear();
-            this.currentConfigDefaultKeys.clear();
-            this.persistConfigDefaultStateMeta();
-            return [];
-        }
-        if (
-            typeof snapshot === "object" &&
-            !Array.isArray(snapshot) &&
-            Object.keys(snapshot as Record<string, unknown>).length === 0
-        ) {
-            this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
-            this.configDefaultStateMeta.sourceHash = sourceHash || "";
-            this.configDefaultValueHashes.clear();
-            this.currentConfigDefaultKeys.clear();
-            this.persistConfigDefaultStateMeta();
-            return [];
-        }
-
-        const normalizedResult = this.normalizeSnapshot(snapshot, true);
-        if (normalizedResult.errors.length) {
-            normalizedResult.errors.forEach((error) =>
-                console.warn(`[AppStateService] Ignoring invalid config state: ${error}`)
-            );
-            return normalizedResult.errors;
-        }
-
-        const normalized = normalizedResult.normalized ?? {};
-        const styleOptionEntries = this.extractStyleOptionSnapshotEntries(normalized);
-        const appliedStateKeys = new Set<string>();
-
-        this.configDefaultStateMeta = this.loadConfigDefaultStateMeta();
-        this.configDefaultStateMeta.sourceHash = sourceHash || "";
-        this.configDefaultValueHashes.clear();
-        this.currentConfigDefaultKeys.clear();
-
-        this.isSeedingConfigDefaults = true;
-        try {
-            this.transaction(() => {
-                for (const [key, state] of this.statePool) {
-                    if (!state.isConfigDefaultState() || !Object.prototype.hasOwnProperty.call(normalized, key)) {
-                        continue;
-                    }
-                    state.applySnapshotValue(normalized[key]);
-                    appliedStateKeys.add(key);
-                }
-
-                if (Object.keys(styleOptionEntries).length) {
-                    this.deserializeStateSafely(this.stylesState, styleOptionEntries);
-                }
-            });
-        } finally {
-            this.isSeedingConfigDefaults = false;
-        }
-
-        for (const key of appliedStateKeys) {
-            const state = this.statePool.get(key);
-            if (!state) {
-                continue;
-            }
-            const valueHash = this.stateValueHashForMeta(state);
-            this.currentConfigDefaultKeys.add(key);
-            this.configDefaultValueHashes.set(key, valueHash);
-            if (this.configDefaultMayOwnStorageKey(key)) {
-                this.setMetaOwner(key, "config", valueHash);
-            }
-        }
-
-        const serializedStyleOptions = this.stylesState.serialize(false) ?? {};
-        for (const [key, serializedValue] of Object.entries(serializedStyleOptions)) {
-            if (!this.stylesState.isStyleOptionUrlParamKey(key)) {
-                continue;
-            }
-            if (!Object.prototype.hasOwnProperty.call(styleOptionEntries, key)) {
-                continue;
-            }
-            const valueHash = hashStateValue(serializedValue);
-            this.currentConfigDefaultKeys.add(key);
-            this.configDefaultValueHashes.set(key, valueHash);
-            if (this.configDefaultMayOwnStorageKey(key)) {
-                this.setMetaOwner(key, "config", valueHash);
-            }
-        }
-
-        this.persistConfigDefaultStateMeta();
-        return [];
-    }
-
-    /** Normalizes, validates, and applies a snapshot import. */
-    importSnapshot(snapshot: unknown): string[] {
-        const normalizedResult = this.normalizeSnapshot(snapshot);
-        if (normalizedResult.errors.length) {
-            return normalizedResult.errors;
-        }
-        this.transaction(() => this.applyNormalizedSnapshot(normalizedResult.normalized!, false));
-        return [];
-    }
-
-    /** Applies a validated snapshot in state-registration order. */
-    private applyNormalizedSnapshot(normalized: Record<string, unknown>, replaceMissing: boolean): void {
-        for (const [key, state] of this.statePool.entries()) {
-            if (!state.isSnapshotState()) {
-                continue;
-            }
-            if (Object.prototype.hasOwnProperty.call(normalized, key)) {
-                state.applySnapshotValue(normalized[key]);
-            } else if (replaceMissing) {
-                state.resetToDefault();
-            }
-        }
-
-        const styleOptionEntries = this.extractStyleOptionSnapshotEntries(normalized);
-        if (replaceMissing) {
-            this.stylesState.next(new Map());
-        }
-        if (Object.keys(styleOptionEntries).length) {
-            this.deserializeStateSafely(this.stylesState, styleOptionEntries);
-        }
-        this.importedSnapshot.next();
-    }
-
     /** Normalizes legacy snapshot shapes before schema validation is applied. */
     private normalizeSnapshot(
         snapshot: unknown,
@@ -940,6 +730,9 @@ export class AppStateService implements OnDestroy {
             serialized = JSON.stringify(snapshot);
         } catch {
             return {errors: ["Snapshot payload is not serializable JSON."]};
+        }
+        if (typeof serialized !== "string") {
+            return {errors: ["Snapshot payload must be a JSON object."]};
         }
         if (serialized.length > limits.maxFileSizeBytes) {
             return {errors: [`Snapshot payload exceeds ${limits.maxFileSizeBytes} bytes.`]};
@@ -971,7 +764,9 @@ export class AppStateService implements OnDestroy {
                 errors.push(`Unknown snapshot state '${key}'.`);
                 continue;
             }
-            const stateIsAllowed = forConfigDefault ? state.isConfigDefaultState() : state.isSnapshotState();
+            const stateIsAllowed = forConfigDefault
+                ? state.codec.isConfigDefaultState()
+                : state.codec.isSnapshotState();
             if (!stateIsAllowed) {
                 delete normalized[key];
             }
@@ -980,28 +775,30 @@ export class AppStateService implements OnDestroy {
             return {errors};
         }
 
-        // Validate all present entries before import to keep mutation transactional.
+        // Validate all present entries before import so rejection publishes no partial state.
         for (const key of Object.keys(normalized)) {
             const state = this.statePool.get(key);
             if (!state) {
                 continue;
             }
-            const stateIsAllowed = forConfigDefault ? state.isConfigDefaultState() : state.isSnapshotState();
+            const stateIsAllowed = forConfigDefault
+                ? state.codec.isConfigDefaultState()
+                : state.codec.isSnapshotState();
             if (!stateIsAllowed) {
                 continue;
             }
             try {
-                state.validateSnapshotValue(normalized[key]);
+                state.codec.validateSnapshotValue(normalized[key], state.read(this.currentValues));
             } catch (error: any) {
                 errors.push(`Invalid value for '${key}': ${error?.message ?? "schema validation failed"}`);
             }
         }
-        if (errors.length) return {errors};
+        if (errors.length) {
+            return {errors};
+        }
         try {
-            const prepared = this.snapshotNormalizers.reduce(
-                (value, normalize) => normalize(value, replaceMissing),
-                normalized
-            );
+            const prepared = normalizeViewSnapshot(normalized, this.store.viewIds(), replaceMissing);
+            this.prepareSnapshotValues(this.currentValues, prepared, replaceMissing, forConfigDefault);
             return {normalized: prepared, errors: []};
         } catch (error) {
             return {errors: [`Invalid snapshot: ${error instanceof Error ? error.message : String(error)}`]};
@@ -1010,7 +807,7 @@ export class AppStateService implements OnDestroy {
 
     /** Returns whether a snapshot key is a compact style-option storage key. */
     private validateStyleOptionSnapshotEntry(key: string, value: unknown, errors: string[]): boolean {
-        if (!this.stylesState.isStyleOptionUrlParamKey(key)) {
+        if (!this.styleCodec.isStyleOptionUrlParamKey(key)) {
             return false;
         }
         if (typeof value !== "string") {
@@ -1023,7 +820,7 @@ export class AppStateService implements OnDestroy {
     private extractStyleOptionSnapshotEntries(snapshot: Record<string, unknown>): Record<string, string> {
         const entries: Record<string, string> = Object.create(null);
         for (const [key, value] of Object.entries(snapshot)) {
-            if (this.stylesState.isStyleOptionUrlParamKey(key) && typeof value === "string") {
+            if (this.styleCodec.isStyleOptionUrlParamKey(key) && typeof value === "string") {
                 entries[key] = value;
             }
         }
@@ -1035,7 +832,7 @@ export class AppStateService implements OnDestroy {
         const entries: Record<string, string> = Object.create(null);
         for (let index = 0; index < localStorage.length; index++) {
             const key = localStorage.key(index);
-            if (!key || !this.stylesState.isStyleOptionUrlParamKey(key)) {
+            if (!key || !this.styleCodec.isStyleOptionUrlParamKey(key)) {
                 continue;
             }
             const value = localStorage.getItem(key);
@@ -1051,7 +848,7 @@ export class AppStateService implements OnDestroy {
         const keys: string[] = [];
         for (let index = 0; index < localStorage.length; index++) {
             const key = localStorage.key(index);
-            if (key && this.stylesState.isStyleOptionUrlParamKey(key)) {
+            if (key && this.styleCodec.isStyleOptionUrlParamKey(key)) {
                 keys.push(key);
             }
         }
@@ -1140,22 +937,6 @@ export class AppStateService implements OnDestroy {
         return metaEntry?.owner === "config" || localStorage.getItem(key) === null;
     }
 
-    /** Computes the hash stored in state metadata. */
-    private stateValueHashForMeta(state: AppState<unknown>): string {
-        return hashStateValue(state.toSnapshotValue());
-    }
-
-    /** Runs a state mutation without marking user-owned metadata. */
-    withSystemStateMutation(action: () => void): void {
-        const previous = this.isSystemStateMutation;
-        this.isSystemStateMutation = true;
-        try {
-            this.transaction(action);
-        } finally {
-            this.isSystemStateMutation = previous;
-        }
-    }
-
     /** Recursively normalizes one snapshot subtree while collecting validation issues. */
     private normalizeSnapshotNode(
         value: unknown,
@@ -1196,7 +977,13 @@ export class AppStateService implements OnDestroy {
                     errors.push(`Snapshot payload contains unsafe key '${key}' at '${path}'.`);
                     return undefined;
                 }
-                normalized[key] = this.normalizeSnapshotNode(entry, `${path}.${key}`, depth + 1, limits, errors);
+                normalized[key] = this.normalizeSnapshotNode(
+                    entry,
+                    `${path}.${key}`,
+                    depth + 1,
+                    limits,
+                    errors
+                );
             }
             return normalized;
         }
@@ -1208,17 +995,15 @@ export class AppStateService implements OnDestroy {
         return value;
     }
 
-    /** Clears persisted app state from local storage and resets URL-backed state. */
-    resetStorage() {
-        for (const state of this.statePool.values()) {
-            state.resetToDefault();
-            localStorage.removeItem(state.name);
+    /** Clear the deployed persisted keys, then restart without saved URL state. */
+    resetStorage(): void {
+        for (const field of this.statePool.values()) {
+            localStorage.removeItem(field.name);
         }
         this.clearStyleOptionStorageEntries();
         localStorage.removeItem("searchHistory");
         localStorage.removeItem(this.STYLE_OPTIONS_STORAGE_KEY);
         localStorage.removeItem(this.CONFIG_DEFAULT_STATE_META_KEY);
-        const {origin, pathname} = window.location;
-        window.location.href = origin + pathname;
+        window.location.href = window.location.origin + window.location.pathname;
     }
 }

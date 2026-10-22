@@ -1,9 +1,5 @@
 import {runInInjectionContext} from "@angular/core";
 import {ownerTestInjector} from "../../test/owner-test-injector";
-import {MapLayerStateService} from "./map-layer-state.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {InspectionStateService} from "../inspection/inspection-state.service";
-import {AppLayoutService} from "../shared/app-layout.service";
 import {AppStateService} from "../shared/appstate.service";
 import {HttpClient, HttpHeaders, HttpResponse} from "@angular/common/http";
 import "@angular/compiler";
@@ -31,14 +27,13 @@ function source(mapId: string, configIndex: number, status = "ready"): MapInfoIt
 /** Exercises the real tree and native parser with only persistence/UI dependencies stubbed. */
 function fixture() {
     const get = vi.fn();
-    const injector = ownerTestInjector([MapViewStateService, MapLayerStateService, AppLayoutService, InspectionStateService]);
-    injector.get(MapViewStateService);
+    const injector = ownerTestInjector();
     const persistence = injector.get(AppStateService);
     persistence.ready.next(true);
     const service = runInInjectionContext(injector, () => new MapInfoService(
         {get} as unknown as HttpClient,
         persistence,
-        {styles: new Map(), styleGroups: new BehaviorSubject([]), pruneVisibility() {}} as unknown as StyleService,
+        {styles: new Map(), styleGroups: new BehaviorSubject([])} as unknown as StyleService,
         {presets: [], presets$: new BehaviorSubject([]), presetsForLayer: () => []} as unknown as MapPresetService,
         {clearBackendConnectionError: vi.fn(), showBackendConnectionError: vi.fn()} as unknown as InfoMessageService
     ));

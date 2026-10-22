@@ -1,8 +1,10 @@
+import {effect, untracked} from "@angular/core";
+import {AppStore} from "../shared/app.store";
 import {Component, inject, OnDestroy, ViewChild} from "@angular/core";
 import {Subscription} from "rxjs";
 import {AppDialogComponent} from "../shared/app-dialog.component";
 import {DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
-import {AppLayoutService} from "../shared/app-layout.service";
+
 import {AppStateService} from "../shared/appstate.service";
 import {DialogStackService} from "../shared/dialog-stack.service";
 import {DiagnosticsFacadeService} from "./diagnostics.facade.service";
@@ -15,7 +17,7 @@ import type {DiagnosticsExportOptions} from "./diagnostics.model";
             #dialog
             header="Export Diagnostics Data"
             class="diagnostics-export-dialog"
-            [(visible)]="dialogVisible"
+            [visible]="store.isDialogOpen(layoutId)" (visibleChange)="store.setDialogOpen(layoutId, $event)"
             [modal]="false"
             [layoutId]="layoutId"
             (onShow)="onDialogShow()"
@@ -85,7 +87,7 @@ import type {DiagnosticsExportOptions} from "./diagnostics.model";
 })
 /** Dialog that configures and launches diagnostics JSON exports. */
 export class DiagnosticsExportDialogComponent implements OnDestroy {
-    readonly layoutState = inject(AppLayoutService);
+    readonly store = inject(AppStore);
     readonly layoutId = DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID;
     @ViewChild("dialog") dialog?: AppDialogComponent;
     exporting = false;
@@ -107,28 +109,25 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
         public readonly stateService: AppStateService,
         private readonly dialogStack: DialogStackService
     ) {
-        const options = this.diagnostics.diagnosticsExportOptions;
+        const options = this.store.diagnostics.exportOptions();
         this.exportOptions = {
             ...options,
             logFilter: {...options.logFilter}
         };
-        this.subscriptions.push(
-            this.diagnostics.diagnosticsExportOptionsState.subscribe((options) => {
+        effect(() => {
+            const options = this.store.diagnostics.exportOptions();
+            untracked(() => {
                 this.exportOptions = {
                     ...options,
                     logFilter: {...options.logFilter}
                 };
-            })
-        );
+            });
+        });
     }
 
-    get dialogVisible(): boolean {
-        return this.layoutState.isDialogOpen(this.layoutId);
-    }
 
-    set dialogVisible(visible: boolean) {
-        this.layoutState.setDialogOpen(this.layoutId, visible);
-    }
+
+
 
     /** Releases the persisted export-options subscription. */
     ngOnDestroy() {
@@ -151,10 +150,10 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
 
     /** Persists the current export-option toggles. */
     updateOptions() {
-        this.diagnostics.diagnosticsExportOptions = {
+        this.store.setDiagnosticsExportOptions({
             ...this.exportOptions,
             logFilter: {...this.exportOptions.logFilter}
-        };
+        });
     }
 
     /** Builds and downloads the export bundle, guarding against duplicate clicks. */

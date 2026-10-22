@@ -16,6 +16,4 @@ export type ViewId = string;
 export interface ViewIdentity {
     id: ViewId;
     generation: number;
-    /** Creation intent used when owners initialize a newly copied view. */
-    copySourceId?: ViewId;
 }

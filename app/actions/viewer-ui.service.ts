@@ -1,21 +1,17 @@
 import {inject, Injectable} from "@angular/core";
 import {rejectAction} from "../actions/action-utils";
-import {AppActionService} from "../actions/app-action.service";
-import type {ViewerActionInput, ViewerActionOutput} from "../actions/viewer-action.contract";
-import {VIEWER_SCREENSHOT_MAX_BASE64} from "../actions/viewer-ui.service.declarations";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {AppStore} from "../shared/app.store";
 import {MapViewService} from "../mapview/map-view.service";
 import {unicodePrefix} from "../shared/unicode-string";
 import {ViewerActionFailure} from "./viewer-action-relay.contract";
-import {
+import {VIEWER_SCREENSHOT_MAX_BASE64} from "./viewer-ui-actions.store-feature";
+import type {
     ViewerResizeCapabilities,
     ViewerResizeSize,
-    viewerUiActions,
     ViewerUiElement,
     ViewerUiInput,
     ViewerUiOutput
-} from "./viewer-ui.contract";
-import {viewerDocumentActions} from "./viewer-ui.service.declarations";
+} from "./viewer-ui-actions.store-feature";
 
 /** Components retain layout state; this registration only connects a live DOM surface to its owner. */
 interface ResizeTarget {
@@ -32,24 +28,10 @@ interface ElementReference {
 /** Owns bounded, short-lived DOM references and live resize registrations; never mirrors application state. */
 @Injectable({providedIn: "root"})
 export class ViewerUiService {
-    static readonly actions = {...viewerDocumentActions, ...viewerUiActions};
     private readonly views = inject(MapViewService);
-    private readonly viewStateOwner = inject(MapViewStateService);
+    private readonly store = inject(AppStore);
     private readonly actionEncoder = new TextEncoder();
     private capturingScreenshot = false;
-
-    constructor() {
-        const actions = inject(AppActionService);
-        actions.registerAction(ViewerUiService.actions.viewer_take_snapshot, (input) => this.snapshot(input));
-        actions.registerAction(ViewerUiService.actions.viewer_get_element, (input) => this.getElement(input));
-        actions.registerAction(ViewerUiService.actions.viewer_click, (input) => this.click(input));
-        actions.registerAction(ViewerUiService.actions.viewer_fill, (input) => this.fill(input));
-        actions.registerAction(ViewerUiService.actions.viewer_scroll, (input) => this.scroll(input));
-        actions.registerAction(ViewerUiService.actions.viewer_resize, (input) => this.resize(input));
-        actions.registerAction(ViewerUiService.actions.viewer_screenshot, (input, context) =>
-            this.screenshot(input, context.signal)
-        );
-    }
 
     private readonly references = new Map<string, ElementReference>();
     private readonly resizeTargets = new WeakMap<HTMLElement, ResizeTarget>();
@@ -442,9 +424,9 @@ export class ViewerUiService {
 
     /** Captures only on demand; owns admission until DOM rasterization settles, even if the relay call was cancelled. */
     async screenshot(
-        input: ViewerActionInput<"viewer_screenshot">,
+        input: ViewerUiInput<"viewer_screenshot">,
         signal?: AbortSignal
-    ): Promise<ViewerActionOutput<"viewer_screenshot">> {
+    ): Promise<ViewerUiOutput<"viewer_screenshot">> {
         if (this.capturingScreenshot) rejectAction("A screenshot is already being captured", "busy");
         this.capturingScreenshot = true;
         const revision = input.viewLayoutRevision ?? this.views.viewLayoutRevision;
@@ -482,7 +464,7 @@ export class ViewerUiService {
                 (input.maxHeight ?? 960) / viewportHeight
             );
             const canvases = new Map<HTMLCanvasElement, string>();
-            for (let index = 0; index < this.viewStateOwner.numViews; ++index) {
+            for (let index = 0; index < this.store.viewIds().length; ++index) {
                 const view = this.views.renderViewFor(index);
                 if (!view?.isAvailable()) rejectAction("A map renderer is not ready for capture");
                 const snapshot = view.captureCanvas(scale);

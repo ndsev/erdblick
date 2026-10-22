@@ -1,3 +1,5 @@
+import {observeStore} from "../shared/persisted-state";
+import {AppStore} from "../shared/app.store";
 import {inject, Injectable, OnDestroy} from "@angular/core";
 import {debounceTime, skip, Subject, Subscription} from "rxjs";
 import type {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
@@ -6,7 +8,7 @@ import {
     type HoverLabelFieldConfig,
     type TileFeatureId
 } from "../inspection/inspection-state.model";
-import {InspectionStateService} from "../inspection/inspection-state.service";
+
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 import {AppStateService} from "../shared/appstate.service";
 import {MAX_STYLE_LOD} from "../shared/lod-policy";
@@ -35,7 +37,7 @@ const DECODED_TILE_CACHE_LIMIT = 16;
  */
 @Injectable({providedIn: "root"})
 export class HoverDetailService implements OnDestroy {
-    readonly inspectionState = inject(InspectionStateService);
+    readonly store = inject(AppStore);
     readonly valuesChanged = new Subject<string | null>();
 
     private readonly subscriptions = new Subscription();
@@ -71,17 +73,17 @@ export class HoverDetailService implements OnDestroy {
         private readonly mapInfo: MapInfoService,
         private readonly tileStream: MapTileStreamService
     ) {
-        this.enabled = this.inspectionState.hoverLabelsEnabled;
-        this.activeFields = this.normalizeFields(this.inspectionState.hoverLabelFields);
+        this.enabled = this.store.inspection.hoverLabelsEnabled();
+        this.activeFields = this.normalizeFields(this.store.inspection.hoverLabelFields());
         this.subscriptions.add(
-            this.inspectionState.hoverLabelsEnabledState.pipe(skip(1)).subscribe((enabled) => {
+            observeStore(this.store, state => state.inspection.hoverLabelsEnabled).pipe(skip(1)).subscribe((enabled) => {
                 this.enabled = enabled;
                 this.rebuildLayers();
                 this.valuesChanged.next(null);
             })
         );
         this.subscriptions.add(
-            this.inspectionState.hoverLabelFieldsState.pipe(skip(1), debounceTime(200)).subscribe((fields) => {
+            observeStore(this.store, state => state.inspection.hoverLabelFields).pipe(skip(1), debounceTime(200)).subscribe((fields) => {
                 this.activeFields = this.normalizeFields(fields);
                 this.rebuildLayers();
                 this.valuesChanged.next(null);

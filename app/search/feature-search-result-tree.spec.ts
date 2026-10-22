@@ -1,11 +1,11 @@
+import {observeStore} from "../shared/persisted-state";
+import {AppStore} from "../shared/app.store";
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 
 import {AppModule} from "../app.module";
 import {FeatureSearchComponent} from "./feature.search.component";
 import {ownerTestInjector} from "../../test/owner-test-injector";
-import {InspectionStateService} from "../inspection/inspection-state.service";
-import {AppLayoutService} from "../shared/app-layout.service";
 import {SEARCH_DOCK_TAB_ID} from "../shared/app-layout.model";
 import {AppStateService} from "../shared/appstate.service";
 
@@ -33,23 +33,23 @@ function resultTreeFixture() {
 
 describe("Feature Search result-tree completion", () => {
     it("publishes a Ctrl-click result as one pinned floating panel and reports a failed camera load", async () => {
-        const injector = ownerTestInjector([AppLayoutService, InspectionStateService]);
-        const inspections = injector.get(InspectionStateService);
-        const layout = injector.get(AppLayoutService);
-        layout.isDockOpen = true;
-        layout.dockActiveTab = SEARCH_DOCK_TAB_ID;
+        const injector = ownerTestInjector([AppStore, AppStore]);
+        const inspections = injector.get(AppStore);
+        const layout = injector.get(AppStore);
+        layout.setDockOpen(true);
+        layout.setDockActiveTab(SEARCH_DOCK_TAB_ID);
         const component = Object.create(FeatureSearchComponent.prototype) as any;
-        component.inspectionState = inspections;
+        component.store = inspections;
         component.stateService = injector.get(AppStateService);
         component.isDocked = () => true;
         component.inspectionSelection = {focusOnFeature: vi.fn().mockRejectedValue(new Error("Feature load failed"))};
         component.infoMessageService = {showError: vi.fn()};
         const observed: unknown[] = [];
-        const priorPanels = inspections.selectionState.signal();
-        const subscription = inspections.selectionState.subscribe(panels => observed.push({
+        const priorPanels = inspections.inspection.selection();
+        const subscription = observeStore(inspections, state => state.inspection.selection).subscribe(panels => observed.push({
             panels: panels.map(panel => ({features: panel.features, locked: panel.locked, undocked: panel.undocked})),
-            dockOpen: layout.isDockOpen,
-            dockTab: layout.dockActiveTab
+            dockOpen: layout.layout.dockOpen(),
+            dockTab: layout.layout.dockActiveTab()
         }));
         const selected = {mapTileKey: "Features:Map:Layer:42", featureId: "Road.1"};
 

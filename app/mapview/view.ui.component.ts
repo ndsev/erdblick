@@ -1,4 +1,5 @@
-import {MapViewStateService} from "./map-view-state.service";
+import {AppStore} from "../shared/app.store";
+
 import {inject} from "@angular/core";
 import {
     AfterViewInit,
@@ -9,14 +10,13 @@ import {
     InputSignal,
     NgZone,
     OnDestroy,
-    Signal,
     ViewChild
 } from "@angular/core";
 import {KeyboardService} from "../shared/keyboard.service";
 import {AppModeService} from "../shared/app-mode.service";
 import {IRenderView} from "./render-view.model";
 import {AppStateService} from "../shared/appstate.service";
-import {toObservable, toSignal} from "@angular/core/rxjs-interop";
+import {toObservable} from "@angular/core/rxjs-interop";
 import {Observable, Subscription} from "rxjs";
 import {filter} from "rxjs/operators";
 
@@ -73,18 +73,17 @@ import {filter} from "rxjs/operators";
  * It hosts movement controls, projection toggles, and the animated compass bound to the active renderer.
  */
 export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
-    readonly viewStateOwner = inject(MapViewStateService);
+    readonly store = inject(AppStore);
     @ViewChild('compassNeedle', {static: false}) needleRef!: ElementRef<HTMLElement>;
 
     mapView: InputSignal<IRenderView | undefined> = input<IRenderView | undefined>(undefined);
     is2D: InputSignal<boolean> = input<boolean>(false);
-    private readonly numViews: Signal<number>;
     readonly isPrimary = computed(() => {
         const mapView = this.mapView();
         if (!mapView) {
             return false;
         }
-        return this.numViews() > 1 && mapView.viewIndex === 0;
+        return this.store.numViews() > 1 && mapView.viewIndex === 0;
     });
     projectionOptions: {icon: string, label: string, mode: string}[] = [
         { icon: '3d', label: '3D', mode: '3D projection' },
@@ -101,7 +100,6 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
                 public stateService: AppStateService,
                 private keyboardService: KeyboardService,
                 private ngZone: NgZone) {
-        this.numViews = toSignal(this.viewStateOwner.numViewsState, {initialValue: this.viewStateOwner.numViewsState.getValue()});
         this.mapView$ = toObservable(this.mapView);
     }
 
@@ -164,9 +162,8 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         if (!mapView) {
             return;
         }
-        this.viewStateOwner.focusedView = mapView.viewIndex;
-        const currentMode = this.viewStateOwner.mode2dState.getValue(mapView.viewIndex);
-        this.viewStateOwner.setProjectionMode(mapView.viewIndex, !currentMode);
+        const currentMode = this.store.views.mode2d()[String(this.store.viewIds()[mapView.viewIndex])];
+        this.store.setProjectionMode(mapView.viewIndex, !currentMode, true);
     }
 
     /** Builds a stable test id for view UI controls. */

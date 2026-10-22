@@ -1,15 +1,17 @@
 import "@angular/compiler";
-import {runInInjectionContext} from "@angular/core";
 import {Subject} from 'rxjs';
 import {beforeAll, describe, expect, it, vi} from 'vitest';
-import {ownerTestInjector} from "../../test/owner-test-injector";
-import {AppActionService} from "../actions/app-action.service";
-import {InspectionStateService} from "../inspection/inspection-state.service";
+import {ownerTestInjector, setTestViewIds} from "../../test/owner-test-injector";
+import {InspectionSelectionService} from "../inspection/inspection-selection.service";
 import {Rectangle} from '../integrations/geo';
 import {coreLib, initializeLibrary} from '../integrations/wasm';
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {AppStore} from "../shared/app.store";
+import {observeStore} from "../shared/persisted-state";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {RightClickMenuService} from "../mapview/rightclickmenu.service";
+import {AppConfigService} from "../shared/app-config.service";
+import {InfoMessageService} from "../shared/info.service";
 import {MapViewService} from "../mapview/map-view.service";
-import {AppStateService} from "../shared/appstate.service";
 import {CoordinateJumpService} from "./coordinate-jump.service";
 import {FeatureSearchService} from "./feature.search.service";
 import {JumpTargetService, normalizeSearchJumpResult} from './jump.service';
@@ -39,6 +41,7 @@ class RightClickMenuServiceStub {
 }
 
 class FeatureSearchServiceStub {
+    store!: AppStore;
     run = vi.fn();
     runFromActionPayload = vi.fn();
 }
@@ -52,34 +55,29 @@ const createService = (config: any = {}) => {
     const inspectionSelection = new InspectionSelectionServiceStub();
     const infoService = new InfoMessageServiceStub();
     const menuService = new RightClickMenuServiceStub();
-    const inspectionState = {setSelection: vi.fn()};
     const renderer = {moveToWgs84PositionTopic: new Subject(), moveToRectangleTopic: new Subject()};
-    const injector = ownerTestInjector([MapViewStateService, CoordinateJumpService,
-        {provide: MapViewService, useValue: renderer},
-        {provide: InspectionStateService, useValue: inspectionState}]);
-    const viewState = injector.get(MapViewStateService);
-    vi.spyOn(viewState, "setMarkerState");
-    vi.spyOn(viewState, "setMarkerPosition");
     const searchService = new FeatureSearchServiceStub();
-    injector.get(AppActionService).registerAction(FeatureSearchService.omnibarActions.run,
-        ({query, payload}) => { searchService.runFromActionPayload(query, payload); });
     const configService = new AppConfigServiceStub();
     configService.getExtensionModuleId.mockImplementation((key: string) =>
         key === 'jumpTargets' ? config?.extensionModules?.jumpTargets ?? null : null
     );
-
-    const service = runInInjectionContext(injector, () => new JumpTargetService(
-        mapService as any,
-        inspectionSelection as any,
-        infoService as any,
-        menuService as any,
-        injector.get(AppStateService),
-        searchService as any,
-        configService as any,
-    ));
+    const injector = ownerTestInjector([
+        JumpTargetService, CoordinateJumpService,
+        {provide: MapViewService, useValue: renderer},
+        {provide: MapInfoService, useValue: mapService},
+        {provide: InspectionSelectionService, useValue: inspectionSelection},
+        {provide: InfoMessageService, useValue: infoService},
+        {provide: RightClickMenuService, useValue: menuService},
+        {provide: FeatureSearchService, useValue: searchService},
+        {provide: AppConfigService, useValue: configService}
+    ]);
+    const store = injector.get(AppStore);
+    searchService.store = store;
+    const selection = vi.spyOn(store, "setSelection");
+    const service = injector.get(JumpTargetService);
     service.initialize();
 
-    return {service, mapService, inspectionSelection, infoService, menuService, renderer, viewState, inspectionState, searchService, configService};
+    return {service, mapService, inspectionSelection, infoService, menuService, renderer, store, selection, searchService, configService};
 };
 
 describe('JumpTargetService', () => {
@@ -95,8 +93,8 @@ describe('JumpTargetService', () => {
     });
 
     it('retires a core jump while its map selection awaits, even if the logical ID is restored', async () => {
-        const {service, mapService, viewState, inspectionState} = createService();
-        const original = viewState.viewIds();
+        const {service, mapService, store, selection} = createService();
+        const original = store.viewIds().map(String);
         mapService.tileLayerParser.filterFeatureJumpTargets.mockReturnValue([
             {id: "Road.id", name: "Road", error: null, idParts: [{key: "id", value: 1}], maps: ["Map", "Other"]}
         ]);
@@ -104,18 +102,18 @@ describe('JumpTargetService', () => {
         const candidate = service.getJumpTargetsForValue("Road.1").find(item => item.id === "fj:Road.id")!;
         const pending = candidate.execute!("Road.1");
         expect(service.setSelectedMap).not.toBeNull();
-        viewState.viewIdsState.next(["temporary"]);
-        viewState.viewIdsState.next(original);
+        setTestViewIds(store, ["temporary"]);
+        setTestViewIds(store, original);
         service.setSelectedMap!("Map");
         await pending;
         expect(fetch).not.toHaveBeenCalled();
-        expect(inspectionState.setSelection).not.toHaveBeenCalled();
+        expect(selection).not.toHaveBeenCalled();
         fetch.mockRestore();
     });
 
     it('keeps delayed plugin navigation on its captured view and rejects removed lifetimes', async () => {
-        const {service, renderer, viewState} = createService();
-        viewState.viewIdsState.next(["left", "right"]);
+        const {service, renderer, store} = createService();
+        setTestViewIds(store, ["left", "right"]);
         let resolve!: (position: number[]) => void;
         const jump = vi.fn(() => new Promise<number[]>(done => { resolve = done; }));
         service.extJumpTargets = [{id: "plugin:place", name: "Place", label: "Provider", icon: "pi-map",
@@ -124,16 +122,16 @@ describe('JumpTargetService', () => {
         renderer.moveToWgs84PositionTopic.subscribe(move);
         const candidate = service.getJumpTargetsForValue("place").find(item => item.id === "plugin:place")!;
         const pending = candidate.execute!("place");
-        viewState.focusedView = 1;
-        viewState.reorderViews(["right", "left"]);
+        store.setFocusedView(1);
+        store.reorderViews(["right", "left"]);
         resolve([48, 11]);
         await pending;
         expect(move).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({targetView: 1, x: 11, y: 48}));
 
-        viewState.focusedView = 1;
+        store.setFocusedView(1);
         const retired = service.getJumpTargetsForValue("place").find(item => item.id === "plugin:place")!.execute!("place");
-        viewState.viewIdsState.next(["right"]);
-        viewState.viewIdsState.next(["right", "left"]);
+        setTestViewIds(store, ["right"]);
+        setTestViewIds(store, ["right", "left"]);
         resolve([49, 12]);
         await expect(retired).rejects.toThrow();
         expect(move).toHaveBeenCalledOnce();
@@ -306,7 +304,7 @@ describe('JumpTargetService', () => {
     });
 
     it('executes inspect-tile source-data target and sets selection when map and layer exist', () => {
-        const {service, mapService, inspectionState, menuService} = createService();
+        const {service, mapService, selection, menuService} = createService();
 
         mapService.maps.maps.set('m1', {});
         mapService.sourceDataLayerIdForLayerName.mockImplementation((name: string) =>
@@ -322,7 +320,7 @@ describe('JumpTargetService', () => {
         }
 
         expect(coreLib.getSourceDataLayerKey('m1', 'LAYER-ID', 65536)).toBe("SourceData:m1:LAYER-ID:65536");
-        expect(inspectionState.setSelection).toHaveBeenCalledWith({
+        expect(selection).toHaveBeenCalledWith({
             mapTileKey: 'SourceData:m1:LAYER-ID:65536',
         } as any);
         expect(menuNextSpy).not.toHaveBeenCalled();
@@ -336,22 +334,17 @@ describe('JumpTargetService', () => {
     });
 
     it('publishes latitude, longitude and marker enabled state coherently through the view owner', () => {
-        const {service, viewState, inspectionState} = createService();
+        const {service, store, selection} = createService();
 
         const observed: unknown[] = [];
-        const subscription = viewState.markerState.subscribe(() => observed.push(viewState.markerControl()));
+        const subscription = observeStore(store, state => state.views.marker).subscribe(() => observed.push(store.markerControl()));
         service.markedPosition.next([48.25, 11.75, 125]);
         expect(observed).toEqual([
             {enabled: false, position: null},
             {enabled: true, position: {lat: 48.25, lon: 11.75, alt: 125}}
         ]);
         subscription.unsubscribe();
-        expect(viewState.setMarkerState).toHaveBeenCalledWith(true);
-        expect(viewState.setMarkerPosition).toHaveBeenCalledTimes(1);
-        const arg = (viewState.setMarkerPosition as any).mock.calls[0][0];
-        expect(arg.longitude).toBeCloseTo(11.75 * Math.PI / 180);
-        expect(arg.latitude).toBeCloseTo(48.25 * Math.PI / 180);
-        expect(arg.height).toBe(125);
+        expect(store.views.markedPosition()).toEqual([11.75, 48.25, 125]);
     });
 
     it('keeps exact marker coordinates when a coordinate jump targets a tile rectangle', () => {

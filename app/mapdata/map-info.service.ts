@@ -1,25 +1,27 @@
-import {InspectionStateService} from "../inspection/inspection-state.service";
+import {DestroyRef} from "@angular/core";
+import {takeUntilDestroyed} from "@angular/core/rxjs-interop";
+import {parseMapPartitionKey} from "./partition.model";
+import {AppStore} from "../shared/app.store";
+
 import {HttpClient} from "@angular/common/http";
 import {inject, Injectable} from "@angular/core";
 import {BehaviorSubject, firstValueFrom, Subject} from "rxjs";
 import {z} from "zod";
 import type {FeatureLayerStyle, TileLayerParser} from "../../build/libs/core/erdblick-core";
 import {pageActionItems, rejectAction} from "../actions/action-utils";
-import {AppActionService} from "../actions/app-action.service";
 import {ControlReadContext} from "../actions/control";
-import type {ViewerActionInput, ViewerActionOutput} from "../actions/viewer-action.contract";
 import {coreLib, uint8ArrayFromWasm, uint8ArrayToWasmOrThrow} from "../integrations/wasm";
 import {VIEW_SYNC_LAYERS} from "../mapview/map-view-state.model";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+
 import {AppStateService} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 import {unicodePrefix} from "../shared/unicode-string";
 import type {LayerPresetRef} from "../styledata/layer-preset.model";
 import {MapPresetService} from "../styledata/map-preset.service";
 import {StyleService} from "../styledata/style.service";
-import {mapInfoActions, mapInfoControls} from "./map-info.service.declarations";
+import {mapInfoActions, mapInfoControls} from "./map-info-actions.store-feature";
 import {TileGridMode} from "./map-layer-state.model";
-import {MapLayerStateService} from "./map-layer-state.service";
+
 import {
     dataSourceCatalogStatus,
     dataSourceProgressPercent,
@@ -44,7 +46,7 @@ interface SourceCatalogEntryUpdate {
     retrying?: boolean;
 }
 
-/** One concrete option/view pair invalidated by an atomic style-option transaction. */
+/** One concrete option/view pair invalidated by a complete style-option edit. */
 export interface StyleOptionChange {
     optionNode: StyleOptionNode;
     viewIndex: number;
@@ -55,19 +57,19 @@ export interface StyleOptionChange {
  */
 @Injectable({providedIn: "root"})
 export class MapInfoService {
-    static readonly actions = mapInfoActions;
+    readonly store = inject(AppStore);
+    private readonly destroyRef = inject(DestroyRef);
 
-    static readonly controls = mapInfoControls;
-    readonly layerState = inject(MapLayerStateService);
-    private readonly inspectionState = inject(InspectionStateService);
-    readonly viewStateOwner = inject(MapViewStateService);
+
     public readonly legalInformationPerMap = new Map<string, Set<string>>();
     public readonly legalInformationUpdated = new Subject<boolean>();
     public readonly layerStateChanged = new Subject<string>();
     public readonly styleOptionsChanged = new Subject<StyleOptionChange[]>();
     /** Emits on replacement/removal, requiring a stream reset; additions leave existing consumers live. */
     public readonly dataSourceInfoChanged = new Subject<void>();
+    /** Replacement notification; synchronous store consumers read the installed tree via maps. */
     public readonly maps$: BehaviorSubject<MapLayerTree>;
+    private currentTree: MapLayerTree;
 
     /** Shared parser instance whose datasource metadata is populated from `/sources`. */
     private parserInstance: TileLayerParser | null = null;
@@ -99,24 +101,12 @@ export class MapInfoService {
         private readonly mapPresetService: MapPresetService,
         private readonly messageService: InfoMessageService
     ) {
-        this.registerControls();
-        const actions = inject(AppActionService);
-        actions.registerAction(MapInfoService.actions.listMaps, (input) => this.listMaps(input));
-        actions.registerAction(MapInfoService.actions.listLayers, (input) => this.listLayers(input));
-        actions.registerAction(MapInfoService.actions.listStyleOptions, (input) => this.listStyleOptions(input));
-        actions.registerAction(MapInfoService.actions.listPresets, (input) => this.listPresets(input));
 
-        this.maps$ = new BehaviorSubject<MapLayerTree>(
-            new MapLayerTree(
-                [],
-                this.stateService,
-                this.styleService,
-                this.mapPresetService,
-                this.layerState,
-                this.viewStateOwner
-            )
+        this.currentTree = new MapLayerTree(
+            [], this.stateService, this.styleService, this.mapPresetService, this.store
         );
-        this.stateService.stateApplied.subscribe(() => {
+        this.maps$ = new BehaviorSubject(this.currentTree);
+        this.stateService.stateApplied.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
             this.configureTreeParameters();
             this.layerStateChanged.next("external-state");
         });
@@ -124,7 +114,12 @@ export class MapInfoService {
 
     /** Returns the mutable map tree owned by the map info service. */
     get maps(): MapLayerTree {
-        return this.maps$.getValue();
+        return this.currentTree;
+    }
+
+    ngOnDestroy(): void {
+        this.currentTree.destroy();
+        this.maps$.complete();
     }
 
     /** Exposes the shared WASM tile parser used by tile hydration, search schema helpers, and inspection. */
@@ -444,27 +439,50 @@ export class MapInfoService {
         );
         this.mapgetLayersByKey = this.materializeMapgetLayers(this.sourceCatalogEntries);
         const maps = this.sourceCatalogEntries.filter((entry) => !entry.addOn || !isDataSourceCatalogEntryReady(entry));
+        const previousTree = this.currentTree;
         const nextTree = new MapLayerTree(
             maps,
             this.stateService,
             this.styleService,
             this.mapPresetService,
-            this.layerState,
-            this.viewStateOwner,
-            this.canPruneStateForCurrentCatalog() ? maps => this.pruneCatalogReferences(maps) : undefined
+            this.store,
+            tree => {
+                // The constructor materializes catalog defaults synchronously.
+                // Install its runtime tree before that native store publication,
+                // so preset/visibility readers cannot pair new state with old nodes.
+                this.currentTree = tree;
+                this.prepareCatalogState(tree);
+            }
         );
-        this.maps.destroy();
+        this.currentTree = nextTree;
+        previousTree.destroy();
         this.maps$.next(nextTree);
-        this.reapplySyncOptionsForAllViews();
     }
 
-    /** A complete datasource catalog coordinates each owner's own cleanup in one revision. */
-    private pruneCatalogReferences(maps: ReadonlyMap<string, MapTreeNode>): void {
-        this.stateService.withSystemStateMutation(() => this.stateService.transaction(() => {
-            this.layerState.prune(maps, this.styleService.styles);
-            this.styleService.pruneVisibility(this.styleService.styles);
-            this.inspectionState.prune(maps);
-        }));
+    /** Materialize defaults and prune a complete catalog in one system-owned publication. */
+    private prepareCatalogState(tree: MapLayerTree): void {
+        const maps = tree.maps;
+        const prune = this.canPruneStateForCurrentCatalog();
+        const retained = (key: string, source: boolean): boolean => {
+            let parsed: [string, string, unknown];
+            try { parsed = parseMapPartitionKey(coreLib, key); } catch { return false; }
+            const map = maps.get(parsed[0]);
+            // A temporarily absent datasource may return on the next catalog refresh.
+            if (!map) return true;
+            return source ? map.layers.size === 0 || map.layers.has(parsed[1])
+                : map.children.length === 0 || map.children.some(layer => layer.id === parsed[1]);
+        };
+        const selection = this.store.inspection.selection();
+        const retainedSelection = prune ? selection.map(panel => ({...panel,
+            features: panel.features.filter(feature => retained(feature.mapTileKey, false)),
+            sourceData: panel.sourceData && retained(panel.sourceData.mapTileKey, true) ? panel.sourceData : undefined
+        })).filter(panel => panel.features.length || panel.sourceData) : selection;
+        this.store.applyCatalogState(tree.collectLayerPresentation(), {
+            layerNames: [...maps].flatMap(([mapId, map]) => map.children.map(layer => `${mapId}/${layer.id}`)),
+            styleIds: [...this.styleService.styles.keys()],
+            styleShortIds: [...this.styleService.styles.values()].map(style => style.shortId),
+            retainedSelection
+        }, prune);
     }
 
     /** Materializes the catalog-only layer model without view or presentation state. */
@@ -569,7 +587,8 @@ export class MapInfoService {
 
     /** Persists map/layer visibility changes and emits the resulting map-state event. */
     setMapLayerVisibility(viewIndex: number, mapOrGroupId: string, layerId: string = "", state: boolean) {
-        this.maps.setMapLayerVisibility(viewIndex, mapOrGroupId, layerId, state);
+        this.maps.setMapLayerVisibility(viewIndex, mapOrGroupId, layerId, state, false);
+        this.publishLayerPresentation(viewIndex);
         this.layerStateChanged.next("visibility");
     }
 
@@ -584,25 +603,25 @@ export class MapInfoService {
         if (this.maps.getViewTileBorderState(viewIndex) === enabled) {
             return;
         }
-        this.maps.setViewTileBorderState(viewIndex, enabled);
+        this.store.setGridPresentation(viewIndex, {visible: enabled}, this.store.views.viewSync().includes(VIEW_SYNC_LAYERS));
         this.layerStateChanged.next("tile-border");
     }
 
     /** Sets the tile-grid coordinate mode and refreshes affected overlays. */
     setViewTileGridMode(viewIndex: number, mode: TileGridMode) {
-        this.maps.setViewTileGridMode(viewIndex, mode);
+        this.store.setGridPresentation(viewIndex, {mode: mode}, this.store.views.viewSync().includes(VIEW_SYNC_LAYERS));
         this.layerStateChanged.next("tile-grid");
     }
 
     /** Sets the independent tile-grid line level for one view. */
     setViewTileGridLevel(viewIndex: number, level: number): void {
-        this.maps.setViewTileGridLevel(viewIndex, level);
+        this.store.setGridPresentation(viewIndex, {level: level}, this.store.views.viewSync().includes(VIEW_SYNC_LAYERS));
         this.layerStateChanged.next("tile-grid");
     }
 
     /** Sets whether the tile grid follows the viewport-based auto-level heuristic. */
     setViewTileGridAutoLevel(viewIndex: number, autoLevel: boolean): void {
-        this.maps.setViewTileGridAutoLevel(viewIndex, autoLevel);
+        this.store.setGridPresentation(viewIndex, {autoLevel: autoLevel}, this.store.views.viewSync().includes(VIEW_SYNC_LAYERS));
         this.layerStateChanged.next("tile-grid");
     }
 
@@ -613,25 +632,25 @@ export class MapInfoService {
 
     /** Sets the tile-grid line colour for one view. */
     setViewTileGridColor(viewIndex: number, color: string): void {
-        this.maps.setViewTileGridColor(viewIndex, color);
+        this.store.setGridPresentation(viewIndex, {color: color}, this.store.views.viewSync().includes(VIEW_SYNC_LAYERS));
         this.layerStateChanged.next("tile-grid");
     }
 
     /** Sets the tile-grid opacity for one view. */
     setViewTileGridOpacity(viewIndex: number, opacity: number): void {
-        this.maps.setViewTileGridOpacity(viewIndex, opacity);
+        this.store.setGridPresentation(viewIndex, {opacity: opacity}, this.store.views.viewSync().includes(VIEW_SYNC_LAYERS));
         this.layerStateChanged.next("tile-grid");
     }
 
     /** Persists an explicit layer level for one view. */
     setMapLayerLevel(viewIndex: number, mapId: string, layerId: string, level: number) {
-        this.maps.setMapLayerLevel(viewIndex, mapId, layerId, level);
+        this.setLayerPresentation(viewIndex, mapId, layerId, {level});
         this.layerStateChanged.next("layer-level");
     }
 
     /** Persists whether a map layer currently follows the auto-level heuristic. */
     setMapLayerAutoLevel(viewIndex: number, mapId: string, layerId: string, autoLevel: boolean) {
-        this.maps.setMapLayerAutoLevel(viewIndex, mapId, layerId, autoLevel);
+        this.setLayerPresentation(viewIndex, mapId, layerId, {autoLevel});
         this.layerStateChanged.next("auto-level");
     }
 
@@ -641,24 +660,52 @@ export class MapInfoService {
     }
 
     /** Enables or disables one view as the source for cross-view option synchronization. */
-    setSyncOptionsForView(viewIndex: number, enabled: boolean) {
-        const current = this.layerState.getLayerSyncOption(viewIndex);
-        if (current !== enabled) {
-            this.layerState.setLayerSyncOption(viewIndex, enabled);
+    setSyncOptionsForView(viewIndex: number, enabled: boolean): void {
+        const changes: StyleOptionChange[] = [];
+        if (enabled) {
+            for (const layer of this.maps.allFeatureLayers()) {
+                changes.push(...this.maps.syncLayers(viewIndex, layer.mapId, layer.id, false)
+                    .map(optionNode => ({optionNode, viewIndex})));
+            }
         }
+        const synchronized = this.store.views.viewSync().includes(VIEW_SYNC_LAYERS);
+        if (synchronized) this.maps.syncViews(viewIndex, false);
+        this.maps.reconcilePresetSelections(new Set(), false);
+        this.store.applyLayerPresentation(this.maps.collectLayerPresentation(), {
+            syncFromView: synchronized ? viewIndex : undefined, layerSync: {viewIndex, enabled}
+        });
+        this.publishStyleOptionChanges(changes);
+    }
+
+    /** Apply related visibility/level/auto-level values before synchronization and one publication. */
+    setLayerPresentation(viewIndex: number, mapId: string, layerId: string,
+        value: Partial<{visible: boolean; level: number; autoLevel: boolean}>): void {
+        const layer = this.maps.getFeatureLayer(mapId, layerId);
+        if (!layer || !layer.viewConfig[viewIndex]) return;
+        layer.viewConfig[viewIndex] = {...layer.viewConfig[viewIndex], ...value};
+        this.publishLayerPresentation(viewIndex);
+    }
+
+    private publishLayerPresentation(viewIndex: number, origin: "user" | "system" = "user"): void {
+        const synchronized = this.store.views.viewSync().includes(VIEW_SYNC_LAYERS);
+        if (synchronized) this.maps.syncViews(viewIndex, false);
+        this.store.applyLayerPresentation(this.maps.collectLayerPresentation(), {
+            syncFromView: synchronized ? viewIndex : undefined, origin
+        });
     }
 
     /** Returns whether the given view currently drives option synchronization. */
     isSyncOptionsForViewEnabled(viewIndex: number): boolean {
-        return this.layerState.getLayerSyncOption(viewIndex);
+        return this.store.getLayerSyncOption(viewIndex);
     }
 
     /** Mirrors layer, style, and background-layer state to sibling views when global view sync is enabled. */
     syncViewsIfEnabled(viewIndex: number): boolean {
-        if (!this.viewStateOwner.viewSync.includes(VIEW_SYNC_LAYERS)) {
+        if (!this.store.views.viewSync().includes(VIEW_SYNC_LAYERS)) {
             return false;
         }
-        const result = this.maps.syncViews(viewIndex);
+        const result = this.maps.syncViews(viewIndex, false);
+        this.publishLayerPresentation(viewIndex);
         this.publishStyleOptionChanges(
             result.styleOptionChanges.map(([optionNode, targetIndex]) => ({
                 optionNode,
@@ -678,7 +725,7 @@ export class MapInfoService {
             }
         }
         let viewConfigChanged = false;
-        if (this.viewStateOwner.viewSync.includes(VIEW_SYNC_LAYERS)) {
+        if (this.store.views.viewSync().includes(VIEW_SYNC_LAYERS)) {
             const result = this.maps.syncViews(viewIndex, false);
             viewConfigChanged = result.viewConfigChanged;
             changes.push(
@@ -696,9 +743,9 @@ export class MapInfoService {
 
     /** Replays sync settings after the number of views or tree contents changed. */
     reapplySyncOptionsForAllViews() {
-        const numViews = this.viewStateOwner.numViews;
+        const numViews = this.store.numViews();
         for (let viewIndex = 0; viewIndex < numViews; viewIndex++) {
-            if (this.layerState.getLayerSyncOption(viewIndex)) {
+            if (this.store.getLayerSyncOption(viewIndex)) {
                 this.applySyncOptionsForView(viewIndex);
             }
         }
@@ -706,31 +753,22 @@ export class MapInfoService {
 
     /** Copies one view's background-layer selection and opacity to the other views. */
     syncBackgroundSettingsFromView(viewIndex: number): boolean {
-        const numViews = this.viewStateOwner.numViews;
+        const numViews = this.store.numViews();
         if (viewIndex < 0 || viewIndex >= numViews) {
             return false;
         }
-        const sourceBackground = this.layerState.getBackgroundState(viewIndex);
-        let changed = false;
-        for (let targetIndex = 0; targetIndex < numViews; targetIndex++) {
-            if (targetIndex === viewIndex) {
-                continue;
-            }
-            const targetBackground = this.layerState.getBackgroundState(targetIndex);
-            if (
-                targetBackground.layerId !== sourceBackground.layerId ||
-                targetBackground.opacity !== sourceBackground.opacity
-            ) {
-                this.layerState.setBackgroundState(targetIndex, sourceBackground.layerId, sourceBackground.opacity);
-                changed = true;
-            }
-        }
+        const sourceBackground = this.store.getBackgroundState(viewIndex);
+        const changed = this.store.viewIds().some((_, index) => {
+            const value = this.store.getBackgroundState(index);
+            return value.layerId !== sourceBackground.layerId || value.opacity !== sourceBackground.opacity;
+        });
+        if (changed) this.store.setBackgroundState(viewIndex, sourceBackground.layerId, sourceBackground.opacity, true);
         return changed;
     }
 
     /** Public entry point that syncs background-layer settings only when layer sync is globally active. */
     syncBackgroundSettings(viewIndex: number) {
-        if (!this.viewStateOwner.viewSync.includes(VIEW_SYNC_LAYERS)) {
+        if (!this.store.views.viewSync().includes(VIEW_SYNC_LAYERS)) {
             return;
         }
         this.syncBackgroundSettingsFromView(viewIndex);
@@ -741,74 +779,71 @@ export class MapInfoService {
         this.applyStyleOptionChanges([optionNode], viewIndex);
     }
 
-    /** Applies a preset through the same transaction for map-tree controls and agent actions. */
+    /** Applies a preset through the same prepared store operation for map-tree controls and agent actions. */
     applyLayerPreset(viewIndex: number, mapId: string, layerId: string, ref: LayerPresetRef | null): boolean {
-        return this.stateService.transaction(() => {
-            const layer = this.maps.getFeatureLayer(mapId, layerId);
-            if (!layer || viewIndex < 0 || viewIndex >= this.viewStateOwner.numViews) return false;
-            const preset = ref
-                ? layerPresetNode(layer)?.presets.find(
-                      (candidate) => candidate.styleId === ref.styleId && candidate.id === ref.presetId
-                  )
-                : undefined;
-            if (ref && !preset) return false;
-            const options = layerStyleOptions(layer);
-            const changed: StyleOptionNode[] = [];
-            for (const value of preset?.values ?? []) {
+        const layer = this.maps.getFeatureLayer(mapId, layerId);
+        if (!layer || viewIndex < 0 || viewIndex >= this.store.numViews()) return false;
+        const preset = ref
+            ? layerPresetNode(layer)?.presets.find(
+                  (candidate) => candidate.styleId === ref.styleId && candidate.id === ref.presetId
+              )
+            : undefined;
+        if (ref && !preset) return false;
+        const options = layerStyleOptions(layer);
+        const changed: StyleOptionNode[] = [];
+        for (const value of preset?.values ?? []) {
+            const option = options.find(
+                (candidate) => candidate.styleId === preset!.styleId && candidate.id === value.optionId
+            );
+            if (option && option.value[viewIndex] !== value.value) {
+                option.value[viewIndex] = value.value;
+                changed.push(option);
+            }
+        }
+        this.maps.setLayerPresetSelection(viewIndex, mapId, layerId, ref, "collapse", false);
+        this.applyPresetChanges(changed, viewIndex, [{mapId, layerId}]);
+        return true;
+    }
+
+    /** Validates an entire map composition before changing any of its component options. */
+    applyMapPreset(viewIndex: number, mapId: string, presetId: string | null): boolean {
+        const map = this.maps.maps.get(mapId);
+        if (!map || viewIndex < 0 || viewIndex >= this.store.numViews()) return false;
+        if (!presetId) {
+            this.maps.setMapPresetSelection(viewIndex, mapId, null, false);
+            this.maps.reconcilePresetSelections(new Set(), false);
+            this.publishLayerPresentation(viewIndex);
+            return true;
+        }
+        const preset = map.mapPresets.find((candidate) => candidate.id === presetId);
+        const components = preset ? this.maps.resolveMapPresetComponents(map, preset) : undefined;
+        if (
+            !preset ||
+            !components ||
+            (this.isSyncOptionsForViewEnabled(viewIndex) && this.maps.mapPresetHasSyncConflict(map, preset))
+        )
+            return false;
+        const changed: StyleOptionNode[] = [];
+        for (const component of components) {
+            const options = layerStyleOptions(component.layer);
+            for (const value of component.preset.values) {
                 const option = options.find(
-                    (candidate) => candidate.styleId === preset!.styleId && candidate.id === value.optionId
+                    (candidate) => candidate.styleId === component.preset.styleId && candidate.id === value.optionId
                 );
                 if (option && option.value[viewIndex] !== value.value) {
                     option.value[viewIndex] = value.value;
                     changed.push(option);
                 }
             }
-            this.maps.setLayerPresetSelection(viewIndex, mapId, layerId, ref);
-            this.applyPresetChanges(changed, viewIndex, [{mapId, layerId}]);
-            return true;
-        });
-    }
-
-    /** Validates an entire map composition before changing any of its component options. */
-    applyMapPreset(viewIndex: number, mapId: string, presetId: string | null): boolean {
-        return this.stateService.transaction(() => {
-            const map = this.maps.maps.get(mapId);
-            if (!map || viewIndex < 0 || viewIndex >= this.viewStateOwner.numViews) return false;
-            if (!presetId) {
-                this.maps.setMapPresetSelection(viewIndex, mapId, null);
-                this.maps.reconcilePresetSelections();
-                return true;
-            }
-            const preset = map.mapPresets.find((candidate) => candidate.id === presetId);
-            const components = preset ? this.maps.resolveMapPresetComponents(map, preset) : undefined;
-            if (
-                !preset ||
-                !components ||
-                (this.isSyncOptionsForViewEnabled(viewIndex) && this.maps.mapPresetHasSyncConflict(map, preset))
-            )
-                return false;
-            const changed: StyleOptionNode[] = [];
-            for (const component of components) {
-                const options = layerStyleOptions(component.layer);
-                for (const value of component.preset.values) {
-                    const option = options.find(
-                        (candidate) => candidate.styleId === component.preset.styleId && candidate.id === value.optionId
-                    );
-                    if (option && option.value[viewIndex] !== value.value) {
-                        option.value[viewIndex] = value.value;
-                        changed.push(option);
-                    }
-                }
-                this.maps.setLayerPresetSelection(viewIndex, mapId, component.layer.id, component.preset.ref);
-            }
-            this.maps.setMapPresetSelection(viewIndex, mapId, preset.id);
-            this.applyPresetChanges(
-                changed,
-                viewIndex,
-                components.map((component) => ({mapId, layerId: component.layer.id}))
-            );
-            return true;
-        });
+            this.maps.setLayerPresetSelection(viewIndex, mapId, component.layer.id, component.preset.ref, "collapse", false);
+        }
+        this.maps.setMapPresetSelection(viewIndex, mapId, preset.id, false);
+        this.applyPresetChanges(
+            changed,
+            viewIndex,
+            components.map((component) => ({mapId, layerId: component.layer.id}))
+        );
+        return true;
     }
 
     /** Applies one atomic collection of option mutations and performs synchronization once. */
@@ -833,7 +868,7 @@ export class MapInfoService {
         );
     }
 
-    /** Executes one option transaction across direct, layer-synced, and view-synced targets. */
+    /** Prepares one option edit across direct targets and synchronized layers and views. */
     private applyStyleOptionTransaction(
         directNodes: StyleOptionNode[],
         viewIndex: number,
@@ -849,7 +884,7 @@ export class MapInfoService {
             }
         }
         let viewConfigChanged = false;
-        if (this.viewStateOwner.viewSync.includes(VIEW_SYNC_LAYERS)) {
+        if (this.store.views.viewSync().includes(VIEW_SYNC_LAYERS)) {
             const result = this.maps.syncViews(viewIndex, false);
             viewConfigChanged = result.viewConfigChanged;
             changes.push(
@@ -862,31 +897,19 @@ export class MapInfoService {
         if (changes.length) {
             this.persistAndPublishStyleOptionChanges(changes, inferPresets);
         } else {
-            this.maps.reconcilePresetSelections();
+            this.maps.reconcilePresetSelections(new Set(), false);
+            this.publishLayerPresentation(viewIndex);
         }
         if (viewConfigChanged) {
             this.layerStateChanged.next("style-options");
         }
     }
 
-    /** Writes changed option arrays once and publishes one deduplicated render transaction. */
+    /** Publishes the complete option/preset state once, then deduplicates render invalidations. */
     private persistAndPublishStyleOptionChanges(changes: StyleOptionChange[], inferPresets = true): void {
         if (!changes.length) {
             return;
         }
-        const changedOptions = new Map<string, StyleOptionNode>();
-        for (const change of changes) {
-            changedOptions.set(change.optionNode.key, change.optionNode);
-        }
-        this.layerState.setStyleOptionValuesBatch(
-            [...changedOptions.values()].map((optionNode) => ({
-                mapId: optionNode.mapId,
-                layerId: optionNode.layerId,
-                shortStyleId: optionNode.shortStyleId,
-                optionId: optionNode.id,
-                values: optionNode.value
-            }))
-        );
         const inferenceTargets = inferPresets
             ? new Set(
                   changes.map((change) =>
@@ -894,7 +917,8 @@ export class MapInfoService {
                   )
               )
             : new Set<string>();
-        this.maps.reconcilePresetSelections(inferenceTargets);
+        this.maps.reconcilePresetSelections(inferenceTargets, false);
+        this.publishLayerPresentation(changes[0].viewIndex);
         this.publishStyleOptionChanges(changes);
     }
 
@@ -992,50 +1016,9 @@ export class MapInfoService {
         return layer;
     }
 
-    private registerControls(): void {
-        const actions = inject(AppActionService),
-            controls = MapInfoService.controls;
-        actions.registerControl(controls.layers, {
-            read: (selector, context) => this.layerSummary(selector, context),
-            overview: () => this.viewStateOwner.viewIds().map((viewId) => ({viewId}))
-        });
-        actions.registerControl(controls.styleOption, {
-            read: (selector) => this.styleOptionControl(selector),
-            write: (selector, value) => this.setStyleOptionControl(selector, value)
-        });
-        actions.registerControl(controls.layerPreset, {
-            read: (selector) => {
-                this.requireLayer(selector.mapId, selector.layerId);
-                return this.layerState.getLayerPresetSelection(
-                    this.viewStateOwner.indexOf(this.viewStateOwner.requireView(selector.viewId).id),
-                    selector.mapId,
-                    selector.layerId
-                );
-            },
-            write: (selector, value) => {
-                const index = this.viewStateOwner.indexOf(this.viewStateOwner.requireView(selector.viewId).id);
-                if (!this.applyLayerPreset(index, selector.mapId, selector.layerId, value))
-                    rejectAction("The layer preset is unavailable");
-            }
-        });
-        actions.registerControl(controls.mapPreset, {
-            read: (selector) => {
-                if (!this.maps.maps.has(selector.mapId)) rejectAction("The requested map is unavailable");
-                return this.layerState.getMapPresetSelection(
-                    this.viewStateOwner.indexOf(this.viewStateOwner.requireView(selector.viewId).id),
-                    selector.mapId
-                );
-            },
-            write: (selector, value) => {
-                const index = this.viewStateOwner.indexOf(this.viewStateOwner.requireView(selector.viewId).id);
-                if (!this.applyMapPreset(index, selector.mapId, value))
-                    rejectAction("The map preset is unavailable or conflicts with synchronized options");
-            }
-        });
-    }
 
-    layerSummary(selector: z.infer<typeof MapInfoService.controls.layers.selectorSchema>, context: ControlReadContext) {
-        const index = this.viewStateOwner.indexOf(this.viewStateOwner.requireView(selector.viewId).id);
+    layerSummary(selector: z.infer<typeof mapInfoControls.layers.selectorSchema>, context: ControlReadContext) {
+        const index = this.store.indexOf(this.store.requireView(selector.viewId).id);
         if (selector.layerId && !selector.mapId) rejectAction("layerId requires mapId", "invalid_arguments");
         const map = selector.mapId ? this.maps.maps.get(selector.mapId) : undefined;
         if (selector.mapId && !map) rejectAction("The requested map is unavailable");
@@ -1054,8 +1037,8 @@ export class MapInfoService {
         return context.items(layers());
     }
 
-    styleOptionControl(selector: z.infer<typeof MapInfoService.controls.styleOption.selectorSchema>) {
-        const index = this.viewStateOwner.indexOf(this.viewStateOwner.requireView(selector.viewId).id);
+    styleOptionControl(selector: z.infer<typeof mapInfoControls.styleOption.selectorSchema>) {
+        const index = this.store.indexOf(this.store.requireView(selector.viewId).id);
         const option = this.requireStyleOption(selector);
         return option.value[index];
     }
@@ -1069,10 +1052,10 @@ export class MapInfoService {
     }
 
     setStyleOptionControl(
-        selector: z.infer<typeof MapInfoService.controls.styleOption.selectorSchema>,
+        selector: z.infer<typeof mapInfoControls.styleOption.selectorSchema>,
         value: string | number | boolean
     ): void {
-        const index = this.viewStateOwner.indexOf(this.viewStateOwner.requireView(selector.viewId).id);
+        const index = this.store.indexOf(this.store.requireView(selector.viewId).id);
         const option = this.requireStyleOption(selector);
         if (typeof value !== typeof option.info.defaultValue)
             rejectAction("Value does not match the style option type", "invalid_arguments");
@@ -1080,7 +1063,7 @@ export class MapInfoService {
         this.applyStyleOptionChange(option, index);
     }
 
-    listMaps(input: ViewerActionInput<"viewer_list_maps">): ViewerActionOutput<"viewer_list_maps"> {
+    listMaps(input: z.output<typeof mapInfoActions.listMaps.inputSchema>): z.output<typeof mapInfoActions.listMaps.outputSchema> {
         const maps = function* (this: MapInfoService) {
             for (const map of this.maps.maps.values())
                 yield {id: map.id, name: map.id, available: this.isMapReady(map.id)};
@@ -1088,12 +1071,12 @@ export class MapInfoService {
         return pageActionItems(maps(), input.offset, input.limit);
     }
 
-    listLayers(input: ViewerActionInput<"viewer_list_layers">): ViewerActionOutput<"viewer_list_layers"> {
+    listLayers(input: z.output<typeof mapInfoActions.listLayers.inputSchema>): z.output<typeof mapInfoActions.listLayers.outputSchema> {
         const map = this.maps.maps.get(input.mapId);
         if (!map) rejectAction("The requested map is unavailable");
         const index = input.viewId
-            ? this.viewStateOwner.indexOf(this.viewStateOwner.requireView(input.viewId).id)
-            : this.viewStateOwner.focusedView;
+            ? this.store.indexOf(this.store.requireView(input.viewId).id)
+            : this.store.focusedView();
         const layers = function* (this: MapInfoService) {
             for (const layer of map.layers.values()) {
                 if (input.layerType !== "all" && layer.type !== input.layerType) continue;
@@ -1114,10 +1097,10 @@ export class MapInfoService {
     }
 
     listStyleOptions(
-        input: ViewerActionInput<"viewer_list_style_options">
-    ): ViewerActionOutput<"viewer_list_style_options"> {
+        input: z.output<typeof mapInfoActions.listStyleOptions.inputSchema>
+    ): z.output<typeof mapInfoActions.listStyleOptions.outputSchema> {
         const layer = this.requireLayer(input.mapId, input.layerId);
-        const index = this.viewStateOwner.indexOf(this.viewStateOwner.requireView(input.viewId).id);
+        const index = this.store.indexOf(this.store.requireView(input.viewId).id);
         const options = function* () {
             for (const option of layerStyleOptions(layer)) {
                 if (option.info.internal || (input.styleId && option.styleId !== input.styleId)) continue;
@@ -1143,10 +1126,10 @@ export class MapInfoService {
         return pageActionItems(options(), input.offset, input.limit);
     }
 
-    listPresets(input: ViewerActionInput<"viewer_list_presets">): ViewerActionOutput<"viewer_list_presets"> {
+    listPresets(input: z.output<typeof mapInfoActions.listPresets.inputSchema>): z.output<typeof mapInfoActions.listPresets.outputSchema> {
         const map = this.maps.maps.get(input.mapId);
         if (!map) rejectAction("The requested map is unavailable");
-        const index = this.viewStateOwner.indexOf(this.viewStateOwner.requireView(input.viewId).id);
+        const index = this.store.indexOf(this.store.requireView(input.viewId).id);
         const layer = input.layerId ? this.requireLayer(input.mapId, input.layerId) : undefined;
         const presets = function* (this: MapInfoService) {
             if (layer) {

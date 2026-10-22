@@ -1,3 +1,13 @@
+import "@angular/compiler";
+import {TestBed} from "@angular/core/testing";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {AppStore} from "../shared/app.store";
+import {AppStateService} from "../shared/appstate.service";
+import {ClipboardService} from "../shared/clipboard.service";
+import {InfoMessageService} from "../shared/info.service";
+import {JumpTargetService} from "../search/jump.service";
+import {FeatureSearchService} from "../search/feature.search.service";
+import {InspectionSelectionService} from "./inspection-selection.service";
 import {describe, expect, it, vi} from "vitest";
 import type {TreeTableNode} from "primeng/api";
 import {inspectionSearchNumberLiteral} from "./inspection-search.util";
@@ -111,11 +121,11 @@ describe("incoming relation actions", () => {
     it("opens a source relation that is outside the selected target panel", () => {
         const component = Object.create(InspectionTreeComponent.prototype) as any;
         component.inspectionMenu = {toggle: vi.fn()};
-        component.panelId = () => 'target';
-        component.inspectionState = {
-            selection: [{id: 'target', features: [{mapTileKey: 'surface', featureId: 'Surface.1'}]}],
-            setSelection: vi.fn(), toggleInspectionFeatureHighlight: vi.fn()
-        };
+        component.store = ownerTestInjector().get(AppStore);
+        const panelId = component.store.setSelection([{mapTileKey: "surface", featureId: "Surface.1"}]);
+        component.panelId = () => panelId;
+        vi.spyOn(component.store, "setSelection");
+        vi.spyOn(component.store, "toggleInspectionFeatureHighlight");
         component.shouldShowScalarRowActions = () => false;
         component.onRowActionsClick({stopPropagation: vi.fn()}, {}, {
             key: 'visible', value: '', mapTileKey: 'lane', hoverId: 'Lane.7:relation#1'
@@ -123,9 +133,48 @@ describe("incoming relation actions", () => {
         const action = component.inspectionMenuItems.find((item: any) => item.label === 'Inspect source relation');
         expect(action).toBeDefined();
         action.command();
-        expect(component.inspectionState.setSelection).toHaveBeenCalledWith([
+        expect(component.store.setSelection).toHaveBeenCalledWith([
             {mapTileKey: 'lane', featureId: 'Lane.7:relation#1'}
         ]);
-        expect(component.inspectionState.toggleInspectionFeatureHighlight).not.toHaveBeenCalled();
+        expect(component.store.toggleInspectionFeatureHighlight).not.toHaveBeenCalled();
+    });
+});
+
+
+describe("inspection input effect ownership", () => {
+    it("does not rebuild and re-save tree expansion for unrelated inspection preferences", async () => {
+        const injector = ownerTestInjector();
+        const store = injector.get(AppStore);
+        const panelId = store.setSelection([{mapTileKey: "Features:Map:Layer:42", featureId: "Way.7"}])!;
+        await TestBed.configureTestingModule({
+            declarations: [InspectionTreeComponent],
+            providers: [
+                {provide: AppStore, useValue: store},
+                {provide: AppStateService, useValue: injector.get(AppStateService)},
+                {provide: ClipboardService, useValue: {}},
+                {provide: InfoMessageService, useValue: {}},
+                {provide: JumpTargetService, useValue: {}},
+                {provide: FeatureSearchService, useValue: {}},
+                {provide: InspectionSelectionService, useValue: {}}
+            ]
+        }).overrideComponent(InspectionTreeComponent, {set: {template: ""}}).compileComponents();
+        const fixture = TestBed.createComponent(InspectionTreeComponent);
+        const saveExpansion = vi.spyOn(fixture.componentInstance as any, "savePanelExpansionState");
+        try {
+            fixture.componentRef.setInput("panelId", panelId);
+            fixture.componentRef.setInput("columns", []);
+            fixture.componentRef.setInput("treeData", [{data: {key: "first"}, children: [{data: {key: "value"}}]}]);
+            fixture.detectChanges();
+            fixture.componentRef.setInput("treeData", [{data: {key: "next"}, children: [{data: {key: "value"}}]}]);
+            fixture.detectChanges();
+            expect(saveExpansion).toHaveBeenCalled();
+            saveExpansion.mockClear();
+            store.setHoverLabelsEnabled(!store.inspection.hoverLabelsEnabled());
+            fixture.detectChanges();
+            expect(saveExpansion).not.toHaveBeenCalled();
+        } finally {
+            fixture.destroy();
+            TestBed.resetTestingModule();
+        }
     });
 });
