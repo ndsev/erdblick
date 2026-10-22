@@ -1,17 +1,20 @@
-import {Injectable, NgZone, OnDestroy} from "@angular/core";
+import {AppStore} from "../shared/app.store";
+import {inject, Injectable, NgZone, OnDestroy} from "@angular/core";
 import {BehaviorSubject, interval, Subscription} from "rxjs";
 import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import {TileSubsetLayerRenderService} from "../mapview/deck/tile-subset-layer-render.service";
+import {type SubsetDiagnosticsError, ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
+import {DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
+
+import {StyleValidationReportService} from "../styledata/style-validation-report.service";
+import type {StyleValidationIssue} from "../styledata/style-validation.model";
 import {
-    TileSubsetLayerRenderService
-} from "../mapview/deck/tile-subset-layer-render.service";
-import {
-    type SubsetDiagnosticsError,
-    ViewLayerDiagnosticsService
-} from "../mapview/view-layer-diagnostics.service";
-import {
-    AppStateService,
-    DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
-} from "../shared/appstate.service";
+    LOG_INTERVAL_MS,
+    MAX_LOGS,
+    PEAK_TILE_LIMIT,
+    PERF_INTERVAL_MS,
+    SNAPSHOT_INTERVAL_MS
+} from "./diagnostics.constants";
 import {
     DiagnosticsSnapshot,
     LogEntry,
@@ -20,18 +23,7 @@ import {
     TilePipelineProgress,
     TileStateCounts
 } from "./diagnostics.model";
-import {
-    LOG_INTERVAL_MS,
-    MAX_LOGS,
-    PEAK_TILE_LIMIT,
-    PERF_INTERVAL_MS,
-    SNAPSHOT_INTERVAL_MS
-} from "./diagnostics.constants";
 import {buildAggregatedPerfStats} from "./diagnostics.perf-aggregation";
-import {
-    StyleValidationReportService
-} from "../styledata/style-validation-report.service";
-import type {StyleValidationIssue} from "../styledata/style-validation.model";
 
 /**
  * Current-generation diagnostics assembled from live StyledMapgetLayers.
@@ -40,17 +32,13 @@ import type {StyleValidationIssue} from "../styledata/style-validation.model";
  */
 @Injectable()
 export class DiagnosticsDatasource implements OnDestroy {
-    readonly snapshot$ = new BehaviorSubject<DiagnosticsSnapshot>(
-        this.buildSnapshot()
-    );
+    readonly store = inject(AppStore);
+    readonly snapshot$ = new BehaviorSubject<DiagnosticsSnapshot>(this.buildSnapshot());
     readonly perfStats$ = new BehaviorSubject<PerfStat[]>([]);
     readonly logs$ = new BehaviorSubject<LogEntry[]>([]);
 
     private static consolePatched = false;
-    private static consoleLogHandler?: (
-        level: LogLevel,
-        args: unknown[]
-    ) => void;
+    private static consoleLogHandler?: (level: LogLevel, args: unknown[]) => void;
 
     private readonly subscriptions: Subscription[] = [];
     private readonly errorTileKeys = new Set<string>();
@@ -63,43 +51,45 @@ export class DiagnosticsDatasource implements OnDestroy {
         private readonly mapService: MapTileStreamService,
         private readonly renderService: TileSubsetLayerRenderService,
         private readonly viewDiagnostics: ViewLayerDiagnosticsService,
-        private readonly appStateService: AppStateService,
-        private readonly styleValidationReportService:
-            StyleValidationReportService,
+        private readonly styleValidationReportService: StyleValidationReportService,
         private readonly ngZone: NgZone
     ) {
         this.patchConsoleLogging();
         let wasPaused = this.mapService.tilePipelinePaused;
         const backgroundSubscriptions = this.ngZone.runOutsideAngular(() => [
-            interval(SNAPSHOT_INTERVAL_MS).subscribe(() =>
-                this.refreshSnapshot()
-            ),
-            interval(PERF_INTERVAL_MS).subscribe(() =>
-                this.refreshPerfStatsIfVisible()),
+            interval(SNAPSHOT_INTERVAL_MS).subscribe(() => this.refreshSnapshot()),
+            interval(PERF_INTERVAL_MS).subscribe(() => this.refreshPerfStatsIfVisible()),
             interval(LOG_INTERVAL_MS).subscribe(() => this.refreshLogs()),
-            this.viewDiagnostics.cameraInteracting$.subscribe(interacting =>
-                this.flushDeferredDiagnostics(interacting))
+            this.viewDiagnostics.cameraInteracting$.subscribe((interacting) =>
+                this.flushDeferredDiagnostics(interacting)
+            )
         ]);
         this.subscriptions.push(
             ...backgroundSubscriptions,
-            this.mapService.tilePipelinePaused$.subscribe(paused => {
+            this.mapService.tilePipelinePaused$.subscribe((paused) => {
                 if (wasPaused && !paused) {
                     this.refreshSnapshot();
                     this.refreshPerfStatsIfVisible();
                 }
                 wasPaused = paused;
             }),
-            this.viewDiagnostics.tileWarning.subscribe(warning => this.appendLogEntries([{
-                at: Date.now(), level: "warn", message: `Tile warning: ${warning.message}`,
-                data: {tileId: warning.mapTileKey, mapName: warning.mapName,
-                       layerName: warning.layerName, presentation: warning.presentationKind}
-            }])),
-            this.viewDiagnostics.tileError.subscribe(error =>
-                this.appendTileError(error)
+            this.viewDiagnostics.tileWarning.subscribe((warning) =>
+                this.appendLogEntries([
+                    {
+                        at: Date.now(),
+                        level: "warn",
+                        message: `Tile warning: ${warning.message}`,
+                        data: {
+                            tileId: warning.mapTileKey,
+                            mapName: warning.mapName,
+                            layerName: warning.layerName,
+                            presentation: warning.presentationKind
+                        }
+                    }
+                ])
             ),
-            this.styleValidationReportService.reports$.subscribe(issues =>
-                this.appendStyleValidationLogs(issues)
-            )
+            this.viewDiagnostics.tileError.subscribe((error) => this.appendTileError(error)),
+            this.styleValidationReportService.reports$.subscribe((issues) => this.appendStyleValidationLogs(issues))
         );
         this.refreshPerfStatsIfVisible();
         this.refreshLogs();
@@ -113,97 +103,54 @@ export class DiagnosticsDatasource implements OnDestroy {
             return;
         }
         const recovery = this.mapService.getConnectionDiagnostics();
-        this.snapshot$.next({...this.snapshot$.getValue(),
+        this.snapshot$.next({
+            ...this.snapshot$.getValue(),
             backend: {connected: this.mapService.isTileStreamConnected()},
-            recovery, loading: recovery.loading});
+            recovery,
+            loading: recovery.loading
+        });
     }
 
     /** Stop every timer and event subscription owned by this dialog datasource. */
     ngOnDestroy(): void {
-        this.subscriptions.forEach(subscription => subscription.unsubscribe());
+        this.subscriptions.forEach((subscription) => subscription.unsubscribe());
     }
 
     /** Rebuild aggregate CPU, transport, Deck, and persistent-scene counters. */
     refreshPerfStats(): void {
-        if (!this.deferDiagnosticsRefresh() &&
-            !this.mapService.tilePipelinePaused) {
-            const stats = buildAggregatedPerfStats(
-                this.viewDiagnostics.currentTiles(),
-                PEAK_TILE_LIMIT
-            );
-            const deckFrameTimeMs =
-                this.renderService.currentFrameTimeMs();
-            const presentation =
-                this.renderService.currentDeckPresentationDiagnostics();
-            const addLiveStat = (
-                path: string[],
-                value: number,
-                unit: string,
-                peak = value
-            ) => stats.push({
-                key: path.join("/"),
-                path,
-                scope: "view",
-                unit,
-                peak,
-                average: value,
-                min: value
-            });
-            addLiveStat(
-                ["Rendering", "Deck.gl", "Frame Time (p90)"],
-                deckFrameTimeMs,
-                "ms"
-            );
+        if (!this.deferDiagnosticsRefresh() && !this.mapService.tilePipelinePaused) {
+            const stats = buildAggregatedPerfStats(this.viewDiagnostics.currentTiles(), PEAK_TILE_LIMIT);
+            const deckFrameTimeMs = this.renderService.currentFrameTimeMs();
+            const presentation = this.renderService.currentDeckPresentationDiagnostics();
+            const addLiveStat = (path: string[], value: number, unit: string, peak = value) =>
+                stats.push({
+                    key: path.join("/"),
+                    path,
+                    scope: "view",
+                    unit,
+                    peak,
+                    average: value,
+                    min: value
+                });
+            addLiveStat(["Rendering", "Deck.gl", "Frame Time (p90)"], deckFrameTimeMs, "ms");
             addLiveStat(
                 ["Rendering", "Deck.gl", "Frame Rate (from p90)"],
                 deckFrameTimeMs > 0 ? 1000 / deckFrameTimeMs : 0,
                 "fps"
             );
-            addLiveStat(
-                ["Rendering", "Deck.gl", "Logical Layers"],
-                presentation.layers,
-                "count"
-            );
-            addLiveStat(
-                ["Rendering", "GPU Scene", "Materials"],
-                presentation.materials,
-                "count"
-            );
-            addLiveStat(
-                ["Rendering", "GPU Scene", "Active Contributions"],
-                presentation.activeContributions,
-                "count"
-            );
-            addLiveStat(
-                ["Rendering", "GPU Scene", "Active Origins"],
-                presentation.activeOrigins,
-                "count"
-            );
-            addLiveStat(
-                ["Rendering", "GPU Scene", "Labels"],
-                presentation.labels,
-                "count"
-            );
-            addLiveStat(
-                ["Rendering", "GPU Scene", "Picking High Water"],
-                presentation.pickingHighWater,
-                "count"
-            );
+            addLiveStat(["Rendering", "Deck.gl", "Logical Layers"], presentation.layers, "count");
+            addLiveStat(["Rendering", "GPU Scene", "Materials"], presentation.materials, "count");
+            addLiveStat(["Rendering", "GPU Scene", "Active Contributions"], presentation.activeContributions, "count");
+            addLiveStat(["Rendering", "GPU Scene", "Active Origins"], presentation.activeOrigins, "count");
+            addLiveStat(["Rendering", "GPU Scene", "Labels"], presentation.labels, "count");
+            addLiveStat(["Rendering", "GPU Scene", "Picking High Water"], presentation.pickingHighWater, "count");
             addLiveStat(
                 ["Rendering", "GPU Scene", "Picking Fragmentation"],
                 presentation.pickingFragmentation,
                 "count"
             );
-            addLiveStat(
-                ["Rendering", "GPU Scene", "Z-Index Values"],
-                presentation.zIndexHighWater,
-                "count"
-            );
-            addLiveStat(
-                ["Rendering", "GPU Scene", "Z-Index Lookup Update"],
-                presentation.maxZIndexUpdateMs,
-                "ms"
-            );
+            addLiveStat(["Rendering", "GPU Scene", "Z-Index Values"], presentation.zIndexHighWater, "count");
+            addLiveStat(["Rendering", "GPU Scene", "Z-Index Lookup Update"], presentation.maxZIndexUpdateMs, "ms");
             addLiveStat(
                 ["Rendering", "GPU Scene", "Last Contribution Lookup Rows"],
                 presentation.lastContributionLookupRows,
@@ -224,55 +171,31 @@ export class DiagnosticsDatasource implements OnDestroy {
                 presentation.lookupUploadCount,
                 "count"
             );
-            addLiveStat(
-                ["Rendering", "GPU Scene", "Lookup Growths"],
-                presentation.lookupGrowthCount,
-                "count"
-            );
+            addLiveStat(["Rendering", "GPU Scene", "Lookup Growths"], presentation.lookupGrowthCount, "count");
             addLiveStat(
                 ["Rendering", "GPU Scene", "Fatal Presentation Failures"],
                 presentation.fatalPresentationFailures,
                 "count"
             );
-            addLiveStat(
-                ["Rendering", "GPU Scene", "Primitive Stores"],
-                presentation.stores,
-                "count"
-            );
+            addLiveStat(["Rendering", "GPU Scene", "Primitive Stores"], presentation.stores, "count");
             addLiveStat(
                 ["Rendering", "GPU Scene", "Allocated Buffers"],
                 presentation.allocatedBytes / (1024 * 1024),
                 "MiB"
             );
-            addLiveStat(
-                ["Rendering", "GPU Scene", "Uploaded Data"],
-                presentation.uploadedBytes / (1024 * 1024),
-                "MiB"
-            );
-            addLiveStat(
-                ["Rendering", "GPU Scene", "Upload Operations"],
-                presentation.uploadCount,
-                "count"
-            );
-            addLiveStat(
-                ["Rendering", "GPU Scene", "Buffer Growths"],
-                presentation.growthCount,
-                "count"
-            );
+            addLiveStat(["Rendering", "GPU Scene", "Uploaded Data"], presentation.uploadedBytes / (1024 * 1024), "MiB");
+            addLiveStat(["Rendering", "GPU Scene", "Upload Operations"], presentation.uploadCount, "count");
+            addLiveStat(["Rendering", "GPU Scene", "Buffer Growths"], presentation.growthCount, "count");
             addLiveStat(
                 ["Rendering", "GPU Scene", "Record Fill"],
                 presentation.capacityRecords > 0
-                    ? (presentation.highWaterRecords -
-                        presentation.fragmentedRecords) /
-                        presentation.capacityRecords * 100
+                    ? ((presentation.highWaterRecords - presentation.fragmentedRecords) /
+                          presentation.capacityRecords) *
+                          100
                     : 0,
                 "%"
             );
-            addLiveStat(
-                ["Rendering", "GPU Scene", "Record Fragmentation"],
-                presentation.fragmentedRecords,
-                "count"
-            );
+            addLiveStat(["Rendering", "GPU Scene", "Record Fragmentation"], presentation.fragmentedRecords, "count");
             // The polling timer deliberately runs outside Angular. Re-enter
             // only for the single observable publication so an open
             // performance dialog visibly refreshes its live frame cadence.
@@ -282,9 +205,7 @@ export class DiagnosticsDatasource implements OnDestroy {
 
     /** Avoid expensive aggregation while the performance dialog is closed. */
     refreshPerfStatsIfVisible(): void {
-        if (this.appStateService.isDialogOpen(
-            DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
-        )) {
+        if (this.store.isDialogOpen(DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID)) {
             this.refreshPerfStats();
         }
     }
@@ -303,9 +224,7 @@ export class DiagnosticsDatasource implements OnDestroy {
                 // A sampled socket transition also includes intentional metadata
                 // resets. Actual transport failures are reported by the transport.
                 level: "info",
-                message: connected
-                    ? "Backend connected"
-                    : "Backend disconnected"
+                message: connected ? "Backend connected" : "Backend disconnected"
             });
             this.lastBackendConnected = connected;
         }
@@ -338,31 +257,25 @@ export class DiagnosticsDatasource implements OnDestroy {
         const expected = summary.expected;
         const loaded = summary.ready;
         const errors = summary.errors;
-        const compression = this.mapService
-            .getTileStreamTransportCompressionStats();
+        const compression = this.mapService.getTileStreamTransportCompressionStats();
         const backend = this.mapService.getBackendRequestProgress();
         const parseQueueSize = this.mapService.getPendingFrameQueueSize();
         const renderQueueSize = this.renderService.visualizationQueueLength();
         const recovery = this.mapService.getConnectionDiagnostics();
-        if (backend.allDone &&
-            loaded === expected &&
-            parseQueueSize === 0 &&
-            renderQueueSize === 0) {
+        if (backend.allDone && loaded === expected && parseQueueSize === 0 && renderQueueSize === 0) {
             this.mapService.markCurrentViewportRendered();
         }
         const progress: TilePipelineProgress = {
             backend: {done: backend.done, total: backend.total},
             rendered: {done: loaded, total: expected},
             bubbles: {
-                downstreamBytesPerSecond:
-                    this.mapService.getDownstreamBytesPerSecond(),
+                downstreamBytesPerSecond: this.mapService.getDownstreamBytesPerSecond(),
                 pullResponses: compression.totalPullResponses,
                 pullGzipResponses: compression.totalPullGzipResponses,
                 pullUncompressedBytes: compression.totalUncompressedBytes,
                 pullCompressedBytesKnown: compression.knownCompressedBytes,
                 pullCompressionRatioPct: compression.compressionRatioPct,
-                pullCompressionCoveragePct:
-                    compression.knownCompressedCoveragePct,
+                pullCompressionCoveragePct: compression.knownCompressedCoveragePct,
                 features: summary.sourceFeatures,
                 vertices: summary.vertices,
                 parseQueueSize,
@@ -394,17 +307,19 @@ export class DiagnosticsDatasource implements OnDestroy {
             return;
         }
         this.errorTileKeys.add(key);
-        this.appendLogEntries([{
-            at: Date.now(),
-            level: "error",
-            message: `Subset error: ${error.message}`,
-            data: {
-                tileId: error.mapTileKey,
-                mapName: error.mapName,
-                layerName: error.layerName,
-                presentation: error.presentationKind
+        this.appendLogEntries([
+            {
+                at: Date.now(),
+                level: "error",
+                message: `Subset error: ${error.message}`,
+                data: {
+                    tileId: error.mapTileKey,
+                    mapName: error.mapName,
+                    layerName: error.layerName,
+                    presentation: error.presentationKind
+                }
             }
-        }]);
+        ]);
     }
 
     /** Convert newly observed validation issues into deduplicated diagnostic logs. */
@@ -431,11 +346,8 @@ export class DiagnosticsDatasource implements OnDestroy {
             this.loggedStyleIssueIds.add(id);
             entries.push({
                 at: issue.at,
-                level: issue.severity === "error"
-                    ? "error"
-                    : issue.severity === "warning" ? "warn" : "info",
-                message:
-                    this.styleValidationReportService.formatIssueSummary(issue),
+                level: issue.severity === "error" ? "error" : issue.severity === "warning" ? "warn" : "info",
+                message: this.styleValidationReportService.formatIssueSummary(issue),
                 data: issue
             });
         }
@@ -445,25 +357,25 @@ export class DiagnosticsDatasource implements OnDestroy {
     /** Append bounded logs while preserving chronological order. */
     private appendLogEntries(entries: LogEntry[]): void {
         if (entries.length) {
-            this.logs$.next(
-                [...this.logs$.getValue(), ...entries].slice(-MAX_LOGS)
-            );
+            this.logs$.next([...this.logs$.getValue(), ...entries].slice(-MAX_LOGS));
         }
     }
 
     /** Install one process-wide console tap while routing entries to the live instance. */
     private patchConsoleLogging(): void {
         DiagnosticsDatasource.consoleLogHandler = (level, args) => {
-            this.appendLogEntries([{
-                at: Date.now(),
-                level,
-                message: args.map(value => this.stringifyLogPart(value))
-                    .filter(Boolean)
-                    .join(" ") || "(empty log)",
-                data: args.some(value =>
-                    typeof value === "object" && value !== null
-                ) ? args : undefined
-            }]);
+            this.appendLogEntries([
+                {
+                    at: Date.now(),
+                    level,
+                    message:
+                        args
+                            .map((value) => this.stringifyLogPart(value))
+                            .filter(Boolean)
+                            .join(" ") || "(empty log)",
+                    data: args.some((value) => typeof value === "object" && value !== null) ? args : undefined
+                }
+            ]);
         };
         if (DiagnosticsDatasource.consolePatched) {
             return;

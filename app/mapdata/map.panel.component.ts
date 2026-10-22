@@ -1,32 +1,10 @@
-import {Component, ViewChild} from "@angular/core";
-import {MapInfoService} from "./map-info.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {
-    AppStateService,
-    DEFAULT_TILE_GRID_COLOR,
-    DEFAULT_TILE_GRID_OPACITY,
-    SelectedSourceData,
-    TileGridMode,
-    tileGridMaxLevel
-} from "../shared/appstate.service";
-import {coreLib} from "../integrations/wasm";
+import {effect, untracked} from "@angular/core";
+import {observeStore} from "../shared/persisted-state";
+import {AppStore} from "../shared/app.store";
+import {Component, inject, OnDestroy, ViewChild} from "@angular/core";
 import {MenuItem, TreeNode} from "primeng/api";
 import {Menu} from "primeng/menu";
 import {Popover} from "primeng/popover";
-import {KeyboardService} from "../shared/keyboard.service";
-import {AppModeService} from "../shared/app-mode.service";
-import {
-    CoverageRectItem,
-    dataSourceCatalogStatus,
-    filterMapTreeNodes,
-    layerPresetNode,
-    layerStyleOptions,
-    LayerPresetNode,
-    MapInfoItem,
-    MapTreeViewNode,
-    removeGroupPrefix,
-    StyleOptionNode
-} from "./map.tree.model";
 import {
     BehaviorSubject,
     combineLatest,
@@ -40,23 +18,46 @@ import {
     switchMap,
     timer
 } from "rxjs";
+import {SelectedSourceData} from "../inspection/inspection-state.model";
+
 import {GeoMath, Rectangle} from "../integrations/geo";
-import {DialogStackService} from "../shared/dialog-stack.service";
-import {AppDialogComponent} from "../shared/app-dialog.component";
+import {coreLib} from "../integrations/wasm";
+
+import {MapViewService, ViewRecalculationReason} from "../mapview/map-view.service";
+import {FeatureSearchService} from "../search/feature.search.service";
 import {
     AppConfigService,
     BackgroundLayerConfig,
     WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP
 } from "../shared/app-config.service";
-import {FeatureSearchService} from "../search/feature.search.service";
+import {AppDialogComponent} from "../shared/app-dialog.component";
+import {AppModeService} from "../shared/app-mode.service";
+import {AppStateService} from "../shared/appstate.service";
+import {DialogStackService} from "../shared/dialog-stack.service";
 import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
 import {InfoMessageService} from "../shared/info.service";
+import {KeyboardService} from "../shared/keyboard.service";
+import {MapPresetService} from "../styledata/map-preset.service";
 import {StyleEditorRequestService} from "../styledata/style-editor-request.service";
 import {StyleService} from "../styledata/style.service";
+import {MapInfoService} from "./map-info.service";
 import {
-    MapPresetService,
-    NO_PRESET_ID
-} from "../styledata/map-preset.service";
+    DEFAULT_TILE_GRID_COLOR,
+    DEFAULT_TILE_GRID_OPACITY,
+    tileGridMaxLevel,
+    TileGridMode
+} from "./map-layer-state.model";
+
+import {
+    CoverageRectItem,
+    dataSourceCatalogStatus,
+    filterMapTreeNodes,
+    LayerPresetNode,
+    MapInfoItem,
+    MapTreeViewNode,
+    removeGroupPrefix,
+    StyleOptionNode
+} from "./map.tree.model";
 
 /** One rendered select option in the per-view background-layer dropdown. */
 interface BackgroundLayerOption {
@@ -82,526 +83,880 @@ interface MapPanelTreeView {
 const MAP_FILTER_DELAY_MS = 300;
 
 @Component({
-    selector: 'map-panel',
+    selector: "map-panel",
     template: `
-        <app-dialog #mapLayerDialog class="map-layer-dialog" data-testid="map-layer-dialog" header=""
-                  [visible]="layerDialogVisible"
-                  (visibleChange)="setMapsPanelVisible($event)"
-                  [position]="'left'" [draggable]="false" [resizable]="true"
-                  (onShow)="onMapLayerDialogShow()"
-                  [style]="{ 'max-height': '100%', 
-                  'border-top-left-radius': '0 !important',
-                  'border-bottom-left-radius': '0 !important' }">
-            <p-button class="close-maps-button" icon="pi pi-times" severity="secondary" (click)="closeMapsPanel()"
-                      (mousedown)="$event.stopPropagation()"/>
+        <app-dialog
+            #mapLayerDialog
+            class="map-layer-dialog"
+            data-testid="map-layer-dialog"
+            header=""
+            [visible]="layerDialogVisible"
+            (visibleChange)="setMapsPanelVisible($event)"
+            [position]="'left'"
+            [draggable]="false"
+            [resizable]="true"
+            (onShow)="onMapLayerDialogShow()"
+            [style]="{
+                'max-height': '100%',
+                'border-top-left-radius': '0 !important',
+                'border-bottom-left-radius': '0 !important'
+            }"
+        >
+            <p-button
+                class="close-maps-button"
+                icon="pi pi-times"
+                severity="secondary"
+                (click)="closeMapsPanel()"
+                (mousedown)="$event.stopPropagation()"
+            />
             <ng-container *ngIf="mapTreeView$ | async as mapTreeView">
-            <div class="map-filter" data-testid="map-filter">
-                <p-iconfield class="input-container">
-                    <p-inputicon class="pi pi-filter"/>
-                    <input class="filter-input" data-testid="map-filter-input" type="text" pInputText
-                           placeholder="Filter maps, layers, and options"
-                           aria-label="Filter maps, layers, and options"
-                           [ngModel]="mapFilterText"
-                           (ngModelChange)="updateMapFilter($event)"
-                           (keydown.escape)="clearMapFilter(); $event.stopPropagation()"/>
-                    @if (mapFilterText) {
-                        <i onEnterClick class="pi pi-times clear-icon" data-testid="map-filter-clear"
-                           role="button" tabindex="0" aria-label="Clear map filter"
-                           (click)="clearMapFilter()"></i>
-                    }
-                </p-iconfield>
-            </div>
-            <p-accordion data-testid="map-tabs" [(value)]="mapAccordionValue" [multiple]="true">
-                @for (index of viewIndices; track index) {
-                    <p-accordion-panel class="map-tab" [value]="index" [attr.data-testid]="getMapTabTestId(index)">
-                        <p-accordion-header>
-                            <div class="maps-header">
-                                <div class="maps-view-title">
-                                    @if (stateService.numViews > 1) {
-                                        <p-tag severity="info" [rounded]="true">
-                                            @if (index < 1) {
-                                                <div>
-                                                    <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
-                                                        splitscreen_left
-                                                    </span>
-                                                    <span>Left</span>
-                                                </div>
-                                            } @else {
-                                                <div>
-                                                    <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
-                                                        splitscreen_right
-                                                    </span>
-                                                    <span>Right</span>
-                                                </div>
-                                            }
-                                        </p-tag>
-                                    }
-                                    <span>Maps</span>
-                                </div>
-                                <div class="maps-config">
-                                    <p-button onEnterClick (click)="syncOptionsForView($event, index)"
-                                              [styleClass]="syncedOptions[index] ? 'map-controls-button p-button-success' : 'map-controls-button p-button-primary'"
-                                              [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                              icon="" label="" pTooltip="Sync visualization options in this view"
-                                              tooltipPosition="bottom" tabindex="0">
-                                        <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
-                                            {{ syncedOptions[index] ? "sync" : "sync_disabled" }}
-                                        </span>
-                                    </p-button>
-                                    <p-button onEnterClick (click)="toggleTileGridPopover($event, tileGridPopover)"
-                                              (mousedown)="$event.stopPropagation()"
-                                              [attr.data-testid]="getTileGridButtonTestId(index)"
-                                              [styleClass]="tileBordersEnabled[index] ? 'map-controls-button p-button-success' : 'map-controls-button p-button-primary'"
-                                              [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                              icon="" label="" pTooltip="Configure tile grid"
-                                              tooltipPosition="bottom" tabindex="0">
-                                        <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
-                                            {{ tileBordersEnabled[index] ? "border_outer" : "border_clear" }}
-                                        </span>
-                                    </p-button>
-                                    <p-button onEnterClick (click)="toggleBackgroundPopover($event, backgroundPopover)"
-                                              (mousedown)="$event.stopPropagation()"
-                                              class="background-opacity-button"
-                                              [attr.data-testid]="getBackgroundButtonTestId(index)"
-                                              [styleClass]="backgroundLayerIds[index] !== null ? 'map-controls-button p-button-success' : 'map-controls-button p-button-primary'"
-                                              [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                              icon="" label="" pTooltip="Configure background layer"
-                                              tooltipPosition="bottom" tabindex="0">
-                                        <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
-                                            opacity
-                                        </span>
-                                    </p-button>
-                                    @if (viewIndices.length > 1) {
-                                        <p-button onEnterClick (click)="removeView($event, index)" class="close-view-button"
-                                                  [attr.data-testid]="'close-view-button-' + index"
-                                                  icon="pi pi-times" label="" pTooltip="Remove the view from comparison"
-                                                  [styleClass]="'map-controls-button p-button-secondary'"
-                                                  tooltipPosition="bottom" tabindex="0">
-                                        </p-button>
-                                    }
-                                    <p-popover #tileGridPopover [baseZIndex]="30000">
-                                        <div class="tile-grid-popover" [attr.data-testid]="getTileGridPopoverTestId(index)">
-                                            <div class="tile-grid-toggle-row">
-                                                <label [for]="'tile-grid-enabled-' + index">Tile Grid</label>
-                                                <p-toggleswitch [ngModel]="tileBordersEnabled[index]"
-                                                                (ngModelChange)="setViewTileBorders(index, $event)"
-                                                                [inputId]="'tile-grid-enabled-' + index"
-                                                                [attr.data-testid]="getTileGridEnabledTestId(index)"/>
-                                            </div>
-                                            <div class="tile-grid-mode-row" [ngClass]="{'disabled': !tileBordersEnabled[index]}">
-                                                <span>Mode</span>
-                                                <div class="tile-grid-radio-group">
-                                                    <div class="tile-grid-radio-option">
-                                                        <p-radiobutton [ngModel]="tileGridModes[index]"
-                                                                       (ngModelChange)="setTileGridMode(index, $event)"
-                                                                       value="nds"
-                                                                       [name]="'tile-grid-mode-' + index"
-                                                                       [inputId]="'tile-grid-mode-nds-' + index"
-                                                                       [disabled]="!tileBordersEnabled[index]"
-                                                                       [attr.data-testid]="getTileGridModeTestId(index, 'nds')"/>
-                                                        <label [for]="'tile-grid-mode-nds-' + index">NDS</label>
+                <div class="map-filter" data-testid="map-filter">
+                    <p-iconfield class="input-container">
+                        <p-inputicon class="pi pi-filter" />
+                        <input
+                            class="filter-input"
+                            data-testid="map-filter-input"
+                            type="text"
+                            pInputText
+                            placeholder="Filter maps, layers, and options"
+                            aria-label="Filter maps, layers, and options"
+                            [ngModel]="mapFilterText"
+                            (ngModelChange)="updateMapFilter($event)"
+                            (keydown.escape)="clearMapFilter(); $event.stopPropagation()"
+                        />
+                        @if (mapFilterText) {
+                            <i
+                                onEnterClick
+                                class="pi pi-times clear-icon"
+                                data-testid="map-filter-clear"
+                                role="button"
+                                tabindex="0"
+                                aria-label="Clear map filter"
+                                (click)="clearMapFilter()"
+                            ></i>
+                        }
+                    </p-iconfield>
+                </div>
+                <p-accordion data-testid="map-tabs" [(value)]="mapAccordionValue" [multiple]="true">
+                    @for (index of viewIndices; track index) {
+                        <p-accordion-panel class="map-tab" [value]="index" [attr.data-testid]="getMapTabTestId(index)">
+                            <p-accordion-header>
+                                <div class="maps-header">
+                                    <div class="maps-view-title">
+                                        @if (store.numViews() > 1) {
+                                            <p-tag severity="info" [rounded]="true">
+                                                @if (index < 1) {
+                                                    <div>
+                                                        <span
+                                                            class="material-symbols-outlined"
+                                                            style="font-size: 1.2em; margin: 0 auto;"
+                                                        >
+                                                            splitscreen_left
+                                                        </span>
+                                                        <span>Left</span>
                                                     </div>
-                                                    <div class="tile-grid-radio-option">
-                                                        <p-radiobutton [ngModel]="tileGridModes[index]"
-                                                                       (ngModelChange)="setTileGridMode(index, $event)"
-                                                                       value="xyz"
-                                                                       [name]="'tile-grid-mode-' + index"
-                                                                       [inputId]="'tile-grid-mode-xyz-' + index"
-                                                                       [disabled]="!tileBordersEnabled[index]"
-                                                                       [attr.data-testid]="getTileGridModeTestId(index, 'xyz')"/>
-                                                        <label [for]="'tile-grid-mode-xyz-' + index">XYZ</label>
+                                                } @else {
+                                                    <div>
+                                                        <span
+                                                            class="material-symbols-outlined"
+                                                            style="font-size: 1.2em; margin: 0 auto;"
+                                                        >
+                                                            splitscreen_right
+                                                        </span>
+                                                        <span>Right</span>
                                                     </div>
-                                                </div>
-                                            </div>
-                                            <div class="tile-grid-level-row" [ngClass]="{'disabled': !tileBordersEnabled[index]}">
-                                                <label [for]="'tile-grid-level-' + index">Level</label>
-                                                <div class="tile-grid-level-controls">
-                                                    <p-inputNumber [ngModel]="displayTileGridLevel(index)"
-                                                                   (ngModelChange)="onTileGridLevelChanged(index, $event)"
-                                                                   [showButtons]="true"
-                                                                   [min]="0"
-                                                                   [max]="maxTileGridLevel(tileGridModes[index])"
-                                                                   buttonLayout="horizontal"
-                                                                   spinnerMode="horizontal"
-                                                                   [inputId]="'tile-grid-level-' + index"
-                                                                   decrementButtonClass="p-button-secondary"
-                                                                   incrementButtonClass="p-button-secondary"
-                                                                   incrementButtonIcon="pi pi-plus"
-                                                                   decrementButtonIcon="pi pi-minus"
-                                                                   pTooltip="Change grid level"
-                                                                   tooltipPosition="bottom"
-                                                                   [disabled]="!tileBordersEnabled[index]"
-                                                                   [attr.data-testid]="getTileGridLevelTestId(index)"
-                                                                   tabindex="0"/>
-                                                    <p-button onEnterClick
-                                                              (click)="toggleTileGridAutoLevel(index)"
-                                                              [styleClass]="tileGridAutoLevels[index] ? 'map-controls-button p-button-success' : 'map-controls-button p-button-secondary'"
-                                                              [style]="{'min-width': '3.75em', 'padding-left': '0.35em', 'padding-right': '0.35em'}"
-                                                              label="AUTO"
-                                                              pTooltip="Automatically select the grid level"
-                                                              tooltipPosition="bottom"
-                                                              [disabled]="!tileBordersEnabled[index]"
-                                                              [attr.data-testid]="getTileGridAutoLevelTestId(index)"
-                                                              tabindex="0"/>
-                                                </div>
-                                            </div>
-                                            <div class="tile-grid-appearance-row" [ngClass]="{'disabled': !tileBordersEnabled[index]}">
-                                                <p-colorpicker class="tile-grid-color-picker"
-                                                               [ngModel]="tileGridColors[index]"
-                                                               (ngModelChange)="setTileGridColor(index, $event)"
-                                                               format="hex"
-                                                               appendTo="body"
-                                                               [overlayOptions]="{autoZIndex: true, baseZIndex: 30010}"
-                                                               [disabled]="!tileBordersEnabled[index]"
-                                                               [attr.data-testid]="getTileGridColorTestId(index)"/>
-                                                <span class="tile-grid-opacity-value">{{ tileGridOpacities[index] }}%</span>
-                                                <p-slider class="tile-grid-opacity-slider"
-                                                          [ngModel]="tileGridOpacities[index]"
-                                                          (ngModelChange)="setTileGridOpacity(index, $event)"
-                                                          orientation="horizontal"
-                                                          [min]="0"
-                                                          [max]="100"
-                                                          [disabled]="!tileBordersEnabled[index]"
-                                                          [attr.data-testid]="getTileGridOpacityTestId(index)"
-                                                          tabindex="-1"/>
-                                            </div>
-                                        </div>
-                                    </p-popover>
-                                    <p-popover #backgroundPopover [baseZIndex]="30000">
-                                        <div class="background-settings-popover" [attr.data-testid]="getBackgroundPopoverTestId(index)">
-                                            <div class="background-toggle-row">
-                                                <label [for]="'background-enabled-' + index">Background</label>
-                                                <p-toggleswitch [ngModel]="isBackgroundEnabled(index)"
-                                                                (ngModelChange)="setBackgroundEnabled(index, $event)"
-                                                                [inputId]="'background-enabled-' + index"
-                                                                [attr.data-testid]="getBackgroundEnabledTestId(index)"/>
-                                            </div>
-                                            <p-select class="background-layer-select"
-                                                      [attr.data-testid]="getBackgroundSelectTestId(index)"
-                                                      [options]="backgroundOptions[index]"
-                                                      [(ngModel)]="backgroundLayerIds[index]"
-                                                      (ngModelChange)="updateBackgroundLayer(index)"
-                                                      optionLabel="label"
-                                                      optionValue="value"
-                                                      optionDisabled="disabled"
-                                                      [disabled]="!isBackgroundEnabled(index) || !backgroundOptions[index]?.length"
-                                                      placeholder="Select Background"
-                                                      appendTo="body"
-                                                      tabindex="0">
-                                                <ng-template let-option pTemplate="selectedItem">
-                                                    <div class="background-option">
-                                                        <span class="background-option-label">{{ option?.label ?? 'Select Background' }}</span>
-                                                        @if (option?.experimental) {
-                                                            <span class="background-badges">
-                                                                <p-tag severity="warn" value="EXPERIMENTAL" />
-                                                            </span>
-                                                        }
-                                                    </div>
-                                                </ng-template>
-                                                <ng-template let-option pTemplate="item">
-                                                    <div class="background-option">
-                                                        <span class="background-option-label">{{ option.label }}</span>
-                                                        @if (option.experimental) {
-                                                            <span class="background-badges">
-                                                                <p-tag severity="warn" value="EXPERIMENTAL" />
-                                                                <span class="material-symbols-outlined background-info"
-                                                                      [pTooltip]="wmsExperimentalTooltip"
-                                                                      tooltipPosition="bottom">info</span>
-                                                            </span>
-                                                        }
-                                                    </div>
-                                                </ng-template>
-                                            </p-select>
-                                            @if (backgroundDetails[index]) {
-                                                <div class="background-details">
-                                                    <span class="material-symbols-outlined background-info">info</span>
-                                                    <span>{{ backgroundDetails[index] }}</span>
-                                                </div>
-                                            }
-                                            @if (backgroundLayerIds[index] !== null) {
-                                                <div class="background-opacity-row">
-                                                    <span class="background-opacity-value">{{ backgroundOpacityValue[index] }}%</span>
-                                                    <p-slider [(ngModel)]="backgroundOpacityValue[index]"
-                                                              (ngModelChange)="updateBackgroundLayer(index)"
-                                                              orientation="horizontal"
-                                                              class="background-opacity-slider"
-                                                              [attr.data-testid]="getBackgroundOpacitySliderTestId(index)"
-                                                              tabindex="-1">
-                                                    </p-slider>
-                                                </div>
-                                            }
-                                        </div>
-                                    </p-popover>
-                                </div>
-                            </div>
-                        </p-accordion-header>
-
-                        <p-accordion-content>
-                            @if (mapAccordionValue.includes(index)) {
-                            @if (!mapTreeView.size) {
-                                    <div class="map-tree-message">
-                                        No maps loaded.
+                                                }
+                                            </p-tag>
+                                        }
+                                        <span>Maps</span>
                                     </div>
-                            } @else if (!mapTreeView.nodesByView[index]?.length) {
-                                <div class="map-tree-message" data-testid="map-filter-empty">
-                                    No matching maps, layers, presets, or options.
-                                </div>
-                            } @else {
-                            <div class="maps-container">
-                                <p-tree [value]="mapTreeView.nodesByView[index]" [trackBy]="trackMapTreeNode"
-                                        (onNodeExpand)="updateMapTreeNodeExpansion($event.node, true)"
-                                        (onNodeCollapse)="updateMapTreeNodeExpansion($event.node, false)"
-                                        [attr.data-testid]="'map-tree-' + index">
-                                    <!-- Template for Group nodes -->
-                                    <ng-template let-node pTemplate="Group">
-                                        <div class="flex-container map-group-row">
-                                            <span class="checkbox-entry map-tree-title">
-                                                <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
-                                                      (click)="showLayersToggleMenu($event, index, node.id+'/', '')">
-                                                    more_vert
-                                                </span>
-                                                <p-checkbox [ngModel]="node.visible[index]"
-                                                            (click)="$event.stopPropagation()"
-                                                            (ngModelChange)="toggleLayer(index, node.id, '', !node.visible[index])"
-                                                            [binary]="true"
-                                                            [inputId]="index + '_' + node.id"
-                                                            [name]="index + '_' + node.id" tabindex="0"/>
-                                                <label [for]="index + '_' + node.id">{{ removeGroupPrefix(node.id) }}</label>
+                                    <div class="maps-config">
+                                        <p-button
+                                            onEnterClick
+                                            (click)="syncOptionsForView($event, index)"
+                                            [styleClass]="
+                                                syncedOptions[index]
+                                                    ? 'map-controls-button p-button-success'
+                                                    : 'map-controls-button p-button-primary'
+                                            "
+                                            [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                            icon=""
+                                            label=""
+                                            pTooltip="Sync visualization options in this view"
+                                            tooltipPosition="bottom"
+                                            tabindex="0"
+                                        >
+                                            <span
+                                                class="material-symbols-outlined"
+                                                style="font-size: 1.2em; margin: 0 auto;"
+                                            >
+                                                {{ syncedOptions[index] ? "sync" : "sync_disabled" }}
                                             </span>
-                                        </div>
-                                    </ng-template>
-                                    <!-- Template for Map nodes -->
-                                    <ng-template let-node pTemplate="Map">
-                                        <p-popover #metadataPopover
-                                                   styleClass="metadata-layer-popover"
-                                                   [baseZIndex]="30000"
-                                                   appendTo="body">
-                                            <p-listbox class="metadata-layer-listbox"
-                                                       [options]="metadataLayerOptions.get(node.id) ?? []"
-                                                       optionLabel="label"
-                                                       [filter]="true"
-                                                       filterBy="label"
-                                                       filterPlaceHolder="Search metadata"
-                                                       ariaFilterLabel="Search metadata"
-                                                       emptyFilterMessage="No matching metadata"
-                                                       scrollHeight="min(24rem, calc(100vh - 10rem))"
-                                                       [ngModel]="null"
-                                                       (onChange)="inspectMetadataLayer($event.value, metadataPopover)">
-                                                <ng-template let-option pTemplate="item">
-                                                    <span class="metadata-layer-option"
-                                                          [title]="option.label">{{ option.label }}</span>
-                                                </ng-template>
-                                            </p-listbox>
-                                        </p-popover>
-                                        <div class="flex-container map-tree-row"
-                                             [class.has-map-presets]="node.mapPresets.length > 0"
-                                             [ngClass]="{'has-datasource-status': dataSourceStatus(node.info) !== 'ready'}">
-                                            <span class="checkbox-entry map-tree-title">
-                                                @if (dataSourceStatus(node.info) !== 'ready') {
-                                                    <span class="datasource-status"
-                                                          [ngClass]="dataSourceStatusClass(node.info)"
-                                                          [style.--datasource-progress]="dataSourceProgressIndicator(node.info)"
-                                                          [pTooltip]="dataSourceStatusTooltip(node.info)"
-                                                          tooltipPosition="bottom">
-                                                    </span>
-                                                }
-                                                <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
-                                                      (click)="showLayersToggleMenu($event, index, node.id, '')">
-                                                        more_vert
-                                                </span>
-                                                <p-checkbox [(ngModel)]="node.visible[index]"
-                                                            (click)="$event.stopPropagation()"
-                                                            (ngModelChange)="toggleLayer(index, node.id, '', node.visible[index])"
-                                                            [binary]="true"
-                                                            [disabled]="dataSourceStatus(node.info) !== 'ready'"
-                                                            [inputId]="index + '_' + node.id"
-                                                            [name]="index + '_' + node.id" tabindex="0"/>
-                                                <label [for]="index + '_' + node.id"
-                                                       [ngClass]="{'disabled-label': dataSourceStatus(node.info) !== 'ready'}">
-                                                    {{ removeGroupPrefix(node.id) }}
-                                                </label>
+                                        </p-button>
+                                        <p-button
+                                            onEnterClick
+                                            (click)="toggleTileGridPopover($event, tileGridPopover)"
+                                            (mousedown)="$event.stopPropagation()"
+                                            [attr.data-testid]="getTileGridButtonTestId(index)"
+                                            [styleClass]="
+                                                tileBordersEnabled[index]
+                                                    ? 'map-controls-button p-button-success'
+                                                    : 'map-controls-button p-button-primary'
+                                            "
+                                            [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                            icon=""
+                                            label=""
+                                            pTooltip="Configure tile grid"
+                                            tooltipPosition="bottom"
+                                            tabindex="0"
+                                        >
+                                            <span
+                                                class="material-symbols-outlined"
+                                                style="font-size: 1.2em; margin: 0 auto;"
+                                            >
+                                                {{ tileBordersEnabled[index] ? "border_outer" : "border_clear" }}
                                             </span>
-                                            <div class="map-controls">
-                                                @if (node.mapPresets.length > 0) {
-                                                    <p-select class="map-preset-select"
-                                                              [options]="mapPresetOptionsForView(node.id, index)"
-                                                              [ngModel]="node.selectedMapPresetIds[index]"
-                                                              (ngModelChange)="selectMapPreset(node.id, index, $event)"
-                                                              optionLabel="label"
-                                                              optionValue="value"
-                                                              optionDisabled="disabled"
-                                                              appendTo="body"
-                                                              [disabled]="dataSourceStatus(node.info) !== 'ready'"
-                                                              [attr.aria-label]="'Map preset for ' + node.id"/>
-                                                }
-                                                <p-button onEnterClick (click)="focus($event, index, mapCoverage(node.id))"
-                                                          label="" pTooltip="Focus on map" tooltipPosition="bottom"
-                                                          [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                          tabindex="0"
-                                                          *ngIf="mapCoverage(node.id).length">
-                                                    <span class="material-symbols-outlined"
-                                                          style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
-                                                        </p-button>
-                                                        <p-button onEnterClick (click)="metadataPopover.toggle($event)" label=""
-                                                                  pTooltip="{{!metadataLayerOptions.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'}}"
-                                                                  tooltipPosition="bottom"
-                                                                  [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                                  tabindex="0"
-                                                                  [disabled]="!metadataLayerOptions.get(node.id)?.length">
-                                                    <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">
-                                                        data_object
-                                                    </span>
-                                                </p-button>
-                                            </div>
-                                        </div>
-                                    </ng-template>
-                                    <!-- Template for Feature Layer nodes -->
-                                    <ng-template let-node pTemplate="Features">
-                                        <div *ngIf="node.type != 'SourceData'" class="flex-container map-layer-row">
-                                            <div class="font-bold white-space-nowrap layer-tree-title">
-                                                <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
-                                                      (click)="showLayersToggleMenu($event, index, node.mapId, node.id)">
-                                                    more_vert
-                                                </span>
-                                                <span class="checkbox-entry">
-                                                    <p-checkbox [(ngModel)]="node.viewConfig[index].visible"
-                                                                (click)="$event.stopPropagation()"
-                                                                (ngModelChange)="toggleLayer(index, node.mapId, node.id, node.viewConfig[index].visible)"
-                                                                [binary]="true"
-                                                                [inputId]="index + '_' + node.key"
-                                                                [name]="index + '_' + node.key" tabindex="0"/>
-                                                    <label [for]="index + '_' + node.key">{{ node.id }}</label>
-                                                </span>
-                                            </div>
-                                            <div class="tree-node-controls">
-                                                <p-button onEnterClick *ngIf="node.info.coverage.length"
-                                                          (click)="focus($event, index, node.info.coverage)"
-                                                          label="" pTooltip="Focus on layer" tooltipPosition="bottom"
-                                                          [style]="{'padding-left': '0', 'padding-right': '0'}"
-                                                          tabindex="0">
-                                                    <span class="material-symbols-outlined"
-                                                      style="font-size: 1.2em; margin: 0 auto;">
-                                                        center_focus_strong
-                                                    </span>
-                                                </p-button>
-                                                <p-inputNumber [ngModel]="displayMapLayerLevel(index, node.mapId, node.id, node.viewConfig[index].level)"
-                                                               (ngModelChange)="onLayerLevelChanged($event, index, node.mapId, node.id)"
-                                                               [showButtons]="true" [min]="0" [max]="15"
-                                                               buttonLayout="horizontal" spinnerMode="horizontal"
-                                                               inputId="horizontal"
-                                                               decrementButtonClass="p-button-secondary"
-                                                               incrementButtonClass="p-button-secondary"
-                                                               incrementButtonIcon="pi pi-plus"
-                                                               decrementButtonIcon="pi pi-minus"
-                                                               pTooltip="Change zoom level" tooltipPosition="bottom"
-                                                               tabindex="0">
-                                                </p-inputNumber>
-                                                <p-button onEnterClick
-                                                          (click)="toggleLayerAutoLevel(index, node.mapId, node.id)"
-                                                          [styleClass]="node.viewConfig[index].autoLevel ? 'map-controls-button p-button-success' : 'map-controls-button p-button-secondary'"
-                                                          [style]="{'min-width': '3.75em', 'padding-left': '0.35em', 'padding-right': '0.35em'}"
-                                                          label="AUTO"
-                                                          pTooltip="Automatically select the layer level"
-                                                          tooltipPosition="bottom"
-                                                          tabindex="0">
-                                                </p-button>
-                                            </div>
-                                            <input class="level-indicator" type="text" pInputText [disabled]="true"
-                                                   [ngModel]="displayMapLayerLevel(index, node.mapId, node.id, node.viewConfig[index].level)"/>
-                                        </div>
-                                    </ng-template>
-                                    <!-- Template for the leading layer-preset control. -->
-                                    <ng-template let-node pTemplate="Preset">
-                                        <div class="style-preset-row"
-                                             [attr.data-testid]="stylePresetRowTestId(node, index)">
-                                            <p-select class="style-preset-select"
-                                                      [options]="node.selectOptions"
-                                                      [ngModel]="node.selectedPresetKeys[index]"
-                                                      (ngModelChange)="selectLayerPreset(node, index, $event)"
-                                                      optionLabel="label"
-                                                      optionValue="value"
-                                                      appendTo="body"
-                                                      [disabled]="node.presets.length === 0"
-                                                      [attr.aria-label]="'Layer preset for ' + node.layerId"/>
-                                            @if (node.selectedPresetKeys[index]) {
-                                                <p-button onEnterClick
-                                                          class="style-preset-expand-button"
-                                                          [attr.data-testid]="stylePresetExpandTestId(node, index)"
-                                                          [pTooltip]="node.expandedPresetOptions[index]
-                                                              ? 'Hide preset options'
-                                                              : 'Show preset options'"
-                                                          tooltipPosition="bottom"
-                                                          (click)="toggleStylePresetOptions($event, node, index)">
-                                                    <span class="material-symbols-outlined">
-                                                        {{ node.expandedPresetOptions[index] ? "unfold_less" : "unfold_more" }}
-                                                    </span>
-                                                </p-button>
-                                                @for (styleId of selectedPresetStyleIds(node, index); track styleId) {
-                                                    <p-button onEnterClick
-                                                              class="style-option-edit-button"
-                                                              [attr.data-testid]="stylePresetEditButtonTestId(node, index, styleId)"
-                                                              pTooltip="Edit style sheet"
-                                                              tooltipPosition="bottom"
-                                                              (click)="openPresetStyleSheet($event, styleId)">
-                                                        <span class="material-symbols-outlined">brush</span>
-                                                    </p-button>
-                                                }
-                                            }
-                                        </div>
-                                    </ng-template>
-                                    <!-- Template for boolean style option nodes -->
-                                    <ng-template let-node pTemplate="Bool">
-                                        <div class="map-option-row"
-                                             [class.style-option-group-highlight]="isStyleOptionGroupActive(node, index)"
-                                             [attr.data-style-option-group]="styleOptionGroupKey(node, index)"
-                                             (mouseenter)="activateStyleOptionGroup(node, index)"
-                                             (mouseleave)="deactivateStyleOptionGroup($event, node, index)"
-                                             (focusin)="activateStyleOptionGroup(node, index)"
-                                             (focusout)="deactivateStyleOptionGroup($event, node, index)">
-                                        <span class="checkbox-entry oblique"
-                                              [ngClass]="{'disabled': !mapService.maps.getMapLayerVisibility(index, node.mapId, node.layerId)}">
-                                            <p-checkbox
-                                                    [attr.data-testid]="styleOptionCheckboxTestId(node, index)"
-                                                    [(ngModel)]="node.value[index]"
-                                                    (ngModelChange)="updateStyleOption(node, index)"
-                                                    [binary]="true"
-                                                    [inputId]="index + '_' + node.key"
-                                                    [name]="index + '_' + node.key"/>
-                                            <label [for]="index + '_' + node.key">{{ node.info.label }}</label>
-                                        </span>
-                                        @if (node.firstInStyleGroup) {
-                                            <p-button onEnterClick class="style-option-edit-button"
-                                                      [attr.data-testid]="styleOptionEditButtonTestId(node, index)"
-                                                      (click)="openStyleSheet($event, node)"
-                                                      pTooltip="Edit style sheet"
-                                                      tooltipPosition="bottom"
-                                                      tabindex="0">
-                                                <span class="material-symbols-outlined">brush</span>
+                                        </p-button>
+                                        <p-button
+                                            onEnterClick
+                                            (click)="toggleBackgroundPopover($event, backgroundPopover)"
+                                            (mousedown)="$event.stopPropagation()"
+                                            class="background-opacity-button"
+                                            [attr.data-testid]="getBackgroundButtonTestId(index)"
+                                            [styleClass]="
+                                                backgroundLayerIds[index] !== null
+                                                    ? 'map-controls-button p-button-success'
+                                                    : 'map-controls-button p-button-primary'
+                                            "
+                                            [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                            icon=""
+                                            label=""
+                                            pTooltip="Configure background layer"
+                                            tooltipPosition="bottom"
+                                            tabindex="0"
+                                        >
+                                            <span
+                                                class="material-symbols-outlined"
+                                                style="font-size: 1.2em; margin: 0 auto;"
+                                            >
+                                                opacity
+                                            </span>
+                                        </p-button>
+                                        @if (viewIndices.length > 1) {
+                                            <p-button
+                                                onEnterClick
+                                                (click)="removeView($event, index)"
+                                                class="close-view-button"
+                                                [attr.data-testid]="'close-view-button-' + index"
+                                                icon="pi pi-times"
+                                                label=""
+                                                pTooltip="Remove the view from comparison"
+                                                [styleClass]="'map-controls-button p-button-secondary'"
+                                                tooltipPosition="bottom"
+                                                tabindex="0"
+                                            >
                                             </p-button>
                                         }
+                                        <p-popover #tileGridPopover [baseZIndex]="30000">
+                                            <div
+                                                class="tile-grid-popover"
+                                                [attr.data-testid]="getTileGridPopoverTestId(index)"
+                                            >
+                                                <div class="tile-grid-toggle-row">
+                                                    <label [for]="'tile-grid-enabled-' + index">Tile Grid</label>
+                                                    <p-toggleswitch
+                                                        [ngModel]="tileBordersEnabled[index]"
+                                                        (ngModelChange)="setViewTileBorders(index, $event)"
+                                                        [inputId]="'tile-grid-enabled-' + index"
+                                                        [attr.data-testid]="getTileGridEnabledTestId(index)"
+                                                    />
+                                                </div>
+                                                <div
+                                                    class="tile-grid-mode-row"
+                                                    [ngClass]="{disabled: !tileBordersEnabled[index]}"
+                                                >
+                                                    <span>Mode</span>
+                                                    <div class="tile-grid-radio-group">
+                                                        <div class="tile-grid-radio-option">
+                                                            <p-radiobutton
+                                                                [ngModel]="tileGridModes[index]"
+                                                                (ngModelChange)="setTileGridMode(index, $event)"
+                                                                value="nds"
+                                                                [name]="'tile-grid-mode-' + index"
+                                                                [inputId]="'tile-grid-mode-nds-' + index"
+                                                                [disabled]="!tileBordersEnabled[index]"
+                                                                [attr.data-testid]="getTileGridModeTestId(index, 'nds')"
+                                                            />
+                                                            <label [for]="'tile-grid-mode-nds-' + index">NDS</label>
+                                                        </div>
+                                                        <div class="tile-grid-radio-option">
+                                                            <p-radiobutton
+                                                                [ngModel]="tileGridModes[index]"
+                                                                (ngModelChange)="setTileGridMode(index, $event)"
+                                                                value="xyz"
+                                                                [name]="'tile-grid-mode-' + index"
+                                                                [inputId]="'tile-grid-mode-xyz-' + index"
+                                                                [disabled]="!tileBordersEnabled[index]"
+                                                                [attr.data-testid]="getTileGridModeTestId(index, 'xyz')"
+                                                            />
+                                                            <label [for]="'tile-grid-mode-xyz-' + index">XYZ</label>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div
+                                                    class="tile-grid-level-row"
+                                                    [ngClass]="{disabled: !tileBordersEnabled[index]}"
+                                                >
+                                                    <label [for]="'tile-grid-level-' + index">Level</label>
+                                                    <div class="tile-grid-level-controls">
+                                                        <p-inputNumber
+                                                            [ngModel]="displayTileGridLevel(index)"
+                                                            (ngModelChange)="onTileGridLevelChanged(index, $event)"
+                                                            [showButtons]="true"
+                                                            [min]="0"
+                                                            [max]="maxTileGridLevel(tileGridModes[index])"
+                                                            buttonLayout="horizontal"
+                                                            spinnerMode="horizontal"
+                                                            [inputId]="'tile-grid-level-' + index"
+                                                            decrementButtonClass="p-button-secondary"
+                                                            incrementButtonClass="p-button-secondary"
+                                                            incrementButtonIcon="pi pi-plus"
+                                                            decrementButtonIcon="pi pi-minus"
+                                                            pTooltip="Change grid level"
+                                                            tooltipPosition="bottom"
+                                                            [disabled]="!tileBordersEnabled[index]"
+                                                            [attr.data-testid]="getTileGridLevelTestId(index)"
+                                                            tabindex="0"
+                                                        />
+                                                        <p-button
+                                                            onEnterClick
+                                                            (click)="toggleTileGridAutoLevel(index)"
+                                                            [styleClass]="
+                                                                tileGridAutoLevels[index]
+                                                                    ? 'map-controls-button p-button-success'
+                                                                    : 'map-controls-button p-button-secondary'
+                                                            "
+                                                            [style]="{
+                                                                'min-width': '3.75em',
+                                                                'padding-left': '0.35em',
+                                                                'padding-right': '0.35em'
+                                                            }"
+                                                            label="AUTO"
+                                                            pTooltip="Automatically select the grid level"
+                                                            tooltipPosition="bottom"
+                                                            [disabled]="!tileBordersEnabled[index]"
+                                                            [attr.data-testid]="getTileGridAutoLevelTestId(index)"
+                                                            tabindex="0"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div
+                                                    class="tile-grid-appearance-row"
+                                                    [ngClass]="{disabled: !tileBordersEnabled[index]}"
+                                                >
+                                                    <p-colorpicker
+                                                        class="tile-grid-color-picker"
+                                                        [ngModel]="tileGridColors[index]"
+                                                        (ngModelChange)="setTileGridColor(index, $event)"
+                                                        format="hex"
+                                                        appendTo="body"
+                                                        [overlayOptions]="{autoZIndex: true, baseZIndex: 30010}"
+                                                        [disabled]="!tileBordersEnabled[index]"
+                                                        [attr.data-testid]="getTileGridColorTestId(index)"
+                                                    />
+                                                    <span class="tile-grid-opacity-value"
+                                                        >{{ tileGridOpacities[index] }}%</span
+                                                    >
+                                                    <p-slider
+                                                        class="tile-grid-opacity-slider"
+                                                        [ngModel]="tileGridOpacities[index]"
+                                                        (ngModelChange)="setTileGridOpacity(index, $event)"
+                                                        orientation="horizontal"
+                                                        [min]="0"
+                                                        [max]="100"
+                                                        [disabled]="!tileBordersEnabled[index]"
+                                                        [attr.data-testid]="getTileGridOpacityTestId(index)"
+                                                        tabindex="-1"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </p-popover>
+                                        <p-popover #backgroundPopover [baseZIndex]="30000">
+                                            <div
+                                                class="background-settings-popover"
+                                                [attr.data-testid]="getBackgroundPopoverTestId(index)"
+                                            >
+                                                <div class="background-toggle-row">
+                                                    <label [for]="'background-enabled-' + index">Background</label>
+                                                    <p-toggleswitch
+                                                        [ngModel]="isBackgroundEnabled(index)"
+                                                        (ngModelChange)="setBackgroundEnabled(index, $event)"
+                                                        [inputId]="'background-enabled-' + index"
+                                                        [attr.data-testid]="getBackgroundEnabledTestId(index)"
+                                                    />
+                                                </div>
+                                                <p-select
+                                                    class="background-layer-select"
+                                                    [attr.data-testid]="getBackgroundSelectTestId(index)"
+                                                    [options]="backgroundOptions[index]"
+                                                    [(ngModel)]="backgroundLayerIds[index]"
+                                                    (ngModelChange)="updateBackgroundLayer(index)"
+                                                    optionLabel="label"
+                                                    optionValue="value"
+                                                    optionDisabled="disabled"
+                                                    [disabled]="
+                                                        !isBackgroundEnabled(index) || !backgroundOptions[index]?.length
+                                                    "
+                                                    placeholder="Select Background"
+                                                    appendTo="body"
+                                                    tabindex="0"
+                                                >
+                                                    <ng-template let-option pTemplate="selectedItem">
+                                                        <div class="background-option">
+                                                            <span class="background-option-label">{{
+                                                                option?.label ?? "Select Background"
+                                                            }}</span>
+                                                            @if (option?.experimental) {
+                                                                <span class="background-badges">
+                                                                    <p-tag severity="warn" value="EXPERIMENTAL" />
+                                                                </span>
+                                                            }
+                                                        </div>
+                                                    </ng-template>
+                                                    <ng-template let-option pTemplate="item">
+                                                        <div class="background-option">
+                                                            <span class="background-option-label">{{
+                                                                option.label
+                                                            }}</span>
+                                                            @if (option.experimental) {
+                                                                <span class="background-badges">
+                                                                    <p-tag severity="warn" value="EXPERIMENTAL" />
+                                                                    <span
+                                                                        class="material-symbols-outlined background-info"
+                                                                        [pTooltip]="wmsExperimentalTooltip"
+                                                                        tooltipPosition="bottom"
+                                                                        >info</span
+                                                                    >
+                                                                </span>
+                                                            }
+                                                        </div>
+                                                    </ng-template>
+                                                </p-select>
+                                                @if (backgroundDetails[index]) {
+                                                    <div class="background-details">
+                                                        <span class="material-symbols-outlined background-info"
+                                                            >info</span
+                                                        >
+                                                        <span>{{ backgroundDetails[index] }}</span>
+                                                    </div>
+                                                }
+                                                @if (backgroundLayerIds[index] !== null) {
+                                                    <div class="background-opacity-row">
+                                                        <span class="background-opacity-value"
+                                                            >{{ backgroundOpacityValue[index] }}%</span
+                                                        >
+                                                        <p-slider
+                                                            [(ngModel)]="backgroundOpacityValue[index]"
+                                                            (ngModelChange)="updateBackgroundLayer(index)"
+                                                            orientation="horizontal"
+                                                            class="background-opacity-slider"
+                                                            [attr.data-testid]="getBackgroundOpacitySliderTestId(index)"
+                                                            tabindex="-1"
+                                                        >
+                                                        </p-slider>
+                                                    </div>
+                                                }
+                                            </div>
+                                        </p-popover>
+                                    </div>
+                                </div>
+                            </p-accordion-header>
+
+                            <p-accordion-content>
+                                @if (mapAccordionValue.includes(index)) {
+                                    @if (!mapTreeView.size) {
+                                        <div class="map-tree-message">No maps loaded.</div>
+                                    } @else if (!mapTreeView.nodesByView[index]?.length) {
+                                        <div class="map-tree-message" data-testid="map-filter-empty">
+                                            No matching maps, layers, presets, or options.
                                         </div>
-                                    </ng-template>
-                                    <!-- TODO: Add Templates for String/Color Options, and ignore internal ones. -->
-                                </p-tree>
-                            </div>
-                            }
-                            }
-                        </p-accordion-content>
-                    </p-accordion-panel>
+                                    } @else {
+                                        <div class="maps-container">
+                                            <p-tree
+                                                [value]="mapTreeView.nodesByView[index]"
+                                                [trackBy]="trackMapTreeNode"
+                                                (onNodeExpand)="updateMapTreeNodeExpansion($event.node, true)"
+                                                (onNodeCollapse)="updateMapTreeNodeExpansion($event.node, false)"
+                                                [attr.data-testid]="'map-tree-' + index"
+                                            >
+                                                <!-- Template for Group nodes -->
+                                                <ng-template let-node pTemplate="Group">
+                                                    <div class="flex-container map-group-row">
+                                                        <span class="checkbox-entry map-tree-title">
+                                                            <span
+                                                                onEnterClick
+                                                                class="material-symbols-outlined menu-toggler"
+                                                                tabindex="0"
+                                                                (click)="
+                                                                    showLayersToggleMenu(
+                                                                        $event,
+                                                                        index,
+                                                                        node.id + '/',
+                                                                        ''
+                                                                    )
+                                                                "
+                                                            >
+                                                                more_vert
+                                                            </span>
+                                                            <p-checkbox
+                                                                [ngModel]="node.visible[index]"
+                                                                (click)="$event.stopPropagation()"
+                                                                (ngModelChange)="
+                                                                    toggleLayer(
+                                                                        index,
+                                                                        node.id,
+                                                                        '',
+                                                                        !node.visible[index]
+                                                                    )
+                                                                "
+                                                                [binary]="true"
+                                                                [inputId]="index + '_' + node.id"
+                                                                [name]="index + '_' + node.id"
+                                                                tabindex="0"
+                                                            />
+                                                            <label [for]="index + '_' + node.id">{{
+                                                                removeGroupPrefix(node.id)
+                                                            }}</label>
+                                                        </span>
+                                                    </div>
+                                                </ng-template>
+                                                <!-- Template for Map nodes -->
+                                                <ng-template let-node pTemplate="Map">
+                                                    <p-popover
+                                                        #metadataPopover
+                                                        styleClass="metadata-layer-popover"
+                                                        [baseZIndex]="30000"
+                                                        appendTo="body"
+                                                    >
+                                                        <p-listbox
+                                                            class="metadata-layer-listbox"
+                                                            [options]="metadataLayerOptions.get(node.id) ?? []"
+                                                            optionLabel="label"
+                                                            [filter]="true"
+                                                            filterBy="label"
+                                                            filterPlaceHolder="Search metadata"
+                                                            ariaFilterLabel="Search metadata"
+                                                            emptyFilterMessage="No matching metadata"
+                                                            scrollHeight="min(24rem, calc(100vh - 10rem))"
+                                                            [ngModel]="null"
+                                                            (onChange)="
+                                                                inspectMetadataLayer($event.value, metadataPopover)
+                                                            "
+                                                        >
+                                                            <ng-template let-option pTemplate="item">
+                                                                <span
+                                                                    class="metadata-layer-option"
+                                                                    [title]="option.label"
+                                                                    >{{ option.label }}</span
+                                                                >
+                                                            </ng-template>
+                                                        </p-listbox>
+                                                    </p-popover>
+                                                    <div
+                                                        class="flex-container map-tree-row"
+                                                        [class.has-map-presets]="node.mapPresets.length > 0"
+                                                        [ngClass]="{
+                                                            'has-datasource-status':
+                                                                dataSourceStatus(node.info) !== 'ready'
+                                                        }"
+                                                    >
+                                                        <span class="checkbox-entry map-tree-title">
+                                                            @if (dataSourceStatus(node.info) !== "ready") {
+                                                                <span
+                                                                    class="datasource-status"
+                                                                    [ngClass]="dataSourceStatusClass(node.info)"
+                                                                    [style.--datasource-progress]="
+                                                                        dataSourceProgressIndicator(node.info)
+                                                                    "
+                                                                    [pTooltip]="dataSourceStatusTooltip(node.info)"
+                                                                    tooltipPosition="bottom"
+                                                                >
+                                                                </span>
+                                                            }
+                                                            <span
+                                                                onEnterClick
+                                                                class="material-symbols-outlined menu-toggler"
+                                                                tabindex="0"
+                                                                (click)="
+                                                                    showLayersToggleMenu($event, index, node.id, '')
+                                                                "
+                                                            >
+                                                                more_vert
+                                                            </span>
+                                                            <p-checkbox
+                                                                [(ngModel)]="node.visible[index]"
+                                                                (click)="$event.stopPropagation()"
+                                                                (ngModelChange)="
+                                                                    toggleLayer(index, node.id, '', node.visible[index])
+                                                                "
+                                                                [binary]="true"
+                                                                [disabled]="dataSourceStatus(node.info) !== 'ready'"
+                                                                [inputId]="index + '_' + node.id"
+                                                                [name]="index + '_' + node.id"
+                                                                tabindex="0"
+                                                            />
+                                                            <label
+                                                                [for]="index + '_' + node.id"
+                                                                [ngClass]="{
+                                                                    'disabled-label':
+                                                                        dataSourceStatus(node.info) !== 'ready'
+                                                                }"
+                                                            >
+                                                                {{ removeGroupPrefix(node.id) }}
+                                                            </label>
+                                                        </span>
+                                                        <div class="map-controls">
+                                                            @if (node.mapPresets.length > 0) {
+                                                                <p-select
+                                                                    class="map-preset-select"
+                                                                    [options]="mapPresetOptionsForView(node.id, index)"
+                                                                    [ngModel]="node.selectedMapPresetIds[index]"
+                                                                    (ngModelChange)="
+                                                                        selectMapPreset(node.id, index, $event)
+                                                                    "
+                                                                    optionLabel="label"
+                                                                    optionValue="value"
+                                                                    optionDisabled="disabled"
+                                                                    appendTo="body"
+                                                                    [disabled]="dataSourceStatus(node.info) !== 'ready'"
+                                                                    [attr.aria-label]="'Map preset for ' + node.id"
+                                                                />
+                                                            }
+                                                            <p-button
+                                                                onEnterClick
+                                                                (click)="focus($event, index, mapCoverage(node.id))"
+                                                                label=""
+                                                                pTooltip="Focus on map"
+                                                                tooltipPosition="bottom"
+                                                                [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                                                tabindex="0"
+                                                                *ngIf="mapCoverage(node.id).length"
+                                                            >
+                                                                <span
+                                                                    class="material-symbols-outlined"
+                                                                    style="font-size: 1.2em; margin: 0 auto;"
+                                                                    >center_focus_strong</span
+                                                                >
+                                                            </p-button>
+                                                            <p-button
+                                                                onEnterClick
+                                                                (click)="metadataPopover.toggle($event)"
+                                                                label=""
+                                                                pTooltip="{{
+                                                                    !metadataLayerOptions.get(node.id)?.length
+                                                                        ? 'No metadata available'
+                                                                        : 'Request service metadata'
+                                                                }}"
+                                                                tooltipPosition="bottom"
+                                                                [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                                                tabindex="0"
+                                                                [disabled]="!metadataLayerOptions.get(node.id)?.length"
+                                                            >
+                                                                <span
+                                                                    class="material-symbols-outlined"
+                                                                    style="font-size: 1.2em; margin: 0 auto;"
+                                                                >
+                                                                    data_object
+                                                                </span>
+                                                            </p-button>
+                                                        </div>
+                                                    </div>
+                                                </ng-template>
+                                                <!-- Template for Feature Layer nodes -->
+                                                <ng-template let-node pTemplate="Features">
+                                                    <div
+                                                        *ngIf="node.type != 'SourceData'"
+                                                        class="flex-container map-layer-row"
+                                                    >
+                                                        <div class="font-bold white-space-nowrap layer-tree-title">
+                                                            <span
+                                                                onEnterClick
+                                                                class="material-symbols-outlined menu-toggler"
+                                                                tabindex="0"
+                                                                (click)="
+                                                                    showLayersToggleMenu(
+                                                                        $event,
+                                                                        index,
+                                                                        node.mapId,
+                                                                        node.id
+                                                                    )
+                                                                "
+                                                            >
+                                                                more_vert
+                                                            </span>
+                                                            <span class="checkbox-entry">
+                                                                <p-checkbox
+                                                                    [(ngModel)]="node.viewConfig[index].visible"
+                                                                    (click)="$event.stopPropagation()"
+                                                                    (ngModelChange)="
+                                                                        toggleLayer(
+                                                                            index,
+                                                                            node.mapId,
+                                                                            node.id,
+                                                                            node.viewConfig[index].visible
+                                                                        )
+                                                                    "
+                                                                    [binary]="true"
+                                                                    [inputId]="index + '_' + node.key"
+                                                                    [name]="index + '_' + node.key"
+                                                                    tabindex="0"
+                                                                />
+                                                                <label [for]="index + '_' + node.key">{{
+                                                                    node.id
+                                                                }}</label>
+                                                            </span>
+                                                        </div>
+                                                        <div class="tree-node-controls">
+                                                            <p-button
+                                                                onEnterClick
+                                                                *ngIf="node.info.coverage.length"
+                                                                (click)="focus($event, index, node.info.coverage)"
+                                                                label=""
+                                                                pTooltip="Focus on layer"
+                                                                tooltipPosition="bottom"
+                                                                [style]="{'padding-left': '0', 'padding-right': '0'}"
+                                                                tabindex="0"
+                                                            >
+                                                                <span
+                                                                    class="material-symbols-outlined"
+                                                                    style="font-size: 1.2em; margin: 0 auto;"
+                                                                >
+                                                                    center_focus_strong
+                                                                </span>
+                                                            </p-button>
+                                                            <p-inputNumber
+                                                                [ngModel]="
+                                                                    displayMapLayerLevel(
+                                                                        index,
+                                                                        node.mapId,
+                                                                        node.id,
+                                                                        node.viewConfig[index].level
+                                                                    )
+                                                                "
+                                                                (ngModelChange)="
+                                                                    onLayerLevelChanged(
+                                                                        $event,
+                                                                        index,
+                                                                        node.mapId,
+                                                                        node.id
+                                                                    )
+                                                                "
+                                                                [showButtons]="true"
+                                                                [min]="0"
+                                                                [max]="15"
+                                                                buttonLayout="horizontal"
+                                                                spinnerMode="horizontal"
+                                                                inputId="horizontal"
+                                                                decrementButtonClass="p-button-secondary"
+                                                                incrementButtonClass="p-button-secondary"
+                                                                incrementButtonIcon="pi pi-plus"
+                                                                decrementButtonIcon="pi pi-minus"
+                                                                pTooltip="Change zoom level"
+                                                                tooltipPosition="bottom"
+                                                                tabindex="0"
+                                                            >
+                                                            </p-inputNumber>
+                                                            <p-button
+                                                                onEnterClick
+                                                                (click)="
+                                                                    toggleLayerAutoLevel(index, node.mapId, node.id)
+                                                                "
+                                                                [styleClass]="
+                                                                    node.viewConfig[index].autoLevel
+                                                                        ? 'map-controls-button p-button-success'
+                                                                        : 'map-controls-button p-button-secondary'
+                                                                "
+                                                                [style]="{
+                                                                    'min-width': '3.75em',
+                                                                    'padding-left': '0.35em',
+                                                                    'padding-right': '0.35em'
+                                                                }"
+                                                                label="AUTO"
+                                                                pTooltip="Automatically select the layer level"
+                                                                tooltipPosition="bottom"
+                                                                tabindex="0"
+                                                            >
+                                                            </p-button>
+                                                        </div>
+                                                        <input
+                                                            class="level-indicator"
+                                                            type="text"
+                                                            pInputText
+                                                            [disabled]="true"
+                                                            [ngModel]="
+                                                                displayMapLayerLevel(
+                                                                    index,
+                                                                    node.mapId,
+                                                                    node.id,
+                                                                    node.viewConfig[index].level
+                                                                )
+                                                            "
+                                                        />
+                                                    </div>
+                                                </ng-template>
+                                                <!-- Template for the leading layer-preset control. -->
+                                                <ng-template let-node pTemplate="Preset">
+                                                    <div
+                                                        class="style-preset-row"
+                                                        [attr.data-testid]="stylePresetRowTestId(node, index)"
+                                                    >
+                                                        <p-select
+                                                            class="style-preset-select"
+                                                            [options]="node.selectOptions"
+                                                            [ngModel]="node.selectedPresetKeys[index]"
+                                                            (ngModelChange)="selectLayerPreset(node, index, $event)"
+                                                            optionLabel="label"
+                                                            optionValue="value"
+                                                            appendTo="body"
+                                                            [disabled]="node.presets.length === 0"
+                                                            [attr.aria-label]="'Layer preset for ' + node.layerId"
+                                                        />
+                                                        @if (node.selectedPresetKeys[index]) {
+                                                            <p-button
+                                                                onEnterClick
+                                                                class="style-preset-expand-button"
+                                                                [attr.data-testid]="
+                                                                    stylePresetExpandTestId(node, index)
+                                                                "
+                                                                [pTooltip]="
+                                                                    node.expandedPresetOptions[index]
+                                                                        ? 'Hide preset options'
+                                                                        : 'Show preset options'
+                                                                "
+                                                                tooltipPosition="bottom"
+                                                                (click)="toggleStylePresetOptions($event, node, index)"
+                                                            >
+                                                                <span class="material-symbols-outlined">
+                                                                    {{
+                                                                        node.expandedPresetOptions[index]
+                                                                            ? "unfold_less"
+                                                                            : "unfold_more"
+                                                                    }}
+                                                                </span>
+                                                            </p-button>
+                                                            @for (
+                                                                styleId of selectedPresetStyleIds(node, index);
+                                                                track styleId
+                                                            ) {
+                                                                <p-button
+                                                                    onEnterClick
+                                                                    class="style-option-edit-button"
+                                                                    [attr.data-testid]="
+                                                                        stylePresetEditButtonTestId(
+                                                                            node,
+                                                                            index,
+                                                                            styleId
+                                                                        )
+                                                                    "
+                                                                    pTooltip="Edit style sheet"
+                                                                    tooltipPosition="bottom"
+                                                                    (click)="openPresetStyleSheet($event, styleId)"
+                                                                >
+                                                                    <span class="material-symbols-outlined">brush</span>
+                                                                </p-button>
+                                                            }
+                                                        }
+                                                    </div>
+                                                </ng-template>
+                                                <!-- Template for boolean style option nodes -->
+                                                <ng-template let-node pTemplate="Bool">
+                                                    <div
+                                                        class="map-option-row"
+                                                        [class.style-option-group-highlight]="
+                                                            isStyleOptionGroupActive(node, index)
+                                                        "
+                                                        [attr.data-style-option-group]="
+                                                            styleOptionGroupKey(node, index)
+                                                        "
+                                                        (mouseenter)="activateStyleOptionGroup(node, index)"
+                                                        (mouseleave)="deactivateStyleOptionGroup($event, node, index)"
+                                                        (focusin)="activateStyleOptionGroup(node, index)"
+                                                        (focusout)="deactivateStyleOptionGroup($event, node, index)"
+                                                    >
+                                                        <span
+                                                            class="checkbox-entry oblique"
+                                                            [ngClass]="{
+                                                                disabled: !mapService.maps.getMapLayerVisibility(
+                                                                    index,
+                                                                    node.mapId,
+                                                                    node.layerId
+                                                                )
+                                                            }"
+                                                        >
+                                                            <p-checkbox
+                                                                [attr.data-testid]="
+                                                                    styleOptionCheckboxTestId(node, index)
+                                                                "
+                                                                [(ngModel)]="node.value[index]"
+                                                                (ngModelChange)="updateStyleOption(node, index)"
+                                                                [binary]="true"
+                                                                [inputId]="index + '_' + node.key"
+                                                                [name]="index + '_' + node.key"
+                                                            />
+                                                            <label [for]="index + '_' + node.key">{{
+                                                                node.info.label
+                                                            }}</label>
+                                                        </span>
+                                                        @if (node.firstInStyleGroup) {
+                                                            <p-button
+                                                                onEnterClick
+                                                                class="style-option-edit-button"
+                                                                [attr.data-testid]="
+                                                                    styleOptionEditButtonTestId(node, index)
+                                                                "
+                                                                (click)="openStyleSheet($event, node)"
+                                                                pTooltip="Edit style sheet"
+                                                                tooltipPosition="bottom"
+                                                                tabindex="0"
+                                                            >
+                                                                <span class="material-symbols-outlined">brush</span>
+                                                            </p-button>
+                                                        }
+                                                    </div>
+                                                </ng-template>
+                                                <!-- TODO: Add Templates for String/Color Options, and ignore internal ones. -->
+                                            </p-tree>
+                                        </div>
+                                    }
+                                }
+                            </p-accordion-content>
+                        </p-accordion-panel>
+                    }
+                </p-accordion>
+                @if (viewIndices.length < 2) {
+                    <p-button
+                        onEnterClick
+                        class="add-view-button"
+                        data-testid="add-view-button"
+                        (click)="addView()"
+                        icon=""
+                        label="Add View"
+                        pTooltip="Add split view for comparison"
+                        tooltipPosition="bottom"
+                        tabindex="0"
+                    >
+                        <span class="material-symbols-outlined" style="margin: 0 auto;"> add_column_right </span>
+                    </p-button>
                 }
-            </p-accordion>
-            @if (viewIndices.length < 2) {
-                <p-button onEnterClick class="add-view-button" data-testid="add-view-button" (click)="addView()" icon="" label="Add View"
-                          pTooltip="Add split view for comparison" tooltipPosition="bottom" tabindex="0">
-                        <span class="material-symbols-outlined" style="margin: 0 auto;">
-                            add_column_right
-                        </span>
-                </p-button>
-            }
             </ng-container>
         </app-dialog>
-        <p-menu #menu [model]="toggleMenuItems" [popup]="true" [baseZIndex]="1000"
-                [style]="{'font-size': '0.9em'}"></p-menu>
+        <p-menu
+            #menu
+            [model]="toggleMenuItems"
+            [popup]="true"
+            [baseZIndex]="1000"
+            [style]="{'font-size': '0.9em'}"
+        ></p-menu>
     `,
     standalone: false
 })
@@ -609,7 +964,10 @@ const MAP_FILTER_DELAY_MS = 300;
  * Renders the maps-and-layers panel and translates its UI controls into map-service and
  * app-state updates for the active views, including tile-grid and background-layer controls.
  */
-export class MapPanelComponent {
+export class MapPanelComponent implements OnDestroy {
+    readonly store = inject(AppStore);
+
+
     protected readonly wmsExperimentalTooltip = WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP;
 
     mapFilterText = "";
@@ -623,29 +981,44 @@ export class MapPanelComponent {
         distinctUntilChanged()
     );
     private readonly stylePresetProjectionChanges = new BehaviorSubject(0);
+    private readonly treeStateChanges = observeStore(this.store, state => ({
+        viewIds: state.viewIds,
+        layerPresets: state.layers.layerPresetSelection,
+        mapPresets: state.layers.mapPresetSelection
+    }), (previous, current) => previous.viewIds === current.viewIds &&
+        previous.layerPresets === current.layerPresets && previous.mapPresets === current.mapPresets);
+
+    // A replacement catalog can subscribe after this panel. Refresh its read-only
+    // projection before cloning per-view arrays, without a global publication barrier.
+
     readonly mapTreeView$: Observable<MapPanelTreeView> = combineLatest([
         this.mapService.maps$,
         this.appliedMapFilterTextChanges,
         this.styleService.styleGroups,
-        this.stateService.numViewsState,
+        this.treeStateChanges,
         this.mapPresetService.presets$,
-        this.stateService.layerPresetSelectionState.appState,
-        this.stateService.mapPresetSelectionState.appState,
         this.stylePresetProjectionChanges,
         this.mapService.layerStateChanged.pipe(
-            filter(reason => reason === "visibility"),
+            filter((reason) => reason === "visibility" || reason === "external-state"),
             startWith("visibility")
         )
     ]).pipe(
-        map(([mapTree, filterText, _styleGroups, numViews]) => ({
-            size: mapTree.size,
-            nodesByView: Array.from(
-                {length: numViews},
-                (_, viewIndex) => filterMapTreeNodes(mapTree.nodes, filterText, viewIndex))
-        }))
+        map(([_catalogEvent, filterText, _styleGroups, state]) => {
+            // The resource owner installs the next catalog before publishing its
+            // state. Its replacement event follows that patch, so another input
+            // can emit while combineLatest still holds the previous event value.
+            const mapTree = this.mapService.maps;
+            mapTree.configureTreeParameters();
+            return {
+                size: mapTree.size,
+                nodesByView: Array.from({length: state.viewIds.length}, (_, viewIndex) =>
+                    filterMapTreeNodes(mapTree.nodes, filterText, viewIndex))
+            };
+        })
     );
 
     subscriptions: Subscription[] = [];
+    private readonly toggleMapsShortcut = () => this.toggleLayerDialog();
     viewIndices: number[] = [];
     mapAccordionValue: number[] = [0];
 
@@ -674,23 +1047,25 @@ export class MapPanelComponent {
     metadataLayerOptions = new Map<string, MetadataLayerOption[]>();
 
     /** Subscribes the panel UI to map, app-state, and dialog-stack updates. */
-    constructor(public mapService: MapInfoService,
-                private readonly viewState: MapViewStateService,
-                public appModeService: AppModeService,
-                public stateService: AppStateService,
-                public keyboardService: KeyboardService,
-                private readonly configService: AppConfigService,
-                private readonly dialogStack: DialogStackService,
-                private readonly featureSearchService: FeatureSearchService,
-                private readonly infoMessageService: InfoMessageService,
-                private readonly styleEditorRequestService: StyleEditorRequestService,
-                private readonly mapPresetService: MapPresetService,
-                private readonly styleService: StyleService) {
-        this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
+    constructor(
+        public mapService: MapInfoService,
+        private readonly viewState: MapViewService,
+        public appModeService: AppModeService,
+        public stateService: AppStateService,
+        public keyboardService: KeyboardService,
+        private readonly configService: AppConfigService,
+        private readonly dialogStack: DialogStackService,
+        private readonly featureSearchService: FeatureSearchService,
+        private readonly infoMessageService: InfoMessageService,
+        private readonly styleEditorRequestService: StyleEditorRequestService,
+        private readonly mapPresetService: MapPresetService,
+        private readonly styleService: StyleService
+    ) {
+        this.keyboardService.registerShortcut('m', this.toggleMapsShortcut, true);
 
         this.subscriptions.push(
             // Rebuild metadata menus recursively and prune when needed.
-            this.mapService.maps$.subscribe(mapTree => {
+            this.mapService.maps$.subscribe((mapTree) => {
                 this.metadataLayerOptions.clear();
                 for (const [_, mapItem] of mapTree.maps) {
                     this.metadataLayerOptions.set(
@@ -702,7 +1077,7 @@ export class MapPanelComponent {
                             }))
                     );
                 }
-                const numViews = this.stateService.numViews;
+                const numViews = this.store.numViews();
                 this.tileBordersEnabled = Array.from({length: numViews}, (_, index) =>
                     this.mapService.maps.getViewTileBorderState(index));
                 this.tileGridModes = Array.from({length: numViews}, (_, index) =>
@@ -711,12 +1086,13 @@ export class MapPanelComponent {
             })
         );
 
-        this.subscriptions.push(
-            this.viewState.beforeViewRemoval.subscribe(({retainedIndices}) => {
+        this.subscriptions.push(this.viewState.beforeViewRemoval.subscribe(({retainedIndices}) => {
                 this.lastEnabledBackgroundLayerIds = retainedIndices.map(index =>
                     this.lastEnabledBackgroundLayerIds[index]);
-            }),
-            this.stateService.numViewsState.subscribe(numViews => {
+            }));
+        effect(() => {
+            const numViews = this.store.viewIds().length;
+            untracked(() => {
                 const previousViewIndices = new Set(this.viewIndices);
                 this.viewIndices = Array.from({length: numViews}, (_, i) => i);
                 const validViewIndices = new Set(this.viewIndices);
@@ -744,62 +1120,96 @@ export class MapPanelComponent {
                     this.mapsCollapsed.length = this.viewIndices.length;
                 }
                 this.syncedOptions = this.viewIndices.map(viewIndex => this.viewState.isSyncOptionsForViewEnabled(viewIndex));
-            })
-        );
+            });
+        });
 
-        this.subscriptions.push(
-            this.stateService.layerSyncOptionsState.appState.subscribe(_ => {
-                const numViews = this.stateService.numViews;
+        effect(() => {
+            const _ = this.store.layers.layerSyncOptions();
+            untracked(() => {
+                const numViews = this.store.numViews();
                 this.syncedOptions = Array.from({length: numViews}, (_, viewIndex) =>
                     this.viewState.isSyncOptionsForViewEnabled(viewIndex));
-            })
-        );
+            });
+        });
 
-        this.subscriptions.push(
-            this.stateService.backgroundState.appState.subscribe(_ => this.refreshBackgroundControls())
-        );
+        effect(() => {
+            const _ = this.store.layers.background();
+            untracked(() => {
+                this.refreshBackgroundControls();
+            });
+        });
 
-        this.subscriptions.push(
-            this.stateService.mode2dState.appState.subscribe(_ => this.refreshBackgroundControls())
-        );
+        effect(() => {
+            const _ = this.store.views.mode2d();
+            untracked(() => {
+                this.refreshBackgroundControls();
+            });
+        });
 
         this.subscriptions.push(
             this.configService.config$.subscribe(_ => this.refreshBackgroundControls())
         );
 
-        this.subscriptions.push(
-            this.stateService.viewTileBordersState.appState.subscribe(_ => {
-                const numViews = this.stateService.numViews;
+        effect(() => {
+            const _ = this.store.layers.viewTileBorders();
+            untracked(() => {
+                const numViews = this.store.numViews();
                 this.tileBordersEnabled = Array.from({length: numViews}, (_, index) =>
-                    this.stateService.viewTileBordersState.getValue(index));
-            })
-        );
+                    this.store.layers.viewTileBorders()[String(this.store.viewIds()[index])]
+                );
+            });
+        });
 
-        this.subscriptions.push(
-            this.stateService.viewTileGridModeState.appState.subscribe(_ => {
-                const numViews = this.stateService.numViews;
+        effect(() => {
+            const _ = this.store.layers.viewTileGridMode();
+            untracked(() => {
+                const numViews = this.store.numViews();
                 this.tileGridModes = Array.from({length: numViews}, (_, index) =>
-                    this.stateService.viewTileGridModeState.getValue(index));
+                    this.store.layers.viewTileGridMode()[String(this.store.viewIds()[index])]
+                );
                 this.refreshTileGridControls();
-            })
-        );
+            });
+        });
 
-        this.subscriptions.push(
-            this.stateService.viewTileGridLevelState.appState.subscribe(_ => this.refreshTileGridControls())
-        );
-        this.subscriptions.push(
-            this.stateService.viewTileGridAutoLevelState.appState.subscribe(_ => this.refreshTileGridControls())
-        );
-        this.subscriptions.push(
-            this.stateService.viewTileGridColorState.appState.subscribe(_ => this.refreshTileGridControls())
-        );
-        this.subscriptions.push(
-            this.stateService.viewTileGridOpacityState.appState.subscribe(_ => this.refreshTileGridControls())
-        );
+        effect(() => {
+            const _ = this.store.layers.viewTileGridLevel();
+            untracked(() => {
+                this.refreshTileGridControls();
+            });
+        });
+        effect(() => {
+            const _ = this.store.layers.viewTileGridAutoLevel();
+            untracked(() => {
+                this.refreshTileGridControls();
+            });
+        });
+        effect(() => {
+            const _ = this.store.layers.viewTileGridColor();
+            untracked(() => {
+                this.refreshTileGridControls();
+            });
+        });
+        effect(() => {
+            const _ = this.store.layers.viewTileGridOpacity();
+            untracked(() => {
+                this.refreshTileGridControls();
+            });
+        });
 
-        this.subscriptions.push(
-            this.stateService.mapsOpenState.subscribe(isOpen => this.layerDialogVisible = isOpen)
-        );
+        effect(() => {
+            const isOpen = this.store.layers.mapsOpen();
+            untracked(() => {
+                (this.layerDialogVisible = isOpen);
+            });
+        });
+    }
+
+    /** Release catalog listeners and the keyboard callback with this component instance. */
+    ngOnDestroy(): void {
+        this.subscriptions.forEach(subscription => subscription.unsubscribe());
+        this.keyboardService.unregisterShortcut("m", this.toggleMapsShortcut);
+        this.mapFilterTextChanges.complete();
+        this.stylePresetProjectionChanges.complete();
     }
 
     /** Brings the floating maps dialog to the top of the dialog stack when shown. */
@@ -833,7 +1243,7 @@ export class MapPanelComponent {
 
     /** Refreshes independent tile-grid controls from their per-view AppState values. */
     private refreshTileGridControls(): void {
-        const numViews = this.stateService.numViews;
+        const numViews = this.store.numViews();
         this.tileGridAutoLevels = Array.from({length: numViews}, (_, index) =>
             this.mapService.maps.getViewTileGridAutoLevel(index));
         this.tileGridColors = Array.from({length: numViews}, (_, index) =>
@@ -844,14 +1254,18 @@ export class MapPanelComponent {
 
     /** Rebuilds the background dropdown contents and resolved per-view selection state. */
     private refreshBackgroundControls() {
-        const numViews = this.stateService.numViews;
+        const numViews = this.store.numViews();
         const backgroundLayers = this.configService.getBackgroundLayers();
         const defaultBackgroundLayerId = this.configService.getDefaultBackgroundLayerId();
 
-        this.backgroundLayerIds = Array.from({length: numViews}, (_, index) =>
-            this.stateService.resolveBackgroundState(index, backgroundLayers, defaultBackgroundLayerId).layerId);
+        this.backgroundLayerIds = Array.from(
+            {length: numViews},
+            (_, index) =>
+                this.store.resolveBackgroundState(index, backgroundLayers, defaultBackgroundLayerId).layerId
+        );
         this.backgroundOpacityValue = Array.from({length: numViews}, (_, index) =>
-            this.stateService.getBackgroundOpacity(index));
+            this.store.getBackgroundOpacity(index)
+        );
         this.backgroundOptions = Array.from({length: numViews}, (_, index) =>
             this.createBackgroundOptions(index, backgroundLayers));
         this.backgroundDetails = Array.from({length: numViews}, (_, index) =>
@@ -865,8 +1279,11 @@ export class MapPanelComponent {
     }
 
     /** Builds the background-layer dropdown options for one view, including 3D WMS gating. */
-    private createBackgroundOptions(viewIndex: number, backgroundLayers: readonly BackgroundLayerConfig[]): BackgroundLayerOption[] {
-        const is2d = this.stateService.mode2dState.getValue(viewIndex);
+    private createBackgroundOptions(
+        viewIndex: number,
+        backgroundLayers: readonly BackgroundLayerConfig[]
+    ): BackgroundLayerOption[] {
+        const is2d = this.store.views.mode2d()[String(this.store.viewIds()[viewIndex])];
         return backgroundLayers.map(layer => ({
             label: layer.name,
             value: layer.id,
@@ -885,7 +1302,7 @@ export class MapPanelComponent {
         if (selectedLayer.type === "wms") {
             details.push(WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP);
         }
-        if (selectedLayer?.type === "wms" && !this.stateService.mode2dState.getValue(viewIndex)) {
+        if (selectedLayer?.type === "wms" && !this.store.views.mode2d()[String(this.store.viewIds()[viewIndex])]) {
             details.push("WMS backgrounds are currently limited to 2D views.");
         }
         if (selectedLayer.attribution) {
@@ -1009,7 +1426,7 @@ export class MapPanelComponent {
                 targetRect = tileIdRect;
             }
         }
-        this.stateService.focusedView = viewIndex;
+        this.store.setFocusedView(viewIndex);
         this.viewState.moveToRectangleTopic.next(
             {
                 targetView: viewIndex,
@@ -1041,8 +1458,13 @@ export class MapPanelComponent {
         if (this.backgroundLayerIds[viewIndex] !== null) {
             this.lastEnabledBackgroundLayerIds[viewIndex] = this.backgroundLayerIds[viewIndex];
         }
-        this.stateService.setBackgroundState(viewIndex, this.backgroundLayerIds[viewIndex], this.backgroundOpacityValue[viewIndex]);
-        this.viewState.syncBackgroundSettings(viewIndex);
+        this.store.setBackgroundState(
+            viewIndex,
+            this.backgroundLayerIds[viewIndex],
+            this.backgroundOpacityValue[viewIndex],
+            this.store.views.viewSync().includes("lay")
+        );
+        this.viewState.requestViewRecalculation(ViewRecalculationReason.BackgroundSync);
     }
 
     /** Returns whether the selected view currently has a background layer enabled. */
@@ -1086,7 +1508,7 @@ export class MapPanelComponent {
         if (!option) {
             return;
         }
-        this.stateService.setSelection({
+        this.store.setSelection({
             mapTileKey: option.mapTileKey
         } as SelectedSourceData);
         popover.hide();
@@ -1407,8 +1829,8 @@ export class MapPanelComponent {
     /** Adds another synchronized map view up to the current supported limit. */
     addView() {
         // Limit the increment for now since we do not yet support more than 2 views
-        if (this.stateService.numViews < 2) {
-            this.stateService.numViews += 1;
+        if (this.store.numViews() < 2) {
+            this.store.setNumViews(this.store.numViews() + 1);
         }
     }
 
@@ -1423,7 +1845,7 @@ export class MapPanelComponent {
         event.stopPropagation();
         const nextState = !this.viewState.isSyncOptionsForViewEnabled(viewIndex);
         this.viewState.setSyncOptionsForView(viewIndex, nextState);
-        const numViews = this.stateService.numViews;
+        const numViews = this.store.numViews();
         this.syncedOptions = Array.from({length: numViews}, (_, index) =>
             this.viewState.isSyncOptionsForViewEnabled(index));
     }
@@ -1436,8 +1858,8 @@ export class MapPanelComponent {
     /** Keeps direct PrimeNG dialog closes, Escape, shortcuts, and the main-bar button in one state path. */
     protected setMapsPanelVisible(isVisible: boolean) {
         this.layerDialogVisible = isVisible;
-        if (this.stateService.mapsOpenState.getValue() !== isVisible) {
-            this.stateService.mapsOpenState.next(isVisible);
+        if (this.store.layers.mapsOpen() !== isVisible) {
+            this.store.setMapsOpen(isVisible);
         }
     }
 

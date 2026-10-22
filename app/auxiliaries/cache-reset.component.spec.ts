@@ -1,3 +1,5 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
 import "@angular/compiler";
 import {HttpErrorResponse} from "@angular/common/http";
 import {BehaviorSubject, firstValueFrom} from "rxjs";
@@ -21,13 +23,14 @@ const createComponent = (enabled = true) => {
         isDialogOpen: vi.fn(() => true),
         setDialogOpen: vi.fn()
     };
-    const component = new CacheResetComponent(
+    const injector = ownerTestInjector();
+    const component = runInInjectionContext(injector, () => new CacheResetComponent(
         mapInfo as any,
         cacheReset as any,
         config as any,
         messages as any,
         state as any
-    );
+    ));
     return {component, cacheReset, messages, state};
 };
 

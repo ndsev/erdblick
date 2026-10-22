@@ -1,13 +1,15 @@
-import "@angular/compiler";
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {AppStateService} from "../shared/appstate.service";
 import {HttpClient, HttpHeaders, HttpResponse} from "@angular/common/http";
+import "@angular/compiler";
 import {BehaviorSubject, of, Subject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
+import type {InfoMessageService} from "../shared/info.service";
+import type {MapPresetService} from "../styledata/map-preset.service";
+import type {StyleService} from "../styledata/style.service";
 import {MapInfoService} from "./map-info.service";
 import type {MapInfoItem} from "./map.tree.model";
-import type {AppStateService} from "../shared/appstate.service";
-import type {StyleService} from "../styledata/style.service";
-import type {MapPresetService} from "../styledata/map-preset.service";
-import type {InfoMessageService} from "../shared/info.service";
 
 /** Minimal valid catalog entry; each refresh below crosses a real JSON boundary. */
 function source(mapId: string, configIndex: number, status = "ready"): MapInfoItem {
@@ -25,19 +27,16 @@ function source(mapId: string, configIndex: number, status = "ready"): MapInfoIt
 /** Exercises the real tree and native parser with only persistence/UI dependencies stubbed. */
 function fixture() {
     const get = vi.fn();
-    const service = new MapInfoService(
+    const injector = ownerTestInjector();
+    const persistence = injector.get(AppStateService);
+    persistence.ready.next(true);
+    const service = runInInjectionContext(injector, () => new MapInfoService(
         {get} as unknown as HttpClient,
-        {
-            ready: new BehaviorSubject(true), numViews: 1, numViewsState: new BehaviorSubject(1),
-            stateApplied: new Subject<void>(),
-            mapLayerConfig: () => [{visible: true, level: 13, autoLevel: false}],
-            getMapPresetSelection: () => null, getLayerSyncOption: () => false,
-            prune: vi.fn()
-        } as unknown as AppStateService,
+        persistence,
         {styles: new Map(), styleGroups: new BehaviorSubject([])} as unknown as StyleService,
         {presets: [], presets$: new BehaviorSubject([]), presetsForLayer: () => []} as unknown as MapPresetService,
         {clearBackendConnectionError: vi.fn(), showBackendConnectionError: vi.fn()} as unknown as InfoMessageService
-    );
+    ));
     const resets = vi.fn();
     service.dataSourceInfoChanged.subscribe(resets);
     let revision = 0;

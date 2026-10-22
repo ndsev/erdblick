@@ -1,21 +1,27 @@
 import "@angular/compiler";
-import {TestBed} from "@angular/core/testing";
 import {BehaviorSubject, Observable, Subject, of} from "rxjs";
-import {afterEach, describe, expect, it, vi} from "vitest";
-import {MapViewStateService} from "../mapview/map-view-state.service";
+import {describe, expect, it, vi} from "vitest";
+import {ownerTestInjector, setTestViewIds} from "../../test/owner-test-injector";
+import {AppStore} from "../shared/app.store";
+import {MapViewService} from "../mapview/map-view.service";
 import {ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
 import {AppStateService} from "../shared/appstate.service";
 import {InfoMessageService} from "../shared/info.service";
 import {JumpTargetService} from "./jump.service";
-import {LocationSearchService, ResolvedLocationNavigation} from "./location.search.service";
 import {LocationNavigationService} from "./location-navigation.service";
+import {LocationSearchService, ResolvedLocationNavigation} from "./location.search.service";
 
 const areaResult: ResolvedLocationNavigation = {area: {label: "Place", rectangle: {west: 10, south: 47, east: 14, north: 49}}};
 
 /** Creates controlled transport and renderer lifecycles without bootstrapping the map. */
 function setup() {
     const response = new Subject<ResolvedLocationNavigation>();
-    const locations = {resolveNavigation: vi.fn<() => Observable<ResolvedLocationNavigation>>(() => response)};
+    const locations = {
+        resolveNavigation: vi.fn<() => Observable<ResolvedLocationNavigation>>(() => response),
+        createSearchTarget: (match: {id: string; name: string}) => ({id: `loc:mapget-offline:${match.id}`,
+            name: match.name, label: match.name, icon: "location_city", color: "green", enabled: true,
+            payload: match, validate: () => true})
+    };
     const camera = {destination: {lon: 1, lat: 2, alt: 300}, orientation: {heading: 0, pitch: -90, roll: 0}};
     const renderer = {rendererInvalidated: new Subject<void>(), getLiveCameraState: () => camera,
         isCameraInteractionActive: () => false, getCanvasClientRect: () => ({width: 600, height: 400}),
@@ -24,27 +30,58 @@ function setup() {
         moveToLocationAreaTopic: new Subject(), moveToRectangleTopic: new Subject(), moveToWgs84PositionTopic: new Subject(),
         clearLocationHighlightTopic: new Subject(), showLocationLabelTopic: new Subject(), presentationCameraViewStateTopic: new Subject(),
         locationBoundaryUnavailableTopic: new Subject<void>(), navigationStarted: new Subject<void>()};
-    const state = {focusedView: 0, focusedViewState: new BehaviorSubject(0), numViewsState: new BehaviorSubject(1),
-        viewSyncState: new BehaviorSubject([]), stateApplied: new Subject<void>(),
-        cameraViewDataState: {appState: new Subject<void>(), getValue: () => camera}};
     const diagnostics = {cameraInteracting: false, cameraInteracting$: new BehaviorSubject(false)};
     const jumps = {markedPosition: new Subject()};
     const messages = {showError: vi.fn(), showInfo: vi.fn()};
-    TestBed.configureTestingModule({providers: [LocationNavigationService,
-        {provide: LocationSearchService, useValue: locations}, {provide: MapViewStateService, useValue: views},
-        {provide: AppStateService, useValue: state}, {provide: ViewLayerDiagnosticsService, useValue: diagnostics},
-        {provide: JumpTargetService, useValue: jumps}, {provide: InfoMessageService, useValue: messages}]});
-    const service = TestBed.inject(LocationNavigationService);
+    const injector = ownerTestInjector([LocationNavigationService,
+        {provide: LocationSearchService, useValue: locations}, {provide: MapViewService, useValue: views},
+        {provide: ViewLayerDiagnosticsService, useValue: diagnostics},
+        {provide: JumpTargetService, useValue: jumps}, {provide: InfoMessageService, useValue: messages}]);
+    const persistence = injector.get(AppStateService);
+    const store = injector.get(AppStore);
+    setTestViewIds(store, ["left", "right"]);
+    store.setCameraViewData(0, {...camera, position: [0, 0, 0]});
+    const service = injector.get(LocationNavigationService);
     const area = vi.fn(), point = vi.fn(), marker = vi.fn();
     views.moveToLocationAreaTopic.subscribe(area);
     views.moveToWgs84PositionTopic.subscribe(point);
     jumps.markedPosition.subscribe(marker);
-    return {service, response, locations, renderer, views, state, diagnostics, jumps, messages, area, point, marker};
+    return {service, response, locations, renderer, views, store, persistence, diagnostics, jumps, messages, area, point, marker};
 }
 
-afterEach(() => TestBed.resetTestingModule());
 
 describe("Location navigation ownership", () => {
+    it("uses the typed candidate for a live lookup and rebuilds history after retirement", async () => {
+        const h = setup();
+        const match = {id: "wof:1", name: "Place", providerId: "mapget-offline", providerName: "Mapget"};
+        const candidate = h.service.createTarget(match);
+        await candidate.execute!("Place");
+        expect(h.locations.resolveNavigation).toHaveBeenCalledWith("loc:mapget-offline:wof:1", match);
+        setTestViewIds(h.store, ["right"]);
+        setTestViewIds(h.store, ["left", "right"]);
+        h.response.next(areaResult);
+        expect(h.area).not.toHaveBeenCalled();
+        await expect(candidate.execute!("Place")).rejects.toThrow("no longer available");
+        h.locations.resolveNavigation.mockReturnValueOnce(of(areaResult));
+        h.store.setFocusedView(0);
+        h.service.runFromHistory(candidate.id, match);
+        expect(h.area).toHaveBeenCalledExactlyOnceWith({targetView: 0, area: areaResult.area});
+    });
+
+    it("rejects a retired candidate before cancelling the current lookup", () => {
+        const h = setup();
+        const retired = h.store.captureView(0)!;
+        setTestViewIds(h.store, ["right"]);
+        setTestViewIds(h.store, ["left", "right"]);
+        h.store.setFocusedView(0);
+        h.service.navigate("loc:mapget-offline:current");
+
+        expect(() => h.service.navigate("loc:mapget-offline:old", undefined, retired)).toThrow();
+        expect(h.response.observed).toBe(true);
+        h.response.next(areaResult);
+        expect(h.area).toHaveBeenCalledExactlyOnceWith({targetView: 0, area: areaResult.area});
+    });
+
     it("commits an area once without creating a point marker", () => {
         const h = setup();
         h.service.navigate("loc:mapget-offline:wof:1");
@@ -64,16 +101,17 @@ describe("Location navigation ownership", () => {
         expect(h.marker).toHaveBeenCalledExactlyOnceWith([48, 11, 0]);
     });
 
-    it.each(["focus", "gesture", "renderer", "layout", "camera", "reset", "point", "rectangle", "async navigation", "cancel"])(
+    it.each(["focus", "gesture", "renderer", "renderer teardown", "layout", "camera", "reset", "point", "rectangle", "async navigation", "cancel"])(
         "discards delayed responses after %s, without fallback notices", event => {
             const h = setup();
             h.service.navigate("area");
-            if (event === "focus") { h.state.focusedView = 1; h.state.focusedViewState.next(1); }
+            if (event === "focus") { h.store.setFocusedView(1); }
             if (event === "gesture") h.diagnostics.cameraInteracting$.next(true);
             if (event === "renderer") h.renderer.rendererInvalidated.next();
-            if (event === "layout") h.views.viewLayoutRevision++;
-            if (event === "camera") { h.renderer.getLiveCameraState = () => ({destination: {lon: 3, lat: 4, alt: 500}, orientation: {heading: 0, pitch: -90, roll: 0}}); h.state.cameraViewDataState.appState.next(); }
-            if (event === "reset") h.state.stateApplied.next();
+            if (event === "renderer teardown") h.renderer.rendererInvalidated.complete();
+            if (event === "layout") h.store.retainViews([1], new Map());
+            if (event === "camera") { h.renderer.getLiveCameraState = () => ({destination: {lon: 3, lat: 4, alt: 500}, orientation: {heading: 0, pitch: -90, roll: 0}}); h.store.setCameraViewData(0, {...h.store.views.cameraViewData()[h.store.idAt(0)!], destination: {lon: 3, lat: 4, alt: 500}}); }
+            if (event === "reset") h.persistence.stateApplied.next();
             if (event === "point") h.views.moveToWgs84PositionTopic.next({});
             if (event === "rectangle") h.views.moveToRectangleTopic.next({});
             if (event === "async navigation") h.views.navigationStarted.next();

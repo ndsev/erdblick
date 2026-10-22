@@ -1,12 +1,12 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {AppStore} from "../shared/app.store";
 import "@angular/compiler";
 import {BehaviorSubject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
+import type {HoverLabelFieldConfig, TileFeatureId} from "../inspection/inspection-state.model";
+import {defaultHoverLabelFieldKey} from "../inspection/inspection-state.model";
 import {coreLib} from "../integrations/wasm";
-import type {
-    HoverLabelFieldConfig,
-    TileFeatureId
-} from "../shared/appstate.service";
-import {defaultHoverLabelFieldKey} from "../shared/appstate.service";
 import {HoverDetailService} from "./hover-detail.service";
 import {MapgetLayer} from "./mapget-layer.model";
 import {partitionKey, tilePartition} from "./partition.model";
@@ -16,18 +16,10 @@ function createHarness(
     initialFields: HoverLabelFieldConfig[],
     initialEnabled = true
 ) {
-    const hoverLabelFieldsState = new BehaviorSubject(initialFields);
-    const hoverLabelsEnabledState = new BehaviorSubject(initialEnabled);
-    const state = {
-        hoverLabelFieldsState,
-        hoverLabelsEnabledState,
-        get hoverLabelFields() {
-            return hoverLabelFieldsState.getValue();
-        },
-        get hoverLabelsEnabled() {
-            return hoverLabelsEnabledState.getValue();
-        }
-    };
+    const injector = ownerTestInjector();
+    const state = injector.get(AppStore);
+    state.setHoverLabelFields(initialFields);
+    state.setHoverLabelsEnabled(initialEnabled);
     const filterRefs: any[] = [];
     const tileStream = {
         createFilterSubscription: vi.fn((definition, _coverage, callbacks) => {
@@ -57,11 +49,11 @@ function createHarness(
     const mapInfo = {
         tileLayerParser: {readTileSubsetLayer: vi.fn()}
     };
-    const service = new HoverDetailService(
+    const service = runInInjectionContext(injector, () => new HoverDetailService(
         state as never,
         mapInfo as never,
         tileStream as never
-    );
+    ));
     const mapgetLayer = new MapgetLayer(
         "source",
         "pool",
@@ -156,14 +148,14 @@ describe("HoverDetailService", () => {
         }]);
 
         expect(tileStream.createFilterSubscription).toHaveBeenCalledOnce();
-        state.hoverLabelsEnabledState.next(false);
+        state.setHoverLabelsEnabled(false);
 
         expect(filterRefs[0].release).toHaveBeenCalledOnce();
         expect(service.detailsFor(0, [{
             mapTileKey: "Features:Map:Road:42:0",
             featureId: "Road.42"
         }])).toEqual([]);
-        expect(state.hoverLabelFieldsState.getValue()).toHaveLength(2);
+        expect(state.inspection.hoverLabelFields()).toHaveLength(2);
         service.ngOnDestroy();
     });
 

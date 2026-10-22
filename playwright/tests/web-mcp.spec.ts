@@ -1,6 +1,6 @@
 import {expect, test} from '../fixtures/test';
 import type {Page} from '@playwright/test';
-import {viewerActions} from '../../app/actions/viewer-action.contract';
+import {viewerActionNames} from '../utils/viewer-catalog';
 
 // Exercise the actual browser implementation, never an injected modelContext polyfill.
 // Chrome 153 supports document.modelContext behind the WebMCP flag and takes stringified input.
@@ -25,12 +25,12 @@ async function call(page: Page, name: string, input: Record<string, unknown> = {
 }
 
 test('native WebMCP discovers all tools, controls only this document and calls real mapget', async ({page, context}) => {
-    await page.goto('/?v2=1&n=1&lon=11&lat=48&alt=500&m2d=0&l=');
+    await page.goto('/?v2=1&n=1&vid=left&lon=11&lat=48&alt=500&m2d=0&l=');
     await page.getByTestId('viewer-action-status').click();
     await expect(page.getByTestId('viewer-action-details')).toContainText('WebMCP ready for this tab and mapget');
     const names = await page.evaluate(async () =>
         (await (document as Document & {modelContext: ModelContext}).modelContext.getTools()).map(tool => tool.name));
-    expect(names.filter(name => name.startsWith('viewer_')).sort()).toEqual(Object.keys(viewerActions).sort());
+    expect(names.filter(name => name.startsWith('viewer_')).sort()).toEqual(viewerActionNames.sort());
     expect(names).not.toContain('viewer_list_sessions');
     expect(names).toContain('mapget_docs');
     const native = await page.evaluate(async () => {
@@ -42,24 +42,24 @@ test('native WebMCP discovers all tools, controls only this document and calls r
     expect(names.filter(name => name.startsWith('mapget_')).sort()).toEqual(native.sort());
     const second = await context.newPage();
     try {
-        await second.goto('/?v2=1&n=1&lon=20&lat=50&alt=1000&m2d=0&l=');
+        await second.goto('/?v2=1&n=1&vid=left&lon=20&lat=50&alt=1000&m2d=0&l=');
         await expect.poll(() => second.evaluate(async () =>
             (await (document as Document & {modelContext: ModelContext}).modelContext.getTools()).map(tool => tool.name)))
-            .toContain('viewer_get_app_state');
-        const before = await call(page, 'viewer_get_app_state', {targets: [{channel: 'view.projection', viewIndex: 0}]});
-        const otherBefore = await call(second, 'viewer_get_app_state', {targets: [{channel: 'view.projection', viewIndex: 0}]});
-        const applied = await call(page, 'viewer_set_app_state', {
-            target: {channel: 'view.projection', viewIndex: 0}, value: '2d', viewLayoutRevision: before.viewLayoutRevision
+            .toContain('viewer_get_controls');
+        const before = await call(page, 'viewer_get_controls', {targets: [{control: 'view.projection', viewId: 'left'}]});
+        const otherBefore = await call(second, 'viewer_get_controls', {targets: [{control: 'view.projection', viewId: 'left'}]});
+        const applied = await call(page, 'viewer_set_control', {
+            target: {control: 'view.projection', viewId: 'left'}, value: '2d'
         });
         expect(applied).toMatchObject({status: 'applied', value: '2d'});
-        expect((await call(second, 'viewer_get_app_state', {targets: [{channel: 'view.projection', viewIndex: 0}]})).values)
+        expect((await call(second, 'viewer_get_controls', {targets: [{control: 'view.projection', viewId: 'left'}]})).values)
             .toEqual(otherBefore.values);
         const sources = await call(page, 'mapget_list_sources', {details: false});
         expect(sources.isError).toBe(false);
         expect(sources.structuredContent.items.length).toBeGreaterThan(0);
-        const badInput = await call(page, 'viewer_get_app_state', {clientId: 'not-this-document'});
+        const badInput = await call(page, 'viewer_get_controls', {clientId: 'not-this-document'});
         expect(badInput).toMatchObject({isError: true, error: {code: 'invalid_arguments'}});
-        await expect(page.getByTestId('viewer-action-details')).toContainText('viewer_set_app_state');
+        await expect(page.getByTestId('viewer-action-details')).toContainText('viewer_set_control');
         await page.reload();
         await expect.poll(async () => page.evaluate(async () =>
             (await (document as Document & {modelContext: ModelContext}).modelContext.getTools()).length)).toBe(names.length);

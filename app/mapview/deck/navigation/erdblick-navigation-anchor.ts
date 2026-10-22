@@ -1,6 +1,6 @@
 import type {Deck, PickingInfo} from "@deck.gl/core";
 import {addMetersToLngLat} from "@math.gl/web-mercator";
-import type {TileFeatureId} from "../../../shared/appstate.service";
+import type {TileFeatureId} from "../../../inspection/inspection-state.model";
 import type {
     NavigationAnchor,
     NavigationScreenPosition,
@@ -67,11 +67,14 @@ export function pickNavigationAnchor<ValueT>(
     });
     let firstMatch: NavigationAnchorPick<ValueT> | undefined;
     for (const picked of pickedObjects) {
-        const target = navigationTargetFromPickingInfo({
-            ...picked,
-            x: screenPosition[0],
-            y: screenPosition[1]
-        }, radius);
+        const target = navigationTargetFromPickingInfo(
+            {
+                ...picked,
+                x: screenPosition[0],
+                y: screenPosition[1]
+            },
+            radius
+        );
         if (!target) {
             continue;
         }
@@ -108,27 +111,17 @@ export function navigationTargetFromPickingInfo(
     if (!layerProps?.navigationAnchorEligible) {
         return null;
     }
-    const position = physicalAnchorFromPickingInfo(
-        picked,
-        layerProps,
-        maxScreenDistancePx,
-        preferPickedCoordinate
-    );
+    const position = physicalAnchorFromPickingInfo(picked, layerProps, maxScreenDistancePx, preferPickedCoordinate);
     if (!position) {
         return null;
     }
     const surfaceNormal = surfaceNormalFromPickingInfo(picked, layerProps);
     const origin = navigationTargetOrigin(picked, layerProps);
-    return surfaceNormal
-        ? {position, surfaceNormal, origin}
-        : {position, origin};
+    return surfaceNormal ? {position, surfaceNormal, origin} : {position, origin};
 }
 
 /** Classifies renderer-owned pick proxies without exposing that metadata to deck.gl. */
-function navigationTargetOrigin(
-    picked: PickingInfo,
-    layerProps: DeckFeaturePickLayerProps
-): NavigationTargetOrigin {
+function navigationTargetOrigin(picked: PickingInfo, layerProps: DeckFeaturePickLayerProps): NavigationTargetOrigin {
     if (layerProps.pathCenterline) {
         return "path";
     }
@@ -142,11 +135,7 @@ function navigationTargetOrigin(
 export function markerAnchorFromPickingInfo(picked: PickingInfo): NavigationAnchor | null {
     const layerProps = picked.layer?.props as DeckFeaturePickLayerProps | undefined;
     return layerProps?.markerAnchorEligible
-        ? physicalAnchorFromPickingInfo(
-            picked,
-            layerProps,
-            NAVIGATION_PICK_RADIUS_PIXELS
-        )
+        ? physicalAnchorFromPickingInfo(picked, layerProps, NAVIGATION_PICK_RADIUS_PIXELS)
         : null;
 }
 
@@ -163,10 +152,7 @@ function physicalAnchorFromPickingInfo(
     // point whose physical altitude is wrong enough to move the controller's
     // true rotation center. Scene picks expose their physical altitude, so
     // intersect the pointer ray with that plane below instead.
-    if (preferPickedCoordinate
-        && !layerProps.navigationAltitudeResolver
-        && coordinate
-        && coordinate.length >= 3) {
+    if (preferPickedCoordinate && !layerProps.navigationAltitudeResolver && coordinate && coordinate.length >= 3) {
         const position: NavigationAnchor = [coordinate[0], coordinate[1], coordinate[2]];
         if (position.every(Number.isFinite)) {
             return position;
@@ -174,29 +160,24 @@ function physicalAnchorFromPickingInfo(
     }
 
     if (layerProps.pathCenterline) {
-        const pathAnchor = nearestPathCenterlineAnchor(
-            picked,
-            layerProps.pathCenterline,
-            maxScreenDistancePx
-        );
+        const pathAnchor = nearestPathCenterlineAnchor(picked, layerProps.pathCenterline, maxScreenDistancePx);
         return pathAnchor;
     }
 
     const pickedIndex = Number(picked.index);
-    if (layerProps.anchorPositions
-        && layerProps.coordinateOrigin
-        && Number.isInteger(pickedIndex)
-        && pickedIndex >= 0) {
+    if (
+        layerProps.anchorPositions &&
+        layerProps.coordinateOrigin &&
+        Number.isInteger(pickedIndex) &&
+        pickedIndex >= 0
+    ) {
         const offset = pickedIndex * 3;
         if (offset + 2 < layerProps.anchorPositions.length) {
-            return meterOffsetAnchor(
-                layerProps.coordinateOrigin,
-                [
-                    Number(layerProps.anchorPositions[offset]),
-                    Number(layerProps.anchorPositions[offset + 1]),
-                    Number(layerProps.anchorPositions[offset + 2])
-                ]
-            );
+            return meterOffsetAnchor(layerProps.coordinateOrigin, [
+                Number(layerProps.anchorPositions[offset]),
+                Number(layerProps.anchorPositions[offset + 1]),
+                Number(layerProps.anchorPositions[offset + 2])
+            ]);
         }
     }
 
@@ -217,29 +198,18 @@ function physicalAnchorFromPickingInfo(
         }
     }
 
-    const globalPickIndex = Number(
-        picked.object?.globalPickIndex ?? picked.index
-    );
+    const globalPickIndex = Number(picked.object?.globalPickIndex ?? picked.index);
     const navigationAltitude = Number.isInteger(globalPickIndex)
         ? layerProps.navigationAltitudeResolver?.(globalPickIndex)
         : undefined;
-    if (typeof navigationAltitude === "number"
-        && Number.isFinite(navigationAltitude)
-        && picked.viewport) {
+    if (typeof navigationAltitude === "number" && Number.isFinite(navigationAltitude) && picked.viewport) {
         const screenPosition = [
             Number(picked.x) - Number(picked.viewport.x ?? 0),
             Number(picked.y) - Number(picked.viewport.y ?? 0)
         ];
         if (screenPosition.every(Number.isFinite)) {
-            const unprojected = picked.viewport.unproject(
-                screenPosition,
-                {targetZ: navigationAltitude}
-            );
-            const position: NavigationAnchor = [
-                Number(unprojected[0]),
-                Number(unprojected[1]),
-                Number(unprojected[2])
-            ];
+            const unprojected = picked.viewport.unproject(screenPosition, {targetZ: navigationAltitude});
+            const position: NavigationAnchor = [Number(unprojected[0]), Number(unprojected[1]), Number(unprojected[2])];
             if (position.every(Number.isFinite)) {
                 return position;
             }
@@ -259,9 +229,7 @@ function surfaceNormalFromPickingInfo(
     layerProps: DeckFeaturePickLayerProps
 ): NavigationSurfaceNormal | null {
     const pickedIndex = Number(picked.index);
-    if (!layerProps.surfaceNormals
-        || !Number.isInteger(pickedIndex)
-        || pickedIndex < 0) {
+    if (!layerProps.surfaceNormals || !Number.isInteger(pickedIndex) || pickedIndex < 0) {
         return null;
     }
     const offset = pickedIndex * 3;
@@ -280,10 +248,7 @@ function surfaceNormalFromPickingInfo(
 }
 
 /** Converts one local meter-offset coordinate into its layer's WGS84 frame. */
-function meterOffsetAnchor(
-    coordinateOrigin: NavigationAnchor,
-    offset: NavigationAnchor
-): NavigationAnchor | null {
+function meterOffsetAnchor(coordinateOrigin: NavigationAnchor, offset: NavigationAnchor): NavigationAnchor | null {
     const position = addMetersToLngLat(coordinateOrigin, offset);
     if (position.length < 3 || !position.every(Number.isFinite)) {
         return null;
@@ -303,13 +268,15 @@ function nearestPathCenterlineAnchor(
         Number(picked.x) - Number(viewport?.x ?? 0),
         Number(picked.y) - Number(viewport?.y ?? 0)
     ];
-    if (!path
-        || !picked.layer
-        || !viewport
-        || !screenPosition.every(Number.isFinite)
-        || !Number.isInteger(pathIndex)
-        || pathIndex < 0
-        || pathIndex + 1 >= path.startIndices.length) {
+    if (
+        !path ||
+        !picked.layer ||
+        !viewport ||
+        !screenPosition.every(Number.isFinite) ||
+        !Number.isInteger(pathIndex) ||
+        pathIndex < 0 ||
+        pathIndex + 1 >= path.startIndices.length
+    ) {
         return null;
     }
 
@@ -355,8 +322,7 @@ function nearestPathCenterlineAnchor(
             };
         }
     }
-    if (!bestSegment
-        || bestDistanceSquared > Math.max(0, maxScreenDistancePx) ** 2) {
+    if (!bestSegment || bestDistanceSquared > Math.max(0, maxScreenDistancePx) ** 2) {
         return null;
     }
     const fraction = bestSegment.fraction;
@@ -388,11 +354,7 @@ function closestVisibleProjectedSegmentPoint(
 ): {fraction: number; distanceSquared: number} | null {
     let firstProjected = homogeneousProjection(pixelProjectionMatrix, first, 0);
     let secondProjected = homogeneousProjection(pixelProjectionMatrix, second, 1);
-    const minimumW = Math.max(
-        1,
-        Math.abs(firstProjected.w),
-        Math.abs(secondProjected.w)
-    ) * 1e-9;
+    const minimumW = Math.max(1, Math.abs(firstProjected.w), Math.abs(secondProjected.w)) * 1e-9;
     if (firstProjected.w <= minimumW && secondProjected.w <= minimumW) {
         return null;
     }
@@ -402,49 +364,40 @@ function closestVisibleProjectedSegmentPoint(
         secondProjected = clipProjectedEndpoint(secondProjected, firstProjected, minimumW);
     }
 
-    const firstScreen = [
-        firstProjected.x / firstProjected.w,
-        firstProjected.y / firstProjected.w
-    ];
-    const secondScreen = [
-        secondProjected.x / secondProjected.w,
-        secondProjected.y / secondProjected.w
-    ];
+    const firstScreen = [firstProjected.x / firstProjected.w, firstProjected.y / firstProjected.w];
+    const secondScreen = [secondProjected.x / secondProjected.w, secondProjected.y / secondProjected.w];
     if (![...firstScreen, ...secondScreen].every(Number.isFinite)) {
         return null;
     }
     const dx = secondScreen[0] - firstScreen[0];
     const dy = secondScreen[1] - firstScreen[1];
     const lengthSquared = dx * dx + dy * dy;
-    const screenFraction = lengthSquared > 0
-        ? Math.max(0, Math.min(1, (
-            (screenPosition[0] - firstScreen[0]) * dx
-            + (screenPosition[1] - firstScreen[1]) * dy
-        ) / lengthSquared))
-        : 0;
+    const screenFraction =
+        lengthSquared > 0
+            ? Math.max(
+                  0,
+                  Math.min(
+                      1,
+                      ((screenPosition[0] - firstScreen[0]) * dx + (screenPosition[1] - firstScreen[1]) * dy) /
+                          lengthSquared
+                  )
+              )
+            : 0;
     const nearestX = firstScreen[0] + dx * screenFraction;
     const nearestY = firstScreen[1] + dy * screenFraction;
-    const denominator = screenFraction * firstProjected.w
-        + (1 - screenFraction) * secondProjected.w;
+    const denominator = screenFraction * firstProjected.w + (1 - screenFraction) * secondProjected.w;
     if (!Number.isFinite(denominator) || Math.abs(denominator) <= 1e-12) {
         return null;
     }
-    const clippedFraction = screenFraction * firstProjected.w / denominator;
+    const clippedFraction = (screenFraction * firstProjected.w) / denominator;
     return {
-        fraction: firstProjected.fraction
-            + (secondProjected.fraction - firstProjected.fraction) * clippedFraction,
-        distanceSquared:
-            (screenPosition[0] - nearestX) ** 2
-            + (screenPosition[1] - nearestY) ** 2
+        fraction: firstProjected.fraction + (secondProjected.fraction - firstProjected.fraction) * clippedFraction,
+        distanceSquared: (screenPosition[0] - nearestX) ** 2 + (screenPosition[1] - nearestY) ** 2
     };
 }
 
 /** Multiplies one common-space position by deck's column-major pixel projection matrix. */
-function homogeneousProjection(
-    matrix: number[],
-    position: number[],
-    fraction: number
-): HomogeneousProjectedPoint {
+function homogeneousProjection(matrix: number[], position: number[], fraction: number): HomogeneousProjectedPoint {
     const x = Number(position[0]);
     const y = Number(position[1]);
     const z = Number(position[2]);
@@ -467,7 +420,6 @@ function clipProjectedEndpoint(
         x: endpoint.x + (visibleEndpoint.x - endpoint.x) * fraction,
         y: endpoint.y + (visibleEndpoint.y - endpoint.y) * fraction,
         w: minimumW,
-        fraction: endpoint.fraction
-            + (visibleEndpoint.fraction - endpoint.fraction) * fraction
+        fraction: endpoint.fraction + (visibleEndpoint.fraction - endpoint.fraction) * fraction
     };
 }

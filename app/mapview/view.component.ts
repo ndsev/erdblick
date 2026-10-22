@@ -1,66 +1,56 @@
-import {
-    AppStateService,
-    type TileFeatureId
-} from "../shared/appstate.service";
+import {observeStore} from "../shared/persisted-state";
+import {AppStore} from "../shared/app.store";
 import {
     AfterViewInit,
     ChangeDetectorRef,
     Component,
+    computed,
     ElementRef,
+    inject,
+    input,
     NgZone,
     OnDestroy,
     OnInit,
-    ViewChild,
-    input,
-    InputSignal
+    ViewChild
 } from "@angular/core";
-import {MapInfoService} from "../mapdata/map-info.service";
-import {MapViewStateService, ViewRecalculationReason} from "./map-view-state.service";
-import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
-import {InspectionSelectionService} from "../inspection/inspection-selection.service";
-import {FeatureSearchService} from "../search/feature.search.service";
-import {CoordinatesService} from "../coords/coordinates.service";
-import {JumpTargetService} from "../search/jump.service";
-import {KeyboardService} from "../shared/keyboard.service";
 import {MenuItem} from "primeng/api";
 import {ContextMenu} from "primeng/contextmenu";
+import {combineLatest, Subscription} from "rxjs";
+import {filter} from "rxjs/operators";
+import {CoordinatesService} from "../coords/coordinates.service";
+import {environment} from "../environments/environment";
+import {InspectionSelectionService} from "../inspection/inspection-selection.service";
+import {type TileFeatureId} from "../inspection/inspection-state.model";
+
+import {inspectionValueBubbleClasses} from "../inspection/inspection-value-bubble.presentation";
+import {coreLib} from "../integrations/wasm";
+import {CacheResetService} from "../mapdata/cache-reset.service";
+import {HoverDetailService, type HoverDetailField, type HoverFeatureDetails} from "../mapdata/hover-detail.service";
+import {MapInfoService} from "../mapdata/map-info.service";
+
+import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import {FeatureSearchService} from "../search/feature.search.service";
+import {JumpTargetService} from "../search/jump.service";
+import {AppConfigService} from "../shared/app-config.service";
+import {AppModeService} from "../shared/app-mode.service";
+import {AppStateService} from "../shared/appstate.service";
+import {KeyboardService} from "../shared/keyboard.service";
+import {StyleValidationReportService} from "../styledata/style-validation-report.service";
+import {StyleService} from "../styledata/style.service";
+import {DeckMapView2D} from "./deck/deck-view2d";
+import {DeckMapView3D} from "./deck/deck-view3d";
+import {TileSubsetLayerRenderService} from "./deck/tile-subset-layer-render.service";
+
+import {MapViewService, ViewRecalculationReason} from "./map-view.service";
+import {IRenderView, MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT, RenderNavigationTarget} from "./render-view.model";
 import {
     FirstPersonViewMenuRequest,
     RightClickMenuService,
     SourceDataDropdownOption,
     TileDiagnosticsMenuOption
 } from "./rightclickmenu.service";
-import {AppModeService} from "../shared/app-mode.service";
-import {DeckMapView2D} from "./deck/deck-view2d";
-import {DeckMapView3D} from "./deck/deck-view3d";
-import {
-    IRenderView,
-    MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT,
-    RenderNavigationTarget
-} from "./render-view.model";
-import {combineLatest, Subscription} from "rxjs";
-import {filter} from "rxjs/operators";
-import {environment} from "../environments/environment";
-import {coreLib} from "../integrations/wasm";
-import {AppConfigService} from "../shared/app-config.service";
-import {StyleService} from "../styledata/style.service";
+import {ViewLayerDiagnosticsService} from "./view-layer-diagnostics.service";
 import {ViewLayerController} from "./view-layer.controller";
-import {
-    TileSubsetLayerRenderService
-} from "./deck/tile-subset-layer-render.service";
-import {
-    ViewLayerDiagnosticsService
-} from "./view-layer-diagnostics.service";
-import {
-    StyleValidationReportService
-} from "../styledata/style-validation-report.service";
-import {CacheResetService} from "../mapdata/cache-reset.service";
-import {
-    HoverDetailService,
-    type HoverDetailField,
-    type HoverFeatureDetails
-} from "../mapdata/hover-detail.service";
-import {inspectionValueBubbleClasses} from "../inspection/inspection-value-bubble.presentation";
 
 interface PreparedContextMenuPosition {
     screenPos: {x: number; y: number};
@@ -70,14 +60,16 @@ interface PreparedContextMenuPosition {
 }
 
 @Component({
-    selector: 'map-view',
+    selector: "map-view",
     template: `
-        <div #viewer
-             [ngClass]="{'border': outlined}"
-             [id]="canvasId"
-             [attr.data-testid]="canvasId"
-             class="mapviewer-renderlayer"
-             style="z-index: 0"></div>
+        <div
+            #viewer
+            [ngClass]="{border: outlined()}"
+            [id]="canvasId"
+            [attr.data-testid]="canvasId"
+            class="mapviewer-renderlayer"
+            style="z-index: 0"
+        ></div>
         @if (viewerInitError) {
             <div class="mapviewer-error-state" role="alert">
                 <span class="material-symbols-outlined">warning</span>
@@ -88,12 +80,14 @@ interface PreparedContextMenuPosition {
             </div>
         }
         @if (mapView?.isFirstPersonViewActive()) {
-            <p-button class="first-person-exit-button"
-                      [attr.data-testid]="'exit-first-person-view-' + viewIndex()"
-                      label="Exit First Person View"
-                      severity="primary"
-                      size="small"
-                      (onClick)="exitFirstPersonView()">
+            <p-button
+                class="first-person-exit-button"
+                [attr.data-testid]="'exit-first-person-view-' + viewIndex()"
+                label="Exit First Person View"
+                severity="primary"
+                size="small"
+                (onClick)="exitFirstPersonView()"
+            >
                 <ng-template #icon let-iconClass="class">
                     <span [class]="iconClass + ' material-symbols-outlined'">ar_on_you</span>
                 </ng-template>
@@ -101,12 +95,18 @@ interface PreparedContextMenuPosition {
         }
         @if (!environment.visualizationOnly && showSyncMenu) {
             <p-buttonGroup class="viewsync-select" data-testid="viewsync-select">
-                @for (option of stateService.syncOptions; track option.code) {
-                    <p-toggleButton onIcon="" offIcon=""
-                                    [ngModel]="isSyncOptionSelected(option.code)"
-                                    [ngClass]="{'green': isSyncOptionSelected(option.code)}"
-                                    (ngModelChange)="onSyncOptionToggle(option.code, $event)"
-                                    onLabel="" offLabel="" pTooltip="{{option.tooltip}}" tooltipPosition="bottom">
+                @for (option of store.syncOptions; track option.code) {
+                    <p-toggleButton
+                        onIcon=""
+                        offIcon=""
+                        [ngModel]="isSyncOptionSelected(option.code)"
+                        [ngClass]="{green: isSyncOptionSelected(option.code)}"
+                        (ngModelChange)="onSyncOptionToggle(option.code, $event)"
+                        onLabel=""
+                        offLabel=""
+                        pTooltip="{{ option.tooltip }}"
+                        tooltipPosition="bottom"
+                    >
                         <ng-template #icon>
                             <span class="material-symbols-outlined">{{ option.icon }}</span>
                         </ng-template>
@@ -115,22 +115,32 @@ interface PreparedContextMenuPosition {
             </p-buttonGroup>
         }
         @if (!appModeService.isVisualizationOnly && !isNarrow) {
-            <p-contextMenu #viewerContextMenu [model]="menuItems" (onShow)="onContextMenuShow()"
-                           (onHide)="onContextMenuHide()" appendTo="body">
+            <p-contextMenu
+                #viewerContextMenu
+                [model]="menuItems"
+                (onShow)="onContextMenuShow()"
+                (onHide)="onContextMenuHide()"
+                appendTo="body"
+            >
                 <ng-template #item let-item>
-                    <a pRipple class="p-contextmenu-item-link"
-                       [attr.data-automationid]="item.automationId"
-                       [attr.title]="item.title"
-                       (mouseenter)="onContextMenuItemHover(item)"
-                       (mouseleave)="onContextMenuItemHoverExit(item)">
+                    <a
+                        pRipple
+                        class="p-contextmenu-item-link"
+                        [attr.data-automationid]="item.automationId"
+                        [attr.title]="item.title"
+                        (mouseenter)="onContextMenuItemHover(item)"
+                        (mouseleave)="onContextMenuItemHoverExit(item)"
+                    >
                         @if (item.icon) {
                             <span class="p-contextmenu-item-icon" [ngClass]="item.icon"></span>
                         }
                         @if (item.mapIdLabel) {
-                            <p-tag class="picked-feature-map-tag"
-                                   severity="contrast"
-                                   [rounded]="true"
-                                   [value]="item.mapIdLabel"/>
+                            <p-tag
+                                class="picked-feature-map-tag"
+                                severity="contrast"
+                                [rounded]="true"
+                                [value]="item.mapIdLabel"
+                            />
                         }
                         <span class="p-contextmenu-item-label">{{ item.label }}</span>
                         @if (item.items?.length) {
@@ -147,18 +157,19 @@ interface PreparedContextMenuPosition {
             <erdblick-view-ui [mapView]="mapView!" [is2D]="is2DMode"></erdblick-view-ui>
         }
         @if (hoverDetailsContent.length) {
-            <div class="feature-hover-hud hover-label-surface"
-                 role="tooltip"
-                 [style.left.px]="hoverHudCenterX"
-                 [style.--hover-hud-layout-width]="hoverHudMaxWidth + 'px'">
+            <div
+                class="feature-hover-hud hover-label-surface"
+                role="tooltip"
+                [style.left.px]="hoverHudCenterX"
+                [style.--hover-hud-layout-width]="hoverHudMaxWidth + 'px'"
+            >
                 @for (feature of hoverDetailsContent; track feature.featureId) {
                     <div class="hover-label-feature">
                         @if (feature.showFeatureId) {
                             <span class="hover-label-feature-id">{{ feature.featureId }}</span>
                         }
                         @for (field of feature.fields; track $index) {
-                            <span class="hover-label-field"
-                                  [ngClass]="hoverValuePillClasses(field)">
+                            <span class="hover-label-field" [ngClass]="hoverValuePillClasses(field)">
                                 <span class="hover-label-key">{{ field.key }}</span>
                                 <span class="hover-label-value">{{ field.value }}</span>
                             </span>
@@ -175,21 +186,25 @@ interface PreparedContextMenuPosition {
  * It owns renderer creation, hover details, right-click context-menu preparation, and view-local mode toggles.
  */
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
+    readonly store = inject(AppStore);
+
+
     private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 4;
     private static readonly SOURCE_DATA_TILE_LEVEL_COUNT = 16;
     private static readonly WEBGL_SETUP_HINT =
         "Ensure WebGL2 is available and browser hardware acceleration is enabled. " +
         "If hardware acceleration is unavailable, switch the browser to a supported software WebGL renderer " +
         "(this is controlled by the browser). Reload the page afterwards.";
-    protected readonly isSyncOptionSelected = (code: string) => this.stateService.viewSync.includes(code);
+    protected readonly isSyncOptionSelected = (code: string) => this.store.views.viewSync().includes(code);
 
     subscriptions: Subscription[] = [];
     menuItems: MenuItem[] = [];
     is2DMode: boolean = false;
     mapView?: IRenderView;
     viewerInitError = "";
-    viewIndex: InputSignal<number> = input.required<number>();
-    outlined: boolean = false;
+    viewId = input.required<string>();
+    readonly viewIndex = computed(() => this.store.viewIds().indexOf(this.viewId()));
+    readonly outlined = computed(() => this.store.numViews() > 1 && this.viewId() === this.store.focusedViewId());
     showSyncMenu: boolean = false;
     isNarrow: boolean = false;
     @ViewChild('viewer', { static: true }) viewerElement!: ElementRef<HTMLDivElement>;
@@ -232,40 +247,37 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * Constructs the host component for one deck-backed view, wiring in the shared
      * map, search, config, and input services the renderer depends on.
      */
-    constructor(public mapService: MapInfoService,
-                public mapViewState: MapViewStateService,
-                public tileStream: MapTileStreamService,
-                public inspectionSelection: InspectionSelectionService,
-                public featureSearchService: FeatureSearchService,
-                public stateService: AppStateService,
-                public jumpService: JumpTargetService,
-                public keyboardService: KeyboardService,
-                public menuService: RightClickMenuService,
-                public coordinatesService: CoordinatesService,
-                public appModeService: AppModeService,
-                public configService: AppConfigService,
-                private styleService: StyleService,
-                private subsetRenderService: TileSubsetLayerRenderService,
-                private cacheResetService: CacheResetService,
-                private hoverDetails: HoverDetailService,
-                private viewLayerDiagnostics: ViewLayerDiagnosticsService,
-                private styleValidationReports: StyleValidationReportService,
-                private cdr: ChangeDetectorRef,
-                private ngZone: NgZone
+    constructor(
+        public mapService: MapInfoService,
+        public mapViewState: MapViewService,
+        public tileStream: MapTileStreamService,
+        public inspectionSelection: InspectionSelectionService,
+        public featureSearchService: FeatureSearchService,
+        public stateService: AppStateService,
+        public jumpService: JumpTargetService,
+        public keyboardService: KeyboardService,
+        public menuService: RightClickMenuService,
+        public coordinatesService: CoordinatesService,
+        public appModeService: AppModeService,
+        public configService: AppConfigService,
+        private styleService: StyleService,
+        private subsetRenderService: TileSubsetLayerRenderService,
+        private cacheResetService: CacheResetService,
+        private hoverDetails: HoverDetailService,
+        private viewLayerDiagnostics: ViewLayerDiagnosticsService,
+        private styleValidationReports: StyleValidationReportService,
+        private cdr: ChangeDetectorRef,
+        private ngZone: NgZone
     ) {
-        this.subscriptions.push(
-            this.stateService.focusedViewState.subscribe(focusedViewIndex => {
-                this.outlined = this.stateService.numViews > 1 && this.mapView?.viewIndex === focusedViewIndex;
-            })
-        );
+
     }
 
     /** Mirrors one sync toggle button back into the canonical view-sync selection. */
     onSyncOptionToggle(code: string, enabled: boolean): void {
         const nextSelection = enabled
-            ? [...this.stateService.viewSync, code]
-            : this.stateService.viewSync.filter(currentCode => currentCode !== code);
-        this.stateService.updateSelectedSyncOptions(nextSelection);
+            ? [...this.store.views.viewSync(), code]
+            : this.store.views.viewSync().filter((currentCode) => currentCode !== code);
+        this.store.updateSelectedSyncOptions(nextSelection);
     }
 
     /** Registers menu subscriptions and viewport-size listeners once the component inputs are available. */
@@ -298,14 +310,14 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.initializingMapView?.prepareForViewRemoval();
                 this.disposeView();
             }),
-            this.menuService.menuItems.subscribe(items => {
+            this.menuService.menuItems.subscribe((items) => {
                 this.menuItems = [...items];
-                if (this.stateService.numViews === 1) {
+                if (this.store.numViews() === 1) {
                     this.menuItems.push({
-                        label: 'Split View',
-                        icon: 'pi pi-plus',
+                        label: "Split View",
+                        icon: "pi pi-plus",
                         command: () => {
-                            this.stateService.numViews += 1;
+                            this.store.setNumViews(this.store.numViews() + 1);
                         }
                     });
                 } else {
@@ -382,11 +394,16 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
         this.setupViewerContextMenuHandling();
         this.modeSubscription = combineLatest([
-            this.stateService.ready.pipe(filter(ready => ready)),
-            this.stateService.mode2dState.pipe(this.viewIndex()),
-            this.stateService.deckAntialiasingEnabledState,
-            this.stateService.semanticCompositingEnabledState
-        ]).subscribe(([_, mode2d, antialiasingEnabled, semanticCompositingEnabled]) => {
+            this.stateService.ready.pipe(filter((ready) => ready)),
+            // One native selector observes the complete renderer configuration in a
+            // publication, so a combined projection/preference edit creates one canvas.
+            observeStore(this.store, state => [
+                state.views.mode2d[this.viewId()],
+                state.views.deckAntialiasingEnabled,
+                state.views.semanticCompositingEnabled
+            ] as const, (previous, current) => previous.every((value, index) => value === current[index]))
+                .pipe(filter(([mode2d]) => mode2d !== undefined))
+        ]).subscribe(([_, [mode2d, antialiasingEnabled, semanticCompositingEnabled]]) => {
             const needsRebuild =
                 this.is2DMode !== mode2d ||
                 this.deckAntialiasingEnabled !== antialiasingEnabled ||
@@ -464,17 +481,35 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
         const mapView: IRenderView = is2D
             ? new DeckMapView2D(
-                this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
-                this.inspectionSelection, this.featureSearchService,
-                this.menuService, this.coordinatesService, this.stateService, this.configService,
-                this.layerController!
-            )
+                  this.viewIndex(),
+                  this.canvasId,
+                  this.mapService,
+                  this.mapViewState,
+                  this.tileStream,
+                  this.inspectionSelection,
+                  this.featureSearchService,
+                  this.menuService,
+                  this.coordinatesService,
+                  this.stateService,
+                  this.configService,
+                  this.layerController!,
+                  this.store
+              )
             : new DeckMapView3D(
-                this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
-                this.inspectionSelection, this.featureSearchService,
-                this.menuService, this.coordinatesService, this.stateService, this.configService,
-                this.layerController!
-            );
+                  this.viewIndex(),
+                  this.canvasId,
+                  this.mapService,
+                  this.mapViewState,
+                  this.tileStream,
+                  this.inspectionSelection,
+                  this.featureSearchService,
+                  this.menuService,
+                  this.coordinatesService,
+                  this.stateService,
+                  this.configService,
+                  this.layerController!,
+                  this.store
+              );
         mapView.setDesktopDrillPickingEnabled(!this.isNarrow);
         this.initializingMapView = mapView;
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
@@ -576,12 +611,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                     if (spinner) {
                         spinner.style.display = 'none';
                     }
-                    this.stateService.focusedView = this.stateService.focusedView.valueOf();
                     const mapView = this.mapView;
                     if (!mapView) {
                         this.cdr.markForCheck();
                     } else {
-                        this.showSyncMenu = this.stateService.numViews > 1 && mapView.viewIndex > 0;
+                        this.showSyncMenu = this.store.numViews() > 1 && mapView.viewIndex > 0;
                         this.firstPersonViewActiveSubscription = mapView.firstPersonViewActive.subscribe(() => {
                             this.cdr.markForCheck();
                         });
@@ -612,15 +646,18 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
 
     /** Applies the inspection value-bubble presentation to one joined hover key/value pill. */
     protected hoverValuePillClasses(field: HoverDetailField): Record<string, boolean> {
-        return inspectionValueBubbleClasses({
-            kind: "scalar",
-            colorKey: field.colorKey,
-            label: field.key
-        }, {
-            varyColors: this.stateService.inspectionValueVaryColors,
-            varyOutlines: this.stateService.inspectionValueVaryOutlines,
-            varyStriping: this.stateService.inspectionValueVaryStriping
-        });
+        return inspectionValueBubbleClasses(
+            {
+                kind: "scalar",
+                colorKey: field.colorKey,
+                label: field.key
+            },
+            {
+                varyColors: this.store.inspection.inspectionValueVaryColors(),
+                varyOutlines: this.store.inspection.inspectionValueVaryOutlines(),
+                varyStriping: this.store.inspection.inspectionValueVaryStriping()
+            }
+        );
     }
 
     /** Returns the DOM id used for this map view canvas. */
@@ -749,16 +786,20 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /** Prepares source-data context and opens the PrimeNG context menu at the supplied screen position. */
-    private openContextMenu(menu: ContextMenu, event: {clientX: number; clientY: number; pageX: number; pageY: number}) {
+    private openContextMenu(
+        menu: ContextMenu,
+        event: {clientX: number; clientY: number; pageX: number; pageY: number}
+    ) {
         this.menuService.closeAllContextMenus();
         const screenPos = this.contextMenuScreenPosition(event);
-        const featureIds = screenPos && this.mapView
-            ? this.mapView.drillPickFeatures(
-                screenPos,
-                this.stateService.drillPickRadius,
-                this.stateService.inspectionsLimit
-            ).featureIds
-            : [];
+        const featureIds =
+            screenPos && this.mapView
+                ? this.mapView.drillPickFeatures(
+                      screenPos,
+                      this.store.inspection.drillPickRadius(),
+                      this.store.inspection.inspectionsLimit()
+                  ).featureIds
+                : [];
         this.menuService.setPickedFeatures(featureIds);
         let contextPosition: PreparedContextMenuPosition | null = null;
         try {
@@ -789,7 +830,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         if (!this.mapView) {
             return null;
         }
-        this.stateService.focusedView = this.viewIndex();
+        this.store.setFocusedView(this.viewIndex());
         const canvasRect = this.mapView.getCanvasClientRect();
         return {
             x: event.clientX - canvasRect.left,

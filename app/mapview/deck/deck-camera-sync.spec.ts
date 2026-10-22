@@ -1,7 +1,10 @@
+import {AppStore} from "../../shared/app.store";
+import {ownerTestInjector} from "../../../test/owner-test-injector";
 import "@angular/compiler";
+import {Subject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 
-import {VIEW_SYNC_POSITION} from "../../shared/appstate.service";
+import {VIEW_SYNC_POSITION} from "../map-view-state.model";
 import {DeckMapView3D} from "./deck-view3d";
 
 interface CameraSyncTestInternals {
@@ -15,11 +18,7 @@ interface CameraSyncTestInternals {
         maxPitch: number;
         position: [number, number, number];
     };
-    stateService: {
-        numViews: number;
-        viewSync: string[];
-        setView: ReturnType<typeof vi.fn>;
-    };
+    store: AppStore;
     mapViewState: {
         publishLiveCameraViewState: ReturnType<typeof vi.fn>;
     };
@@ -40,11 +39,11 @@ function createView(): CameraSyncTestInternals {
         {} as never,
         {} as never,
         {} as never,
-        {} as never
+        {} as never, ownerTestInjector().get(AppStore)
     ) as unknown as CameraSyncTestInternals;
-    view.stateService.numViews = 2;
-    view.stateService.viewSync = [VIEW_SYNC_POSITION];
-    view.stateService.setView = vi.fn();
+    view.store.setNumViews(2);
+    view.store.updateSelectedSyncOptions([VIEW_SYNC_POSITION]);
+    vi.spyOn(view.store, "setView");
     view.mapViewState.publishLiveCameraViewState = vi.fn();
     return view;
 }
@@ -66,7 +65,7 @@ describe("DeckMapView split-camera synchronization", () => {
             view.scheduleViewStatePush();
 
             expect(requestAnimationFrame).toHaveBeenCalledOnce();
-            expect(view.stateService.setView).not.toHaveBeenCalled();
+            expect(view.store.setView).not.toHaveBeenCalled();
 
             callbacks[0](0);
 
@@ -74,7 +73,7 @@ describe("DeckMapView split-camera synchronization", () => {
             expect(view.mapViewState.publishLiveCameraViewState.mock.calls[0][0]).toBe(0);
             expect(view.mapViewState.publishLiveCameraViewState.mock.calls[0][1])
                 .toMatchObject({destination: {lon: 12.5}});
-            expect(view.stateService.setView).not.toHaveBeenCalled();
+            expect(view.store.setView).not.toHaveBeenCalled();
         } finally {
             requestAnimationFrame.mockRestore();
         }
@@ -95,10 +94,40 @@ describe("DeckMapView split-camera synchronization", () => {
 
             expect(cancelAnimationFrame).toHaveBeenCalledWith(23);
             expect(view.mapViewState.publishLiveCameraViewState).not.toHaveBeenCalled();
-            expect(view.stateService.setView).toHaveBeenCalledOnce();
+            expect(view.store.setView).toHaveBeenCalledOnce();
         } finally {
             requestAnimationFrame.mockRestore();
             cancelAnimationFrame.mockRestore();
         }
+    });
+
+    it("accepts an external camera update after a no-op renderer commit", () => {
+        const view = createView() as any;
+        for (const name of ["clearLocationHighlightTopic", "moveToLocationAreaTopic", "liveCameraViewStateTopic",
+            "presentationCameraViewStateTopic", "moveToWgs84PositionTopic", "showLocationLabelTopic", "moveToRectangleTopic"]) {
+            view.mapViewState[name] = new Subject();
+        }
+        view.stateService.stateApplied = new Subject();
+        view.configService.config$ = new Subject();
+        view.mapInfo.maps$ = new Subject();
+        view.mapInfo.maps = {getViewTileGridLevel: () => 13, getViewTileGridAutoLevel: () => false,
+            getViewTileGridColor: () => "#ffffff", getViewTileGridOpacity: () => 100};
+        view.layerController.occupancyChanged = new Subject();
+        view.featureSearchService.progress = new Subject();
+        view.menuService.tileOutline = new Subject();
+        for (const method of ["updateBackgroundLayer", "updateContactShadingTarget", "requestRender",
+            "updateLocationMarkerOverlay", "scheduleTileGridOverlayUpdate", "scheduleSearchResultsOverlayUpdate"]) {
+            vi.spyOn(view, method).mockImplementation(() => {});
+        }
+        const applied = vi.spyOn(view, "setViewFromState").mockImplementation(() => {});
+        view.setupSubscriptions();
+        view.pushViewStateToAppState();
+        applied.mockClear();
+        view.pushViewStateToAppState(); // Same camera; native patchState emits nothing.
+        expect(applied).not.toHaveBeenCalled();
+        const next = {...view.store.views.cameraViewData()[view.identity.id], destination: {lon: 12, lat: 49, alt: 100}};
+        view.store.setCameraViewData(0, next);
+        expect(applied).toHaveBeenCalledExactlyOnceWith(next);
+        view.subscriptions.forEach((subscription: {unsubscribe(): void}) => subscription.unsubscribe());
     });
 });

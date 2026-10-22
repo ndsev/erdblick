@@ -1,244 +1,215 @@
 // @vitest-environment node
-import { describe, it, expect } from 'vitest';
-import { z } from 'zod';
-
-import { AppState, Boolish, MapViewState, StyleState } from './app-state';
-
-describe('AppState', () => {
+import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { StateCodec, StyleOptionsCodec } from "./state-codec";
+import { Boolish, deepCopy } from "./state-value";
+describe('StateCodec', () => {
     it('does not let in-place edits poison defaults across repeated resets', () => {
-        const original = {enabled: {} as Record<string, boolean>, values: [1]};
-        const state = new AppState(new Map(), {
+        const original = { enabled: {} as Record<string, boolean>, values: [1] };
+        const state = new StateCodec({
             name: 'editable', defaultValue: original,
-            schema: z.object({enabled: z.record(z.string(), z.boolean()), values: z.array(z.number())})
+            schema: z.object({ enabled: z.record(z.string(), z.boolean()), values: z.array(z.number()) })
         });
-        state.getValue().enabled['New Style'] = true;
-        state.getValue().values.push(2);
-        expect(original).toEqual({enabled: {}, values: [1]});
-        state.resetToDefault();
-        expect(state.getValue()).toEqual({enabled: {}, values: [1]});
-        state.getValue().enabled['Another Style'] = true;
-        state.resetToDefault();
-        expect(state.getValue()).toEqual({enabled: {}, values: [1]});
+        let stateValue = deepCopy(state.defaultValue);
+        stateValue.enabled['New Style'] = true;
+        stateValue.values.push(2);
+        expect(original).toEqual({ enabled: {}, values: [1] });
+        stateValue = deepCopy(state.defaultValue);
+        expect(stateValue).toEqual({ enabled: {}, values: [1] });
+        stateValue.enabled['Another Style'] = true;
+        stateValue = deepCopy(state.defaultValue);
+        expect(stateValue).toEqual({ enabled: {}, values: [1] });
     });
     it('retains Map state types and detaches mutable default entries', () => {
-        const state = new AppState(new Map(), {
+        const state = new StateCodec({
             name: 'map', defaultValue: new Map([['option', [true]]]),
             schema: z.map(z.string(), z.array(z.boolean()))
         });
-        state.getValue().get('option')!.push(false);
-        state.resetToDefault();
-        expect(state.getValue()).toEqual(new Map([['option', [true]]]));
-        expect(state.getValue()).not.toBe(state.defaultValue);
+        let stateValue = deepCopy(state.defaultValue);
+        stateValue.get('option')!.push(false);
+        stateValue = deepCopy(state.defaultValue);
+        expect(stateValue).toEqual(new Map([['option', [true]]]));
+        expect(stateValue).not.toBe(state.defaultValue);
     });
     it('serializes boolean values to compact JSON for storage', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState(pool, {
+        const state = new StateCodec({
             name: 'testBool',
             defaultValue: false,
             schema: Boolish,
         });
-
-        state.next(true);
-
-        expect(state.serialize(false)).toEqual({
+        const stateValue = true;
+        expect(state.serialize(stateValue, false)).toEqual({
             testBool: '1',
         });
     });
-
     it('serializes primitive arrays as CSV when targeting the URL', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState(pool, {
+        const state = new StateCodec({
             name: 'numbers',
             defaultValue: [0],
             schema: z.array(z.number()),
             urlParamName: 'n',
         });
-
-        state.next([3, 4, 5]);
-
-        expect(state.serialize(true)).toEqual({
+        const stateValue = [3, 4, 5];
+        expect(state.serialize(stateValue, true)).toEqual({
             n: '3,4,5',
         });
     });
-
     it('serializes enum arrays as CSV when targeting the URL', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState(pool, {
+        const state = new StateCodec({
             name: 'tileGridMode',
             defaultValue: ['xyz'],
             schema: z.array(z.enum(['xyz', 'nds'])),
             urlParamName: 'tgm',
         });
-
-        state.next(['nds']);
-
-        expect(state.serialize(true)).toEqual({
+        const stateValue = ['nds'];
+        expect(state.serialize(stateValue, true)).toEqual({
             tgm: 'nds',
         });
     });
+    it.each([
+        ['optional', z.number().optional()],
+        ['nullable', z.number().nullable()],
+        ['default', z.number().default(0)],
+        ['lazy', z.lazy(() => z.number())],
+        ['nested', z.lazy(() => z.number().nullable().optional().default(0))],
+    ] as const)('keeps numeric URL encoding through a %s schema wrapper', (_name, schema) => {
+        const state = new StateCodec<number[]>({
+            name: 'numbers',
+            defaultValue: [0],
+            schema: z.array(schema),
+            urlParamName: 'n',
+        });
 
+        expect(state.serialize([3, 3, 5], true)).toEqual({n: '3,3,5'});
+        expect(state.deserialize({n: '3x2,5'}, [0])).toEqual([3, 3, 5]);
+    });
     it('serializes string arrays without pre-encoding URL-permitted separators', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState<string[]>(pool, {
+        const state = new StateCodec<string[]>({
             name: 'selection',
             defaultValue: [] as string[],
             schema: z.array(z.string()),
             urlParamName: 'sel',
         });
-
-        state.next(['SourceData:https-api-nds-live-island6:SourceData-LaneLayer-0:21fa0777000d:0']);
-
-        expect(state.serialize(true)).toEqual({
+        const stateValue = ['SourceData:https-api-nds-live-island6:SourceData-LaneLayer-0:21fa0777000d:0'];
+        expect(state.serialize(stateValue, true)).toEqual({
             sel: 'SourceData:https-api-nds-live-island6:SourceData-LaneLayer-0:21fa0777000d:0',
         });
     });
-
     it('serializes empty URL arrays as query parameter removals', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState<string[]>(pool, {
+        const state = new StateCodec<string[]>({
             name: 'selection',
             defaultValue: [] as string[],
             schema: z.array(z.string()),
             urlParamName: 'sel',
         });
-
-        expect(state.serialize(true)).toEqual({
+        let stateValue = deepCopy(state.defaultValue);
+        expect(state.serialize(stateValue, true)).toEqual({
             sel: null,
         });
     });
-
     it('ignores stale empty URL array encodings during hydration', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState<string[]>(pool, {
+        const state = new StateCodec<string[]>({
             name: 'selection',
             defaultValue: [] as string[],
             schema: z.array(z.string()),
             urlParamName: 'sel',
         });
-        state.next(['feature-panel']);
-
-        state.deserialize({sel: ''});
-        expect(state.getValue()).toEqual(['feature-panel']);
-
-        state.deserialize({sel: '[]'});
-        expect(state.getValue()).toEqual(['feature-panel']);
+        let stateValue = ['feature-panel'];
+        stateValue = state.deserialize({ sel: '' }, stateValue);
+        expect(stateValue).toEqual(['feature-panel']);
+        stateValue = state.deserialize({ sel: '[]' }, stateValue);
+        expect(stateValue).toEqual(['feature-panel']);
     });
-
     it('serializes arrays of primitive arrays using colon-separated CSV groups', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState(pool, {
+        const state = new StateCodec({
             name: 'matrix',
             defaultValue: [[0]],
             schema: z.array(z.array(z.number())),
             urlParamName: 'mx',
         });
-
-        state.next([[1, 2], [3], []]);
-
-        expect(state.serialize(true)).toEqual({
+        const stateValue = [[1, 2], [3], []];
+        expect(state.serialize(stateValue, true)).toEqual({
             mx: '1,2:3:',
         });
     });
-
     it('deserializes stored JSON payloads', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState(pool, {
+        const state = new StateCodec({
             name: 'count',
             defaultValue: 0,
             schema: z.number(),
         });
-
-        state.deserialize('5');
-
-        expect(state.getValue()).toBe(5);
+        let stateValue = deepCopy(state.defaultValue);
+        stateValue = state.deserialize('5', stateValue);
+        expect(stateValue).toBe(5);
     });
-
     it('exports and imports snapshot values using schema validation', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState(pool, {
+        const state = new StateCodec({
             name: 'count',
             defaultValue: 0,
             schema: z.number(),
         });
-
-        state.applySnapshotValue(7);
-        expect(state.getValue()).toBe(7);
-        expect(state.toSnapshotValue()).toBe(7);
+        let stateValue = deepCopy(state.defaultValue);
+        stateValue = state.validateSnapshotValue(7, stateValue);
+        expect(stateValue).toBe(7);
+        expect(state.toSnapshotValue(stateValue)).toBe(7);
     });
-
     it('deserializes Boolish URL params', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState(pool, {
+        const state = new StateCodec({
             name: 'flag',
             defaultValue: true,
             schema: Boolish,
             urlParamName: 'flag',
         });
-
-        state.deserialize({ flag: '0' });
-
-        expect(state.getValue()).toBe(false);
+        let stateValue = deepCopy(state.defaultValue);
+        stateValue = state.deserialize({ flag: '0' }, stateValue);
+        expect(stateValue).toBe(false);
     });
-
     it('deserializes colon-separated CSV payloads into arrays of primitive arrays', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState(pool, {
+        const state = new StateCodec({
             name: 'matrix',
             defaultValue: [[0]],
             schema: z.array(z.array(z.number())),
             urlParamName: 'mx',
         });
-
-        state.deserialize({ mx: '4,5:6,7:' });
-
-        expect(state.getValue()).toEqual([[4, 5], [6, 7], []]);
+        let stateValue = deepCopy(state.defaultValue);
+        stateValue = state.deserialize({ mx: '4,5:6,7:' }, stateValue);
+        expect(stateValue).toEqual([[4, 5], [6, 7], []]);
     });
-
     it('deserializes pre-encoded CSV payloads for backward compatibility', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState<string[]>(pool, {
+        const state = new StateCodec<string[]>({
             name: 'selection',
             defaultValue: [] as string[],
             schema: z.array(z.string()),
             urlParamName: 'sel',
         });
-
-        state.deserialize({ sel: 'SourceData%3Amap%3Alayer' });
-
-        expect(state.getValue()).toEqual(['SourceData:map:layer']);
+        let stateValue = deepCopy(state.defaultValue);
+        stateValue = state.deserialize({ sel: 'SourceData%3Amap%3Alayer' }, stateValue);
+        expect(stateValue).toEqual(['SourceData:map:layer']);
     });
-
     it('deserializes run-length tokens for numeric arrays', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState(pool, {
+        const state = new StateCodec({
             name: 'numbers',
             defaultValue: [0],
             schema: z.array(z.number()),
             urlParamName: 'n',
         });
-
-        state.deserialize({ n: '5x3,2' });
-
-        expect(state.getValue()).toEqual([5, 5, 5, 2]);
+        let stateValue = deepCopy(state.defaultValue);
+        stateValue = state.deserialize({ n: '5x3,2' }, stateValue);
+        expect(stateValue).toEqual([5, 5, 5, 2]);
     });
-
     it('does not treat string-array tokens as run-length compressed values', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState<string[]>(pool, {
+        const state = new StateCodec<string[]>({
             name: 'labels',
             defaultValue: [],
             schema: z.array(z.string()),
             urlParamName: 'l',
         });
-
-        state.deserialize({ l: 'ax2,b' });
-
-        expect(state.getValue()).toEqual(['ax2', 'b']);
+        let stateValue = deepCopy(state.defaultValue);
+        stateValue = state.deserialize({ l: 'ax2,b' }, stateValue);
+        expect(stateValue).toEqual(['ax2', 'b']);
     });
-
     it('exposes field names for form-encoded objects', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const state = new AppState(pool, {
+        const state = new StateCodec({
             name: 'formState',
             defaultValue: {
                 foo: 'a',
@@ -250,82 +221,39 @@ describe('AppState', () => {
             }),
             urlFormEncode: true,
         });
-
         expect(state.getFormFieldNames()).toEqual(['foo', 'bar']);
     });
 });
-
-describe('MapViewState', () => {
-    it('extends the underlying array when writing to a higher view index', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        const viewState = new MapViewState(pool, {
-            name: 'views',
-            defaultValue: 0,
-            schema: z.number(),
-        });
-
-        viewState.next(2, 10);
-
-        expect(viewState.getValue(0)).toBe(0);
-        expect(viewState.getValue(1)).toBe(0);
-        expect(viewState.getValue(2)).toBe(10);
-        expect(viewState.length()).toBe(3);
-    });
-});
-
-describe('StyleState', () => {
-    function createLayerAndViewStates(pool: Map<string, AppState<unknown>>, layerNames: string[], numViews: number) {
-        new AppState(pool, {
-            name: 'layerNames',
-            defaultValue: layerNames,
-            schema: z.array(z.string()),
-        });
-        new AppState(pool, {
-            name: 'numberOfViews',
-            defaultValue: numViews,
-            schema: z.number().int().positive(),
-        });
-    }
-
+describe('StyleOptionsCodec', () => {
     it('serializes per-style option values across layers and views', () => {
-        const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane', 'Bavaria/Island6/Lane'];
-        createLayerAndViewStates(pool, layers, 2);
-        const styles = new StyleState(pool);
-
+        const context = { layerNames: layers, viewCount: 2 };
+        const styles = new StyleOptionsCodec();
         const key = (layer: string, style: string, opt: string) => {
             // Split mapId/layerId for the helper
             const [mapId, ...rest] = layer.split('/');
             return styles.styleOptionKey(mapId, rest.join('/'), style, opt);
         };
-
-        const store = new Map<string, (string|number|boolean)[]>();
+        const store = new Map<string, (string | number | boolean)[]>();
         // showLanes: [true,true] for first layer; [false,false] for second
         store.set(key('Bavaria/Island2/Lane', 'NY0X', 'showLanes'), [true, true]);
         store.set(key('Bavaria/Island6/Lane', 'NY0X', 'showLanes'), [false, false]);
         // showLaneGroups: [true,false] for both layers
         store.set(key('Bavaria/Island2/Lane', 'NY0X', 'showLaneGroups'), [true, false]);
         store.set(key('Bavaria/Island6/Lane', 'NY0X', 'showLaneGroups'), [true, false]);
-
-        styles.next(store);
-
-        const encoded = styles.serialize(true)!;
+        const encoded = styles.serialize(store, true, context)!;
         expect(Object.keys(encoded)).toEqual(['NY0X~0-1~showLanes~showLaneGroups']);
         expect(encoded['NY0X~0-1~showLanes~showLaneGroups']).toBe('1,0:1,0~1,1:0,0');
     });
-
     it('deserializes URL params back into the internal map', () => {
-        const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane', 'Bavaria/Island6/Lane'];
-        createLayerAndViewStates(pool, layers, 2);
-        const styles = new StyleState(pool);
-
-        styles.resetToDefault();
-        styles.deserialize({
+        const context = { layerNames: layers, viewCount: 2 };
+        const styles = new StyleOptionsCodec();
+        let stylesValue = deepCopy(styles.defaultValue);
+        stylesValue = styles.deserialize({
             'NY0X~0-1~showLanes~showLaneGroups': '1,0:1,0~1,1:0,0',
-        });
-
-        const v = styles.getValue();
+        }, stylesValue, context);
+        const v = stylesValue;
         const k = (layer: string, style: string, opt: string) => {
             const [mapId, ...rest] = layer.split('/');
             return styles.styleOptionKey(mapId, rest.join('/'), style, opt);
@@ -335,44 +263,33 @@ describe('StyleState', () => {
         expect(v.get(k('Bavaria/Island2/Lane', 'NY0X', 'showLaneGroups'))).toEqual(['1', '0']);
         expect(v.get(k('Bavaria/Island6/Lane', 'NY0X', 'showLaneGroups'))).toEqual(['1', '0']);
     });
-
     it('omits options with fewer entries than views', () => {
-        const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane'];
-        createLayerAndViewStates(pool, layers, 2);
-        const styles = new StyleState(pool);
-        const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
+        const context = { layerNames: layers, viewCount: 2 };
+        const styles = new StyleOptionsCodec();
+        const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
         try {
             const k = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'showLanes');
-            styles.next(new Map([[k, [true]]]));
-
-            const encoded = styles.serialize(true)!;
+            const stylesValue = new Map([[k, [true]]]);
+            const encoded = styles.serialize(stylesValue, true, context)!;
             // Underfilled values are skipped; no params produced for this style/option
             expect(Object.keys(encoded).length).toBe(0);
-        } finally {
+        }
+        finally {
             consoleWarnSpy.mockRestore();
         }
     });
-
     it('slices extra per-view values beyond the current number of views', () => {
-        const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane'];
-        createLayerAndViewStates(pool, layers, 2);
-        const styles = new StyleState(pool);
-
+        const context = { layerNames: layers, viewCount: 2 };
+        const styles = new StyleOptionsCodec();
         const k = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'opt');
-        styles.next(new Map([[k, [true, false, true]]]))
-
-        const encoded = styles.serialize(true)!;
+        const stylesValue = new Map([[k, [true, false, true]]]);
+        const encoded = styles.serialize(stylesValue, true, context)!;
         expect(encoded['NY0X~0~opt']).toBe('1:0'); // only first two views kept
     });
-
     it('coerceOptionValue converts by declared type', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        createLayerAndViewStates(pool, [], 1);
-        const styles = new StyleState(pool);
-
+        const styles = new StyleOptionsCodec();
         expect(styles.coerceOptionValue('1', 'bool')).toBe(true);
         expect(styles.coerceOptionValue('true', 'boolean')).toBe(true);
         expect(styles.coerceOptionValue(0, 'boolean')).toBe(false);
@@ -381,107 +298,83 @@ describe('StyleState', () => {
         expect(styles.coerceOptionValue(undefined, 'string')).toBe('');
         expect(styles.coerceOptionValue('abc', 'string')).toBe('abc');
     });
-
     it('styleOptionKey composes the compound key correctly', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        createLayerAndViewStates(pool, [], 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleOptionsCodec();
         expect(styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'opt')).toBe('Bavaria/Island2/Lane/NY0X/opt');
     });
-
     it('isUrlState always returns true', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        createLayerAndViewStates(pool, [], 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleOptionsCodec();
         expect(styles.isUrlState()).toBe(true);
     });
-
     it('serialize returns empty object when no styles set', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
-        expect(styles.serialize(true)).toEqual({});
+        const context = { layerNames: ['Bavaria/Island2/Lane'], viewCount: 1 };
+        const styles = new StyleOptionsCodec();
+        let stylesValue = deepCopy(styles.defaultValue);
+        expect(styles.serialize(stylesValue, true, context)).toEqual({});
     });
-
     it('exports and applies snapshot values with a stable object shape', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
+        const styles = new StyleOptionsCodec();
         const key = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'showLanes');
-        styles.applySnapshotValue({
+        const stylesValue = styles.validateSnapshotValue({
             [key]: [true]
         });
-        expect(styles.getValue().get(key)).toEqual([true]);
-        expect(styles.toSnapshotValue()).toEqual({
+        expect(stylesValue.get(key)).toEqual([true]);
+        expect(styles.toSnapshotValue(stylesValue)).toEqual({
             [key]: [true]
         });
     });
-
     it('serialize excludes layers not present in layerNames', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
-
+        const context = { layerNames: ['Bavaria/Island2/Lane'], viewCount: 1 };
+        const styles = new StyleOptionsCodec();
         const kPresent = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'opt');
         const kMissing = styles.styleOptionKey('Unknown', 'Layer', 'NY0X', 'opt');
-        styles.next(new Map([
+        const stylesValue = new Map([
             [kPresent, [true]],
             [kMissing, [false]],
-        ]));
-
-        const encoded = styles.serialize(true)!;
+        ]);
+        const encoded = styles.serialize(stylesValue, true, context)!;
         expect(Object.keys(encoded)).toEqual(['NY0X~0~opt']);
         expect(encoded['NY0X~0~opt']).toBe('1');
     });
-
     it('serialize skips a style entirely if no layers match', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
+        const context = { layerNames: ['Bavaria/Island2/Lane'], viewCount: 1 };
+        const styles = new StyleOptionsCodec();
         const kMissing = styles.styleOptionKey('Unknown', 'Layer', 'NY0X', 'opt');
-        styles.next(new Map([[kMissing, [true]]]));
-        expect(styles.serialize(true)).toEqual({});
+        const stylesValue = new Map([[kMissing, [true]]]);
+        expect(styles.serialize(stylesValue, true, context)).toEqual({});
     });
-
     it('deserialize ignores keys that do not match the style option pattern', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
-        styles.resetToDefault();
-        styles.deserialize({ notAStyleKey: '1,0' });
-        expect(styles.getValue().size).toBe(0);
+        const context = { layerNames: ['Bavaria/Island2/Lane'], viewCount: 1 };
+        const styles = new StyleOptionsCodec();
+        let stylesValue = deepCopy(styles.defaultValue);
+        stylesValue = styles.deserialize({ notAStyleKey: '1,0' }, stylesValue, context);
+        expect(stylesValue.size).toBe(0);
     });
-
     it('deserialize skips malformed compact style option values without throwing', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
-        const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
+        const context = { layerNames: ['Bavaria/Island2/Lane'], viewCount: 1 };
+        const styles = new StyleOptionsCodec();
+        let stylesValue = deepCopy(styles.defaultValue);
+        const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
         try {
-            expect(() => styles.deserialize({
+            expect(() => stylesValue = styles.deserialize({
                 'NY0X~0~opt': ['1'],
                 'NY0X~0~valid': '1'
-            })).not.toThrow();
-        } finally {
+            }, stylesValue, context)).not.toThrow();
+        }
+        finally {
             consoleWarnSpy.mockRestore();
         }
-
         const key = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'valid');
-        expect(styles.getValue().get(key)).toEqual(['1']);
+        expect(stylesValue.get(key)).toEqual(['1']);
     });
-
     it('deserialize uses only in-range layer indices', () => {
-        const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane', 'Bavaria/Island6/Lane'];
-        createLayerAndViewStates(pool, layers, 1);
-        const styles = new StyleState(pool);
-        styles.resetToDefault();
-
+        const context = { layerNames: layers, viewCount: 1 };
+        const styles = new StyleOptionsCodec();
+        let stylesValue = deepCopy(styles.defaultValue);
         // Indices 0 and 1 exist; 99 must be ignored
-        styles.deserialize({ 'NY0X~0-99-1~opt': 'A,B,C' });
-
-        const v = styles.getValue();
+        stylesValue = styles.deserialize({ 'NY0X~0-99-1~opt': 'A,B,C' }, stylesValue, context);
+        const v = stylesValue;
         const k = (layer: string, style: string, opt: string) => {
             const [mapId, ...rest] = layer.split('/');
             return styles.styleOptionKey(mapId, rest.join('/'), style, opt);
@@ -489,33 +382,27 @@ describe('StyleState', () => {
         expect(v.get(k(layers[0], 'NY0X', 'opt'))).toEqual(['A']);
         expect(v.get(k(layers[1], 'NY0X', 'opt'))).toEqual(['C']);
     });
-
     it('deserialize accepts raw JSON storage string', () => {
-        const pool = new Map<string, AppState<unknown>>();
-        createLayerAndViewStates(pool, ['Bavaria/Island2/Lane'], 1);
-        const styles = new StyleState(pool);
-        styles.resetToDefault();
-        styles.deserialize('{"NY0X~0~opt":"1"}');
+        const context = { layerNames: ['Bavaria/Island2/Lane'], viewCount: 1 };
+        const styles = new StyleOptionsCodec();
+        let stylesValue = deepCopy(styles.defaultValue);
+        stylesValue = styles.deserialize('{"NY0X~0~opt":"1"}', stylesValue, context);
         const k = styles.styleOptionKey('Bavaria', 'Island2/Lane', 'NY0X', 'opt');
-        expect(styles.getValue().get(k)).toEqual(['1']);
+        expect(stylesValue.get(k)).toEqual(['1']);
     });
-
     it('deserialize accepts show-option shorthand with broadcast and run-length payloads', () => {
-        const pool = new Map<string, AppState<unknown>>();
         const layers = ['Bavaria/Island2/Lane', 'Bavaria/Island6/Lane'];
-        createLayerAndViewStates(pool, layers, 2);
-        const styles = new StyleState(pool);
-        styles.resetToDefault();
-
-        styles.deserialize({
+        const context = { layerNames: layers, viewCount: 2 };
+        const styles = new StyleOptionsCodec();
+        let stylesValue = deepCopy(styles.defaultValue);
+        stylesValue = styles.deserialize({
             'NY0X~0-1~.Lanes': '1x2',
-        });
-
+        }, stylesValue, context);
         const k = (layer: string) => {
             const [mapId, ...rest] = layer.split('/');
             return styles.styleOptionKey(mapId, rest.join('/'), 'NY0X', 'showLanes');
         };
-        expect(styles.getValue().get(k(layers[0]))).toEqual(['1', '1']);
-        expect(styles.getValue().get(k(layers[1]))).toEqual(['1', '1']);
+        expect(stylesValue.get(k(layers[0]))).toEqual(['1', '1']);
+        expect(stylesValue.get(k(layers[1]))).toEqual(['1', '1']);
     });
 });

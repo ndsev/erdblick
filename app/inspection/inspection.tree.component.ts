@@ -1,43 +1,44 @@
+import {untracked} from "@angular/core";
+import {AppStore} from "../shared/app.store";
 import {
     AfterViewInit,
     ChangeDetectionStrategy,
     ChangeDetectorRef,
     Component,
-    ViewChild,
-    input,
     OnDestroy,
     SecurityContext,
+    ViewChild,
     effect,
+    input,
     output
 } from "@angular/core";
+import {toObservable} from "@angular/core/rxjs-interop";
 import {DomSanitizer} from "@angular/platform-browser";
 import {MenuItem, TreeNode, TreeTableNode} from "primeng/api";
+import {Menu} from "primeng/menu";
+import {Popover} from "primeng/popover";
 import {TreeTable} from "primeng/treetable";
-import {toObservable} from "@angular/core/rxjs-interop";
 import {Subscription} from "rxjs";
 import {coreLib} from "../integrations/wasm";
-import {InfoMessageService} from "../shared/info.service";
-import {InspectionSelectionService} from "./inspection-selection.service";
-import {Menu} from "primeng/menu";
-import {ClipboardService} from "../shared/clipboard.service";
-import {AppStateService, SelectedSourceData, type InspectionTreeExpansionState} from "../shared/appstate.service";
-import {Popover} from "primeng/popover";
+import {parseMapPartitionKey} from "../mapdata/partition.model";
+import {FeatureSearchService} from "../search/feature.search.service";
 import {JumpTargetService} from "../search/jump.service";
+import {AppStateService} from "../shared/appstate.service";
+import {ClipboardService} from "../shared/clipboard.service";
+import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
+import {InfoMessageService} from "../shared/info.service";
 import {
     isFeatureInspectionSubTarget,
     parseFeatureInspectionTarget,
     stripFeatureInspectionTarget
 } from "../shared/tile-feature-id";
-import {FeatureSearchService} from "../search/feature.search.service";
-import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
+import {inspectionHtmlPresentation, type InspectionHtmlPresentation} from "./inspection-html.presentation";
 import {inspectionSearchNumberLiteral} from "./inspection-search.util";
-import {
-    inspectionHtmlPresentation,
-    type InspectionHtmlPresentation
-} from "./inspection-html.presentation";
+import {InspectionSelectionService} from "./inspection-selection.service";
+import {SelectedSourceData, type InspectionTreeExpansionState} from "./inspection-state.model";
+
 import {expandPathToFirstHighlightedRow} from "./inspection-tree-highlight";
 import {inspectionValueBubbleClasses} from "./inspection-value-bubble.presentation";
-import {parseMapPartitionKey} from "../mapdata/partition.model";
 
 /** Column definition used by the inspection tree's generic table renderer. */
 export interface Column {
@@ -58,51 +59,72 @@ export class FeatureFilterOptions {
 }
 
 @Component({
-    selector: 'inspection-tree',
+    selector: "inspection-tree",
     changeDetection: ChangeDetectionStrategy.OnPush,
     template: `
-        <p-treeTable #tt class="inspection-tree-table" scrollHeight="flex" filterMode="strict"
-                     [value]="data"
-                     [autoLayout]="true"
-                     [scrollable]="true"
-                     [resizableColumns]="true"
-                     [rowHover]="true"
-                     [virtualScroll]="true"
-                     [virtualScrollItemSize]="'1.5em'"
-                     [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
-                     [globalFilterFields]="filterFields">
+        <p-treeTable
+            #tt
+            class="inspection-tree-table"
+            scrollHeight="flex"
+            filterMode="strict"
+            [value]="data"
+            [autoLayout]="true"
+            [scrollable]="true"
+            [resizableColumns]="true"
+            [rowHover]="true"
+            [virtualScroll]="true"
+            [virtualScrollItemSize]="'1.5em'"
+            [tableStyle]="{'min-height': '1px', padding: '0px'}"
+            [globalFilterFields]="filterFields"
+        >
             <ng-template pTemplate="caption">
                 @if (showFilter() || toggleableColumns().length) {
                     <div class="filter-container">
                         @if (showFilter()) {
                             <p-iconfield class="input-container">
                                 @if (filterOptions()) {
-                                    <p-inputicon (click)="filterPanel.toggle($event)" styleClass="pi pi-filter"
-                                                 style="cursor: pointer"/>
+                                    <p-inputicon
+                                        (click)="filterPanel.toggle($event)"
+                                        styleClass="pi pi-filter"
+                                        style="cursor: pointer"
+                                    />
                                 }
-                                <input class="filter-input" type="text" pInputText placeholder="Filter inspection tree"
-                                       [(ngModel)]="filterString"
-                                       (ngModelChange)="onFilterInput($event)"
-                                       (input)="onFilterInput($any($event.target).value)"/>
+                                <input
+                                    class="filter-input"
+                                    type="text"
+                                    pInputText
+                                    placeholder="Filter inspection tree"
+                                    [(ngModel)]="filterString"
+                                    (ngModelChange)="onFilterInput($event)"
+                                    (input)="onFilterInput($any($event.target).value)"
+                                />
                                 @if (filterString) {
-                                    <i (click)="clearFilter()" class="pi pi-times clear-icon" style="cursor: pointer"></i>
+                                    <i
+                                        (click)="clearFilter()"
+                                        class="pi pi-times clear-icon"
+                                        style="cursor: pointer"
+                                    ></i>
                                 }
                             </p-iconfield>
                         }
                         @if (toggleableColumns().length) {
                             <p-buttonGroup class="inspection-column-visibility-buttons">
                                 @for (col of toggleableColumns(); track col.key) {
-                                    <p-button class="inspection-column-visibility-button"
-                                              [severity]="isColumnVisible(col) ? 'primary' : 'secondary'"
-                                              [outlined]="!isColumnVisible(col)"
-                                              (click)="toggleColumnVisibility($event, col)"
-                                              [pTooltip]="(isColumnVisible(col) ? 'Hide ' : 'Show ') + col.header + ' column'"
-                                              [tooltipOptions]="{appendTo: 'body'}"
-                                              tooltipPosition="bottom"
-                                              [attr.aria-pressed]="isColumnVisible(col)"
-                                              [attr.aria-label]="(isColumnVisible(col) ? 'Hide ' : 'Show ') + col.header + ' column'">
+                                    <p-button
+                                        class="inspection-column-visibility-button"
+                                        [severity]="isColumnVisible(col) ? 'primary' : 'secondary'"
+                                        [outlined]="!isColumnVisible(col)"
+                                        (click)="toggleColumnVisibility($event, col)"
+                                        [pTooltip]="(isColumnVisible(col) ? 'Hide ' : 'Show ') + col.header + ' column'"
+                                        [tooltipOptions]="{appendTo: 'body'}"
+                                        tooltipPosition="bottom"
+                                        [attr.aria-pressed]="isColumnVisible(col)"
+                                        [attr.aria-label]="
+                                            (isColumnVisible(col) ? 'Hide ' : 'Show ') + col.header + ' column'
+                                        "
+                                    >
                                         <span class="material-symbols-outlined">
-                                            {{ col.toggleIcon || 'view_column' }}
+                                            {{ col.toggleIcon || "view_column" }}
                                         </span>
                                     </p-button>
                                 }
@@ -115,7 +137,7 @@ export class FeatureFilterOptions {
             <ng-template pTemplate="colgroup">
                 <colgroup>
                     @for (col of visibleColumns(); track col.key) {
-                        <col [style.width]="col.width"/>
+                        <col [style.width]="col.width" />
                     }
                 </colgroup>
             </ng-template>
@@ -127,30 +149,41 @@ export class FeatureFilterOptions {
                             <div class="inspection-header-content">
                                 <span class="inspection-header-label">{{ col.header }}</span>
                                 @if (col.key === "key") {
-                                    <p-buttonGroup class="table-header-buttons"
-                                                   (mousedown)="$event.stopPropagation()">
-                                        <p-button class="table-header-button"
-                                                  severity="secondary"
-                                                  (click)="toggleFullExpansion($event)"
-                                                  [disabled]="fullCollapseActive"
-                                                  [pTooltip]="fullExpansionActive ? 'Restore expanded state' : 'Expand all nodes'"
-                                                  [tooltipOptions]="{appendTo: 'body'}"
-                                                  tooltipPosition="bottom"
-                                                  [attr.aria-label]="fullExpansionActive ? 'Restore expanded state' : 'Expand all nodes'">
+                                    <p-buttonGroup class="table-header-buttons" (mousedown)="$event.stopPropagation()">
+                                        <p-button
+                                            class="table-header-button"
+                                            severity="secondary"
+                                            (click)="toggleFullExpansion($event)"
+                                            [disabled]="fullCollapseActive"
+                                            [pTooltip]="
+                                                fullExpansionActive ? 'Restore expanded state' : 'Expand all nodes'
+                                            "
+                                            [tooltipOptions]="{appendTo: 'body'}"
+                                            tooltipPosition="bottom"
+                                            [attr.aria-label]="
+                                                fullExpansionActive ? 'Restore expanded state' : 'Expand all nodes'
+                                            "
+                                        >
                                             <span class="material-symbols-outlined">
-                                                {{ fullExpansionActive ? 'settings_backup_restore' : 'unfold_more' }}
+                                                {{ fullExpansionActive ? "settings_backup_restore" : "unfold_more" }}
                                             </span>
                                         </p-button>
-                                        <p-button class="table-header-button"
-                                                  severity="secondary"
-                                                  (click)="toggleFullCollapse($event)"
-                                                  [disabled]="fullExpansionActive"
-                                                  [pTooltip]="fullCollapseActive ? 'Restore collapsed state' : 'Collapse all nodes'"
-                                                  [tooltipOptions]="{appendTo: 'body'}"
-                                                  tooltipPosition="bottom"
-                                            [attr.aria-label]="fullCollapseActive ? 'Restore collapsed state' : 'Collapse all nodes'">
+                                        <p-button
+                                            class="table-header-button"
+                                            severity="secondary"
+                                            (click)="toggleFullCollapse($event)"
+                                            [disabled]="fullExpansionActive"
+                                            [pTooltip]="
+                                                fullCollapseActive ? 'Restore collapsed state' : 'Collapse all nodes'
+                                            "
+                                            [tooltipOptions]="{appendTo: 'body'}"
+                                            tooltipPosition="bottom"
+                                            [attr.aria-label]="
+                                                fullCollapseActive ? 'Restore collapsed state' : 'Collapse all nodes'
+                                            "
+                                        >
                                             <span class="material-symbols-outlined">
-                                                {{ fullCollapseActive ? 'settings_backup_restore' : 'unfold_less' }}
+                                                {{ fullCollapseActive ? "settings_backup_restore" : "unfold_less" }}
                                             </span>
                                         </p-button>
                                     </p-buttonGroup>
@@ -163,87 +196,132 @@ export class FeatureFilterOptions {
 
             <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
                 @if (rowData) {
-                    <tr [ttRow]="rowNode"
+                    <tr
+                        [ttRow]="rowNode"
                         [attr.data-inspection-node-id]="rowData['nodeId']"
                         (click)="onRowClick($event, rowNode)"
                         (mouseenter)="onRowHover(rowData)"
                         (mouseleave)="onRowHoverExit(rowData)"
-                        [ngClass]="getRowClasses(rowData)">
+                        [ngClass]="getRowClasses(rowData)"
+                    >
                         @for (col of visibleColumns(); track $index) {
-                            <td [class]="getStyleClassByType(rowData) + ' inspection-tree-cell'"
-                                [pTooltip]="valueCellUsesBubblePopover(rowNode, rowData, col.key) ? '' : cellTooltip(rowNode, rowData, col.key)"
+                            <td
+                                [class]="getStyleClassByType(rowData) + ' inspection-tree-cell'"
+                                [pTooltip]="
+                                    valueCellUsesBubblePopover(rowNode, rowData, col.key)
+                                        ? ''
+                                        : cellTooltip(rowNode, rowData, col.key)
+                                "
                                 tooltipPosition="left"
                                 [tooltipOptions]="tooltipOptions"
                                 (mouseenter)="onValueCellMouseEnter($event, rowNode, rowData, col.key)"
-                                (mouseleave)="onValueCellMouseLeave(col.key)">
-                                <div [class.inspection-first-cell-content]="$index === 0"
-                                     [class.inspection-value-cell-content]="col.key === 'value'"
-                                     class="inspection-cell-content">
+                                (mouseleave)="onValueCellMouseLeave(col.key)"
+                            >
+                                <div
+                                    [class.inspection-first-cell-content]="$index === 0"
+                                    [class.inspection-value-cell-content]="col.key === 'value'"
+                                    class="inspection-cell-content"
+                                >
                                     @if ($index === 0) {
                                         @if (shouldShowRowActions(rowNode, rowData)) {
-                                            <button type="button"
-                                                    class="inspection-row-actions"
-                                                    (click)="onRowActionsClick($event, rowNode, rowData)"
-                                                    pTooltip="Row actions"
-                                                    tooltipPosition="top">...</button>
+                                            <button
+                                                type="button"
+                                                class="inspection-row-actions"
+                                                (click)="onRowActionsClick($event, rowNode, rowData)"
+                                                pTooltip="Row actions"
+                                                tooltipPosition="top"
+                                            >
+                                                ...
+                                            </button>
                                         }
                                         <span class="inspection-row-toggle" (click)="$event.stopPropagation()">
-                                            <p-treeTableToggler [rowNode]="rowNode"/>
+                                            <p-treeTableToggler [rowNode]="rowNode" />
                                         </span>
                                     }
                                     @if (col.key === "key" && rowData["incomingLoading"]) {
-                                        <i class="pi pi-spinner pi-spin" role="status" aria-label="Loading incoming relations"></i>
+                                        <i
+                                            class="pi pi-spinner pi-spin"
+                                            role="status"
+                                            aria-label="Loading incoming relations"
+                                        ></i>
                                     }
                                     @if (col.key === "key" && rowData["retryIncoming"]) {
-                                        <button type="button" aria-label="Reload incoming relations"
-                                                (click)="$event.stopPropagation(); rowData['retryIncoming']()">Retry</button>
+                                        <button
+                                            type="button"
+                                            aria-label="Reload incoming relations"
+                                            (click)="$event.stopPropagation(); rowData['retryIncoming']()"
+                                        >
+                                            Retry
+                                        </button>
                                     }
                                     @if (shouldShowValueCopyButton(rowNode, rowData, col.key)) {
-                                        <p-button class="inspection-value-copy-button"
-                                                  severity="secondary"
-                                                  (click)="copyNodeValue($event, rowData)"
-                                                  pTooltip="Copy"
-                                                  [tooltipOptions]="{appendTo: 'body'}"
-                                                  tooltipPosition="left">
+                                        <p-button
+                                            class="inspection-value-copy-button"
+                                            severity="secondary"
+                                            (click)="copyNodeValue($event, rowData)"
+                                            pTooltip="Copy"
+                                            [tooltipOptions]="{appendTo: 'body'}"
+                                            tooltipPosition="left"
+                                        >
                                             <span class="material-symbols-outlined">content_copy</span>
                                         </p-button>
                                     }
                                     @if (col.key === "value" && shouldShowValueBubbles(rowNode, rowData)) {
                                         <span class="inspection-value-bubbles">
-                                            @for (bubble of rowData["valueBubbles"]; track bubble.targetNodeId + ':' + bubble.label + ':' + $index) {
+                                            @for (
+                                                bubble of rowData["valueBubbles"];
+                                                track bubble.targetNodeId + ":" + bubble.label + ":" + $index
+                                            ) {
                                                 @if (hasBubbleChildren(bubble)) {
                                                     <span class="inspection-value-bubble-group">
-                                                        @for (child of bubble.children; track child.targetNodeId + ':' + child.label + ':' + $index) {
-                                                            <span class="inspection-value-bubble-frame"
-                                                                  (mouseenter)="onValueBubbleHover(child, rowData)"
-                                                                  (mouseleave)="onValueBubbleHoverExit(child, rowData)">
-                                                                <button type="button"
-                                                                        class="inspection-value-bubble"
-                                                                        [ngClass]="valueBubbleClasses(child)"
-                                                                        (click)="onValueBubbleClick($event, child)">
+                                                        @for (
+                                                            child of bubble.children;
+                                                            track child.targetNodeId + ":" + child.label + ":" + $index
+                                                        ) {
+                                                            <span
+                                                                class="inspection-value-bubble-frame"
+                                                                (mouseenter)="onValueBubbleHover(child, rowData)"
+                                                                (mouseleave)="onValueBubbleHoverExit(child, rowData)"
+                                                            >
+                                                                <button
+                                                                    type="button"
+                                                                    class="inspection-value-bubble"
+                                                                    [ngClass]="valueBubbleClasses(child)"
+                                                                    (click)="onValueBubbleClick($event, child)"
+                                                                >
                                                                     {{ valueBubbleDisplayText(child) }}
                                                                 </button>
-                                                                <button type="button"
-                                                                        class="inspection-value-bubble-copy"
-                                                                        (click)="copyValueBubble($event, child)">
-                                                                    <span class="material-symbols-outlined">content_copy</span>
+                                                                <button
+                                                                    type="button"
+                                                                    class="inspection-value-bubble-copy"
+                                                                    (click)="copyValueBubble($event, child)"
+                                                                >
+                                                                    <span class="material-symbols-outlined"
+                                                                        >content_copy</span
+                                                                    >
                                                                 </button>
                                                             </span>
                                                         }
                                                     </span>
                                                 } @else {
-                                                    <span class="inspection-value-bubble-frame"
-                                                          (mouseenter)="onValueBubbleHover(bubble, rowData)"
-                                                          (mouseleave)="onValueBubbleHoverExit(bubble, rowData)">
-                                                        <button type="button"
-                                                                class="inspection-value-bubble"
-                                                                [ngClass]="valueBubbleClasses(bubble)"
-                                                                (click)="onValueBubbleClick($event, bubble)">
+                                                    <span
+                                                        class="inspection-value-bubble-frame"
+                                                        (mouseenter)="onValueBubbleHover(bubble, rowData)"
+                                                        (mouseleave)="onValueBubbleHoverExit(bubble, rowData)"
+                                                    >
+                                                        <button
+                                                            type="button"
+                                                            class="inspection-value-bubble"
+                                                            [ngClass]="valueBubbleClasses(bubble)"
+                                                            (click)="onValueBubbleClick($event, bubble)"
+                                                        >
                                                             {{ valueBubbleDisplayText(bubble) }}
                                                         </button>
-                                                        <button type="button"
-                                                                class="inspection-value-bubble-copy"
-                                                                (click)="copyValueBubble($event, bubble)">
+                                                        <button
+                                                            type="button"
+                                                            class="inspection-value-bubble-copy"
+                                                            (click)="copyValueBubble($event, bubble)"
+                                                        >
                                                             <span class="material-symbols-outlined">content_copy</span>
                                                         </button>
                                                     </span>
@@ -251,72 +329,109 @@ export class FeatureFilterOptions {
                                             }
                                         </span>
                                     } @else if (col.key === "value" && isFeatureIdValueRow(rowData)) {
-                                        <a href=""
-                                           class="inspection-cell-primary-value"
-                                           (click)="onFeatureIdLinkClick($event, rowData)"
-                                           (mouseenter)="onNodeValueHover(rowData, col.key)"
-                                           (mouseleave)="onNodeValueHoverExit(rowData, col.key)"
-                                           style="cursor: pointer"
-                                           [class.inspection-feature-id-pill]="isHoveredFeatureIdValue(rowData, col.key)"
-                                           [style.overflow]="filterFields.indexOf(col.key) !== -1 ? 'hidden' : null"
-                                           [style.white-space]="filterFields.indexOf(col.key) !== -1 ? 'nowrap' : null"
-                                           [style.text-overflow]="filterFields.indexOf(col.key) !== -1 ? 'ellipsis' : null"
-                                           [innerHTML]="filterFields.indexOf(col.key) !== -1 ? (col.transform(col.key, rowData) | highlight: filterString) : col.transform(col.key, rowData)">
+                                        <a
+                                            href=""
+                                            class="inspection-cell-primary-value"
+                                            (click)="onFeatureIdLinkClick($event, rowData)"
+                                            (mouseenter)="onNodeValueHover(rowData, col.key)"
+                                            (mouseleave)="onNodeValueHoverExit(rowData, col.key)"
+                                            style="cursor: pointer"
+                                            [class.inspection-feature-id-pill]="
+                                                isHoveredFeatureIdValue(rowData, col.key)
+                                            "
+                                            [style.overflow]="filterFields.indexOf(col.key) !== -1 ? 'hidden' : null"
+                                            [style.white-space]="filterFields.indexOf(col.key) !== -1 ? 'nowrap' : null"
+                                            [style.text-overflow]="
+                                                filterFields.indexOf(col.key) !== -1 ? 'ellipsis' : null
+                                            "
+                                            [innerHTML]="
+                                                filterFields.indexOf(col.key) !== -1
+                                                    ? (col.transform(col.key, rowData) | highlight: filterString)
+                                                    : col.transform(col.key, rowData)
+                                            "
+                                        >
                                         </a>
                                     } @else {
-                                        <span class="inspection-cell-primary-value"
-                                              (click)="onNodeClick($event, rowData, col.key)"
-                                              (mouseenter)="onNodeValueHover(rowData, col.key)"
-                                              (mouseleave)="onNodeValueHoverExit(rowData, col.key)"
-                                              style="cursor: pointer"
-                                              [class.inspection-feature-id-pill]="isHoveredFeatureIdValue(rowData, col.key)"
-                                              [style.overflow]="filterFields.indexOf(col.key) !== -1 ? 'hidden' : null"
-                                              [style.white-space]="filterFields.indexOf(col.key) !== -1 ? 'nowrap' : null"
-                                              [style.text-overflow]="filterFields.indexOf(col.key) !== -1 ? 'ellipsis' : null"
-                                              [innerHTML]="filterFields.indexOf(col.key) !== -1 ? (col.transform(col.key, rowData) | highlight: filterString) : col.transform(col.key, rowData)">
+                                        <span
+                                            class="inspection-cell-primary-value"
+                                            (click)="onNodeClick($event, rowData, col.key)"
+                                            (mouseenter)="onNodeValueHover(rowData, col.key)"
+                                            (mouseleave)="onNodeValueHoverExit(rowData, col.key)"
+                                            style="cursor: pointer"
+                                            [class.inspection-feature-id-pill]="
+                                                isHoveredFeatureIdValue(rowData, col.key)
+                                            "
+                                            [style.overflow]="filterFields.indexOf(col.key) !== -1 ? 'hidden' : null"
+                                            [style.white-space]="filterFields.indexOf(col.key) !== -1 ? 'nowrap' : null"
+                                            [style.text-overflow]="
+                                                filterFields.indexOf(col.key) !== -1 ? 'ellipsis' : null
+                                            "
+                                            [innerHTML]="
+                                                filterFields.indexOf(col.key) !== -1
+                                                    ? (col.transform(col.key, rowData) | highlight: filterString)
+                                                    : col.transform(col.key, rowData)
+                                            "
+                                        >
                                         </span>
                                     }
                                     @if (col.key === "key" && hasKeyBubbles(rowData)) {
                                         <span class="inspection-key-bubbles">
-                                            @for (bubble of rowData["keyBubbles"]; track bubble.kind + ':' + bubble.label + ':' + $index) {
-                                                <span class="inspection-key-bubble"
-                                                      [ngClass]="keyBubbleClasses(bubble)"
-                                                      [pTooltip]="keyBubbleTooltip(bubble)"
-                                                      tooltipPosition="top">
+                                            @for (
+                                                bubble of rowData["keyBubbles"];
+                                                track bubble.kind + ":" + bubble.label + ":" + $index
+                                            ) {
+                                                <span
+                                                    class="inspection-key-bubble"
+                                                    [ngClass]="keyBubbleClasses(bubble)"
+                                                    [pTooltip]="keyBubbleTooltip(bubble)"
+                                                    tooltipPosition="top"
+                                                >
                                                     {{ bubble.label }}
                                                 </span>
                                             }
                                         </span>
                                     }
                                     @if (rowData.hasOwnProperty("geometryNameBubble") && $index === 0) {
-                                        <span class="inspection-geometry-name-badge">{{rowData["geometryNameBubble"]}}</span>
+                                        <span class="inspection-geometry-name-badge">{{
+                                            rowData["geometryNameBubble"]
+                                        }}</span>
                                     }
                                     @if (rowData.hasOwnProperty("valueCount") && $index === 0) {
-                                        <p-tag class="inspection-node-count-tag"
-                                               severity="info"
-                                               [rounded]="true"
-                                               [value]="rowData['valueCount']"
-                                               [pTooltip]="'Value count: ' + rowData['valueCount']"
-                                               tooltipPosition="top"/>
+                                        <p-tag
+                                            class="inspection-node-count-tag"
+                                            severity="info"
+                                            [rounded]="true"
+                                            [value]="rowData['valueCount']"
+                                            [pTooltip]="'Value count: ' + rowData['valueCount']"
+                                            tooltipPosition="top"
+                                        />
                                     }
                                     @if (rowData.hasOwnProperty("info") && $index !== 0) {
                                         <span>
-                                            <i class="pi pi-info-circle" pTooltip="{{rowData['info']}}" tooltipPosition="top"></i>
+                                            <i
+                                                class="pi pi-info-circle"
+                                                pTooltip="{{ rowData['info'] }}"
+                                                tooltipPosition="top"
+                                            ></i>
                                         </span>
                                     }
-                                    @if (enableSourceDataNavigation() &&
-                                    rowData.hasOwnProperty("sourceDataReferences") &&
-                                    rowData["sourceDataReferences"].length > 0 &&
-                                    $index === 0) {
+                                    @if (
+                                        enableSourceDataNavigation() &&
+                                        rowData.hasOwnProperty("sourceDataReferences") &&
+                                        rowData["sourceDataReferences"].length > 0 &&
+                                        $index === 0
+                                    ) {
                                         <p-buttonGroup class="source-data-ref-container">
                                             @for (item of rowData["sourceDataReferences"]; track $index) {
-                                                <p-button class="source-data-button"
-                                                          (click)="showSourceData($event, item)"
-                                                          severity="secondary"
-                                                          [label]="sourceDataReferenceLabel(item)"
-                                                          [pTooltip]="sourceDataReferenceTooltip(item)"
-                                                          [tooltipOptions]="{appendTo: 'body'}"
-                                                          tooltipPosition="bottom" />
+                                                <p-button
+                                                    class="source-data-button"
+                                                    (click)="showSourceData($event, item)"
+                                                    severity="secondary"
+                                                    [label]="sourceDataReferenceLabel(item)"
+                                                    [pTooltip]="sourceDataReferenceTooltip(item)"
+                                                    [tooltipOptions]="{appendTo: 'body'}"
+                                                    tooltipPosition="bottom"
+                                                />
                                             }
                                         </p-buttonGroup>
                                     }
@@ -334,24 +449,46 @@ export class FeatureFilterOptions {
             </ng-template>
         </p-treeTable>
         <p-menu #geoJsonMenu [popup]="true" [model]="geoJsonMenuItems" appendTo="body" [baseZIndex]="30000"></p-menu>
-        <p-menu #inspectionMenu [model]="inspectionMenuItems" [popup]="true" [baseZIndex]="30000" appendTo="body"
-                [style]="{'font-size': '0.9em'}"></p-menu>
+        <p-menu
+            #inspectionMenu
+            [model]="inspectionMenuItems"
+            [popup]="true"
+            [baseZIndex]="30000"
+            appendTo="body"
+            [style]="{'font-size': '0.9em'}"
+        ></p-menu>
         <p-popover *ngIf="filterOptions() !== undefined" #filterPanel class="filter-panel">
-            <div class="font-bold white-space-nowrap"
-                 style="display: flex; justify-items: flex-start; gap: 0.5em; flex-direction: column">
-                <p-checkbox [(ngModel)]="filterOptions()!.filterByKeys" (ngModelChange)="filterTree(filterString)"
-                            inputId="fbk" [binary]="true"/>
+            <div
+                class="font-bold white-space-nowrap"
+                style="display: flex; justify-items: flex-start; gap: 0.5em; flex-direction: column"
+            >
+                <p-checkbox
+                    [(ngModel)]="filterOptions()!.filterByKeys"
+                    (ngModelChange)="filterTree(filterString)"
+                    inputId="fbk"
+                    [binary]="true"
+                />
                 <label for="fbk" style="margin-left: 0.5em; cursor: pointer">Filter by Keys</label>
-                <p-checkbox [(ngModel)]="filterOptions()!.filterByValues" (ngModelChange)="filterTree(filterString)"
-                            inputId="fbv" [binary]="true"/>
+                <p-checkbox
+                    [(ngModel)]="filterOptions()!.filterByValues"
+                    (ngModelChange)="filterTree(filterString)"
+                    inputId="fbv"
+                    [binary]="true"
+                />
                 <label for="fbv" style="margin-left: 0.5em; cursor: pointer">Filter by Values</label>
-                <p-checkbox [(ngModel)]="filterOptions()!.filterOnlyFeatureIds"
-                            (ngModelChange)="filterTree(filterString)"
-                            inputId="fofids" [binary]="true"/>
+                <p-checkbox
+                    [(ngModel)]="filterOptions()!.filterOnlyFeatureIds"
+                    (ngModelChange)="filterTree(filterString)"
+                    inputId="fofids"
+                    [binary]="true"
+                />
                 <label for="fofids" style="margin-left: 0.5em; cursor: pointer">Filter only FeatureIDs</label>
-                <p-checkbox [(ngModel)]="filterOptions()!.filterGeometryEntries"
-                            (ngModelChange)="filterTree(filterString)"
-                            inputId="ige" [binary]="true"/>
+                <p-checkbox
+                    [(ngModel)]="filterOptions()!.filterGeometryEntries"
+                    (ngModelChange)="filterTree(filterString)"
+                    inputId="ige"
+                    [binary]="true"
+                />
                 <label for="ige" style="margin-left: 0.5em; cursor: pointer">Include Geometry Entries</label>
             </div>
         </p-popover>
@@ -411,7 +548,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         } else {
             this.hiddenColumnKeys.add(column.key);
         }
-        this.stateService.setInspectionTreeHiddenColumns(this.panelId(), this.hiddenColumnKeys);
+        this.store.setInspectionTreeHiddenColumns(this.panelId(), this.hiddenColumnKeys);
         this.refreshLayout();
         this.cdr.markForCheck();
     }
@@ -462,17 +599,20 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     @ViewChild('geoJsonMenu') geoJsonMenu!: Menu;
     geoJsonMenuItems: MenuItem[] = [];
 
-    constructor(private cdr: ChangeDetectorRef,
-                private clipboardService: ClipboardService,
-                public mapService: InspectionSelectionService,
-                private jumpService: JumpTargetService,
-                public stateService: AppStateService,
-                private messageService: InfoMessageService,
-                private featureSearchService: FeatureSearchService,
-                private sanitizer: DomSanitizer) {
+    constructor(
+        private cdr: ChangeDetectorRef,
+        private clipboardService: ClipboardService,
+        public mapService: InspectionSelectionService,
+        private jumpService: JumpTargetService,
+        public stateService: AppStateService,
+        public store: AppStore,
+        private messageService: InfoMessageService,
+        private featureSearchService: FeatureSearchService,
+        private sanitizer: DomSanitizer
+    ) {
         effect(() => {
             const columns = this.columns();
-            const savedHiddenColumns = this.stateService.getInspectionTreeHiddenColumns(this.panelId());
+            const savedHiddenColumns = this.store.getInspectionTreeHiddenColumns(this.panelId());
             const defaultVisibleColumns = this.defaultVisibleColumnKeys();
             const visibleByDefault = defaultVisibleColumns === undefined
                 ? undefined
@@ -494,58 +634,84 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.cdr.markForCheck();
         });
         effect(() => {
-            this.savePanelExpansionState();
-            this.data = this.treeData();
-            this.fullExpansionActive = false;
-            this.expansionSnapshotBeforeFullExpand = undefined;
-            this.fullCollapseActive = false;
-            this.expansionSnapshotBeforeFullCollapse = undefined;
-            this.applyInitialExpansion(this.data);
-            this.restorePanelExpansionState(this.data);
-            const targetedHighlightIndex = expandPathToFirstHighlightedRow(this.data);
+            const nextData = this.treeData();
+            this.panelId();
+            // Rebuild for new input only. Saving/restoring expansion reads native
+            // state, but must not subscribe this effect to every panel edit.
+            untracked(() => {
+                this.savePanelExpansionState();
+                this.data = nextData;
+                this.fullExpansionActive = false;
+                this.expansionSnapshotBeforeFullExpand = undefined;
+                this.fullCollapseActive = false;
+                this.expansionSnapshotBeforeFullCollapse = undefined;
+                this.applyInitialExpansion(this.data);
+                this.restorePanelExpansionState(this.data);
+                const targetedHighlightIndex = expandPathToFirstHighlightedRow(this.data);
 
-            this.refreshLayout();
-            this.scrollToHighlightedIndex(
-                targetedHighlightIndex ?? this.firstHighlightedItemIndex()
-            );
-            this.cdr.markForCheck();
+                this.refreshLayout();
+                this.scrollToHighlightedIndex(
+                    targetedHighlightIndex ?? this.firstHighlightedItemIndex()
+                );
+                this.cdr.markForCheck();
+            });
         });
         effect(() => {
             const sharedFilter = this.filterText();
             if (sharedFilter === undefined || sharedFilter === this.filterString) {
                 return;
             }
-            this.suppressFilterEmit = true;
-            this.filterString = sharedFilter;
-            this.filterTree(sharedFilter);
-            this.lastEmittedFilterText = sharedFilter;
-            this.suppressFilterEmit = false;
-            this.cdr.markForCheck();
+            untracked(() => {
+                this.suppressFilterEmit = true;
+                this.filterString = sharedFilter;
+                this.filterTree(sharedFilter);
+                this.lastEmittedFilterText = sharedFilter;
+                this.suppressFilterEmit = false;
+                this.cdr.markForCheck();
+            });
         });
         this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
             this.scrollToHighlightedIndex(index);
         }));
-        this.subscriptions.push(this.stateService.inspectionTreeExpandByDefaultState.subscribe(expandByDefault => {
-            if (!this.data.length) {
-                return;
-            }
-            if (expandByDefault) {
-                this.setTreeExpansion(this.data, true, true);
-            } else if (this.isFeatureInspectionTree(this.data)) {
-                this.expandTreeNodes(this.data);
-            }
-            this.fullExpansionActive = false;
-            this.expansionSnapshotBeforeFullExpand = undefined;
-            this.fullCollapseActive = false;
-            this.expansionSnapshotBeforeFullCollapse = undefined;
-            this.data = [...this.data];
-            this.savePanelExpansionState();
-            this.refreshLayout();
-            this.cdr.markForCheck();
-        }));
-        this.subscriptions.push(this.stateService.inspectionValueVaryColorsState.subscribe(() => this.cdr.markForCheck()));
-        this.subscriptions.push(this.stateService.inspectionValueVaryOutlinesState.subscribe(() => this.cdr.markForCheck()));
-        this.subscriptions.push(this.stateService.inspectionValueVaryStripingState.subscribe(() => this.cdr.markForCheck()));
+        effect(() => {
+            const expandByDefault = this.store.inspection.inspectionTreeExpandByDefault();
+            untracked(() => {
+                if (!this.data.length) {
+                    return;
+                }
+                if (expandByDefault) {
+                    this.setTreeExpansion(this.data, true, true);
+                } else if (this.isFeatureInspectionTree(this.data)) {
+                    this.expandTreeNodes(this.data);
+                }
+                this.fullExpansionActive = false;
+                this.expansionSnapshotBeforeFullExpand = undefined;
+                this.fullCollapseActive = false;
+                this.expansionSnapshotBeforeFullCollapse = undefined;
+                this.data = [...this.data];
+
+                this.refreshLayout();
+                this.cdr.markForCheck();
+            });
+        });
+        effect(() => {
+            this.store.inspection.inspectionValueVaryColors();
+            untracked(() => {
+                this.cdr.markForCheck();
+            });
+        });
+        effect(() => {
+            this.store.inspection.inspectionValueVaryOutlines();
+            untracked(() => {
+                this.cdr.markForCheck();
+            });
+        });
+        effect(() => {
+            this.store.inspection.inspectionValueVaryStriping();
+            untracked(() => {
+                this.cdr.markForCheck();
+            });
+        });
     }
 
     /** Attaches resize observers and window listeners once the PrimeNG tree has been rendered. */
@@ -1061,9 +1227,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Assigns stable kind and color classes so grouped bubbles keep their leaf colors. */
     protected valueBubbleClasses(bubble: any): Record<string, boolean> {
         return inspectionValueBubbleClasses(bubble, {
-            varyColors: this.stateService.inspectionValueVaryColors,
-            varyOutlines: this.stateService.inspectionValueVaryOutlines,
-            varyStriping: this.stateService.inspectionValueVaryStriping
+            varyColors: this.store.inspection.inspectionValueVaryColors(),
+            varyOutlines: this.store.inspection.inspectionValueVaryOutlines(),
+            varyStriping: this.store.inspection.inspectionValueVaryStriping()
         });
     }
 
@@ -1231,19 +1397,28 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 ? "Relation/Validity"
                 : "Attr/Validity";
             const baseId = stripFeatureInspectionTarget(inspectionTarget);
-            const ownedByPanel = this.stateService.selection.find(panel => panel.id === this.panelId())
-                ?.features.some(feature => feature.mapTileKey === mapTileKey
-                    && stripFeatureInspectionTarget(feature.featureId) === baseId);
+            const ownedByPanel = this.store.inspection.selection()
+                .find((panel) => panel.id === this.panelId())
+                ?.features.some(
+                    (feature) =>
+                        feature.mapTileKey === mapTileKey && stripFeatureInspectionTarget(feature.featureId) === baseId
+                );
             this.inspectionMenuItems.push({
-                label: !ownedByPanel ? "Inspect source relation" : this.isInspectionTargetHighlighted(mapTileKey, inspectionTarget)
-                    ? `Unhighlight ${targetLabel}`
-                    : `Highlight ${targetLabel}`,
-                icon: 'pi pi-bullseye',
+                label: !ownedByPanel
+                    ? "Inspect source relation"
+                    : this.isInspectionTargetHighlighted(mapTileKey, inspectionTarget)
+                      ? `Unhighlight ${targetLabel}`
+                      : `Highlight ${targetLabel}`,
+                icon: "pi pi-bullseye",
                 command: () => {
                     if (ownedByPanel) {
-                        this.stateService.toggleInspectionFeatureHighlight(this.panelId(), mapTileKey, inspectionTarget);
+                        this.store.toggleInspectionFeatureHighlight(
+                            this.panelId(),
+                            mapTileKey,
+                            inspectionTarget
+                        );
                     } else {
-                        this.stateService.setSelection([{mapTileKey, featureId: inspectionTarget}]);
+                        this.store.setSelection([{mapTileKey, featureId: inspectionTarget}]);
                     }
                 }
             });
@@ -1273,7 +1448,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Checks whether this panel already highlights the requested attribute/validity target. */
     private isInspectionTargetHighlighted(mapTileKey: string, targetFeatureId: string): boolean {
         const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
-        const panel = this.stateService.selection.find(item => item.id === this.panelId());
+        const panel = this.store.inspection.selection().find((item) => item.id === this.panelId());
         return panel?.features.some(feature =>
             feature.mapTileKey === mapTileKey &&
             stripFeatureInspectionTarget(feature.featureId) === targetBaseFeatureId &&
@@ -1380,7 +1555,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         event.stopPropagation();
         this.jumpService.highlightByJumpTargetFilter(
             rowData["mapId"],
-            rowData["value"]).then();
+            rowData["value"]
+        ).catch(error => this.messageService.showError(error instanceof Error ? error.message : String(error)));
     }
 
     /** Converts the rendered feature-id anchor back into the same value-click behavior. */
@@ -1600,7 +1776,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             return;
         }
         try {
-            this.stateService.setSelection({
+            this.store.setSelection({
                 mapTileKey: sourceDataRef.mapTileKey,
                 address: sourceDataRef.address
             } as SelectedSourceData);
@@ -1810,7 +1986,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Applies either the global expand-by-default preference or the legacy feature-tree heuristic. */
     private applyInitialExpansion(nodes: TreeTableNode[]): void {
-        if (this.stateService.inspectionTreeExpandByDefault) {
+        if (this.store.inspection.inspectionTreeExpandByDefault()) {
             this.setTreeExpansion(nodes, true, true);
             return;
         }
@@ -1876,12 +2052,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         if (this.expansionSnapshotBeforeFullCollapse) {
             state.expansionSnapshotBeforeFullCollapse = this.expansionSnapshotBeforeFullCollapse;
         }
-        this.stateService.setInspectionTreeExpansionState(this.panelId(), state);
+        this.store.setInspectionTreeExpansionState(this.panelId(), state);
     }
 
     /** Restores expansion state captured by a previous component instance for the same panel. */
     private restorePanelExpansionState(nodes: TreeNode[]): void {
-        const state = this.stateService.getInspectionTreeExpansionState(this.panelId());
+        const state = this.store.getInspectionTreeExpansionState(this.panelId());
         if (!state) {
             return;
         }

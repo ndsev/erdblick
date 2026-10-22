@@ -1,19 +1,21 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {AppStore} from "../shared/app.store";
+import {observeStore} from "../shared/persisted-state";
+import {AppConfigService} from "../shared/app-config.service";
+import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
 import "@angular/compiler";
 import {Subject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 
-import {
-    CameraViewState,
-    VIEW_SYNC_MOVEMENT,
-    VIEW_SYNC_POSITION
-} from "../shared/appstate.service";
+import {CameraViewState, VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION} from "./map-view-state.model";
 import {
     LiveCameraViewStateUpdate,
-    MapViewStateService,
+    MapViewService,
     ViewRecalculationReason
-} from "./map-view-state.service";
-import {ViewVisualizationState} from "./view.visualization.model";
+} from "./map-view.service";
 import type {RenderViewCameraState} from "./render-view.model";
+import {ViewVisualizationState} from "./view.visualization.model";
 
 /** Builds a complete camera value with explicit target-relative position. */
 function camera(
@@ -32,31 +34,30 @@ function camera(
 
 /** Creates the service with inert visualization collaborators for camera-only tests. */
 function createService(cameras: CameraViewState[], viewSync: string[]) {
-    const stateService = {
-        numViews: cameras.length,
-        focusedView: 0,
-        viewSync,
-        cameraViewDataState: {getValue: (viewIndex: number) => cameras[viewIndex]},
-        numViewsState: new Subject<number>(),
-        lod3TileThresholdState: new Subject<number>()
-    };
+    const injector = ownerTestInjector([
+        {provide: AppConfigService, useValue: {}}, {provide: MapTileStreamService, useValue: {}}]);
+    const store = injector.get(AppStore);
+    store.setNumViews(cameras.length);
+    cameras.forEach((value, index) => store.setCameraViewData(index, value));
+    store.setSynchronization(viewSync);
     const mapInfo = {
+        maps: {maps: new Map()},
         layerStateChanged: new Subject<string>(),
-        reapplySyncOptionsForAllViews: vi.fn()
+        reapplySyncOptionsForAllViews: vi.fn(),
+        configureTreeParameters: vi.fn()
     };
     return {
-        service: new MapViewStateService(stateService as never, mapInfo as never),
-        stateService
+        service: runInInjectionContext(injector, () => new MapViewService(store, mapInfo as never)),
+        store, mapInfo
     };
 }
 
-describe("MapViewStateService live camera synchronization", () => {
+describe("MapViewService live camera synchronization", () => {
     it("waits for the current camera footprint before reporting search coverage ready", async () => {
         const {service} = createService([camera(11, 48, 1000, 0, [0, 0, 0])], []);
-        const state = new ViewVisualizationState();
-        service.viewVisualizationState.push(state);
+        const state = service.viewVisualizationState[0];
         const viewport = {...state.viewport, camPosLon: 11, camPosLat: 48, width: 1, height: 1};
-        service.registerRenderView({viewIndex: 0, isAvailable: () => true, computeViewport: () => viewport} as never);
+        service.registerRenderView({identity: service.store.captureView(0)!, viewIndex: 0, isAvailable: () => true, computeViewport: () => viewport} as never);
         let ready = false;
         const pending = service.waitForCurrentViewports(new AbortController().signal).then(() => { ready = true; });
         await Promise.resolve();
@@ -72,13 +73,12 @@ describe("MapViewStateService live camera synchronization", () => {
 
     it("waits for a recreated renderer even when its retained viewport is already current", async () => {
         const {service} = createService([camera(11, 48, 1000, 0, [0, 0, 0])], []);
-        const state = new ViewVisualizationState();
-        service.viewVisualizationState.push(state);
+        const state = service.viewVisualizationState[0];
         let ready = false;
         const pending = service.waitForCurrentViewports(new AbortController().signal).then(() => { ready = true; });
         await Promise.resolve();
         expect(ready).toBe(false);
-        service.registerRenderView({viewIndex: 0, isAvailable: () => true, computeViewport: () => state.viewport} as never);
+        service.registerRenderView({identity: service.store.captureView(0)!, viewIndex: 0, isAvailable: () => true, computeViewport: () => state.viewport} as never);
         await pending;
         expect(ready).toBe(true);
     });
@@ -93,8 +93,8 @@ describe("MapViewStateService live camera synchronization", () => {
 
     it("does not let an old renderer teardown erase its replacement", () => {
         const {service} = createService([camera(0, 0, 100, 0, [0, 0, 0])], []);
-        const oldView = {viewIndex: 0, isAvailable: () => true};
-        const nextView = {viewIndex: 0, isAvailable: () => true};
+        const oldView = {identity: service.store.captureView(0)!, viewIndex: 0, isAvailable: () => true};
+        const nextView = {identity: service.store.captureView(0)!, viewIndex: 0, isAvailable: () => true};
         const unregisterOld = service.registerRenderView(oldView as never);
         const unregisterNext = service.registerRenderView(nextView as never);
         unregisterOld();
@@ -104,14 +104,14 @@ describe("MapViewStateService live camera synchronization", () => {
     });
 
     it("changes the layout revision only for changed view counts", () => {
-        const {service, stateService} = createService([camera(0, 0, 100, 0, [0, 0, 0])], []);
+        const {service, store} = createService([camera(0, 0, 100, 0, [0, 0, 0])], []);
         vi.spyOn(service, "requestViewRecalculation").mockImplementation(() => undefined);
         expect(service.viewLayoutRevision).toBe(0);
-        stateService.numViewsState.next(1);
+        store.setNumViews(1);
         expect(service.viewLayoutRevision).toBe(0);
-        stateService.numViewsState.next(2);
+        store.setNumViews(2);
         expect(service.viewLayoutRevision).toBe(1);
-        stateService.numViewsState.next(1);
+        store.setNumViews(1);
         expect(service.viewLayoutRevision).toBe(2);
     });
     it("routes complete position previews to sibling renderers", () => {
@@ -159,10 +159,10 @@ describe("MapViewStateService live camera synchronization", () => {
             camera(11, 48, 1000, 0.1, [1, 2, 3]),
             camera(12, 49, 2000, 0.2, [4, 5, 6])
         ];
-        const {service, stateService} = createService(cameras, [VIEW_SYNC_POSITION]);
+        const {service, store} = createService(cameras, [VIEW_SYNC_POSITION]);
         const updates = vi.fn();
         service.liveCameraViewStateTopic.subscribe(updates);
-        stateService.focusedView = 1;
+        store.setFocusedView(1);
 
         service.publishLiveCameraViewState(0, cameras[0]);
 
@@ -170,7 +170,7 @@ describe("MapViewStateService live camera synchronization", () => {
     });
 });
 
-describe("MapViewStateService indexed removal", () => {
+describe("MapViewService indexed removal", () => {
     it.each([-1, 2, 0.5, Number.NaN])("ignores invalid index %s", index => {
         const {service} = createService([camera(0, 0, 100, 0, [0, 0, 0]), camera(1, 1, 100, 0, [0, 0, 0])], []);
         const retire = vi.fn();
@@ -189,25 +189,19 @@ describe("MapViewStateService indexed removal", () => {
 
     it("retires first, compacts coverage, and preserves unconsumed camera handoffs across rapid closes", () => {
         const order: string[] = [];
-        const state = {
-            numViews: 3,
-            numViewsState: new Subject<number>(),
-            lod3TileThresholdState: new Subject<number>(),
-            retainViews: vi.fn((indices: readonly number[]) => {
-                order.push('state');
-                state.numViews = indices.length;
-                state.numViewsState.next(indices.length);
-            })
-        };
-        const mapInfo = {
-            layerStateChanged: new Subject<string>(),
-            reapplySyncOptionsForAllViews: vi.fn()
-        };
-        const service = new MapViewStateService(state as never, mapInfo as never);
-        state.numViewsState.subscribe(() => order.push('tree'));
+        const {service, store, mapInfo} = createService([
+            camera(0, 0, 100, 0, [0, 0, 0]), camera(1, 1, 100, 0, [0, 0, 0]), camera(2, 2, 100, 0, [0, 0, 0])
+        ], []);
+        const retain = store.retainViews.bind(store);
+        vi.spyOn(store, 'retainViews').mockImplementation((indices, cameras) => {
+            order.push('state');
+            retain(indices, cameras);
+        });
+        observeStore(store, state => state.viewIds).subscribe(() => order.push('tree'));
         vi.spyOn(service, 'requestViewRecalculation').mockImplementation(() => order.push('coverage'));
-        const states = [new ViewVisualizationState(), new ViewVisualizationState(), new ViewVisualizationState()];
-        service.viewVisualizationState.push(...states);
+        const states = service.viewVisualizationState;
+        order.length = 0;
+        mapInfo.reapplySyncOptionsForAllViews.mockClear();
         const handoff: RenderViewCameraState = {
             camera: camera(11, 48, 1000, 0.5, [1, 2, 3]),
             firstPerson: {position: [11, 48, 100], bearing: 42, pitch: 5}
@@ -221,7 +215,7 @@ describe("MapViewStateService indexed removal", () => {
         expect(order).toEqual(['retire', 'state', 'tree', 'coverage']);
         expect(service.viewVisualizationState).toEqual([states[1], states[2]]);
         expect(mapInfo.reapplySyncOptionsForAllViews).not.toHaveBeenCalled();
-        expect(state.retainViews).toHaveBeenCalledWith([1, 2], new Map([[2, handoff.camera]]));
+        expect(store.retainViews).toHaveBeenCalledWith([1, 2], new Map([[2, handoff.camera]]));
         subscription.unsubscribe();
 
         service.removeView(0);

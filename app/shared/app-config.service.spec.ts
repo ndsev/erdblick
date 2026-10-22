@@ -1,3 +1,5 @@
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {HttpClient} from "@angular/common/http";
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {HttpResponse} from "@angular/common/http";
@@ -17,7 +19,7 @@ class HttpClientStub {
 
 const createService = () => {
     const httpClient = new HttpClientStub();
-    const service = new AppConfigService(httpClient as any);
+    const service = ownerTestInjector([AppConfigService, {provide: HttpClient, useValue: httpClient}]).get(AppConfigService);
     return {service, httpClient};
 };
 

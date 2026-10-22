@@ -1,3 +1,5 @@
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {runInInjectionContext} from "@angular/core";
 import "@angular/compiler";
 import {BehaviorSubject, Subject} from "rxjs";
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
@@ -12,30 +14,16 @@ import {
     type MapTileStreamStatusPayload
 } from "./tilestream";
 import {coreLib} from "../integrations/wasm";
-import {DEFAULT_CONNECTION_RETRY_POLICY} from "../shared/connection-retry-policy";
-
-/** Supplies real observable preference values to each transport harness. */
-function retryStateHarness() {
-    const policy = {...DEFAULT_CONNECTION_RETRY_POLICY};
-    return {
-        connectionRetryPolicy: policy,
-        connectionRetryEnabledState: new BehaviorSubject(policy.enabled),
-        connectionRetryInitialDelayMsState: new BehaviorSubject(policy.initialDelayMs),
-        connectionRetryBackoffMultiplierState: new BehaviorSubject(policy.backoffMultiplier),
-        connectionRetryMaxDelayMsState: new BehaviorSubject(policy.maxDelayMs)
-    };
-}
 
 function serviceHarness(): MapTileStreamService {
-    return new MapTileStreamService(
-        {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any,
+    return runInInjectionContext(ownerTestInjector(), () => new MapTileStreamService(
         {dataSourceInfoChanged: new Subject<void>()} as any,
         {} as any,
         {
             run: (callback: () => unknown) => callback(),
             runOutsideAngular: (callback: () => unknown) => callback()
         } as any
-    );
+    ));
 }
 
 describe("MapTileStreamService request failures", () => {
@@ -121,13 +109,8 @@ describe("MapTileStreamService page lifecycle", () => {
     beforeEach(async () => {
         vi.useFakeTimers();
         connectionError.mockClear();
-        service = new MapTileStreamService(
-            {
-                ...retryStateHarness(),
-                tilePullCompressionEnabled: false,
-                tilePullCompressionEnabledState: new Subject<boolean>()
-            } as any,
-            {
+        service = runInInjectionContext(ownerTestInjector(), () => new MapTileStreamService(
+                {
                 dataSourceInfoChanged: new Subject<void>(),
                 reloadDataSources: vi.fn().mockResolvedValue(true)
             } as any,
@@ -136,7 +119,7 @@ describe("MapTileStreamService page lifecycle", () => {
                 run: (callback: () => unknown) => callback(),
                 runOutsideAngular: (callback: () => unknown) => callback()
             } as any
-        );
+        ));
         await service.initialize();
         client = service['tileStream']!;
         vi.spyOn(client, 'updateRequest').mockResolvedValue('sent');
@@ -266,15 +249,14 @@ describe("MapTileStreamService source catalog refresh", () => {
                 .mockReturnValueOnce(firstReload)
                 .mockResolvedValue(true)
         };
-        const service = new MapTileStreamService(
-            {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any,
-            mapInfo as any,
+        const service = runInInjectionContext(ownerTestInjector(), () => new MapTileStreamService(
+                mapInfo as any,
             {} as any,
             {
                 run: (callback: () => unknown) => callback(),
                 runOutsideAngular: (callback: () => unknown) => callback()
             } as any
-        );
+        ));
         const internals = service as any;
         internals.tileStream = {getSourcesRevision: () => 1};
         internals.scheduleUpdate = vi.fn();
@@ -317,15 +299,14 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
     it("coalesces acceptance-only omission snapshots behind a bounded delay", () => {
         vi.useFakeTimers();
         try {
-            const service = new MapTileStreamService(
-                {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any,
-                {dataSourceInfoChanged: new Subject<void>()} as any,
+            const service = runInInjectionContext(ownerTestInjector(), () => new MapTileStreamService(
+                        {dataSourceInfoChanged: new Subject<void>()} as any,
                 {} as any,
                 {
                     run: (callback: () => unknown) => callback(),
                     runOutsideAngular: (callback: () => unknown) => callback()
                 } as any
-            );
+            ));
             const internal = service as any;
             const ref = {filterId: "filter", released: false};
             internal.filterSubscriptionsById.set(ref.filterId, ref);
@@ -612,7 +593,7 @@ describe("failed tile expiry", () => {
         await vi.advanceTimersByTimeAsync(100);
         expect(updates.mock.calls.at(-1)![0][0].partitions).toEqual([{kind: "tile", id: 3}]);
         // Turning off connection retries does not disable value freshness.
-        internal.stateService.connectionRetryPolicy = {...DEFAULT_CONNECTION_RETRY_POLICY, enabled: false};
+        internal.store.setConnectionRetryEnabled(false);
         internal.applyRetryPolicy();
         await vi.advanceTimersByTimeAsync(5000);
         expect(updates.mock.calls.at(-1)![0][0].partitions).toEqual([

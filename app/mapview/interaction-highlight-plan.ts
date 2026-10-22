@@ -1,16 +1,8 @@
-import type {FilterChannelDefinition} from
-    "../mapdata/filter-subscription.model";
-import type {StyleFilterPlan} from
-    "../mapdata/styled-mapget-layer.model";
-import type {TileFeatureId} from "../shared/appstate.service";
-import {
-    parseFeatureInspectionTarget,
-    type FeatureInspectionTarget
-} from "../shared/tile-feature-id";
-import {
-    partitionKey,
-    type PartitionId
-} from "../mapdata/partition.model";
+import type {TileFeatureId} from "../inspection/inspection-state.model";
+import type {FilterChannelDefinition} from "../mapdata/filter-subscription.model";
+import {partitionKey, type PartitionId} from "../mapdata/partition.model";
+import type {StyleFilterPlan} from "../mapdata/styled-mapget-layer.model";
+import {parseFeatureInspectionTarget, type FeatureInspectionTarget} from "../shared/tile-feature-id";
 
 /** One visible inspection target with the partition required by exact-root requests. */
 export type InteractionHighlightTarget = TileFeatureId & {
@@ -39,13 +31,8 @@ export function interactionTargetKey(feature: TileFeatureId): string {
 }
 
 /** Joins a planner expression with an exact-target restriction. */
-function restrictExpression(
-    expression: string | undefined,
-    restriction: string
-): string {
-    return expression
-        ? `(${expression}) and (${restriction})`
-        : restriction;
+function restrictExpression(expression: string | undefined, restriction: string): string {
+    return expression ? `(${expression}) and (${restriction})` : restriction;
 }
 
 /** Builds an entry restriction for one exact attribute target. */
@@ -59,10 +46,7 @@ function attributeEntryRestriction(
         `$attributeIndex == ${target.inspectionTarget.attributeIndex}`
     ];
     if (target.inspectionTarget.validityIndex !== undefined) {
-        conditions.push(
-            "$hasValidity",
-            `$validityIndex == ${target.inspectionTarget.validityIndex}`
-        );
+        conditions.push("$hasValidity", `$validityIndex == ${target.inspectionTarget.validityIndex}`);
     }
     return `(${conditions.join(" and ")})`;
 }
@@ -84,17 +68,15 @@ function channelTargets(
     targets: readonly ResolvedInteractionTarget[]
 ): ResolvedInteractionTarget[] {
     if (channel.scope === "feature") {
-        return targets.filter(target =>
-            target.inspectionTarget.scope === "feature");
+        return targets.filter((target) => target.inspectionTarget.scope === "feature");
     }
     if (channel.scope === "attribute") {
-        return targets.filter(target =>
-            target.inspectionTarget.scope === "attribute");
+        return targets.filter((target) => target.inspectionTarget.scope === "attribute");
     }
     if (channel.scope === "relation") {
-        return targets.filter(target =>
-            target.inspectionTarget.scope === "feature" ||
-            target.inspectionTarget.scope === "relation");
+        return targets.filter(
+            (target) => target.inspectionTarget.scope === "feature" || target.inspectionTarget.scope === "relation"
+        );
     }
     return [...targets];
 }
@@ -105,12 +87,9 @@ function channelTargets(
  * Relation channels on a whole feature are additive visualization and do not
  * replace the local host-feature interaction effect.
  */
-export function hasAuthoredInteractionHighlight(
-    plan: StyleFilterPlan,
-    feature: InteractionHighlightTarget
-): boolean {
+export function hasAuthoredInteractionHighlight(plan: StyleFilterPlan, feature: InteractionHighlightTarget): boolean {
     const scope = parseFeatureInspectionTarget(feature.featureId).scope;
-    return plan.channels.some(channel => channel.scope === scope);
+    return plan.channels.some((channel) => channel.scope === scope);
 }
 
 /** Restricts one cloned channel to the exact compatible semantic targets. */
@@ -123,47 +102,45 @@ function restrictChannel(
         return [];
     }
 
-    const backendFeatureIds = [...new Set(remoteTargets.map(target =>
-        target.inspectionTarget.baseFeatureId))];
-    const featureRestriction = backendFeatureIds
-        .map(featureId => `id == ${JSON.stringify(featureId)}`)
-        .join(" or ");
-    channel.featureFilter = restrictExpression(
-        channel.featureFilter,
-        featureRestriction
-    );
+    const backendFeatureIds = [...new Set(remoteTargets.map((target) => target.inspectionTarget.baseFeatureId))];
+    const featureRestriction = backendFeatureIds.map((featureId) => `id == ${JSON.stringify(featureId)}`).join(" or ");
+    channel.featureFilter = restrictExpression(channel.featureFilter, featureRestriction);
 
     if (channel.scope === "attribute") {
         const entryRestriction = remoteTargets
-            .filter((target): target is ResolvedInteractionTarget & {
-                inspectionTarget: Extract<FeatureInspectionTarget, {
-                    scope: "attribute";
-                }>;
-            } => target.inspectionTarget.scope === "attribute")
+            .filter(
+                (
+                    target
+                ): target is ResolvedInteractionTarget & {
+                    inspectionTarget: Extract<
+                        FeatureInspectionTarget,
+                        {
+                            scope: "attribute";
+                        }
+                    >;
+                } => target.inspectionTarget.scope === "attribute"
+            )
             .map(attributeEntryRestriction)
             .join(" or ");
-        channel.entryFilter = restrictExpression(
-            channel.entryFilter,
-            entryRestriction
-        );
+        channel.entryFilter = restrictExpression(channel.entryFilter, entryRestriction);
     } else if (channel.scope === "relation") {
         const exactRelationTargets = remoteTargets.filter(
-            (target): target is ResolvedInteractionTarget & {
-                inspectionTarget: Extract<FeatureInspectionTarget, {
-                    scope: "relation";
-                }>;
+            (
+                target
+            ): target is ResolvedInteractionTarget & {
+                inspectionTarget: Extract<
+                    FeatureInspectionTarget,
+                    {
+                        scope: "relation";
+                    }
+                >;
             } => target.inspectionTarget.scope === "relation"
         );
         // Whole-feature traversal and exact rows are planned separately so
         // a feature selection cannot remove another target's row restriction.
         if (exactRelationTargets.length) {
-            const entryRestriction = exactRelationTargets
-                .map(relationEntryRestriction)
-                .join(" or ");
-            channel.entryFilter = restrictExpression(
-                channel.entryFilter,
-                entryRestriction
-            );
+            const entryRestriction = exactRelationTargets.map(relationEntryRestriction).join(" or ");
+            channel.entryFilter = restrictExpression(channel.entryFilter, entryRestriction);
         }
     }
     return remoteTargets;
@@ -181,27 +158,31 @@ export function planRemoteInteractionHighlights(
     features: readonly InteractionHighlightTarget[],
     options: RemoteInteractionHighlightOptions = {}
 ): RemoteInteractionHighlightPlan[] {
-    const targets: ResolvedInteractionTarget[] = features
-        .map(feature => ({
-            ...feature,
-            inspectionTarget: parseFeatureInspectionTarget(feature.featureId)
-        }));
+    const targets: ResolvedInteractionTarget[] = features.map((feature) => ({
+        ...feature,
+        inspectionTarget: parseFeatureInspectionTarget(feature.featureId)
+    }));
     let targetGroups = [targets];
-    if (rawPlan.channels.some(channel => channel.scope === "relation")) {
-        const wholeFeatures = targets.filter(target =>
-            target.inspectionTarget.scope === "feature");
+    if (rawPlan.channels.some((channel) => channel.scope === "relation")) {
+        const wholeFeatures = targets.filter((target) => target.inspectionTarget.scope === "feature");
         const wholeFeatureKeys = new Set(wholeFeatures.map(interactionTargetKey));
-        const exactRows = targets.filter(target =>
-            target.inspectionTarget.scope !== "feature" &&
-            // A whole feature already requests this row's authored relations.
-            !(target.inspectionTarget.scope === "relation" &&
-                wholeFeatureKeys.has(interactionTargetKey({
-                    mapTileKey: target.mapTileKey,
-                    featureId: target.inspectionTarget.baseFeatureId
-                }))));
+        const exactRows = targets.filter(
+            (target) =>
+                target.inspectionTarget.scope !== "feature" &&
+                // A whole feature already requests this row's authored relations.
+                !(
+                    target.inspectionTarget.scope === "relation" &&
+                    wholeFeatureKeys.has(
+                        interactionTargetKey({
+                            mapTileKey: target.mapTileKey,
+                            featureId: target.inspectionTarget.baseFeatureId
+                        })
+                    )
+                )
+        );
         targetGroups = [wholeFeatures, exactRows];
     }
-    return targetGroups.flatMap(group => {
+    return targetGroups.flatMap((group) => {
         const plan = planRemoteInteractionHighlight(rawPlan, group, options);
         return plan ? [plan] : [];
     });
@@ -218,48 +199,44 @@ function planRemoteInteractionHighlight(
     }
     const plan = structuredClone(rawPlan);
     const admittedTargetKeys = new Set<string>();
-    plan.channels = plan.channels.filter(channel => {
+    plan.channels = plan.channels.filter((channel) => {
         // A local host highlight cannot supply its authored relation targets.
         // Keep those channels while avoiding duplicate exact-target geometry.
-        const remoteTargets = targets.filter(target =>
-            (channel.scope === "relation" &&
-                target.inspectionTarget.scope === "feature") ||
-            !options.localTargetKeys?.has(interactionTargetKey(target)));
+        const remoteTargets = targets.filter(
+            (target) =>
+                (channel.scope === "relation" && target.inspectionTarget.scope === "feature") ||
+                !options.localTargetKeys?.has(interactionTargetKey(target))
+        );
         const admittedTargets = restrictChannel(channel, remoteTargets);
-        admittedTargets.forEach(target =>
-            admittedTargetKeys.add(interactionTargetKey(target)));
+        admittedTargets.forEach((target) => admittedTargetKeys.add(interactionTargetKey(target)));
         return admittedTargets.length > 0;
     });
     if (!plan.channels.length) {
         return null;
     }
 
-    const admittedTargets = targets.filter(target =>
-        admittedTargetKeys.has(interactionTargetKey(target)));
-    const partitions = [...new Map(admittedTargets.map(target => [
-        partitionKey(target.partition),
-        target.partition
-    ])).values()];
-    const needsRoots = plan.channels.some(channel =>
-        channel.scope === "relation");
-    const roots = new Map<string, {
-        partition: PartitionId;
-        featureId: string;
-    }>();
+    const admittedTargets = targets.filter((target) => admittedTargetKeys.has(interactionTargetKey(target)));
+    const partitions = [
+        ...new Map(admittedTargets.map((target) => [partitionKey(target.partition), target.partition])).values()
+    ];
+    const needsRoots = plan.channels.some((channel) => channel.scope === "relation");
+    const roots = new Map<
+        string,
+        {
+            partition: PartitionId;
+            featureId: string;
+        }
+    >();
     if (needsRoots) {
         for (const target of admittedTargets) {
-            if (target.inspectionTarget.scope !== "feature" &&
-                target.inspectionTarget.scope !== "relation") {
+            if (target.inspectionTarget.scope !== "feature" && target.inspectionTarget.scope !== "relation") {
                 continue;
             }
             const root = {
                 partition: target.partition,
                 featureId: target.inspectionTarget.baseFeatureId
             };
-            roots.set(
-                `${partitionKey(root.partition)}\n${root.featureId}`,
-                root
-            );
+            roots.set(`${partitionKey(root.partition)}\n${root.featureId}`, root);
         }
     }
     return {

@@ -1,9 +1,11 @@
+import {AppStore} from "../../shared/app.store";
+import {ownerTestInjector} from "../../../test/owner-test-injector";
 import "@angular/compiler";
 import {WebMercatorViewport} from "@deck.gl/core";
 import {addMetersToLngLat} from "@math.gl/web-mercator";
 import {describe, expect, it, vi} from "vitest";
 
-import type {TileFeatureId} from "../../shared/appstate.service";
+import type {TileFeatureId} from "../../inspection/inspection-state.model";
 import {DeckMapView2D} from "./deck-view2d";
 import {DeckMapView3D} from "./deck-view3d";
 import {ErdblickVectorLayer} from "./erdblick-vector.layer";
@@ -26,7 +28,7 @@ function createView() {
         {} as never,
         {} as never,
         {} as never,
-        {} as never
+        {} as never, ownerTestInjector().get(AppStore)
     );
     return view;
 }
@@ -45,7 +47,7 @@ function create3DView() {
         {} as never,
         {} as never,
         {} as never,
-        {} as never
+        {} as never, ownerTestInjector().get(AppStore)
     );
 }
 
@@ -216,13 +218,8 @@ describe("Deck rendered-feature picking", () => {
         const top = {mapTileKey: "map/tile", featureId: "top"};
         const lower = {mapTileKey: "map/tile", featureId: "lower"};
         view.desktopDrillPickingEnabled = true;
-        view.stateService = {
-            focusedView: 0,
-            drillPickRadius: 2,
-            inspectionsLimit: 10,
-            marker: false,
-            unsetUnlockedSelections: vi.fn()
-        };
+        view.store.setDrillPickRadius(2);
+        view.store.setInspectionsLimit(10);
         view.inspectionSelection = {inspectFeatureIds: vi.fn()};
         view.coordinatesService = {
             mouseClickCoordinates: {next: vi.fn()}
@@ -249,13 +246,8 @@ describe("Deck rendered-feature picking", () => {
         const second = {mapTileKey: "map/tile", featureId: "merged-b"};
         const lower = {mapTileKey: "map/tile", featureId: "lower"};
         view.desktopDrillPickingEnabled = true;
-        view.stateService = {
-            focusedView: 0,
-            drillPickRadius: 2,
-            inspectionsLimit: 10,
-            marker: false,
-            unsetUnlockedSelections: vi.fn()
-        };
+        view.store.setDrillPickRadius(2);
+        view.store.setInspectionsLimit(10);
         view.inspectionSelection = {inspectFeatureIds: vi.fn()};
         view.coordinatesService = {
             mouseClickCoordinates: {next: vi.fn()}
@@ -280,13 +272,8 @@ describe("Deck rendered-feature picking", () => {
         const view = createView() as any;
         const tapped = {mapTileKey: "map/tile", featureId: "tapped"};
         view.desktopDrillPickingEnabled = false;
-        view.stateService = {
-            focusedView: 0,
-            drillPickRadius: 5,
-            inspectionsLimit: 10,
-            marker: false,
-            unsetUnlockedSelections: vi.fn()
-        };
+        view.store.setDrillPickRadius(5);
+        view.store.setInspectionsLimit(10);
         view.inspectionSelection = {inspectFeatureIds: vi.fn()};
         view.coordinatesService = {
             mouseClickCoordinates: {next: vi.fn()}
@@ -319,13 +306,8 @@ describe("Deck rendered-feature picking", () => {
             }
         };
         view.desktopDrillPickingEnabled = false;
-        view.stateService = {
-            focusedView: 0,
-            drillPickRadius: 5,
-            inspectionsLimit: 10,
-            marker: false,
-            unsetUnlockedSelections: vi.fn()
-        };
+        view.store.setDrillPickRadius(5);
+        view.store.setInspectionsLimit(10);
         view.inspectionSelection = {inspectFeatureIds: vi.fn()};
         view.coordinatesService = {
             mouseClickCoordinates: {next: vi.fn()}
@@ -364,7 +346,7 @@ describe("Deck rendered-feature picking", () => {
         const pickObjectsAsync = vi.fn(async () => [{layer: baseLayer, index: 0}]);
         view.deckCanvasPointerInside = true;
         view.latestHoverPosition = {x: 12, y: 24};
-        view.stateService = {drillPickRadius: 6};
+        view.store.setDrillPickRadius(6);
         view.inspectionSelection = {setHoveredFeatures: vi.fn()};
         view.groundNavigationTarget = vi.fn(() => ({position: [11, 48, 0]}));
         view.setHoverNavigationPivot = vi.fn();
@@ -426,7 +408,7 @@ describe("Deck rendered-feature picking", () => {
         const lower = {mapTileKey: "map/tile", featureId: "feature-8"};
         view.deckCanvasPointerInside = true;
         view.latestHoverPosition = {x: 12, y: 24};
-        view.stateService = {drillPickRadius: 6};
+        view.store.setDrillPickRadius(6);
         view.inspectionSelection = {setHoveredFeatures: vi.fn()};
         view.hoveredFeatureIds.next([top, lower]);
         view.deck = {
@@ -473,7 +455,7 @@ describe("Deck rendered-feature picking", () => {
         });
         view.deckCanvasPointerInside = true;
         view.latestHoverPosition = {x: 12, y: 24};
-        view.stateService = {drillPickRadius: 6};
+        view.store.setDrillPickRadius(6);
         view.inspectionSelection = {setHoveredFeatures: vi.fn()};
         view.groundNavigationTarget = vi.fn(() => ({position: [11, 48, 0]}));
         view.setHoverNavigationPivot = vi.fn();
@@ -528,7 +510,7 @@ describe("Deck rendered-feature picking", () => {
             index: 0,
             coordinate: depthCoordinate
         }));
-        view.stateService = {drillPickRadius: 6};
+        view.store.setDrillPickRadius(6);
         view.deck = {
             props: {layers: [baseLayer]},
             pickObject
@@ -588,7 +570,7 @@ describe("Deck rendered-feature picking", () => {
             coordinate: [11.25, 48.5, 123],
             viewport
         }));
-        view.stateService = {drillPickRadius: 6};
+        view.store.setDrillPickRadius(6);
         view.deck = {
             props: {layers: [baseLayer]},
             pickObject
@@ -640,7 +622,7 @@ describe("Deck rendered-feature picking", () => {
         };
         view.deckCanvasPointerInside = true;
         view.latestHoverPosition = {x: 12, y: 24};
-        view.stateService = {drillPickRadius: 6};
+        view.store.setDrillPickRadius(6);
         view.inspectionSelection = {setHoveredFeatures: vi.fn()};
         view.setHoverNavigationPivot = vi.fn();
         view.deck = {
@@ -699,7 +681,7 @@ describe("Deck rendered-feature picking", () => {
 
     it("applies feature clearance only to renderer feature origins", () => {
         const view = create3DView() as any;
-        view.stateService = {featureZoomClearanceMeters: 20};
+        view.store.setFeatureZoomClearanceMeters(20);
 
         expect(view.minimumTargetDistanceForOrigin("feature")).toBe(20);
         expect(view.minimumTargetDistanceForOrigin("path")).toBe(20);
@@ -707,7 +689,7 @@ describe("Deck rendered-feature picking", () => {
         expect(view.minimumTargetDistanceForOrigin("ground")).toBeUndefined();
         expect(view.minimumTargetDistanceForOrigin("unknown")).toBeUndefined();
 
-        view.stateService.featureZoomClearanceMeters = 0;
+        view.store.setFeatureZoomClearanceMeters(0);
         expect(view.minimumTargetDistanceForOrigin("feature")).toBeUndefined();
     });
 
@@ -734,6 +716,7 @@ describe("Deck rendered-feature picking", () => {
 
     it("snaps a thick picked path ribbon to its base XYZ centerline", () => {
         const view = createView();
+        (view as any).store.setDrillPickRadius(4);
         const origin: [number, number, number] = [11, 48, 100];
         const positions = new Float32Array([
             0, 0, 0,
@@ -893,7 +876,7 @@ describe("Deck rendered-feature picking", () => {
             x: cursor[0],
             y: cursor[1]
         }]);
-        (view as any).stateService = {drillPickRadius: 10};
+        (view as any).store.setDrillPickRadius(10);
         (view as any).deck = {pickMultipleObjects};
 
         const target = view.pickNavigationTarget({x: cursor[0], y: cursor[1]});

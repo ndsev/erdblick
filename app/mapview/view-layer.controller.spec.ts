@@ -1,5 +1,7 @@
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
+import {ownerTestInjector, setTestViewIds} from "../../test/owner-test-injector";
+import {AppStore} from "../shared/app.store";
 import {ViewLayerController} from "./view-layer.controller";
 import {TileSubsetLayerVisualization} from
     "./deck/tile-subset-layer.visualization";
@@ -14,9 +16,19 @@ import {
 
 const tileKey = (id: number) => partitionKey(tilePartition(id));
 
+/** Install the logical view identity without creating a renderer or stream. */
+function controllerFixture(viewIndex = 0): any {
+    const store = ownerTestInjector().get(AppStore);
+    setTestViewIds(store, Array.from({length: viewIndex + 1}, (_, index) => `view-${index}`));
+    const controller = Object.create(ViewLayerController.prototype);
+    controller.identity = store.captureView(viewIndex)!;
+    controller.viewState = {store};
+    return controller;
+}
+
 describe("ViewLayerController", () => {
     it("owns mixed feature/row highlight plans independently and reuses them", () => {
-        const controller = Object.create(ViewLayerController.prototype);
+        const controller = controllerFixture();
         const partition = tilePartition(coreLib.getTileIdFromPosition(11, 48, 13));
         const features = [
             {mapTileKey: "tile", featureId: "Lane.1"},
@@ -24,13 +36,12 @@ describe("ViewLayerController", () => {
         ];
         const mapgetLayer = {key: "Map/Lane", mapId: "Map", layerId: "Lane"};
         const style = {id: "DrivePaths", source: "style", sourceRef: {}};
-        controller.viewIndex = 0;
         controller.inspection = {
             selectionIdsTopic: {getValue: () => [{id: 1, features}]},
             hoverIdsTopic: {getValue: () => []}
         };
         controller.mapInfo = {maps: {getLayerStyleOptions: () => ({})}};
-        controller.viewState = {styleLod: () => 7};
+        controller.viewState = {...controller.viewState, styleLod: () => 7};
         controller.resolveInteractionTargetLayer = () => ({
             mapgetLayer, partition
         });
@@ -98,7 +109,7 @@ describe("ViewLayerController", () => {
     });
 
     it("rerenders camera-dependent line detail on the retained tile owner", () => {
-        const controller = Object.create(ViewLayerController.prototype) as any;
+        const controller = controllerFixture() as any;
         const state = {partitionKey: tileKey(7), status: "ready", subsetBlob: new Uint8Array([1])};
         const visualization = {
             state,
@@ -116,7 +127,7 @@ describe("ViewLayerController", () => {
         controller.presentationStillDemanded = vi.fn(() => true);
         controller.presentationLod = vi.fn(() => 3);
         controller.lineSimplificationToleranceMeters = vi.fn(() => 2);
-        controller.viewState = {viewStateFor: () => ({metersPerPixel: 1})};
+        controller.viewState = {...controller.viewState, viewStateFor: () => ({metersPerPixel: 1})};
         controller.shouldVisualize = vi.fn(() => true);
         controller.replaceVisualization = vi.fn();
         controller.queueVisualizationRender = vi.fn();
@@ -131,9 +142,7 @@ describe("ViewLayerController", () => {
     });
 
     it("reconciles hover masks without rebuilding regular presentation demand", async () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         controller.disposed = false;
         controller.reconcileQueued = false;
         controller.fullReconcileRequired = false;
@@ -165,9 +174,7 @@ describe("ViewLayerController", () => {
     });
 
     it("does not scan replacement coverage when no fallback exists", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         controller.retiringRegularLayers = new Map();
         controller.regularReplacementIsReady = vi.fn(() => false);
 
@@ -179,9 +186,7 @@ describe("ViewLayerController", () => {
     });
 
     it("retires regular presentation when the current LOD has no active rules", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         const style = {
             id: "style",
             visible: true,
@@ -217,7 +222,7 @@ describe("ViewLayerController", () => {
                 issues: []
             }))
         };
-        controller.viewState = {
+        controller.viewState = {...controller.viewState,
             getEffectiveMapLayerLevel: () => 13,
             visibleTileIdsForLevel: () => [7],
             styleLod: () => 2
@@ -246,9 +251,7 @@ describe("ViewLayerController", () => {
     });
 
     it("refreshes only non-search presentations for the selected map", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         controller.disposed = false;
         controller.sceneHandle = null;
         controller.occupancyChanged = {next: vi.fn()};
@@ -313,9 +316,7 @@ describe("ViewLayerController", () => {
         expect(controller.diagnostics.notifyChanged).toHaveBeenCalledOnce();
     });
     it("retires an inherited contribution when its pending successor is dropped", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         controller.sceneHandle = {scene: {}};
         controller.scheduleInteractionPresenceReconcile = vi.fn();
         const retireContribution = vi.spyOn(
@@ -343,9 +344,7 @@ describe("ViewLayerController", () => {
     });
 
     it("keeps inherited contribution ownership across pending state updates", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         controller.presentationLod = vi.fn(() => 2);
         controller.lineSimplificationToleranceMeters = vi.fn(() => 4);
         controller.schedulePendingTiles = vi.fn();
@@ -377,9 +376,7 @@ describe("ViewLayerController", () => {
     });
 
     it("dispatches queued rerenders only while global worker credit is free", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         const first = {};
         const second = {};
         controller.sceneHandle = {scene: {}};
@@ -400,9 +397,7 @@ describe("ViewLayerController", () => {
     });
 
     it("interleaves new tile renders across styled layers", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         const first = {id: "first"};
         const second = {id: "second"};
         const third = {id: "third"};
@@ -443,9 +438,7 @@ describe("ViewLayerController", () => {
     });
 
     it("reattaches scene owners by queueing rather than rendering immediately", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         const regular = {reattach: vi.fn()};
         const retiring = {reattach: vi.fn()};
         controller.ngZone = {runOutsideAngular: (callback: () => void) => callback()};
@@ -468,9 +461,7 @@ describe("ViewLayerController", () => {
     });
 
     it("replays retained interaction masks after a contribution renders", async () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         const visualization = {
             owner: {identity: {presentationKind: "regular"}},
             state: {
@@ -501,9 +492,7 @@ describe("ViewLayerController", () => {
     });
 
     it("reconciles authored fallback demand after local geometry is removed", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         const visualization = {destroy: vi.fn()};
         const owned = {
             layer: {identity: {presentationKind: "regular"}},
@@ -526,9 +515,7 @@ describe("ViewLayerController", () => {
     });
 
     it("reconciles presence only for interaction targets in the changed tile", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         const layer = {
             identity: {presentationKind: "regular"},
             mapgetLayer: {mapId: "Map", layerId: "Road"}
@@ -555,9 +542,7 @@ describe("ViewLayerController", () => {
     });
 
     it("filters retained interaction targets against one local contribution", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         const matching = {mapTileKey: "tile", featureId: "Road.1"};
         const missing = {mapTileKey: "tile", featureId: "Road.2"};
         const visualization = {
@@ -587,9 +572,7 @@ describe("ViewLayerController", () => {
     });
 
     it("resolves local interaction work directly from target tile ids", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         const matching = {};
         const unrelated = {};
         controller.parseFeaturePartition = vi.fn(target => ({
@@ -624,9 +607,7 @@ describe("ViewLayerController", () => {
     });
 
     it("detects an exact relation already present in regular presentation", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         const target = {
             mapTileKey: "tile",
             featureId: "Road.7:relation#2"
@@ -659,15 +640,12 @@ describe("ViewLayerController", () => {
     });
 
     it("keeps exact fallback eligible across visibility and level changes", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         const mapgetLayer = {
             key: "Islands/Island-6-Local/Lane",
             mapId: "Islands/Island-6-Local",
             layerId: "Lane"
         };
-        controller.viewIndex = 0;
         controller.parseFeaturePartition = vi.fn(() => ({
             mapId: mapgetLayer.mapId,
             layerId: mapgetLayer.layerId,
@@ -679,7 +657,7 @@ describe("ViewLayerController", () => {
                 getMapLayerVisibility: vi.fn(() => false)
             }
         };
-        controller.viewState = {
+        controller.viewState = {...controller.viewState,
             getEffectiveMapLayerLevel: vi.fn(() => 12)
         };
 
@@ -694,9 +672,7 @@ describe("ViewLayerController", () => {
     });
 
     it("reuses immutable interaction planning across hover targets", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         controller.interactionLayerAffinityCache = new WeakMap();
         controller.interactionFilterPlanCache = new WeakMap();
         controller.interactionEffectCache = new WeakMap();
@@ -755,9 +731,7 @@ describe("ViewLayerController", () => {
     });
 
     it("invalidates interaction planning after datasource metadata changes", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         const style = {
             featureLayerStyle: {
                 supportsHighlightMode: vi.fn(() => true)
@@ -791,9 +765,7 @@ describe("ViewLayerController", () => {
     });
 
     it("skips membership scans for identical regular coverage inputs", () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture() as any;
         const layer = {setPartitionCoverage: vi.fn()};
         const partitions = [1, 2, 3].map(tilePartition);
         const priorityPartitions = [2, 1, 3].map(tilePartition);
@@ -806,9 +778,7 @@ describe("ViewLayerController", () => {
     });
 
     it("discovers object coverage at the advertised association level", async () => {
-        const controller = Object.create(
-            ViewLayerController.prototype
-        ) as any;
+        const controller = controllerFixture(3) as any;
         const layer = {
             key: "SmartMap/Road",
             tileAssociationLevel: 13
@@ -818,9 +788,8 @@ describe("ViewLayerController", () => {
             objectPartition("18446744073709551615")
         ];
         controller.disposed = false;
-        controller.viewIndex = 3;
         controller.objectCoverageByLayer = new Map();
-        controller.viewState = {
+        controller.viewState = {...controller.viewState,
             visibleTileIdsForLevel: vi.fn(() => [101, 102])
         };
         controller.tileStream = {

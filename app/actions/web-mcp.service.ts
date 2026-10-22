@@ -1,7 +1,8 @@
-import {Injectable, NgZone, OnDestroy} from "@angular/core";
+import {inject, Injectable, NgZone, OnDestroy} from "@angular/core";
 import {BehaviorSubject} from "rxjs";
 import {z} from "zod";
-import {viewerActions, viewerJsonSchema} from "./viewer-action.contract";
+import {viewerJsonSchema} from "./viewer-action.contract";
+import {AppStore} from "../shared/app.store";
 import {ViewerActionService} from "./viewer-action.service";
 import {ViewerActionFailure} from "./viewer-action-relay.contract";
 
@@ -30,6 +31,7 @@ const rpcResponseSchema = z.object({
 /** Owns document tool registrations and the authenticated, same-origin mapget bridge. */
 @Injectable({providedIn: "root"})
 export class WebMcpService implements OnDestroy {
+    private readonly viewerActions = inject(AppStore).actionCatalog.publicActions;
     readonly status$ = new BehaviorSubject({supported: false, viewerTools: 0, mapgetTools: 0, message: "WebMCP is not available in this browser"});
     private readonly lifetime = new AbortController();
     private nativeRegistration = new AbortController();
@@ -50,7 +52,7 @@ export class WebMcpService implements OnDestroy {
         this.status$.next({...this.status$.value, supported: true, message: "Starting WebMCP"});
         void this.zone.runOutsideAngular(async () => {
             try {
-                for (const [name, action] of Object.entries(viewerActions)) {
+                for (const [name, action] of Object.entries(this.viewerActions)) {
                     await this.context!.registerTool({
                         name, description: `${action.description} Acts on this browser tab; no clientId is needed.`,
                         inputSchema: viewerJsonSchema(action.inputSchema),

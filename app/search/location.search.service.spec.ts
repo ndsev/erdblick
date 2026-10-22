@@ -1,6 +1,9 @@
+import {HttpClient} from "@angular/common/http";
 import "@angular/compiler";
 import {firstValueFrom, NEVER, of, throwError} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {AppConfigService} from "../shared/app-config.service";
 
 import {LocationSearchProviderConfig} from "../shared/app-config.service";
 import {
@@ -33,7 +36,8 @@ const createService = (providers: LocationSearchProviderConfig[] = [
         }
     };
     return {
-        service: new LocationSearchService(httpClient as any, configService as any),
+        service: ownerTestInjector([LocationSearchService, {provide: HttpClient, useValue: httpClient},
+            {provide: AppConfigService, useValue: configService}]).get(LocationSearchService),
         httpClient
     };
 };
@@ -95,7 +99,8 @@ describe("LocationSearchService", () => {
         expect(target.id).toBe("loc:mapget-offline:geonames:2867714");
         expect(target.iconType).toBe("material");
         expect(target.icon).toBe("location_city");
-        expect(target.jump?.("munich", target.payload)).toEqual([48.13743, 11.57549, 0]);
+        expect(await firstValueFrom(service.resolveNavigation(target.id, target.payload)))
+            .toMatchObject({point: [11.57549, 48.13743], label: "Munich, DE"});
     });
 
     it("adds a zero-extent aabb when an otherwise valid provider match omits one", async () => {

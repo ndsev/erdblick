@@ -1,3 +1,6 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {AppStore} from "../shared/app.store";
 import {describe, it, expect, vi} from 'vitest';
 import {CoordinatesService} from './coordinates.service';
 
@@ -5,28 +8,27 @@ class AppConfigServiceStub {
     getExtensionModuleId = vi.fn().mockReturnValue(null);
 }
 
-class AppStateServiceStub {
-    setMarkerPosition = vi.fn();
-}
-
 const createService = () => {
-    const stateService = new AppStateServiceStub();
+    const injector = ownerTestInjector();
+    const store = injector.get(AppStore);
+    vi.spyOn(store, "setMarkerPosition");
     const configService = new AppConfigServiceStub();
-    const service = new CoordinatesService(stateService as any, configService as any);
-    return {service, stateService, configService};
+    const service = runInInjectionContext(injector, () =>
+        new CoordinatesService(configService as any));
+    return {service, store, configService};
 };
 
 describe('CoordinatesService', () => {
-    it('forwards mouse click coordinates to AppStateService, skipping the initial null', () => {
-        const {service, stateService} = createService();
+    it('forwards mouse click coordinates to the view owner, skipping the initial null', () => {
+        const {service, store} = createService();
 
-        expect(stateService.setMarkerPosition).not.toHaveBeenCalled();
+        expect(store.setMarkerPosition).not.toHaveBeenCalled();
 
         const position = {longitude: 1, latitude: 2, height: 3} as any;
         service.mouseClickCoordinates.next(position);
 
-        expect(stateService.setMarkerPosition).toHaveBeenCalledTimes(1);
-        expect(stateService.setMarkerPosition).toHaveBeenCalledWith(position);
+        expect(store.setMarkerPosition).toHaveBeenCalledTimes(1);
+        expect(store.setMarkerPosition).toHaveBeenCalledWith(position);
     });
 
     it('loads the auxiliary plugin when a jump-target extension module is configured', async () => {

@@ -1,15 +1,20 @@
 import type {Page} from '@playwright/test';
 import {expect, test} from '../fixtures/test';
-import {viewerActions} from '../../app/actions/viewer-action.contract';
-import {appStateChannels, cameraViewStateSchema} from '../../app/shared/app-state-channel.contract';
+import {viewerActionNames, viewerResult, availableValue, viewerControlSchema, type ViewerActionName} from '../utils/viewer-catalog';
+import type {z} from 'zod';
+import type {CameraViewState} from '../../app/mapview/map-view-state.model';
+import type {inspectionStateControls} from '../../app/inspection/inspection.store-feature';
 import {enableMapLayer} from '../utils/ui-helpers';
 import {mcpClient} from '../utils/mcp-client';
 import {TEST_LAYER_NAMES, TEST_MAP_NAMES} from '../utils/test-params';
 
+const cameraViewStateSchema = viewerControlSchema<CameraViewState>('view.camera');
+const inspectionPanelSchema = viewerControlSchema<z.output<typeof inspectionStateControls.panel.valueSchema>>('inspection.panel');
+
 test.use({stateSnapshot: null});
 test.skip(process.env['EB_MAPGET_MCP_LOCAL'] !== '1', 'Requires the native local MCP fixture, not a mocked relay');
 
-const twoViews = '/?v2=1&n=2&m=1&f=0&sync=&lon=10,20&lat=40,50&alt=500,1000&h=0,0&p=-1,-1&r=0,0&px=0,0&py=0,0&pz=0,0&m2d=0,0&bg=~10,~10&l=';
+const twoViews = '/?v2=1&n=2&vid=left,right&m=1&f=0&sync=&lon=10,20&lat=40,50&alt=500,1000&h=0,0&p=-1,-1&r=0,0&px=0,0&py=0,0&pz=0,0&m2d=0,0&bg=~10,~10&l=';
 
 /** Labels a real tab through the product UI, so discovery also proves WS registration/update. */
 async function openViewer(page: Page, label: string, sync = false, origin?: string) {
@@ -28,7 +33,7 @@ test('native MCP controls the selected live tab/view, retires stale UUIDs, and p
     const discovery = await mcp.rpc('tools/list');
     expect(discovery.response.ok()).toBe(true);
     expect(discovery.message.result.tools.map((tool: {name: string}) => tool.name).filter((name: string) => name.startsWith('viewer_')).sort())
-        .toEqual([...Object.keys(viewerActions), 'viewer_list_sessions'].sort());
+        .toEqual([...viewerActionNames, 'viewer_list_sessions'].sort());
     await openViewer(page, 'first-native-tab');
     const second = await context.newPage();
     try {
@@ -41,15 +46,15 @@ test('native MCP controls the selected live tab/view, retires stale UUIDs, and p
         const firstId = sessions.find(tab => tab.label === 'first-native-tab')!.clientId;
         const secondId = sessions.find(tab => tab.label === 'second-native-tab')!.clientId;
         expect(firstId).not.toEqual(secondId);
-        const targets = [{channel: 'view.camera', viewIndex: 0}, {channel: 'view.camera', viewIndex: 1}];
+        const targets = [{control: 'view.camera', viewId: 'left'}, {control: 'view.camera', viewId: 'right'}];
         async function read(clientId: string) {
-            const result = await mcp.call('viewer_get_app_state', {clientId, targets});
+            const result = await mcp.call('viewer_get_controls', {clientId, targets});
             expect(result.isError).not.toBe(true);
-            return viewerActions.viewer_get_app_state.outputSchema.parse(result.structuredContent);
+            return viewerResult('viewer_get_controls', result.structuredContent);
         }
-        const description = await mcp.call('viewer_describe_app_state', {clientId: firstId});
+        const description = await mcp.call('viewer_describe_controls', {clientId: firstId});
         expect(description.isError).not.toBe(true);
-        viewerActions.viewer_describe_app_state.outputSchema.parse(description.structuredContent);
+        viewerResult('viewer_describe_controls', description.structuredContent);
         let before = await read(firstId);
         await expect.poll(async () => {
             before = await read(firstId);
@@ -57,28 +62,34 @@ test('native MCP controls the selected live tab/view, retires stale UUIDs, and p
         }).toBe(true);
         const otherBefore = await read(secondId);
         const value = {destination: {lon: 11.5374, lat: 48.1584, alt: 700}, orientation: {heading: 0, pitch: -1, roll: 0}, position: [0, 0, 0]};
-        const result = await mcp.call('viewer_set_app_state', {
-            clientId: firstId, target: targets[1], value, viewLayoutRevision: before.viewLayoutRevision
+        const result = await mcp.call('viewer_set_control', {
+            clientId: firstId, target: targets[1], value
         });
         expect(result.isError).not.toBe(true);
-        const applied = viewerActions.viewer_set_app_state.outputSchema.parse(result.structuredContent);
-        expect(applied).toMatchObject({status: 'applied', focusedView: 1, affectedViews: [1], changed: true});
+        const applied = viewerResult('viewer_set_control', result.structuredContent);
+        expect(applied).toMatchObject({status: 'applied', changed: true});
         expect(cameraViewStateSchema.parse(applied.value).destination.lon).toBeCloseTo(value.destination.lon, 5);
         expect((await read(firstId)).values[0]).toEqual(before.values[0]);
         expect((await read(secondId)).values).toEqual(otherBefore.values);
-        await expect(page.getByTestId('viewer-action-details').getByRole('listitem').filter({hasText: 'viewer_set_app_state'}))
+        await expect(page.getByTestId('viewer-action-details').getByRole('listitem').filter({hasText: 'viewer_set_control'}))
             .toContainText('applied');
 
-        const synced = await mcp.call('viewer_set_app_state', {
-            clientId: secondId, target: targets[1], value, viewLayoutRevision: otherBefore.viewLayoutRevision
+        const synced = await mcp.call('viewer_set_control', {
+            clientId: secondId, target: targets[1], value
         });
         expect(synced.isError).not.toBe(true);
-        expect(synced.structuredContent.affectedViews.sort()).toEqual([0, 1]);
+        const synchronized = await read(secondId);
+        for (const entry of synchronized.values) {
+            const camera = cameraViewStateSchema.parse(availableValue(entry));
+            expect(camera.destination.lon).toBeCloseTo(value.destination.lon, 5);
+            expect(camera.destination.lat).toBeCloseTo(value.destination.lat, 5);
+            expect(camera.destination.alt).toBeCloseTo(value.destination.alt, 1);
+        }
 
         // Navigation closes the old interactive connection; no target is silently rebound.
         await page.reload();
         await expect.poll(async () => (await mcp.sessions()).some(tab => tab.clientId === firstId)).toBe(false);
-        const stale = await mcp.call('viewer_get_app_state', {clientId: firstId, targets});
+        const stale = await mcp.call('viewer_get_controls', {clientId: firstId, targets});
         expect(stale.isError).toBe(true);
         await expect.poll(async () => (await mcp.sessions()).length).toBe(2);
         const replacement = (await mcp.sessions()).find(tab => tab.clientId !== secondId)!;
@@ -93,9 +104,8 @@ test('native MCP controls the selected live tab/view, retires stale UUIDs, and p
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.mouse.down();
         await page.mouse.move(box.x + box.width / 2 + 100, box.y + box.height / 2, {steps: 8});
-        const duringGesture = await mcp.call('viewer_set_app_state', {
-            clientId: replacement.clientId, target: targets[0], value,
-            viewLayoutRevision: cameraBefore.viewLayoutRevision
+        const duringGesture = await mcp.call('viewer_set_control', {
+            clientId: replacement.clientId, target: targets[0], value
         });
         expect(duringGesture.isError).toBe(true);
         expect(duringGesture.structuredContent.error).toMatchObject({code: 'busy', outcome: 'not_applied'});
@@ -104,12 +114,12 @@ test('native MCP controls the selected live tab/view, retires stale UUIDs, and p
 
         // The same connection must still deliver/render real subsets alongside controls.
         const enableLayer = enableMapLayer(page, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0]);
-        expect((await mcp.call('viewer_get_app_state', {clientId: replacement.clientId})).isError).not.toBe(true);
+        expect((await mcp.call('viewer_get_controls', {clientId: replacement.clientId})).isError).not.toBe(true);
         await enableLayer;
         await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions))
             .toBeGreaterThan(0);
         expect(await page.evaluate(() => window.ebDebug!.subsetRenderQueue().failed)).toBe(0);
-        expect((await mcp.call('viewer_get_app_state', {clientId: replacement.clientId})).isError).not.toBe(true);
+        expect((await mcp.call('viewer_get_controls', {clientId: replacement.clientId})).isError).not.toBe(true);
         expect(errors).toEqual([]);
     } finally {
         await second.close();
@@ -129,7 +139,7 @@ test('native MCP reads and operates UI controls and resizes sidebar, dock and sp
         return result.structuredContent;
     }
     async function snapshot() {
-        return viewerActions.viewer_take_snapshot.outputSchema.parse(await call('viewer_take_snapshot', {limit: 300}));
+        return viewerResult('viewer_take_snapshot', await call('viewer_take_snapshot', {limit: 300}));
     }
     let ui = await snapshot();
     const label = ui.elements.find(element => element.name === 'Tab label' && element.tag === 'input')!;
@@ -198,13 +208,15 @@ test('native MCP reads and operates UI controls and resizes sidebar, dock and sp
 
 test('native local MCP rejects untrusted origins/hosts and requires an explicit browser target', async ({request}) => {
     const mcp = mcpClient(request);
-    for (const headers of [{Origin: 'https://untrusted.invalid'}, {Host: 'untrusted.invalid'}]) {
+    for (const headers of [{Origin: 'https://untrusted.invalid'}, {Host: 'untrusted.invalid'}] as Array<Record<string, string>>) {
         const reply = await mcp.rpc('tools/list', {}, headers);
         expect(reply.response.status()).toBe(403);
     }
-    const missingTarget = await mcp.rpc('tools/call', {name: 'viewer_get_app_state', arguments: {}});
-    expect(missingTarget.response.status()).toBe(400);
-    expect((await missingTarget.response.json()).error.code).toBe(-32602);
+    const missingTarget = await mcp.rpc('tools/call', {name: 'viewer_get_controls', arguments: {}});
+    expect(missingTarget.response.status()).toBe(200);
+    expect(missingTarget.message.result).toMatchObject({isError: true, structuredContent: {
+        error: {code: 'invalid_arguments', message: 'A clientId UUID is required.'}
+    }});
 });
 
 test('native MCP starts, styles, exports and inspects a real search through the ordinary viewer services', async ({page, request}, testInfo) => {
@@ -214,20 +226,26 @@ test('native MCP starts, styles, exports and inspects a real search through the 
     await expect.poll(async () => (await mcp.sessions()).length).toBe(1);
     const clientId = (await mcp.sessions())[0].clientId;
     /** Validates the browser and native result schemas for every operation. */
-    async function call<Name extends keyof typeof viewerActions>(name: Name, args: object) {
+    async function call<Name extends ViewerActionName>(name: Name, args: object) {
         const result = await mcp.call(name, {clientId, ...args});
         expect(result.isError, JSON.stringify(result.structuredContent)).not.toBe(true);
-        return viewerActions[name].outputSchema.parse(result.structuredContent);
+        return viewerResult(name, result.structuredContent);
     }
-    const initial = viewerActions.viewer_get_app_state.outputSchema.parse(await call('viewer_get_app_state', {}));
-    const viewLayoutRevision = initial.viewLayoutRevision;
+    const initial = viewerResult('viewer_get_controls', await call('viewer_get_controls', {}));
+    expect(initial.values.length).toBeGreaterThan(0);
     const layer = {mapId: TEST_MAP_NAMES[0], layerId: TEST_LAYER_NAMES[0]};
-    await call('viewer_set_app_state', {target: {channel: 'view.layer', viewIndex: 0, ...layer},
-        value: {visible: true, level: 13, autoLevel: false}, viewLayoutRevision});
-    expect(await call('viewer_get_catalog', {kind: 'layers', viewIndex: 0, ...layer})).toMatchObject({items: [{visible: true, available: true}]});
+    await call('viewer_set_control', {target: {control: 'view.layer', viewId: 'left', ...layer},
+        value: {visible: true, level: 13, autoLevel: false}});
+    // Discovery lists every layer in the map. Check the layer we changed even
+    // when the native fixture also exposes its referenced intersection layer.
+    expect(await call('viewer_list_layers', {viewId: 'left', mapId: layer.mapId})).toMatchObject({
+        items: expect.arrayContaining([expect.objectContaining({
+            id: layer.layerId, visible: true, available: true
+        })])
+    });
     await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThan(0);
     // Visibility must change rendered geometry, not only the persisted/catalog flag.
-    const styleCatalog = viewerActions.viewer_get_catalog.outputSchema.parse(await call('viewer_get_catalog', {kind: 'styles', limit: 100}));
+    const styleCatalog = viewerResult('viewer_list_styles', await call('viewer_list_styles', { limit: 100}));
     const visibleStyles = styleCatalog.items.filter(style => style.visible === true);
     expect(visibleStyles.length).toBeGreaterThan(0);
     for (const style of visibleStyles) await call('viewer_edit_style', {operation: 'visibility', styleId: style.id, visible: false});
@@ -243,19 +261,19 @@ rules:
 `});
     expect(invalidRegex).toMatchObject({valid: false, runtimeVerified: false});
     expect(invalidRegex.issues).toEqual(expect.arrayContaining([expect.objectContaining({property: 'attribute-type'})]));
-    const started = viewerActions.viewer_start_search.outputSchema.parse(await call('viewer_start_search', {
+    const started = viewerResult('viewer_start_search', await call('viewer_start_search', {
         // GridDataSource does not advertise zoomLevels; there is no automatic search-level choice.
-        query: 'true', scope: 'feature', mapLayers: [layer], viewIndices: [0], tileLevels: [13], autoUpdate: false, viewLayoutRevision
+        query: 'true', scope: 'feature', mapLayers: [layer], viewIds: ['left'], tileLevels: [13], autoUpdate: false
     }));
     const searchId = started.searchId;
-    let status = viewerActions.viewer_get_search.outputSchema.parse(await call('viewer_get_search', {searchId}));
+    let status = viewerResult('viewer_get_search', await call('viewer_get_search', {searchId}));
     await expect.poll(async () => {
-        status = viewerActions.viewer_get_search.outputSchema.parse(await call('viewer_get_search', {searchId}));
+        status = viewerResult('viewer_get_search', await call('viewer_get_search', {searchId}));
         return status.status.resultCount;
     }).toBeGreaterThan(0);
     expect(status.settings.autoUpdate).toBe(false);
     expect(status.schemaAnalysis).toMatchObject({status: 'ready', concreteScope: 'feature', normalizedQuery: 'true'});
-    const browserDiagnostics = viewerActions.viewer_get_diagnostics.outputSchema.parse(await call('viewer_get_diagnostics', {
+    const browserDiagnostics = viewerResult('viewer_get_diagnostics', await call('viewer_get_diagnostics', {
         sections: ['workers', 'gpu']
     }));
     expect(browserDiagnostics.executionContext).toBe('browser');
@@ -264,7 +282,7 @@ rules:
     expect(browserDiagnostics.metrics.some(metric => metric.name === 'latestNativeMs')).toBe(false);
     // A focused edit must survive native catalog validation and preserve unrelated source.
     const patchSource = 'name: MCP patch regression\nversion: 2\nrules:\n  - geometry: line\n    color: "#1188ff"\n    width: 2\n';
-    const patchStyle = viewerActions.viewer_edit_style.outputSchema.parse(await call('viewer_edit_style', {
+    const patchStyle = viewerResult('viewer_edit_style', await call('viewer_edit_style', {
         operation: 'create', source: patchSource, visible: true
     }));
     const rejectedPatch = await mcp.call('viewer_edit_style', {clientId, operation: 'patch', styleId: patchStyle.styleId,
@@ -284,16 +302,16 @@ rules:
         edits: [{find: 'width: 2', replace: 'width: 6'}]})).toMatchObject({changed: true, editCount: 1});
     expect(await call('viewer_get_style', {styleId: patchStyle.styleId})).toMatchObject({source: patchSource.replace('width: 2', 'width: 6')});
     await call('viewer_edit_style', {operation: 'delete', styleId: patchStyle.styleId});
-    await call('viewer_set_search', {searchId, viewLayoutRevision, settings: {pinColor: '#00ccff',
+    await call('viewer_set_search', {searchId, settings: {pinColor: '#00ccff',
         searchStyleRules: [{geometry: ['line'], filter: [], color: {mode: 'solid', color: '#00ccff'}, width: 5}],
         renderStrategy: {showHighFiGeometry: true}}});
-    await call('viewer_set_search', {searchId, viewLayoutRevision, settings: {renderStrategy: {showHighFiResultDots: false}}});
-    const patched = viewerActions.viewer_get_search.outputSchema.parse(await call('viewer_get_search', {searchId}));
+    await call('viewer_set_search', {searchId, settings: {renderStrategy: {showHighFiResultDots: false}}});
+    const patched = viewerResult('viewer_get_search', await call('viewer_get_search', {searchId}));
     expect(patched.settings).toMatchObject({...status.settings, pinColor: '#00ccff',
         searchStyleRules: [{geometry: ['line'], filter: [], color: {mode: 'solid', color: '#00ccff'}, width: 5}],
         renderStrategy: {...status.settings.renderStrategy, showHighFiGeometry: true, showHighFiResultDots: false}});
     const addressBeforeShare = page.url();
-    const shared = viewerActions.viewer_get_share_link.outputSchema.parse(await call('viewer_get_share_link', {}));
+    const shared = viewerResult('viewer_get_share_link', await call('viewer_get_share_link', {}));
     expect(shared.localOnly).toBe(true);
     expect(shared.localSearchIds).toContain(searchId);
     expect(new URL(shared.url).searchParams.size).toBeGreaterThan(0);
@@ -301,75 +319,75 @@ rules:
     await call('viewer_control_search', {searchId, operation: 'pause'});
     await call('viewer_control_search', {searchId, operation: 'resume'});
     await call('viewer_control_search', {searchId, operation: 'refresh'});
-    await expect.poll(async () => viewerActions.viewer_get_search.outputSchema.parse(await call('viewer_get_search', {searchId})).status.resultCount).toBeGreaterThan(0);
-    const slice = viewerActions.viewer_get_search_results.outputSchema.parse(await call('viewer_get_search_results', {searchId, limit: 1}));
+    await expect.poll(async () => viewerResult('viewer_get_search', await call('viewer_get_search', {searchId})).status.resultCount).toBeGreaterThan(0);
+    const slice = viewerResult('viewer_get_search_results', await call('viewer_get_search_results', {searchId, limit: 1}));
     const feature = slice.results[0];
     expect(feature).toBeDefined();
-    const exported = viewerActions.viewer_export_search.outputSchema.parse(await call('viewer_export_search', {searchId, include: 'both', limit: 1}));
+    const exported = viewerResult('viewer_export_search', await call('viewer_export_search', {searchId, include: 'both', limit: 1}));
     expect(JSON.parse(exported.content).configuration.pinColor).toBe('#00ccff');
-    const inspected = viewerActions.viewer_inspect.outputSchema.parse(await call('viewer_inspect', {
+    const inspected = viewerResult('viewer_inspect', await call('viewer_inspect', {
         features: [{mapId: feature.mapId, layerId: feature.layerId, featureId: feature.featureId}], lock: true, newPanel: true, color: '#aa33cc'
     }));
     expect(inspected.complete).toBe(true);
     const panelId = inspected.panelIds[0];
     await expect.poll(async () => {
-        const result = viewerActions.viewer_get_app_state.outputSchema.parse(await call('viewer_get_app_state', {targets: [{channel: 'app.selections', panelId}]}));
+        const result = viewerResult('viewer_get_controls', await call('viewer_get_controls', {targets: [{control: 'app.selections', panelId}]}));
         return result.values;
     }).toMatchObject([{value: [{loading: false}]}]);
     const relationData = await mcp.call('mapget_extract_features', {...layer, featureIds: [feature.featureId], expressions: ['relations']});
     expect(relationData.isError).not.toBe(true);
     expect(relationData.structuredContent.complete).toBe(true);
     expect(relationData.structuredContent.items[0].values[0][0][0].name).toBe('startIntersection');
-    const relationInspection = viewerActions.viewer_inspect.outputSchema.parse(await call('viewer_inspect', {
+    const relationInspection = viewerResult('viewer_inspect', await call('viewer_inspect', {
         features: [{mapTileKey: feature.mapTileKey, featureId: feature.featureId, relationIndex: 0}], newPanel: true
     }));
     expect(relationInspection.features).toEqual([{mapTileKey: feature.mapTileKey, featureId: `${feature.featureId}:relation#0`}]);
     await call('viewer_close_inspection', {panelId: relationInspection.panelIds[0]});
-    await call('viewer_navigate', {viewIndex: 0, viewLayoutRevision, target: {features: [{mapTileKey: feature.mapTileKey, featureId: feature.featureId}]}});
+    await call('viewer_navigate', {viewId: 'left', target: {features: [{mapTileKey: feature.mapTileKey, featureId: feature.featureId}]}});
     // Exercise the same persisted resize callbacks as floating and stacked inspection UI.
-    const panelTarget = {channel: 'inspection.panel', panelId};
-    const panelState = viewerActions.viewer_get_app_state.outputSchema.parse(await call('viewer_get_app_state', {targets: [panelTarget]}));
-    const presentation = appStateChannels['inspection.panel'].valueSchema.parse(panelState.values[0].value);
+    const panelTarget = {control: 'inspection.panel', panelId};
+    const panelState = viewerResult('viewer_get_controls', await call('viewer_get_controls', {targets: [panelTarget]}));
+    const presentation = inspectionPanelSchema.parse(availableValue(panelState.values[0]));
     expect(presentation.color).toBe('#aa33cc');
     async function layoutTarget(kind: 'dialog' | 'panel', id: number) {
         let offset = 0;
         for (;;) {
-            const snapshot = viewerActions.viewer_take_snapshot.outputSchema.parse(await call('viewer_take_snapshot', {offset, limit: 300}));
+            const snapshot = viewerResult('viewer_take_snapshot', await call('viewer_take_snapshot', {offset, limit: 300}));
             const target = snapshot.elements.find(element => element.resize?.kind === kind && element.resize.layoutId === `inspection:${id}`);
             if (target) return target;
             expect(snapshot.nextOffset, `Missing ${kind} target for inspection ${id}`).toBeDefined();
             offset = snapshot.nextOffset!;
         }
     }
-    await call('viewer_set_app_state', {target: panelTarget, value: {...presentation, undocked: true}});
+    await call('viewer_set_control', {target: panelTarget, value: {...presentation, undocked: true}});
     const floating = page.locator('inspection-panel-dialog .p-dialog').first();
     await expect(floating).toBeVisible();
     const dialog = await layoutTarget('dialog', panelId);
-    const floatingSize = viewerActions.viewer_resize.outputSchema.parse(await call('viewer_resize', {uid: dialog.uid, size: {widthPx: 600, heightPx: 500}}));
+    const floatingSize = viewerResult('viewer_resize', await call('viewer_resize', {uid: dialog.uid, size: {widthPx: 600, heightPx: 500}}));
     expect(floatingSize.element.bounds.width).toBeCloseTo(600, 0);
     await expect.poll(async () => (await floating.boundingBox())!.width).toBeCloseTo(600, 0);
-    await call('viewer_set_app_state', {target: panelTarget, value: {...presentation, undocked: false}});
+    await call('viewer_set_control', {target: panelTarget, value: {...presentation, undocked: false}});
     await expect(floating).not.toBeVisible();
-    await call('viewer_set_app_state', {target: panelTarget, value: {...presentation, undocked: true}});
+    await call('viewer_set_control', {target: panelTarget, value: {...presentation, undocked: true}});
     await expect(floating).toBeVisible();
     await expect.poll(async () => (await floating.boundingBox())!.width).toBeCloseTo(600, 0);
-    await call('viewer_set_app_state', {target: panelTarget, value: {...presentation, undocked: false}});
-    const duplicate = viewerActions.viewer_inspect.outputSchema.parse(await call('viewer_inspect', {
+    await call('viewer_set_control', {target: panelTarget, value: {...presentation, undocked: false}});
+    const duplicate = viewerResult('viewer_inspect', await call('viewer_inspect', {
         features: [{mapId: feature.mapId, layerId: feature.layerId, featureId: feature.featureId}], newPanel: true, lock: true
     }));
     const otherPanelId = duplicate.panelIds.find(id => id !== panelId)!;
     expect(otherPanelId).toBeDefined();
-    await call('viewer_set_app_state', {target: {channel: 'inspection.panel', panelId: otherPanelId}, value: {...presentation, undocked: false}});
+    await call('viewer_set_control', {target: {control: 'inspection.panel', panelId: otherPanelId}, value: {...presentation, undocked: false}});
     await expect(page.getByTestId('inspection-panel')).toHaveCount(2);
     const stacked = await layoutTarget('panel', panelId);
     expect(stacked.resize!.dimensions).toEqual(['heightPx']);
-    const bodySize = viewerActions.viewer_resize.outputSchema.parse(await call('viewer_resize', {uid: stacked.uid, size: {heightPx: 320}}));
+    const bodySize = viewerResult('viewer_resize', await call('viewer_resize', {uid: stacked.uid, size: {heightPx: 320}}));
     expect(bodySize.element.bounds.height).toBeCloseTo(320, 0);
     const panelContent = page.getByTestId('inspection-panel').first().getByTestId('dock-panel-content');
     await expect.poll(async () => (await panelContent.boundingBox())!.height).toBeCloseTo(320, 0);
-    await call('viewer_set_app_state', {target: panelTarget, value: {...presentation, undocked: true}});
+    await call('viewer_set_control', {target: panelTarget, value: {...presentation, undocked: true}});
     await expect(floating).toBeVisible();
-    await call('viewer_set_app_state', {target: panelTarget, value: {...presentation, undocked: false}});
+    await call('viewer_set_control', {target: panelTarget, value: {...presentation, undocked: false}});
     await expect.poll(async () => (await panelContent.boundingBox())!.height).toBeCloseTo(320, 0);
     await call('viewer_close_inspection', {panelId: otherPanelId});
     // Capture actual panels and both WebGL views through the native MCP image boundary, not a mocked canvas.
@@ -378,11 +396,11 @@ rules:
     const panelBox = (await inspection.boundingBox())!;
     const beforeScreenshot = await page.screenshot({animations: 'disabled'});
     const captureStarted = Date.now();
-    const screenshot = await mcp.call('viewer_screenshot', {clientId, maxWidth: 1280, maxHeight: 960, viewLayoutRevision});
+    const screenshot = await mcp.call('viewer_screenshot', {clientId, maxWidth: 1280, maxHeight: 960});
     const captureElapsedMs = Date.now() - captureStarted;
     expect(screenshot.isError, JSON.stringify(screenshot.structuredContent)).not.toBe(true);
-    const metadata = viewerActions.viewer_screenshot.outputSchema.shape.metadata.parse(screenshot.structuredContent);
-    expect(metadata).toMatchObject({scope: 'application-viewport', viewLayoutRevision, readiness: {status: 'unknown'}});
+    const metadata = screenshot.structuredContent;
+    expect(metadata).toMatchObject({scope: 'application-viewport', viewLayoutRevision: expect.any(Number), readiness: {status: 'unknown'}});
     expect(metadata.width).toBeLessThanOrEqual(1280);
     expect(metadata.height).toBeLessThanOrEqual(960);
     const image = screenshot.content.find((item: {type: string}) => item.type === 'image');
@@ -430,5 +448,5 @@ rules:
     await call('viewer_control_search', {searchId, operation: 'rerun', query: 'true'});
     await call('viewer_control_search', {searchId, operation: 'stop'});
     await call('viewer_control_search', {searchId, operation: 'close'});
-    expect(await call('viewer_get_app_state', {targets: [{channel: 'app.searches'}]})).toMatchObject({values: [{value: []}]});
+    expect(await call('viewer_get_controls', {targets: [{control: 'app.searches'}]})).toMatchObject({values: [{value: []}]});
 });

@@ -1,12 +1,6 @@
 import "@angular/compiler";
 import {describe, expect, it} from "vitest";
-import {
-    clampTileGridLevel,
-    clampTileGridOpacity,
-    normalizeTileGridColor,
-    tileGridMaxLevel,
-    tileGridRgba
-} from "./appstate.service";
+import {clampTileGridLevel, clampTileGridOpacity, normalizeTileGridColor, tileGridMaxLevel, tileGridRgba} from "../mapdata/map-layer-state.model";
 
 describe("tile-grid state helpers", () => {
     it("uses mode-specific level limits", () => {

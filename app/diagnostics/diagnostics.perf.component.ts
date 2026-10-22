@@ -1,15 +1,13 @@
-import {Component, OnDestroy, ViewChild} from '@angular/core';
-import {Subscription} from 'rxjs';
-import {DiagnosticsFacadeService} from './diagnostics.facade.service';
-import {DialogStackService} from '../shared/dialog-stack.service';
-import {TreeTableNode} from 'primeng/api';
-import {
-    SubsetDiagnosticsTile,
-    ViewLayerDiagnosticsService
-} from '../mapview/view-layer-diagnostics.service';
-import {AppStateService, DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
-import {PerformanceDiagnosticsScope, PerfStat} from './diagnostics.model';
-import {buildAggregatedPerfStats} from './diagnostics.perf-aggregation';
+import {AppStore} from "../shared/app.store";
+import {Component, inject, OnDestroy, ViewChild} from "@angular/core";
+import {TreeTableNode} from "primeng/api";
+import {Subscription} from "rxjs";
+import {SubsetDiagnosticsTile, ViewLayerDiagnosticsService} from "../mapview/view-layer-diagnostics.service";
+import {AppDialogComponent} from "../shared/app-dialog.component";
+import {DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
+
+import {AppStateService} from "../shared/appstate.service";
+import {DialogStackService} from "../shared/dialog-stack.service";
 import {
     CONVERSION_AGE_UNIT,
     COUNT_KEY_PATTERN,
@@ -19,8 +17,10 @@ import {
     ROOT_BADGE_LOAD_DT,
     ROOT_BADGE_RENDER_DT,
     UNIT_SUFFIXES
-} from './diagnostics.constants';
-import {AppDialogComponent} from '../shared/app-dialog.component';
+} from "./diagnostics.constants";
+import {DiagnosticsFacadeService} from "./diagnostics.facade.service";
+import {PerformanceDiagnosticsScope, PerfStat} from "./diagnostics.model";
+import {buildAggregatedPerfStats} from "./diagnostics.perf-aggregation";
 
 interface LayerOption {
     label: string;
@@ -57,9 +57,9 @@ interface PerfTreeRowData {
     rootBadgeTooltip?: string;
 }
 
-type SupportedUnit = 'ms' | 'count' | 'features';
-type DurationDisplayUnit = 'ms' | 's' | 'm' | 'h' | 'd';
-type BytesDisplayUnit = 'B' | 'KB' | 'MB' | 'GB';
+type SupportedUnit = "ms" | "count" | "features";
+type DurationDisplayUnit = "ms" | "s" | "m" | "h" | "d";
+type BytesDisplayUnit = "B" | "KB" | "MB" | "GB";
 
 interface ParentAggregate {
     hasNumeric: boolean;
@@ -78,13 +78,19 @@ interface PerfTileScopeCounts {
 }
 
 @Component({
-    selector: 'diagnostics-performance-dialog',
+    selector: "diagnostics-performance-dialog",
     template: `
-        <app-dialog #dialog header="Performance Statistics" class="diagnostics-performance-dialog" [(visible)]="dialogVisible"
-                  [modal]="false"
-                  [persistLayout]="true" [layoutId]="layoutId"
-                  [style]="dialogStyle"
-                  (onShow)="onDialogShow()">
+        <app-dialog
+            #dialog
+            header="Performance Statistics"
+            class="diagnostics-performance-dialog"
+            [visible]="store.isDialogOpen(layoutId)" (visibleChange)="store.setDialogOpen(layoutId, $event)"
+            [modal]="false"
+            [persistLayout]="true"
+            [layoutId]="layoutId"
+            [style]="dialogStyle"
+            (onShow)="onDialogShow()"
+        >
             @if (diagnostics.snapshot$ | async; as snapshot) {
                 <div class="diagnostics-perf-progress">
                     <diagnostics-progress [progress]="snapshot.progress"></diagnostics-progress>
@@ -100,7 +106,8 @@ interface PerfTileScopeCounts {
                     placeholder="Select Map Layers"
                     [maxSelectedLabels]="20"
                     [showHeader]="false"
-                    [style]="{'width': '100%'}">
+                    [style]="{width: '100%'}"
+                >
                 </p-multiSelect>
                 <p-multiSelect
                     [options]="availableTileIds"
@@ -110,21 +117,24 @@ interface PerfTileScopeCounts {
                     placeholder="Select Tile IDs"
                     [selectionLimit]="20"
                     [maxSelectedLabels]="20"
-                    [style]="{'width': '100%', 'margin-top': '0.25em'}">
+                    [style]="{width: '100%', 'margin-top': '0.25em'}"
+                >
                 </p-multiSelect>
             </div>
 
-            <p-treeTable [value]="treeNodes"
-                         [scrollable]="true"
-                         scrollHeight="flex"
-                         class="diagnostics-perf-table"
-                         [tableStyle]="{'table-layout': 'fixed', 'width': '100%'}"
-                         [resizableColumns]="true"
-                         columnResizeMode="expand"
-                         [rowTrackBy]="trackNodeByPath"
-                         [rowHover]="true"
-                         (onNodeExpand)="onNodeExpand($event.node)"
-                         (onNodeCollapse)="onNodeCollapse($event.node)">
+            <p-treeTable
+                [value]="treeNodes"
+                [scrollable]="true"
+                scrollHeight="flex"
+                class="diagnostics-perf-table"
+                [tableStyle]="{'table-layout': 'fixed', width: '100%'}"
+                [resizableColumns]="true"
+                columnResizeMode="expand"
+                [rowTrackBy]="trackNodeByPath"
+                [rowHover]="true"
+                (onNodeExpand)="onNodeExpand($event.node)"
+                (onNodeCollapse)="onNodeCollapse($event.node)"
+            >
                 <ng-template pTemplate="header">
                     <tr>
                         <th ttResizableColumn style="width: 40%;">Key</th>
@@ -136,11 +146,11 @@ interface PerfTileScopeCounts {
                 </ng-template>
                 <ng-template pTemplate="colgroup">
                     <colgroup>
-                        <col style="width: 40%;">
-                        <col style="width: 13%;">
-                        <col style="width: 13%;">
-                        <col style="width: 13%;">
-                        <col style="width: 21%;">
+                        <col style="width: 40%;" />
+                        <col style="width: 13%;" />
+                        <col style="width: 13%;" />
+                        <col style="width: 13%;" />
+                        <col style="width: 21%;" />
                     </colgroup>
                 </ng-template>
                 <ng-template pTemplate="body" let-rowNode let-rowData="rowData">
@@ -148,54 +158,68 @@ interface PerfTileScopeCounts {
                         <td class="diagnostics-cell" style="width: 40%;">
                             <div class="diagnostics-key-cell diagnostics-ellipsis">
                                 <p-treeTableToggler [rowNode]="rowNode"></p-treeTableToggler>
-                                <span class="diagnostics-key-text"
-                                      [pTooltip]="rowData.key"
-                                      tooltipPosition="top"
-                                      [tooltipDisabled]="!rowData.key">
+                                <span
+                                    class="diagnostics-key-text"
+                                    [pTooltip]="rowData.key"
+                                    tooltipPosition="top"
+                                    [tooltipDisabled]="!rowData.key"
+                                >
                                     {{ rowData.key }}
                                 </span>
                                 @if (rowData.rootBadgeDt) {
-                                    <span class="diagnostics-perf-root-badge-wrapper"
-                                          [pTooltip]="rowData.rootBadgeTooltip ?? ''"
-                                          tooltipPosition="top"
-                                          tooltipStyleClass="diagnostics-perf-root-badge-tooltip"
-                                          [tooltipDisabled]="!rowData.rootBadgeTooltip">
-                                        <p-badge [value]="rowData.rootBadgeValue ?? 0"
-                                                 [dt]="rowData.rootBadgeDt"></p-badge>
+                                    <span
+                                        class="diagnostics-perf-root-badge-wrapper"
+                                        [pTooltip]="rowData.rootBadgeTooltip ?? ''"
+                                        tooltipPosition="top"
+                                        tooltipStyleClass="diagnostics-perf-root-badge-tooltip"
+                                        [tooltipDisabled]="!rowData.rootBadgeTooltip"
+                                    >
+                                        <p-badge
+                                            [value]="rowData.rootBadgeValue ?? 0"
+                                            [dt]="rowData.rootBadgeDt"
+                                        ></p-badge>
                                     </span>
                                 }
                             </div>
                         </td>
-                        <td class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
+                        <td
+                            class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
                             [ngClass]="rowData.peakClass"
                             style="width: 13%;"
                             [pTooltip]="rowData.basePeakTooltip"
                             tooltipPosition="top"
-                            [tooltipDisabled]="!rowData.basePeakTooltip">
-                            {{ rowData.displayPeak ?? '' }}
+                            [tooltipDisabled]="!rowData.basePeakTooltip"
+                        >
+                            {{ rowData.displayPeak ?? "" }}
                         </td>
-                        <td class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
+                        <td
+                            class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
                             [ngClass]="rowData.averageClass"
                             style="width: 13%;"
                             [pTooltip]="rowData.baseAverageTooltip"
                             tooltipPosition="top"
-                            [tooltipDisabled]="!rowData.baseAverageTooltip">
-                            {{ rowData.displayAverage ?? '' }}
+                            [tooltipDisabled]="!rowData.baseAverageTooltip"
+                        >
+                            {{ rowData.displayAverage ?? "" }}
                         </td>
-                        <td class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
+                        <td
+                            class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
                             [ngClass]="rowData.minClass"
                             style="width: 13%;"
                             [pTooltip]="rowData.baseMinTooltip"
                             tooltipPosition="top"
-                            [tooltipDisabled]="!rowData.baseMinTooltip">
-                            {{ rowData.displayMin ?? '' }}
+                            [tooltipDisabled]="!rowData.baseMinTooltip"
+                        >
+                            {{ rowData.displayMin ?? "" }}
                         </td>
-                        <td class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
+                        <td
+                            class="diagnostics-cell diagnostics-ellipsis diagnostics-perf-value"
                             style="width: 21%;"
                             [pTooltip]="rowData.peakTileIds ?? ''"
                             tooltipPosition="left"
-                            [tooltipDisabled]="!rowData.peakTileIds">
-                            {{ rowData.peakTileIds ?? '' }}
+                            [tooltipDisabled]="!rowData.peakTileIds"
+                        >
+                            {{ rowData.peakTileIds ?? "" }}
                         </td>
                     </tr>
                 </ng-template>
@@ -219,27 +243,30 @@ interface PerfTileScopeCounts {
  * raw stats, and highlights unusually expensive timing rows.
  */
 export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
+    readonly store = inject(AppStore);
     readonly layoutId = DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID;
-    @ViewChild('dialog') dialog?: AppDialogComponent;
+    @ViewChild("dialog") dialog?: AppDialogComponent;
     readonly dialogStyle: {[key: string]: string} = {
-        height: '75vh'
+        height: "75vh"
     };
     availableMapLayers: LayerOption[] = [];
     selectedMapLayers: LayerOption[] = [];
     availableTileIds: TileIdOption[] = [];
     selectedTileIds: TileIdOption[] = [];
     treeNodes: TreeTableNode[] = [];
-    private durationDisplayUnit: DurationDisplayUnit = 'ms';
-    private bytesDisplayUnit: BytesDisplayUnit = 'B';
+    private durationDisplayUnit: DurationDisplayUnit = "ms";
+    private bytesDisplayUnit: BytesDisplayUnit = "B";
     private perfTileScopeCounts: PerfTileScopeCounts = this.createEmptyTileScopeCounts();
     private readonly expansionStateByPath = new Map<string, boolean>();
     private readonly subscriptions: Subscription[] = [];
     private appliedPerformanceScopeRequestId: number | null = null;
 
-    constructor(public readonly diagnostics: DiagnosticsFacadeService,
-                public readonly stateService: AppStateService,
-                private readonly dialogStack: DialogStackService,
-                private readonly viewDiagnostics: ViewLayerDiagnosticsService) {
+    constructor(
+        public readonly diagnostics: DiagnosticsFacadeService,
+        public readonly stateService: AppStateService,
+        private readonly dialogStack: DialogStackService,
+        private readonly viewDiagnostics: ViewLayerDiagnosticsService
+    ) {
         this.subscriptions.push(
             this.diagnostics.perfStats$.subscribe(() => {
                 this.refreshAvailableMapLayers();
@@ -247,7 +274,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                 this.applyPerformanceScope(this.diagnostics.performanceScope$.getValue(), false);
                 this.rebuildTreeNodes();
             }),
-            this.diagnostics.performanceScope$.subscribe(scope => {
+            this.diagnostics.performanceScope$.subscribe((scope) => {
                 this.refreshAvailableMapLayers();
                 this.refreshAvailableTileIds();
                 this.applyPerformanceScope(scope, true);
@@ -256,17 +283,13 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         );
     }
 
-    get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.layoutId);
-    }
 
-    set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.layoutId, visible);
-    }
+
+
 
     /** Releases subscriptions feeding the filter options and tree state. */
     ngOnDestroy() {
-        this.subscriptions.forEach(sub => sub.unsubscribe());
+        this.subscriptions.forEach((sub) => sub.unsubscribe());
     }
 
     /** Refreshes the visible stats, rebuilds filters, and promotes the dialog. */
@@ -327,11 +350,11 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         if (!node) {
             return undefined;
         }
-        if (typeof node.key === 'string' && node.key.length) {
+        if (typeof node.key === "string" && node.key.length) {
             return node.key;
         }
         const dataPathKey = node.data?.pathKey;
-        if (typeof dataPathKey === 'string' && dataPathKey.length) {
+        if (typeof dataPathKey === "string" && dataPathKey.length) {
             return dataPathKey;
         }
         return undefined;
@@ -350,7 +373,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
     /** Infers count semantics from the key name when no explicit unit suffix exists. */
     private inferCountUnitFromKey(key: string): string | undefined {
-        return COUNT_KEY_PATTERN.test(this.stripPerfUnitSuffix(key)) ? 'count' : undefined;
+        return COUNT_KEY_PATTERN.test(this.stripPerfUnitSuffix(key)) ? "count" : undefined;
     }
 
     /** Removes unit suffixes from perf-stat keys before building tree paths. */
@@ -367,7 +390,10 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     /** Splits a perf-stat key into path segments for the tree-table hierarchy. */
     private splitPerfPath(key: string): string[] {
         const cleaned = this.stripPerfUnitSuffix(key);
-        const segments = cleaned.split('/').map(segment => segment.trim()).filter(Boolean);
+        const segments = cleaned
+            .split("/")
+            .map((segment) => segment.trim())
+            .filter(Boolean);
         return segments.length ? segments : [cleaned];
     }
 
@@ -387,8 +413,9 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             });
         }
 
-        const nextLayers = Array.from(mapLayersByKey.values())
-            .sort((a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key));
+        const nextLayers = Array.from(mapLayersByKey.values()).sort(
+            (a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key)
+        );
         if (this.isSameLayerList(nextLayers, this.availableMapLayers)) {
             return;
         }
@@ -399,14 +426,15 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             return;
         }
 
-        const validSelection = this.selectedMapLayers.filter(selection =>
-            nextLayers.some(layer => layer.key === selection.key));
+        const validSelection = this.selectedMapLayers.filter((selection) =>
+            nextLayers.some((layer) => layer.key === selection.key)
+        );
         this.selectedMapLayers = validSelection;
     }
 
     /** Rebuilds the list of selectable tile ids for the currently selected map layers. */
     private refreshAvailableTileIds() {
-        const selectedLayerKeys = new Set(this.selectedMapLayers.map(selection => selection.key));
+        const selectedLayerKeys = new Set(this.selectedMapLayers.map((selection) => selection.key));
         if (!selectedLayerKeys.size) {
             this.availableTileIds = [];
             this.selectedTileIds = [];
@@ -426,15 +454,15 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
         const nextTileIds = Array.from(tileIdSet)
             .sort((left, right) => this.compareTileIdStrings(left, right))
-            .map(tileId => ({label: tileId, tileId}));
+            .map((tileId) => ({label: tileId, tileId}));
 
         const hasSameOptions = this.isSameTileIdList(nextTileIds, this.availableTileIds);
         if (!hasSameOptions) {
             this.availableTileIds = nextTileIds;
         }
 
-        const selectedTileIdSet = new Set(this.selectedTileIds.map(option => option.tileId));
-        const validSelectedTileIds = nextTileIds.filter(option => selectedTileIdSet.has(option.tileId));
+        const selectedTileIdSet = new Set(this.selectedTileIds.map((option) => option.tileId));
+        const validSelectedTileIds = nextTileIds.filter((option) => selectedTileIdSet.has(option.tileId));
         if (!this.isSameTileIdList(validSelectedTileIds, this.selectedTileIds)) {
             this.selectedTileIds = validSelectedTileIds;
         }
@@ -455,12 +483,12 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             return;
         }
 
-        const scopedLayerKeys = new Set(scope.layers.map(layer => JSON.stringify([layer.mapId, layer.layerId])));
-        this.selectedMapLayers = this.availableMapLayers.filter(layer => scopedLayerKeys.has(layer.key));
+        const scopedLayerKeys = new Set(scope.layers.map((layer) => JSON.stringify([layer.mapId, layer.layerId])));
+        this.selectedMapLayers = this.availableMapLayers.filter((layer) => scopedLayerKeys.has(layer.key));
         this.refreshAvailableTileIds();
 
         const scopedTileIds = new Set(scope.tileIds);
-        this.selectedTileIds = this.availableTileIds.filter(tileId => scopedTileIds.has(tileId.tileId));
+        this.selectedTileIds = this.availableTileIds.filter((tileId) => scopedTileIds.has(tileId.tileId));
         this.appliedPerformanceScopeRequestId = scope.requestId ?? null;
     }
 
@@ -517,27 +545,25 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
     /** Filters aggregated perf stats by the active layer and tile-id selections. */
     private computeFilteredPerfStats(): PerfStat[] {
-        const viewStats = this.diagnostics.perfStats$.getValue().filter(
-            stat => stat.scope === 'view'
-        );
-        const selectedLayerKeys = new Set(this.selectedMapLayers.map(selection => selection.key));
+        const viewStats = this.diagnostics.perfStats$.getValue().filter((stat) => stat.scope === "view");
+        const selectedLayerKeys = new Set(this.selectedMapLayers.map((selection) => selection.key));
         if (!selectedLayerKeys.size) {
             this.perfTileScopeCounts = this.createEmptyTileScopeCounts();
             return viewStats;
         }
 
-        const selectedTileIdSet = new Set(this.selectedTileIds.map(selection => selection.tileId));
+        const selectedTileIdSet = new Set(this.selectedTileIds.map((selection) => selection.tileId));
         const hasTileIdSelection = selectedTileIdSet.size > 0;
 
-        const layerScopedTiles = this.viewDiagnostics.currentTiles().filter(tile => {
+        const layerScopedTiles = this.viewDiagnostics.currentTiles().filter((tile) => {
             if (!selectedLayerKeys.has(JSON.stringify([tile.mapName, tile.layerName]))) {
                 return false;
             }
             return true;
         });
-        const layerScopedNonEmptyTiles = layerScopedTiles.filter(tile => tile.ready);
+        const layerScopedNonEmptyTiles = layerScopedTiles.filter((tile) => tile.ready);
 
-        const tileScopedNonEmptyTiles = layerScopedNonEmptyTiles.filter(tile => {
+        const tileScopedNonEmptyTiles = layerScopedNonEmptyTiles.filter((tile) => {
             if (!hasTileIdSelection) {
                 return true;
             }
@@ -554,9 +580,11 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     }
 
     /** Computes tile-scope counts used by the root badges and their tooltips. */
-    private computeTileScopeCounts(scopedTiles: SubsetDiagnosticsTile[],
-                                   nonEmptyTiles: SubsetDiagnosticsTile[],
-                                   consideredSourceTiles: SubsetDiagnosticsTile[]): PerfTileScopeCounts {
+    private computeTileScopeCounts(
+        scopedTiles: SubsetDiagnosticsTile[],
+        nonEmptyTiles: SubsetDiagnosticsTile[],
+        consideredSourceTiles: SubsetDiagnosticsTile[]
+    ): PerfTileScopeCounts {
         const consideredTilesByRoot = new Map<string, number>();
         let consideredTiles = 0;
 
@@ -568,7 +596,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                 if (!rawValues || rawValues.length === 0) {
                     continue;
                 }
-                const values = rawValues.filter(value => this.isFiniteNumber(value));
+                const values = rawValues.filter((value) => this.isFiniteNumber(value));
                 if (!values.length) {
                     continue;
                 }
@@ -627,7 +655,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             `${consideredTiles} tile(s) considered`,
             `${this.perfTileScopeCounts.nonEmptyTiles} non-empty tile(s)`,
             `${this.perfTileScopeCounts.totalTiles} tile(s) total`
-        ].join('\n');
+        ].join("\n");
     }
 
     /** Chooses the badge color tokens for known top-level perf categories. */
@@ -651,7 +679,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
         for (const stat of stats) {
             const unit = stat.unit ?? this.parsePerfUnit(stat.key) ?? this.inferCountUnitFromKey(stat.key);
-            if (unit === 'ms') {
+            if (unit === "ms") {
                 if (this.isFiniteNumber(stat.peak)) {
                     maxAbsDurationMs = Math.max(maxAbsDurationMs, Math.abs(stat.peak));
                 }
@@ -662,7 +690,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                     maxAbsDurationMs = Math.max(maxAbsDurationMs, Math.abs(stat.min));
                 }
             }
-            if (unit === 'B' || unit === 'KB' || unit === 'MB' || unit === 'GB') {
+            if (unit === "B" || unit === "KB" || unit === "MB" || unit === "GB") {
                 if (this.isFiniteNumber(stat.peak)) {
                     maxAbsBytes = Math.max(maxAbsBytes, Math.abs(this.toBytes(stat.peak, unit)));
                 }
@@ -718,22 +746,23 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             return node;
         };
 
-        stats.forEach(stat => {
+        stats.forEach((stat) => {
             const path = stat.path && stat.path.length ? stat.path : this.splitPerfPath(stat.key);
             if (!path.length) {
                 return;
             }
 
             let parent: TreeTableNode | undefined;
-            let currentPath = '';
+            let currentPath = "";
             path.forEach((segment: string, index: number) => {
                 currentPath = currentPath ? `${currentPath}/${segment}` : segment;
                 const node = ensureNode(currentPath, segment, parent);
                 if (index === path.length - 1) {
-                    const unit = stat.unit
-                        ?? this.parsePerfUnit(stat.key)
-                        ?? this.inferCountUnitFromKey(stat.key)
-                        ?? this.inferCountUnitFromKey(currentPath);
+                    const unit =
+                        stat.unit ??
+                        this.parsePerfUnit(stat.key) ??
+                        this.inferCountUnitFromKey(stat.key) ??
+                        this.inferCountUnitFromKey(currentPath);
                     const peakNumber = stat.peak;
                     const averageNumber = stat.average;
                     const minNumber = stat.min;
@@ -750,7 +779,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                         basePeakTooltip: this.formatBaseTooltip(peakNumber, unit),
                         baseAverageTooltip: this.formatBaseTooltip(averageNumber, unit),
                         baseMinTooltip: this.formatBaseTooltip(minNumber, unit),
-                        peakTileIds: stat.peakTileIds?.join(', ')
+                        peakTileIds: stat.peakTileIds?.join(", ")
                     };
                 }
                 parent = node;
@@ -759,8 +788,8 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
         /** Sorts path nodes before rendering the tree. */
         const sortNodes = (nodes: TreeTableNode[]) => {
-            nodes.sort((a, b) => String(a.data?.key ?? '').localeCompare(String(b.data?.key ?? '')));
-            nodes.forEach(node => {
+            nodes.sort((a, b) => String(a.data?.key ?? "").localeCompare(String(b.data?.key ?? "")));
+            nodes.forEach((node) => {
                 if (node.children && node.children.length) {
                     sortNodes(node.children);
                 }
@@ -793,15 +822,13 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                 const isRootParent = depth === 0 && hasChildren;
                 const classes: string[] = [];
                 if (hasChildren) {
-                    classes.push('diagnostics-perf-parent');
+                    classes.push("diagnostics-perf-parent");
                 }
                 if (isRootParent) {
-                    classes.push('diagnostics-perf-root');
+                    classes.push("diagnostics-perf-root");
                 }
-                rowData.rowClass = classes.join(' ');
-                rowData.rootBadgeDt = isRootParent
-                    ? this.resolveRootBadgeDt(rowData.key)
-                    : undefined;
+                rowData.rowClass = classes.join(" ");
+                rowData.rootBadgeDt = isRootParent ? this.resolveRootBadgeDt(rowData.key) : undefined;
                 if (rowData.rootBadgeDt) {
                     const consideredTiles = this.resolveConsideredTilesForRoot(rowData.key);
                     rowData.rootBadgeValue = consideredTiles;
@@ -822,7 +849,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
     /** Propagates aggregate peak, average, and minimum values up the tree hierarchy. */
     private propagateParentStats(nodes: TreeTableNode[]) {
-        nodes.forEach(node => this.buildParentAggregate(node));
+        nodes.forEach((node) => this.buildParentAggregate(node));
     }
 
     /** Computes the aggregate value for one node from its own values and its descendants. */
@@ -835,9 +862,8 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             return selfAggregate;
         }
 
-        const childAggregates = node.children!.map(child => this.buildParentAggregate(child));
-        if (rowData.pathKey === 'Rendering' ||
-            rowData.pathKey === 'Rendering/Buffer Arena') {
+        const childAggregates = node.children!.map((child) => this.buildParentAggregate(child));
+        if (rowData.pathKey === "Rendering" || rowData.pathKey === "Rendering/Buffer Arena") {
             // These are organizational groups containing incomparable live
             // counters. Showing the largest child as their own value suggests
             // a meaningful aggregate which does not exist.
@@ -849,7 +875,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             rowData.basePeakTooltip = undefined;
             rowData.baseAverageTooltip = undefined;
             return {
-                hasNumeric: childAggregates.some(value => value.hasNumeric),
+                hasNumeric: childAggregates.some((value) => value.hasNumeric),
                 eligible: false
             };
         }
@@ -880,7 +906,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
 
         const unit = aggregatesForCalculation[0].unit;
-        if (!unit || aggregatesForCalculation.some(aggregate => aggregate.unit !== unit)) {
+        if (!unit || aggregatesForCalculation.some((aggregate) => aggregate.unit !== unit)) {
             return {
                 hasNumeric: true,
                 eligible: false
@@ -888,13 +914,13 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
 
         const peakValues = aggregatesForCalculation
-            .map(aggregate => aggregate.peak)
+            .map((aggregate) => aggregate.peak)
             .filter((value): value is number => this.isFiniteNumber(value));
         const averageValues = aggregatesForCalculation
-            .map(aggregate => aggregate.average)
+            .map((aggregate) => aggregate.average)
             .filter((value): value is number => this.isFiniteNumber(value));
         const minValues = aggregatesForCalculation
-            .map(aggregate => aggregate.min)
+            .map((aggregate) => aggregate.min)
             .filter((value): value is number => this.isFiniteNumber(value));
 
         if (!peakValues.length || !averageValues.length || !minValues.length) {
@@ -933,7 +959,8 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
     /** Extracts the aggregate contribution of one row when it has numeric values. */
     private extractNodeAggregate(rowData: PerfTreeRowData): ParentAggregate {
-        const hasNumeric = this.isFiniteNumber(rowData.peak) ||
+        const hasNumeric =
+            this.isFiniteNumber(rowData.peak) ||
             this.isFiniteNumber(rowData.average) ||
             this.isFiniteNumber(rowData.min);
         if (!hasNumeric) {
@@ -944,10 +971,12 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         }
 
         const unit = this.toSupportedUnit(rowData.unit);
-        if (!unit ||
+        if (
+            !unit ||
             !this.isFiniteNumber(rowData.peak) ||
             !this.isFiniteNumber(rowData.average) ||
-            !this.isFiniteNumber(rowData.min)) {
+            !this.isFiniteNumber(rowData.min)
+        ) {
             return {
                 hasNumeric: true,
                 eligible: false
@@ -966,12 +995,12 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
 
     /** Restricts parent aggregation to the supported comparable units. */
     private toSupportedUnit(unit?: string): SupportedUnit | undefined {
-        return unit === 'ms' || unit === 'count' || unit === 'features' ? unit : undefined;
+        return unit === "ms" || unit === "count" || unit === "features" ? unit : undefined;
     }
 
     /** Small helper that guards against non-finite numeric values. */
     private isFiniteNumber(value: number | undefined): value is number {
-        return typeof value === 'number' && Number.isFinite(value);
+        return typeof value === "number" && Number.isFinite(value);
     }
 
     /** Highlights suspiciously expensive timing rows relative to their peers. */
@@ -987,10 +1016,8 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
                 rowData.averageClass = undefined;
                 rowData.minClass = undefined;
                 const hasChildren = !!node.children?.length;
-                if (rowData.unit === 'ms') {
-                    const target = hasChildren
-                        ? parentValuesByDepth.get(depth) ?? []
-                        : leafValues;
+                if (rowData.unit === "ms") {
+                    const target = hasChildren ? (parentValuesByDepth.get(depth) ?? []) : leafValues;
                     if (hasChildren && !parentValuesByDepth.has(depth)) {
                         parentValuesByDepth.set(depth, target);
                     }
@@ -1019,7 +1046,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             for (const node of items) {
                 const rowData = this.getRowData(node);
                 const hasChildren = !!node.children?.length;
-                if (rowData.unit === 'ms') {
+                if (rowData.unit === "ms") {
                     const median = hasChildren ? parentMediansByDepth.get(depth) : leafMedian;
                     rowData.peakClass = this.resolveSuspiciousClass(rowData.peak, median);
                     rowData.averageClass = this.resolveSuspiciousClass(rowData.average, median);
@@ -1060,10 +1087,10 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
             return undefined;
         }
         if (value >= median * 3) {
-            return 'diagnostics-suspicious-bad';
+            return "diagnostics-suspicious-bad";
         }
         if (value >= median * 2) {
-            return 'diagnostics-suspicious-warn';
+            return "diagnostics-suspicious-warn";
         }
         return undefined;
     }
@@ -1071,44 +1098,44 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     /** Chooses the shared duration unit that keeps displayed values readable. */
     private resolveDurationDisplayUnit(maxAbsDurationMs: number): DurationDisplayUnit {
         if (maxAbsDurationMs >= 86_400_000) {
-            return 'd';
+            return "d";
         }
         if (maxAbsDurationMs >= 3_600_000) {
-            return 'h';
+            return "h";
         }
         if (maxAbsDurationMs >= 60_000) {
-            return 'm';
+            return "m";
         }
         if (maxAbsDurationMs >= 1_000) {
-            return 's';
+            return "s";
         }
-        return 'ms';
+        return "ms";
     }
 
     /** Chooses the shared byte unit that keeps displayed values readable. */
     private resolveBytesDisplayUnit(maxAbsBytes: number): BytesDisplayUnit {
         if (maxAbsBytes >= 1024 * 1024 * 1024) {
-            return 'GB';
+            return "GB";
         }
         if (maxAbsBytes >= 1024 * 1024) {
-            return 'MB';
+            return "MB";
         }
         if (maxAbsBytes >= 1024) {
-            return 'KB';
+            return "KB";
         }
-        return 'B';
+        return "B";
     }
 
     /** Converts a byte-valued perf metric back to raw bytes. */
     private toBytes(value: number, unit: BytesDisplayUnit): number {
         switch (unit) {
-            case 'B':
+            case "B":
                 return value;
-            case 'KB':
+            case "KB":
                 return value * 1024;
-            case 'MB':
+            case "MB":
                 return value * 1024 * 1024;
-            case 'GB':
+            case "GB":
                 return value * 1024 * 1024 * 1024;
         }
     }
@@ -1116,13 +1143,13 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     /** Converts raw bytes into the currently selected display unit. */
     private fromBytesToDisplayUnit(bytes: number, unit: BytesDisplayUnit): number {
         switch (unit) {
-            case 'B':
+            case "B":
                 return bytes;
-            case 'KB':
+            case "KB":
                 return bytes / 1024;
-            case 'MB':
+            case "MB":
                 return bytes / (1024 * 1024);
-            case 'GB':
+            case "GB":
                 return bytes / (1024 * 1024 * 1024);
         }
     }
@@ -1130,15 +1157,15 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     /** Converts raw milliseconds into the currently selected duration display unit. */
     private fromMsToDisplayUnit(ms: number, unit: DurationDisplayUnit): number {
         switch (unit) {
-            case 'ms':
+            case "ms":
                 return ms;
-            case 's':
+            case "s":
                 return ms / 1000;
-            case 'm':
+            case "m":
                 return ms / 60_000;
-            case 'h':
+            case "h":
                 return ms / 3_600_000;
-            case 'd':
+            case "d":
                 return ms / 86_400_000;
         }
     }
@@ -1155,13 +1182,13 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         if (value === undefined || value === null) {
             return undefined;
         }
-        if (unit === 'count') {
+        if (unit === "count") {
             return Math.round(value).toLocaleString();
         }
-        if (unit === 'features') {
+        if (unit === "features") {
             return `${Math.round(value)} features`;
         }
-        if (unit === 'B' || unit === 'KB' || unit === 'MB' || unit === 'GB') {
+        if (unit === "B" || unit === "KB" || unit === "MB" || unit === "GB") {
             const bytes = this.toBytes(value, unit);
             const converted = this.fromBytesToDisplayUnit(bytes, this.bytesDisplayUnit);
             return `${this.formatDecimal(converted, DISPLAY_DECIMALS)} ${this.bytesDisplayUnit}`;
@@ -1169,7 +1196,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         if (unit === CONVERSION_AGE_UNIT) {
             return this.formatConversionAge(value);
         }
-        if (unit === 'ms') {
+        if (unit === "ms") {
             const converted = this.fromMsToDisplayUnit(value, this.durationDisplayUnit);
             return `${this.formatDecimal(converted, DISPLAY_DECIMALS)} ${this.durationDisplayUnit}`;
         }
@@ -1182,13 +1209,13 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         if (value === undefined || value === null) {
             return undefined;
         }
-        if (unit === 'count') {
+        if (unit === "count") {
             return `${Math.round(value).toLocaleString()} count`;
         }
-        if (unit === 'features') {
+        if (unit === "features") {
             return `${Math.round(value)} features`;
         }
-        if (unit === 'B' || unit === 'KB' || unit === 'MB' || unit === 'GB') {
+        if (unit === "B" || unit === "KB" || unit === "MB" || unit === "GB") {
             const bytes = this.toBytes(value, unit);
             const converted = this.fromBytesToDisplayUnit(bytes, this.bytesDisplayUnit);
             return `${this.formatDecimal(converted, DISPLAY_DECIMALS)} ${this.bytesDisplayUnit}`;
@@ -1196,7 +1223,7 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
         if (unit === CONVERSION_AGE_UNIT) {
             return this.formatConversionAge(value);
         }
-        if (unit === 'ms') {
+        if (unit === "ms") {
             const converted = this.fromMsToDisplayUnit(value, this.durationDisplayUnit);
             return `${this.formatDecimal(converted, DISPLAY_DECIMALS)} ${this.durationDisplayUnit}`;
         }

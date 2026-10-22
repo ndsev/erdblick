@@ -1,69 +1,40 @@
+import {NgZone} from "@angular/core";
 import {Subject, Subscription} from "rxjs";
+import type {InspectionSelectionService} from "../inspection/inspection-selection.service";
+import type {InspectionPanelModel, TileFeatureId} from "../inspection/inspection-state.model";
+import {coreLib} from "../integrations/wasm";
 import type {FilterTileState} from "../mapdata/filter-tile-state.model";
+import type {HoverDetailService} from "../mapdata/hover-detail.service";
 import type {MapInfoService} from "../mapdata/map-info.service";
 import type {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import type {MapgetLayer} from "../mapdata/mapget-layer.model";
+import {parseMapPartitionKey, partitionKey, tilePartition, type PartitionId} from "../mapdata/partition.model";
 import {
     StyledMapgetLayer,
     type StyleFilterPlan,
     type StyledMapgetLayerEvent
 } from "../mapdata/styled-mapget-layer.model";
-import type {MapgetLayer} from "../mapdata/mapget-layer.model";
-import type {StyleService, ErdblickStyle} from "../styledata/style.service";
-import {coreLib} from "../integrations/wasm";
-import type {IRenderSceneHandle} from "./render-view.model";
-import {
-    MapViewStateService,
-    ViewRecalculationReason
-} from "./map-view-state.service";
-import {
-    TileSubsetLayerRenderService
-} from "./deck/tile-subset-layer-render.service";
-import {
-    TileSubsetLayerVisualization,
-    type TileSubsetInteractionOverlay
-} from "./deck/tile-subset-layer.visualization";
-import {
-    resolveDeckInteractionEffect,
-    type DeckInteractionEffect
-} from
-    "./deck/deck-interaction-effect";
-import {tileCoordinateOrigin} from "./deck/tile-coordinate-origin";
 import type {FeatureSearchService} from "../search/feature.search.service";
-import type {
-    InspectionSelectionService
-} from "../inspection/inspection-selection.service";
-import type {
-    InspectionPanelModel,
-    TileFeatureId
-} from "../shared/appstate.service";
+import {MAX_STYLE_LOD} from "../shared/lod-policy";
+import {tileFeatureInteractionTargetsEqual} from "../shared/tile-feature-id";
 import {sipHash64Hex} from "../styledata/hash";
-import {
-    tileFeatureInteractionTargetsEqual
-} from "../shared/tile-feature-id";
+import type {StyleValidationReportService} from "../styledata/style-validation-report.service";
+import type {ErdblickStyle, StyleService} from "../styledata/style.service";
+import {resolveDeckInteractionEffect, type DeckInteractionEffect} from "./deck/deck-interaction-effect";
+import type {GpuSceneSnapshot} from "./deck/gpu-scene";
+import {tileCoordinateOrigin} from "./deck/tile-coordinate-origin";
+import {INTERACTION_STYLE_ORDER_BASE} from "./deck/tile-subset-interaction.model";
+import {TileSubsetLayerRenderService} from "./deck/tile-subset-layer-render.service";
+import {TileSubsetLayerVisualization, type TileSubsetInteractionOverlay} from "./deck/tile-subset-layer.visualization";
 import {
     hasAuthoredInteractionHighlight,
     interactionTargetKey,
     planRemoteInteractionHighlights
 } from "./interaction-highlight-plan";
-import type {
-    ViewLayerDiagnosticsService
-} from "./view-layer-diagnostics.service";
-import type {
-    StyleValidationReportService
-} from "../styledata/style-validation-report.service";
-import type {HoverDetailService} from "../mapdata/hover-detail.service";
-import {NgZone} from "@angular/core";
-import type {GpuSceneSnapshot} from "./deck/gpu-scene";
-import {INTERACTION_STYLE_ORDER_BASE} from
-    "./deck/tile-subset-interaction.model";
-import {MAX_STYLE_LOD} from "../shared/lod-policy";
-import {
-    parseMapPartitionKey,
-    parsePartition,
-    partitionKey,
-    tilePartition,
-    type PartitionId
-} from "../mapdata/partition.model";
+import {MapViewService, ViewRecalculationReason} from "./map-view.service";
+import type {IRenderSceneHandle} from "./render-view.model";
+import type {ViewIdentity} from "./view-id";
+import type {ViewLayerDiagnosticsService} from "./view-layer-diagnostics.service";
 
 export type ViewTileOccupancy = "unknown" | "empty" | "non-empty" | "error";
 
@@ -144,10 +115,15 @@ export class ViewLayerController {
     private readonly unregisterDiagnostics: () => void;
 
     /** Bind one logical view to catalog, style, search, inspection, and worker state. */
+    private readonly identity: ViewIdentity;
+    get viewIndex(): number {
+        return this.viewState.store.indexOf(this.identity.id);
+    }
+
     constructor(
-        readonly viewIndex: number,
+        viewIndex: number,
         private readonly mapInfo: MapInfoService,
-        private readonly viewState: MapViewStateService,
+        private readonly viewState: MapViewService,
         private readonly tileStream: MapTileStreamService,
         private readonly styleService: StyleService,
         private readonly renderService: TileSubsetLayerRenderService,
@@ -158,6 +134,9 @@ export class ViewLayerController {
         private readonly styleValidationReports: StyleValidationReportService,
         private readonly ngZone: NgZone
     ) {
+        const identity = this.viewState.store.captureView(viewIndex);
+        if (!identity) throw new Error("Cannot attach layers to an unavailable view");
+        this.identity = identity;
         this.unregisterDiagnostics = diagnostics.register(
             viewIndex,
             () => this.diagnosticStyledLayers(),
@@ -166,50 +145,48 @@ export class ViewLayerController {
         let previousCloudWorkingMiB = this.renderService.pointCloudPolicy.workingMemoryMiB;
         this.subscriptions.push(
             this.mapInfo.maps$.subscribe(() => this.scheduleReconcile()),
-            this.mapInfo.dataSourceInfoChanged.subscribe(() =>
-                this.resetInteractionStyleCaches()),
+            this.mapInfo.dataSourceInfoChanged.subscribe(() => this.resetInteractionStyleCaches()),
             this.mapInfo.layerStateChanged.subscribe(() => this.scheduleReconcile()),
-            this.mapInfo.styleOptionsChanged.subscribe(changes => {
-                if (changes.some(change => change.viewIndex === this.viewIndex)) {
+            this.mapInfo.styleOptionsChanged.subscribe((changes) => {
+                if (changes.some((change) => change.viewIndex === this.viewIndex)) {
                     this.scheduleReconcile();
                 }
             }),
-            this.viewState.viewStateChanged.subscribe(reason =>
-                this.scheduleReconcile(
-                    reason !== ViewRecalculationReason.Viewport
-                )
+            this.viewState.viewStateChanged.subscribe((reason) =>
+                this.scheduleReconcile(reason !== ViewRecalculationReason.Viewport)
             ),
             this.styleService.styleAddedForId.subscribe(() => this.scheduleReconcile()),
             this.styleService.styleRemovedForId.subscribe(() => this.scheduleReconcile()),
             this.styleService.styleGroups.subscribe(() => this.scheduleReconcile()),
-            this.featureSearch.searchPresentationsChanged.subscribe(() =>
-                this.scheduleReconcile()
-            ),
-            this.inspection.selectionIdsTopic.subscribe(() =>
-                this.scheduleInteractionReconcile()
-            ),
-            this.inspection.hoverIdsTopic.subscribe(() =>
-                this.scheduleInteractionReconcile()
-            ),
-            this.renderService.pointCloudPolicyChanged.subscribe(reclaim => {
+            this.featureSearch.searchPresentationsChanged.subscribe(() => this.scheduleReconcile()),
+            this.inspection.selectionIdsTopic.subscribe(() => this.scheduleInteractionReconcile()),
+            this.inspection.hoverIdsTopic.subscribe(() => this.scheduleInteractionReconcile()),
+            this.renderService.pointCloudPolicyChanged.subscribe((reclaim) => {
                 const workingMiB = this.renderService.pointCloudPolicy.workingMemoryMiB;
                 if (workingMiB > previousCloudWorkingMiB) {
                     for (const owned of this.styledLayers.values()) {
-                        if ([...owned.layer.tileStates.values()].some(state =>
-                            state.pointCloudInputRejected && !state.backendPending)) owned.layer.refresh();
+                        if (
+                            [...owned.layer.tileStates.values()].some(
+                                (state) => state.pointCloudInputRejected && !state.backendPending
+                            )
+                        )
+                            owned.layer.refresh();
                     }
                 }
                 previousCloudWorkingMiB = workingMiB;
-                const owners = [...this.styledLayers.values(),
-                    ...[...this.retiringRegularLayers.values()].map(value => value.owned)];
+                const owners = [
+                    ...this.styledLayers.values(),
+                    ...[...this.retiringRegularLayers.values()].map((value) => value.owned)
+                ];
                 for (const owned of owners)
                     for (const visualization of owned.visualizations.values())
-                        visualization.setPointCloudScale(this.viewState.viewStateFor(this.viewIndex)?.metersPerPixel ?? null, reclaim);
+                        visualization.setPointCloudScale(
+                            this.viewState.viewStateFor(this.viewIndex)?.metersPerPixel ?? null,
+                            reclaim
+                        );
                 this.scheduleReconcile();
             }),
-            this.renderService.capacityChanged.subscribe(() =>
-                this.schedulePendingTiles()
-            )
+            this.renderService.capacityChanged.subscribe(() => this.schedulePendingTiles())
         );
         this.scheduleReconcile();
     }

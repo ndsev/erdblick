@@ -1,3 +1,5 @@
+import {AppStore} from "../../shared/app.store";
+import {ownerTestInjector} from "../../../test/owner-test-injector";
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {addMetersToLngLat} from "@math.gl/web-mercator";
@@ -34,10 +36,7 @@ interface DeckViewTestInternals {
 }
 
 interface MarkerTestInternals extends DeckViewTestInternals {
-    stateService: {
-        markerState: {getValue: () => boolean};
-        markedPositionState: {getValue: () => number[]};
-    };
+    store: AppStore;
     featureSearchService: {markerGraphics: () => string};
     layerRegistry: {upsert: (...args: unknown[]) => void};
     updateLocationMarkerOverlay(): void;
@@ -53,9 +52,7 @@ interface CameraPersistenceTestInternals {
         maxPitch: number;
         position: [number, number, number];
     };
-    stateService: {
-        setView: (...args: unknown[]) => void;
-    };
+    store: AppStore;
     pushViewStateToAppState(): void;
 }
 
@@ -73,7 +70,7 @@ function createView(): DeckMapView3D {
         {} as never,
         {} as never,
         {} as never,
-        {} as never
+        {} as never, ownerTestInjector().get(AppStore)
     );
 }
 
@@ -204,8 +201,7 @@ describe("Deck navigation target and layout", () => {
         const view = createView();
         const internals = view as unknown as MarkerTestInternals;
         installDeckMock(view, 1000, 700);
-        internals.stateService.markerState = {getValue: () => true};
-        internals.stateService.markedPositionState = {getValue: () => [11, 48, 120]};
+        internals.store.setMarkerControl({enabled: true, position: {lon: 11, lat: 48, alt: 120}});
         internals.featureSearchService.markerGraphics = () => "marker.svg";
         const upsert = vi.spyOn(internals.layerRegistry, "upsert");
 
@@ -227,8 +223,7 @@ describe("Deck navigation target and layout", () => {
     it("round-trips deck.gl's target-relative map-centre offset through app state", () => {
         const view = createView();
         const internals = view as unknown as CameraPersistenceTestInternals;
-        const setView = vi.fn();
-        internals.stateService.setView = setView;
+        const setView = vi.spyOn(internals.store, "setView");
         const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame")
             .mockReturnValue(17);
 

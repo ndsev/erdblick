@@ -1,20 +1,20 @@
-import { Texture, type Device } from "@luma.gl/core";
-import type { TileFeatureId } from "../../shared/appstate.service";
-import { sipHash64Hex } from "../../styledata/hash";
+import {Texture, type Device} from "@luma.gl/core";
+import type {TileFeatureId} from "../../inspection/inspection-state.model";
+import {sipHash64Hex} from "../../styledata/hash";
+import {gpuMemoryBudget} from "./gpu-memory-budget";
 import {
-  GpuRenderPacketView,
-  type GpuLabelRecordView,
-  type GpuPickRecordView,
-  type GpuRetainedPickTable,
-  type GpuRuntimeIssueView,
-  type GpuZIndexEntryView,
-} from "./gpu-render-packet";
-import {
-  GpuPrimitiveStore,
-  type GpuPrimitiveStoreSnapshot,
+    GpuPrimitiveStore,
+    type GpuPrimitiveStoreSnapshot,
 } from "./gpu-primitive-store";
-import { GpuRangeAllocator, type GpuRecordRange } from "./gpu-range-allocator";
-import { gpuMemoryBudget } from "./gpu-memory-budget";
+import {GpuRangeAllocator, type GpuRecordRange} from "./gpu-range-allocator";
+import {
+    GpuRenderPacketView,
+    type GpuLabelRecordView,
+    type GpuPickRecordView,
+    type GpuRetainedPickTable,
+    type GpuRuntimeIssueView,
+    type GpuZIndexEntryView
+} from "./gpu-render-packet";
 
 const LOOKUP_TEXTURE_WIDTH = 1024;
 const MAX_PICKING_INDEX = 0x00ff_fffe;

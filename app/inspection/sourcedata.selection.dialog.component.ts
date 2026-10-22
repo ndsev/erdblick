@@ -1,18 +1,25 @@
 import {Component} from "@angular/core";
-import {RightClickMenuService, SourceDataDropdownOption} from "../mapview/rightclickmenu.service";
-import {MapInfoService} from "../mapdata/map-info.service";
 import {Color} from "../integrations/geo";
-import {SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
+import {MapInfoService} from "../mapdata/map-info.service";
+import {RightClickMenuService, SourceDataDropdownOption} from "../mapview/rightclickmenu.service";
+import {SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
 
 @Component({
-    selector: 'sourcedatadialog',
+    selector: "sourcedatadialog",
     template: `
-        <app-dialog header="Inspect Tile Source Data" class="tilesource-select-dialog" [(visible)]="dialogVisible" [modal]="false"
-                  [persistLayout]="true" [persistOpenState]="false" [layoutId]="dialogLayoutId"
-                  (onHide)="reset()">
+        <app-dialog
+            header="Inspect Tile Source Data"
+            class="tilesource-select-dialog"
+            [(visible)]="dialogVisible"
+            [modal]="false"
+            [persistLayout]="true"
+            [persistOpenState]="false"
+            [layoutId]="dialogLayoutId"
+            (onHide)="reset()"
+        >
             @if (loading) {
                 <div style="display:flex; justify-content: center">
-                    <p-progressSpinner ariaLabel="loading"/>
+                    <p-progressSpinner ariaLabel="loading" />
                 </div>
             } @else {
                 <div class="tilesource-options" data-testid="source-data-selection-panel">
@@ -21,44 +28,67 @@ import {SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID} from "../shared/appstate.service
                     } @else {
                         <div class="main-dropdown">
                             @if (showCustomTileIdInput) {
-                                <input data-testid="source-data-selection-custom-tile-id" placeholder="Enter custom Tile ID" type="text"
-                                       pInputText [(ngModel)]="customTileId" (ngModelChange)="onCustomTileIdChange($event)"/>
+                                <input
+                                    data-testid="source-data-selection-custom-tile-id"
+                                    placeholder="Enter custom Tile ID"
+                                    type="text"
+                                    pInputText
+                                    [(ngModel)]="customTileId"
+                                    (ngModelChange)="onCustomTileIdChange($event)"
+                                />
                             } @else {
                                 <div data-testid="source-data-selection-tile-select">
-                                    <p-select [options]="tileIds"
-                                              [(ngModel)]="selectedTileId"
-                                              optionLabel="name"
-                                              scrollHeight="20em"
-                                              placeholder="Select a TileId"
-                                              (ngModelChange)="onTileIdChange($event)"
-                                              appendTo="body"/>
+                                    <p-select
+                                        [options]="tileIds"
+                                        [(ngModel)]="selectedTileId"
+                                        optionLabel="name"
+                                        scrollHeight="20em"
+                                        placeholder="Select a TileId"
+                                        (ngModelChange)="onTileIdChange($event)"
+                                        appendTo="body"
+                                    />
                                 </div>
                             }
-                            <p-button (click)="toggleCustomTileIdInput()" class="osm-button" data-testid="source-data-selection-toggle-custom-tile-id"
-                                      icon="{{showCustomTileIdInput ? 'pi pi-times' : 'pi pi-plus'}}"
-                                      label="" [pTooltip]="showCustomTileIdInput ? 'Reset custom Tile ID' : 'Enter custom Tile ID'" tooltipPosition="bottom" tabindex="0">
+                            <p-button
+                                (click)="toggleCustomTileIdInput()"
+                                class="osm-button"
+                                data-testid="source-data-selection-toggle-custom-tile-id"
+                                icon="{{ showCustomTileIdInput ? 'pi pi-times' : 'pi pi-plus' }}"
+                                label=""
+                                [pTooltip]="showCustomTileIdInput ? 'Reset custom Tile ID' : 'Enter custom Tile ID'"
+                                tooltipPosition="bottom"
+                                tabindex="0"
+                            >
                             </p-button>
                         </div>
                         <div data-testid="source-data-selection-map-select">
-                            <p-select [options]="mapIds"
-                                      [(ngModel)]="selectedMapId"
-                                      [disabled]="!mapIds.length"
-                                      optionLabel="name"
-                                      scrollHeight="20em"
-                                      [placeholder]="mapIds.length ? 'Select a MapId' : 'No associated maps found'"
-                                      (ngModelChange)="onMapIdChange($event)"
-                                      appendTo="body" />
+                            <p-select
+                                [options]="mapIds"
+                                [(ngModel)]="selectedMapId"
+                                [disabled]="!mapIds.length"
+                                optionLabel="name"
+                                scrollHeight="20em"
+                                [placeholder]="mapIds.length ? 'Select a MapId' : 'No associated maps found'"
+                                (ngModelChange)="onMapIdChange($event)"
+                                appendTo="body"
+                            />
                         </div>
                         <div data-testid="source-data-selection-layer-select">
-                            <p-select [options]="sourceDataLayers"
-                                      [(ngModel)]="selectedSourceDataLayer"
-                                      [disabled]="!sourceDataLayers.length"
-                                      optionLabel="name"
-                                      scrollHeight="20em"
-                                      placeholder="Select a SourceDataLayer"
-                                      [placeholder]="mapIds.length ? 'Select a SourceDataLayer' : 'No associated source data layers found'"
-                                      (ngModelChange)="onLayerIdChange($event)"
-                                      appendTo="body" />
+                            <p-select
+                                [options]="sourceDataLayers"
+                                [(ngModel)]="selectedSourceDataLayer"
+                                [disabled]="!sourceDataLayers.length"
+                                optionLabel="name"
+                                scrollHeight="20em"
+                                placeholder="Select a SourceDataLayer"
+                                [placeholder]="
+                                    mapIds.length
+                                        ? 'Select a SourceDataLayer'
+                                        : 'No associated source data layers found'
+                                "
+                                (ngModelChange)="onLayerIdChange($event)"
+                                appendTo="body"
+                            />
                         </div>
                     }
                     <div style="display: flex; flex-direction: row; gap: 0.5em">
@@ -97,9 +127,11 @@ export class SourceDataLayerSelectionDialogComponent {
     customMapId: string = "";
     showCustomTileIdInput: boolean = false;
 
-    constructor(private mapService: MapInfoService,
-                public menuService: RightClickMenuService) {
-        this.menuService.tileIdsForSourceData.subscribe(data => {
+    constructor(
+        private mapService: MapInfoService,
+        public menuService: RightClickMenuService
+    ) {
+        this.menuService.tileIdsForSourceData.subscribe((data) => {
             this.tileIds = data;
             this.loading = !data.length;
             this.load();
@@ -231,9 +263,11 @@ export class SourceDataLayerSelectionDialogComponent {
 
     /** Persists the current choice and asks the right-click menu service to open the source-data panel. */
     requestSourceData() {
-        if (this.selectedTileId === undefined ||
+        if (
+            this.selectedTileId === undefined ||
             this.selectedMapId === undefined ||
-            this.selectedSourceDataLayer === undefined) {
+            this.selectedSourceDataLayer === undefined
+        ) {
             return;
         }
         this.menuService.lastInspectedTileSourceDataOption.next({
@@ -283,11 +317,11 @@ export class SourceDataLayerSelectionDialogComponent {
     /** Restores the last used map selection when it is still compatible with the chosen tile. */
     private restorePreferredMapSelection() {
         if (this.customMapId) {
-            const mapSelection = this.mapIds.find(entry => entry.id == this.customMapId);
+            const mapSelection = this.mapIds.find((entry) => entry.id == this.customMapId);
             if (mapSelection) {
                 this.selectedMapId = mapSelection;
             } else {
-                this.mapIds.unshift({ id: this.customMapId, name: this.customMapId });
+                this.mapIds.unshift({id: this.customMapId, name: this.customMapId});
             }
             return;
         }
@@ -296,14 +330,14 @@ export class SourceDataLayerSelectionDialogComponent {
         if (!savedMapId) {
             return;
         }
-        this.selectedMapId = this.mapIds.find(entry => entry.id == savedMapId);
+        this.selectedMapId = this.mapIds.find((entry) => entry.id == savedMapId);
     }
 
     /** Restores the last inspected source-data layer when it is available for the current map. */
     private restorePreferredLayerSelection() {
         const savedLayerId = this.menuService.lastInspectedTileSourceDataOption.getValue()?.layerId;
         if (savedLayerId) {
-            const layerSelection = this.sourceDataLayers.find(entry => entry.id == savedLayerId);
+            const layerSelection = this.sourceDataLayers.find((entry) => entry.id == savedLayerId);
             if (layerSelection) {
                 this.selectedSourceDataLayer = layerSelection;
                 return;

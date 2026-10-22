@@ -1,3 +1,5 @@
+import {AppStore} from "../../shared/app.store";
+import {ownerTestInjector} from "../../../test/owner-test-injector";
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {DeckMapView3D} from "./deck-view3d";
@@ -5,12 +7,15 @@ import type {RenderViewCameraState} from "../render-view.model";
 
 /** Constructs a real camera owner with inert collaborators and no WebGL canvas. */
 function createView() {
-    const state = {setView: vi.fn(), numViews: 2, focusedView: 1, viewSync: []};
+    const state = ownerTestInjector().get(AppStore);
+    state.setNumViews(2);
+    state.setFocusedView(1);
+    vi.spyOn(state, "setView");
     const viewState = {setViewport: vi.fn()};
     const view = new DeckMapView3D(1, 'camera-test', {} as never, viewState as never,
         {} as never, {setHoveredFeatures: vi.fn()} as never, {} as never,
         {} as never, {} as never, state as never, {} as never,
-        {setCameraInteracting: vi.fn(), clearDeckPresentationDiagnostics: vi.fn()} as never);
+        {setCameraInteracting: vi.fn(), clearDeckPresentationDiagnostics: vi.fn()} as never, state);
     return {view, state, viewState};
 }
 

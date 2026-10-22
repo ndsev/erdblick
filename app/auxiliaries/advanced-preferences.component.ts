@@ -1,57 +1,61 @@
-import {Component, ElementRef, HostListener, ViewChild} from '@angular/core';
-import {Subscription} from 'rxjs';
-import {ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, AppStateService} from '../shared/appstate.service';
-import {EditorService} from '../shared/editor.service';
-import {AppDialogComponent} from '../shared/app-dialog.component';
-import {DialogStackService} from '../shared/dialog-stack.service';
+import {AppStore} from "../shared/app.store";
+import {Component, ElementRef, HostListener, inject, ViewChild} from "@angular/core";
+import {Subscription} from "rxjs";
+import {AppDialogComponent} from "../shared/app-dialog.component";
+import {ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
+
+import {AppStateService} from "../shared/appstate.service";
+import {DialogStackService} from "../shared/dialog-stack.service";
+import {EditorService} from "../shared/editor.service";
 
 @Component({
-    selector: 'advanced-preferences',
+    selector: "advanced-preferences",
     template: `
-        <app-dialog header="Advanced Preferences"
-                    class="editor-dialog advanced-preferences-dialog"
-                    [(visible)]="dialogVisible"
-                    [modal]="false"
-                    [closable]="false"
-                    [closeOnEscape]="false"
-                    [persistLayout]="true"
-                    [layoutId]="dialogLayoutId"
-                    #advancedPreferencesDialog
-                    (onShow)="onDialogShow()"
-                    (onHide)="onDialogHide()">
+        <app-dialog
+            header="Advanced Preferences"
+            class="editor-dialog advanced-preferences-dialog"
+            [visible]="store.isDialogOpen(dialogLayoutId)" (visibleChange)="store.setDialogOpen(dialogLayoutId, $event)"
+            [modal]="false"
+            [closable]="false"
+            [closeOnEscape]="false"
+            [persistLayout]="true"
+            [layoutId]="dialogLayoutId"
+            #advancedPreferencesDialog
+            (onShow)="onDialogShow()"
+            (onHide)="onDialogHide()"
+        >
             @if (validationError.length > 0) {
                 <div class="advanced-preferences-validation-error">{{ validationError }}</div>
             }
             <editor [sessionId]="advancedPreferencesEditorSessionId"></editor>
             <div class="advanced-preferences-actions">
                 <div class="advanced-preferences-actions-left">
-                    <p-button (click)="saveSnapshot()"
-                              label="Save"
-                              icon="pi pi-check"
-                              [disabled]="!dirty"></p-button>
-                    <p-button (click)="triggerImport()"
-                              label="Import"
-                              icon="pi pi-file-import"></p-button>
-                    <p-button (click)="exportSnapshot()"
-                              label="Export"
-                              icon="pi pi-file-export"></p-button>
-                    <input #snapshotFileInput
-                           type="file"
-                           accept=".json,application/json"
-                           style="display: none;"
-                           (change)="onImportFileSelected($event)">
+                    <p-button (click)="saveSnapshot()" label="Save" icon="pi pi-check" [disabled]="!dirty"></p-button>
+                    <p-button (click)="triggerImport()" label="Import" icon="pi pi-file-import"></p-button>
+                    <p-button (click)="exportSnapshot()" label="Export" icon="pi pi-file-export"></p-button>
+                    <input
+                        #snapshotFileInput
+                        type="file"
+                        accept=".json,application/json"
+                        style="display: none;"
+                        (change)="onImportFileSelected($event)"
+                    />
                 </div>
-                <p-button (click)="closeDialog($event)"
-                          [label]="dirty ? 'Discard' : 'Close'"
-                          icon="pi pi-times"></p-button>
+                <p-button
+                    (click)="closeDialog($event)"
+                    [label]="dirty ? 'Discard' : 'Close'"
+                    icon="pi pi-times"
+                ></p-button>
             </div>
         </app-dialog>
-        <app-dialog header="Warning!"
-                    [(visible)]="discardWarningVisible"
-                    [modal]="true"
-                    [closeOnEscape]="false"
-                    #discardWarningDialog
-                    (onShow)="onDiscardWarningShow()">
+        <app-dialog
+            header="Warning!"
+            [(visible)]="discardWarningVisible"
+            [modal]="true"
+            [closeOnEscape]="false"
+            #discardWarningDialog
+            (onShow)="onDiscardWarningShow()"
+        >
             <p>You have unsaved advanced preference changes. Do you want to save before closing?</p>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
                 <p-button (click)="saveSnapshot(true)" label="Save"></p-button>
@@ -64,53 +68,53 @@ import {DialogStackService} from '../shared/dialog-stack.service';
 })
 /** Provides the advanced preferences JSON editor dialog. */
 export class AdvancedPreferencesComponent {
+    readonly store = inject(AppStore);
     readonly dialogLayoutId = ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID;
-    readonly advancedPreferencesEditorSessionId = 'advanced-preferences-editor';
+    readonly advancedPreferencesEditorSessionId = "advanced-preferences-editor";
     dirty = false;
     discardWarningVisible = false;
-    validationError = '';
+    validationError = "";
 
-    @ViewChild('advancedPreferencesDialog') advancedPreferencesDialog?: AppDialogComponent;
-    @ViewChild('discardWarningDialog') discardWarningDialog?: AppDialogComponent;
-    @ViewChild('snapshotFileInput') snapshotFileInput?: ElementRef<HTMLInputElement>;
+    @ViewChild("advancedPreferencesDialog") advancedPreferencesDialog?: AppDialogComponent;
+    @ViewChild("discardWarningDialog") discardWarningDialog?: AppDialogComponent;
+    @ViewChild("snapshotFileInput") snapshotFileInput?: ElementRef<HTMLInputElement>;
 
-    private baselineSnapshotText = '';
+    private baselineSnapshotText = "";
     private sourceSubscription: Subscription = new Subscription();
     private saveSubscription: Subscription = new Subscription();
 
-    constructor(public readonly stateService: AppStateService,
-                private readonly editorService: EditorService,
-                private readonly dialogStack: DialogStackService) {}
+    constructor(
+        public readonly stateService: AppStateService,
+        private readonly editorService: EditorService,
+        private readonly dialogStack: DialogStackService
+    ) {}
 
-    get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.dialogLayoutId);
-    }
 
-    set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
-    }
+
+
 
     onDialogShow() {
         const snapshotText = JSON.stringify(this.stateService.exportSnapshot(), null, 2);
         this.baselineSnapshotText = snapshotText;
-        this.validationError = '';
+        this.validationError = "";
         this.dirty = false;
         this.editorService.createSession({
             id: this.advancedPreferencesEditorSessionId,
             source: snapshotText,
-            language: 'json',
+            language: "json",
             readOnly: false
         });
         const session = this.editorService.getSession(this.advancedPreferencesEditorSessionId);
         if (session) {
             this.sourceSubscription.unsubscribe();
-            this.sourceSubscription = session.source$.subscribe(source => {
+            this.sourceSubscription = session.source$.subscribe((source) => {
                 this.dirty = source.trimEnd() !== this.baselineSnapshotText.trimEnd();
             });
             this.saveSubscription.unsubscribe();
-            this.saveSubscription = this.editorService.onSaveRequested(this.advancedPreferencesEditorSessionId)?.subscribe(() => {
-                this.saveSnapshot();
-            }) ?? new Subscription();
+            this.saveSubscription =
+                this.editorService.onSaveRequested(this.advancedPreferencesEditorSessionId)?.subscribe(() => {
+                    this.saveSnapshot();
+                }) ?? new Subscription();
         }
         this.dialogStack.bringToFront(this.advancedPreferencesDialog);
     }
@@ -121,7 +125,7 @@ export class AdvancedPreferencesComponent {
         this.sourceSubscription = new Subscription();
         this.saveSubscription = new Subscription();
         this.editorService.closeSession(this.advancedPreferencesEditorSessionId);
-        this.validationError = '';
+        this.validationError = "";
         this.dirty = false;
         this.discardWarningVisible = false;
     }
@@ -132,7 +136,7 @@ export class AdvancedPreferencesComponent {
             this.discardWarningVisible = true;
             return;
         }
-        this.dialogVisible = false;
+        this.store.setDialogOpen(this.dialogLayoutId, false);
     }
 
     /** Validates and imports the edited application-state snapshot. */
@@ -142,7 +146,7 @@ export class AdvancedPreferencesComponent {
         try {
             parsed = JSON.parse(editorText);
         } catch {
-            this.validationError = 'Advanced preferences JSON syntax is invalid.';
+            this.validationError = "Advanced preferences JSON syntax is invalid.";
             return;
         }
 
@@ -155,11 +159,11 @@ export class AdvancedPreferencesComponent {
         const nextText = JSON.stringify(this.stateService.exportSnapshot(), null, 2);
         this.baselineSnapshotText = nextText;
         this.editorService.updateSessionSource(this.advancedPreferencesEditorSessionId, nextText);
-        this.validationError = '';
+        this.validationError = "";
         this.dirty = false;
         this.discardWarningVisible = false;
         if (closeAfterSave) {
-            this.dialogVisible = false;
+            this.store.setDialogOpen(this.dialogLayoutId, false);
         }
     }
 
@@ -178,20 +182,20 @@ export class AdvancedPreferencesComponent {
         const limits = this.stateService.getSnapshotImportLimits();
         if (file.size > limits.maxFileSizeBytes) {
             this.validationError = `Advanced preferences file exceeds ${limits.maxFileSizeBytes} bytes.`;
-            input.value = '';
+            input.value = "";
             return;
         }
         const text = await file.text();
         this.editorService.updateSessionSource(this.advancedPreferencesEditorSessionId, text);
         this.validateSnapshotText(text);
-        input.value = '';
+        input.value = "";
     }
 
     /** Downloads the current snapshot editor contents as JSON. */
     exportSnapshot() {
         const source = this.editorService.getSessionSource(this.advancedPreferencesEditorSessionId);
-        const blob = new Blob([source], {type: 'application/json;charset=utf-8'});
-        const link = document.createElement('a');
+        const blob = new Blob([source], {type: "application/json;charset=utf-8"});
+        const link = document.createElement("a");
         link.href = URL.createObjectURL(blob);
         link.download = `mv_state_${this.snapshotTimestamp()}.json`;
         link.click();
@@ -200,13 +204,13 @@ export class AdvancedPreferencesComponent {
 
     discardAndClose() {
         this.discardWarningVisible = false;
-        this.validationError = '';
-        this.dialogVisible = false;
+        this.validationError = "";
+        this.store.setDialogOpen(this.dialogLayoutId, false);
     }
 
-    @HostListener('window:keydown', ['$event'])
+    @HostListener("window:keydown", ["$event"])
     onWindowKeyDown(event: KeyboardEvent) {
-        if (event.key !== 'Escape' || !this.dialogVisible) {
+        if (event.key !== "Escape" || !this.store.isDialogOpen(this.dialogLayoutId)) {
             return;
         }
         event.preventDefault();
@@ -227,15 +231,15 @@ export class AdvancedPreferencesComponent {
         try {
             parsed = JSON.parse(source);
         } catch {
-            this.validationError = 'Advanced preferences JSON syntax is invalid.';
+            this.validationError = "Advanced preferences JSON syntax is invalid.";
             return;
         }
         const errors = this.stateService.validateSnapshot(parsed);
-        this.validationError = errors.length ? errors[0] : '';
+        this.validationError = errors.length ? errors[0] : "";
     }
 
     /** Formats the current time for exported snapshot filenames. */
     private snapshotTimestamp(): string {
-        return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '_');
+        return new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "_");
     }
 }

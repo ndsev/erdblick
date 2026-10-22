@@ -305,9 +305,9 @@ export async function packedTileIdForTestPosition(
 }
 
 /**
- * Selects one deterministic feature through the same AppState path used by
- * result clicks and map picking. The inspection service performs the exact
- * restricted feature fetch; no client-side complete-tile registry is involved.
+ * Selects one deterministic inspection fixture through the validated owner action.
+ * The inspection service performs the exact restricted feature fetch and normal
+ * panel reuse/locking; no client-side complete-tile registry is involved.
  */
 export async function selectFeatureForInspection(
     page: Page,
@@ -327,7 +327,9 @@ export async function selectFeatureForInspection(
         if (summary?.error) {
             throw new Error(String(summary.error));
         }
-        debugApi.stateService.setSelection([{ mapTileKey, featureId }]);
+        await debugApi.executeAction('viewer_inspect', {
+            features: [{mapTileKey, featureId}]
+        });
     }, { mapId, layerId, tileId: resolvedTileId, featureId });
 }
 

@@ -82,8 +82,11 @@ export default defineConfig({
                 ...sharedUse,
                 launchOptions: {
                     args: [
-                        '--use-gl=swiftshader',
-                        '--disable-gpu',
+                        // Use ANGLE's software driver so headless tests exercise WebGL2
+                        // even on hosts without a GPU. Disabling the GPU path prevents
+                        // context creation in current Chromium.
+                        '--use-gl=angle',
+                        '--use-angle=swiftshader',
                         '--ignore-gpu-blocklist'
                     ],
                     env: {

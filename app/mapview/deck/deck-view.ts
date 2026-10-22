@@ -1,106 +1,90 @@
-import {
-    BehaviorSubject,
-    combineLatest,
-    distinctUntilChanged,
-    skip,
-    Subject,
-    Subscription
-} from "rxjs";
+import {observeStore} from "../../shared/persisted-state";
+import {AppStore} from "../../shared/app.store";
 import {
     COORDINATE_SYSTEM,
-    Deck as DeckGlDeck,
-    type DeckProps,
     FirstPersonView as DeckFirstPersonView,
-    type InteractionState,
-    MapController,
+    Deck as DeckGlDeck,
     MapView as DeckMercatorView,
+    type DeckProps,
+    type InteractionState,
     type InteractionTargetContext,
+    MapController,
     type PickingInfo,
     type WebMercatorViewport
 } from "@deck.gl/core";
 import {BitmapLayer, IconLayer, PolygonLayer, TextLayer} from "@deck.gl/layers";
-import {LocationAreaLayer} from "./location-area.layer";
-import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
 import {WMSImageSource} from "@loaders.gl/wms";
-import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
-import {MapInfoService} from "../../mapdata/map-info.service";
-import {MapViewStateService} from "../map-view-state.service";
-import {MapTileStreamService} from "../../mapdata/map-tile-stream.service";
-import {InspectionSelectionService} from "../../inspection/inspection-selection.service";
-import {
-    FeatureSearchService,
-    type FeatureSearchOverlayLayer
-} from "../../search/feature.search.service";
-import {featureSearchVisibleInView} from "../../shared/feature-search-state";
-import {featureSetsEqual} from "../../mapdata/feature-inspection.model";
-import type {SearchResultDensityMarker, SearchResultPoint} from "../../search/search-result-density.model";
-import {RightClickMenuService, TileOutlinePayload} from "../rightclickmenu.service";
+import type {Device, Parameters as LumaParameters} from "@luma.gl/core";
+import {BehaviorSubject, combineLatest, distinctUntilChanged, filter, Subject, Subscription} from "rxjs";
+import {Viewport} from "../../../build/libs/core/erdblick-core";
 import {CoordinatesService} from "../../coords/coordinates.service";
+import {environment} from "../../environments/environment";
+import {InspectionSelectionService} from "../../inspection/inspection-selection.service";
+import {TileFeatureId} from "../../inspection/inspection-state.model";
+import {type TileLayerProps, WMSLayer} from "../../integrations/deckgl";
+import {Cartographic, Color, GeoMath, SceneMode} from "../../integrations/geo";
+import {coreLib} from "../../integrations/wasm";
+import {featureSetsEqual} from "../../mapdata/feature-inspection.model";
+import {MapInfoService} from "../../mapdata/map-info.service";
 import {
-    AppStateService,
-    CameraViewState,
     DEFAULT_TILE_GRID_COLOR,
     DEFAULT_TILE_GRID_LEVEL,
     DEFAULT_TILE_GRID_OPACITY,
-    DEFAULT_MAP_ZOOM_STEP,
-    TileFeatureId,
     TileGridMode,
-    VIEW_SYNC_MOVEMENT,
-    VIEW_SYNC_POSITION,
     tileGridRgba
-} from "../../shared/appstate.service";
+} from "../../mapdata/map-layer-state.model";
+import {MapTileStreamService} from "../../mapdata/map-tile-stream.service";
+import {type FeatureSearchOverlayLayer, FeatureSearchService} from "../../search/feature.search.service";
+import type {SearchResultDensityMarker, SearchResultPoint} from "../../search/search-result-density.model";
 import {
     AppConfigService,
-    type BackgroundLayerConfig,
     type WmsBackgroundLayerConfig,
     type XyzBackgroundLayerConfig
 } from "../../shared/app-config.service";
+import {AppStateService} from "../../shared/appstate.service";
+import {featureSearchVisibleInView} from "../../shared/feature-search-state";
+import {CameraViewState, DEFAULT_MAP_ZOOM_STEP, VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION} from "../map-view-state.model";
+import {MapViewService} from "../map-view.service";
 import {
     IRenderSceneHandle,
     IRenderView,
     LocationArea,
     LocationPolygon,
-    RenderViewCameraState,
+    RenderedFeaturePickResult,
     RenderNavigationTarget,
-    RenderedFeaturePickResult
+    RenderViewCameraState
 } from "../render-view.model";
-import {Viewport} from "../../../build/libs/core/erdblick-core";
-import {DeckLayerRegistry} from "./deck-layer-registry";
+import {RightClickMenuService, TileOutlinePayload} from "../rightclickmenu.service";
 import {
-    createErdblickVectorLayers,
-    ErdblickVectorLayer
-} from "./erdblick-vector.layer";
-import {GpuScene} from "./gpu-scene";
-import {GpuSceneMaskController} from "./gpu-scene-mask.controller";
-import {gpuIconAtlasService} from "./gpu-icon-atlas.service";
-import {
-    createGpuTextLayerHost,
-    DeckTextOverlayService,
-    GpuTextLayerHost,
-    isDeckTextOverlayLayer
-} from "./gpu-text-layer.host";
-import {
-    DeckInteractionOutlineService,
-    isDeckInteractionMaskLayer
-} from "./deck-interaction-outline.service";
-import {
-    DeckSemanticZIndexService,
-    isSemanticZIndexPassLayer,
-    isSemanticZIndexPickingLayer
-} from "./deck-semantic-z-index.service";
+    autoTileGridLevel,
+    coarsenedTileLevel,
+    tileGridExtentForLevel,
+    tileGridLatToNormY,
+    type TileGridLevelExtent,
+    tileGridLonToNormX,
+    tileGridVisibleCellCount,
+    wrapColumnIntoExtent
+} from "../tile-grid-visibility";
+import type {ViewIdentity} from "../view-id";
+import {ViewLayerController} from "../view-layer.controller";
+import {BatchedTileLayer} from "./batched-tile.layer";
 import {DeckContactShadingService} from "./deck-contact-shading.service";
+import {
+    createFirstPersonCoverageViewport,
+    createFixedFirstPersonCameraState,
+    FIRST_PERSON_EYE_HEIGHT_METERS,
+    FIRST_PERSON_FAR_METERS,
+    FIRST_PERSON_FOCAL_DISTANCE,
+    FIRST_PERSON_FOV_DEGREES,
+    FIRST_PERSON_NEAR_METERS,
+    type FixedFirstPersonCameraState,
+    updateFixedFirstPersonLook
+} from "./deck-first-person-navigation";
+import {DeckInteractionOutlineService, isDeckInteractionMaskLayer} from "./deck-interaction-outline.service";
+import {DeckLayerRegistry} from "./deck-layer-registry";
+import {fitLocationArea, LOCATION_MIN_MAP_ZOOM, locationOverlayPolygons} from "./deck-location-area-navigation";
 import {NavigationTargetOverlay} from "./deck-navigation-target";
 import {planarPanViewState} from "./deck-planar-pan";
-import {environment} from "../../environments/environment";
-import {coreLib} from "../../integrations/wasm";
-import {
-    TileGridOverlayDatum,
-    TILE_STATE_KIND_EMPTY,
-    TILE_STATE_KIND_ERROR,
-    TileGridOverlayLayer,
-    TileGridStateOverlayLayer,
-    tileGridOverlayData
-} from "./deck-tile-grid-overlay.layer";
 import {
     createSearchResultDensityLabelLayer,
     createSearchResultDensityLayer,
@@ -110,18 +94,45 @@ import {
     type SearchResultDensityCountDomain,
     type SearchResultDensityLayoutEntry
 } from "./deck-search-result-density.layer";
-import {type TileLayerProps, WMSLayer} from "../../integrations/deckgl";
 import {
-    autoTileGridLevel,
-    coarsenedTileLevel,
-    tileGridExtentForLevel,
-    tileGridLatToNormY,
-    tileGridLonToNormX,
-    tileGridVisibleCellCount,
-    wrapColumnIntoExtent,
-    type TileGridLevelExtent
-} from "../tile-grid-visibility";
-import {ViewLayerController} from "../view-layer.controller";
+    DeckSemanticZIndexService,
+    isSemanticZIndexPassLayer,
+    isSemanticZIndexPickingLayer
+} from "./deck-semantic-z-index.service";
+import {
+    TILE_STATE_KIND_EMPTY,
+    TILE_STATE_KIND_ERROR,
+    tileGridOverlayData,
+    TileGridOverlayDatum,
+    TileGridOverlayLayer,
+    TileGridStateOverlayLayer
+} from "./deck-tile-grid-overlay.layer";
+import {clippedGeographicBounds} from "./deck-viewport-coverage";
+import {createErdblickVectorLayers, ErdblickVectorLayer} from "./erdblick-vector.layer";
+import {gpuIconAtlasService} from "./gpu-icon-atlas.service";
+import {GpuScene} from "./gpu-scene";
+import {GpuSceneMaskController} from "./gpu-scene-mask.controller";
+import {
+    createGpuTextLayerHost,
+    DeckTextOverlayService,
+    GpuTextLayerHost,
+    isDeckTextOverlayLayer
+} from "./gpu-text-layer.host";
+import {LocationAreaLayer} from "./location-area.layer";
+import {
+    type DeckFeaturePickLayerProps,
+    markerAnchorFromPickingInfo,
+    NAVIGATION_PICK_RADIUS_PIXELS,
+    navigationTargetFromPickingInfo,
+    pickNavigationAnchor
+} from "./navigation/erdblick-navigation-anchor";
+import {ErdblickTargetNavigationAdapter} from "./navigation/erdblick-target-navigation-adapter";
+import type {
+    NavigationAnchor,
+    NavigationSurfaceNormal,
+    NavigationTargetOrigin,
+    NavigationVisualTarget
+} from "./navigation/feature-navigation.types";
 import {
     createDeckMapViewport,
     DECK_MAP_FOV_DEGREES,
@@ -132,34 +143,6 @@ import {
     viewStateKeepingNavigationAnchor,
     viewStateWithGroundCenter
 } from "./navigation/web-mercator-feature-navigation";
-import {clippedGeographicBounds} from "./deck-viewport-coverage";
-import {fitLocationArea, locationOverlayPolygons, LOCATION_MIN_MAP_ZOOM} from "./deck-location-area-navigation";
-import {ErdblickTargetNavigationAdapter} from "./navigation/erdblick-target-navigation-adapter";
-import type {
-    NavigationAnchor,
-    NavigationSurfaceNormal,
-    NavigationTargetOrigin,
-    NavigationVisualTarget
-} from "./navigation/feature-navigation.types";
-import {
-    type DeckFeaturePickLayerProps,
-    markerAnchorFromPickingInfo,
-    NAVIGATION_PICK_RADIUS_PIXELS,
-    navigationTargetFromPickingInfo,
-    pickNavigationAnchor
-} from "./navigation/erdblick-navigation-anchor";
-import {BatchedTileLayer} from "./batched-tile.layer";
-import {
-    createFirstPersonCoverageViewport,
-    createFixedFirstPersonCameraState,
-    FIRST_PERSON_FAR_METERS,
-    FIRST_PERSON_FOCAL_DISTANCE,
-    FIRST_PERSON_FOV_DEGREES,
-    FIRST_PERSON_EYE_HEIGHT_METERS,
-    FIRST_PERSON_NEAR_METERS,
-    type FixedFirstPersonCameraState,
-    updateFixedFirstPersonLook
-} from "./deck-first-person-navigation";
 
 /** Internal camera state deck uses while the rest of the app still speaks Cesium-like camera values. */
 interface DeckCameraState {
@@ -305,7 +288,10 @@ export abstract class DeckMapView implements IRenderView {
         cullMode: "none"
     };
 
-    protected readonly _viewIndex: number;
+    readonly identity: ViewIdentity;
+    protected get _viewIndex(): number {
+        return this.store.indexOf(this.identity.id);
+    }
     readonly canvasId: string;
     protected deck: DeckGlDeck<DeckView> | null = null;
     private deckContainer: HTMLDivElement | null = null;
@@ -337,7 +323,7 @@ export abstract class DeckMapView implements IRenderView {
     readonly firstPersonViewActive = new BehaviorSubject(false);
     readonly rendererInvalidated = new Subject<void>();
 
-    private ignoreNextCamAppStateUpdate = false;
+    private publishingCameraState = false;
     private suppressDeckViewStateEvent = false;
     private readonly tickCallbacks = new Set<() => void>();
     private tickHandle: number | null = null;
@@ -496,37 +482,40 @@ export abstract class DeckMapView implements IRenderView {
     protected readonly useOrthographicProjection: boolean = false;
 
     /** Creates the deck-backed view wrapper for one canvas and app-state view index. */
-    constructor(id: number,
-                canvasId: string,
-                protected mapInfo: MapInfoService,
-                protected mapViewState: MapViewStateService,
-                protected tileStream: MapTileStreamService,
-                protected inspectionSelection: InspectionSelectionService,
-                protected featureSearchService: FeatureSearchService,
-                protected menuService: RightClickMenuService,
-                protected coordinatesService: CoordinatesService,
-                protected stateService: AppStateService,
-                protected configService: AppConfigService,
-                protected layerController: ViewLayerController) {
-        this._viewIndex = id;
+    constructor(
+        id: number,
+        canvasId: string,
+        protected mapInfo: MapInfoService,
+        protected mapViewState: MapViewService,
+        protected tileStream: MapTileStreamService,
+        protected inspectionSelection: InspectionSelectionService,
+        protected featureSearchService: FeatureSearchService,
+        protected menuService: RightClickMenuService,
+        protected coordinatesService: CoordinatesService,
+        protected stateService: AppStateService,
+        protected configService: AppConfigService,
+        protected layerController: ViewLayerController,
+        protected readonly store: AppStore
+    ) {
+        const identity = this.store.captureView(id);
+        if (!identity) throw new Error("Cannot create renderer for an unavailable view");
+        this.identity = identity;
         this.canvasId = canvasId;
         this.targetNavigationAdapter = new ErdblickTargetNavigationAdapter({
-            viewId: `deck-view-${id}`,
-            resolveTarget: context =>
-                this.resolveControllerNavigationTarget(context),
-            getRetainedTarget: () => this.retainedNavigationPivot
-                ? {
-                    position: this.retainedNavigationPivot,
-                    ...(this.retainedNavigationSurfaceNormal
-                        ? {surfaceNormal: this.retainedNavigationSurfaceNormal}
-                        : {}),
-                    origin: this.retainedNavigationOrigin ?? "unknown"
-                }
-                : null,
-            getMinimumTargetDistance: target =>
-                this.minimumTargetDistanceForOrigin(target.origin),
-            onTargetChange: (target, active) =>
-                this.onControllerNavigationTargetChange(target, active)
+            viewId: `deck-view-${this.identity.id}-${this.identity.generation}`,
+            resolveTarget: (context) => this.resolveControllerNavigationTarget(context),
+            getRetainedTarget: () =>
+                this.retainedNavigationPivot
+                    ? {
+                          position: this.retainedNavigationPivot,
+                          ...(this.retainedNavigationSurfaceNormal
+                              ? {surfaceNormal: this.retainedNavigationSurfaceNormal}
+                              : {}),
+                          origin: this.retainedNavigationOrigin ?? "unknown"
+                      }
+                    : null,
+            getMinimumTargetDistance: (target) => this.minimumTargetDistanceForOrigin(target.origin),
+            onTargetChange: (target, active) => this.onControllerNavigationTargetChange(target, active)
         });
     }
 
@@ -579,12 +568,12 @@ export abstract class DeckMapView implements IRenderView {
         this.setCanvasDrawingBufferSize(canvas, container.clientWidth, container.clientHeight);
         this.lastCanvasCssSize = this.normalizedCanvasCssSize(container.clientWidth, container.clientHeight);
         const gl = this.createWebGl2Context(canvas, container);
-        this.contactShadingEnabled = this.stateService.contactShadingEnabled;
+        this.contactShadingEnabled = this.store.views.contactShadingEnabled();
         // Snapshot once: setup awaits the device, while preference changes may
         // already be starting the next renderer generation.
-        const semanticCompositingEnabled = this.stateService.semanticCompositingEnabled;
+        const semanticCompositingEnabled = this.store.views.semanticCompositingEnabled();
 
-        this.setViewFromState(this.stateService.cameraViewDataState.getValue(this._viewIndex));
+        this.setViewFromState(this.store.views.cameraViewData()[this.identity.id]);
 
         let resolveDeckDevice!: () => void;
         const deckDeviceReady = new Promise<void>(resolve => {
@@ -899,7 +888,7 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Returns whether the deck renderer is currently initialized. */
     isAvailable(): boolean {
-        return this.deck !== null;
+        return this.deck !== null && this.store.isCurrent(this.identity);
     }
 
     /** Marks a stable shell dirty so Deck coalesces scene changes into its next frame. */
@@ -1163,7 +1152,7 @@ export abstract class DeckMapView implements IRenderView {
         };
         const attributes: WebGLContextAttributes = {
             alpha: true,
-            antialias: this.stateService.deckAntialiasingEnabled,
+            antialias: this.store.views.deckAntialiasingEnabled(),
             depth: true,
             stencil: false,
             preserveDrawingBuffer: false,
@@ -1279,13 +1268,17 @@ export abstract class DeckMapView implements IRenderView {
         const picked = pickNavigationAnchor(
             this.deck,
             [screenPos.x, screenPos.y],
-            pickingInfo => this.featureIdsFromPickingInfo(pickingInfo),
-            (first, second) => first.length > 0 && second.length > 0 &&
-                first.some(firstId => second.some(secondId =>
-                    firstId.mapTileKey === secondId.mapTileKey
-                    && firstId.featureId === secondId.featureId
-                )),
-            this.stateService.drillPickRadius,
+            (pickingInfo) => this.featureIdsFromPickingInfo(pickingInfo),
+            (first, second) =>
+                first.length > 0 &&
+                second.length > 0 &&
+                first.some((firstId) =>
+                    second.some(
+                        (secondId) =>
+                            firstId.mapTileKey === secondId.mapTileKey && firstId.featureId === secondId.featureId
+                    )
+                ),
+            this.store.inspection.drillPickRadius(),
             layerIds.length ? layerIds : undefined
         );
         if (picked) {
@@ -1327,7 +1320,7 @@ export abstract class DeckMapView implements IRenderView {
         if (!this.deck || !layerIds.length) {
             return null;
         }
-        const radius = Math.max(0, Math.trunc(this.stateService.drillPickRadius));
+        const radius = Math.max(0, Math.trunc(this.store.inspection.drillPickRadius()));
         const canvasPosition = [
             context.viewport.x + screenPosition[0],
             context.viewport.y + screenPosition[1]
@@ -1614,7 +1607,7 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Returns the persisted camera state for this view. */
     getViewState(): CameraViewState {
-        return this.stateService.cameraViewDataState.getValue(this._viewIndex);
+        return this.store.views.cameraViewData()[this.identity.id];
     }
 
     /** Reads renderer-local motion without triggering persistence, tile loads or a redraw. */
@@ -1766,10 +1759,10 @@ export abstract class DeckMapView implements IRenderView {
         if (this.firstPersonSession) {
             return;
         }
-        this.stateService.focusedView = this._viewIndex;
+        this.store.setFocusedView(this._viewIndex);
         this.applyAnchoredMapViewState({
             ...this.viewState,
-            zoom: this.viewState.zoom + this.stateService.mapZoomStep
+            zoom: this.viewState.zoom + this.store.views.mapZoomStep()
         });
     }
 
@@ -1778,16 +1771,16 @@ export abstract class DeckMapView implements IRenderView {
         if (this.firstPersonSession) {
             return;
         }
-        this.stateService.focusedView = this._viewIndex;
+        this.store.setFocusedView(this._viewIndex);
         this.applyAnchoredMapViewState({
             ...this.viewState,
-            zoom: this.viewState.zoom - this.stateService.mapZoomStep
+            zoom: this.viewState.zoom - this.store.views.mapZoomStep()
         });
     }
 
     /** Resets pitch and bearing while preserving the current center and zoom. */
     resetOrientation(): void {
-        this.stateService.focusedView = this._viewIndex;
+        this.store.setFocusedView(this._viewIndex);
         if (this.firstPersonSession) {
             this.updateFirstPersonViewState({
                 ...this.firstPersonSession.viewState,
@@ -1803,7 +1796,7 @@ export abstract class DeckMapView implements IRenderView {
         });
     }
 
-    /** Pushes the currently visible viewport rectangle back into `MapViewStateService`. */
+    /** Pushes the currently visible viewport rectangle back into `MapViewService`. */
     protected updateViewport(): void {
         if (this.retiringForViewRemoval) {
             return;
@@ -1816,10 +1809,7 @@ export abstract class DeckMapView implements IRenderView {
             this._viewIndex,
             viewport,
             this.zoomToAltitude(this.viewState.zoom, 0),
-            this.metersPerPixelAtZoom(
-                this.viewState.zoom,
-                this.viewState.latitude
-            )
+            this.metersPerPixelAtZoom(this.viewState.zoom, this.viewState.latitude)
         );
     }
 
@@ -1875,11 +1865,13 @@ export abstract class DeckMapView implements IRenderView {
             if (targetView === this._viewIndex) this.moveToLocationArea(area);
         }));
         this.subscriptions.push(
-            this.stateService.cameraViewDataState
-                .pipe(this._viewIndex, distinctUntilChanged())
-                .subscribe(cameraViewData => {
-                    if (this.ignoreNextCamAppStateUpdate) {
-                        this.ignoreNextCamAppStateUpdate = false;
+            observeStore(this.store, state => state.views.cameraViewData[this.identity.id])
+                .pipe(
+                    filter(() => this.store.isCurrent(this.identity)),
+                    distinctUntilChanged()
+                )
+                .subscribe((cameraViewData) => {
+                    if (this.publishingCameraState) {
                         return;
                     }
                     this.setViewFromState(cameraViewData);
@@ -1907,15 +1899,19 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.stateService.backgroundState.pipe(this._viewIndex).subscribe(() => {
-                this.updateBackgroundLayer();
-            })
+            observeStore(this.store, state => state.layers.background[this.identity.id])
+                .pipe(filter(() => this.store.isCurrent(this.identity)))
+                .subscribe(() => {
+                    this.updateBackgroundLayer();
+                })
         );
 
         this.subscriptions.push(
-            this.stateService.mode2dState.pipe(this._viewIndex).subscribe(() => {
-                this.updateBackgroundLayer();
-            })
+            observeStore(this.store, state => state.views.mode2d[this.identity.id])
+                .pipe(filter(() => this.store.isCurrent(this.identity)))
+                .subscribe(() => {
+                    this.updateBackgroundLayer();
+                })
         );
 
         this.subscriptions.push(
@@ -1925,21 +1921,23 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.stateService.mapZoomStepState.pipe(distinctUntilChanged()).subscribe(() => {
-                if (!this.deck || this.firstPersonSession) {
-                    return;
-                }
-                this.deck.setProps({
-                    views: this.createMapDeckView(this.createDeckControllerOptions()),
-                    controller: false
-                });
-            })
+            observeStore(this.store, state => state.views.mapZoomStep)
+                .pipe(distinctUntilChanged())
+                .subscribe(() => {
+                    if (!this.deck || this.firstPersonSession) {
+                        return;
+                    }
+                    this.deck.setProps({
+                        views: this.createMapDeckView(this.createDeckControllerOptions()),
+                        controller: false
+                    });
+                })
         );
 
         this.subscriptions.push(
-            this.stateService.contactShadingEnabledState
+            observeStore(this.store, state => state.views.contactShadingEnabled)
                 .pipe(distinctUntilChanged())
-                .subscribe(enabled => {
+                .subscribe((enabled) => {
                     this.contactShadingEnabled = enabled;
                     this.updateContactShadingTarget();
                     this.requestRender("Contact shading setting changed");
@@ -1947,64 +1945,83 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            combineLatest([
-                this.stateService.markerState,
-                this.stateService.markedPositionState
-            ]).subscribe(() => {
+            observeStore(
+                this.store,
+                state => [state.views.marker, state.views.markedPosition] as const,
+                (previous, current) => previous[0] === current[0] && previous[1] === current[1]
+            ).subscribe(() => {
                 this.updateLocationMarkerOverlay();
             })
         );
 
         this.subscriptions.push(
-            this.stateService.viewTileBordersState
-                .pipe(this._viewIndex, distinctUntilChanged())
-                .subscribe(enabled => {
+            observeStore(this.store, state => state.layers.viewTileBorders[this.identity.id])
+                .pipe(
+                    filter(() => this.store.isCurrent(this.identity)),
+                    distinctUntilChanged()
+                )
+                .subscribe((enabled) => {
                     this.tileGridEnabled = enabled;
                     this.scheduleTileGridOverlayUpdate();
                 })
         );
         this.subscriptions.push(
-            this.stateService.viewTileGridModeState
-                .pipe(this._viewIndex, distinctUntilChanged())
-                .subscribe(mode => {
+            observeStore(this.store, state => state.layers.viewTileGridMode[this.identity.id])
+                .pipe(
+                    filter(() => this.store.isCurrent(this.identity)),
+                    distinctUntilChanged()
+                )
+                .subscribe((mode) => {
                     this.tileGridMode = mode;
                     this.tileGridLevel = this.mapInfo.maps.getViewTileGridLevel(this._viewIndex);
                     this.scheduleTileGridOverlayUpdate();
                 })
         );
         this.subscriptions.push(
-            this.stateService.viewTileGridLevelState
-                .pipe(this._viewIndex, distinctUntilChanged())
-                .subscribe(_ => {
+            observeStore(this.store, state => state.layers.viewTileGridLevel[this.identity.id])
+                .pipe(
+                    filter(() => this.store.isCurrent(this.identity)),
+                    distinctUntilChanged()
+                )
+                .subscribe((_) => {
                     this.tileGridLevel = this.mapInfo.maps.getViewTileGridLevel(this._viewIndex);
                     this.scheduleTileGridOverlayUpdate();
                 })
         );
         this.subscriptions.push(
-            this.stateService.viewTileGridAutoLevelState
-                .pipe(this._viewIndex, distinctUntilChanged())
-                .subscribe(autoLevel => {
+            observeStore(this.store, state => state.layers.viewTileGridAutoLevel[this.identity.id])
+                .pipe(
+                    filter(() => this.store.isCurrent(this.identity)),
+                    distinctUntilChanged()
+                )
+                .subscribe((autoLevel) => {
                     this.tileGridAutoLevel = autoLevel;
                     this.scheduleTileGridOverlayUpdate();
                 })
         );
         this.subscriptions.push(
-            combineLatest([
-                this.stateService.viewTileGridColorState.pipe(this._viewIndex, distinctUntilChanged()),
-                this.stateService.viewTileGridOpacityState.pipe(this._viewIndex, distinctUntilChanged())
-            ]).subscribe(([color, opacity]) => {
-                this.tileGridLineColor = tileGridRgba(color, opacity);
-                this.scheduleTileGridOverlayUpdate();
-            })
+            observeStore(
+                this.store,
+                state => [
+                    state.layers.viewTileGridColor[this.identity.id],
+                    state.layers.viewTileGridOpacity[this.identity.id]
+                ] as const,
+                (previous, current) => previous[0] === current[0] && previous[1] === current[1]
+            )
+                .pipe(filter(() => this.store.isCurrent(this.identity)))
+                .subscribe(([color, opacity]) => {
+                    this.tileGridLineColor = tileGridRgba(color, opacity);
+                    this.scheduleTileGridOverlayUpdate();
+                })
         );
         this.subscriptions.push(
-            this.stateService.layerVisibilityState
-                .pipe(this._viewIndex)
+            observeStore(this.store, state => state.layers.layerVisibility[this.identity.id])
+                .pipe(filter(() => this.store.isCurrent(this.identity)))
                 .subscribe(() => this.scheduleTileGridOverlayUpdate())
         );
         this.subscriptions.push(
-            this.stateService.layerZoomLevelState
-                .pipe(this._viewIndex)
+            observeStore(this.store, state => state.layers.layerZoomLevel[this.identity.id])
+                .pipe(filter(() => this.store.isCurrent(this.identity)))
                 .subscribe(() => this.scheduleTileGridOverlayUpdate())
         );
         this.subscriptions.push(
@@ -2020,7 +2037,7 @@ export abstract class DeckMapView implements IRenderView {
         );
 
         this.subscriptions.push(
-            this.mapViewState.moveToWgs84PositionTopic.subscribe(value => {
+            this.mapViewState.moveToWgs84PositionTopic.subscribe((value) => {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
@@ -2028,10 +2045,10 @@ export abstract class DeckMapView implements IRenderView {
                 this.stopLocationLabel();
                 this.prepareForNavigation();
                 const alt = value.z ?? this.zoomToAltitude(this.viewState.zoom, value.y);
-                this.stateService.setView(
+                this.store.setView(
                     this._viewIndex,
                     Cartographic.fromDegrees(value.x, value.y, alt),
-                    this.stateService.getCameraOrientation(this._viewIndex)
+                    this.store.getCameraOrientation(this._viewIndex)
                 );
             })
         );
@@ -2077,8 +2094,8 @@ export abstract class DeckMapView implements IRenderView {
             })
         );
 
-        this.tileGridEnabled = this.stateService.viewTileBordersState.getValue(this._viewIndex);
-        this.tileGridMode = this.stateService.viewTileGridModeState.getValue(this._viewIndex);
+        this.tileGridEnabled = this.store.layers.viewTileBorders()[this.identity.id];
+        this.tileGridMode = this.store.layers.viewTileGridMode()[this.identity.id];
         this.tileGridLevel = this.mapInfo.maps.getViewTileGridLevel(this._viewIndex);
         this.tileGridAutoLevel = this.mapInfo.maps.getViewTileGridAutoLevel(this._viewIndex);
         this.tileGridLineColor = tileGridRgba(
@@ -2102,8 +2119,8 @@ export abstract class DeckMapView implements IRenderView {
             this.updateFirstPersonViewState(rawViewState as DeckFirstPersonCameraState);
             return;
         }
-        if (this.stateService.focusedView !== this._viewIndex) {
-            this.stateService.focusedView = this._viewIndex;
+        if (this.store.focusedView() !== this._viewIndex) {
+            this.store.setFocusedView(this._viewIndex);
         }
         this.noteCameraInteraction(interactionState);
         // Deck is wired in controlled mode (`viewState` prop). User interactions only
@@ -2351,7 +2368,7 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
         const generation = this.hoverPickGeneration;
-        const radius = Math.max(0, Math.trunc(this.stateService.drillPickRadius));
+        const radius = Math.max(0, Math.trunc(this.store.inspection.drillPickRadius()));
         const navigationLayerIds = this.navigationPickLayerIds();
         this.hoverPickInFlight = true;
         try {
@@ -2442,7 +2459,7 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
         const generation = this.hoverPickGeneration;
-        const radius = Math.max(0, Math.trunc(this.stateService.drillPickRadius));
+        const radius = Math.max(0, Math.trunc(this.store.inspection.drillPickRadius()));
         const canvas = deck.getCanvas();
         const left = Math.max(0, position.x - radius);
         const top = Math.max(0, position.y - radius);
@@ -2551,9 +2568,9 @@ export abstract class DeckMapView implements IRenderView {
         if (srcEvent && Number.isInteger(srcEvent.button) && srcEvent.button !== 0) {
             return;
         }
-        this.stateService.focusedView = this._viewIndex;
+        this.store.setFocusedView(this._viewIndex);
         if (!info || !Number.isFinite(info.x) || !Number.isFinite(info.y)) {
-            this.stateService.unsetUnlockedSelections();
+            this.store.unsetUnlockedSelections();
             this.menuService.tileOutline.next(null);
             return;
         }
@@ -2563,19 +2580,15 @@ export abstract class DeckMapView implements IRenderView {
             && (!srcEvent?.pointerType || srcEvent.pointerType === "mouse");
         let featureIds = useDesktopDrillPick
             ? this.drillPickFeatures(
-                screenPosition,
-                this.stateService.drillPickRadius,
-                this.stateService.inspectionsLimit
-            ).topFeatureIds
+                  screenPosition,
+                  this.store.inspection.drillPickRadius(),
+                  this.store.inspection.inspectionsLimit()
+              ).topFeatureIds
             : this.featurePickResultFromPickingInfos([info]).topFeatureIds;
         // Deck's speculative pointer-down picker is intentionally disabled. Touch taps therefore
         // perform their bounded pick here, after the recognizer has ruled out a drag.
         if (!featureIds.length && !useDesktopDrillPick) {
-            featureIds = this.drillPickFeatures(
-                screenPosition,
-                this.stateService.drillPickRadius,
-                1
-            ).topFeatureIds;
+            featureIds = this.drillPickFeatures(screenPosition, this.store.inspection.drillPickRadius(), 1).topFeatureIds;
         }
         // Primary click means "the top rendered object". A server-grouped
         // point is one object with several semantic members, all of which
@@ -2583,14 +2596,14 @@ export abstract class DeckMapView implements IRenderView {
         // selections only.
         const featurePosition = featureIds.length
             ? this.markerPositionForFeature(
-                info,
-                screenPosition,
-                featureIds[0],
-                this.stateService.drillPickRadius,
-                this.stateService.inspectionsLimit
-            )
+                  info,
+                  screenPosition,
+                  featureIds[0],
+                  this.store.inspection.drillPickRadius(),
+                  this.store.inspection.inspectionsLimit()
+              )
             : null;
-        const markerPosition = this.stateService.marker ? featurePosition : null;
+        const markerPosition = this.store.views.marker() ? featurePosition : null;
         const cartographic = markerPosition
             ? {lon: markerPosition[0], lat: markerPosition[1], alt: markerPosition[2]}
             : this.pickCartographic(screenPosition);
@@ -2601,7 +2614,7 @@ export abstract class DeckMapView implements IRenderView {
         }
 
         if (!featureIds.length) {
-            this.stateService.unsetUnlockedSelections();
+            this.store.unsetUnlockedSelections();
             this.menuService.tileOutline.next(null);
             return;
         }
@@ -2762,17 +2775,23 @@ export abstract class DeckMapView implements IRenderView {
             this.updateViewState(groundCentered, true, true);
         }
         const cameraViewData = this.cameraViewData(groundCentered);
-        this.ignoreNextCamAppStateUpdate = true;
-        this.stateService.setView(
-            this._viewIndex,
-            Cartographic.fromDegrees(
-                cameraViewData.destination.lon,
-                cameraViewData.destination.lat,
-                cameraViewData.destination.alt
-            ),
-            cameraViewData.orientation,
-            cameraViewData.position
-        );
+        // Native watchState notifications are synchronous. Scope echo suppression
+        // to this call so a no-op write cannot swallow a later external camera update.
+        this.publishingCameraState = true;
+        try {
+            this.store.setView(
+                this._viewIndex,
+                Cartographic.fromDegrees(
+                    cameraViewData.destination.lon,
+                    cameraViewData.destination.lat,
+                    cameraViewData.destination.alt
+                ),
+                cameraViewData.orientation,
+                cameraViewData.position
+            );
+        } finally {
+            this.publishingCameraState = false;
+        }
     }
 
     /** Keeps renderer-local camera motion hot and persists only settled state. */
@@ -2822,9 +2841,11 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Retains renderer-local live camera motion only when another view consumes it. */
     private liveCameraSyncEnabled(): boolean {
-        return this.stateService.numViews > 1 &&
-            (this.stateService.viewSync.includes(VIEW_SYNC_POSITION) ||
-                this.stateService.viewSync.includes(VIEW_SYNC_MOVEMENT));
+        return (
+            this.store.numViews() > 1 &&
+            (this.store.views.viewSync().includes(VIEW_SYNC_POSITION) ||
+                this.store.views.viewSync().includes(VIEW_SYNC_MOVEMENT))
+        );
     }
 
     /** Converts one Deck camera pose into the renderer-neutral synchronization model. */
@@ -2846,7 +2867,7 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Builds the deck controller options from the current view mode and persisted zoom-speed preference. */
     private createDeckControllerOptions(): DeckProps<DeckView>["controller"] {
-        const zoomStep = this.stateService.mapZoomStep;
+        const zoomStep = this.store.views.mapZoomStep();
         const scrollZoomSpeed = DeckMapView.DEFAULT_DECK_SCROLL_ZOOM_SPEED * zoomStep / DEFAULT_MAP_ZOOM_STEP;
         const keyboardZoomSpeed = Math.pow(2, zoomStep);
         if (!this.allowPitchAndBearing) {
@@ -2953,7 +2974,7 @@ export abstract class DeckMapView implements IRenderView {
 
         const backgroundLayers = this.configService.getBackgroundLayers();
         const defaultBackgroundLayerId = this.configService.getDefaultBackgroundLayerId();
-        const backgroundState = this.stateService.resolveBackgroundState(
+        const backgroundState = this.store.resolveBackgroundState(
             this._viewIndex,
             backgroundLayers,
             defaultBackgroundLayerId
@@ -2964,7 +2985,7 @@ export abstract class DeckMapView implements IRenderView {
             return;
         }
 
-        if (!this.stateService.mode2dState.getValue(this._viewIndex) && selectedLayer.type === "wms") {
+        if (!this.store.views.mode2d()[this.identity.id] && selectedLayer.type === "wms") {
             // WMS backgrounds remain a 2D-only option in erdblick. Dropping them here avoids
             // carrying an unstable layer into pitched 3D views where it cannot render correctly.
             this.removeBackgroundLayer();
@@ -2975,7 +2996,7 @@ export abstract class DeckMapView implements IRenderView {
         const signature = JSON.stringify({
             layerId: selectedLayer.id,
             opacity,
-            mode2d: this.stateService.mode2dState.getValue(this._viewIndex)
+            mode2d: this.store.views.mode2d()[this.identity.id]
         });
         if (signature === this.backgroundLayerSignature) {
             // Skip deck layer churn when only unrelated state changed.
@@ -3462,8 +3483,8 @@ export abstract class DeckMapView implements IRenderView {
      * Mirrors the legacy Cesium single-location pin as a dedicated deck IconLayer.
      */
     private updateLocationMarkerOverlay(): void {
-        const markerEnabled = this.stateService.markerState.getValue();
-        const markedPosition = this.stateService.markedPositionState.getValue();
+        const markerEnabled = this.store.views.marker();
+        const markedPosition = this.store.views.markedPosition();
         if (!this.deck || !markerEnabled || markedPosition.length < 2) {
             this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
             this.lastLocationMarkerSignature = "";
@@ -3775,8 +3796,8 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Returns the per-view tile budget derived from the global load limit and split-view count. */
     private tileLimitPerView(): number {
-        const viewCount = Math.max(1, this.stateService.numViews);
-        return Math.max(1, Math.floor(this.stateService.tilesLoadLimit / viewCount));
+        const viewCount = Math.max(1, this.store.numViews());
+        return Math.max(1, Math.floor(this.store.views.tilesLoadLimit() / viewCount));
     }
 
     /** Adds or removes the temporary tile-outline overlay created from context-menu interactions. */
@@ -4338,10 +4359,7 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Applies one map camera change while preserving the shared 3D anchor at a shifted pixel. */
-    private applyAnchoredMapViewState(
-        nextState: DeckCameraState,
-        pixelOffset: [number, number] = [0, 0]
-    ): void {
+    private applyAnchoredMapViewState(nextState: DeckCameraState, pixelOffset: [number, number] = [0, 0]): void {
         const sanitizedNext = this.sanitizeViewState(nextState);
         const anchor = this.commandNavigationAnchor();
         let anchoredState = sanitizedNext;
@@ -4354,23 +4372,23 @@ export abstract class DeckMapView implements IRenderView {
                 ];
                 anchoredState = this.isFeatureNavigationOrigin(anchor.origin)
                     ? viewStateKeepingNavigationAnchor(
-                        this.viewState,
-                        sanitizedNext,
-                        anchor.pivot,
-                        targetPixel,
-                        viewport.width,
-                        viewport.height,
-                        this.useOrthographicProjection,
-                        this.stateService.featureZoomClearanceMeters
-                    )
+                          this.viewState,
+                          sanitizedNext,
+                          anchor.pivot,
+                          targetPixel,
+                          viewport.width,
+                          viewport.height,
+                          this.useOrthographicProjection,
+                          this.store.views.featureZoomClearanceMeters()
+                      )
                     : viewStateKeepingAnchor(
-                        sanitizedNext,
-                        anchor.pivot,
-                        targetPixel,
-                        viewport.width,
-                        viewport.height,
-                        this.useOrthographicProjection
-                    );
+                          sanitizedNext,
+                          anchor.pivot,
+                          targetPixel,
+                          viewport.width,
+                          viewport.height,
+                          this.useOrthographicProjection
+                      );
             }
         }
         this.updateViewState(anchoredState, true, true);
@@ -4383,19 +4401,17 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Samples the current feature clearance once when deck.gl acquires a target session. */
-    private minimumTargetDistanceForOrigin(
-        origin: NavigationTargetOrigin | undefined
-    ): number | undefined {
+    private minimumTargetDistanceForOrigin(origin: NavigationTargetOrigin | undefined): number | undefined {
         if (!this.isFeatureNavigationOrigin(origin)) {
             return undefined;
         }
-        const clearance = this.stateService.featureZoomClearanceMeters;
+        const clearance = this.store.views.featureZoomClearanceMeters();
         return clearance > 0 ? clearance : undefined;
     }
 
     /** Moves the camera parallel to the map plane in view-local screen space. */
     private applyPan(xFactor: number, yFactor: number): void {
-        this.stateService.focusedView = this._viewIndex;
+        this.store.setFocusedView(this._viewIndex);
         const pixelOffset: [number, number] = [
             -xFactor * DeckMapView.NAVIGATION_COMMAND_STEP_PX,
             yFactor * DeckMapView.NAVIGATION_COMMAND_STEP_PX

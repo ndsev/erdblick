@@ -1,6 +1,15 @@
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {AppStore} from "../shared/app.store";
 import "@angular/compiler";
-import {describe, expect, it, vi} from 'vitest';
 import {BehaviorSubject} from "rxjs";
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import {AppStateService} from "../shared/appstate.service";
+import type {MapPresetService, ResolvedLayerPreset} from "../styledata/map-preset.service";
+import type {
+    ErdblickStyle,
+    FeatureStyleOptionWithStringType,
+    StyleService
+} from "../styledata/style.service";
 import {
     bestMatchingLayerPreset,
     dataSourceCatalogStatus,
@@ -8,25 +17,29 @@ import {
     filterMapTreeNodes,
     GroupTreeNode,
     isDataSourceCatalogEntryReady,
+    LayerInfoItem,
     layerPresetInferenceKey,
     layerPresetNode,
     layerStyleOptions,
-    LayerInfoItem,
-    MapLayerTree,
     MapInfoItem,
+    MapLayerTree,
     MapTreeNode,
     MapTreeViewNode,
-    StyleOptionNode,
-    sortDataSourceCatalogEntries
+    sortDataSourceCatalogEntries,
+    StyleOptionNode
 } from './map.tree.model';
-import type {AppStateService} from "../shared/appstate.service";
-import type {
-    ErdblickStyle,
-    FeatureStyleOptionWithStringType,
-    StyleService
-} from "../styledata/style.service";
-import type {MapPresetService} from "../styledata/map-preset.service";
-import type {ResolvedLayerPreset} from "../styledata/map-preset.service";
+
+const trees: MapLayerTree[] = [];
+afterEach(() => trees.splice(0).forEach(tree => tree.destroy()));
+
+function treeState(viewCount = 1) {
+    const injector = ownerTestInjector();
+    const store = injector.get(AppStore);
+    store.setNumViews(viewCount);
+    const persistence = injector.get(AppStateService);
+    persistence.ready.next(true);
+    return {store, persistence};
+}
 
 function source(mapId: string, configIndex?: number, status?: string): MapInfoItem {
     return {
@@ -240,19 +253,10 @@ describe("map tree presentation filtering", () => {
 
 describe("style option groups", () => {
     it("marks style groups and passes catalog visibility defaults below saved user state", () => {
-        const ready = new BehaviorSubject(true);
-        const numViewsState = new BehaviorSubject(1);
-        const stateService = {
-            ready,
-            numViewsState,
-            mapLayerConfig: vi.fn(() => [{autoLevel: true, level: 13, visible: true}]),
-            styleOptionValues: vi.fn((_mapId, _layerId, _styleId, _optionId, _type, defaultValue) => [defaultValue]),
-            getLayerPresetSelection: vi.fn(() => null),
-            setLayerPresetSelection: vi.fn(),
-            getMapPresetSelection: vi.fn(() => null),
-            setMapPresetSelection: vi.fn(),
-            prune: vi.fn()
-        };
+        const {store, persistence} = treeState();
+        store.setMapLayerConfig("Map", "Preview", [{autoLevel: true, level: 13, visible: true}]);
+        const configReads = vi.spyOn(store, "mapLayerConfig");
+        const optionReads = vi.spyOn(store, "styleOptionValues");
         const styleGroups = new BehaviorSubject([]);
         const option = (id: string, internal = false) => ({
             id,
@@ -290,15 +294,11 @@ describe("style option groups", () => {
             }
         };
 
-        const tree = new MapLayerTree(
-            [map],
-            stateService as unknown as AppStateService,
-            styleService as unknown as StyleService,
-            emptyPresetService(),
-            false
-        );
+        const tree = new MapLayerTree([map], persistence, styleService as unknown as StyleService,
+            emptyPresetService(), store);
+        trees.push(tree);
         const layer = tree.maps.get("Map")?.layers.get("Roads");
-        expect(stateService.mapLayerConfig).toHaveBeenCalledWith("Map", "Preview", false, 13);
+        expect(configReads).toHaveBeenCalledWith("Map", "Preview", false, 13);
         expect(tree.maps.get("Map")?.layers.get("Preview")?.viewConfig[0].visible).toBe(true);
         const children = layer ? layerStyleOptions(layer) : [];
 
@@ -314,11 +314,11 @@ describe("style option groups", () => {
         tree.setNodeExpanded(layer!.key, false);
         expect(layer?.expanded).toBe(false);
 
-        const styleOptionReadsBeforeDestroy = stateService.styleOptionValues.mock.calls.length;
+        const styleOptionReadsBeforeDestroy = optionReads.mock.calls.length;
         tree.destroy();
         styleGroups.next([]);
-        numViewsState.next(2);
-        expect(stateService.styleOptionValues).toHaveBeenCalledTimes(styleOptionReadsBeforeDestroy);
+        store.setNumViews(2);
+        expect(optionReads).toHaveBeenCalledTimes(styleOptionReadsBeforeDestroy);
     });
 });
 
@@ -358,41 +358,11 @@ describe("layer presets in the map tree", () => {
 
     /** Builds a two-view layer with one owned and one unowned Boolean option. */
     function presetTreeFixture(ownedValues = [false, false]) {
-        const ready = new BehaviorSubject(true);
-        const numViewsState = new BehaviorSubject(2);
-        const selections: Array<Record<string, Record<string, {styleId: string; presetId: string}>>> = [{}, {}];
-        const stateService = {
-            ready,
-            numViewsState,
-            mapLayerConfig: vi.fn(() => [
-                {autoLevel: true, level: 13, visible: true},
-                {autoLevel: true, level: 13, visible: true}
-            ]),
-            styleOptionValues: vi.fn((_mapId, _layerId, _styleId, optionId) =>
-                optionId === "owned" ? ownedValues : [false, false]),
-            getLayerPresetSelection: vi.fn((viewIndex: number, mapId: string, layerId: string) =>
-                selections[viewIndex][mapId]?.[layerId] ?? null),
-            setLayerPresetSelection: vi.fn((
-                viewIndex: number,
-                mapId: string,
-                layerId: string,
-                ref: {styleId: string; presetId: string} | null
-            ) => {
-                const mapSelections = {...(selections[viewIndex][mapId] ?? {})};
-                if (ref) {
-                    mapSelections[layerId] = ref;
-                    selections[viewIndex] = {...selections[viewIndex], [mapId]: mapSelections};
-                } else {
-                    delete mapSelections[layerId];
-                    selections[viewIndex] = Object.keys(mapSelections).length
-                        ? {...selections[viewIndex], [mapId]: mapSelections}
-                        : {};
-                }
-            }),
-            getMapPresetSelection: vi.fn(() => null),
-            setMapPresetSelection: vi.fn(),
-            prune: vi.fn()
-        };
+        const {store, persistence} = treeState(2);
+        store.setMapLayerConfig("Map", "Example", [
+            {autoLevel: true, level: 13, visible: true}, {autoLevel: true, level: 13, visible: true}]);
+        store.setStyleOptionValues("Map", "Example", "style", "owned", ownedValues);
+        vi.spyOn(store, "setLayerPresetSelection");
         const styleGroups = new BehaviorSubject([]);
         const style = {
             id: "Example/Style",
@@ -437,13 +407,11 @@ describe("layer presets in the map tree", () => {
         };
         const map = source("Map");
         map.layers = {Example: featureLayer("Example")};
-        const tree = new MapLayerTree(
-            [map],
-            stateService as unknown as AppStateService,
-            styleService as unknown as StyleService,
-            presetService as unknown as MapPresetService,
-            false);
-        return {tree, stateService};
+        const tree = new MapLayerTree([map], persistence, styleService as unknown as StyleService,
+            presetService as unknown as MapPresetService, store, prepared =>
+                store.applyLayerPresentation(prepared.collectLayerPresentation(), {origin: "system"}));
+        trees.push(tree);
+        return {tree, stateService: store};
     }
 
     it("places the preset row first and projects owned options independently per view", () => {
@@ -489,8 +457,7 @@ describe("layer presets in the map tree", () => {
         const presetNode = layerPresetNode(tree.getFeatureLayer("Map", "Example")!)!;
 
         expect(presetNode.selectedPresetKeys).toEqual([presetNode.presets[0].key, ""]);
-        expect(stateService.setLayerPresetSelection).toHaveBeenCalledWith(
-            0, "Map", "Example", presetNode.presets[0].ref);
+        expect(stateService.getLayerPresetSelection(0, "Map", "Example")).toEqual(presetNode.presets[0].ref);
     });
 
     it("keeps an empty preset node for reconciliation but omits it from presentation", () => {
@@ -584,17 +551,9 @@ describe("map presets in the map tree", () => {
             name: "Broken",
             layerPresets: [{layerId: "Unrelated", styleId: ref.styleId, presetId: ref.presetId}]
         };
-        const stateService = {
-            ready: new BehaviorSubject(true),
-            numViewsState: new BehaviorSubject(1),
-            mapLayerConfig: vi.fn(() => [{autoLevel: true, level: 13, visible: true}]),
-            styleOptionValues: vi.fn(() => [true]),
-            getLayerPresetSelection: vi.fn(() => null),
-            setLayerPresetSelection: vi.fn(),
-            getMapPresetSelection: vi.fn(() => null),
-            setMapPresetSelection: vi.fn(),
-            prune: vi.fn()
-        };
+        const {store, persistence} = treeState();
+        store.setMapLayerConfig("Map", "Example", [{autoLevel: true, level: 13, visible: true}]);
+        store.setStyleOptionValues("Map", "Example", "style", "owned", [true]);
         const style = {
             id: ref.styleId,
             shortId: "style",
@@ -627,12 +586,10 @@ describe("map presets in the map tree", () => {
             Unrelated: featureLayer("Unrelated")
         };
 
-        const tree = new MapLayerTree(
-            [map],
-            stateService as unknown as AppStateService,
-            styleService as unknown as StyleService,
-            presetService as unknown as MapPresetService,
-            false);
+        const tree = new MapLayerTree([map], persistence, styleService as unknown as StyleService,
+            presetService as unknown as MapPresetService, store, prepared =>
+                store.applyLayerPresentation(prepared.collectLayerPresentation(), {origin: "system"}));
+        trees.push(tree);
         const mapNode = tree.maps.get("Map")!;
         const renderedMap = filterMapTreeNodes(tree.nodes, "", 0)[0];
 
@@ -641,10 +598,8 @@ describe("map presets in the map tree", () => {
             {label: "Overview", value: "overview"}
         ]);
         expect(mapNode.selectedMapPresetIds).toEqual(["overview"]);
-        expect(stateService.setLayerPresetSelection).toHaveBeenCalledWith(
-            0, "Map", "Example", ref);
-        expect(stateService.setMapPresetSelection).toHaveBeenCalledWith(
-            0, "Map", "overview");
+        expect(store.getLayerPresetSelection(0, "Map", "Example")).toEqual(ref);
+        expect(store.getMapPresetSelection(0, "Map")).toBe("overview");
         expect(renderedMap.children?.map(child => child.id)).toEqual(["Example", "Unrelated"]);
         expect(renderedMap.children?.[0].children?.map(child => child.id)).toEqual(["layer-preset"]);
     });

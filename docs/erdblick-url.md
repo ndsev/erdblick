@@ -5,8 +5,24 @@ Erdblick encodes shareable view state in the browser URL. That makes it easy to 
 <!-- mcp:
 title: "Viewer startup state precedence"
 keywords: ["URL", "local storage", "default", "startup", "reload", "state"]
-hint: "For the running tab, inspect viewer_get_app_state rather than reconstructing state from the URL alone. MCP state assignments use canonical runtime objects, not flattened URL encodings."
+hint: "For the running tab, inspect viewer_get_controls rather than reconstructing state from the URL alone. MCP state assignments use canonical runtime objects, not flattened URL encodings."
 -->
+## Stable View IDs
+
+The `vid` parameter contains the ordered view IDs, for example
+`?v2=1&vid=left,right&n=2`. IDs contain 1–64 letters, digits, `_` or `-` and must be
+unique; JavaScript Object.prototype names such as `constructor` are reserved.
+An explicit `vid` list determines the count when `n` is omitted. If both are
+present, their counts must agree. Invalid IDs reject the link before other state
+changes.
+
+Older links without `vid` remain supported. Empty startup and partial imports keep
+saved IDs and adjust the mapping to the effective view count. A full replacement
+without IDs generates a fresh mapping once. A shared link includes the resulting
+IDs so per-view operations can retain their target after reordering. Removing a
+view retires pending navigation; restoring the same URL ID starts a new runtime
+lifetime. Live search targets keep surviving IDs and prune removed IDs.
+
 ## Startup State Precedence
 
 Erdblick combines several possible state sources during startup:
@@ -94,7 +110,9 @@ When you enable split view, erdblick still encodes the full layout into the quer
 
 You do not need to set these parameters manually for normal usage, but they make generated URLs stable even for complex multi-view layouts.
 
-Legacy `osm` links from older releases are still accepted during startup and are migrated to the new `bg` state automatically.
+Legacy `osm` links and saved values from older releases are migrated to the new
+`bg` state during startup. Positional entries beyond the current view count are
+ignored; they do not open additional views.
 
 ## Presentation Embedding
 

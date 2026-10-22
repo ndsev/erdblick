@@ -1,6 +1,6 @@
 import type {Viewport} from "../../build/libs/core/erdblick-core";
 import {coreLib} from "../integrations/wasm";
-import {tileGridMaxLevel, type TileGridMode} from "../shared/appstate.service";
+import {tileGridMaxLevel, type TileGridMode} from "../mapdata/map-layer-state.model";
 
 const TILE_GRID_MAX_LEVEL = 22;
 const AUTO_TILE_GRID_MAX_VISIBLE_CELLS = 64;
@@ -53,15 +53,12 @@ export function coarsenedTileLevel(
 }
 
 /** Selects auto level from a fixed equatorial, north-up camera at the supplied physical altitude. */
-export function autoTileGridLevel(
-    canonicalCameraAltitudeMeters: number,
-    mode: TileGridMode
-): number {
+export function autoTileGridLevel(canonicalCameraAltitudeMeters: number, mode: TileGridMode): number {
     let level = tileGridMaxLevel(mode);
-    while (level > 0 && coreLib.getNumTileIdsForCanonicalCamera(
-        canonicalCameraAltitudeMeters,
-        level
-    ) > AUTO_TILE_GRID_MAX_VISIBLE_CELLS) {
+    while (
+        level > 0 &&
+        coreLib.getNumTileIdsForCanonicalCamera(canonicalCameraAltitudeMeters, level) > AUTO_TILE_GRID_MAX_VISIBLE_CELLS
+    ) {
         level -= 1;
     }
     return level;

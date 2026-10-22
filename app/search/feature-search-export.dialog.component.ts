@@ -1,11 +1,13 @@
-import {Component, OnDestroy, ViewChild} from "@angular/core";
+import {AppStore} from "../shared/app.store";
+import {Component, inject, OnDestroy, ViewChild} from "@angular/core";
 import {Subscription} from "rxjs";
-import {FeatureSearchExportDialogRequest, FeatureSearchService} from "./feature.search.service";
-import {DialogStackService} from "../shared/dialog-stack.service";
-import {AppStateService, FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
 import {AppDialogComponent} from "../shared/app-dialog.component";
-import {InfoMessageService} from "../shared/info.service";
+import {FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID} from "../shared/app-layout.model";
+
+import {AppStateService} from "../shared/appstate.service";
+import {DialogStackService} from "../shared/dialog-stack.service";
 import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
+import {InfoMessageService} from "../shared/info.service";
 import {
     featureSearchExportFilename,
     featureSearchExportPayload,
@@ -14,6 +16,7 @@ import {
     featureSearchMapLayerLabel,
     type FeatureSearchExportSelection
 } from "./feature-search-export.util";
+import {FeatureSearchExportDialogRequest, FeatureSearchService} from "./feature.search.service";
 
 interface FeatureSearchExportOptions extends FeatureSearchExportSelection {
     closeAfterExport: boolean;
@@ -27,20 +30,31 @@ interface FeatureSearchExportMapLayerOption extends FeatureSearchMapLayerRef {
 @Component({
     selector: "feature-search-export-dialog",
     template: `
-        <app-dialog #dialog header="Export Feature Search" class="feature-search-export-dialog" [(visible)]="dialogVisible"
-                    [modal]="false" [layoutId]="layoutId" (onShow)="onDialogShow()">
+        <app-dialog
+            #dialog
+            header="Export Feature Search"
+            class="feature-search-export-dialog"
+            [visible]="store.isDialogOpen(layoutId)" (visibleChange)="onVisibleChange($event)"
+            [modal]="false"
+            [layoutId]="layoutId"
+            (onShow)="onDialogShow()"
+        >
             <div class="feature-search-export-content">
                 <div class="feature-search-export-section">
                     <div class="feature-search-export-label">Include</div>
                     <div class="feature-search-export-options">
-                        <p-checkbox inputId="feature-search-export-configuration"
-                                    [(ngModel)]="exportOptions.includeConfiguration"
-                                    [binary]="true">
+                        <p-checkbox
+                            inputId="feature-search-export-configuration"
+                            [(ngModel)]="exportOptions.includeConfiguration"
+                            [binary]="true"
+                        >
                         </p-checkbox>
                         <label for="feature-search-export-configuration">Search Configuration</label>
-                        <p-checkbox inputId="feature-search-export-results"
-                                    [(ngModel)]="exportOptions.includeResults"
-                                    [binary]="true">
+                        <p-checkbox
+                            inputId="feature-search-export-results"
+                            [(ngModel)]="exportOptions.includeResults"
+                            [binary]="true"
+                        >
                         </p-checkbox>
                         <label for="feature-search-export-results">Search Results</label>
                     </div>
@@ -49,15 +63,17 @@ interface FeatureSearchExportMapLayerOption extends FeatureSearchMapLayerRef {
                 @if (exportOptions.includeResults) {
                     <div class="feature-search-export-section">
                         <p-iftalabel class="feature-search-export-layer-select">
-                            <p-multiSelect inputId="feature-search-export-map-layers"
-                                           [options]="mapLayerOptions"
-                                           [(ngModel)]="selectedMapLayerKeys"
-                                           optionLabel="label"
-                                           optionValue="value"
-                                           [filter]="true"
-                                           [showToggleAll]="true"
-                                           [maxSelectedLabels]="4"
-                                           appendTo="body">
+                            <p-multiSelect
+                                inputId="feature-search-export-map-layers"
+                                [options]="mapLayerOptions"
+                                [(ngModel)]="selectedMapLayerKeys"
+                                optionLabel="label"
+                                optionValue="value"
+                                [filter]="true"
+                                [showToggleAll]="true"
+                                [maxSelectedLabels]="4"
+                                appendTo="body"
+                            >
                             </p-multiSelect>
                             <label for="feature-search-export-map-layers">Selected Map Layers</label>
                         </p-iftalabel>
@@ -65,10 +81,7 @@ interface FeatureSearchExportMapLayerOption extends FeatureSearchMapLayerRef {
                 }
 
                 <div class="feature-search-export-actions">
-                    <p-button label="Export"
-                              [disabled]="!canExport || exporting"
-                              (click)="export()">
-                    </p-button>
+                    <p-button label="Export" [disabled]="!canExport || exporting" (click)="export()"> </p-button>
                 </div>
             </div>
         </app-dialog>
@@ -77,8 +90,9 @@ interface FeatureSearchExportMapLayerOption extends FeatureSearchMapLayerRef {
 })
 /** Dialog that configures and launches feature-search JSON exports. */
 export class FeatureSearchExportDialogComponent implements OnDestroy {
+    readonly store = inject(AppStore);
     readonly layoutId = FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID;
-    @ViewChild('dialog') dialog?: AppDialogComponent;
+    @ViewChild("dialog") dialog?: AppDialogComponent;
     exporting = false;
     exportOptions: FeatureSearchExportOptions = this.defaultExportOptions();
     request: FeatureSearchExportDialogRequest | null = null;
@@ -87,29 +101,27 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
 
     private readonly subscription: Subscription;
 
-    constructor(public readonly searchService: FeatureSearchService,
-                public readonly stateService: AppStateService,
-                private readonly dialogStack: DialogStackService,
-                private readonly infoMessageService: InfoMessageService) {
-        this.subscription = this.searchService.exportDialogRequest.subscribe(request => {
+    constructor(
+        public readonly searchService: FeatureSearchService,
+        public readonly stateService: AppStateService,
+        private readonly dialogStack: DialogStackService,
+        private readonly infoMessageService: InfoMessageService
+    ) {
+        this.subscription = this.searchService.exportDialogRequest.subscribe((request) => {
             this.request = request;
             this.exportOptions = request
                 ? {
-                    includeConfiguration: request.includeConfiguration,
-                    includeResults: request.includeResults,
-                    closeAfterExport: request.closeAfterExport
-                }
+                      includeConfiguration: request.includeConfiguration,
+                      includeResults: request.includeResults,
+                      closeAfterExport: request.closeAfterExport
+                  }
                 : this.defaultExportOptions();
             this.refreshMapLayerOptions(request);
         });
     }
 
-    get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.layoutId);
-    }
-
-    set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.layoutId, visible);
+    onVisibleChange(visible: boolean): void {
+        this.store.setDialogOpen(this.layoutId, visible);
         if (!visible) {
             this.searchService.clearExportDialogRequest();
         }
@@ -127,8 +139,7 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
 
     /** Returns whether there is an active search and at least one category selected. */
     get canExport(): boolean {
-        return !!this.session
-            && (this.exportOptions.includeConfiguration || this.exportOptions.includeResults);
+        return !!this.session && (this.exportOptions.includeConfiguration || this.exportOptions.includeResults);
     }
 
     /** Builds and downloads the selected feature-search JSON payload. */
@@ -158,7 +169,7 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
             this.infoMessageService.showSuccess("Feature search JSON export started");
             if (this.exportOptions.closeAfterExport) {
                 this.searchService.closeSearch(session.id);
-                this.dialogVisible = false;
+                this.onVisibleChange(false);
             }
         } finally {
             this.exporting = false;
@@ -178,12 +189,12 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
 
     private refreshMapLayerOptions(request: FeatureSearchExportDialogRequest | null): void {
         const session = request ? this.searchService.getSession(request.searchId) : undefined;
-        this.mapLayerOptions = (session?.definition.selectedMapLayers ?? []).map(ref => ({
+        this.mapLayerOptions = (session?.definition.selectedMapLayers ?? []).map((ref) => ({
             ...ref,
             label: featureSearchMapLayerLabel(ref),
             value: featureSearchMapLayerKey(ref)
         }));
-        this.selectedMapLayerKeys = this.mapLayerOptions.map(option => option.value);
+        this.selectedMapLayerKeys = this.mapLayerOptions.map((option) => option.value);
     }
 
     private activeMapLayers(): FeatureSearchMapLayerRef[] {
@@ -193,7 +204,7 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
     private exportedMapLayers(): FeatureSearchMapLayerRef[] {
         const selectedKeys = new Set(this.selectedMapLayerKeys);
         return this.mapLayerOptions
-            .filter(option => selectedKeys.has(option.value))
+            .filter((option) => selectedKeys.has(option.value))
             .map(({mapId, layerId}) => ({mapId, layerId}));
     }
 

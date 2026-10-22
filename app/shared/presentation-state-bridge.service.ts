@@ -1,12 +1,13 @@
-import {Injectable, OnDestroy, Optional} from "@angular/core";
+import {AppStore} from "./app.store";
+import {inject, Injectable, OnDestroy, Optional} from "@angular/core";
 import type {Params} from "@angular/router";
-import {AppStateService} from "./appstate.service";
-import type {CameraViewState} from "./appstate.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {StyleService} from "../styledata/style.service";
-import {FeatureSearchService} from "../search/feature.search.service";
-import {featureSearchDefinitionFromImportPayload} from "../search/feature-search-export.util";
 import {addMetersToLngLat} from "@math.gl/web-mercator";
+import type {CameraViewState} from "../mapview/map-view-state.model";
+import {MapViewService} from "../mapview/map-view.service";
+import {featureSearchDefinitionFromImportPayload} from "../search/feature-search-export.util";
+import {FeatureSearchService} from "../search/feature.search.service";
+import {StyleService} from "../styledata/style.service";
+import {AppStateService} from "./appstate.service";
 
 export const PRESENTATION_BRIDGE_PROTOCOL_VERSION = 2;
 export const PRESENTATION_BRIDGE_READY = "erdblick:presentation:ready";
@@ -53,11 +54,18 @@ interface PresentationApplyUrlRequest {
 }
 
 type PresentationApplyRequest = PresentationApplyStateRequest | PresentationApplyUrlRequest;
-type PresentationBridgeError = "invalid-message" | "invalid-search" | "invalid-searches" | "invalid-state" | "state-application-failed";
+type PresentationBridgeError =
+    | "invalid-message"
+    | "invalid-search"
+    | "invalid-searches"
+    | "invalid-state"
+    | "state-application-failed";
 
 /** Applies native state snapshots requested by an explicitly embedded presentation parent. */
 @Injectable({providedIn: "root"})
 export class PresentationStateBridgeService implements OnDestroy {
+    readonly store = inject(AppStore);
+
     private browserWindow?: Window;
     private parentOrigin?: string;
     private applying = false;
@@ -70,7 +78,7 @@ export class PresentationStateBridgeService implements OnDestroy {
 
     constructor(
         private readonly stateService: AppStateService,
-        private readonly mapViewState: MapViewStateService,
+        private readonly mapViewState: MapViewService,
         private readonly styleService: StyleService,
         @Optional() private readonly searchService?: FeatureSearchService
     ) {}
@@ -80,19 +88,24 @@ export class PresentationStateBridgeService implements OnDestroy {
         if (this.browserWindow) {
             return true;
         }
-        if (browserWindow.parent === browserWindow
-            || new URLSearchParams(browserWindow.location.search).get("embed") !== "presentation") {
+        if (
+            browserWindow.parent === browserWindow ||
+            new URLSearchParams(browserWindow.location.search).get("embed") !== "presentation"
+        ) {
             return false;
         }
 
         this.browserWindow = browserWindow;
         browserWindow.addEventListener("message", this.handleMessage);
         browserWindow.addEventListener("keydown", this.handleReviewShortcut, {capture: true});
-        browserWindow.parent.postMessage({
-            type: PRESENTATION_BRIDGE_READY,
-            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
-            capabilities: {searches: !!this.searchService}
-        }, "*");
+        browserWindow.parent.postMessage(
+            {
+                type: PRESENTATION_BRIDGE_READY,
+                version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
+                capabilities: {searches: !!this.searchService}
+            },
+            "*"
+        );
         return true;
     }
 
@@ -110,15 +123,24 @@ export class PresentationStateBridgeService implements OnDestroy {
     /** Forwards the presentation shortcut when the embedded canvas owns keyboard focus. */
     private readonly handleReviewShortcut = (event: KeyboardEvent): void => {
         const target = event.target;
-        if (!event.shiftKey || event.ctrlKey || event.altKey || event.metaKey
-            || event.key.toLowerCase() !== "r"
-            || (target instanceof Element && target.closest("input,textarea,select,[contenteditable=true]"))) return;
+        if (
+            !event.shiftKey ||
+            event.ctrlKey ||
+            event.altKey ||
+            event.metaKey ||
+            event.key.toLowerCase() !== "r" ||
+            (target instanceof Element && target.closest("input,textarea,select,[contenteditable=true]"))
+        )
+            return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        this.browserWindow?.parent.postMessage({
-            type: "erdblick:presentation:review-toggle",
-            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION
-        }, this.parentOrigin ?? "*");
+        this.browserWindow?.parent.postMessage(
+            {
+                type: "erdblick:presentation:review-toggle",
+                version: PRESENTATION_BRIDGE_PROTOCOL_VERSION
+            },
+            this.parentOrigin ?? "*"
+        );
     };
 
     private readonly handleMessage = (event: MessageEvent<unknown>): void => {
@@ -171,9 +193,7 @@ export class PresentationStateBridgeService implements OnDestroy {
                 origin: event.origin
             };
         } else {
-            const params = typeof event.data["search"] === "string"
-                ? presentationParams(event.data["search"])
-                : null;
+            const params = typeof event.data["search"] === "string" ? presentationParams(event.data["search"]) : null;
             if (!params) {
                 this.postResult(requestId, event.origin, false, "invalid-search");
                 return;
@@ -184,7 +204,12 @@ export class PresentationStateBridgeService implements OnDestroy {
                 this.postResult(requestId, event.origin, false, "invalid-message");
                 return;
             }
-            if (typeof transitionMs !== "number" || !Number.isFinite(transitionMs) || transitionMs < 0 || transitionMs > 10000) {
+            if (
+                typeof transitionMs !== "number" ||
+                !Number.isFinite(transitionMs) ||
+                transitionMs < 0 ||
+                transitionMs > 10000
+            ) {
                 this.postResult(requestId, event.origin, false, "invalid-message");
                 return;
             }
@@ -202,8 +227,16 @@ export class PresentationStateBridgeService implements OnDestroy {
                     return;
                 }
             }
-            request = {requestId, kind: "url", params, origin: event.origin, transitionMs, reset, searches,
-                fromCamera: this.transitionPose ? structuredClone(this.transitionPose) : undefined};
+            request = {
+                requestId,
+                kind: "url",
+                params,
+                origin: event.origin,
+                transitionMs,
+                reset,
+                searches,
+                fromCamera: this.transitionPose ? structuredClone(this.transitionPose) : undefined
+            };
         }
 
         this.parentOrigin ??= event.origin;
@@ -218,9 +251,11 @@ export class PresentationStateBridgeService implements OnDestroy {
 
     /** Pins presentation control to the same concrete parent and protocol version. */
     private acceptsControlMessage(origin: string, data: Record<string, unknown>): boolean {
-        if (!isConcreteOrigin(origin)
-            || data["version"] !== PRESENTATION_BRIDGE_PROTOCOL_VERSION
-            || (this.parentOrigin && this.parentOrigin !== origin)) {
+        if (
+            !isConcreteOrigin(origin) ||
+            data["version"] !== PRESENTATION_BRIDGE_PROTOCOL_VERSION ||
+            (this.parentOrigin && this.parentOrigin !== origin)
+        ) {
             return false;
         }
         this.parentOrigin ??= origin;
@@ -286,11 +321,15 @@ export class PresentationStateBridgeService implements OnDestroy {
             try {
                 const duration = request.kind === "url" ? request.transitionMs : 0;
                 const motionGeneration = this.motionGeneration;
-                const from = duration > 0 ? (request.kind === "url" ? request.fromCamera : undefined)
-                    ?? structuredClone(this.stateService.cameraViewDataState.getValue(0)) : undefined;
-                const errors = request.kind === "snapshot"
-                    ? await Promise.resolve(this.stateService.replaceSnapshotState(request.state))
-                    : await this.applyUrlState(request.params, request.reset);
+                const from =
+                    duration > 0
+                        ? ((request.kind === "url" ? request.fromCamera : undefined) ??
+                          structuredClone(this.store.views.cameraViewData()[String(this.store.viewIds()[0])]))
+                        : undefined;
+                const errors =
+                    request.kind === "snapshot"
+                        ? await Promise.resolve(this.stateService.replaceSnapshotState(request.state))
+                        : await this.applyUrlState(request.params, request.reset);
                 if (errors.length) {
                     console.warn("[PresentationStateBridge] Rejected presentation state.", errors);
                     this.postResult(request.requestId, request.origin, false, "invalid-state");
@@ -320,7 +359,11 @@ export class PresentationStateBridgeService implements OnDestroy {
                         }
                     }
                     if (from && !this.queuedRequest && motionGeneration === this.motionGeneration) {
-                        this.transitionCamera(from, structuredClone(this.stateService.cameraViewDataState.getValue(0)), duration);
+                        this.transitionCamera(
+                            from,
+                            structuredClone(this.store.views.cameraViewData()[String(this.store.viewIds()[0])]),
+                            duration
+                        );
                     }
                     this.postResult(request.requestId, request.origin, true);
                 }
@@ -337,13 +380,9 @@ export class PresentationStateBridgeService implements OnDestroy {
 
     /** Keeps query-authored presentation scenes compatible with native-snapshot scenes. */
     private async applyUrlState(params: Params, reset: boolean): Promise<string[]> {
-        await this.stateService.replaceUrlState(params, reset);
         // A URL encodes whether each inspection is docked, but not the dock's
-        // open state. Make authored docked selections visible after replacement.
-        if (this.stateService.selection?.some(panel => !panel.undocked && panel.features.length > 0)) {
-            this.stateService.dockActiveTab = "inspection";
-            this.stateService.isDockOpen = true;
-        }
+        // open state. Publish both parts of the authored scene in the import.
+        await this.stateService.replaceUrlState(params, reset, {revealDockedInspection: true});
         return [];
     }
 
@@ -363,17 +402,39 @@ export class PresentationStateBridgeService implements OnDestroy {
             const progress = Math.min(1, (time - start) / durationMs);
             const t = smootherStep(progress);
             const angle = (a: number, b: number) => mix(a, unwrapAngle(b, a), t);
-            emit(progress === 1 ? to : {
-                destination: {
-                    lon: mix(from.destination.lon, from.destination.lon + ((to.destination.lon - from.destination.lon + 540) % 360 - 180), t),
-                    lat: mix(from.destination.lat, to.destination.lat, t),
-                    // Log altitude makes both globe-to-city and metre-scale changes legible.
-                    alt: Math.exp(mix(Math.log(Math.max(1, from.destination.alt)), Math.log(Math.max(1, to.destination.alt)), t))
-                },
-                orientation: {heading: angle(from.orientation.heading, to.orientation.heading),
-                    pitch: mix(from.orientation.pitch, to.orientation.pitch, t), roll: angle(from.orientation.roll, to.orientation.roll)},
-                position: [0, 1, 2].map(i => mix(from.position?.[i] ?? 0, to.position?.[i] ?? 0, t)) as [number, number, number]
-            });
+            emit(
+                progress === 1
+                    ? to
+                    : {
+                          destination: {
+                              lon: mix(
+                                  from.destination.lon,
+                                  from.destination.lon +
+                                      (((to.destination.lon - from.destination.lon + 540) % 360) - 180),
+                                  t
+                              ),
+                              lat: mix(from.destination.lat, to.destination.lat, t),
+                              // Log altitude makes both globe-to-city and metre-scale changes legible.
+                              alt: Math.exp(
+                                  mix(
+                                      Math.log(Math.max(1, from.destination.alt)),
+                                      Math.log(Math.max(1, to.destination.alt)),
+                                      t
+                                  )
+                              )
+                          },
+                          orientation: {
+                              heading: angle(from.orientation.heading, to.orientation.heading),
+                              pitch: mix(from.orientation.pitch, to.orientation.pitch, t),
+                              roll: angle(from.orientation.roll, to.orientation.roll)
+                          },
+                          position: [0, 1, 2].map((i) => mix(from.position?.[i] ?? 0, to.position?.[i] ?? 0, t)) as [
+                              number,
+                              number,
+                              number
+                          ]
+                      }
+            );
             this.flightFrame = progress < 1 ? host.requestAnimationFrame(frame) : undefined;
             if (progress === 1) this.transitionPose = undefined;
         };
@@ -382,44 +443,48 @@ export class PresentationStateBridgeService implements OnDestroy {
     }
 
     /** Replies only to the pinned parent and never includes application state. */
-    private postResult(
-        requestId: number,
-        origin: string,
-        ok: boolean,
-        error?: PresentationBridgeError
-    ): void {
+    private postResult(requestId: number, origin: string, ok: boolean, error?: PresentationBridgeError): void {
         const browserWindow = this.browserWindow;
         if (!browserWindow || (this.parentOrigin && origin !== this.parentOrigin)) {
             return;
         }
-        browserWindow.parent.postMessage({
-            type: PRESENTATION_BRIDGE_RESULT,
-            version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
-            requestId,
-            ok,
-            ...(error ? {error} : {})
-        }, origin);
+        browserWindow.parent.postMessage(
+            {
+                type: PRESENTATION_BRIDGE_RESULT,
+                version: PRESENTATION_BRIDGE_PROTOCOL_VERSION,
+                requestId,
+                ok,
+                ...(error ? {error} : {})
+            },
+            origin
+        );
     }
 }
 
 /** Narrows unrelated window messages without responding to them. */
 function isApplyMessage(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object"
-        && value !== null
-        && ((value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_APPLY
-            || (value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_APPLY_URL_STATE);
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        ((value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_APPLY ||
+            (value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_APPLY_URL_STATE)
+    );
 }
 
 function isStartFlightMessage(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object"
-        && value !== null
-        && (value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_START_FLIGHT;
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        (value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_START_FLIGHT
+    );
 }
 
 function isStopFlightMessage(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object"
-        && value !== null
-        && (value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_STOP_FLIGHT;
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        (value as Record<string, unknown>)["type"] === PRESENTATION_BRIDGE_STOP_FLIGHT
+    );
 }
 
 /** Rejects oversized and non-finite motion programs at the trust boundary. */
@@ -431,35 +496,55 @@ function presentationCameraFlight(value: unknown): PresentationCameraFlight | nu
     // Orbit is authored by its target and metre offsets; reuse the flight lifecycle and protocol.
     if (raw["orbit"] !== undefined) {
         const orbit = raw["orbit"];
-        if (!isStateObject(orbit) || !Array.isArray(orbit["center"])
-            || orbit["center"].length !== 3
-            || !orbit["center"].every(v => typeof v === "number" && Number.isFinite(v))
-            || Math.abs(orbit["center"][0]) > 180 || Math.abs(orbit["center"][1]) > 80
-            || typeof orbit["radius"] !== "number" || !Number.isFinite(orbit["radius"])
-            || orbit["radius"] < 1 || orbit["radius"] > 100_000
-            || typeof orbit["height"] !== "number" || !Number.isFinite(orbit["height"])
-            || orbit["height"] < 1 || orbit["height"] > 100_000
-            || raw["pingPong"] !== false) return null;
+        if (
+            !isStateObject(orbit) ||
+            !Array.isArray(orbit["center"]) ||
+            orbit["center"].length !== 3 ||
+            !orbit["center"].every((v) => typeof v === "number" && Number.isFinite(v)) ||
+            Math.abs(orbit["center"][0]) > 180 ||
+            Math.abs(orbit["center"][1]) > 80 ||
+            typeof orbit["radius"] !== "number" ||
+            !Number.isFinite(orbit["radius"]) ||
+            orbit["radius"] < 1 ||
+            orbit["radius"] > 100_000 ||
+            typeof orbit["height"] !== "number" ||
+            !Number.isFinite(orbit["height"]) ||
+            orbit["height"] < 1 ||
+            orbit["height"] > 100_000 ||
+            raw["pingPong"] !== false
+        )
+            return null;
         const center = orbit["center"] as number[];
         const radius = orbit["radius"];
         const height = orbit["height"];
         const waypoints = Array.from({length: 49}, (_, i) => {
-            const angle = i * Math.PI * 2 / 48;
-            const [lon, lat, alt] = addMetersToLngLat(center,
-                [Math.sin(angle) * radius, Math.cos(angle) * radius, height]);
-            return {lon, lat, alt, heading: angle + Math.PI,
-                pitch: -Math.atan2(height, radius), roll: 0};
+            const angle = (i * Math.PI * 2) / 48;
+            const [lon, lat, alt] = addMetersToLngLat(center, [
+                Math.sin(angle) * radius,
+                Math.cos(angle) * radius,
+                height
+            ]);
+            return {
+                lon,
+                lat,
+                alt,
+                heading: angle + Math.PI,
+                pitch: -Math.atan2(height, radius),
+                roll: 0
+            };
         });
         const result = presentationCameraFlight({...raw, orbit: undefined, waypoints});
         return result ? {...result, loop: true} : null;
     }
-    if (!Number.isFinite(raw["durationMs"])
-        || Number(raw["durationMs"]) < 1_000
-        || Number(raw["durationMs"]) > 300_000
-        || typeof raw["pingPong"] !== "boolean"
-        || !Array.isArray(raw["waypoints"])
-        || raw["waypoints"].length < 2
-        || raw["waypoints"].length > 64) {
+    if (
+        !Number.isFinite(raw["durationMs"]) ||
+        Number(raw["durationMs"]) < 1_000 ||
+        Number(raw["durationMs"]) > 300_000 ||
+        typeof raw["pingPong"] !== "boolean" ||
+        !Array.isArray(raw["waypoints"]) ||
+        raw["waypoints"].length < 2 ||
+        raw["waypoints"].length > 64
+    ) {
         return null;
     }
     const waypointFields = ["lon", "lat", "alt", "heading", "pitch", "roll"] as const;
@@ -469,13 +554,14 @@ function presentationCameraFlight(value: unknown): PresentationCameraFlight | nu
             return null;
         }
         const waypoint = value as Record<string, unknown>;
-        if (!waypointFields.every(field => typeof waypoint[field] === "number"
-            && Number.isFinite(waypoint[field]))) {
+        if (!waypointFields.every((field) => typeof waypoint[field] === "number" && Number.isFinite(waypoint[field]))) {
             return null;
         }
-        waypoints.push(Object.fromEntries(
-            waypointFields.map(field => [field, waypoint[field]])
-        ) as unknown as PresentationCameraWaypoint);
+        waypoints.push(
+            Object.fromEntries(
+                waypointFields.map((field) => [field, waypoint[field]])
+            ) as unknown as PresentationCameraWaypoint
+        );
     }
     const turnDurationMs = raw["turnDurationMs"] === undefined ? 0 : Number(raw["turnDurationMs"]);
     if (!Number.isFinite(turnDurationMs) || turnDurationMs < 0 || turnDurationMs > 30_000) {
@@ -496,21 +582,17 @@ function presentationCameraFlight(value: unknown): PresentationCameraFlight | nu
 }
 
 /** Interpolates equal-duration segments with continuous position and orientation tangents. */
-function interpolateFlight(
-    waypoints: PresentationCameraWaypoint[],
-    progress: number,
-    loop = false
-): CameraViewState {
+function interpolateFlight(waypoints: PresentationCameraWaypoint[], progress: number, loop = false): CameraViewState {
     const segmentPosition = Math.min(1, Math.max(0, progress)) * (waypoints.length - 1);
     const segmentIndex = Math.min(waypoints.length - 2, Math.floor(segmentPosition));
     const amount = segmentPosition - segmentIndex;
     const from = waypoints[segmentIndex];
     const to = waypoints[segmentIndex + 1];
     const before = waypoints[loop && segmentIndex === 0 ? waypoints.length - 2 : Math.max(0, segmentIndex - 1)];
-    const after = waypoints[loop && segmentIndex + 2 === waypoints.length ? 1 : Math.min(waypoints.length - 1, segmentIndex + 2)];
-    const spline = (field: "lon" | "lat" | "alt" | "pitch" | "roll") => catmullRom(
-        before[field], from[field], to[field], after[field], amount
-    );
+    const after =
+        waypoints[loop && segmentIndex + 2 === waypoints.length ? 1 : Math.min(waypoints.length - 1, segmentIndex + 2)];
+    const spline = (field: "lon" | "lat" | "alt" | "pitch" | "roll") =>
+        catmullRom(before[field], from[field], to[field], after[field], amount);
     const heading0 = unwrapAngle(before.heading, from.heading);
     const heading2 = unwrapAngle(to.heading, from.heading);
     const heading3 = unwrapAngle(after.heading, heading2);
@@ -539,18 +621,13 @@ function smootherStep(value: number): number {
 function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): number {
     const t2 = t * t;
     const t3 = t2 * t;
-    return 0.5 * (
-        2 * p1
-        + (-p0 + p2) * t
-        + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
-        + (-p0 + 3 * p1 - 3 * p2 + p3) * t3
-    );
+    return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
 }
 
 /** Selects the representation of an angle nearest to a reference angle. */
 function unwrapAngle(value: number, reference: number): number {
     const tau = Math.PI * 2;
-    return reference + ((value - reference + Math.PI) % tau + tau) % tau - Math.PI;
+    return reference + ((((value - reference + Math.PI) % tau) + tau) % tau) - Math.PI;
 }
 
 /** Accepts monotonic presentation request identifiers without coercion. */
@@ -567,8 +644,7 @@ function isStateObject(value: unknown): value is Record<string, unknown> {
 function isConcreteOrigin(origin: string): boolean {
     try {
         const parsed = new URL(origin);
-        return (parsed.protocol === "http:" || parsed.protocol === "https:")
-            && parsed.origin === origin;
+        return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.origin === origin;
     } catch {
         return false;
     }

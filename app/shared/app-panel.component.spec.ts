@@ -1,9 +1,12 @@
+import {runInInjectionContext} from "@angular/core";
+import {ownerTestInjector} from "../../test/owner-test-injector";
+import {AppStore} from "./app.store";
+import {MapViewService} from "../mapview/map-view.service";
 import '@angular/compiler';
 import {ElementRef} from '@angular/core';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {AppPanelComponent} from './app-panel.component';
-import {AppStateService} from './appstate.service';
 import {ViewerUiService} from '../actions/viewer-ui.service';
+import {AppPanelComponent} from './app-panel.component';
 
 interface AppPanelTestAccess {
     contentRef?: ElementRef<HTMLElement>;
@@ -52,11 +55,12 @@ describe('AppPanelComponent custom resizing', () => {
     let capturedPointer: number | undefined;
 
     beforeEach(() => {
-        const stateService = {
-            baseFontSize: 16,
-            setPanelLayout
-        } as unknown as AppStateService;
-        component = new AppPanelComponent(stateService, new ViewerUiService());
+        document.documentElement.style.fontSize = "16px";
+        const injector = ownerTestInjector([ViewerUiService, {provide: MapViewService, useValue: {}}]);
+        const stateService = injector.get(AppStore);
+        vi.spyOn(stateService, "setPanelLayout").mockImplementation(setPanelLayout);
+        component = runInInjectionContext(injector, () =>
+            new AppPanelComponent(stateService as never, injector.get(ViewerUiService)));
         component.layoutId = 'test-panel';
         component.persistLayout = true;
         component.resizeMode = 'vertical';
@@ -98,6 +102,7 @@ describe('AppPanelComponent custom resizing', () => {
 
     afterEach(() => {
         component.ngOnDestroy();
+        document.documentElement.style.fontSize = '';
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
         vi.restoreAllMocks();
