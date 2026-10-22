@@ -1,18 +1,18 @@
-import {ChangeDetectorRef, Component, effect, input, NgZone, OnDestroy, output, ViewChild} from "@angular/core";
-import {TreeTableNode} from "primeng/api";
-import {coreLib} from "../integrations/wasm";
-import {InspectionPanelModel} from "../shared/appstate.service";
-import {FeatureWrapper, IncomingInspectionResult} from "../mapdata/feature-inspection.model";
-import {Column, FeatureFilterOptions, InspectionTreeComponent} from "./inspection.tree.component";
-import {MapInfoService} from "../mapdata/map-info.service";
-import {Subscription} from "rxjs";
-import {Feature} from '../../build/libs/core/erdblick-core';
+import { ChangeDetectorRef, Component, effect, input, NgZone, OnDestroy, output, ViewChild } from "@angular/core";
+import { TreeTableNode } from "primeng/api";
+import { Subscription } from "rxjs";
+import { Feature } from '../../build/libs/core/erdblick-core';
+import { coreLib } from "../integrations/wasm";
+import { FeatureWrapper, IncomingInspectionResult } from "../mapdata/feature-inspection";
+import { MapInfoService } from "../mapdata/map-info.service";
 import {
     hasFeatureInspectionValidity,
     isFeatureInspectionSubTarget,
     stripFeatureInspectionTarget,
     stripFeatureInspectionValidity
 } from "../shared/tile-feature-id";
+import { InspectionPanelModel } from "./inspection-state";
+import { Column, FeatureFilterOptions, InspectionTreeComponent } from "./inspection.tree.component";
 
 /** Click target metadata emitted by C++ for propagated scalar value pills. */
 interface InspectionValueBubble {
@@ -95,7 +95,7 @@ export class FeaturePanelComponent implements OnDestroy {
 
     treeData: TreeTableNode[] = [];
     columns: Column[] = [
-        { key: "key",   header: "Key",   width: '0*', transform: this.formatData.bind(this) },
+        { key: "key", header: "Key", width: '0*', transform: this.formatData.bind(this) },
         { key: "value", header: "Value", width: '0*', transform: this.formatData.bind(this) }
     ];
     filterOptions = new FeatureFilterOptions();
@@ -125,8 +125,8 @@ export class FeaturePanelComponent implements OnDestroy {
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
     constructor(private cdr: ChangeDetectorRef,
-                private ngZone: NgZone,
-                mapInfo: MapInfoService) {
+        private ngZone: NgZone,
+        mapInfo: MapInfoService) {
         this.catalogSubscription = mapInfo.dataSourceInfoChanged.subscribe(() => {
             for (const state of this.incoming.values()) {
                 state.controller.abort();
@@ -262,7 +262,7 @@ export class FeaturePanelComponent implements OnDestroy {
             } catch (error) {
                 eligibilityError = `Incoming discovery unavailable: ${error instanceof Error ? error.message : String(error)}`;
             }
-            state = {controller: new AbortController(), loading: !eligibilityError, error: eligibilityError};
+            state = { controller: new AbortController(), loading: !eligibilityError, error: eligibilityError };
             this.incoming.set(feature, state);
             if (state.loading) void this.loadIncoming(feature, state);
         }
@@ -270,12 +270,14 @@ export class FeaturePanelComponent implements OnDestroy {
         const section: InspectionModelData = result?.model[0] ?? {
             key: "Incoming Relations", type: coreLib.ValueType.SECTION.value, value: "", children: []
         };
-        return {...section, nodeId: "incoming-relations", incomingLoading: state.loading,
+        return {
+            ...section, nodeId: "incoming-relations", incomingLoading: state.loading,
             value: state.loading ? "Loading…" : state.error ?? (result?.complete
                 ? (section.children?.length ? "" : "No matching relations in this partition")
                 : "Partial result"),
             info: state.error ?? result?.issues.join("\n") ?? section.info,
-            retryIncoming: !state.loading ? () => this.retryIncoming(feature) : undefined};
+            retryIncoming: !state.loading ? () => this.retryIncoming(feature) : undefined
+        };
     }
 
     /** Publish only while the selected wrapper and request generation remain current. */
@@ -426,9 +428,9 @@ export class FeaturePanelComponent implements OnDestroy {
                 const data = node.data as Record<string, unknown> | undefined;
                 const rowTargetMatches = selectedHighlightMode === "strong"
                     ? data?.["hoverId"] === selectedHighlightTarget ||
-                        data?.["strongHoverGroupId"] === selectedHighlightTarget
+                    data?.["strongHoverGroupId"] === selectedHighlightTarget
                     : data?.["hoverId"] === selectedHighlightTarget ||
-                        data?.["softHoverGroupId"] === selectedHighlightTarget;
+                    data?.["softHoverGroupId"] === selectedHighlightTarget;
                 if (rowTargetMatches) {
                     node.data = {
                         ...(node.data ?? {}),

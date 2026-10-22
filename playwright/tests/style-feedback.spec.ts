@@ -6,7 +6,7 @@ import {
     enableMapLayer,
     navigateToStateSnapshotRoot,
     openLayerDialog,
-    openSearchPalette,
+    openOmnibar,
     openStylesDialog
 } from '../utils/ui-helpers';
 
@@ -82,11 +82,11 @@ test.describe('Style feedback workflows', () => {
         await requireMapSource(request, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0]);
         await navigateToStateSnapshotRoot(page);
         await enableMapLayer(page, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0]);
-        const searchPalette = await openSearchPalette(page, SEARCH_QUERY);
-        const featureSearchAction = searchPalette.locator('.search-menu', {
+        const searchPalette = await openOmnibar(page, SEARCH_QUERY);
+        const featureSearchAction = searchPalette.locator('.omnibar-menu', {
             hasText: 'Search Features and Attributes'
         }).first();
-        await featureSearchAction.locator('.search-option-wrapper').first().click();
+        await featureSearchAction.locator('.omnibar-option-wrapper').first().click();
 
         const searchDialog = page.getByTestId('feature-search-dialog').locator('.p-dialog').first();
         await expect(searchDialog).toBeVisible();

@@ -2,10 +2,15 @@ import "@angular/compiler";
 import {BehaviorSubject, Subject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 
+import {StateOwners, testPersistence} from "../../test/state-owners";
 import {MapInfoService} from "./map-info.service";
-import {LayerPresetNode, layerPresetInferenceKey, StyleOptionNode} from "./map.tree.model";
+import {LayerPresetNode, layerPresetInferenceKey, StyleOptionNode} from "./map.tree";
 
 function fixture() {
+    const registry = testPersistence();
+    const owners = new StateOwners(registry);
+    owners.layerState.materializeLayerDefaults("Map", "Layer");
+    owners.layerState.materializeStyleOptionDefaults("Map", "Layer", "Style", "enabled", "Bool", false);
     const reconcilePresetSelections = vi.fn();
     const tree = {
         reconcilePresetSelections,
@@ -14,10 +19,9 @@ function fixture() {
     };
     const service = Object.create(MapInfoService.prototype) as any;
     service.maps$ = new BehaviorSubject(tree);
-    service.stateService = {
-        viewSync: [],
-        setStyleOptionValuesBatch: vi.fn()
-    };
+    service.stateService = registry;
+    service.layerState = owners.layerState;
+    service.viewSettings = owners.viewSettings;
     service.styleOptionsChanged = new Subject();
     service.layerStateChanged = new Subject();
     service.isSyncOptionsForViewEnabled = vi.fn(() => false);
@@ -37,7 +41,7 @@ function fixture() {
         true
     );
     option.value = [true];
-    return {service, option, reconcilePresetSelections};
+    return {service, option, reconcilePresetSelections, registry, layers: owners.layerState};
 }
 
 describe("MapInfoService preset reconciliation policy", () => {
@@ -74,6 +78,38 @@ describe("MapInfoService preset reconciliation policy", () => {
         expect(apply).not.toHaveBeenCalled();
         expect(service.applyLayerPreset(0, "Map", "Layer", {...ref, presetId: "missing"})).toBe(false);
         expect(option.value).toEqual([false]);
+    });
+
+    it.each(["layer", "map"])("publishes one complete ordinary %s preset edit and restores cache on failure", kind => {
+        const {service, option, registry, layers} = fixture();
+        option.value = [false];
+        const ref = {styleId: "Style", presetId: "preset"};
+        const preset = {id: "preset", styleId: "Style", name: "Preset", key: "key", ref, values: [{optionId: "enabled", value: true}]};
+        const layer = {id: "Layer", mapId: "Map", children: [new LayerPresetNode("Map", "Layer", [preset]), option]};
+        service.maps.maps = new Map([["Map", {id: "Map", mapPresets: [{id: "whole"}]}]]);
+        service.maps.getFeatureLayer = () => layer;
+        service.maps.setLayerPresetSelection = (view: number, map: string, layer: string, value: typeof ref | null) => layers.setLayerPresetSelection(view, map, layer, value);
+        service.maps.setMapPresetSelection = (view: number, map: string, value: string | null) => layers.setMapPresetSelection(view, map, value);
+        service.maps.resolveMapPresetComponents = () => [{layer, preset}];
+        service.maps.mapPresetHasSyncConflict = () => false;
+        service.maps.configureTreeParameters = () => { option.value = layers.styleOptionValues("Map", "Layer", "Style", "enabled", "Bool", false); };
+        const state = () => ({preset: layers.getLayerPresetSelection(0, "Map", "Layer"),
+            mapPreset: layers.getMapPresetSelection(0, "Map"), values: layers.styleOptionValues("Map", "Layer", "Style", "enabled", "Bool", false)});
+        const observed: unknown[] = [], render: unknown[] = [];
+        registry.observe(state).subscribe(value => observed.push(value));
+        service.styleOptionsChanged.subscribe(() => render.push(state()));
+        const apply = () => kind === "map" ? service.applyMapPreset(0, "Map", "whole") : service.applyLayerPreset(0, "Map", "Layer", ref);
+        const write = vi.spyOn(layers, "setStyleOptionValuesBatch").mockImplementationOnce(() => { throw new Error("prepared write failed"); });
+        expect(apply).toThrow("prepared write failed");
+        expect(observed).toHaveLength(1);
+        expect(render).toEqual([]);
+        expect(option.value).toEqual([false]);
+        write.mockRestore();
+        expect(apply()).toBe(true);
+        expect(observed).toHaveLength(2);
+        expect(observed[1]).toEqual({preset: ref, mapPreset: kind === "map" ? "whole" : null, values: [true]});
+        expect(render).toEqual([observed[1]]);
+        registry.ngOnDestroy();
     });
 
     it("infers only after a manual option transaction", () => {

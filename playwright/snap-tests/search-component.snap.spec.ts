@@ -5,7 +5,7 @@ import {
     captureDocsScreenshotWithLabels,
     enableMapLayer,
     navigateToStateSnapshotRoot,
-    openSearchPalette
+    openOmnibar
 } from '../utils/ui-helpers';
 
 const MAP_INDEX = 0;
@@ -20,7 +20,7 @@ test.describe('Snapshot – search component', () => {
         await navigateToStateSnapshotRoot(page);
         await enableMapLayer(page, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
 
-        const searchPalette = await openSearchPalette(page, SEARCH_QUERY);
+        const searchPalette = await openOmnibar(page, SEARCH_QUERY);
         // Schema-backed jump providers are initialized asynchronously. Wait
         // for one datasource-derived option so the snapshot never captures
         // the transient built-in-only palette.
@@ -31,16 +31,16 @@ test.describe('Snapshot – search component', () => {
             maxDiffPixelRatio: 0.01
         });
 
-        const searchInput = page.getByTestId('search-input');
-        const searchMenu = page.getByTestId('search-menu-panel');
+        const searchInput = page.getByTestId('omnibar-input');
+        const searchMenu = page.getByTestId('omnibar-menu-panel');
         await expect(searchMenu).toBeVisible();
 
-        const featureSearchAction = searchMenu.locator('.search-menu', {
+        const featureSearchAction = searchMenu.locator('.omnibar-menu', {
             hasText: 'Search Features and Attributes'
         }).first();
         await expect(featureSearchAction).toBeVisible();
 
-        await featureSearchAction.locator('.search-option-wrapper').first().click();
+        await featureSearchAction.locator('.omnibar-option-wrapper').first().click();
 
         const featureSearchDialog = page.getByTestId('feature-search-dialog').locator('.p-dialog').first();
         await expect(featureSearchDialog).toBeVisible();
@@ -64,7 +64,7 @@ test.describe('Snapshot – search component', () => {
         await page.mouse.move(0, 0);
         await captureDocsScreenshotWithLabels(page, 'docs/screenshots/search-component-controls.png', [
             {
-                locator: page.getByTestId('search-input'),
+                locator: page.getByTestId('omnibar-input'),
                 label: 'Search query input'
             },
             {

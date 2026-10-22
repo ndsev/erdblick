@@ -1,7 +1,7 @@
 import {describe, expect, it} from "vitest";
 import {lngLatToWorld} from "@math.gl/web-mercator";
 import {buildLocationOutlineBuffer, LOCATION_OUTLINE_RECORD_FLOATS as STRIDE} from "./location-outline-buffer";
-import type {LocationPolygon} from "../render-view.model";
+import type {LocationPolygon} from "../render-view";
 
 describe("location outline buffer", () => {
     it("preserves every supplied vertex, including tiny islands, holes and repeated points, without connecting rings", () => {

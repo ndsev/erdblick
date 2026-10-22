@@ -1,8 +1,8 @@
-import {Component} from "@angular/core";
-import {RightClickMenuService, SourceDataDropdownOption} from "../mapview/rightclickmenu.service";
-import {MapInfoService} from "../mapdata/map-info.service";
-import {Color} from "../integrations/geo";
-import {SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID} from "../shared/appstate.service";
+import { Component } from "@angular/core";
+import { Color } from "../integrations/geo";
+import { MapInfoService } from "../mapdata/map-info.service";
+import { RightClickMenuService, SourceDataDropdownOption } from "../mapview/rightclickmenu.service";
+import { SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID } from "../layout/app-layout";
 
 @Component({
     selector: 'sourcedatadialog',
@@ -98,7 +98,7 @@ export class SourceDataLayerSelectionDialogComponent {
     showCustomTileIdInput: boolean = false;
 
     constructor(private mapService: MapInfoService,
-                public menuService: RightClickMenuService) {
+        public menuService: RightClickMenuService) {
         this.menuService.tileIdsForSourceData.subscribe(data => {
             this.tileIds = data;
             this.loading = !data.length;
@@ -176,7 +176,7 @@ export class SourceDataLayerSelectionDialogComponent {
         }
         const maps = this.mapService.findSourceDataMapsForTileId(tileId);
         this.mapIdsPerTileId.set(tileId, maps);
-        this.setCurrentTileId({id: tileId, name: tileIdString});
+        this.setCurrentTileId({ id: tileId, name: tileIdString });
     }
 
     /** Applies the current tile selection and cascades the dependent map/layer selections. */
@@ -227,7 +227,7 @@ export class SourceDataLayerSelectionDialogComponent {
     }
 
     /** Placeholder hook for future layer-specific side effects. */
-    onLayerIdChange(_: SourceDataDropdownOption) {}
+    onLayerIdChange(_: SourceDataDropdownOption) { }
 
     /** Persists the current choice and asks the right-click menu service to open the source-data panel. */
     requestSourceData() {

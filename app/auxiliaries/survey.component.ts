@@ -1,5 +1,5 @@
 import {Component, OnDestroy, OnInit} from '@angular/core';
-import {AppConfigService, SurveyConfig} from "../shared/app-config.service";
+import {AppConfigService, SurveyConfig} from "../config/app-config.service";
 
 @Component({
     selector: 'survey',

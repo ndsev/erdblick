@@ -2,7 +2,7 @@ import {AfterViewInit, Component, ElementRef, EventEmitter, ViewChild, input, ou
 import {FormsModule} from "@angular/forms";
 import {ButtonModule} from "primeng/button";
 import {Textarea} from "primeng/textarea";
-import {AppDialogComponent} from "./app-dialog.component";
+import {AppDialogComponent} from "../layout/app-dialog.component";
 
 @Component({
     selector: 'alert-dialog',

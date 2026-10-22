@@ -1,6 +1,6 @@
-import type {Deck, PickingInfo} from "@deck.gl/core";
-import {addMetersToLngLat} from "@math.gl/web-mercator";
-import type {TileFeatureId} from "../../../shared/appstate.service";
+import type { Deck, PickingInfo } from "@deck.gl/core";
+import { addMetersToLngLat } from "@math.gl/web-mercator";
+import type { TileFeatureId } from "../../../inspection/inspection-state";
 import type {
     NavigationAnchor,
     NavigationScreenPosition,
@@ -62,7 +62,7 @@ export function pickNavigationAnchor<ValueT>(
         y: screenPosition[1],
         radius,
         depth: NAVIGATION_PICK_DEPTH,
-        ...(layerIds ? {layerIds} : {}),
+        ...(layerIds ? { layerIds } : {}),
         unproject3D: true
     });
     let firstMatch: NavigationAnchorPick<ValueT> | undefined;
@@ -80,14 +80,14 @@ export function pickNavigationAnchor<ValueT>(
             continue;
         }
         if (!firstMatch) {
-            firstMatch = {...target, value};
+            firstMatch = { ...target, value };
             if (target.surfaceNormal || !sameValue) {
                 return firstMatch;
             }
             continue;
         }
         if (target.surfaceNormal && sameValue?.(firstMatch.value, value)) {
-            return {...firstMatch, surfaceNormal: target.surfaceNormal};
+            return { ...firstMatch, surfaceNormal: target.surfaceNormal };
         }
     }
     return firstMatch;
@@ -120,8 +120,8 @@ export function navigationTargetFromPickingInfo(
     const surfaceNormal = surfaceNormalFromPickingInfo(picked, layerProps);
     const origin = navigationTargetOrigin(picked, layerProps);
     return surfaceNormal
-        ? {position, surfaceNormal, origin}
-        : {position, origin};
+        ? { position, surfaceNormal, origin }
+        : { position, origin };
 }
 
 /** Classifies renderer-owned pick proxies without exposing that metadata to deck.gl. */
@@ -233,7 +233,7 @@ function physicalAnchorFromPickingInfo(
         if (screenPosition.every(Number.isFinite)) {
             const unprojected = picked.viewport.unproject(
                 screenPosition,
-                {targetZ: navigationAltitude}
+                { targetZ: navigationAltitude }
             );
             const position: NavigationAnchor = [
                 Number(unprojected[0]),
@@ -338,8 +338,8 @@ function nearestPathCenterlineAnchor(
             Number(path.positions[secondOffset + 1]),
             Number(path.positions[secondOffset + 2])
         ];
-        const firstCommon = picked.layer.projectPosition(firstLocal, {autoOffset: false});
-        const secondCommon = picked.layer.projectPosition(secondLocal, {autoOffset: false});
+        const firstCommon = picked.layer.projectPosition(firstLocal, { autoOffset: false });
+        const secondCommon = picked.layer.projectPosition(secondLocal, { autoOffset: false });
         const nearest = closestVisibleProjectedSegmentPoint(
             viewport.pixelProjectionMatrix,
             firstCommon,
@@ -385,7 +385,7 @@ function closestVisibleProjectedSegmentPoint(
     first: number[],
     second: number[],
     screenPosition: NavigationScreenPosition
-): {fraction: number; distanceSquared: number} | null {
+): { fraction: number; distanceSquared: number } | null {
     let firstProjected = homogeneousProjection(pixelProjectionMatrix, first, 0);
     let secondProjected = homogeneousProjection(pixelProjectionMatrix, second, 1);
     const minimumW = Math.max(

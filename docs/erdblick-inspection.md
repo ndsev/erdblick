@@ -54,7 +54,7 @@ shell instead of leaving the workspace without feedback.
 <!-- mcp:
 title: "Inspection tree attributes and references"
 keywords: ["properties", "attribute", "relation", "geometry", "source reference", "tree"]
-hint: "Use mapget schema/extraction for machine-readable fields and source references; viewer_get_app_state does not expose inspection trees. Visible tree operations are available through a fresh UI snapshot. Search help for \"Opening SourceData\" to follow raw source references."
+hint: "Use mapget schema/extraction for machine-readable fields and source references; viewer_get_controls does not expose inspection trees. Visible tree operations are available through a fresh UI snapshot. Search help for \"Opening SourceData\" to follow raw source references."
 -->
 ## Understanding the Tree
 

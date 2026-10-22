@@ -1,7 +1,9 @@
-import {Component, ViewChild} from '@angular/core';
-import {AppStateService, KEYBOARD_DIALOG_LAYOUT_ID} from '../shared/appstate.service';
-import {DialogStackService} from '../shared/dialog-stack.service';
-import {AppDialogComponent} from '../shared/app-dialog.component';
+import { Component, ViewChild } from '@angular/core';
+import { AppDialogComponent } from '../layout/app-dialog.component';
+import { KEYBOARD_DIALOG_LAYOUT_ID } from "../layout/app-layout";
+import { AppLayoutService } from "../layout/app-layout.service";
+import { AppStateService } from "../state/app-state.service";
+import { DialogStackService } from '../layout/dialog-stack.service';
 
 @Component({
     selector: 'keyboard-dialog',
@@ -100,14 +102,15 @@ export class KeyboardComponent {
     @ViewChild('keyboardDialog') keyboardDialog?: AppDialogComponent;
 
     constructor(public stateService: AppStateService,
-                private dialogStack: DialogStackService) {}
+        private dialogStack: DialogStackService,
+        public readonly layout: AppLayoutService) { }
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.dialogLayoutId);
+        return this.layout.isDialogOpen(this.dialogLayoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+        this.layout.setDialogOpen(this.dialogLayoutId, visible);
     }
 
     /** Promotes the keyboard-help dialog above other overlays. */

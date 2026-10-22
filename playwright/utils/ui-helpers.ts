@@ -145,17 +145,14 @@ export async function openDatasourcesDialog(page: Page): Promise<Locator> {
     return dialog;
 }
 
-export async function openSearchPalette(page: Page, query: string): Promise<Locator> {
-    const searchInput = page.locator('textarea[placeholder="Search"]').first();
-    await expect(searchInput).toBeVisible();
-    await searchInput.click();
-    await searchInput.fill(query);
+export async function openOmnibar(page: Page, query: string): Promise<Locator> {
+    const input = page.getByTestId('omnibar-input');
+    await expect(input).toBeVisible();
+    await input.click();
+    await input.fill(query);
 
-    const searchMenuContainer = page.locator('.resizable-container').filter({
-        has: page.locator('.search-menu-dialog')
-    }).first();
-    await expect(searchMenuContainer).toBeVisible();
-    return searchMenuContainer;
+    await expect(page.getByTestId('omnibar-menu-panel')).toBeVisible();
+    return page.getByTestId('omnibar-container');
 }
 
 export async function enableMapLayer(page: Page, mapLabel: string, layerLabel: string): Promise<void> {
@@ -181,21 +178,21 @@ export async function enableMapLayer(page: Page, mapLabel: string, layerLabel: s
 }
 
 /**
- * Uses the search box to jump to a specific lon/lat/level by selecting the
- * "WGS84 Lon-Lat Coordinates" search option.
+ * Uses the omnibar to jump to a specific lon/lat/level by selecting the
+ * "WGS84 Lon-Lat Coordinates" action.
  */
 export async function navigateToArea(page: Page, lon: number, lat: number, level: number): Promise<void> {
-    const searchInput = page.getByTestId('search-input');
-    await searchInput.click();
-    await searchInput.fill(`${lon} ${lat} ${level}`);
-    const searchMenu = page.getByTestId('search-menu-panel');
-    await expect(searchMenu).toBeVisible();
-    const jumpToWGS84 = searchMenu.locator('.search-menu', {
+    const omnibarInput = page.getByTestId('omnibar-input');
+    await omnibarInput.click();
+    await omnibarInput.fill(`${lon} ${lat} ${level}`);
+    const omnibarMenu = page.getByTestId('omnibar-menu-panel');
+    await expect(omnibarMenu).toBeVisible();
+    const jumpToWGS84 = omnibarMenu.locator('.omnibar-menu', {
         hasText: 'WGS84 Lon-Lat Coordinates'
     }).first();
     await expect(jumpToWGS84).toBeVisible();
     // Force the exact coordinate target even when the map panel overlaps the
-    // search overlay on narrow layouts.
+    // omnibar overlay on narrow layouts.
     await jumpToWGS84.click({ force: true });
 }
 
@@ -240,19 +237,19 @@ export async function addComparisonView(page: Page): Promise<void> {
  * result appears in the feature search dialog.
  */
 export async function runFeatureSearch(page: Page, query: string): Promise<void> {
-    const searchInput = page.getByTestId('search-input');
-    await searchInput.click();
-    await searchInput.fill(query);
-    await searchInput.focus();
+    const omnibarInput = page.getByTestId('omnibar-input');
+    await omnibarInput.click();
+    await omnibarInput.fill(query);
+    await omnibarInput.focus();
 
-    const searchMenu = page.getByTestId('search-menu-panel');
-    await expect(searchMenu).toBeVisible();
+    const omnibarMenu = page.getByTestId('omnibar-menu-panel');
+    await expect(omnibarMenu).toBeVisible();
 
-    const featureSearchAction = searchMenu.locator('.search-menu', {
+    const featureSearchAction = omnibarMenu.locator('.omnibar-menu', {
         hasText: 'Search Features and Attributes'
     }).first();
     await expect(featureSearchAction).toBeVisible();
-    await featureSearchAction.locator('.search-option-wrapper').first().click();
+    await featureSearchAction.locator('.omnibar-option-wrapper').first().click();
 
     const featureSearch = page.getByTestId('feature-search-panel');
     await expect(featureSearch).toBeVisible();
@@ -305,8 +302,8 @@ export async function packedTileIdForTestPosition(
 }
 
 /**
- * Selects one deterministic feature through the same AppState path used by
- * result clicks and map picking. The inspection service performs the exact
+ * Selects one deterministic feature through the registered inspection action.
+ * The inspection service performs the exact
  * restricted feature fetch; no client-side complete-tile registry is involved.
  */
 export async function selectFeatureForInspection(
@@ -327,7 +324,7 @@ export async function selectFeatureForInspection(
         if (summary?.error) {
             throw new Error(String(summary.error));
         }
-        debugApi.stateService.setSelection([{ mapTileKey, featureId }]);
+        await debugApi.executeAction('viewer_inspect', { features: [{ mapTileKey, featureId }] });
     }, { mapId, layerId, tileId: resolvedTileId, featureId });
 }
 

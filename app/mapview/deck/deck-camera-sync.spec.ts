@@ -1,8 +1,8 @@
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import {VIEW_SYNC_POSITION} from "../../shared/appstate.service";
-import {DeckMapView3D} from "./deck-view3d";
+import { VIEW_SYNC_POSITION } from "../map-view-state";
+import { DeckMapView3D } from "./deck-view3d";
 
 interface CameraSyncTestInternals {
     isCameraInteracting: boolean;
@@ -15,7 +15,7 @@ interface CameraSyncTestInternals {
         maxPitch: number;
         position: [number, number, number];
     };
-    stateService: {
+    viewSettings: {
         numViews: number;
         viewSync: string[];
         setView: ReturnType<typeof vi.fn>;
@@ -40,11 +40,11 @@ function createView(): CameraSyncTestInternals {
         {} as never,
         {} as never,
         {} as never,
-        {} as never
+        {} as never, {} as never, Object.assign({} as never, { viewIdAt: (index: number) => String(index), viewIds: ["0", "1"] }) as never, {} as never as never, {} as never as never
     ) as unknown as CameraSyncTestInternals;
-    view.stateService.numViews = 2;
-    view.stateService.viewSync = [VIEW_SYNC_POSITION];
-    view.stateService.setView = vi.fn();
+    view.viewSettings.numViews = 2;
+    view.viewSettings.viewSync = [VIEW_SYNC_POSITION];
+    view.viewSettings.setView = vi.fn();
     view.mapViewState.publishLiveCameraViewState = vi.fn();
     return view;
 }
@@ -66,15 +66,15 @@ describe("DeckMapView split-camera synchronization", () => {
             view.scheduleViewStatePush();
 
             expect(requestAnimationFrame).toHaveBeenCalledOnce();
-            expect(view.stateService.setView).not.toHaveBeenCalled();
+            expect(view.viewSettings.setView).not.toHaveBeenCalled();
 
             callbacks[0](0);
 
             expect(view.mapViewState.publishLiveCameraViewState).toHaveBeenCalledOnce();
             expect(view.mapViewState.publishLiveCameraViewState.mock.calls[0][0]).toBe(0);
             expect(view.mapViewState.publishLiveCameraViewState.mock.calls[0][1])
-                .toMatchObject({destination: {lon: 12.5}});
-            expect(view.stateService.setView).not.toHaveBeenCalled();
+                .toMatchObject({ destination: { lon: 12.5 } });
+            expect(view.viewSettings.setView).not.toHaveBeenCalled();
         } finally {
             requestAnimationFrame.mockRestore();
         }
@@ -95,7 +95,7 @@ describe("DeckMapView split-camera synchronization", () => {
 
             expect(cancelAnimationFrame).toHaveBeenCalledWith(23);
             expect(view.mapViewState.publishLiveCameraViewState).not.toHaveBeenCalled();
-            expect(view.stateService.setView).toHaveBeenCalledOnce();
+            expect(view.viewSettings.setView).toHaveBeenCalledOnce();
         } finally {
             requestAnimationFrame.mockRestore();
             cancelAnimationFrame.mockRestore();

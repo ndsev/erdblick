@@ -1,20 +1,26 @@
-import {Component, OnDestroy, Renderer2, ViewChild, effect, input} from "@angular/core";
-import {Popover} from "primeng/popover";
-import {MapInfoService} from "../mapdata/map-info.service";
-import {InspectionSelectionService} from "./inspection-selection.service";
-import {AppStateService, InspectionComparisonOption, InspectionPanelModel} from "../shared/appstate.service";
-import {FeatureWrapper} from "../mapdata/feature-inspection.model";
-import {coreLib} from "../integrations/wasm";
-import {DialogStackService} from "../shared/dialog-stack.service";
-import {FeaturePanelComponent} from "./feature.panel.component";
-import {SourceDataPanelComponent} from "./sourcedata.panel.component";
-import {AppDialogComponent} from "../shared/app-dialog.component";
-import type {AppSurfaceHeaderAction, AppSurfaceHeaderActionCommandEvent} from "../shared/app-surface-header.component";
-import {displayFeatureId} from "../shared/tile-feature-id";
+import { Component, OnDestroy, Renderer2, ViewChild, effect, input } from "@angular/core";
+import { Popover } from "primeng/popover";
+import { coreLib } from "../integrations/wasm";
+import { FeatureWrapper } from "../mapdata/feature-inspection";
+import { MapInfoService } from "../mapdata/map-info.service";
 import {
     parseMapPartitionKey,
     partitionKeySuffix
-} from "../mapdata/partition.model";
+} from "../mapdata/partition";
+import { AppDialogComponent } from "../layout/app-dialog.component";
+import { AppLayoutService } from "../layout/app-layout.service";
+import type {
+    AppSurfaceHeaderAction,
+    AppSurfaceHeaderActionCommandEvent
+} from "../layout/app-surface-header.component";
+import { AppStateService } from "../state/app-state.service";
+import { DialogStackService } from "../layout/dialog-stack.service";
+import { displayFeatureId } from "../shared/tile-feature-id";
+import { FeaturePanelComponent } from "./feature.panel.component";
+import { InspectionSelectionService } from "./inspection-selection.service";
+import { InspectionComparisonOption, InspectionPanelModel } from "./inspection-state";
+import { InspectionPanelService } from "./inspection-panel.service";
+import { SourceDataPanelComponent } from "./sourcedata.panel.component";
 
 @Component({
     selector: 'inspection-panel-dialog',
@@ -128,7 +134,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     compareOptions: InspectionComparisonOption[] = [];
     selectedCompareIds: number[] = [];
     isMetadata: boolean = false;
-    protected readonly sourceLayerDropdownOverlayOptions = {autoZIndex: true, baseZIndex: 30000};
+    protected readonly sourceLayerDropdownOverlayOptions = { autoZIndex: true, baseZIndex: 30000 };
 
     @ViewChild('dialog') dialog?: AppDialogComponent;
     @ViewChild('comparePopover') comparePopover!: Popover;
@@ -139,10 +145,12 @@ export class InspectionPanelDialogComponent implements OnDestroy {
 
     /** Wires dialog state to the active inspection panel and floating-dialog helpers. */
     constructor(private mapService: MapInfoService,
-                private inspectionSelection: InspectionSelectionService,
-                public stateService: AppStateService,
-                private renderer: Renderer2,
-                private dialogStack: DialogStackService) {
+        private inspectionSelection: InspectionSelectionService,
+        public stateService: AppStateService,
+        private renderer: Renderer2,
+        private dialogStack: DialogStackService,
+        public readonly inspectionState: InspectionPanelService,
+        public readonly layout: AppLayoutService) {
         effect(() => {
             const panel = this.panel();
             this.errorMessage = "";
@@ -183,7 +191,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
                                     partitionKeySuffix(partition)
                                 );
                                 sourceData.address = undefined;
-                                this.stateService.setSelection(sourceData, panel.id);
+                                this.inspectionState.setSelection(sourceData, panel.id);
                             }
                         }
                     }).sort((a, b) => a.label.localeCompare(b.label));
@@ -212,7 +220,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
             this.title = p.features.length > 1 ? `Selected ${p.features.length} features` : displayFeatureId(p.features[0].featureId);
         }
         this.errorMessage = "";
-        this.stateService.setSelection(p.features, p.id);
+        this.inspectionState.setSelection(p.features, p.id);
     }
 
     /** Applies the currently selected source-data layer menu entry. */
@@ -237,24 +245,24 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     protected toggleLockedState(event: MouseEvent) {
         event.stopPropagation();
         const p = this.panel();
-        this.stateService.setInspectionPanelLockedState(p.id, !p.locked);
+        this.inspectionState.setInspectionPanelLockedState(p.id, !p.locked);
     }
 
     /** Marks this floating dialog as the active target for inspection shortcuts. */
     protected focusPanel() {
-        this.stateService.setFocusedInspectionPanel(this.panel().id);
+        this.inspectionState.setFocusedInspectionPanel(this.panel().id);
     }
 
     /** Persists the highlight color selected from the shared surface header. */
     protected onPanelColorChange(color: string) {
         const panel = this.panel();
         panel.color = color;
-        this.stateService.setInspectionPanelColor(panel.id, color);
+        this.inspectionState.setInspectionPanelColor(panel.id, color);
     }
 
     /** Closes and removes the inspection panel entirely. */
     protected unsetPanel() {
-        this.stateService.unsetPanel(this.panel().id);
+        this.inspectionState.unsetPanel(this.panel().id);
     }
 
     /** Zooms the map to the primary feature represented by the panel. */
@@ -338,7 +346,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     /** Re-docks the floating inspection panel into the dock area. */
     protected dock(event: MouseEvent) {
         event.stopPropagation();
-        this.stateService.setInspectionPanelUndockedState(this.panel().id, false);
+        this.inspectionState.setInspectionPanelUndockedState(this.panel().id, false);
     }
 
     /** Opens the compare popover from either an inline action or the collapsed action menu. */
@@ -353,7 +361,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
 
     /** Rebuilds valid comparison targets for the current selection context. */
     protected refreshCompareOptions() {
-        this.compareOptions = this.stateService.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue(), this.panel().id);
+        this.compareOptions = this.inspectionState.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue(), this.panel().id);
         this.selectedCompareIds = this.selectedCompareIds.filter(id =>
             this.compareOptions.some(option => option.value === id)
         );
@@ -365,7 +373,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         if (!this.selectedCompareIds.length) {
             return;
         }
-        const model = this.stateService.createComparisonModel(
+        const model = this.inspectionState.createComparisonModel(
             this.panel().id,
             this.selectedCompareIds,
             this.inspectionSelection.selectionTopic.getValue()
@@ -373,7 +381,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         if (!model) {
             return;
         }
-        this.stateService.openInspectionComparison(model);
+        this.inspectionState.openInspectionComparison(model);
         this.selectedCompareIds = [];
         this.comparePopover.hide();
     }
@@ -383,15 +391,15 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.focusPanel();
         this.dialogStack.bringToFront(this.dialog);
         const panel = this.panel();
-        const layout = this.stateService.ensureInspectionDialogLayout(
+        const layout = this.inspectionState.ensureInspectionDialogLayout(
             panel.id,
             this.dialogIndex(),
             () => {
                 const container = this.getDialogContainer();
                 if (!container) {
-                    const baseFontSize = this.stateService.baseFontSize;
+                    const baseFontSize = this.layout.baseFontSize;
                     return {
-                        position: {left: 0, top: 0},
+                        position: { left: 0, top: 0 },
                         size: {
                             width: Math.round(panel.size[0] * baseFontSize),
                             height: Math.round(panel.size[1] * baseFontSize)
@@ -400,19 +408,19 @@ export class InspectionPanelDialogComponent implements OnDestroy {
                 }
                 const rect = container.getBoundingClientRect();
                 return {
-                    position: {left: Math.round(rect.left), top: Math.round(rect.top)},
-                    size: {width: Math.round(rect.width), height: Math.round(rect.height)}
+                    position: { left: Math.round(rect.left), top: Math.round(rect.top) },
+                    size: { width: Math.round(rect.width), height: Math.round(rect.height) }
                 };
             }
         );
-        const baseFontSize = this.stateService.baseFontSize;
+        const baseFontSize = this.layout.baseFontSize;
         if (baseFontSize) {
             const widthEm = layout.size.width / baseFontSize;
             const heightEm = layout.size.height / baseFontSize;
             panel.size[0] = widthEm;
             panel.size[1] = heightEm;
             this.dialogStyle = this.buildDialogStyle(panel);
-            this.stateService.setInspectionPanelSize(panel.id, [widthEm, heightEm]);
+            this.inspectionState.setInspectionPanelSize(panel.id, [widthEm, heightEm]);
         }
         setTimeout(() => this.featurePanel?.refresh(), 0);
     }
@@ -421,7 +429,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
     protected onDialogDragEnd() {
         this.endDrag();
         if (this.shouldDock()) {
-            this.stateService.setInspectionPanelUndockedState(this.panel().id, false);
+            this.inspectionState.setInspectionPanelUndockedState(this.panel().id, false);
         }
         this.dialogStack.bringToFront(this.dialog);
     }
@@ -433,7 +441,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         if (!panel || !container || !container.offsetWidth || !container.offsetHeight) {
             return;
         }
-        const baseFontSize = this.stateService.baseFontSize;
+        const baseFontSize = this.layout.baseFontSize;
         if (!baseFontSize) {
             return;
         }
@@ -442,7 +450,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         panel.size[0] = currentEmWidth;
         panel.size[1] = currentEmHeight;
         this.dialogStyle = this.buildDialogStyle(panel);
-        this.stateService.setInspectionPanelSize(panel.id, [currentEmWidth, currentEmHeight]);
+        this.inspectionState.setInspectionPanelSize(panel.id, [currentEmWidth, currentEmHeight]);
     }
 
     /** Converts panel size in em units into the dialog style object expected by PrimeNG. */

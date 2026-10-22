@@ -31,7 +31,7 @@ viewport:
 <!-- mcp:
 title: "Map camera navigation and projection"
 keywords: ["navigate", "zoom", "pan", "rotate", "flat", "2D", "3D", "first person"]
-hint: "Use viewer_navigate to fit known features, native mapTileKeys or WGS84 bounds. For direct camera/projection changes discover view.camera and view.projection; camera angles are radians and destination.alt is a scale-height, not physical elevation. Observe viewLayoutRevision and synchronization. Direct camera assignment is unavailable in first-person mode."
+hint: "Use viewer_navigate to fit known features, native mapTileKeys or WGS84 bounds. For direct camera/projection changes discover view.camera and view.projection; camera angles are radians and destination.alt is a scale-height, not physical elevation. Use a discovered viewId and observe synchronization. Direct camera assignment is unavailable in first-person mode."
 -->
 ## Navigating the Map
 

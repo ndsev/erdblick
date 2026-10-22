@@ -1,8 +1,8 @@
-import {describe, expect, it, vi} from "vitest";
-import type {TreeTableNode} from "primeng/api";
-import {inspectionSearchNumberLiteral} from "./inspection-search.util";
-import {expandPathToFirstHighlightedRow} from "./inspection-tree-highlight";
-import {InspectionTreeComponent} from "./inspection.tree.component";
+import { describe, expect, it, vi } from "vitest";
+import type { TreeTableNode } from "primeng/api";
+import { inspectionSearchNumberLiteral } from "./inspection-search.util";
+import { expandPathToFirstHighlightedRow } from "./inspection-tree-highlight";
+import { InspectionTreeComponent } from "./inspection.tree.component";
 
 describe("inspectionSearchNumberLiteral", () => {
     it("keeps BigInt inspection integers as unquoted Simfil numeric literals", () => {
@@ -23,19 +23,19 @@ describe("inspectionSearchNumberLiteral", () => {
 describe("expandPathToFirstHighlightedRow", () => {
     it("reopens a restored collapsed path and returns the resulting visible index", () => {
         const highlighted: TreeTableNode = {
-            data: {key: "target", styleClass: "source-data-field highlight"}
+            data: { key: "target", styleClass: "source-data-field highlight" }
         };
         const branch: TreeTableNode = {
-            data: {key: "branch"},
+            data: { key: "branch" },
             expanded: false,
-            children: [{data: {key: "before"}}, highlighted]
+            children: [{ data: { key: "before" } }, highlighted]
         };
         const root: TreeTableNode = {
-            data: {key: "root"},
+            data: { key: "root" },
             expanded: false,
             children: [branch]
         };
-        const nodes: TreeTableNode[] = [{data: {key: "other"}}, root];
+        const nodes: TreeTableNode[] = [{ data: { key: "other" } }, root];
 
         expect(expandPathToFirstHighlightedRow(nodes)).toBe(4);
         expect(root.expanded).toBe(true);
@@ -44,9 +44,9 @@ describe("expandPathToFirstHighlightedRow", () => {
 
     it("leaves expansion untouched when no explicit highlight exists", () => {
         const nodes: TreeTableNode[] = [{
-            data: {key: "root"},
+            data: { key: "root" },
             expanded: false,
-            children: [{data: {key: "child"}}]
+            children: [{ data: { key: "child" } }]
         }];
 
         expect(expandPathToFirstHighlightedRow(nodes)).toBeUndefined();
@@ -59,7 +59,7 @@ describe("inspection map-hover ownership", () => {
         const component = Object.create(InspectionTreeComponent.prototype) as any;
         component.destroyed = false;
         component.mapHoverEpoch = 0;
-        component.cdr = {markForCheck: vi.fn()};
+        component.cdr = { markForCheck: vi.fn() };
         const transition = vi.fn();
 
         component.claimMapHover("row:X");
@@ -77,9 +77,9 @@ describe("lazy geometry export", () => {
         const component = Object.create(InspectionTreeComponent.prototype) as any;
         const serialize = vi.fn(() => '{"type":"FeatureCollection","features":[]}');
         component.geoJson = () => serialize;
-        component.geoJsonMenu = {toggle: vi.fn()};
+        component.geoJsonMenu = { toggle: vi.fn() };
         component.copyToClipboard = vi.fn();
-        component.showGeoJsonMenu({stopPropagation: vi.fn()} as unknown as MouseEvent);
+        component.showGeoJsonMenu({ stopPropagation: vi.fn() } as unknown as MouseEvent);
         expect(serialize).not.toHaveBeenCalled();
         component.copyGeoJson();
         expect(serialize).toHaveBeenCalledTimes(1);
@@ -98,22 +98,22 @@ describe("lazy geometry export", () => {
 describe("incoming relation actions", () => {
     it("opens a source relation that is outside the selected target panel", () => {
         const component = Object.create(InspectionTreeComponent.prototype) as any;
-        component.inspectionMenu = {toggle: vi.fn()};
+        component.inspectionMenu = { toggle: vi.fn() };
         component.panelId = () => 'target';
-        component.stateService = {
-            selection: [{id: 'target', features: [{mapTileKey: 'surface', featureId: 'Surface.1'}]}],
+        component.inspectionState = {
+            model: { selection: [{ id: 'target', features: [{ mapTileKey: 'surface', featureId: 'Surface.1' }] }] },
             setSelection: vi.fn(), toggleInspectionFeatureHighlight: vi.fn()
         };
         component.shouldShowScalarRowActions = () => false;
-        component.onRowActionsClick({stopPropagation: vi.fn()}, {}, {
+        component.onRowActionsClick({ stopPropagation: vi.fn() }, {}, {
             key: 'visible', value: '', mapTileKey: 'lane', hoverId: 'Lane.7:relation#1'
         });
         const action = component.inspectionMenuItems.find((item: any) => item.label === 'Inspect source relation');
         expect(action).toBeDefined();
         action.command();
-        expect(component.stateService.setSelection).toHaveBeenCalledWith([
-            {mapTileKey: 'lane', featureId: 'Lane.7:relation#1'}
+        expect(component.inspectionState.setSelection).toHaveBeenCalledWith([
+            { mapTileKey: 'lane', featureId: 'Lane.7:relation#1' }
         ]);
-        expect(component.stateService.toggleInspectionFeatureHighlight).not.toHaveBeenCalled();
+        expect(component.inspectionState.toggleInspectionFeatureHighlight).not.toHaveBeenCalled();
     });
 });

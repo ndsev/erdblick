@@ -4,7 +4,7 @@ import {
     navigateToRoot,
     openLayerDialog,
     openPreferencesDialog,
-    openSearchPalette
+    openOmnibar
 } from '../utils/ui-helpers';
 
 test.use({stateSnapshot: null});
@@ -72,8 +72,8 @@ test.describe('UI quick-fix regressions', () => {
 
     test('the search actions pane uses a width-only custom resize handle', async ({page}) => {
         await navigateToRoot(page);
-        const searchPane = await openSearchPalette(page, '42.5 11.615');
-        const handle = searchPane.getByTestId('search-resize-handle');
+        const searchPane = await openOmnibar(page, '42.5 11.615');
+        const handle = searchPane.getByTestId('omnibar-resize-handle');
         await expect(handle).toBeVisible();
         expect(await searchPane.evaluate(element => getComputedStyle(element).resize)).toBe('none');
 

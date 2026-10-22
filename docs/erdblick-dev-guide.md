@@ -369,23 +369,27 @@ stays pending.
 
 ## Optional MCP browser actions
 
-`ViewerActionService` binds an explicit action allowlist to existing application
-owners. It is not a second application state store or an arbitrary method-call
-API. Mapget owns MCP authentication, authorization and session routing; erdblick
+`ActionRegistry` binds named controls and actions to their owning services.
+The [state and action architecture](erdblick-state-actions.md) explains owner registration, completed observations, stable view IDs and shared omnibar dispatch.
+
+`McpActionService` handles browser relay admission, cancellation and transport. Mapget owns MCP authentication, authorization and session routing; erdblick
 does not grant permissions based on browser-supplied identity claims.
 Optional `/mcp/info` discovery allows up to 30 seconds for source/schema startup.
 Discovery runs asynchronously and does not block ordinary map startup.
 
-Settings use `viewer_describe_app_state`, `viewer_get_app_state` and
-`viewer_set_app_state`; semantic operations use the commands below.
+Settings use `viewer_describe_controls`, `viewer_get_controls` and
+`viewer_set_control`; semantic operations use the commands below.
 Mapget adds/removes the routing `clientId` at the MCP
 boundary; it also owns `viewer_list_sessions`. Browser arguments have no routing
-field. State-channel contracts live in `app/shared/app-state-channel.contract.ts`.
+field. Control and action declarations live beside their handlers in controller service
+files. `app/application-registration.ts` composes the controllers through Angular
+DI. The Node build flavor runs that same registration and serializes the registry
+into the trusted static catalog; mapget does not run Node.
 
-| Channel | Access | Owner/value |
+| Control | Access | Owner/value |
 | --- | --- | --- |
-| `app.views` | Read | View indices, focus, sync, projection and navigation availability |
-| `view.camera` | Read/write | Live render-view pose; ordinary AppState camera setter |
+| `app.views` | Read | Logical view IDs, focus, sync, projection and navigation availability |
+| `view.camera` | Read/write | Live render-view pose; MapViewService camera assignment |
 | `view.layers` | Read | Visible layers, or a selected map/layer including hidden settings |
 | `app.selections` | Read | Panel and feature identities; no inspection trees |
 | `app.searches` | Read | Definitions and pinColor including hidden/paused searches, plus runtime counts; no result data |
@@ -396,16 +400,17 @@ field. State-channel contracts live in `app/shared/app-state-channel.contract.ts
 | `view.styleOption` | Read/write | One applicable public style option, validated against its declared type |
 | `view.layerPreset`, `view.mapPreset` | Read/write | Existing preset selections; `null` clears the association, not its option values |
 | `app.focusedView`, `app.viewSync`, `app.marker` | Read/write | Focus, ordinary synchronization and coordinate marker |
-| `app.preferences.rendering` | Read/write | AA, semantic compositing, contact shading, tile budget, render workers, compression |
+| `app.preferences.rendering` | Read/write | AA, semantic compositing, contact shading, tile budget, render workers |
+| `app.preferences.connection` | Read/write | Tile-pull compression |
 | `app.preferences.navigation` | Read/write | Zoom step and feature-fit clearance |
 | `app.preferences.inspection` | Read/write | Panel budget, drill-pick radius, expansion and value presentation |
 | `app.preferences.hover` | Read/write | Hover-label visibility, expressions and display keys |
 | `inspection.panel` | Read/write | One panel's locking, docking, focus and highlight color |
 
-Use discovery to obtain each channel's exact selector/value schema and persistence
+Use discovery to obtain each control's exact selector/value schema and persistence
 and synchronization behavior. Settings are complete coherent values, not partial
-patches. View-scoped writes and changes to `app.focusedView` require the observed
-layout revision. Invalid channel/value pairs are rejected by both the browser and
+patches. View-scoped selectors use logical `viewId`; `app.focusedView` takes a view ID.
+Invalid control/value pairs are rejected by both the browser and
 the generated native JSON Schema validator. Layer/preset operations share the
 map-tree owner's notifications and synchronization; they do not synthesize clicks.
 
@@ -418,19 +423,18 @@ state belongs to the panel, not feature inspection resolution.
 Camera values are runtime objects, not flattened URL/storage codecs. Longitude
 and latitude are degrees; orientation is radians; `destination.alt` is the
 positive viewer scale-height in metres, not physical eye altitude. Nonzero roll
-and first-person map-camera writes are unsupported. Writes require the observed
-`viewLayoutRevision`, focus the target and honor position/movement sync. Active
+and first-person map-camera writes are unsupported. Writes target a logical `viewId`, focus that view and honor position/movement sync. Active
 human camera gestures reject conflicting writes. The response reports the actual
-normalized pose and affected views. `applied` does not mean tiles have loaded or
+normalized pose. Read the affected view controls to check synchronization. `applied` does not mean tiles have loaded or
 a frame has rendered; readiness is currently `unknown` to avoid a scene-wide
 diagnostics scan for each acknowledgement.
 
-For layer visibility and level changes, use `viewer_set_app_state` with the
-singular `view.layer` channel, not the read-only `view.layers` overview. Select
-`viewIndex`, `mapId` and `layerId`; read that exact target first, then assign its
+For layer visibility and level changes, use `viewer_set_control` with the
+singular `view.layer` control. Select
+`viewId`, `mapId` and `layerId`; read that exact target first, then assign its
 complete `{visible, level, autoLevel}` value with only the desired fields changed
-and the observed `viewLayoutRevision`. No checkbox click is necessary. Use
-`viewer_describe_app_state` to discover other writable settings and their schemas.
+using `{target: {control: "view.layer", viewId, mapId, layerId}, value}`. No checkbox click is necessary. Use
+`viewer_describe_controls` to discover other writable settings and their schemas.
 
 <!-- mcp:
 title: "Viewer semantic commands and style discovery"
@@ -440,8 +444,9 @@ keywords: ["MCP", "catalog", "styles", "local YAML", "validation", "inspection",
 
 | Tools | Behavior |
 | --- | --- |
-| `viewer_get_catalog` | Explicit `kind` selects maps, layers, backgrounds, styles, options or presets; bounded metadata without datasource URLs/headers |
-| `viewer_manage_view` | Create a second view from a selected source view, or remove an explicit view; never remove the last one |
+| `viewer_list_maps`, `viewer_list_layers`, `viewer_list_backgrounds` | Bounded map/layer/background metadata without datasource URLs or headers |
+| `viewer_list_styles`, `viewer_list_style_options`, `viewer_list_presets` | Style identities, typed options and qualified preset choices |
+| `viewer_manage_view` | Create a view from a selected source `viewId` (up to 32), or remove an explicit view; never remove the last one |
 | `viewer_navigate` | Fit explicit WGS84 bounds, a tile partition, or up to 50 located features through ordinary navigation |
 | `viewer_inspect`, `viewer_close_inspection` | Open feature/entity inspection shells and return panel IDs, or close one explicit panel |
 | `viewer_open_source_data` | Open a source-data panel at a native map/partition/reference or SourceData key/address |
@@ -462,10 +467,9 @@ geometry. Runtime diagnostics identify the expression/property and rule, with
 available map/layer/feature context. Options belong to the stylesheet declaring
 them; a copied rule cannot implicitly borrow another sheet's options.
 
-Choose the catalog kind explicitly. A layers result is not a list of style controls
-or capabilities. Use `kind: "styles"` and copy the returned item ID exactly; a display
-name or layer ID may differ. Missing stock options do not prevent creating a local
-style. `relatedCatalogs` points to other relevant discovery requests.
+Use `viewer_list_styles` and copy the returned item ID exactly; a display name or
+layer ID may differ. `viewer_list_style_options` describes the selected style's
+typed options. Missing stock options do not prevent creating a local style.
 
 Feature identities are either `{mapTileKey, featureId}` or
 `{mapId, layerId?, featureId}`. The latter goes through native `/locate`; ambiguous
@@ -582,9 +586,9 @@ callbacks and persistence are used, including inspection-tree relayout.
 
 Dock width and split proportions are local layout preferences, persisted after
 completed human/MCP resizing and absent from map URLs. Ratio changes update the
-splitter in place without recreating the map renderers. `ViewerUiService` owns
+splitter in place without recreating the map renderers. `UiAutomationService` owns
 only short-lived DOM references and live resize registrations; components and
-`AppStateService` remain the layout owners. No background DOM scan/observer or
+`AppLayoutService` remain the layout owners. No background DOM scan/observer or
 second layout tree is maintained.
 
 ### Application screenshots
@@ -593,8 +597,8 @@ second layout tree is maintained.
 the **visible application viewport**, including both map views, labels/highlights,
 inspection panels, toolbars and open overlays, not browser chrome or a full-page
 scrolling export. Optional `maxWidth`/`maxHeight` (128–1920; defaults 1280×960)
-bound the whole image without cropping. `viewLayoutRevision` optionally guards the
-layout; a resize during capture fails explicitly. No clipboard, download,
+bound the whole image without cropping. A resize or view membership change during
+capture fails explicitly. No clipboard, download,
 screen-sharing prompt or screenshot storage is involved.
 
 Each render view forces one synchronous Deck frame and immediately copies its
@@ -638,7 +642,7 @@ model. Client acceptance must check the model-visible callable inventory:
 successful `tools/list` discovery or direct invocation alone does not prove that
 the client can convert every input schema into a model tool signature.
 The generic setter additionally uses routing-safe Draft-07 `allOf`/`if`/`then`
-branches derived from the channel registry to pair each target with its exact
+branches derived from the control declarations to pair each target with its exact
 value schema. Keep runtime and native parity fixtures together when extending
 this surface; client-side conditional-schema support is a separate acceptance gate.
 When changing contracts during an already-running watch/serve session, rerun

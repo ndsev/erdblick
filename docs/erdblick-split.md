@@ -11,7 +11,7 @@ the projections and styles independent.
 <!-- mcp:
 title: "Create close and focus split views"
 keywords: ["split", "side by side", "left", "right", "comparison", "focus"]
-hint: "Read app.views and the current viewLayoutRevision. Use viewer_manage_view for layout changes and app.focusedView to change focus. Re-read state after creating/removing a view; indices and layout revision may change."
+hint: "Read app.views through viewer_get_controls to discover logical view IDs. Use viewer_manage_view for layout changes and app.focusedView to change focus. Re-read state after creating/removing a view; the ordered view ID list changes."
 -->
 ## Opening, Closing, and Focusing Views
 
@@ -55,7 +55,7 @@ Each view maintains its own layer tree:
 <!-- mcp:
 title: "Search results in split views"
 keywords: ["search", "left", "right", "all views", "viewport", "auto update"]
-hint: "Set explicit viewIndices when starting a search. For an existing search read viewer_get_search, then send selectedViewIndices with viewer_set_search and the observed layout revision; omitted settings are preserved. The selected view set also controls viewport coverage; it is not just a cosmetic overlay target."
+hint: "Set explicit viewIds when starting a search. For an existing search read viewer_get_search, then send selectedViewIds with viewer_set_search ; omitted settings are preserved. The selected view set also controls viewport coverage; it is not just a cosmetic overlay target."
 -->
 ## Search in Split View
 

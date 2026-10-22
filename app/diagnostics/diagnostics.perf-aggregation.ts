@@ -4,7 +4,7 @@ import {
     COUNT_KEY_PATTERN,
     UNIT_SUFFIXES
 } from "./diagnostics.constants";
-import type {PerfStat} from "./diagnostics.model";
+import type {PerfStat} from "./diagnostics.types";
 
 function parsePerfUnit(key: string): string | undefined {
     const lower = key.toLowerCase();

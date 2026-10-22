@@ -1,16 +1,14 @@
-import type {FilterChannelDefinition} from
-    "../mapdata/filter-subscription.model";
-import type {StyleFilterPlan} from
-    "../mapdata/styled-mapget-layer.model";
-import type {TileFeatureId} from "../shared/appstate.service";
+import type { TileFeatureId } from "../inspection/inspection-state";
+import type { FilterChannelDefinition } from "../mapdata/filter-subscription";
+import {
+    partitionKey,
+    type PartitionId
+} from "../mapdata/partition";
+import type { StyleFilterPlan } from "../mapdata/styled-mapget-layer";
 import {
     parseFeatureInspectionTarget,
     type FeatureInspectionTarget
 } from "../shared/tile-feature-id";
-import {
-    partitionKey,
-    type PartitionId
-} from "../mapdata/partition.model";
 
 /** One visible inspection target with the partition required by exact-root requests. */
 export type InteractionHighlightTarget = TileFeatureId & {
@@ -21,7 +19,7 @@ export type InteractionHighlightTarget = TileFeatureId & {
 export interface RemoteInteractionHighlightPlan {
     plan: StyleFilterPlan;
     partitions: PartitionId[];
-    roots: Array<{partition: PartitionId; featureId: string}>;
+    roots: Array<{ partition: PartitionId; featureId: string }>;
 }
 
 /** Exact targets already represented by regular/search scene geometry. */
@@ -51,7 +49,7 @@ function restrictExpression(
 /** Builds an entry restriction for one exact attribute target. */
 function attributeEntryRestriction(
     target: ResolvedInteractionTarget & {
-        inspectionTarget: Extract<FeatureInspectionTarget, {scope: "attribute"}>;
+        inspectionTarget: Extract<FeatureInspectionTarget, { scope: "attribute" }>;
     }
 ): string {
     const conditions = [
@@ -70,7 +68,7 @@ function attributeEntryRestriction(
 /** Builds an entry restriction for one explicitly selected relation row. */
 function relationEntryRestriction(
     target: ResolvedInteractionTarget & {
-        inspectionTarget: Extract<FeatureInspectionTarget, {scope: "relation"}>;
+        inspectionTarget: Extract<FeatureInspectionTarget, { scope: "relation" }>;
     }
 ): string {
     return `($source.id == ${JSON.stringify(

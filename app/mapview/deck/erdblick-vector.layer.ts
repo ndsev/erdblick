@@ -54,7 +54,7 @@ import {
   SURFACE_VERTEX_SHADER,
 } from "./erdblick-vector.shaders";
 import { gpuIconAtlasService } from "./gpu-icon-atlas.service";
-import { INTERACTION_STYLE_ORDER_BASE } from "./tile-subset-interaction.model";
+import { INTERACTION_STYLE_ORDER_BASE } from "./tile-subset-interaction";
 
 const DEPTH_PARAMETERS: RenderPipelineParameters = {
   depthCompare: "less-equal",

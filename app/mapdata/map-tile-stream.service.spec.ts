@@ -1,24 +1,25 @@
 import "@angular/compiler";
-import {BehaviorSubject, Subject} from "rxjs";
-import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
-import {MapTileStreamService} from "./map-tile-stream.service";
-import {TileDeliveryError} from "./tile-diagnostics";
-import {MapgetLayer} from "./mapget-layer.model";
-import {objectPartition, tilePartition} from "./partition.model";
+import { BehaviorSubject, Subject } from "rxjs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MapTileStreamService } from "./map-tile-stream.service";
+import { TileDeliveryError } from "./tile-diagnostics";
+import { MapgetLayer } from "./mapget-layer";
+import { objectPartition, tilePartition } from "./partition";
 import {
     MapTileRequestStatus,
     MapTileStreamClientInteractive,
     MapTileStreamClientTiles,
     type MapTileStreamStatusPayload
 } from "./tilestream";
-import {coreLib} from "../integrations/wasm";
-import {DEFAULT_CONNECTION_RETRY_POLICY} from "../shared/connection-retry-policy";
+import { coreLib } from "../integrations/wasm";
+import { DEFAULT_CONNECTION_RETRY_POLICY } from "../connection/connection-retry-policy";
 
 /** Supplies real observable preference values to each transport harness. */
 function retryStateHarness() {
-    const policy = {...DEFAULT_CONNECTION_RETRY_POLICY};
+    const policy = { ...DEFAULT_CONNECTION_RETRY_POLICY };
     return {
         connectionRetryPolicy: policy,
+        connectionRetryPolicyChanges: new BehaviorSubject(policy),
         connectionRetryEnabledState: new BehaviorSubject(policy.enabled),
         connectionRetryInitialDelayMsState: new BehaviorSubject(policy.initialDelayMs),
         connectionRetryBackoffMultiplierState: new BehaviorSubject(policy.backoffMultiplier),
@@ -28,25 +29,25 @@ function retryStateHarness() {
 
 function serviceHarness(): MapTileStreamService {
     return new MapTileStreamService(
-        {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any,
-        {dataSourceInfoChanged: new Subject<void>()} as any,
+        { ...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>() } as any,
+        { dataSourceInfoChanged: new Subject<void>() } as any,
         {} as any,
         {
             run: (callback: () => unknown) => callback(),
             runOutsideAngular: (callback: () => unknown) => callback()
-        } as any
+        } as any, { ...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>() } as any as never
     );
 }
 
 describe("MapTileStreamService request failures", () => {
     it("aborts a one-shot inspection and destroys its transport without starting locate fallback", async () => {
         const service = serviceHarness();
-        const request = vi.spyOn(MapTileStreamClientTiles.prototype, "request").mockImplementation(() => new Promise(() => {}));
+        const request = vi.spyOn(MapTileStreamClientTiles.prototype, "request").mockImplementation(() => new Promise(() => { }));
         const destroy = vi.spyOn(MapTileStreamClientTiles.prototype, "destroy");
         const fetchSpy = vi.spyOn(globalThis, "fetch");
         const controller = new AbortController();
         try {
-            const loading = service.loadFeatures([{mapTileKey: "Features:Map:Layer:1", featureId: "Road.1"}], controller.signal);
+            const loading = service.loadFeatures([{ mapTileKey: "Features:Map:Layer:1", featureId: "Road.1" }], controller.signal);
             expect(request).toHaveBeenCalledOnce();
             controller.abort(new Error("cancelled by caller"));
             await expect(loading).rejects.toThrow("cancelled by caller");
@@ -60,16 +61,18 @@ describe("MapTileStreamService request failures", () => {
     it("locates canonical identities without narrowing object partitions or swallowing cancellation", async () => {
         const service = serviceHarness();
         const tileKey = coreLib.createMapTileKey("Features", "Map", "Other", String(coreLib.getTileIdFromPosition(10, 48, 13)));
-        const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({responses: [[
-            {partitionKey: "Features:Map:Layer:object/18446744073709551615", canonicalFeatureId: "Road.9"},
-            {partitionKey: tileKey, canonicalFeatureId: "Road.9"}
-        ]]})));
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+            responses: [[
+                { partitionKey: "Features:Map:Layer:object/18446744073709551615", canonicalFeatureId: "Road.9" },
+                { partitionKey: tileKey, canonicalFeatureId: "Road.9" }
+            ]]
+        })));
         try {
             const controller = new AbortController();
             const matches = await service.locateFeature("Map", "Road.1:attribute#2", "Layer", controller.signal);
             expect(matches).toHaveLength(2);
-            expect(matches[0]).toEqual({mapTileKey: "Features:Map:Layer:object/18446744073709551615", featureId: "Road.9"});
-            expect(JSON.parse(fetchSpy.mock.calls[0][1]!.body as string)).toEqual({requests: [{mapId: "Map", layerId: "Layer", featureId: "Road.1"}]});
+            expect(matches[0]).toEqual({ mapTileKey: "Features:Map:Layer:object/18446744073709551615", featureId: "Road.9" });
+            expect(JSON.parse(fetchSpy.mock.calls[0][1]!.body as string)).toEqual({ requests: [{ mapId: "Map", layerId: "Layer", featureId: "Road.1" }] });
             controller.abort(new Error("cancelled"));
             await expect(service.locateFeature("Map", "Road.1", undefined, controller.signal)).rejects.toThrow("cancelled");
             expect(fetchSpy).toHaveBeenCalledOnce();
@@ -78,10 +81,10 @@ describe("MapTileStreamService request failures", () => {
 
     it("logs bulk viewport failures without flooding error toasts", () => {
         const service = serviceHarness();
-        const messages = {showError: vi.fn()};
+        const messages = { showError: vi.fn() };
         const internal = service as any;
         internal.messageService = messages;
-        const log = vi.spyOn(console, "error").mockImplementation(() => {});
+        const log = vi.spyOn(console, "error").mockImplementation(() => { });
         try {
             for (let requestId = 1; requestId <= 30; ++requestId) {
                 const status: MapTileStreamStatusPayload = {
@@ -131,11 +134,15 @@ describe("MapTileStreamService page lifecycle", () => {
                 dataSourceInfoChanged: new Subject<void>(),
                 reloadDataSources: vi.fn().mockResolvedValue(true)
             } as any,
-            {showBackendConnectionError: connectionError} as any,
+            { showBackendConnectionError: connectionError } as any,
             {
                 run: (callback: () => unknown) => callback(),
                 runOutsideAngular: (callback: () => unknown) => callback()
-            } as any
+            } as any, {
+                ...retryStateHarness(),
+                tilePullCompressionEnabled: false,
+                tilePullCompressionEnabledState: new Subject<boolean>()
+            } as any as never
         );
         await service.initialize();
         client = service['tileStream']!;
@@ -153,16 +160,16 @@ describe("MapTileStreamService page lifecycle", () => {
     });
 
     it("stops scheduled work and ignores late socket callbacks after pagehide", async () => {
-        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const error = vi.spyOn(console, 'error').mockImplementation(() => { });
         service['scheduleUpdate']();
         service['scheduleAcknowledgementUpdate']();
 
-        window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}));
+        window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
 
         expect(client.close).toHaveBeenCalledWith(1000, 'page hidden');
         expect(client.setFrameProcessingPaused).toHaveBeenLastCalledWith(true);
         expect(vi.getTimerCount()).toBe(0);
-        client.onClose?.(new CloseEvent('close', {code: 1006}));
+        client.onClose?.(new CloseEvent('close', { code: 1006 }));
         client.onError?.(new Event('error'));
         service['scheduleUpdate']();
         service['scheduleAcknowledgementUpdate']();
@@ -175,7 +182,7 @@ describe("MapTileStreamService page lifecycle", () => {
     });
 
     it("cancels before WebKit unload rejection and resumes a page that stays active", async () => {
-        window.dispatchEvent(new Event('beforeunload', {cancelable: true}));
+        window.dispatchEvent(new Event('beforeunload', { cancelable: true }));
 
         expect(client.close).toHaveBeenCalledWith(1000, 'page hidden');
         expect(service['pageHidden']).toBe(true);
@@ -192,23 +199,23 @@ describe("MapTileStreamService page lifecycle", () => {
 
     it("cancels unload recovery on pagehide and restores a fresh pending snapshot once", async () => {
         window.dispatchEvent(new Event('beforeunload'));
-        window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}));
+        window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
         await vi.advanceTimersByTimeAsync(100);
         expect(client.updateRequest).not.toHaveBeenCalled();
 
-        window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+        window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
         await vi.advanceTimersByTimeAsync(100);
         expect(client.updateRequest).toHaveBeenCalledExactlyOnceWith([], true);
 
-        window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+        window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
         await vi.advanceTimersByTimeAsync(100);
         expect(client.updateRequest).toHaveBeenCalledOnce();
     });
 
     it("preserves the user's diagnostic pause across page restoration", async () => {
         service.tilePipelinePaused$.next(true);
-        window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}));
-        window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+        window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+        window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
         await vi.advanceTimersByTimeAsync(100);
 
         expect(service.tilePipelinePaused).toBe(true);
@@ -243,7 +250,7 @@ describe("MapTileStreamService page lifecycle", () => {
     });
 
     it("still reports unexpected disconnects while the page is active", async () => {
-        client.onClose?.(new CloseEvent('close', {code: 1006, reason: 'connection lost'}));
+        client.onClose?.(new CloseEvent('close', { code: 1006, reason: 'connection lost' }));
         await vi.advanceTimersByTimeAsync(100);
 
         expect(connectionError).toHaveBeenCalledWith('The map backend connection was closed (connection lost).');
@@ -267,16 +274,16 @@ describe("MapTileStreamService source catalog refresh", () => {
                 .mockResolvedValue(true)
         };
         const service = new MapTileStreamService(
-            {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any,
+            { ...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>() } as any,
             mapInfo as any,
             {} as any,
             {
                 run: (callback: () => unknown) => callback(),
                 runOutsideAngular: (callback: () => unknown) => callback()
-            } as any
+            } as any, { ...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>() } as any as never
         );
         const internals = service as any;
-        internals.tileStream = {getSourcesRevision: () => 1};
+        internals.tileStream = { getSourcesRevision: () => 1 };
         internals.scheduleUpdate = vi.fn();
 
         internals.requestSourceCatalogRefresh(49);
@@ -318,16 +325,16 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
         vi.useFakeTimers();
         try {
             const service = new MapTileStreamService(
-                {...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>()} as any,
-                {dataSourceInfoChanged: new Subject<void>()} as any,
+                { ...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>() } as any,
+                { dataSourceInfoChanged: new Subject<void>() } as any,
                 {} as any,
                 {
                     run: (callback: () => unknown) => callback(),
                     runOutsideAngular: (callback: () => unknown) => callback()
-                } as any
+                } as any, { ...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>() } as any as never
             );
             const internal = service as any;
-            const ref = {filterId: "filter", released: false};
+            const ref = { filterId: "filter", released: false };
             internal.filterSubscriptionsById.set(ref.filterId, ref);
             internal.scheduleUpdate = vi.fn();
 
@@ -350,7 +357,7 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
             MapTileStreamService.prototype
         ) as MapTileStreamService;
         const internal = service as any;
-        const owner = {expireTiles: vi.fn()};
+        const owner = { expireTiles: vi.fn() };
         internal.tileExpiryScheduler = {
             cancel: vi.fn(),
             schedule: vi.fn()
@@ -369,7 +376,7 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
             MapTileStreamService.prototype
         ) as MapTileStreamService;
         const internal = service as any;
-        const ref = {filterId: "filter", released: false};
+        const ref = { filterId: "filter", released: false };
         internal.filterSubscriptionsById = new Map([["filter", ref]]);
         internal.tileExpiryScheduler = {
             cancel: vi.fn(),
@@ -432,9 +439,9 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
             [firstRef.filterId, firstRef],
             [emptyRef.filterId, emptyRef]
         ]);
-        internal.tileStream = {updateRequest};
+        internal.tileStream = { updateRequest };
         internal.lastUpdateAt = 0;
-        internal.backendRequestProgress = {done: 0, total: 0, allDone: true};
+        internal.backendRequestProgress = { done: 0, total: 0, allDone: true };
         internal.viewportLoadStartedAtMs = null;
         internal.viewportCompletedAtMs = null;
         internal.scheduleUpdate = vi.fn();
@@ -452,10 +459,10 @@ describe("MapTileStreamService object discovery", () => {
     it("bounds cached discovery tiles without evicting current or pending work", () => {
         const service = serviceHarness() as any;
         const cache = new Map<number, unknown>();
-        cache.set(0, {pending: Promise.resolve({objects: [], expiresAtMs: null})});
+        cache.set(0, { pending: Promise.resolve({ objects: [], expiresAtMs: null }) });
         for (let tileId = 1; tileId <= 4_100; ++tileId) {
             cache.set(tileId, {
-                value: {objects: [], expiresAtMs: null}
+                value: { objects: [], expiresAtMs: null }
             });
         }
 
@@ -484,31 +491,33 @@ describe("MapTileStreamService object discovery", () => {
             ok: true,
             status: 200,
             statusText: "OK",
-            json: vi.fn(async () => ({responses: [{
-                mapId: "SmartMap",
-                layerId: "Road",
-                sourceId: "smart-source",
-                tileId: 102,
-                status: "success",
-                timestamp: 1_000,
-                ttlMs: 800,
-                objects: [{
-                    id: firstId,
-                    bounds: [11, 48, 12, 49]
+            json: vi.fn(async () => ({
+                responses: [{
+                    mapId: "SmartMap",
+                    layerId: "Road",
+                    sourceId: "smart-source",
+                    tileId: 102,
+                    status: "success",
+                    timestamp: 1_000,
+                    ttlMs: 800,
+                    objects: [{
+                        id: firstId,
+                        bounds: [11, 48, 12, 49]
+                    }]
+                }, {
+                    mapId: "SmartMap",
+                    layerId: "Road",
+                    sourceId: "smart-source",
+                    tileId: 101,
+                    status: "success",
+                    timestamp: 1_000,
+                    ttlMs: 500,
+                    objects: [
+                        { id: firstId, bounds: [10, 47, 11, 48] },
+                        { id: lastId }
+                    ]
                 }]
-            }, {
-                mapId: "SmartMap",
-                layerId: "Road",
-                sourceId: "smart-source",
-                tileId: 101,
-                status: "success",
-                timestamp: 1_000,
-                ttlMs: 500,
-                objects: [
-                    {id: firstId, bounds: [10, 47, 11, 48]},
-                    {id: lastId}
-                ]
-            }]}) )
+            }))
         };
         const fetchMock = vi.fn(async (
             _input: RequestInfo | URL,
@@ -535,12 +544,14 @@ describe("MapTileStreamService object discovery", () => {
             });
             expect(fetchMock).toHaveBeenCalledOnce();
             expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)))
-                .toEqual({requests: [{
-                    mapId: "SmartMap",
-                    layerId: "Road",
-                    sourceId: "smart-source",
-                    tileIds: [101, 102]
-                }]});
+                .toEqual({
+                    requests: [{
+                        mapId: "SmartMap",
+                        layerId: "Road",
+                        sourceId: "smart-source",
+                        tileIds: [101, 102]
+                    }]
+                });
 
             const reprioritized = await service.discoverObjectPartitions(
                 layer,
@@ -566,15 +577,17 @@ describe("MapTileStreamService object discovery", () => {
         } as never);
         vi.stubGlobal("fetch", vi.fn(async () => ({
             ok: true,
-            json: async () => ({responses: [{
-                mapId: "Map",
-                layerId: "Road",
-                tileId: 7,
-                status: "success",
-                timestamp: 1_000,
-                ttlMs: 0,
-                objects: [{id: "1", bounds: [0, -91, 1, 0]}]
-            }]})
+            json: async () => ({
+                responses: [{
+                    mapId: "Map",
+                    layerId: "Road",
+                    tileId: 7,
+                    status: "success",
+                    timestamp: 1_000,
+                    ttlMs: 0,
+                    objects: [{ id: "1", bounds: [0, -91, 1, 0] }]
+                }]
+            })
         })));
         try {
             await expect(service.discoverObjectPartitions(layer, [7]))
@@ -585,7 +598,6 @@ describe("MapTileStreamService object discovery", () => {
     });
 });
 
-
 describe("failed tile expiry", () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());
@@ -594,36 +606,38 @@ describe("failed tile expiry", () => {
         const service = serviceHarness();
         const internal = service as any;
         const updates = vi.fn().mockResolvedValue("sent");
-        internal.tileStream = {updateRequest: updates};
-        const ref = service.createFilterSubscription({mapId: "Map", layerId: "Layer", channels: []},
-            {partitions: [tilePartition(1), tilePartition(2)]},
-            {onTile: () => ({status: "accepted", valueVersion: 1})});
+        internal.tileStream = { updateRequest: updates };
+        const ref = service.createFilterSubscription({ mapId: "Map", layerId: "Layer", channels: [] },
+            { partitions: [tilePartition(1), tilePartition(2)] },
+            { onTile: () => ({ status: "accepted", valueVersion: 1 }) });
         const generation = ref.generation;
         for (const id of [1, 2]) {
-            ref.accept({blob: new Uint8Array(), filterId: ref.filterId, generation,
+            ref.accept({
+                blob: new Uint8Array(), filterId: ref.filterId, generation,
                 mapId: "Map", layerId: "Layer", partition: tilePartition(id), partitionKey: `tile:${id}`,
                 mapTileKey: `Features:Map:Layer:${id}`, stringPoolId: "source",
                 conversionTimestampMs: Date.now(), ttlMs: id === 2 ? 5000 : null,
                 error: id === 2 ? "503" : null, dependencies: [], issues: [], info: {}, numEntries: 0,
-                geometryVertexCount: 0, glbAttachmentName: "", receivedAt: 0});
+                geometryVertexCount: 0, glbAttachmentName: "", receivedAt: 0
+            });
         }
         expect(internal.tileExpiryScheduler.size).toBe(1);
-        ref.setCoverage({partitions: [tilePartition(1), tilePartition(2), tilePartition(3)]});
+        ref.setCoverage({ partitions: [tilePartition(1), tilePartition(2), tilePartition(3)] });
         await vi.advanceTimersByTimeAsync(100);
-        expect(updates.mock.calls.at(-1)![0][0].partitions).toEqual([{kind: "tile", id: 3}]);
+        expect(updates.mock.calls.at(-1)![0][0].partitions).toEqual([{ kind: "tile", id: 3 }]);
         // Turning off connection retries does not disable value freshness.
-        internal.stateService.connectionRetryPolicy = {...DEFAULT_CONNECTION_RETRY_POLICY, enabled: false};
+        internal.stateService.connectionRetryPolicy = { ...DEFAULT_CONNECTION_RETRY_POLICY, enabled: false };
         internal.applyRetryPolicy();
         await vi.advanceTimersByTimeAsync(5000);
         expect(updates.mock.calls.at(-1)![0][0].partitions).toEqual([
-            {kind: "tile", id: 2}, {kind: "tile", id: 3}]);
+            { kind: "tile", id: 2 }, { kind: "tile", id: 3 }]);
         expect(ref.generation).toBe(generation);
         ref.release();
     });
 
     it("cancels expiry when the failed output is no longer retained", async () => {
         const service = serviceHarness();
-        const owner = {expireTiles: vi.fn()};
+        const owner = { expireTiles: vi.fn() };
         service.updateRetainedTileExpiry(owner, "tile", 3, Date.now() + 5000);
         service.cancelRetainedTileExpiries(owner);
         await vi.advanceTimersByTimeAsync(6000);

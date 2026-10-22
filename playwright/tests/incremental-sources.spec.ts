@@ -2,7 +2,7 @@ import type {WebSocketRoute} from '@playwright/test';
 import {expect, test} from '../fixtures/test';
 import {enableMapLayer, navigateToRoot, openLayerDialog} from '../utils/ui-helpers';
 import {TEST_LAYER_NAMES, TEST_MAP_NAMES} from '../utils/test-params';
-import type {MapInfoItem} from '../../app/mapdata/map.tree.model';
+import type {MapInfoItem} from '../../app/mapdata/map.tree';
 
 test.use({stateSnapshot: null});
 

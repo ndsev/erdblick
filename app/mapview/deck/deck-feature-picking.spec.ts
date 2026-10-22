@@ -1,12 +1,12 @@
 import "@angular/compiler";
-import {WebMercatorViewport} from "@deck.gl/core";
-import {addMetersToLngLat} from "@math.gl/web-mercator";
-import {describe, expect, it, vi} from "vitest";
+import { WebMercatorViewport } from "@deck.gl/core";
+import { addMetersToLngLat } from "@math.gl/web-mercator";
+import { describe, expect, it, vi } from "vitest";
 
-import type {TileFeatureId} from "../../shared/appstate.service";
-import {DeckMapView2D} from "./deck-view2d";
-import {DeckMapView3D} from "./deck-view3d";
-import {ErdblickVectorLayer} from "./erdblick-vector.layer";
+import type { TileFeatureId } from "../../inspection/inspection-state";
+import { DeckMapView2D } from "./deck-view2d";
+import { DeckMapView3D } from "./deck-view3d";
+import { ErdblickVectorLayer } from "./erdblick-vector.layer";
 import {
     DECK_MAP_FAR_Z_MULTIPLIER,
     DECK_MAP_FOV_DEGREES,
@@ -23,10 +23,10 @@ function createView() {
         {} as never,
         {} as never,
         {} as never,
+        { model: {} } as never,
         {} as never,
         {} as never,
-        {} as never,
-        {} as never
+        {} as never, {} as never, Object.assign({} as never, { viewIdAt: (index: number) => String(index), viewIds: ["0", "1"] }) as never, { model: {} } as never, {} as never as never
     );
     return view;
 }
@@ -42,10 +42,10 @@ function create3DView() {
         {} as never,
         {} as never,
         {} as never,
+        { model: {} } as never,
         {} as never,
         {} as never,
-        {} as never,
-        {} as never
+        {} as never, {} as never, Object.assign({} as never, { viewIdAt: (index: number) => String(index), viewIds: ["0", "1"] }) as never, { model: {} } as never, {} as never as never
     );
 }
 
@@ -81,22 +81,22 @@ describe("Deck rendered-feature picking", () => {
         };
         const highlightLayer = {
             id: "selection-highlight",
-            props: {pickable: true, drillPickEligible: false}
+            props: { pickable: true, drillPickEligible: false }
         };
         const searchLayer = {
             id: "search-results",
-            props: {pickable: true}
+            props: { pickable: true }
         };
         const pickMultipleObjects = vi.fn(() => [
-            {layer: unselectableLayer, index: 0},
-            {layer: selectableLayer, index: 0}
+            { layer: unselectableLayer, index: 0 },
+            { layer: selectableLayer, index: 0 }
         ]);
         (view as any).deck = {
-            props: {layers: [unselectableLayer, selectableLayer, highlightLayer, searchLayer]},
+            props: { layers: [unselectableLayer, selectableLayer, highlightLayer, searchLayer] },
             pickMultipleObjects
         };
 
-        const result = view.drillPickFeatures({x: 12, y: 24}, 3, 5);
+        const result = view.drillPickFeatures({ x: 12, y: 24 }, 3, 5);
 
         expect(pickMultipleObjects).toHaveBeenCalledOnce();
         expect(pickMultipleObjects).toHaveBeenCalledWith({
@@ -108,8 +108,8 @@ describe("Deck rendered-feature picking", () => {
             unproject3D: false
         });
         expect(result).toEqual({
-            topFeatureIds: [{mapTileKey: "map-b/tile", featureId: "feature-7"}],
-            featureIds: [{mapTileKey: "map-b/tile", featureId: "feature-7"}]
+            topFeatureIds: [{ mapTileKey: "map-b/tile", featureId: "feature-7" }],
+            featureIds: [{ mapTileKey: "map-b/tile", featureId: "feature-7" }]
         });
     });
 
@@ -142,19 +142,19 @@ describe("Deck rendered-feature picking", () => {
             }
         ]);
         (view as any).deck = {
-            props: {layers: [mergedLayer]},
+            props: { layers: [mergedLayer] },
             pickMultipleObjects
         };
 
-        expect(view.drillPickFeatures({x: 0, y: 0}, 1, 3)).toEqual({
+        expect(view.drillPickFeatures({ x: 0, y: 0 }, 1, 3)).toEqual({
             topFeatureIds: [
-                {mapTileKey: "map-a/tile", featureId: "feature-4"},
-                {mapTileKey: "map-b/tile", featureId: "feature-4"}
+                { mapTileKey: "map-a/tile", featureId: "feature-4" },
+                { mapTileKey: "map-b/tile", featureId: "feature-4" }
             ],
             featureIds: [
-                {mapTileKey: "map-a/tile", featureId: "feature-4"},
-                {mapTileKey: "map-b/tile", featureId: "feature-4"},
-                {mapTileKey: "map-b/tile", featureId: "feature-5"}
+                { mapTileKey: "map-a/tile", featureId: "feature-4" },
+                { mapTileKey: "map-b/tile", featureId: "feature-4" },
+                { mapTileKey: "map-b/tile", featureId: "feature-5" }
             ]
         });
     });
@@ -178,9 +178,9 @@ describe("Deck rendered-feature picking", () => {
             }
         };
         const orders = [
-            {zIndex: 5, primitiveOrder: 2},
-            {zIndex: 10, primitiveOrder: 1},
-            {zIndex: 10, primitiveOrder: 2}
+            { zIndex: 5, primitiveOrder: 2 },
+            { zIndex: 10, primitiveOrder: 1 },
+            { zIndex: 10, primitiveOrder: 2 }
         ];
         view.gpuScene = {
             pickOrder: (index: number) => orders[index],
@@ -190,44 +190,43 @@ describe("Deck rendered-feature picking", () => {
             }]
         };
         view.deck = {
-            props: {layers: [layer, externalLayer]},
+            props: { layers: [layer, externalLayer] },
             pickMultipleObjects: vi.fn(() => [
-                {layer, object: {globalPickIndex: 0}, index: 0},
-                {layer: externalLayer, index: 0},
-                {layer, object: {globalPickIndex: 1}, index: 1},
-                {layer, object: {globalPickIndex: 2}, index: 2}
+                { layer, object: { globalPickIndex: 0 }, index: 0 },
+                { layer: externalLayer, index: 0 },
+                { layer, object: { globalPickIndex: 1 }, index: 1 },
+                { layer, object: { globalPickIndex: 2 }, index: 2 }
             ])
         };
 
-        const result = view.drillPickFeatures({x: 0, y: 0}, 4, 4);
+        const result = view.drillPickFeatures({ x: 0, y: 0 }, 4, 4);
         expect(result.topFeatureIds).toEqual([
-            {mapTileKey: "map/tile", featureId: "feature-2"}
+            { mapTileKey: "map/tile", featureId: "feature-2" }
         ]);
         expect(result.featureIds).toEqual([
-            {mapTileKey: "map/tile", featureId: "feature-2"},
-            {mapTileKey: "external/tile", featureId: "feature-7"},
-            {mapTileKey: "map/tile", featureId: "feature-1"},
-            {mapTileKey: "map/tile", featureId: "feature-0"}
+            { mapTileKey: "map/tile", featureId: "feature-2" },
+            { mapTileKey: "external/tile", featureId: "feature-7" },
+            { mapTileKey: "map/tile", featureId: "feature-1" },
+            { mapTileKey: "map/tile", featureId: "feature-0" }
         ]);
     });
 
     it("selects only the top unique feature on primary click", () => {
         const view = createView() as any;
-        const top = {mapTileKey: "map/tile", featureId: "top"};
-        const lower = {mapTileKey: "map/tile", featureId: "lower"};
+        const top = { mapTileKey: "map/tile", featureId: "top" };
+        const lower = { mapTileKey: "map/tile", featureId: "lower" };
         view.desktopDrillPickingEnabled = true;
-        view.stateService = {
+        view.inspectionState = {
             focusedView: 0,
-            drillPickRadius: 2,
-            inspectionsLimit: 10,
-            marker: false,
+            model: { drillPickRadius: 2, inspectionsLimit: 10 },
             unsetUnlockedSelections: vi.fn()
         };
-        view.inspectionSelection = {inspectFeatureIds: vi.fn()};
+        view.inspectionSelection = { inspectFeatureIds: vi.fn() };
         view.coordinatesService = {
-            mouseClickCoordinates: {next: vi.fn()}
+            model: { marker: false },
+            mouseClickCoordinates: { next: vi.fn() }
         };
-        view.menuService = {tileOutline: {next: vi.fn()}};
+        view.menuService = { tileOutline: { next: vi.fn() } };
         view.drillPickFeatures = vi.fn(() => ({
             topFeatureIds: [top],
             featureIds: [top, lower]
@@ -235,8 +234,8 @@ describe("Deck rendered-feature picking", () => {
         view.pickCartographic = vi.fn(() => null);
 
         view.onClick(
-            {x: 10, y: 20},
-            {srcEvent: {button: 0, pointerType: "mouse", ctrlKey: false}}
+            { x: 10, y: 20 },
+            { srcEvent: { button: 0, pointerType: "mouse", ctrlKey: false } }
         );
 
         expect(view.inspectionSelection.inspectFeatureIds)
@@ -245,22 +244,21 @@ describe("Deck rendered-feature picking", () => {
 
     it("selects every member of the top merged point without selecting lower objects", () => {
         const view = createView() as any;
-        const first = {mapTileKey: "map/tile", featureId: "merged-a"};
-        const second = {mapTileKey: "map/tile", featureId: "merged-b"};
-        const lower = {mapTileKey: "map/tile", featureId: "lower"};
+        const first = { mapTileKey: "map/tile", featureId: "merged-a" };
+        const second = { mapTileKey: "map/tile", featureId: "merged-b" };
+        const lower = { mapTileKey: "map/tile", featureId: "lower" };
         view.desktopDrillPickingEnabled = true;
-        view.stateService = {
+        view.inspectionState = {
             focusedView: 0,
-            drillPickRadius: 2,
-            inspectionsLimit: 10,
-            marker: false,
+            model: { drillPickRadius: 2, inspectionsLimit: 10 },
             unsetUnlockedSelections: vi.fn()
         };
-        view.inspectionSelection = {inspectFeatureIds: vi.fn()};
+        view.inspectionSelection = { inspectFeatureIds: vi.fn() };
         view.coordinatesService = {
-            mouseClickCoordinates: {next: vi.fn()}
+            model: { marker: false },
+            mouseClickCoordinates: { next: vi.fn() }
         };
-        view.menuService = {tileOutline: {next: vi.fn()}};
+        view.menuService = { tileOutline: { next: vi.fn() } };
         view.drillPickFeatures = vi.fn(() => ({
             topFeatureIds: [first, second],
             featureIds: [first, second, lower]
@@ -268,8 +266,8 @@ describe("Deck rendered-feature picking", () => {
         view.pickCartographic = vi.fn(() => null);
 
         view.onClick(
-            {x: 10, y: 20},
-            {srcEvent: {button: 0, pointerType: "mouse", ctrlKey: false}}
+            { x: 10, y: 20 },
+            { srcEvent: { button: 0, pointerType: "mouse", ctrlKey: false } }
         );
 
         expect(view.inspectionSelection.inspectFeatureIds)
@@ -278,20 +276,19 @@ describe("Deck rendered-feature picking", () => {
 
     it("picks after a touch tap when no pointer-down picking info is available", () => {
         const view = createView() as any;
-        const tapped = {mapTileKey: "map/tile", featureId: "tapped"};
+        const tapped = { mapTileKey: "map/tile", featureId: "tapped" };
         view.desktopDrillPickingEnabled = false;
-        view.stateService = {
+        view.inspectionState = {
             focusedView: 0,
-            drillPickRadius: 5,
-            inspectionsLimit: 10,
-            marker: false,
+            model: { drillPickRadius: 5, inspectionsLimit: 10 },
             unsetUnlockedSelections: vi.fn()
         };
-        view.inspectionSelection = {inspectFeatureIds: vi.fn()};
+        view.inspectionSelection = { inspectFeatureIds: vi.fn() };
         view.coordinatesService = {
-            mouseClickCoordinates: {next: vi.fn()}
+            model: { marker: false },
+            mouseClickCoordinates: { next: vi.fn() }
         };
-        view.menuService = {tileOutline: {next: vi.fn()}};
+        view.menuService = { tileOutline: { next: vi.fn() } };
         view.drillPickFeatures = vi.fn(() => ({
             topFeatureIds: [tapped],
             featureIds: [tapped]
@@ -299,19 +296,19 @@ describe("Deck rendered-feature picking", () => {
         view.pickCartographic = vi.fn(() => null);
 
         view.onClick(
-            {x: 10, y: 20},
-            {srcEvent: {button: 0, pointerType: "touch", ctrlKey: false}}
+            { x: 10, y: 20 },
+            { srcEvent: { button: 0, pointerType: "touch", ctrlKey: false } }
         );
 
-        expect(view.drillPickFeatures).toHaveBeenCalledWith({x: 10, y: 20}, 5, 1);
+        expect(view.drillPickFeatures).toHaveBeenCalledWith({ x: 10, y: 20 }, 5, 1);
         expect(view.inspectionSelection.inspectFeatureIds)
             .toHaveBeenCalledWith([tapped], false);
     });
 
     it("preserves merged membership from the direct touch pick", () => {
         const view = createView() as any;
-        const first = {mapTileKey: "map/tile", featureId: "merged-a"};
-        const second = {mapTileKey: "map/tile", featureId: "merged-b"};
+        const first = { mapTileKey: "map/tile", featureId: "merged-a" };
+        const second = { mapTileKey: "map/tile", featureId: "merged-b" };
         const mergedLayer = {
             props: {
                 subsetPickResolver: (address: number) =>
@@ -319,18 +316,17 @@ describe("Deck rendered-feature picking", () => {
             }
         };
         view.desktopDrillPickingEnabled = false;
-        view.stateService = {
+        view.inspectionState = {
             focusedView: 0,
-            drillPickRadius: 5,
-            inspectionsLimit: 10,
-            marker: false,
+            model: { drillPickRadius: 5, inspectionsLimit: 10 },
             unsetUnlockedSelections: vi.fn()
         };
-        view.inspectionSelection = {inspectFeatureIds: vi.fn()};
+        view.inspectionSelection = { inspectFeatureIds: vi.fn() };
         view.coordinatesService = {
-            mouseClickCoordinates: {next: vi.fn()}
+            model: { marker: false },
+            mouseClickCoordinates: { next: vi.fn() }
         };
-        view.menuService = {tileOutline: {next: vi.fn()}};
+        view.menuService = { tileOutline: { next: vi.fn() } };
         view.drillPickFeatures = vi.fn();
         view.pickCartographic = vi.fn(() => null);
 
@@ -339,9 +335,9 @@ describe("Deck rendered-feature picking", () => {
                 x: 10,
                 y: 20,
                 layer: mergedLayer,
-                object: {featureAddresses: [1, 2]}
+                object: { featureAddresses: [1, 2] }
             },
-            {srcEvent: {button: 0, pointerType: "touch", ctrlKey: false}}
+            { srcEvent: { button: 0, pointerType: "touch", ctrlKey: false } }
         );
 
         expect(view.drillPickFeatures).not.toHaveBeenCalled();
@@ -360,23 +356,23 @@ describe("Deck rendered-feature picking", () => {
                 subsetPickResolver: subsetPickResolver("map/tile")
             }
         };
-        const pickObjectAsync = vi.fn(async () => ({layer: baseLayer, index: 0}));
-        const pickObjectsAsync = vi.fn(async () => [{layer: baseLayer, index: 0}]);
+        const pickObjectAsync = vi.fn(async () => ({ layer: baseLayer, index: 0 }));
+        const pickObjectsAsync = vi.fn(async () => [{ layer: baseLayer, index: 0 }]);
         view.deckCanvasPointerInside = true;
-        view.latestHoverPosition = {x: 12, y: 24};
-        view.stateService = {drillPickRadius: 6};
-        view.inspectionSelection = {setHoveredFeatures: vi.fn()};
-        view.groundNavigationTarget = vi.fn(() => ({position: [11, 48, 0]}));
+        view.latestHoverPosition = { x: 12, y: 24 };
+        view.inspectionState = { model: { drillPickRadius: 6 } };
+        view.inspectionSelection = { setHoveredFeatures: vi.fn() };
+        view.groundNavigationTarget = vi.fn(() => ({ position: [11, 48, 0] }));
         view.setHoverNavigationPivot = vi.fn();
         view.deck = {
-            props: {layers: [baseLayer]},
-            getCanvas: () => ({clientWidth: 100, clientHeight: 100}),
+            props: { layers: [baseLayer] },
+            getCanvas: () => ({ clientWidth: 100, clientHeight: 100 }),
             pickObjectAsync,
             pickObjectsAsync,
             setProps: vi.fn()
         };
 
-        await view.processHoverAnchorPick({x: 12, y: 24});
+        await view.processHoverAnchorPick({ x: 12, y: 24 });
 
         expect(pickObjectAsync).toHaveBeenCalledWith({
             x: 12,
@@ -392,7 +388,7 @@ describe("Deck rendered-feature picking", () => {
                 featureId: "feature-7"
             }]);
 
-        await view.processHoverDetailPick({x: 12, y: 24});
+        await view.processHoverDetailPick({ x: 12, y: 24 });
 
         expect(pickObjectsAsync).toHaveBeenCalledWith({
             x: 6,
@@ -422,20 +418,20 @@ describe("Deck rendered-feature picking", () => {
                 subsetPickResolver: subsetPickResolver("map/tile")
             }
         };
-        const top = {mapTileKey: "map/tile", featureId: "feature-7"};
-        const lower = {mapTileKey: "map/tile", featureId: "feature-8"};
+        const top = { mapTileKey: "map/tile", featureId: "feature-7" };
+        const lower = { mapTileKey: "map/tile", featureId: "feature-8" };
         view.deckCanvasPointerInside = true;
-        view.latestHoverPosition = {x: 12, y: 24};
-        view.stateService = {drillPickRadius: 6};
-        view.inspectionSelection = {setHoveredFeatures: vi.fn()};
+        view.latestHoverPosition = { x: 12, y: 24 };
+        view.inspectionState = { model: { drillPickRadius: 6 } };
+        view.inspectionSelection = { setHoveredFeatures: vi.fn() };
         view.hoveredFeatureIds.next([top, lower]);
         view.deck = {
-            props: {layers: [baseLayer]},
-            pickObjectAsync: vi.fn(async () => ({layer: baseLayer, index: 0})),
+            props: { layers: [baseLayer] },
+            pickObjectAsync: vi.fn(async () => ({ layer: baseLayer, index: 0 })),
             setProps: vi.fn()
         };
 
-        await view.processHoverAnchorPick({x: 12, y: 24});
+        await view.processHoverAnchorPick({ x: 12, y: 24 });
 
         expect(view.hoveredFeatureIds.getValue()).toEqual([top, lower]);
         expect(view.inspectionSelection.setHoveredFeatures).not.toHaveBeenCalled();
@@ -452,7 +448,7 @@ describe("Deck rendered-feature picking", () => {
             pitch: 55,
             bearing: 30
         });
-        const expected = viewport.unproject([12, 24], {targetZ: 120});
+        const expected = viewport.unproject([12, 24], { targetZ: 120 });
         const baseLayer = {
             id: "gpu-vector",
             props: {
@@ -466,24 +462,24 @@ describe("Deck rendered-feature picking", () => {
         const pickObjectAsync = vi.fn().mockResolvedValue({
             layer: baseLayer,
             index: 0,
-            object: {globalPickIndex: 0},
+            object: { globalPickIndex: 0 },
             viewport,
             x: 12,
             y: 24
         });
         view.deckCanvasPointerInside = true;
-        view.latestHoverPosition = {x: 12, y: 24};
-        view.stateService = {drillPickRadius: 6};
-        view.inspectionSelection = {setHoveredFeatures: vi.fn()};
-        view.groundNavigationTarget = vi.fn(() => ({position: [11, 48, 0]}));
+        view.latestHoverPosition = { x: 12, y: 24 };
+        view.inspectionState = { model: { drillPickRadius: 6 } };
+        view.inspectionSelection = { setHoveredFeatures: vi.fn() };
+        view.groundNavigationTarget = vi.fn(() => ({ position: [11, 48, 0] }));
         view.setHoverNavigationPivot = vi.fn();
         view.deck = {
-            props: {layers: [baseLayer]},
+            props: { layers: [baseLayer] },
             pickObjectAsync,
             setProps: vi.fn()
         };
 
-        await view.processHoverAnchorPick({x: 12, y: 24});
+        await view.processHoverAnchorPick({ x: 12, y: 24 });
 
         expect(view.inspectionSelection.setHoveredFeatures)
             .toHaveBeenCalledWith([{
@@ -521,16 +517,16 @@ describe("Deck rendered-feature picking", () => {
         const depthCoordinate: [number, number, number] = [11.25, 48.5, 123];
         const baseLayer = {
             id: "gpu-vector",
-            props: {navigationAnchorEligible: true}
+            props: { navigationAnchorEligible: true }
         };
         const pickObject = vi.fn(() => ({
             layer: baseLayer,
             index: 0,
             coordinate: depthCoordinate
         }));
-        view.stateService = {drillPickRadius: 6};
+        view.inspectionState = { model: { drillPickRadius: 6 } };
         view.deck = {
-            props: {layers: [baseLayer]},
+            props: { layers: [baseLayer] },
             pickObject
         };
         view.groundNavigationTarget = vi.fn();
@@ -584,13 +580,13 @@ describe("Deck rendered-feature picking", () => {
         const pickObject = vi.fn(() => ({
             layer: baseLayer,
             index: 0,
-            object: {globalPickIndex: 0},
+            object: { globalPickIndex: 0 },
             coordinate: [11.25, 48.5, 123],
             viewport
         }));
-        view.stateService = {drillPickRadius: 6};
+        view.inspectionState = { model: { drillPickRadius: 6 } };
         view.deck = {
-            props: {layers: [baseLayer]},
+            props: { layers: [baseLayer] },
             pickObject
         };
         view.groundNavigationTarget = vi.fn();
@@ -603,7 +599,7 @@ describe("Deck rendered-feature picking", () => {
             viewport
         });
 
-        const expected = viewport.unproject([12, 24], {targetZ: 500});
+        const expected = viewport.unproject([12, 24], { targetZ: 500 });
         expect(target.position[0]).toBeCloseTo(expected[0], 10);
         expect(target.position[1]).toBeCloseTo(expected[1], 10);
         expect(target.position[2]).toBeCloseTo(500, 7);
@@ -633,25 +629,25 @@ describe("Deck rendered-feature picking", () => {
         const representativePick = {
             layer: baseLayer,
             index: 0,
-            object: {globalPickIndex: 0},
+            object: { globalPickIndex: 0 },
             viewport,
             x: 12,
             y: 24
         };
         view.deckCanvasPointerInside = true;
-        view.latestHoverPosition = {x: 12, y: 24};
-        view.stateService = {drillPickRadius: 6};
-        view.inspectionSelection = {setHoveredFeatures: vi.fn()};
+        view.latestHoverPosition = { x: 12, y: 24 };
+        view.inspectionState = { model: { drillPickRadius: 6 } };
+        view.inspectionSelection = { setHoveredFeatures: vi.fn() };
         view.setHoverNavigationPivot = vi.fn();
         view.deck = {
-            props: {layers: [baseLayer]},
-            getCanvas: () => ({clientWidth: 100, clientHeight: 100}),
+            props: { layers: [baseLayer] },
+            getCanvas: () => ({ clientWidth: 100, clientHeight: 100 }),
             pickObjectsAsync: vi.fn(async () => [representativePick]),
             pickObjectAsync: vi.fn(),
             setProps: vi.fn()
         };
 
-        await view.processHoverDetailPick({x: 12, y: 24});
+        await view.processHoverDetailPick({ x: 12, y: 24 });
 
         expect(view.deck.pickObjectAsync).not.toHaveBeenCalled();
         expect(view.setHoverNavigationPivot).toHaveBeenCalledTimes(1);
@@ -662,13 +658,13 @@ describe("Deck rendered-feature picking", () => {
     it("does not move the navigation pivot or start a hover pick while dragging", () => {
         const view = createView() as any;
         view.deckCanvasPointerInside = true;
-        view.coordinatesService = {mouseMoveCoordinates: {next: vi.fn()}};
-        view.pickCartographic = vi.fn(() => ({lon: 11, lat: 48, alt: 0}));
+        view.coordinatesService = { mouseMoveCoordinates: { next: vi.fn() } };
+        view.pickCartographic = vi.fn(() => ({ lon: 11, lat: 48, alt: 0 }));
         view.groundNavigationTarget = vi.fn();
         view.setHoverNavigationPivot = vi.fn();
         view.queueHoverPicks = vi.fn();
 
-        view.onCanvasPointerMove({offsetX: 12, offsetY: 24, buttons: 1});
+        view.onCanvasPointerMove({ offsetX: 12, offsetY: 24, buttons: 1 });
 
         expect(view.setHoverNavigationPivot).not.toHaveBeenCalled();
         expect(view.groundNavigationTarget).not.toHaveBeenCalled();
@@ -677,10 +673,10 @@ describe("Deck rendered-feature picking", () => {
 
     it("keeps camera interaction active while a wheel target is retained between packets", () => {
         const view = create3DView() as any;
-        view.layerController = {setCameraInteracting: vi.fn()};
+        view.layerController = { setCameraInteracting: vi.fn() };
         view.cancelHoverPickScheduling = vi.fn();
         view.queueHoverPicks = vi.fn();
-        view.latestHoverPosition = {x: 12, y: 24};
+        view.latestHoverPosition = { x: 12, y: 24 };
 
         view.noteCameraInteraction({
             interactionTargetPosition: [11, 48, 120]
@@ -690,16 +686,16 @@ describe("Deck rendered-feature picking", () => {
         expect(view.layerController.setCameraInteracting).toHaveBeenCalledWith(true);
         expect(view.queueHoverPicks).not.toHaveBeenCalled();
 
-        view.noteCameraInteraction({interactionTargetPosition: undefined});
+        view.noteCameraInteraction({ interactionTargetPosition: undefined });
 
         expect(view.isCameraInteracting).toBe(false);
         expect(view.layerController.setCameraInteracting).toHaveBeenLastCalledWith(false);
-        expect(view.queueHoverPicks).toHaveBeenCalledWith({x: 12, y: 24});
+        expect(view.queueHoverPicks).toHaveBeenCalledWith({ x: 12, y: 24 });
     });
 
     it("applies feature clearance only to renderer feature origins", () => {
         const view = create3DView() as any;
-        view.stateService = {featureZoomClearanceMeters: 20};
+        view.viewSettings.featureZoomClearanceMeters = 20;
 
         expect(view.minimumTargetDistanceForOrigin("feature")).toBe(20);
         expect(view.minimumTargetDistanceForOrigin("path")).toBe(20);
@@ -707,7 +703,7 @@ describe("Deck rendered-feature picking", () => {
         expect(view.minimumTargetDistanceForOrigin("ground")).toBeUndefined();
         expect(view.minimumTargetDistanceForOrigin("unknown")).toBeUndefined();
 
-        view.stateService.featureZoomClearanceMeters = 0;
+        view.viewSettings.featureZoomClearanceMeters = 0;
         expect(view.minimumTargetDistanceForOrigin("feature")).toBeUndefined();
     });
 
@@ -715,7 +711,7 @@ describe("Deck rendered-feature picking", () => {
         vi.useFakeTimers();
         try {
             const view = createView() as any;
-            const position = {x: 12, y: 24};
+            const position = { x: 12, y: 24 };
             view.deckCanvasPointerInside = true;
             view.pendingHoverDetailPosition = position;
             view.hoverDetailPickDueAtMs = performance.now() + 120;
@@ -775,12 +771,12 @@ describe("Deck rendered-feature picking", () => {
             x: cursor[0],
             y: cursor[1]
         }]);
-        (view as any).deck = {pickMultipleObjects};
+        (view as any).deck = { pickMultipleObjects };
 
-        const target = view.pickNavigationTarget({x: cursor[0], y: cursor[1]});
+        const target = view.pickNavigationTarget({ x: cursor[0], y: cursor[1] });
 
         expect(target?.featureIds).toEqual([
-            {mapTileKey: "map/tile", featureId: "feature-12"}
+            { mapTileKey: "map/tile", featureId: "feature-12" }
         ]);
         expect(target?.position[0]).toBeCloseTo(expected[0], 7);
         expect(target?.position[1]).toBeCloseTo(expected[1], 7);
@@ -828,7 +824,7 @@ describe("Deck rendered-feature picking", () => {
             viewport.projectPosition(addMetersToLngLat(origin, position));
         const ribbonCoordinate = addMetersToLngLat(origin, [50, 20, 0]);
         const cursor = viewport.project(ribbonCoordinate);
-        (view as unknown as {deck: unknown}).deck = {
+        (view as unknown as { deck: unknown }).deck = {
             pickMultipleObjects: vi.fn(() => [{
                 layer: pathLayer,
                 index: 0,
@@ -839,7 +835,7 @@ describe("Deck rendered-feature picking", () => {
             }])
         };
 
-        const target = view.pickNavigationTarget({x: cursor[0], y: cursor[1]});
+        const target = view.pickNavigationTarget({ x: cursor[0], y: cursor[1] });
 
         expect(target).toBeUndefined();
     });
@@ -893,10 +889,10 @@ describe("Deck rendered-feature picking", () => {
             x: cursor[0],
             y: cursor[1]
         }]);
-        (view as any).stateService = {drillPickRadius: 10};
-        (view as any).deck = {pickMultipleObjects};
+        (view as any).inspectionState = { model: { drillPickRadius: 10 } };
+        (view as any).deck = { pickMultipleObjects };
 
-        const target = view.pickNavigationTarget({x: cursor[0], y: cursor[1]});
+        const target = view.pickNavigationTarget({ x: cursor[0], y: cursor[1] });
 
         expect(target?.position[0]).toBeCloseTo(expected[0], 7);
         expect(target?.position[1]).toBeCloseTo(expected[1], 7);
@@ -953,7 +949,7 @@ describe("Deck rendered-feature picking", () => {
             536.75
         ]);
         const cursor = viewport.project(expected);
-        (view as unknown as {deck: unknown}).deck = {
+        (view as unknown as { deck: unknown }).deck = {
             pickMultipleObjects: vi.fn(() => [{
                 layer: pathLayer,
                 index: 0,
@@ -964,7 +960,7 @@ describe("Deck rendered-feature picking", () => {
             }])
         };
 
-        const target = view.pickNavigationTarget({x: cursor[0], y: cursor[1]});
+        const target = view.pickNavigationTarget({ x: cursor[0], y: cursor[1] });
         const projected = viewport.project(target!.position);
 
         expect(Math.hypot(projected[0] - cursor[0], projected[1] - cursor[1])).toBeLessThanOrEqual(4);
@@ -985,7 +981,7 @@ describe("Deck rendered-feature picking", () => {
             }
         };
         const coordinate: [number, number, number] = [11, 48, 120];
-        (view as unknown as {deck: unknown}).deck = {
+        (view as unknown as { deck: unknown }).deck = {
             pickMultipleObjects: vi.fn(() => [{
                 layer: surfaceLayer,
                 index: 0,
@@ -993,7 +989,7 @@ describe("Deck rendered-feature picking", () => {
             }])
         };
 
-        const target = view.pickNavigationTarget({x: 500, y: 350});
+        const target = view.pickNavigationTarget({ x: 500, y: 350 });
 
         expect(target?.position).toEqual(coordinate);
         expect(target?.surfaceNormal?.[0]).toBe(0);
@@ -1014,7 +1010,7 @@ describe("Deck rendered-feature picking", () => {
             bearing: 30
         });
         const cursor: [number, number] = [620, 390];
-        const expected = viewport.unproject(cursor, {targetZ: 120});
+        const expected = viewport.unproject(cursor, { targetZ: 120 });
         const biasedCoordinate = viewport.unproject([cursor[0], cursor[1], 0.1]);
         const layer = {
             id: "gpu-vector",
@@ -1024,11 +1020,11 @@ describe("Deck rendered-feature picking", () => {
                 subsetPickResolver: subsetPickResolver("map/tile")
             }
         };
-        (view as unknown as {deck: unknown}).deck = {
+        (view as unknown as { deck: unknown }).deck = {
             pickMultipleObjects: vi.fn(() => [{
                 layer,
                 index: 47,
-                object: {globalPickIndex: 47},
+                object: { globalPickIndex: 47 },
                 coordinate: biasedCoordinate,
                 viewport,
                 x: cursor[0],
@@ -1036,7 +1032,7 @@ describe("Deck rendered-feature picking", () => {
             }])
         };
 
-        const target = view.pickNavigationTarget({x: cursor[0], y: cursor[1]});
+        const target = view.pickNavigationTarget({ x: cursor[0], y: cursor[1] });
 
         expect(layer.props.navigationAltitudeResolver).toHaveBeenCalledWith(47);
         expect(target?.position[0]).toBeCloseTo(expected[0], 8);
@@ -1048,14 +1044,14 @@ describe("Deck rendered-feature picking", () => {
     it("accepts an eligible physical surface without a logical feature identity", () => {
         const view = createView();
         const coordinate: [number, number, number] = [11, 48, 120];
-        (view as unknown as {deck: unknown}).deck = {
+        (view as unknown as { deck: unknown }).deck = {
             pickMultipleObjects: vi.fn(() => [{
-                layer: {props: {navigationAnchorEligible: true}},
+                layer: { props: { navigationAnchorEligible: true } },
                 coordinate
             }])
         };
 
-        const target = view.pickNavigationTarget({x: 500, y: 350});
+        const target = view.pickNavigationTarget({ x: 500, y: 350 });
 
         expect(target?.position).toEqual(coordinate);
         expect(target?.featureIds).toEqual([]);
@@ -1100,7 +1096,7 @@ describe("Deck rendered-feature picking", () => {
         const pathCoordinate = addMetersToLngLat(origin, [50, 8, 0]);
         const expected = addMetersToLngLat(origin, [50, 0, 0]);
         const cursor = viewport.project(expected);
-        (view as unknown as {deck: unknown}).deck = {
+        (view as unknown as { deck: unknown }).deck = {
             pickMultipleObjects: vi.fn(() => [
                 {
                     layer: pathLayer,
@@ -1110,11 +1106,11 @@ describe("Deck rendered-feature picking", () => {
                     x: cursor[0],
                     y: cursor[1]
                 },
-                {layer: surfaceLayer, index: 0, coordinate: [11, 48, 120], viewport}
+                { layer: surfaceLayer, index: 0, coordinate: [11, 48, 120], viewport }
             ])
         };
 
-        const target = view.pickNavigationTarget({x: cursor[0], y: cursor[1]});
+        const target = view.pickNavigationTarget({ x: cursor[0], y: cursor[1] });
 
         expect(target?.position[0]).toBeCloseTo(expected[0], 7);
         expect(target?.position[1]).toBeCloseTo(expected[1], 7);
@@ -1124,7 +1120,7 @@ describe("Deck rendered-feature picking", () => {
 
     it("skips a nonphysical label and anchors navigation and markers to the feature point", () => {
         const view = createView();
-        const targetFeature = {mapTileKey: "map/tile", featureId: "feature-12"};
+        const targetFeature = { mapTileKey: "map/tile", featureId: "feature-12" };
         const labelLayer = {
             id: "base-label",
             props: {
@@ -1153,18 +1149,18 @@ describe("Deck rendered-feature picking", () => {
             }
         };
         const pickMultipleObjects = vi.fn(() => [
-            {layer: labelLayer, index: 0, coordinate: [11, 48, 999]},
-            {layer: pointLayer, index: 0, coordinate: [11, 48, 0]}
+            { layer: labelLayer, index: 0, coordinate: [11, 48, 999] },
+            { layer: pointLayer, index: 0, coordinate: [11, 48, 0] }
         ]);
         (view as any).deck = {
-            props: {layers: [labelLayer, pointLayer]},
+            props: { layers: [labelLayer, pointLayer] },
             pickMultipleObjects
         };
 
-        const navigationTarget = view.pickNavigationTarget({x: 500, y: 350});
+        const navigationTarget = view.pickNavigationTarget({ x: 500, y: 350 });
         const position = (view as any).markerPositionForFeature(
-            {layer: labelLayer, index: 0, coordinate: [11, 48, 999]},
-            {x: 500, y: 350},
+            { layer: labelLayer, index: 0, coordinate: [11, 48, 999] },
+            { x: 500, y: 350 },
             targetFeature,
             1,
             10

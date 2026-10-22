@@ -5,12 +5,12 @@ import {TileSubsetLayerVisualization} from
     "./deck/tile-subset-layer.visualization";
 import {coreLib} from "../integrations/wasm";
 import type {FilterSubscriptionDefinition} from
-    "../mapdata/filter-subscription.model";
+    "../mapdata/filter-subscription";
 import {
     objectPartition,
     partitionKey,
     tilePartition
-} from "../mapdata/partition.model";
+} from "../mapdata/partition";
 
 const tileKey = (id: number) => partitionKey(tilePartition(id));
 

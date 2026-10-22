@@ -10,13 +10,14 @@ import {
     Signal,
     ViewChild
 } from "@angular/core";
-import {KeyboardService} from "../shared/keyboard.service";
-import {AppModeService} from "../shared/app-mode.service";
-import {IRenderView} from "./render-view.model";
-import {AppStateService} from "../shared/appstate.service";
-import {toObservable, toSignal} from "@angular/core/rxjs-interop";
-import {Observable, Subscription} from "rxjs";
-import {filter} from "rxjs/operators";
+import { toObservable, toSignal } from "@angular/core/rxjs-interop";
+import { Observable, Subscription } from "rxjs";
+import { filter } from "rxjs/operators";
+import { AppModeService } from "../config/app-mode.service";
+import { AppStateService } from "../state/app-state.service";
+import { KeyboardService } from "../shared/keyboard.service";
+import { MapViewModel } from "./mapview.model";
+import { IRenderView } from "./render-view";
 
 @Component({
     selector: 'erdblick-view-ui',
@@ -71,7 +72,7 @@ import {filter} from "rxjs/operators";
  * It hosts movement controls, projection toggles, and the animated compass bound to the active renderer.
  */
 export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
-    @ViewChild('compassNeedle', {static: false}) needleRef!: ElementRef<HTMLElement>;
+    @ViewChild('compassNeedle', { static: false }) needleRef!: ElementRef<HTMLElement>;
 
     mapView: InputSignal<IRenderView | undefined> = input<IRenderView | undefined>(undefined);
     is2D: InputSignal<boolean> = input<boolean>(false);
@@ -83,11 +84,11 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         }
         return this.numViews() > 1 && mapView.viewIndex === 0;
     });
-    projectionOptions: {icon: string, label: string, mode: string}[] = [
+    projectionOptions: { icon: string, label: string, mode: string }[] = [
         { icon: '3d', label: '3D', mode: '3D projection' },
         { icon: '2d', label: '2D', mode: '2D projection' },
     ];
-    projection: {icon: string, label: string, mode: string} = this.projectionOptions[0];
+    projection: { icon: string, label: string, mode: string } = this.projectionOptions[0];
 
     private mapViewSubscription = new Subscription();
     private mapView$: Observable<IRenderView | undefined>;
@@ -95,10 +96,11 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
 
     /** Bridges the current renderer input signal into subscriptions used by the compass and projection toggle. */
     constructor(public appModeService: AppModeService,
-                public stateService: AppStateService,
-                private keyboardService: KeyboardService,
-                private ngZone: NgZone) {
-        this.numViews = toSignal(this.stateService.numViewsState, {initialValue: this.stateService.numViewsState.getValue()});
+        public stateService: AppStateService,
+        private keyboardService: KeyboardService,
+        private ngZone: NgZone,
+        public readonly viewSettings: MapViewModel) {
+        this.numViews = toSignal(this.viewSettings.numViewsState, { initialValue: this.viewSettings.numViewsState.getValue() });
         this.mapView$ = toObservable(this.mapView);
     }
 
@@ -106,7 +108,7 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
     ngAfterViewInit(): void {
         const needle = this.needleRef.nativeElement;
         this.mapViewSubscription.add(this.mapView$.pipe(
-            filter(mv=> mv !== undefined)).subscribe(mapView => {
+            filter(mv => mv !== undefined)).subscribe(mapView => {
                 this.projection = this.is2D() ?
                     { icon: '2d', label: '2D', mode: '2D projection' } :
                     { icon: '3d', label: '3D', mode: '3D projection' };
@@ -161,9 +163,9 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         if (!mapView) {
             return;
         }
-        this.stateService.focusedView = mapView.viewIndex;
-        const currentMode = this.stateService.mode2dState.getValue(mapView.viewIndex);
-        this.stateService.setProjectionMode(mapView.viewIndex, !currentMode);
+        this.viewSettings.focusedView = mapView.viewIndex;
+        const currentMode = this.viewSettings.mode2dState.getValue(mapView.viewIndex);
+        this.viewSettings.setProjectionMode(mapView.viewIndex, !currentMode);
     }
 
     /** Builds a stable test id for view UI controls. */

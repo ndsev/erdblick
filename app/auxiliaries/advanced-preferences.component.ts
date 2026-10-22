@@ -1,9 +1,11 @@
-import {Component, ElementRef, HostListener, ViewChild} from '@angular/core';
-import {Subscription} from 'rxjs';
-import {ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, AppStateService} from '../shared/appstate.service';
-import {EditorService} from '../shared/editor.service';
-import {AppDialogComponent} from '../shared/app-dialog.component';
-import {DialogStackService} from '../shared/dialog-stack.service';
+import { Component, ElementRef, HostListener, ViewChild } from '@angular/core';
+import { Subscription } from 'rxjs';
+import { AppDialogComponent } from '../layout/app-dialog.component';
+import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID } from "../layout/app-layout";
+import { AppLayoutService } from "../layout/app-layout.service";
+import { AppStateService } from "../state/app-state.service";
+import { DialogStackService } from '../layout/dialog-stack.service';
+import { EditorService } from '../shared/editor.service';
 
 @Component({
     selector: 'advanced-preferences',
@@ -79,15 +81,16 @@ export class AdvancedPreferencesComponent {
     private saveSubscription: Subscription = new Subscription();
 
     constructor(public readonly stateService: AppStateService,
-                private readonly editorService: EditorService,
-                private readonly dialogStack: DialogStackService) {}
+        private readonly editorService: EditorService,
+        private readonly dialogStack: DialogStackService,
+        public readonly layout: AppLayoutService) { }
 
     get dialogVisible(): boolean {
-        return this.stateService.isDialogOpen(this.dialogLayoutId);
+        return this.layout.isDialogOpen(this.dialogLayoutId);
     }
 
     set dialogVisible(visible: boolean) {
-        this.stateService.setDialogOpen(this.dialogLayoutId, visible);
+        this.layout.setDialogOpen(this.dialogLayoutId, visible);
     }
 
     onDialogShow() {
@@ -190,7 +193,7 @@ export class AdvancedPreferencesComponent {
     /** Downloads the current snapshot editor contents as JSON. */
     exportSnapshot() {
         const source = this.editorService.getSessionSource(this.advancedPreferencesEditorSessionId);
-        const blob = new Blob([source], {type: 'application/json;charset=utf-8'});
+        const blob = new Blob([source], { type: 'application/json;charset=utf-8' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         link.download = `mv_state_${this.snapshotTimestamp()}.json`;

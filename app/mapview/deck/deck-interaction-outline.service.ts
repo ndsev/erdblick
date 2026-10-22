@@ -1,16 +1,16 @@
 import {
     Layer,
+    _LayersPass as LayersPass,
     type Effect,
     type EffectContext,
     type LayerProps,
-    type PreRenderOptions,
-    _LayersPass as LayersPass
+    type PreRenderOptions
 } from "@deck.gl/core";
-import type {Framebuffer, RenderPipelineParameters, Texture} from "@luma.gl/core";
-import {ClipSpace} from "@luma.gl/engine";
-import type {ShaderModule} from "@luma.gl/shadertools";
-import type {DeckInteractionEffect, DeckRgba} from "./deck-interaction-effect";
-import {DeckLayerRegistry} from "./deck-layer-registry";
+import type { Framebuffer, RenderPipelineParameters, Texture } from "@luma.gl/core";
+import { ClipSpace } from "@luma.gl/engine";
+import type { ShaderModule } from "@luma.gl/shadertools";
+import type { DeckInteractionEffect, DeckRgba } from "./deck-interaction-effect";
+import { DeckLayerRegistry } from "./deck-layer-registry";
 
 const MASK_LAYER_PREFIX = "builtin/interaction-mask/";
 const HALO_LAYER_PREFIX = "builtin/interaction-halo/";

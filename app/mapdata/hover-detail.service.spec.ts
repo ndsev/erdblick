@@ -1,15 +1,12 @@
 import "@angular/compiler";
-import {BehaviorSubject} from "rxjs";
-import {describe, expect, it, vi} from "vitest";
-import {coreLib} from "../integrations/wasm";
-import type {
-    HoverLabelFieldConfig,
-    TileFeatureId
-} from "../shared/appstate.service";
-import {defaultHoverLabelFieldKey} from "../shared/appstate.service";
-import {HoverDetailService} from "./hover-detail.service";
-import {MapgetLayer} from "./mapget-layer.model";
-import {partitionKey, tilePartition} from "./partition.model";
+import { BehaviorSubject } from "rxjs";
+import { describe, expect, it, vi } from "vitest";
+import { coreLib } from "../integrations/wasm";
+import type { HoverLabelFieldConfig, TileFeatureId } from "../inspection/inspection-state";
+import { defaultHoverLabelFieldKey } from "../inspection/inspection-state";
+import { HoverDetailService } from "./hover-detail.service";
+import { MapgetLayer } from "./mapget-layer";
+import { partitionKey, tilePartition } from "./partition";
 
 /** Builds the minimal state and transport surface used by HoverDetailService. */
 function createHarness(
@@ -55,12 +52,12 @@ function createHarness(
         retainTileAttachment: vi.fn()
     };
     const mapInfo = {
-        tileLayerParser: {readTileSubsetLayer: vi.fn()}
+        tileLayerParser: { readTileSubsetLayer: vi.fn() }
     };
     const service = new HoverDetailService(
         state as never,
         mapInfo as never,
-        tileStream as never
+        tileStream as never, state as never as never
     );
     const mapgetLayer = new MapgetLayer(
         "source",
@@ -69,7 +66,7 @@ function createHarness(
         "Road",
         {} as never
     );
-    return {service, state, tileStream, filterRefs, mapInfo, mapgetLayer};
+    return { service, state, tileStream, filterRefs, mapInfo, mapgetLayer };
 }
 
 describe("HoverDetailService", () => {
@@ -79,7 +76,7 @@ describe("HoverDetailService", () => {
     });
 
     it("renders the intrinsic feature id without creating a filter subscription", () => {
-        const {service, tileStream, mapgetLayer} = createHarness([{
+        const { service, tileStream, mapgetLayer } = createHarness([{
             expression: "id",
             customExpression: false
         }]);
@@ -103,10 +100,10 @@ describe("HoverDetailService", () => {
     });
 
     it("projects configured fields through a zero-geometry feature channel", () => {
-        const {service, tileStream, filterRefs, mapgetLayer} =
+        const { service, tileStream, filterRefs, mapgetLayer } =
             createHarness([
-                {expression: "id", customExpression: false},
-                {expression: "typeId", customExpression: false}
+                { expression: "id", customExpression: false },
+                { expression: "typeId", customExpression: false }
             ]);
         service.reconcileView(0, [{
             mapgetLayer,
@@ -129,12 +126,12 @@ describe("HoverDetailService", () => {
     });
 
     it("does not rescan unchanged viewport coverage on unrelated reconciliations", () => {
-        const {service, filterRefs, mapgetLayer} = createHarness([
-            {expression: "typeId", customExpression: false}
+        const { service, filterRefs, mapgetLayer } = createHarness([
+            { expression: "typeId", customExpression: false }
         ]);
         const partitions = [tilePartition(545379780)];
         const priorityPartitions = [tilePartition(545379780)];
-        const coverage = [{mapgetLayer, partitions, priorityPartitions}];
+        const coverage = [{ mapgetLayer, partitions, priorityPartitions }];
 
         service.reconcileView(0, coverage);
         service.reconcileView(0, coverage);
@@ -144,10 +141,10 @@ describe("HoverDetailService", () => {
     });
 
     it("disables labels and releases projections without deleting their field configuration", () => {
-        const {service, state, tileStream, filterRefs, mapgetLayer} =
+        const { service, state, tileStream, filterRefs, mapgetLayer } =
             createHarness([
-                {expression: "id", customExpression: false},
-                {expression: "typeId", customExpression: false}
+                { expression: "id", customExpression: false },
+                { expression: "typeId", customExpression: false }
             ]);
         service.reconcileView(0, [{
             mapgetLayer,
@@ -168,10 +165,10 @@ describe("HoverDetailService", () => {
     });
 
     it("reads projected values from the resident subset instead of loading on hover", () => {
-        const {service, tileStream, filterRefs, mapInfo, mapgetLayer} =
+        const { service, tileStream, filterRefs, mapInfo, mapgetLayer } =
             createHarness([
-                {expression: "id", customExpression: false},
-                {expression: "typeId", customExpression: false}
+                { expression: "id", customExpression: false },
+                { expression: "typeId", customExpression: false }
             ]);
         const tileId = 545379780;
         const partition = tilePartition(tileId);
@@ -226,7 +223,7 @@ describe("HoverDetailService", () => {
             featureId: "Road.42",
             showFeatureId: true,
             fields: [
-                {key: "typeId", value: "Road", colorKey: "typeId"}
+                { key: "typeId", value: "Road", colorKey: "typeId" }
             ]
         }]);
         expect(tileStream.parseMapPartitionKeySafe).toHaveBeenCalledOnce();
@@ -234,17 +231,17 @@ describe("HoverDetailService", () => {
     });
 
     it.each([
-        {results: [], present: false, expected: undefined},
-        {results: [null], present: true, expected: null},
-        {results: [undefined], present: true, expected: undefined},
-        {results: [80], present: true, expected: 80},
-        {results: [80, 90], present: false, expected: undefined},
-        {results: [[80, 90]], present: true, expected: [80, 90]}
-    ])("preserves exactly one hover result without flattening arrays: $results", ({results, present, expected}) => {
-        const {service, mapInfo} = createHarness([{expression: "speedLimit", customExpression: false}]);
+        { results: [], present: false, expected: undefined },
+        { results: [null], present: true, expected: null },
+        { results: [undefined], present: true, expected: undefined },
+        { results: [80], present: true, expected: 80 },
+        { results: [80, 90], present: false, expected: undefined },
+        { results: [[80, 90]], present: true, expected: [80, 90] }
+    ])("preserves exactly one hover result without flattening arrays: $results", ({ results, present, expected }) => {
+        const { service, mapInfo } = createHarness([{ expression: "speedLimit", customExpression: false }]);
         mapInfo.tileLayerParser.readTileSubsetLayer.mockReturnValue({
-            channelSchema: () => ({featureFields: ["speedLimit"], entryCount: 1}),
-            entryRange: () => [{featureId: "Road.42", values: [results]}],
+            channelSchema: () => ({ featureFields: ["speedLimit"], entryCount: 1 }),
+            entryRange: () => [{ featureId: "Road.42", values: [results] }],
             delete: vi.fn()
         });
         const values = service["decodeTile"](new Uint8Array([1]), ["speedLimit"])!.get("Road.42")!;
@@ -254,7 +251,7 @@ describe("HoverDetailService", () => {
     });
 
     it("uses a configured display key for projected values", () => {
-        const {service, filterRefs, mapInfo, mapgetLayer} = createHarness([{
+        const { service, filterRefs, mapInfo, mapgetLayer } = createHarness([{
             expression: "properties.rules.speedLimit",
             customExpression: false,
             displayKey: "limit"
@@ -299,7 +296,7 @@ describe("HoverDetailService", () => {
             receivedAt: 1
         });
 
-        expect(service.detailsFor(0, [{mapTileKey, featureId: "Road.42"}]))
+        expect(service.detailsFor(0, [{ mapTileKey, featureId: "Road.42" }]))
             .toEqual([{
                 featureId: "Road.42",
                 showFeatureId: false,

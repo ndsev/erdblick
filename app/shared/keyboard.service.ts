@@ -1,5 +1,12 @@
-import {Directive, ElementRef, HostListener, Injectable, Renderer2, RendererFactory2} from "@angular/core";
-import {DialogStackService} from "./dialog-stack.service";
+import {
+    Directive,
+    ElementRef,
+    HostListener,
+    Injectable,
+    Renderer2,
+    RendererFactory2
+} from "@angular/core";
+import { DialogStackService } from "../layout/dialog-stack.service";
 
 @Directive({
     selector: '[onEnterClick]',
@@ -89,7 +96,6 @@ export class KeyboardService {
 
     /** Registers a shortcut and optionally ignores it while the user edits text inputs. */
     registerShortcut(keys: string, callback: (event: KeyboardEvent) => void, preventOnInput: boolean = false): void {
-        // TODO: If registered for the focused view, only apply shortcuts to the view which gets focused on
         this.shortcuts.set(keys, callback);
         if (preventOnInput) {
             this.preventOnInputShortcuts.add(keys);

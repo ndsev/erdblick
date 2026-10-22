@@ -1,25 +1,20 @@
-import {Injectable} from "@angular/core";
-import {MenuItem} from "primeng/api";
-import {BehaviorSubject, Subject} from "rxjs";
-import {Color, HeightReference, Rectangle} from "../integrations/geo";
-import {coreLib} from "../integrations/wasm";
-import {
-    AppStateService,
-    SelectedSourceData,
-    type TileFeatureId
-} from "../shared/appstate.service";
-import type {FeatureSearchMapLayerRef} from "../shared/feature-search-state";
-import {FeatureSearchService} from "../search/feature.search.service";
-import {InfoMessageService} from "../shared/info.service";
-import {DiagnosticsFacadeService} from "../diagnostics/diagnostics.facade.service";
-import {PerformanceDiagnosticsScope} from "../diagnostics/diagnostics.model";
-import {
-    ExternalViewerLocation,
-    ExternalViewerService
-} from "../search/external-viewer.service";
-import type {RenderNavigationTarget} from "./render-view.model";
-import {InspectionSelectionService} from "../inspection/inspection-selection.service";
-import {parseMapPartitionKey} from "../mapdata/partition.model";
+import { Injectable } from "@angular/core";
+import { MenuItem } from "primeng/api";
+import { BehaviorSubject, Subject } from "rxjs";
+import { DiagnosticsFacadeService } from "../diagnostics/diagnostics.facade.service";
+import { PerformanceDiagnosticsScope } from "../diagnostics/diagnostics.types";
+import { InspectionPanelService } from "../inspection/inspection-panel.service";
+import { InspectionSelectionService } from "../inspection/inspection-selection.service";
+import { SelectedSourceData, type TileFeatureId } from "../inspection/inspection-state";
+import { Color, HeightReference, Rectangle } from "../integrations/geo";
+import { coreLib } from "../integrations/wasm";
+import { parseMapPartitionKey } from "../mapdata/partition";
+import { ExternalViewerLocation, ExternalViewerService } from "../navigation/external-viewer.service";
+import type { FeatureSearchMapLayerRef } from "../feature-search/feature-search-state";
+import { FeatureSearchService } from "../feature-search/feature.search.service";
+import { InfoMessageService } from "../shared/info.service";
+import { AppStateService } from "../state/app-state.service";
+import type { RenderNavigationTarget } from "./render-view";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {
@@ -57,13 +52,13 @@ export interface TileDiagnosticsMenuOption {
 
 /** Transient first-person action offered by the context menu for one render view. */
 export type FirstPersonViewMenuContext =
-    | {viewIndex: number; active: true}
-    | {viewIndex: number; active: false; target: RenderNavigationTarget};
+    | { viewIndex: number; active: true }
+    | { viewIndex: number; active: false; target: RenderNavigationTarget };
 
 /** View-scoped first-person request emitted when a context-menu action is selected. */
 export type FirstPersonViewMenuRequest =
-    | {viewIndex: number; action: "enter"; target: RenderNavigationTarget}
-    | {viewIndex: number; action: "exit"};
+    | { viewIndex: number; action: "enter"; target: RenderNavigationTarget }
+    | { viewIndex: number; action: "exit" };
 
 /** One flat context-menu row retaining its topmost concrete tile hit. */
 interface PickedFeatureMenuRow {
@@ -72,7 +67,7 @@ interface PickedFeatureMenuRow {
     mapIdLabel: string;
 }
 
-@Injectable()
+@Injectable({ providedIn: "root" })
 /**
  * Owns the dynamic right-click menu content for the map view.
  * The service tracks source-data context so the menu can offer quick repeat actions across tiles.
@@ -81,8 +76,8 @@ export class RightClickMenuService {
 
     menuItems: BehaviorSubject<MenuItem[]> = new BehaviorSubject<MenuItem[]>([]);
     preferredTileIdForSourceData: number | null = null;
-    lastInspectedTileSourceDataOption: BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null> =
-        new BehaviorSubject<{tileId: number, mapId: string, layerId: string} | null>(null);
+    lastInspectedTileSourceDataOption: BehaviorSubject<{ tileId: number, mapId: string, layerId: string } | null> =
+        new BehaviorSubject<{ tileId: number, mapId: string, layerId: string } | null>(null);
     closeContextMenus: Subject<void> = new Subject<void>();
     tileIdsForSourceData: Subject<SourceDataDropdownOption[]> = new Subject<SourceDataDropdownOption[]>();
     tileOutline: Subject<TileOutlinePayload | null> = new Subject<TileOutlinePayload | null>();
@@ -90,7 +85,7 @@ export class RightClickMenuService {
     firstPersonViewRequests: Subject<FirstPersonViewMenuRequest> = new Subject<FirstPersonViewMenuRequest>();
     private tileDiagnosticsOptions: TileDiagnosticsMenuOption[] = [];
     private sourceDataDialogVisible = false;
-    private sourceDataShortcut: {tileId: number, mapId: string, layerId: string} | null = null;
+    private sourceDataShortcut: { tileId: number, mapId: string, layerId: string } | null = null;
     private featureSearchScope: FeatureSearchContextMenuScope | null = null;
     private externalViewerLocation: ExternalViewerLocation | null = null;
     private firstPersonViewContext: FirstPersonViewMenuContext | null = null;
@@ -98,11 +93,12 @@ export class RightClickMenuService {
 
     /** Seeds the default menu and keeps the “inspect last layer” shortcut synchronized with context. */
     constructor(private stateService: AppStateService,
-                private featureSearchService: FeatureSearchService,
-                private infoMessageService: InfoMessageService,
-                private diagnostics: DiagnosticsFacadeService,
-                private externalViewerService: ExternalViewerService,
-                private inspectionSelection: InspectionSelectionService) {
+        private featureSearchService: FeatureSearchService,
+        private infoMessageService: InfoMessageService,
+        private diagnostics: DiagnosticsFacadeService,
+        private externalViewerService: ExternalViewerService,
+        private inspectionSelection: InspectionSelectionService,
+        public readonly inspectionState: InspectionPanelService) {
         this.rebuildMenuItems();
         this.tileIdsForSourceData.subscribe(tileIds => {
             this.sourceDataShortcut = null;
@@ -243,23 +239,23 @@ export class RightClickMenuService {
             }
             items.push(...this.pickedFeatureRows.map((row, index) =>
                 this.pickedFeatureMenuItem(row, index)));
-            items.push({separator: true});
+            items.push({ separator: true });
         }
         items.push(...this.sourceDataMenuItems());
         if (this.firstPersonViewContext) {
-            items.push({separator: true}, this.firstPersonViewMenuItem(this.firstPersonViewContext));
+            items.push({ separator: true }, this.firstPersonViewMenuItem(this.firstPersonViewContext));
         }
         if (this.externalViewerLocation && this.externalViewerService.providers.length) {
-            items.push({separator: true}, this.externalViewerMenuItem(this.externalViewerLocation));
+            items.push({ separator: true }, this.externalViewerMenuItem(this.externalViewerLocation));
         }
         if (this.tileDiagnosticsOptions.length) {
-            items.push({separator: true});
+            items.push({ separator: true });
             for (const option of this.tileDiagnosticsOptions) {
                 items.push(this.tileDiagnosticsMenuItem(option));
             }
         }
         if (this.featureSearchScope) {
-            items.push({separator: true}, this.featureSearchMenuItem(this.featureSearchScope));
+            items.push({ separator: true }, this.featureSearchMenuItem(this.featureSearchScope));
         }
         this.menuItems.next(items);
     }
@@ -347,12 +343,12 @@ export class RightClickMenuService {
     }
 
     /** Builds a shortcut that reuses the last inspected source-data layer for the current tile. */
-    private buildLastInspectedSourceDataMenuItem(sourceDataParams: {tileId: number, mapId: string, layerId: string}): MenuItem {
+    private buildLastInspectedSourceDataMenuItem(sourceDataParams: { tileId: number, mapId: string, layerId: string }): MenuItem {
         return {
             label: 'Inspect Source Data with Last Layer',
             icon: 'pi pi-database',
             command: () => {
-                this.stateService.setSelection({
+                this.inspectionState.setSelection({
                     mapTileKey: coreLib.getSourceDataLayerKey(sourceDataParams.mapId, sourceDataParams.layerId, sourceDataParams.tileId)
                 } as SelectedSourceData);
             }

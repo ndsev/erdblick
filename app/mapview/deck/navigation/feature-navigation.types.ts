@@ -1,4 +1,4 @@
-import type {RenderNavigationTargetOrigin} from "../../render-view.model";
+import type {RenderNavigationTargetOrigin} from "../../render-view";
 
 /** Physical WGS84 coordinate retained by three-dimensional map navigation. */
 export type NavigationAnchor = [

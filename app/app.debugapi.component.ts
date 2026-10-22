@@ -1,12 +1,14 @@
-import {coreLib, ErdblickCore_} from "./integrations/wasm";
-import {Cartographic} from "./integrations/geo";
-import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
+import { ActionRegistry } from "./actions/action-registry.service";
+import { Cartographic } from "./integrations/geo";
+import { coreLib, ErdblickCore_ } from "./integrations/wasm";
+import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
 import {
-    type DeckPresentationDebugSnapshot,
     TileSubsetLayerRenderService,
+    type DeckPresentationDebugSnapshot,
     type TileSubsetLayerRenderDebugSnapshot
 } from "./mapview/deck/tile-subset-layer-render.service";
-import {AppStateService} from "./shared/appstate.service";
+import { MapViewModel } from "./mapview/mapview.model";
+import { AppStateService } from "./state/app-state.service";
 
 /** Browser-console helpers which use only supported S4E2 boundaries. */
 export interface DebugWindow extends Window {
@@ -19,15 +21,22 @@ export class ErdblickDebugApi {
     constructor(
         private readonly tileStream: MapTileStreamService,
         private readonly subsetRenderer: TileSubsetLayerRenderService,
-        public readonly stateService: AppStateService
+        public readonly stateService: AppStateService,
+        public readonly viewSettings: MapViewModel,
+        private readonly actions: ActionRegistry
     ) {
+    }
+
+    /** Runs a registered owner action for console/tests, including when the remote relay is disabled. */
+    executeAction(name: string, input: unknown): unknown {
+        return this.actions.execute(name, input);
     }
 
     /** Apply one serialized camera state after validating its logical view index. */
     setCamera(viewIndex: number, cameraInfoStr: string): void {
-        if (viewIndex >= this.stateService.numViews) {
+        if (viewIndex >= this.viewSettings.numViews) {
             console.error(
-                `Expected viewIndex < ${this.stateService.numViews}, got ${viewIndex}!`
+                `Expected viewIndex < ${this.viewSettings.numViews}, got ${viewIndex}!`
             );
             return;
         }
@@ -37,7 +46,7 @@ export class ErdblickDebugApi {
         }
         const cameraInfo = JSON.parse(cameraInfoStr);
         const [longitude, latitude, height] = cameraInfo.position;
-        this.stateService.setView(
+        this.viewSettings.setView(
             viewIndex,
             Cartographic.fromRadians(longitude, latitude, height),
             {
@@ -50,20 +59,20 @@ export class ErdblickDebugApi {
 
     /** Serialize one logical view's camera in the format accepted by `setCamera`. */
     getCamera(viewIndex: number): string | undefined {
-        if (viewIndex >= this.stateService.numViews) {
+        if (viewIndex >= this.viewSettings.numViews) {
             console.error(
-                `Expected viewIndex < ${this.stateService.numViews}, got ${viewIndex}!`
+                `Expected viewIndex < ${this.viewSettings.numViews}, got ${viewIndex}!`
             );
             return undefined;
         }
-        const destination = this.stateService.getCameraPosition(viewIndex);
+        const destination = this.viewSettings.getCameraPosition(viewIndex);
         const position = [
             destination.longitude,
             destination.latitude,
             destination.height
         ];
-        const orientation = this.stateService.getCameraOrientation(viewIndex);
-        return JSON.stringify({position, orientation});
+        const orientation = this.viewSettings.getCameraOrientation(viewIndex);
+        return JSON.stringify({ position, orientation });
     }
 
     /** Expose the initialized core module for deliberate low-level investigations. */
@@ -106,10 +115,10 @@ export class ErdblickDebugApi {
         keyFilter = ""
     ): Promise<Record<string, unknown>> {
         const [wrapper] = await this.tileStream.loadFeatures([
-            {mapTileKey, featureId}
+            { mapTileKey, featureId }
         ]);
         if (!wrapper) {
-            return {error: `Feature ${featureId} was not found in ${mapTileKey}.`};
+            return { error: `Feature ${featureId} was not found in ${mapTileKey}.` };
         }
         return wrapper.peek(feature => {
             const root = feature.inspectionModel();
@@ -138,7 +147,7 @@ export class ErdblickDebugApi {
             if (Array.isArray(root)) {
                 root.forEach((node: unknown) => walk(node, []));
             }
-            return {mapTileKey, featureId, hitCount: hits.length, hits};
-        }) ?? {error: `Feature ${featureId} could not be parsed.`};
+            return { mapTileKey, featureId, hitCount: hits.length, hits };
+        }) ?? { error: `Feature ${featureId} could not be parsed.` };
     }
 }
