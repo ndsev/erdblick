@@ -26,7 +26,7 @@ import {
     hashStateValue,
     SnapshotImportLimits,
     SnapshotNormalizationResult
-} from "./app-state.model";
+} from "./app-state-values";
 
 /** The persistence ownership attached to an edit when it is staged. */
 type MutationOrigin = "user" | "system" | "hydration" | "config";
@@ -724,7 +724,7 @@ export class AppStateService implements OnDestroy {
     /** Reports a rejected persisted field while its owner restores other valid saved values. */
     reportHydrationError(source: string, error: unknown): void {
         // Persistence only publishes a toast. Depending on the modal-dialog
-        // service here would make every store import dialog and map controllers.
+        // service here would make every model import dialog and map controllers.
         this.messages.add({
             key: "tc",
             severity: "error",
@@ -1250,7 +1250,6 @@ export class AppStateService implements OnDestroy {
             localStorage.removeItem(state.name);
         }
         this.clearStyleOptionStorageEntries();
-        localStorage.removeItem('searchHistory');
         localStorage.removeItem(this.STYLE_OPTIONS_STORAGE_KEY);
         localStorage.removeItem(this.CONFIG_DEFAULT_STATE_META_KEY);
         const { origin, pathname } = window.location;

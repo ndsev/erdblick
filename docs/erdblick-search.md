@@ -312,7 +312,7 @@ When you do not know the exact path to an attribute field, type part of the name
 If search behaves unexpectedly, check these common failure modes first:
 
 - **No jump targets light up** - check the inline warnings. Coordinate targets expect two numbers plus an optional zoom. Mapget tile IDs must be numeric. SourceData jumps require at least a tile ID; map and layer names are optional but validated.
-- **A search cannot be edited** - check the enabled toggle in the search-panel header. Disabled searches keep their state but lock editing and rerun controls.
+- **A search cannot be edited** - check the enabled toggle in the omnibar-panel header. Disabled searches keep their state but lock editing and rerun controls.
 - **Results seem incomplete** - verify the selected map layers, selected split views, current visible area, tile budgets, and Auto update area setting.
 - **Search progress appears stuck** - open Diagnostics and compare backend search, result ingress, and result-tree progress. Large result sets can spend visible time building the result tree after backend matches already arrived.
 - **A short field query is ambiguous** - use a more explicit path, force field access with `_.FIELD`, or restrict Map Layers so the schema resolver has fewer possible targets.

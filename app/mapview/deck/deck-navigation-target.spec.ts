@@ -34,7 +34,7 @@ interface DeckViewTestInternals {
 }
 
 interface MarkerTestInternals extends DeckViewTestInternals {
-    coordinatesService: { store: {
+    coordinatesService: { model: {
         markerState: { getValue: () => boolean };
         markedPositionState: { getValue: () => number[] };
     } };
@@ -204,7 +204,7 @@ describe("Deck navigation target and layout", () => {
         const view = createView();
         const internals = view as unknown as MarkerTestInternals;
         installDeckMock(view, 1000, 700);
-        internals.coordinatesService.store = {
+        internals.coordinatesService.model = {
             markerState: { getValue: () => true },
             markedPositionState: { getValue: () => [11, 48, 120] }
         };

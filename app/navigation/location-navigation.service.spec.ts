@@ -8,7 +8,7 @@ import { ViewLayerDiagnosticsService } from "../mapview/view-layer-diagnostics.s
 import { AppStateService } from "../state/app-state.service";
 import { InfoMessageService } from "../shared/info.service";
 import { JumpTargetService } from "./jump.service";
-import { LocationSearchService, ResolvedLocationNavigation } from "../search/location.search.service";
+import { LocationSearchService, ResolvedLocationNavigation } from "../location-search/location.search.service";
 import { LocationNavigationService } from "./location-navigation.service";
 
 const areaResult: ResolvedLocationNavigation = { area: { label: "Place", rectangle: { west: 10, south: 47, east: 14, north: 49 } } };

@@ -17,15 +17,23 @@ interface ModelContext {
     }, options: {signal: AbortSignal}): Promise<void>;
 }
 
-const nativeCatalogSchema = z.object({tools: z.array(z.object({
-    name: z.string().startsWith("mapget_"), description: z.string(),
-    inputSchema: z.record(z.string(), z.unknown()),
-    annotations: z.object({readOnlyHint: z.boolean().optional()}).optional()
-})).max(256)});
+const nativeCatalogSchema = z.object({
+    tools: z
+        .array(
+            z.object({
+                name: z.string().startsWith("mapget_"),
+                description: z.string(),
+                inputSchema: z.record(z.string(), z.unknown()),
+                annotations: z.object({ readOnlyHint: z.boolean().optional() }).optional()
+            })
+        )
+        .max(256)
+});
 const rpcResponseSchema = z.object({
-    jsonrpc: z.literal("2.0"), id: z.number(),
+    jsonrpc: z.literal("2.0"),
+    id: z.number(),
     result: z.unknown().optional(),
-    error: z.object({code: z.number(), message: z.string(), data: z.unknown().optional()}).optional()
+    error: z.object({ code: z.number(), message: z.string(), data: z.unknown().optional() }).optional()
 });
 
 /** Owns document tool registrations and the authenticated, same-origin mapget bridge. */

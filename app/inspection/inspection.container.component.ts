@@ -7,12 +7,12 @@ import {
     ViewChild
 } from "@angular/core";
 import { Subscription } from "rxjs";
-import { FeatureWrapper } from "../mapdata/feature-inspection.model";
+import { FeatureWrapper } from "../mapdata/feature-inspection";
 import { AppLayoutService } from "../layout/app-layout.service";
 import { AppStateService } from "../state/app-state.service";
 import { DockedPanelDragController, DockedPanelDragOffset } from "../layout/docked-panel-drag.controller";
 import { InspectionSelectionService } from "./inspection-selection.service";
-import { InspectionPanelModel } from "./inspection-state.model";
+import { InspectionPanelModel } from "./inspection-state";
 import { InspectionPanelService } from "./inspection-panel.service";
 
 @Component({
@@ -101,8 +101,8 @@ export class InspectionContainerComponent implements OnDestroy {
             const hasDockedPanels = this.dockedPanels.length > 0 ||
                 hasPendingDockedPanels ||
                 this.layout.hasDockedSurface();
-            this.layout.store.isDockOpen = this.layout.store.isDockOpen &&
-                (!this.layout.store.isDockAutoCollapsible || hasDockedPanels);
+            this.layout.model.isDockOpen = this.layout.model.isDockOpen &&
+                (!this.layout.model.isDockAutoCollapsible || hasDockedPanels);
             // Angular 21 bootstraps NgModules with zoneless change detection.
             // RxJS emissions therefore need an explicit render notification;
             // NgZone.run() in the publisher is not one.

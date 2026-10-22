@@ -4,6 +4,8 @@
  * A missing owner must fail here rather than silently losing saved preferences.
  */
 export const APPLICATION_STORAGE_KEYS = [
+    // Previously persisted directly by the omnibar component.
+    "searchHistory",
     "autoZoomLevel",
     "background",
     "cameraView",

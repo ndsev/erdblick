@@ -3,7 +3,7 @@ import {describe, expect, it, vi} from "vitest";
 import type {FeatureLayerStyle, TileLayerParser} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasmOrThrow} from "../integrations/wasm";
 import {MapInfoService} from "./map-info.service";
-import type {MapInfoItem} from "./map.tree.model";
+import type {MapInfoItem} from "./map.tree";
 
 describe("MapInfoService style parser ownership", () => {
     it("deletes a failed parser, propagates its error, and caches only a successful retry", () => {

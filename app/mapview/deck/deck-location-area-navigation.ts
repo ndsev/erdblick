@@ -1,5 +1,5 @@
 import {clipPolygon, cutPolygonByMercatorBounds} from "@math.gl/polygon";
-import type {LocationArea, LocationPolygon, RenderRectangle} from "../render-view.model";
+import type {LocationArea, LocationPolygon, RenderRectangle} from "../render-view";
 import {createDeckMapViewport, type DeckMapCameraState} from "./navigation/web-mercator-feature-navigation";
 
 /** A full 512px world fits even a 1px pane with half its space reserved for padding. */

@@ -130,11 +130,11 @@ export class ActionRegistry {
      */
     sealRegistration(): void {
         if (this.sealed) throw new Error("Action registration is already closed.");
-        const controls = this.controlDeclarations;
+        const controls = this.publicControls;
         const tools = createControlActions(controls);
-        this.registerAction(tools.describeControls, input => this.describe(input));
-        this.registerAction(tools.getControls, input => this.read(input));
-        this.registerAction(tools.setControl, input => this.write(input));
+        this.registerAction(tools.describeControls, (input) => this.describe(input));
+        this.registerAction(tools.getControls, (input) => this.read(input));
+        this.registerAction(tools.setControl, (input) => this.write(input));
         this.sealed = true;
     }
 
@@ -147,7 +147,7 @@ export class ActionRegistry {
     }
 
     /** Stable metadata order makes catalog hashes independent of construction order. */
-    private get controlDeclarations(): AppControl[] {
+    get publicControls(): AppControl[] {
         return [...this.controls.values()].map(entry => entry.declaration)
             .sort((left, right) => left.name.localeCompare(right.name, "en"));
     }
@@ -160,7 +160,7 @@ export class ActionRegistry {
         if (!this.sealed) throw new Error("Action registration must finish before catalog export.");
         return {
             formatVersion: 1 as const,
-            actions: Object.values(this.publicActions).map(action => ({
+            actions: Object.values(this.publicActions).map((action) => ({
                 name: action.name,
                 description: action.description,
                 mutation: action.mutation,
@@ -168,7 +168,7 @@ export class ActionRegistry {
                 inputSchema: viewerJsonSchema(action.inputSchema),
                 outputSchema: viewerJsonSchema(action.outputSchema)
             })),
-            channels: describeControls(this.controlDeclarations)
+            channels: describeControls(this.publicControls)
         };
     }
 
@@ -204,9 +204,10 @@ export class ActionRegistry {
     private describe(input: ControlInput<"describeControls">) {
         return {
             observedAt: new Date().toISOString(),
-            controls: describeControls(this.controlDeclarations).filter(control =>
-                (!input.controls || input.controls.includes(control.name)) &&
-                (!input.prefix || control.name.startsWith(input.prefix))
+            controls: describeControls(this.publicControls).filter(
+                (control) =>
+                    (!input.controls || input.controls.includes(control.name)) &&
+                    (!input.prefix || control.name.startsWith(input.prefix))
             ),
             complete: true,
             omissions: []

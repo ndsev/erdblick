@@ -1,10 +1,10 @@
-import type { TileFeatureId } from "../inspection/inspection-state.model";
-import type { FilterChannelDefinition } from "../mapdata/filter-subscription.model";
+import type { TileFeatureId } from "../inspection/inspection-state";
+import type { FilterChannelDefinition } from "../mapdata/filter-subscription";
 import {
     partitionKey,
     type PartitionId
-} from "../mapdata/partition.model";
-import type { StyleFilterPlan } from "../mapdata/styled-mapget-layer.model";
+} from "../mapdata/partition";
+import type { StyleFilterPlan } from "../mapdata/styled-mapget-layer";
 import {
     parseFeatureInspectionTarget,
     type FeatureInspectionTarget

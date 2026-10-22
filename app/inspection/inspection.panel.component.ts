@@ -1,12 +1,12 @@
 import { Component, effect, input, output, ViewChild } from "@angular/core";
 import { Popover } from "primeng/popover";
 import { coreLib } from "../integrations/wasm";
-import { FeatureWrapper } from "../mapdata/feature-inspection.model";
+import { FeatureWrapper } from "../mapdata/feature-inspection";
 import { MapInfoService } from "../mapdata/map-info.service";
 import {
     parseMapPartitionKey,
     partitionKeySuffix
-} from "../mapdata/partition.model";
+} from "../mapdata/partition";
 import { AppPanelComponent } from "../layout/app-panel.component";
 import type {
     AppSurfaceHeaderAction,
@@ -16,7 +16,7 @@ import { AppStateService } from "../state/app-state.service";
 import { displayFeatureId } from "../shared/tile-feature-id";
 import { FeaturePanelComponent } from "./feature.panel.component";
 import { InspectionSelectionService } from "./inspection-selection.service";
-import { InspectionComparisonOption, InspectionPanelModel } from "./inspection-state.model";
+import { InspectionComparisonOption, InspectionPanelModel } from "./inspection-state";
 import { InspectionPanelService } from "./inspection-panel.service";
 import { SourceDataPanelComponent } from "./sourcedata.panel.component";
 

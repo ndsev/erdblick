@@ -22,7 +22,7 @@ import {
     resizeAppDialogBounds,
     resolveAppDialogCssLength
 } from './app-dialog-resize';
-import { AppDialogLayout } from "./app-layout.model";
+import { AppDialogLayout } from "./app-layout";
 import { AppLayoutService } from "./app-layout.service";
 import { AppStateService } from "../state/app-state.service";
 

@@ -3,8 +3,8 @@ import { BehaviorSubject, Subject } from "rxjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MapTileStreamService } from "./map-tile-stream.service";
 import { TileDeliveryError } from "./tile-diagnostics";
-import { MapgetLayer } from "./mapget-layer.model";
-import { objectPartition, tilePartition } from "./partition.model";
+import { MapgetLayer } from "./mapget-layer";
+import { objectPartition, tilePartition } from "./partition";
 import {
     MapTileRequestStatus,
     MapTileStreamClientInteractive,
@@ -12,7 +12,7 @@ import {
     type MapTileStreamStatusPayload
 } from "./tilestream";
 import { coreLib } from "../integrations/wasm";
-import { DEFAULT_CONNECTION_RETRY_POLICY } from "../shared/connection-retry-policy";
+import { DEFAULT_CONNECTION_RETRY_POLICY } from "../connection/connection-retry-policy";
 
 /** Supplies real observable preference values to each transport harness. */
 function retryStateHarness() {

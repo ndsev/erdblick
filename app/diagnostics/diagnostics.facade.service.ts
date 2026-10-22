@@ -2,35 +2,35 @@ import { Injectable, NgZone, OnDestroy } from "@angular/core";
 import { BehaviorSubject } from "rxjs";
 import { z } from "zod";
 import { ActionRegistry } from "../actions/action-registry.service";
-import type { ActionInput, ActionOutput } from "../actions/app-action";
+
 import { boundedCollection, identifierSchema, rejectAction } from "../actions/app-action";
 import { AppActionContributor } from "../actions/app-action-contributor";
-import { AppConfigStore } from "../config/app-config.store";
+import { ConfigModel } from "../config/config.model";
 import {
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
-} from "../layout/app-layout.model";
+} from "../layout/app-layout";
 import { AppLayoutService } from "../layout/app-layout.service";
 import { MapInfoService } from "../mapdata/map-info.service";
 import { MapTileStreamService } from '../mapdata/map-tile-stream.service';
 import { TileSubsetLayerRenderService } from '../mapview/deck/tile-subset-layer-render.service';
-import { viewIdSchema } from "../mapview/map-view-state.model";
-import { MapViewStore } from "../mapview/map-view.store";
+import { viewIdSchema } from "../mapview/map-view-state";
+import { MapViewModel } from "../mapview/mapview.model";
 import { ViewLayerDiagnosticsService } from '../mapview/view-layer-diagnostics.service';
-import { FeatureSearchService } from "../search/feature.search.service";
+import { FeatureSearchService } from "../feature-search/feature.search.service";
 import { boundedUnicodeString, unicodePrefix } from "../shared/unicode-string";
 import { AppStateService } from "../state/app-state.service";
-import { StyleValidationReportService } from '../styledata/style-validation-report.service';
+import { StyleValidationReportService } from '../map-styles/style-validation-report.service';
 import { DiagnosticsDatasource } from './diagnostics.datasource';
-import type { DiagnosticsExportOptions, DiagnosticsLogFilter } from "./diagnostics.model";
+import type { DiagnosticsExportOptions, DiagnosticsLogFilter } from "./diagnostics.types";
 import {
     DiagnosticsExportBundle,
     LogEntry,
     PerformanceDiagnosticsScope,
     TileSizeDistribution
-} from './diagnostics.model';
-import { DiagnosticsStore } from "./diagnostics.store";
+} from './diagnostics.types';
+import { DiagnosticsModel } from "./diagnostics.model";
 
 interface MapgetStatusDataResponse {
     timestampMs?: unknown;
@@ -61,11 +61,11 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         styleValidationReportService: StyleValidationReportService,
         ngZone: NgZone,
         public override readonly layout: AppLayoutService,
-        public readonly configService: AppConfigStore,
+        public readonly configService: ConfigModel,
         private readonly maps: MapInfoService,
         private readonly searches: FeatureSearchService,
-        private readonly viewSettings: MapViewStore,
-        public readonly store: DiagnosticsStore) {
+        private readonly viewSettings: MapViewModel,
+        public readonly model: DiagnosticsModel) {
         super(mapService, renderService, viewDiagnostics, stateService,
             styleValidationReportService, ngZone, layout);
     }
@@ -85,7 +85,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         this.refreshLogs();
         this.layout.openDialog(DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID);
         if (errorsOnly) {
-            this.store.diagnosticsLogFilter = { info: false, warn: false, error: true };
+            this.model.diagnosticsLogFilter = { info: false, warn: false, error: true };
         }
     }
 
@@ -93,8 +93,8 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     openExportDialog(options?: Partial<DiagnosticsExportOptions>) {
         this.refreshPerfStats();
         this.refreshLogs();
-        const base = this.store.diagnosticsExportOptionsState.defaultValue;
-        this.store.diagnosticsExportOptions = {
+        const base = this.model.diagnosticsExportOptionsState.defaultValue;
+        this.model.diagnosticsExportOptions = {
             ...base,
             ...options,
             logFilter: { ...(options?.logFilter ?? base.logFilter) }
@@ -219,47 +219,149 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     }
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: ActionRegistry): void {
-        actions.registerAction(diagnosticActions.getDiagnostics, input => this.getDiagnostics(input));
+        const text = boundedUnicodeString(4096);
+
+        actions.registerAction(
+            {
+                name: "viewer_get_diagnostics",
+                description:
+                    "Read BROWSER transport, render-worker queues, frame-time metrics, cached loading, GPU " +
+                    "allocation and style/search errors without resetting the view. Native BACKEND " +
+                    "workers/cache/memory require the separately privileged mapget_get_diagnostics tool. Call it " +
+                    "only when it appears in your tool catalog; otherwise explain the permission limit. Browser " +
+                    "workers and observed transport latency are not backend queue statistics. No scene/tile scan or " +
+                    "GPU readback. Cached and unavailable metrics are explicit.",
+                mutation: false,
+                inputSchema: z.strictObject({
+                    viewId: viewIdSchema.optional(),
+                    mapId: identifierSchema.optional(),
+                    layerId: identifierSchema.optional(),
+                    sections: z
+                        .array(z.enum(["transport", "workers", "loading", "gpu", "errors"]))
+                        .max(5)
+                        .optional(),
+                    limit: z.number().int().min(1).max(100).optional()
+                }),
+                outputSchema: z.strictObject({
+                    observedAt: z.string(),
+                    complete: z.boolean(),
+                    reason: z.enum(["item_limit", "byte_limit", "text_limit", "loading"]).optional(),
+                    executionContext: z.literal("browser"),
+                    interpretation: text,
+                    metrics: z
+                        .array(
+                            z.strictObject({
+                                section: text,
+                                name: text,
+                                value: z.union([z.number(), z.boolean(), z.null()]),
+                                scope: z.enum(["tab", "view"]),
+                                viewId: viewIdSchema.optional(),
+                                cached: z.boolean().optional()
+                            })
+                        )
+                        .max(100),
+                    errors: z
+                        .array(
+                            z.strictObject({
+                                source: text,
+                                message: text,
+                                severity: z.enum(["warning", "error"]).optional(),
+                                phase: text.optional(),
+                                property: text.optional(),
+                                expression: text.optional(),
+                                rulePath: text.optional(),
+                                mapId: identifierSchema.optional(),
+                                layerId: identifierSchema.optional(),
+                                featureId: identifierSchema.optional()
+                            })
+                        )
+                        .max(100),
+                    unavailable: z.array(text).max(20)
+                })
+            },
+            (input) => this.getDiagnostics(input)
+        );
     }
 
 
     /** Samples fixed-size counters and existing caches only, never the per-tile diagnostics/export path. */
-    getDiagnostics(input: ActionInput<typeof diagnosticActions.getDiagnostics>): ActionOutput<typeof diagnosticActions.getDiagnostics> {
-        const viewIndex = input.viewId === undefined ? undefined : this.viewSettings.viewIds.indexOf(input.viewId);
+    getDiagnostics(input: {
+        viewId?: string;
+        mapId?: string;
+        layerId?: string;
+        sections?: ("errors" | "loading" | "transport" | "workers" | "gpu")[];
+        limit?: number;
+    }) {
+        const viewIndex =
+            input.viewId === undefined ? undefined : this.viewSettings.viewIds.indexOf(input.viewId);
         if (viewIndex !== undefined && viewIndex < 0) rejectAction("The requested view is unavailable");
         if (input.layerId && !input.mapId) rejectAction("layerId requires mapId", "invalid_arguments");
-        if (input.mapId && !this.maps.maps.maps.has(input.mapId)) rejectAction("The requested map is unavailable");
+        if (input.mapId && !this.maps.maps.maps.has(input.mapId))
+            rejectAction("The requested map is unavailable");
         if (input.mapId && input.layerId) this.maps.requireLayer(input.mapId, input.layerId);
         const sections = input.sections ?? ["transport", "workers", "loading", "gpu", "errors"];
-        const metrics: ActionOutput<typeof diagnosticActions.getDiagnostics>["metrics"] = [];
+        const metrics: Array<{
+            section: string;
+            name: string;
+            value: number | boolean | null;
+            scope: "tab" | "view";
+            viewId?: string;
+            cached?: boolean;
+        }> = [];
         const unavailable: string[] = [];
         const add = (section: string, values: Record<string, number | boolean | null>, cached = false) => {
-            for (const [name, value] of Object.entries(values)) metrics.push({ section, name, value: typeof value === "number" && !Number.isFinite(value) ? null : value, scope: "tab", cached });
+            for (const [name, value] of Object.entries(values))
+                metrics.push({
+                    section,
+                    name,
+                    value: typeof value === "number" && !Number.isFinite(value) ? null : value,
+                    scope: "tab",
+                    cached
+                });
         };
-        if (sections.includes("transport")) add("transport", {
-            connected: this.mapService.isTileStreamConnected(), paused: this.mapService.tilePipelinePaused,
-            parseQueue: this.mapService.getPendingFrameQueueSize(), downstreamBytesPerSecond: this.mapService.getDownstreamBytesPerSecond(),
-            ...this.mapService.getTileStreamTransportCompressionStats()
-        });
+        if (sections.includes("transport"))
+            add("transport", {
+                connected: this.mapService.isTileStreamConnected(),
+                paused: this.mapService.tilePipelinePaused,
+                parseQueue: this.mapService.getPendingFrameQueueSize(),
+                downstreamBytesPerSecond: this.mapService.getDownstreamBytesPerSecond(),
+                ...this.mapService.getTileStreamTransportCompressionStats()
+            });
         if (sections.includes("workers")) {
             const { latestNativeMs, ...browserWorkers } = this.renderService.queueSummary();
             add("workers", { ...browserWorkers, latestWasmMs: latestNativeMs });
         }
         if (sections.includes("loading")) {
-            if (viewIndex !== undefined || input.mapId) unavailable.push("Scoped loading counters are unavailable without a tile scan; tab-wide cached counters are returned.");
+            if (viewIndex !== undefined || input.mapId)
+                unavailable.push(
+                    "Scoped loading counters are unavailable without a tile scan; tab-wide cached counters are returned."
+                );
             const snapshot = this.snapshot$.value;
-            add("loading", {
-                expected: snapshot.tiles.expected, loaded: snapshot.tiles.loaded, errors: snapshot.tiles.errors,
-                rendered: snapshot.progress.rendered.done, renderTotal: snapshot.progress.rendered.total,
-                sampleAgeMs: Math.max(0, Date.now() - snapshot.at)
-            }, true);
+            add(
+                "loading",
+                {
+                    expected: snapshot.tiles.expected,
+                    loaded: snapshot.tiles.loaded,
+                    errors: snapshot.tiles.errors,
+                    rendered: snapshot.progress.rendered.done,
+                    renderTotal: snapshot.progress.rendered.total,
+                    sampleAgeMs: Math.max(0, Date.now() - snapshot.at)
+                },
+                true
+            );
         }
         if (sections.includes("gpu")) {
             metrics.push({
-                section: "gpu", name: "frameIntervalP90Ms", value: this.renderService.currentFrameTimeMs(viewIndex) || null,
-                scope: viewIndex === undefined ? "tab" : "view", ...(viewIndex === undefined ? {} : { viewId: input.viewId })
+                section: "gpu",
+                name: "frameIntervalP90Ms",
+                value: this.renderService.currentFrameTimeMs(viewIndex) || null,
+                scope: viewIndex === undefined ? "tab" : "view",
+                ...(viewIndex === undefined ? {} : { viewId: input.viewId })
             });
-            if (viewIndex !== undefined || input.mapId) unavailable.push("Scoped GPU allocation is unavailable; no scene readback or scan was performed.");
+            if (viewIndex !== undefined || input.mapId)
+                unavailable.push(
+                    "Scoped GPU allocation is unavailable; no scene readback or scan was performed."
+                );
             else {
                 let found = false;
                 for (const stat of this.perfStats$.value) {
@@ -268,91 +370,77 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
                         found = true;
                     }
                 }
-                if (!found) unavailable.push("GPU allocation metrics have not been sampled by the performance diagnostics UI.");
+                if (!found)
+                    unavailable.push(
+                        "GPU allocation metrics have not been sampled by the performance diagnostics UI."
+                    );
             }
         }
         const errorItems = function* (this: DiagnosticsFacadeService) {
             for (const issue of this.styleValidationReportService.reports$.value) {
                 if (input.mapId && issue.runtimeContext?.mapName !== input.mapId) continue;
                 if (input.layerId && issue.runtimeContext?.layerName !== input.layerId) continue;
-                if (issue.severity !== "info") yield {
-                    source: unicodePrefix(issue.source.styleName ?? "style", 4096),
-                    message: unicodePrefix(issue.message, 4096), severity: issue.severity, phase: issue.phase,
-                    property: issue.property === undefined ? undefined : unicodePrefix(issue.property, 4096),
-                    expression: issue.expression === undefined ? undefined : unicodePrefix(issue.expression, 4096),
-                    rulePath: issue.rulePath === undefined ? undefined : unicodePrefix(issue.rulePath, 4096),
-                    mapId: issue.runtimeContext?.mapName === undefined ? undefined : unicodePrefix(issue.runtimeContext.mapName, 4096),
-                    layerId: issue.runtimeContext?.layerName === undefined ? undefined : unicodePrefix(issue.runtimeContext.layerName, 4096),
-                    featureId: issue.runtimeContext?.featureId === undefined ? undefined : unicodePrefix(issue.runtimeContext.featureId, 4096)
-                };
+                if (issue.severity !== "info")
+                    yield {
+                        source: unicodePrefix(issue.source.styleName ?? "style", 4096),
+                        message: unicodePrefix(issue.message, 4096),
+                        severity: issue.severity,
+                        phase: issue.phase,
+                        property:
+                            issue.property === undefined ? undefined : unicodePrefix(issue.property, 4096),
+                        expression:
+                            issue.expression === undefined
+                                ? undefined
+                                : unicodePrefix(issue.expression, 4096),
+                        rulePath:
+                            issue.rulePath === undefined ? undefined : unicodePrefix(issue.rulePath, 4096),
+                        mapId:
+                            issue.runtimeContext?.mapName === undefined
+                                ? undefined
+                                : unicodePrefix(issue.runtimeContext.mapName, 4096),
+                        layerId:
+                            issue.runtimeContext?.layerName === undefined
+                                ? undefined
+                                : unicodePrefix(issue.runtimeContext.layerName, 4096),
+                        featureId:
+                            issue.runtimeContext?.featureId === undefined
+                                ? undefined
+                                : unicodePrefix(issue.runtimeContext.featureId, 4096)
+                    };
             }
             for (const session of this.searches.getSessions()) {
-                if (viewIndex !== undefined && !session.definition.selectedViewIndices.includes(viewIndex)) continue;
-                if (input.mapId && !session.definition.selectedMapLayers.some(layer => layer.mapId === input.mapId && (!input.layerId || layer.layerId === input.layerId))) continue;
-                for (const error of session.errors) yield { source: session.id, message: unicodePrefix(error, 4096) };
+                if (viewIndex !== undefined && !session.definition.selectedViewIndices.includes(viewIndex))
+                    continue;
+                if (
+                    input.mapId &&
+                    !session.definition.selectedMapLayers.some(
+                        (layer) =>
+                            layer.mapId === input.mapId && (!input.layerId || layer.layerId === input.layerId)
+                    )
+                )
+                    continue;
+                for (const error of session.errors)
+                    yield { source: session.id, message: unicodePrefix(error, 4096) };
             }
         }.bind(this);
         const errors = boundedCollection(sections.includes("errors") ? errorItems() : [], input.limit, 64000);
-        if (sections.includes("errors") && viewIndex !== undefined) unavailable.push("Style errors have no per-view attribution; map/layer-filtered style issues and view-filtered search errors are returned.");
+        if (sections.includes("errors") && viewIndex !== undefined)
+            unavailable.push(
+                "Style errors have no per-view attribution; map/layer-filtered style issues and view-filtered search errors are returned."
+            );
         return {
-            observedAt: new Date().toISOString(), executionContext: "browser",
-            interpretation: "All metrics describe this browser tab. Workers execute browser WASM rendering, not native backend jobs. " +
+            observedAt: new Date().toISOString(),
+            executionContext: "browser" as const,
+            interpretation:
+                "All metrics describe this browser tab. Workers execute browser WASM rendering, not native backend jobs. " +
                 "Frame intervals measure observed rendering cadence, not GPU execution time, and can include idle periods. " +
                 "This snapshot alone cannot identify a panning bottleneck. Backend queues, CPU and memory were not sampled.",
-            metrics, errors: errors.items, unavailable, complete: errors.complete, reason: errors.reason
+            metrics,
+            errors: errors.items,
+            unavailable,
+            complete: errors.complete,
+            reason: errors.reason
         };
     }
 
 }
-
-
-/**
- * Public actions and controls implemented by this controller. Their schemas stay
- * beside the handlers; both app startup and the Node catalog build register them.
- */
-const text = boundedUnicodeString(4096);
-
-export const diagnosticActions = {
-    getDiagnostics: {
-        name: "viewer_get_diagnostics",
-        description: "Read BROWSER transport, render-worker queues, frame-time metrics, cached loading, GPU allocation and style/search errors without resetting the view. Native BACKEND workers/cache/memory require the separately privileged mapget_get_diagnostics tool. Call it only when it appears in your tool catalog; otherwise explain the permission limit. Browser workers and observed transport latency are not backend queue statistics. No scene/tile scan or GPU readback. Cached and unavailable metrics are explicit.",
-        mutation: false,
-        inputSchema: z.strictObject({
-            viewId: viewIdSchema.optional(),
-            mapId: identifierSchema.optional(),
-            layerId: identifierSchema.optional(),
-            sections: z.array(z.enum(["transport", "workers", "loading", "gpu", "errors"])).max(5).optional(),
-            limit: z.number().int().min(1).max(100).optional()
-        }),
-        outputSchema: z.strictObject({
-            ...{ observedAt: z.string() },
-            ...{
-                complete: z.boolean(),
-                reason: z.enum(["item_limit", "byte_limit", "text_limit", "loading"]).optional()
-            },
-            executionContext: z.literal("browser"),
-            interpretation: text,
-            metrics: z.array(z.strictObject({
-                section: text,
-                name: text,
-                value: z.union([z.number(), z.boolean(), z.null()]),
-                scope: z.enum(["tab", "view"]),
-                viewId: viewIdSchema.optional(),
-                cached: z.boolean().optional()
-            })).max(100),
-            errors: z.array(z.strictObject({
-                source: text,
-                message: text,
-                severity: z.enum(["warning", "error"]).optional(),
-                phase: text.optional(),
-                property: text.optional(),
-                expression: text.optional(),
-                rulePath: text.optional(),
-                mapId: identifierSchema.optional(),
-                layerId: identifierSchema.optional(),
-                featureId: identifierSchema.optional()
-            })).max(100),
-            unavailable: z.array(text).max(20)
-        })
-    }
-} as const;

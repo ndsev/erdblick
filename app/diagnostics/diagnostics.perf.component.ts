@@ -6,7 +6,7 @@ import {
     ViewLayerDiagnosticsService
 } from '../mapview/view-layer-diagnostics.service';
 import { AppDialogComponent } from '../layout/app-dialog.component';
-import { DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../layout/app-layout";
 import { AppLayoutService } from "../layout/app-layout.service";
 import { AppStateService } from "../state/app-state.service";
 import { DialogStackService } from '../layout/dialog-stack.service';
@@ -21,7 +21,7 @@ import {
     UNIT_SUFFIXES
 } from './diagnostics.constants';
 import { DiagnosticsFacadeService } from './diagnostics.facade.service';
-import { PerformanceDiagnosticsScope, PerfStat } from './diagnostics.model';
+import { PerformanceDiagnosticsScope, PerfStat } from './diagnostics.types';
 import { buildAggregatedPerfStats } from './diagnostics.perf-aggregation';
 
 interface LayerOption {

@@ -3,14 +3,14 @@ import "@angular/compiler";
 import { Subject, skip } from "rxjs";
 import { describe, expect, it, vi } from "vitest";
 
-import { CameraViewState, VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION } from "./map-view-state.model";
+import { CameraViewState, VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION } from "./map-view-state";
 import {
     LiveCameraViewStateUpdate,
     MapViewService,
     ViewRecalculationReason
 } from "./map-view.service";
-import { ViewVisualizationState } from "./view.visualization.model";
-import type { RenderViewCameraState } from "./render-view.model";
+import { ViewVisualizationState } from "./view.visualization";
+import type { RenderViewCameraState } from "./render-view";
 
 /** Builds a complete camera value with explicit target-relative position. */
 function camera(
@@ -37,7 +37,7 @@ function createService(cameras: CameraViewState[], viewSync: string[]) {
     cameras.forEach((value, index) => stateService.cameraViewDataState.next(index, value));
     const mapInfo = { layerStateChanged: new Subject<string>(), reapplySyncOptionsForAllViews: vi.fn(), maps: { maps: new Map() } };
     return {
-        service: new MapViewService(persistence, mapInfo as never, owners.renderPreferences.store, stateService, owners.configService),
+        service: new MapViewService(persistence, mapInfo as never, owners.renderPreferences.model, stateService, owners.configService),
         stateService, mapInfo
     };
 }

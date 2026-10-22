@@ -61,34 +61,6 @@ export const VIEWER_ACTION_INVOCATION_BYTES = 64 * 1024;
 export const VIEWER_ACTION_RESULT_BYTES = 256 * 1024;
 export const VIEWER_ACTION_TARGET_LIMIT = 32;
 
-export type ActionInput<Action extends AppAction> = z.infer<Action["inputSchema"]>;
-export type ActionOutput<Action extends AppAction> = z.infer<Action["outputSchema"]>;
-export type ControlSelector<Control extends AppControl> = z.infer<Control["selectorSchema"]>;
-export type ControlValue<Control extends AppControl> = z.infer<Control["valueSchema"]>;
-
-type GroupValue<Group> = Group extends Record<string, infer Value> ? Value : never;
-
-/**
- * Compose named owner declarations without losing their input/output types.
- * Check before indexing: object spreads would silently hide duplicate wire names
- * from the build exporter, even though runtime registration later rejects them.
- */
-export function composeDeclarations<const Groups extends readonly Record<string, { readonly name: string }>[]>(
-    ...groups: Groups
-): { [Declaration in GroupValue<Groups[number]> as Declaration["name"]]: Declaration } {
-    const declarations = new Map<string, { readonly name: string }>();
-    for (const group of groups) {
-        for (const declaration of Object.values(group)) {
-            if (declarations.has(declaration.name)) {
-                throw new Error(`Duplicate declaration: ${declaration.name}`);
-            }
-            declarations.set(declaration.name, declaration);
-        }
-    }
-    return Object.fromEntries(declarations) as {
-        [Declaration in GroupValue<Groups[number]> as Declaration["name"]]: Declaration
-    };
-}
 
 /** Stable boundary failures reveal no submitted values or private configuration. */
 export function rejectAction(message: string, code: ViewerActionError["code"] = "not_available", reason?: string): never {

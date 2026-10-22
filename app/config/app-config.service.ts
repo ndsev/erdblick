@@ -4,19 +4,12 @@ import * as jsyaml from "js-yaml";
 import { BehaviorSubject, firstValueFrom, Observable } from "rxjs";
 import { z } from "zod";
 import { ActionRegistry } from "../actions/action-registry.service";
-import {
-    ActionInput,
-    ActionOutput,
-    catalogPage,
-    discoveryPageShape,
-    discoveryResult,
-    identifierSchema
-} from "../actions/app-action";
+import { catalogPage, discoveryPageShape, discoveryResult, identifierSchema } from "../actions/app-action";
 import { AppActionContributor } from "../actions/app-action-contributor";
 import { boundedUnicodeString } from "../shared/unicode-string";
 import { AppStateService } from "../state/app-state.service";
-import { MapPresetDefinition, MapPresetIssue, parseMapPresetDefinitions } from "../styledata/map-preset.model";
-import { AppConfigStore } from "./app-config.store";
+import { MapPresetDefinition, MapPresetIssue, parseMapPresetDefinitions } from "../map-styles/map-preset";
+import { ConfigModel } from "./config.model";
 import {
     BackgroundLayerConfig,
     clampBackgroundOpacity,
@@ -24,7 +17,7 @@ import {
     DEFAULT_BACKGROUND_OPACITY,
     DEFAULT_WMS_BACKGROUND_MAX_ZOOM,
     DEFAULT_XYZ_BACKGROUND_MAX_ZOOM
-} from "./background-layer.model";
+} from "./background-layer";
 
 /** One built-in style bundle entry declared in `config.json`. */
 export interface StyleConfigEntry {
@@ -519,7 +512,7 @@ export class AppConfigService implements AppActionContributor {
     /** Creates the shared config loader used by styles, plugins, and background-layer UI. */
     constructor(private readonly httpClient: HttpClient,
         private readonly persistence: AppStateService,
-        public readonly store: AppConfigStore) {
+        public readonly model: ConfigModel) {
     }
 
     /** Returns the latest normalized config value, starting with the built-in fallback defaults. */
@@ -1315,26 +1308,32 @@ export class AppConfigService implements AppActionContributor {
     }
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: ActionRegistry): void {
-        actions.registerAction(configActions.listBackgrounds, input => this.listBackgrounds(input));
+        actions.registerAction(
+            {
+                name: "viewer_list_backgrounds",
+                mutation: false,
+                description:
+                    "List configured background identities, display names and types without disclosing source URLs " +
+                    "or request headers.",
+                inputSchema: z.strictObject({ ...discoveryPageShape }),
+                outputSchema: discoveryResult(
+                    z.strictObject({
+                        id: identifierSchema,
+                        name: boundedUnicodeString(4096),
+                        kind: boundedUnicodeString(128)
+                    })
+                )
+            },
+            (input) => this.listBackgrounds(input)
+        );
     }
 
 
-    listBackgrounds(input: ActionInput<typeof configActions.listBackgrounds>): ActionOutput<typeof configActions.listBackgrounds> {
-        return catalogPage(this.getBackgroundLayers().map(layer => ({ id: layer.id, name: layer.name, kind: layer.type })), input);
+    listBackgrounds(input: { offset?: number; limit?: number }) {
+        return catalogPage(
+            this.getBackgroundLayers().map((layer) => ({ id: layer.id, name: layer.name, kind: layer.type })),
+            input
+        );
     }
 
 }
-
-/**
- * Public actions and controls implemented by this controller. Their schemas stay
- * beside the handlers; both app startup and the Node catalog build register them.
- */
-export const configActions = {
-    listBackgrounds: {
-        name: "viewer_list_backgrounds",
-        mutation: false,
-        description: "List configured background identities, display names and types without disclosing source URLs or request headers.",
-        inputSchema: z.strictObject({ ...discoveryPageShape }),
-        outputSchema: discoveryResult(z.strictObject({ id: identifierSchema, name: boundedUnicodeString(4096), kind: boundedUnicodeString(128) }))
-    }
-} as const;

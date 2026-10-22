@@ -4,10 +4,10 @@ import { HttpClient, HttpHeaders, HttpResponse } from "@angular/common/http";
 import { BehaviorSubject, of, Subject } from "rxjs";
 import { describe, expect, it, vi } from "vitest";
 import { MapInfoService } from "./map-info.service";
-import type { MapInfoItem } from "./map.tree.model";
+import type { MapInfoItem } from "./map.tree";
 import type { AppStateService } from "../state/app-state.service";
-import type { StyleService } from "../styledata/style.service";
-import type { MapPresetService } from "../styledata/map-preset.service";
+import type { StyleService } from "../map-styles/style.service";
+import type { MapPresetService } from "../map-styles/map-preset.service";
 import type { InfoMessageService } from "../shared/info.service";
 
 /** Minimal valid catalog entry; each refresh below crosses a real JSON boundary. */
@@ -63,26 +63,26 @@ describe("MapInfoService incremental catalog startup", () => {
             await reload([source('First', 0), source('Second', 1, 'initializing')]);
             owners.layerState.layerNames = ['First/Road', 'First/Retired'];
             owners.layerState.layerVisibilityState.next(0, [true, false]);
-            owners.styleService.store.styleVisibility = { retired: false };
+            owners.styleService.model.styleVisibility = { retired: false };
             owners.inspectionState.setSelection([{ mapTileKey: 'Features:First:Retired:1', featureId: 'Road.1' }]);
-            const selectedPanel = owners.inspectionState.store.selection[0];
+            const selectedPanel = owners.inspectionState.model.selection[0];
             service.pruneCatalogState();
             expect(owners.layerState.layerNames).toContain('First/Retired');
-            expect(owners.inspectionState.store.selection[0]).toBe(selectedPanel);
-            expect(owners.styleService.store.styleVisibility).toEqual({ retired: false });
+            expect(owners.inspectionState.model.selection[0]).toBe(selectedPanel);
+            expect(owners.styleService.model.styleVisibility).toEqual({ retired: false });
 
             // Finish catalog discovery, then add stale state as a later imported preference.
             await reload([source('First', 0), source('Second', 1)]);
             owners.layerState.layerNames = ['First/Road', 'First/Retired'];
             owners.layerState.layerVisibilityState.next(0, [true, false]);
-            owners.styleService.store.styleVisibility = { retired: false };
+            owners.styleService.model.styleVisibility = { retired: false };
             owners.inspectionState.setSelection([{ mapTileKey: 'Features:First:Retired:1', featureId: 'Road.1' }]);
             const observed: unknown[] = [];
             const subscription = state.observe(() => ({
                 layers: owners.layerState.layerNames,
                 visibility: owners.layerState.layerVisibilityState.getValue(0),
-                styles: owners.styleService.store.styleVisibility,
-                selection: owners.inspectionState.store.selection
+                styles: owners.styleService.model.styleVisibility,
+                selection: owners.inspectionState.model.selection
             })).subscribe(value => observed.push(value));
             const systemEdit = vi.spyOn(state, 'withSystemStateMutation');
             service.pruneCatalogState();

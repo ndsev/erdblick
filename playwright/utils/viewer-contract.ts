@@ -2,14 +2,14 @@
  * Validate browser/MCP responses against the manifest shipped with the tested
  * bundle. Importing controller declarations here would also load Angular and
  * the WASM factory into Playwright's Node process. Only the TypeScript types
- * come from the unit-test inventory; runtime validation uses the public JSON.
+ * are generated from the collected catalog; runtime validation uses the public JSON.
  */
 import Ajv, { type SchemaObject } from "ajv";
 import { readFileSync } from "node:fs";
-import type { z } from "zod";
+import type { ViewerContract } from "../../app/actions/generated/viewer-contract";
 
-type Actions = typeof import("../../test/action-contract").viewerActions;
-type Controls = typeof import("../../test/control-contract").applicationControls;
+type Actions = ViewerContract["actions"];
+type Controls = ViewerContract["controls"];
 type Parser<Value> = { parse(value: unknown): Value };
 
 const catalog = JSON.parse(readFileSync("static/browser/web-mcp-actions.json", "utf8")) as {
@@ -38,21 +38,21 @@ export const viewerActions = Object.fromEntries(catalog.actions.map(action => [a
 }])) as {
     [Name in keyof Actions]: {
         mutation: boolean;
-        inputSchema: Parser<z.infer<Actions[Name]["inputSchema"]>>;
-        outputSchema: Parser<z.infer<Actions[Name]["outputSchema"]>>;
+        inputSchema: Parser<Actions[Name]["input"]>;
+        outputSchema: Parser<Actions[Name]["output"]>;
     }
 };
 
 export const applicationControls = Object.fromEntries(catalog.channels.map(control => [control.name, {
     valueSchema: parser(control.valueSchema)
 }])) as {
-    [Name in keyof Controls]: { valueSchema: Parser<z.infer<Controls[Name]["valueSchema"]>> }
+    [Name in keyof Controls]: { valueSchema: Parser<Controls[Name]["value"]> }
 };
 
 export const cameraViewStateSchema = applicationControls["view.camera"].valueSchema;
 
 // The native screenshot adapter returns its image separately from its metadata.
 const screenshotSchema = catalog.actions.find(action => action.name === "viewer_screenshot")!.outputSchema;
-export const screenshotMetadataSchema = parser<z.infer<Actions["viewer_screenshot"]["outputSchema"]>["metadata"]>(
+export const screenshotMetadataSchema = parser<Actions["viewer_screenshot"]["output"]["metadata"]>(
     screenshotSchema["properties"]["metadata"]
 );

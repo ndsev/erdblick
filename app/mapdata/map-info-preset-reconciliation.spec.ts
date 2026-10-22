@@ -4,7 +4,7 @@ import {describe, expect, it, vi} from "vitest";
 
 import {StateOwners, testPersistence} from "../../test/state-owners";
 import {MapInfoService} from "./map-info.service";
-import {LayerPresetNode, layerPresetInferenceKey, StyleOptionNode} from "./map.tree.model";
+import {LayerPresetNode, layerPresetInferenceKey, StyleOptionNode} from "./map.tree";
 
 function fixture() {
     const registry = testPersistence();

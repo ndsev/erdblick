@@ -1,6 +1,6 @@
 import type { Deck, PickingInfo } from "@deck.gl/core";
 import { addMetersToLngLat } from "@math.gl/web-mercator";
-import type { TileFeatureId } from "../../../inspection/inspection-state.model";
+import type { TileFeatureId } from "../../../inspection/inspection-state";
 import type {
     NavigationAnchor,
     NavigationScreenPosition,

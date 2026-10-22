@@ -4,9 +4,9 @@ import { ChangeDetectorRef, Renderer2 } from "@angular/core";
 import { BehaviorSubject } from "rxjs";
 import { describe, expect, it, vi } from "vitest";
 
-import { FeatureWrapper } from "../mapdata/feature-inspection.model";
+import { FeatureWrapper } from "../mapdata/feature-inspection";
 import { AppStateService } from "../state/app-state.service";
-import { InspectionComparisonModel, InspectionPanelModel, TileFeatureId } from "./inspection-state.model";
+import { InspectionComparisonModel, InspectionPanelModel, TileFeatureId } from "./inspection-state";
 import { InspectionSelectionService } from "./inspection-selection.service";
 import { InspectionContainerComponent } from "./inspection.container.component";
 import { InspectionDialogsComponent } from "./inspection.dialogs.component";
@@ -38,7 +38,7 @@ describe("inspection host render notifications", () => {
         } as unknown as InspectionSelectionService;
         const stateService = {
             baseFontSize: 16,
-            store: { isDockOpen: true, isDockAutoCollapsible: true },
+            model: { isDockOpen: true, isDockAutoCollapsible: true },
             hasDockedSurface: () => false,
             reorderInspectionPanels: vi.fn()
         } as unknown as AppStateService;

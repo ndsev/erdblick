@@ -1,4 +1,4 @@
-import { AppConfigStore } from "./app-config.store";
+import { ConfigModel } from "./config.model";
 import {testPersistence, stateOwners} from '../../test/state-owners';
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
@@ -6,7 +6,7 @@ import {HttpResponse} from "@angular/common/http";
 import {of, throwError} from "rxjs";
 
 import { AppConfigService, ServerConfigResponse } from "./app-config.service";
-import { DEFAULT_BACKGROUND_LAYER_ID, DEFAULT_BACKGROUND_OPACITY, DEFAULT_XYZ_BACKGROUND_MAX_ZOOM } from "./background-layer.model";
+import { DEFAULT_BACKGROUND_LAYER_ID, DEFAULT_BACKGROUND_OPACITY, DEFAULT_XYZ_BACKGROUND_MAX_ZOOM } from "./background-layer";
 
 class HttpClientStub {
     get = vi.fn();
@@ -14,7 +14,7 @@ class HttpClientStub {
 
 const createService = () => {
     const httpClient = new HttpClientStub();
-    const service = new AppConfigService(httpClient as any, testPersistence(), new AppConfigStore(testPersistence()));
+    const service = new AppConfigService(httpClient as any, testPersistence(), new ConfigModel(testPersistence()));
     return {service, httpClient};
 };
 

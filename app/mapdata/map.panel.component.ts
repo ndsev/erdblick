@@ -17,35 +17,35 @@ import {
 } from "rxjs";
 import { AppConfigService } from "../config/app-config.service";
 import { AppModeService } from "../config/app-mode.service";
-import { BackgroundLayerConfig, WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP } from "../config/background-layer.model";
+import { BackgroundLayerConfig, WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP } from "../config/background-layer";
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
-import { SelectedSourceData } from "../inspection/inspection-state.model";
+import { SelectedSourceData } from "../inspection/inspection-state";
 import { GeoMath, Rectangle } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
 import { AppDialogComponent } from "../layout/app-dialog.component";
-import { AppLayoutStore } from "../layout/app-layout.store";
+import { LayoutModel } from "../layout/layout.model";
 import { DialogStackService } from "../layout/dialog-stack.service";
 import {
     DEFAULT_TILE_GRID_COLOR,
     DEFAULT_TILE_GRID_OPACITY,
     tileGridMaxLevel,
     TileGridMode
-} from "../mapview/map-view-state.model";
+} from "../mapview/map-view-state";
 import { MapViewService } from "../mapview/map-view.service";
-import { MapViewStore } from "../mapview/map-view.store";
-import type { FeatureSearchMapLayerRef } from "../search/feature-search-state";
-import { FeatureSearchService } from "../search/feature.search.service";
+import { MapViewModel } from "../mapview/mapview.model";
+import type { FeatureSearchMapLayerRef } from "../feature-search/feature-search-state";
+import { FeatureSearchService } from "../feature-search/feature.search.service";
 import { InfoMessageService } from "../shared/info.service";
 import { KeyboardService } from "../shared/keyboard.service";
 import { deepEquals } from "../state/app-state";
 import { AppStateService } from "../state/app-state.service";
 import {
     MapPresetService
-} from "../styledata/map-preset.service";
-import { StyleEditorRequestService } from "../styledata/style-editor-request.service";
-import { StyleService } from "../styledata/style.service";
+} from "../map-styles/map-preset.service";
+import { StyleEditorRequestService } from "../map-styles/style-editor-request.service";
+import { StyleService } from "../map-styles/style.service";
 import { MapInfoService } from "./map-info.service";
-import { MapLayerStore } from "./map-layer.store";
+import { MapDataModel } from "./mapdata.model";
 import {
     CoverageRectItem,
     dataSourceCatalogStatus,
@@ -55,7 +55,7 @@ import {
     MapTreeViewNode,
     removeGroupPrefix,
     StyleOptionNode
-} from "./map.tree.model";
+} from "./map.tree";
 
 /** One rendered select option in the per-view background-layer dropdown. */
 interface BackgroundLayerOption {
@@ -688,10 +688,10 @@ export class MapPanelComponent {
         private readonly styleEditorRequestService: StyleEditorRequestService,
         private readonly mapPresetService: MapPresetService,
         private readonly styleService: StyleService,
-        public readonly layerState: MapLayerStore,
-        public readonly layout: AppLayoutStore,
+        public readonly layerState: MapDataModel,
+        public readonly layout: LayoutModel,
         public readonly inspectionState: InspectionPanelService,
-        public readonly viewSettings: MapViewStore) {
+        public readonly viewSettings: MapViewModel) {
         this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
 
         this.subscriptions.push(

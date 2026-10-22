@@ -6,9 +6,9 @@ import { StateOwners } from '../../test/state-owners';
 import { APPLICATION_STORAGE_KEYS } from '../../test/state-storage-keys';
 import { MapViewService } from './map-view.service';
 import { InspectionSelectionService } from '../inspection/inspection-selection.service';
-import { FeatureWrapper } from '../mapdata/feature-inspection.model';
+import { FeatureWrapper } from '../mapdata/feature-inspection';
 import { Cartographic } from '../integrations/geo';
-import { VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION } from "./map-view-state.model";
+import { VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION } from "./map-view-state";
 
 function setup(params: Record<string, unknown> = {}) {
     const messages = { showError: vi.fn(), showWarning: vi.fn() };
@@ -56,7 +56,7 @@ describe('logical view identity', () => {
                 orientation: { heading: 0.02, pitch: -0.75, roll: 0 },
                 position: [0, 0, 0]
             });
-            expect(coordinates.store.marker).toBe(true);
+            expect(coordinates.model.marker).toBe(true);
             expect(toasts.add).not.toHaveBeenCalled();
             expect(() => views.setBackgroundState(1, 'osm', 50)).toThrow('unavailable');
             if (source === 'storage') {
@@ -104,7 +104,7 @@ describe('logical view identity', () => {
         expect(snapshot['marker']).toBe(1);
         expect(snapshot['mode2d']).toEqual([true, false]);
         expect(snapshot['visibility']).toEqual([[true, false], [false, true]]);
-        expect(coordinates.store.markerState.serialize(false)).toEqual({ marker: '1' });
+        expect(coordinates.model.markerState.serialize(false)).toEqual({ marker: '1' });
         expect(views.mode2dState.appState.serialize(false)).toEqual({ mode2d: '[true,false]' });
         expect(layers.layerVisibilityState.appState.serialize(false)).toEqual({ visibility: '[[true,false],[false,true]]' });
         expect(views.mode2dState.appState.serialize(true)).toEqual({ m2d: '1,0' });
@@ -123,10 +123,10 @@ describe('logical view identity', () => {
         layers.layerVisibilityState.next(first, [true]);
         layers.layerVisibilityState.next(second, [false]);
         layers.setStyleOptionValues('Map', 'Lane', 'STY0', 'active', [true, false]);
-        searches.store.addFeatureSearch({ query: 'true', selectedViewIndices: [0] });
+        searches.model.addFeatureSearch({ query: 'true', selectedViewIndices: [0] });
         inspections.setSelection([{ mapTileKey: 'Features:Map:Lane:1', featureId: 'Road.1' }]);
-        const inspectionBefore = inspections.store.selection;
-        layout.store.viewPanelSizesState.next([30, 70]);
+        const inspectionBefore = inspections.model.selection;
+        layout.model.viewPanelSizesState.next([30, 70]);
         views.focusedView = 0;
         const observations: unknown[] = [];
         registry.observe(() => ({
@@ -140,10 +140,10 @@ describe('logical view identity', () => {
         expect(views.cameraViewDataState.getValue(first)).toEqual(firstCamera);
         expect(layers.layerVisibilityState.getValue(first)).toEqual([true]);
         expect(layers.stylesState.value.get('Map/Lane/STY0/active')).toEqual({ [first]: true, [second]: false });
-        expect(searches.store.featureSearchState.value[0].selectedViewIds).toEqual([first]);
-        expect(searches.store.featureSearches[0].selectedViewIndices).toEqual([1]);
-        expect(inspections.store.selection).toBe(inspectionBefore);
-        expect(layout.store.viewPanelSizesState.value).toEqual([30, 70]);
+        expect(searches.model.featureSearchState.value[0].selectedViewIds).toEqual([first]);
+        expect(searches.model.featureSearches[0].selectedViewIndices).toEqual([1]);
+        expect(inspections.model.selection).toBe(inspectionBefore);
+        expect(layout.model.viewPanelSizesState.value).toEqual([30, 70]);
         expect(observations).toHaveLength(2);
     });
 
@@ -156,7 +156,7 @@ describe('logical view identity', () => {
         layers.layerVisibilityState.next('first', [true]);
         layers.layerVisibilityState.next('second', [false]);
         layers.setStyleOptionValues('Map', 'Lane', 'STY0', 'active', [true, false]);
-        searches.store.addFeatureSearch({ query: 'true', selectedViewIndices: [0] });
+        searches.model.addFeatureSearch({ query: 'true', selectedViewIndices: [0] });
         views.focusedView = 0;
         const observations: unknown[] = [];
         registry.observe(() => registry.exportSnapshot()).subscribe(value => observations.push(value));
@@ -167,7 +167,7 @@ describe('logical view identity', () => {
         expect(views.cameraViewDataState.getValue('first')).toEqual(camera);
         expect(layers.layerVisibilityState.getValue('first')).toEqual([true]);
         expect(layers.stylesState.value.get('Map/Lane/STY0/active')).toEqual({ first: true, second: false });
-        expect(searches.store.featureSearchState.value[0].selectedViewIds).toEqual(['first']);
+        expect(searches.model.featureSearchState.value[0].selectedViewIds).toEqual(['first']);
         expect(observations).toHaveLength(2);
         registry.ngOnDestroy();
     });
@@ -180,14 +180,14 @@ describe('logical view identity', () => {
         layers.layerNames = ['Map/Lane'];
         layers.layerVisibilityState.next('first', [false]);
         layers.setStyleOptionValues('Map', 'Lane', 'STY0', 'active', [true, false]);
-        searches.store.addFeatureSearch({ query: 'true', selectedViewIndices: [0] });
+        searches.model.addFeatureSearch({ query: 'true', selectedViewIndices: [0] });
         expect(registry.importSnapshot({ viewIds: ['replacement', 'second'] })).toEqual([]);
         expect(views.cameraViewDataState.getValue('replacement')).toEqual(camera);
         expect(layers.layerVisibilityState.getValue('replacement')).toEqual([false]);
         expect(layers.stylesState.value.get('Map/Lane/STY0/active')).toEqual({ replacement: true, second: false });
-        expect(searches.store.featureSearchState.value[0].selectedViewIds).toEqual([]);
+        expect(searches.model.featureSearchState.value[0].selectedViewIds).toEqual([]);
         expect(registry.importSnapshot({ viewIds: ['first', 'second'] })).toEqual([]);
-        expect(searches.store.featureSearchState.value[0].selectedViewIds).toEqual([]);
+        expect(searches.model.featureSearchState.value[0].selectedViewIds).toEqual([]);
         registry.ngOnDestroy();
     });
 
@@ -200,14 +200,14 @@ describe('logical view identity', () => {
         layers.layerNames = ['Map/Lane'];
         layers.layerVisibilityState.next('first', [false]);
         layers.setStyleOptionValues('Map', 'Lane', 'STY0', 'active', [true, false]);
-        searches.store.addFeatureSearch({ query: 'true', selectedViewIndices: [0] });
+        searches.model.addFeatureSearch({ query: 'true', selectedViewIndices: [0] });
         expect(registry.replaceSnapshotState({ viewIds: ['replacement'] })).toEqual([]);
         expect(views.viewIds).toEqual(['replacement']);
         expect(views.cameraViewDataState.getValue(0)).toEqual(defaultCamera);
         expect(layers.layerNames).toEqual([]);
         expect(layers.stylesState.value.size).toBe(0);
         // Search definitions are intentionally outside snapshots; their removed view references are pruned.
-        expect(searches.store.featureSearchState.value[0].selectedViewIds).toEqual([]);
+        expect(searches.model.featureSearchState.value[0].selectedViewIds).toEqual([]);
         registry.ngOnDestroy();
     });
 
@@ -230,15 +230,15 @@ describe('logical view identity', () => {
 
     it.each([true, false])('new views inherit selected search membership from their source: %j', selected => {
         const { owners: { viewSettings: views, searchService: searches } } = setup();
-        searches.store.addFeatureSearch({ query: 'true', selectedViewIndices: selected ? [0] : [] });
+        searches.model.addFeatureSearch({ query: 'true', selectedViewIndices: selected ? [0] : [] });
         views.numViews = 2;
         const removed = views.viewIdAt(1);
-        expect(searches.store.featureSearches[0].selectedViewIndices).toEqual(selected ? [0, 1] : []);
+        expect(searches.model.featureSearches[0].selectedViewIndices).toEqual(selected ? [0, 1] : []);
         views.retainViews([0], new Map());
         views.numViews = 2;
         expect(views.viewIdAt(1)).not.toBe(removed);
-        expect(searches.store.featureSearchState.value[0].selectedViewIds).not.toContain(removed);
-        expect(searches.store.featureSearches[0].selectedViewIndices).toEqual(selected ? [0, 1] : []);
+        expect(searches.model.featureSearchState.value[0].selectedViewIds).not.toContain(removed);
+        expect(searches.model.featureSearches[0].selectedViewIndices).toEqual(selected ? [0, 1] : []);
     });
 
     it.each([false, true])('copies the chosen source into a third view with search membership=%s', selected => {
@@ -249,19 +249,19 @@ describe('logical view identity', () => {
         layers.layerVisibilityState.next(source, [true]);
         layers.layerVisibilityState.next(other, [false]);
         layers.stylesState.next(new Map([['Map/Lane/style/labels', { [source]: true, [other]: false }]]));
-        searches.store.addFeatureSearch({ query: 'true', selectedViewIndices: selected ? [0] : [1] });
+        searches.model.addFeatureSearch({ query: 'true', selectedViewIndices: selected ? [0] : [1] });
         const added = views.addView(source);
         expect(views.cameraViewDataState.getValue(added)).toEqual(views.cameraViewDataState.getValue(source));
         expect(layers.layerVisibilityState.getValue(added)).toEqual([true]);
         expect(layers.stylesState.value.get('Map/Lane/style/labels')?.[added]).toBe(true);
-        expect(searches.store.featureSearchState.value[0].selectedViewIds.includes(added)).toBe(selected);
+        expect(searches.model.featureSearchState.value[0].selectedViewIds.includes(added)).toBe(selected);
         registry.ngOnDestroy();
     });
 
     it('rejects old async targets after removing and restoring the same URL ID', () => {
         const { registry, owners } = setup();
         const views = new MapViewService(registry, { layerStateChanged: new Subject(), reapplySyncOptionsForAllViews() { }, maps: { maps: new Map() } } as never,
-            owners.renderPreferences.store, owners.viewSettings, owners.configService);
+            owners.renderPreferences.model, owners.viewSettings, owners.configService);
         owners.viewSettings.numViews = 2;
         const id = owners.viewSettings.viewIdAt(0);
         const old = { viewId: id, viewIndex: 0, isAvailable: () => true };
@@ -283,7 +283,7 @@ describe('logical view identity', () => {
         const views = new MapViewService(registry, {
             layerStateChanged: new Subject(), reapplySyncOptionsForAllViews() { },
             maps: { maps: new Map() }
-        } as never, owners.renderPreferences.store, owners.viewSettings, owners.configService);
+        } as never, owners.renderPreferences.model, owners.viewSettings, owners.configService);
         const id = owners.viewSettings.viewIdAt(0);
         owners.viewSettings.viewIds.forEach(viewId => views.registerRenderView({ viewId, isAvailable: () => true } as never));
         let finish!: (features: FeatureWrapper[]) => void;
@@ -312,7 +312,7 @@ describe('logical view identity', () => {
         const views = new MapViewService(registry, {
             layerStateChanged: new Subject(), reapplySyncOptionsForAllViews() { },
             maps: { maps: new Map() }
-        } as never, owners.renderPreferences.store, owners.viewSettings, owners.configService);
+        } as never, owners.renderPreferences.model, owners.viewSettings, owners.configService);
         owners.viewSettings.viewIds.forEach(viewId => views.registerRenderView({ viewId, isAvailable: () => true } as never));
         vi.spyOn(views, 'showsFeatureSearchTileInView').mockImplementation(index => matches && index !== 1);
         const wrapper = { featureTile: { tileId: 1, mapName: 'Map', layerName: 'Lane' } } as FeatureWrapper;
@@ -394,7 +394,7 @@ describe('logical view identity', () => {
         expect(registry.ready.value).toBe(true);
         expect(new Set(owners.viewSettings.viewIds).size).toBe(2);
         expect(owners.viewSettings.cameraViewDataState.getValue(1).destination).toEqual({ lon: 12, lat: 49, alt: 400 });
-        expect(owners.coordinates.store.marker).toBe(true);
+        expect(owners.coordinates.model.marker).toBe(true);
         expect(toasts.add).toHaveBeenCalled();
         registry.ngOnDestroy();
     });

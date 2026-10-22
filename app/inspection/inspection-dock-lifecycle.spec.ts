@@ -4,9 +4,9 @@ import { Subject } from "rxjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stateOwners, testPersistence } from "../../test/state-owners";
 import { DockableLayoutComponent } from "../layout/dockable-layout.component";
-import { FeatureWrapper } from "../mapdata/feature-inspection.model";
+import { FeatureWrapper } from "../mapdata/feature-inspection";
 import { InspectionSelectionService } from "./inspection-selection.service";
-import { TileFeatureId } from "./inspection-state.model";
+import { TileFeatureId } from "./inspection-state";
 import { InspectionContainerComponent } from "./inspection.container.component";
 
 const target: TileFeatureId = { mapTileKey: "Features:Map:Road:42", featureId: "Way.0" };
@@ -52,7 +52,7 @@ function createDock(bridgeFirst: boolean) {
         detectChanges: () => {
             // The layout's @if creates the inspection host synchronously when
             // detectChanges first sees the newly selected durable panel.
-            if (owners.inspectionState.store.selection.length && !container) {
+            if (owners.inspectionState.model.selection.length && !container) {
                 container = new InspectionContainerComponent(
                     persistence, bridge, {} as Renderer2,
                     { markForCheck: vi.fn() } as unknown as ChangeDetectorRef,
@@ -60,18 +60,18 @@ function createDock(bridgeFirst: boolean) {
                 );
             }
             rendered.push({
-                open: owners.layout.store.isDockOpen,
-                selected: owners.inspectionState.store.selection.map(panel => panel.id),
+                open: owners.layout.model.isDockOpen,
+                selected: owners.inspectionState.model.selection.map(panel => panel.id),
                 runtime: bridge.selectionTopic.value.map(panel => panel.id)
             });
-            viewerWidth = owners.layout.store.isDockOpen ? 1000 : 1600;
+            viewerWidth = owners.layout.model.isDockOpen ? 1000 : 1600;
         }
     } as unknown as ChangeDetectorRef;
     const component = new DockableLayoutComponent(
         persistence, owners.coordinatePolicy, {} as Renderer2,
         owners.searchService, cdr, {} as never,
         { legalInformationPerMap: new Map(), legalInformationUpdated: new Subject() } as never,
-        owners.layout, owners.inspectionState.store
+        owners.layout, owners.inspectionState.model
     );
     const viewer = document.createElement("div");
     viewer.getBoundingClientRect = () => ({ width: viewerWidth }) as DOMRect;
@@ -96,16 +96,16 @@ describe("inspection dock lifetime", () => {
 
         const id = dock.inspectionState.setSelection([target])!;
 
-        expect(dock.layout.store.isDockOpen).toBe(true);
+        expect(dock.layout.model.isDockOpen).toBe(true);
         expect(dock.rendered).toEqual([{ open: true, selected: [id], runtime: [id] }]);
         expect(dock.container().dockedPanels[0].loading).toBe(true);
         dock.resolveLoad([wrapper]);
         await flushLoads();
-        expect(dock.layout.store.isDockOpen).toBe(true);
+        expect(dock.layout.model.isDockOpen).toBe(true);
         expect(dock.container().dockedPanels[0].features).toEqual([wrapper]);
 
         dock.inspectionState.setInspectionPanelLockedState(id, true);
-        expect(dock.layout.store.isDockOpen).toBe(true);
+        expect(dock.layout.model.isDockOpen).toBe(true);
         expect(dock.container().dockedPanels[0].locked).toBe(true);
     });
 
@@ -113,45 +113,45 @@ describe("inspection dock lifetime", () => {
         const dock = createDock(true);
         const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
         dock.inspectionState.setSelection([target]);
-        expect(dock.layout.store.isDockOpen).toBe(true);
+        expect(dock.layout.model.isDockOpen).toBe(true);
 
         if (outcome === "failed") dock.rejectLoad(new Error("Feature unavailable"));
         else dock.resolveLoad([]);
         await flushLoads();
 
-        expect(dock.inspectionState.store.selection).toHaveLength(1);
+        expect(dock.inspectionState.model.selection).toHaveLength(1);
         expect(dock.bridge.selectionIdsTopic.value).toEqual([]);
         expect(dock.container().dockedPanels).toEqual([]);
-        expect(dock.layout.store.isDockOpen).toBe(false);
+        expect(dock.layout.model.isDockOpen).toBe(false);
         expect(errors).toHaveBeenCalledTimes(outcome === "failed" ? 1 : 0);
     });
 
     it("keeps a manually closed dock closed when the pending selection resolves", async () => {
         const dock = createDock(true);
         dock.inspectionState.setSelection([target]);
-        expect(dock.layout.store.isDockOpen).toBe(true);
+        expect(dock.layout.model.isDockOpen).toBe(true);
         dock.component["closeDock"]();
         dock.resolveLoad([wrapper]);
         await flushLoads();
 
-        expect(dock.layout.store.isDockOpen).toBe(false);
+        expect(dock.layout.model.isDockOpen).toBe(false);
         expect(dock.container().dockedPanels[0].features).toEqual([wrapper]);
         dock.component["toggleDock"]();
-        expect(dock.layout.store.isDockOpen).toBe(true);
+        expect(dock.layout.model.isDockOpen).toBe(true);
     });
 
     it("collapses when selection clears and never revives a removed panel from a late load", async () => {
         const dock = createDock(true);
         const id = dock.inspectionState.setSelection([target])!;
-        expect(dock.layout.store.isDockOpen).toBe(true);
+        expect(dock.layout.model.isDockOpen).toBe(true);
 
         dock.inspectionState.unsetPanel(id);
-        expect(dock.layout.store.isDockOpen).toBe(false);
-        expect(dock.inspectionState.store.selection).toEqual([]);
+        expect(dock.layout.model.isDockOpen).toBe(false);
+        expect(dock.inspectionState.model.selection).toEqual([]);
         dock.resolveLoad([wrapper]);
         await flushLoads();
 
-        expect(dock.layout.store.isDockOpen).toBe(false);
+        expect(dock.layout.model.isDockOpen).toBe(false);
         expect(dock.container().dockedPanels).toEqual([]);
         expect(dock.bridge.selectionIdsTopic.value).toEqual([]);
     });

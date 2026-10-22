@@ -3,24 +3,17 @@ import { BehaviorSubject } from "rxjs";
 import { z } from "zod";
 import { Feature } from "../../build/libs/core/erdblick-core";
 import { ActionRegistry } from "../actions/action-registry.service";
-import type { ActionInput, ActionOutput } from "../actions/app-action";
-import {
-    colorSchema,
-    ControlReadContext,
-    ControlValue,
-    identifierSchema,
-    indexSchema,
-    rejectAction
-} from "../actions/app-action";
+
+import { colorSchema, ControlReadContext, identifierSchema, indexSchema, rejectAction } from "../actions/app-action";
 import { AppActionContributor } from "../actions/app-action-contributor";
 import { Cartesian3 } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
-import { featureSetsEqual, FeatureWrapper } from "../mapdata/feature-inspection.model";
+import { featureSetsEqual, FeatureWrapper } from "../mapdata/feature-inspection";
 import { MapTileStreamService, RetainedTileExpiryOwner } from "../mapdata/map-tile-stream.service";
-import { parsePartition, partitionKeySuffix } from "../mapdata/partition.model";
+import { parsePartition, partitionKeySuffix } from "../mapdata/partition";
 import { TileDeliveryError } from "../mapdata/tile-diagnostics";
 import { MapViewService } from "../mapview/map-view.service";
-import { MapViewStore } from "../mapview/map-view.store";
+import { MapViewModel } from "../mapview/mapview.model";
 import { InfoMessageService } from "../shared/info.service";
 import { KeyboardService } from "../shared/keyboard.service";
 import { tileFeatureInteractionTargetsEqual } from "../shared/tile-feature-id";
@@ -29,7 +22,7 @@ import { deepEquals } from "../state/app-state";
 import { AppStateService } from "../state/app-state.service";
 import { featureIdentitySchema } from "./feature-identity";
 import { InspectionPanelService } from "./inspection-panel.service";
-import { InspectionPanelModel, SelectedSourceData, TileFeatureId } from "./inspection-state.model";
+import { InspectionPanelModel, SelectedSourceData, TileFeatureId } from "./inspection-state";
 
 interface Wgs84Point {
     x: number;
@@ -77,17 +70,17 @@ export class InspectionSelectionService implements AppActionContributor {
         private readonly messageService: InfoMessageService,
         private readonly ngZone: NgZone,
         public readonly inspectionState: InspectionPanelService,
-        public readonly viewSettings: MapViewStore
+        public readonly viewSettings: MapViewModel
     ) {
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFocusedInspectionPanel.bind(this));
     }
 
     /** Wires app-state selection projection once the tile stream can serve feature loads. */
     initialize(): void {
-        this.inspectionState.store.selectionState.subscribe(selected => {
+        this.inspectionState.model.selectionState.subscribe((selected) => {
             this.ngZone.run(() => this.selectionIdsTopic.next(selected));
             const revision = ++this.selectionConversionRevision;
-            const demanded = new Set(selected.map(panel => this.featureLoadKey(panel.features)));
+            const demanded = new Set(selected.map((panel) => this.featureLoadKey(panel.features)));
             for (const [key, controller] of this.pendingFeatureLoadControllers) {
                 if (!demanded.has(key)) {
                     controller.abort();
@@ -97,17 +90,23 @@ export class InspectionSelectionService implements AppActionContributor {
             }
             const pendingSelections: InspectionPanelModel<FeatureWrapper>[] = [];
             const pendingPanelUpdates: Array<{
-                panel: InspectionPanelModel<FeatureWrapper>,
-                selection: InspectionPanelModel<TileFeatureId>
-            }> = [];
-            const existingPanels = new Map(this.selectionTopic.getValue().map(panel => [panel.id, panel]));
-            const featureLoads: Array<Promise<{
+                panel: InspectionPanelModel<FeatureWrapper>;
                 selection: InspectionPanelModel<TileFeatureId>;
-                features: FeatureWrapper[];
-            } | null>> = [];
+            }> = [];
+            const existingPanels = new Map(this.selectionTopic.getValue().map((panel) => [panel.id, panel]));
+            const featureLoads: Array<
+                Promise<{
+                    selection: InspectionPanelModel<TileFeatureId>;
+                    features: FeatureWrapper[];
+                } | null>
+            > = [];
             for (const selection of selected) {
                 const existing = existingPanels.get(selection.id);
-                if (existing && featureSetsEqual(selection.features, existing.features) && deepEquals(existing.sourceData, selection.sourceData)) {
+                if (
+                    existing &&
+                    featureSetsEqual(selection.features, existing.features) &&
+                    deepEquals(existing.sourceData, selection.sourceData)
+                ) {
                     pendingSelections.push(existing);
                     pendingPanelUpdates.push({ panel: existing, selection });
                     continue;
@@ -119,48 +118,53 @@ export class InspectionSelectionService implements AppActionContributor {
                 }
 
                 pendingSelections.push(this.runtimePanel(selection, [], true));
-                featureLoads.push(this.loadFeaturesOnce(selection.features)
-                    .then(features => ({ selection, features }))
-                    .catch(error => {
-                        console.error(
-                            `Failed to resolve inspection selection for panel ${selection.id}.`,
-                            error
-                        );
-                        return null;
-                    }));
+                featureLoads.push(
+                    this.loadFeaturesOnce(selection.features)
+                        .then((features) => ({ selection, features }))
+                        .catch((error) => {
+                            console.error(
+                                `Failed to resolve inspection selection for panel ${selection.id}.`,
+                                error
+                            );
+                            return null;
+                        })
+                );
             }
 
             // Publish panel shells before restricted feature loads finish so
             // docked and floating hosts can show progress immediately.
             this.ngZone.run(() => {
-                pendingPanelUpdates.forEach(update => {
+                pendingPanelUpdates.forEach((update) => {
                     update.panel.locked = update.selection.locked;
                     update.panel.focused = update.selection.focused;
                     update.panel.color = update.selection.color;
                     update.panel.size = update.selection.size;
                     update.panel.undocked = update.selection.undocked ?? false;
                 });
-                this.selectionIdsTopic.next(
-                    this.selectionIdsForRuntime(selected, pendingSelections)
-                );
+                this.selectionIdsTopic.next(this.selectionIdsForRuntime(selected, pendingSelections));
                 this.selectionTopic.next(pendingSelections);
             });
 
             if (!featureLoads.length) {
                 return;
             }
-            void Promise.all(featureLoads).then(results => {
+            void Promise.all(featureLoads).then((results) => {
                 if (revision !== this.selectionConversionRevision) {
                     return;
                 }
-                const resolvedByPanelId = new Map(results
-                    .filter((result): result is NonNullable<typeof result> => result !== null)
-                    .map(result => [result.selection.id, result]));
+                const resolvedByPanelId = new Map(
+                    results
+                        .filter((result): result is NonNullable<typeof result> => result !== null)
+                        .map((result) => [result.selection.id, result])
+                );
                 const convertedSelections: InspectionPanelModel<FeatureWrapper>[] = [];
                 for (const selection of selected) {
                     const existing = existingPanels.get(selection.id);
-                    if (existing && featureSetsEqual(selection.features, existing.features) &&
-                        deepEquals(existing.sourceData, selection.sourceData)) {
+                    if (
+                        existing &&
+                        featureSetsEqual(selection.features, existing.features) &&
+                        deepEquals(existing.sourceData, selection.sourceData)
+                    ) {
                         convertedSelections.push(existing);
                         continue;
                     }
@@ -178,26 +182,29 @@ export class InspectionSelectionService implements AppActionContributor {
                 // callback outside Angular. Publish the resolved model in-zone
                 // so both docked and floating inspection views are checked.
                 this.ngZone.run(() => {
-                    this.selectionIdsTopic.next(
-                        this.selectionIdsForRuntime(selected, convertedSelections)
-                    );
+                    this.selectionIdsTopic.next(this.selectionIdsForRuntime(selected, convertedSelections));
                     this.selectionTopic.next(convertedSelections);
                 });
             });
         });
-        this.selectionTopic.subscribe(selectedPanels => {
+        this.selectionTopic.subscribe((selectedPanels) => {
             this.reconcileInspectionExpiries(
-                selectedPanels.flatMap(panel => panel.features.map(feature => ({
-                    panelId: panel.id,
-                    feature
-                })))
+                selectedPanels.flatMap((panel) =>
+                    panel.features.map((feature) => ({
+                        panelId: panel.id,
+                        feature
+                    }))
+                )
             );
-            const selectedTargets = this.selectionIdsTopic.getValue()
-                .flatMap(panel => panel.features);
-            const hoverIds = this.hoverIdsTopic.getValue().filter(feature =>
-                !selectedTargets.some(selected =>
-                    tileFeatureInteractionTargetsEqual(feature, selected))
-            );
+            const selectedTargets = this.selectionIdsTopic.getValue().flatMap((panel) => panel.features);
+            const hoverIds = this.hoverIdsTopic
+                .getValue()
+                .filter(
+                    (feature) =>
+                        !selectedTargets.some((selected) =>
+                            tileFeatureInteractionTargetsEqual(feature, selected)
+                        )
+                );
             if (hoverIds.length !== this.hoverIdsTopic.getValue().length) {
                 if (!hoverIds.length) {
                     this.remoteHoverHighlightAllowed = false;
@@ -281,10 +288,7 @@ export class InspectionSelectionService implements AppActionContributor {
      * Opens one inspection per exact rendered-feature hit, bounded by the configured panel limit.
      * The warning reports logical features after merged-object expansion, not raw render objects.
      */
-    inspectFeatureIds(
-        tileFeatureIds: TileFeatureId[],
-        lockNewPanels = false
-    ): MultiInspectionResult {
+    inspectFeatureIds(tileFeatureIds: TileFeatureId[], lockNewPanels = false): MultiInspectionResult {
         const featureIds = this.uniqueTileFeatureIds(tileFeatureIds);
         const foundFeatureCount = featureIds.length;
         if (!foundFeatureCount) {
@@ -293,14 +297,16 @@ export class InspectionSelectionService implements AppActionContributor {
 
         this.stateService.transaction(() => {
             if (foundFeatureCount === 1) {
-                const currentPanels = this.inspectionState.store.selection;
+                const currentPanels = this.inspectionState.model.selection;
                 const featureAlreadyInspected = this.panelsContainFeature(currentPanels, featureIds[0]);
-                const reusableFeaturePanel = currentPanels.some(panel =>
-                    panel.sourceData === undefined && !panel.locked
+                const reusableFeaturePanel = currentPanels.some(
+                    (panel) => panel.sourceData === undefined && !panel.locked
                 );
-                if (featureAlreadyInspected
-                    || reusableFeaturePanel
-                    || currentPanels.length < this.inspectionState.store.inspectionsLimit) {
+                if (
+                    featureAlreadyInspected ||
+                    reusableFeaturePanel ||
+                    currentPanels.length < this.inspectionState.model.inspectionsLimit
+                ) {
                     const panelId = this.inspectionState.setSelection(
                         [featureIds[0]],
                         undefined,
@@ -316,10 +322,10 @@ export class InspectionSelectionService implements AppActionContributor {
                 this.inspectionState.unsetUnlockedSelections();
                 let remainingSlots = Math.max(
                     0,
-                    this.inspectionState.store.inspectionsLimit - this.inspectionState.store.selection.length
+                    this.inspectionState.model.inspectionsLimit - this.inspectionState.model.selection.length
                 );
                 for (const featureId of featureIds) {
-                    if (this.panelsContainFeature(this.inspectionState.store.selection, featureId)) {
+                    if (this.panelsContainFeature(this.inspectionState.model.selection, featureId)) {
                         continue;
                     }
                     if (remainingSlots <= 0) {
@@ -336,13 +342,13 @@ export class InspectionSelectionService implements AppActionContributor {
             }
         });
 
-        const inspectedFeatureCount = featureIds.filter(featureId =>
-            this.panelsContainFeature(this.inspectionState.store.selection, featureId)
+        const inspectedFeatureCount = featureIds.filter((featureId) =>
+            this.panelsContainFeature(this.inspectionState.model.selection, featureId)
         ).length;
         if (inspectedFeatureCount < foundFeatureCount) {
             this.messageService.showWarning(
                 `Inspecting ${inspectedFeatureCount} features out of ${foundFeatureCount} found features. ` +
-                "Decrease the selection or increase your max inspections limit to see more."
+                    "Decrease the selection or increase your max inspections limit to see more."
             );
         }
         return { foundFeatureCount, inspectedFeatureCount };
@@ -378,22 +384,19 @@ export class InspectionSelectionService implements AppActionContributor {
     }
 
     /** Publishes hover ids without loading feature data; inspection hovers may opt into remote styles. */
-    setHoveredFeatures(
-        tileFeatureIds: (TileFeatureId | null)[],
-        allowRemoteHighlight = false
-    ): void {
-        const requestedTargets = tileFeatureIds
-            .filter((id): id is TileFeatureId => !!id);
-        const selectedTargets = this.inspectionState.store.selectionState.getValue()
-            .flatMap(panel => panel.features);
-        const hoverTargets = requestedTargets.filter(id =>
-            !selectedTargets.some(selected =>
-                tileFeatureInteractionTargetsEqual(id, selected))
+    setHoveredFeatures(tileFeatureIds: (TileFeatureId | null)[], allowRemoteHighlight = false): void {
+        const requestedTargets = tileFeatureIds.filter((id): id is TileFeatureId => !!id);
+        const selectedTargets = this.inspectionState.model.selectionState
+            .getValue()
+            .flatMap((panel) => panel.features);
+        const hoverTargets = requestedTargets.filter(
+            (id) => !selectedTargets.some((selected) => tileFeatureInteractionTargetsEqual(id, selected))
         );
-        const remoteHighlightAllowed =
-            hoverTargets.length > 0 && allowRemoteHighlight;
-        if (featureSetsEqual(this.hoverIdsTopic.getValue(), hoverTargets) &&
-            this.remoteHoverHighlightAllowed === remoteHighlightAllowed) {
+        const remoteHighlightAllowed = hoverTargets.length > 0 && allowRemoteHighlight;
+        if (
+            featureSetsEqual(this.hoverIdsTopic.getValue(), hoverTargets) &&
+            this.remoteHoverHighlightAllowed === remoteHighlightAllowed
+        ) {
             return;
         }
         this.remoteHoverHighlightAllowed = remoteHighlightAllowed;
@@ -699,23 +702,172 @@ export class InspectionSelectionService implements AppActionContributor {
     }
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: ActionRegistry): void {
-        actions.registerAction(inspectionActions.inspect, (input, signal) => this.inspect(input, signal));
-        actions.registerAction(inspectionActions.openSourceData, input => this.openSourceData(input));
+        actions.registerAction(
+            {
+                name: "viewer_inspect",
+                description:
+                    "Open feature/entity inspections in the ordinary UI. For an attribute validity, copy the base " +
+                    "featureId plus attributeIndex and validityIndex from native extraction or search results. " +
+                    "relationIndex similarly addresses a relation. Existing suffixed IDs remain supported; do not " +
+                    "combine a suffix with numeric selectors. Returns panel IDs immediately; loading remains " +
+                    "observable via app.selections. panelId must address an unlocked feature panel; newPanel opens " +
+                    "one grouped panel. To distinguish groups (e.g. predecessors versus successors), call " +
+                    "separately with newPanel:true and different color values. color requires newPanel:true and " +
+                    "colors only that new panel. lock=true pins the resulting panels. Use mapget extraction for " +
+                    "model content.",
+                mutation: true,
+                inputSchema: z.strictObject({
+                    features: z.array(featureIdentitySchema).min(1).max(50),
+                    lock: z.boolean().optional(),
+                    panelId: indexSchema.optional(),
+                    newPanel: z.boolean().optional(),
+                    color: colorSchema.optional()
+                }),
+                outputSchema: z.strictObject({
+                    status: z.literal("applied"),
+                    panelIds: z.array(indexSchema).max(50),
+                    features: z
+                        .array(z.strictObject({ mapTileKey: identifierSchema, featureId: identifierSchema }))
+                        .max(50),
+                    complete: z.boolean(),
+                    reason: z.enum(["item_limit", "byte_limit", "text_limit", "loading"]).optional()
+                })
+            },
+            (input, signal) => this.inspect(input, signal)
+        );
+        actions.registerAction(
+            {
+                name: "viewer_open_source_data",
+                description:
+                    "Open a source-data inspection at a lossless uint64 address. Use a native SourceData " +
+                    "mapTileKey, or map/partition and a mapget-native source reference returned by extraction. The " +
+                    "existing panel owns loading and reveals the reference.",
+                mutation: true,
+                inputSchema: z.strictObject({
+                    source: z.union([
+                        z.strictObject({
+                            mapTileKey: identifierSchema,
+                            address: z
+                                .string()
+                                .regex(/^[0-9]+$/)
+                                .max(20)
+                                .optional()
+                        }),
+                        z.strictObject({
+                            mapId: identifierSchema,
+                            partition: z.union([
+                                z.strictObject({
+                                    kind: z.literal("tile"),
+                                    id: z.number().int().min(-2147483648).max(2147483647)
+                                }),
+                                z.strictObject({
+                                    kind: z.literal("object"),
+                                    id: z
+                                        .string()
+                                        .regex(/^(0|[1-9][0-9]*)$/)
+                                        .max(20)
+                                })
+                            ]),
+                            reference: z.strictObject({
+                                layerId: identifierSchema,
+                                address: z
+                                    .string()
+                                    .regex(/^[0-9]+$/)
+                                    .max(20),
+                                qualifier: boundedUnicodeString(4096).optional()
+                            })
+                        })
+                    ]),
+                    newPanel: z.boolean().optional()
+                }),
+                outputSchema: z.strictObject({
+                    status: z.literal("applied"),
+                    panelId: indexSchema,
+                    mapTileKey: identifierSchema
+                })
+            },
+            (input) => this.openSourceData(input)
+        );
     }
 
     /** Registers typed state readers and writers without exposing persistence keys. */
     registerControls(actions: ActionRegistry): void {
-        actions.registerControl(inspectionControls.selections, {
-            read: (selector, context) => this.inspectionSummary(selector.panelId, context), defaultTargets: () => [{}]
-        });
+        actions.registerControl(
+            {
+                name: "app.selections",
+                description:
+                    "Inspection identities and panel/loading state, including undocked panels; never inspection trees.",
+                selectorSchema: z.strictObject({ panelId: indexSchema.optional() }),
+                valueSchema: z
+                    .array(
+                        z.strictObject({
+                            panelId: indexSchema,
+                            lifetime: indexSchema.describe(
+                                "Current panel lifetime; supply it to viewer_close_inspection to reject a reused panel identity."
+                            ),
+                            locked: z.boolean(),
+                            undocked: z.boolean(),
+                            loading: z
+                                .boolean()
+                                .nullable()
+                                .describe(
+                                    "Feature resolution state; null when owned by a source-data panel."
+                                ),
+                            features: z
+                                .array(
+                                    z.strictObject({
+                                        mapTileKey: identifierSchema,
+                                        featureId: identifierSchema,
+                                        mapId: identifierSchema.optional(),
+                                        layerId: identifierSchema.optional(),
+                                        partition: z
+                                            .union([
+                                                z.strictObject({
+                                                    kind: z.literal("tile"),
+                                                    id: z.number().int().min(-2147483648).max(2147483647)
+                                                }),
+                                                z.strictObject({
+                                                    kind: z.literal("object"),
+                                                    id: z.string().regex(/^[0-9]{1,20}$/)
+                                                })
+                                            ])
+                                            .optional()
+                                    })
+                                )
+                                .max(100),
+                            sourceData: z
+                                .strictObject({
+                                    mapTileKey: identifierSchema,
+                                    address: z
+                                        .string()
+                                        .regex(/^[0-9]+$/)
+                                        .max(20)
+                                        .optional()
+                                        .describe("Unsigned 64-bit address as a lossless decimal string.")
+                                })
+                                .optional()
+                        })
+                    )
+                    .max(100),
+                readable: true,
+                writable: false,
+                persistence: "runtime-summary",
+                synchronization: "none"
+            },
+            {
+                read: (selector, context) => this.inspectionSummary(selector.panelId, context),
+                defaultTargets: () => [{}]
+            }
+        );
     }
 
 
     /** Inspection identities and loading flags, without loading features or traversing trees. */
-    inspectionSummary(panelId: number | undefined, context: ControlReadContext): ControlValue<typeof inspectionControls.selections> {
-        const panels = this.inspectionState.store.selection;
-        if (panelId !== undefined && !panels.some(panel => panel.id === panelId)) rejectAction("The inspection no longer exists");
-        const runtime = new Map(this.selectionTopic.value.map(panel => [panel.id, panel]));
+    inspectionSummary(panelId: number | undefined, context: ControlReadContext) {
+        const panels = this.inspectionState.model.selection;
+        if (panelId !== undefined && !panels.some((panel) => panel.id === panelId))
+            rejectAction("The inspection no longer exists");
+        const runtime = new Map(this.selectionTopic.value.map((panel) => [panel.id, panel]));
         const stream = this.tileStream;
         const state = this.inspectionState;
         function* summaries() {
@@ -724,19 +876,32 @@ export class InspectionSelectionService implements AppActionContributor {
                 function* features() {
                     for (const feature of panel.features) {
                         const identity = stream.parseMapPartitionKeySafe(feature.mapTileKey);
-                        yield identity ? { ...feature, mapId: identity[0], layerId: identity[1], partition: identity[2] } : feature;
+                        yield identity
+                            ? { ...feature, mapId: identity[0], layerId: identity[1], partition: identity[2] }
+                            : feature;
                     }
                 }
                 yield {
-                    panelId: panel.id, lifetime: state.panelLifetime(panel.id)!, locked: panel.locked, undocked: panel.undocked,
-                    loading: panel.sourceData ? null : runtime.has(panel.id) ? !!runtime.get(panel.id)!.loading : true,
+                    panelId: panel.id,
+                    lifetime: state.panelLifetime(panel.id)!,
+                    locked: panel.locked,
+                    undocked: panel.undocked,
+                    loading: panel.sourceData
+                        ? null
+                        : runtime.has(panel.id)
+                          ? !!runtime.get(panel.id)!.loading
+                          : true,
                     features: context.collect(features(), 32 * 1024),
-                    ...(panel.sourceData ? {
-                        sourceData: {
-                            mapTileKey: panel.sourceData.mapTileKey,
-                            ...(panel.sourceData.address !== undefined ? { address: panel.sourceData.address.toString() } : {})
-                        }
-                    } : {})
+                    ...(panel.sourceData
+                        ? {
+                              sourceData: {
+                                  mapTileKey: panel.sourceData.mapTileKey,
+                                  ...(panel.sourceData.address !== undefined
+                                      ? { address: panel.sourceData.address.toString() }
+                                      : {})
+                              }
+                          }
+                        : {})
                 };
             }
         }
@@ -744,147 +909,141 @@ export class InspectionSelectionService implements AppActionContributor {
     }
 
     /** Uses the native key factory for backend-returned source references; the panel owns address resolution. */
-    openSourceData(input: ActionInput<typeof inspectionActions.openSourceData>): ActionOutput<typeof inspectionActions.openSourceData> {
+    openSourceData(input: {
+        source:
+            | { mapTileKey: string; address?: string }
+            | {
+                  mapId: string;
+                  partition: { kind: "tile"; id: number } | { kind: "object"; id: string };
+                  reference: { layerId: string; address: string; qualifier?: string };
+              };
+        newPanel?: boolean;
+    }) {
         const source = input.source;
-        if (!("mapTileKey" in source) && source.partition.kind === "object" && BigInt(source.partition.id) > 18446744073709551615n) {
+        if (
+            !("mapTileKey" in source) &&
+            source.partition.kind === "object" &&
+            BigInt(source.partition.id) > 18446744073709551615n
+        ) {
             rejectAction("Object partition exceeds uint64", "invalid_arguments");
         }
-        const mapTileKey = "mapTileKey" in source ? source.mapTileKey : coreLib.createMapTileKey(
-            "SourceData", source.mapId, source.reference.layerId, partitionKeySuffix(parsePartition(source.partition)));
+        const mapTileKey =
+            "mapTileKey" in source
+                ? source.mapTileKey
+                : coreLib.createMapTileKey(
+                      "SourceData",
+                      source.mapId,
+                      source.reference.layerId,
+                      partitionKeySuffix(parsePartition(source.partition))
+                  );
         const parsed = this.tileStream.parseMapPartitionKeySafe(mapTileKey);
-        if (!parsed || !mapTileKey.startsWith("SourceData:")) rejectAction("Expected a native SourceData key", "invalid_arguments");
+        if (!parsed || !mapTileKey.startsWith("SourceData:"))
+            rejectAction("Expected a native SourceData key", "invalid_arguments");
         const address = "mapTileKey" in source ? source.address : source.reference.address;
-        if (address !== undefined && BigInt(address) > 18446744073709551615n) rejectAction("Address exceeds uint64", "invalid_arguments");
-        const panelId = this.inspectionState.setSelection({ mapTileKey, ...(address === undefined ? {} : { address: BigInt(address) }) }, undefined, input.newPanel ?? false);
+        if (address !== undefined && BigInt(address) > 18446744073709551615n)
+            rejectAction("Address exceeds uint64", "invalid_arguments");
+        const panelId = this.inspectionState.setSelection(
+            { mapTileKey, ...(address === undefined ? {} : { address: BigInt(address) }) },
+            undefined,
+            input.newPanel ?? false
+        );
         if (panelId === undefined) rejectAction("An inspection could not be opened");
-        return { status: "applied", panelId, mapTileKey };
+        return { status: "applied" as const, panelId, mapTileKey };
     }
 
     /** Publishes inspection shells after locate only; the existing selection owner performs asynchronous feature loading. */
-    async inspect(input: ActionInput<typeof inspectionActions.inspect>, signal?: AbortSignal): Promise<ActionOutput<typeof inspectionActions.inspect>> {
-        if (input.color !== undefined && !input.newPanel) rejectAction("color requires newPanel:true; use the inspection.panel control to recolor an existing panel", "invalid_arguments");
-        if (input.panelId !== undefined && input.newPanel) rejectAction("panelId and newPanel are mutually exclusive", "invalid_arguments");
+    async inspect(
+        input: {
+            features: Array<z.infer<typeof featureIdentitySchema>>;
+            lock?: boolean;
+            panelId?: number;
+            newPanel?: boolean;
+            color?: string;
+        },
+        signal?: AbortSignal
+    ) {
+        if (input.color !== undefined && !input.newPanel)
+            rejectAction(
+                "color requires newPanel:true; use the inspection.panel control to recolor an existing panel",
+                "invalid_arguments"
+            );
+        if (input.panelId !== undefined && input.newPanel)
+            rejectAction("panelId and newPanel are mutually exclusive", "invalid_arguments");
         if (input.panelId !== undefined) {
-            const panel = this.inspectionState.store.selection.find(panel => panel.id === input.panelId);
-            if (!panel || panel.locked || panel.sourceData) rejectAction("An explicit target must be an existing unlocked feature panel");
+            const panel = this.inspectionState.model.selection.find((panel) => panel.id === input.panelId);
+            if (!panel || panel.locked || panel.sourceData)
+                rejectAction("An explicit target must be an existing unlocked feature panel");
         }
         // Reject a stale intent if any selection edit completes while identities are being located.
         let changed: boolean;
-        const guard = this.inspectionState.store.selectionState.subscribe(() => { changed = true; });
+        const guard = this.inspectionState.model.selectionState.subscribe(() => {
+            changed = true;
+        });
         changed = false;
         let features: TileFeatureId[];
         try {
             features = await this.tileStream.resolveFeatureIdentities(input.features, signal);
             signal?.throwIfAborted();
             if (changed) rejectAction("Inspections changed while locating the feature", "cancelled");
-        } finally { guard.unsubscribe(); }
-        let result!: ActionOutput<typeof inspectionActions.inspect>;
-        this.ngZone.run(() => this.stateService.transaction(() => {
-            let newPanelId: number | undefined;
-            if (input.panelId !== undefined || input.newPanel) {
-                newPanelId = this.inspectionState.setSelection(features, input.panelId, input.newPanel ?? false);
-            } else this.inspectFeatureIds(features, input.lock ?? false);
-            const panels = this.inspectionState.store.selection.filter(panel => !panel.sourceData && (!input.newPanel || panel.id === newPanelId) && panel.features.some(candidate =>
-                features.some(feature => candidate.mapTileKey === feature.mapTileKey && candidate.featureId === feature.featureId)));
-            if (input.lock) panels.forEach(panel => this.inspectionState.setInspectionPanelLockedState(panel.id, true));
-            if (input.color !== undefined) panels.forEach(panel => this.inspectionState.setInspectionPanelColor(panel.id, input.color!));
-            const represented = features.filter(feature => panels.some(panel => panel.features.some(candidate =>
-                candidate.mapTileKey === feature.mapTileKey && candidate.featureId === feature.featureId)));
-            result = {
-                status: "applied", panelIds: panels.map(panel => panel.id), features: represented,
-                complete: represented.length === features.length, ...(represented.length < features.length ? { reason: "item_limit" as const } : {})
-            };
-        }));
+        } finally {
+            guard.unsubscribe();
+        }
+        let result!: {
+            complete: boolean;
+            status: "applied";
+            panelIds: number[];
+            features: { mapTileKey: string; featureId: string }[];
+            reason?: "item_limit" | "byte_limit" | "text_limit" | "loading";
+        };
+        this.ngZone.run(() =>
+            this.stateService.transaction(() => {
+                let newPanelId: number | undefined;
+                if (input.panelId !== undefined || input.newPanel) {
+                    newPanelId = this.inspectionState.setSelection(
+                        features,
+                        input.panelId,
+                        input.newPanel ?? false
+                    );
+                } else this.inspectFeatureIds(features, input.lock ?? false);
+                const panels = this.inspectionState.model.selection.filter(
+                    (panel) =>
+                        !panel.sourceData &&
+                        (!input.newPanel || panel.id === newPanelId) &&
+                        panel.features.some((candidate) =>
+                            features.some(
+                                (feature) =>
+                                    candidate.mapTileKey === feature.mapTileKey &&
+                                    candidate.featureId === feature.featureId
+                            )
+                        )
+                );
+                if (input.lock)
+                    panels.forEach((panel) =>
+                        this.inspectionState.setInspectionPanelLockedState(panel.id, true)
+                    );
+                if (input.color !== undefined)
+                    panels.forEach((panel) =>
+                        this.inspectionState.setInspectionPanelColor(panel.id, input.color!)
+                    );
+                const represented = features.filter((feature) =>
+                    panels.some((panel) =>
+                        panel.features.some(
+                            (candidate) =>
+                                candidate.mapTileKey === feature.mapTileKey &&
+                                candidate.featureId === feature.featureId
+                        )
+                    )
+                );
+                result = {
+                    status: "applied" as const,
+                    panelIds: panels.map((panel) => panel.id),
+                    features: represented,
+                    complete: represented.length === features.length,
+                    ...(represented.length < features.length ? { reason: "item_limit" as const } : {})
+                };
+            })
+        );
         return result;
     }
 
 }
-
-
-/**
- * Public actions and controls implemented by this controller. Their schemas stay
- * beside the handlers; both app startup and the Node catalog build register them.
- */
-export const inspectionActions = {
-    inspect: {
-        name: "viewer_inspect",
-        description: "Open feature/entity inspections in the ordinary UI. For an attribute validity, copy the base featureId plus attributeIndex and validityIndex from native extraction or search results. relationIndex similarly addresses a relation. Existing suffixed IDs remain supported; do not combine a suffix with numeric selectors. Returns panel IDs immediately; loading remains observable via app.selections. panelId must address an unlocked feature panel; newPanel opens one grouped panel. To distinguish groups (e.g. predecessors versus successors), call separately with newPanel:true and different color values. color requires newPanel:true and colors only that new panel. lock=true pins the resulting panels. Use mapget extraction for model content.",
-        mutation: true,
-        inputSchema: z.strictObject({
-            features: z.array(featureIdentitySchema).min(1).max(50),
-            lock: z.boolean().optional(),
-            panelId: indexSchema.optional(),
-            newPanel: z.boolean().optional(),
-            color: colorSchema.optional()
-        }),
-        outputSchema: z.strictObject({
-            status: z.literal("applied"),
-            panelIds: z.array(indexSchema).max(50),
-            features: z.array(z.strictObject({ mapTileKey: identifierSchema, featureId: identifierSchema })).max(50),
-            ...{
-                complete: z.boolean(),
-                reason: z.enum(["item_limit", "byte_limit", "text_limit", "loading"]).optional()
-            }
-        })
-    },
-    openSourceData: {
-        name: "viewer_open_source_data",
-        description: "Open a source-data inspection at a lossless uint64 address. Use a native SourceData mapTileKey, or map/partition and a mapget-native source reference returned by extraction. The existing panel owns loading and reveals the reference.",
-        mutation: true,
-        inputSchema: z.strictObject({
-            source: z.union([
-                z.strictObject({ mapTileKey: identifierSchema, address: z.string().regex(/^[0-9]+$/).max(20).optional() }),
-                z.strictObject({
-                    mapId: identifierSchema,
-                    partition: z.union([
-                        z.strictObject({ kind: z.literal("tile"), id: z.number().int().min(-2147483648).max(2147483647) }),
-                        z.strictObject({ kind: z.literal("object"), id: z.string().regex(/^(0|[1-9][0-9]*)$/).max(20) })
-                    ]),
-                    reference: z.strictObject({
-                        layerId: identifierSchema,
-                        address: z.string().regex(/^[0-9]+$/).max(20),
-                        qualifier: boundedUnicodeString(4096).optional()
-                    })
-                })
-            ]),
-            newPanel: z.boolean().optional()
-        }),
-        outputSchema: z.strictObject({ status: z.literal("applied"), panelId: indexSchema, mapTileKey: identifierSchema })
-    }
-} as const;
-
-/** InspectionSelectionService exposes resolved selections alongside their durable panel identities. */
-export const inspectionControls = {
-    selections: {
-        name: "app.selections",
-        description: "Inspection identities and panel/loading state, including undocked panels; never inspection trees.",
-        selectorSchema: z.strictObject({ panelId: indexSchema.optional() }),
-        valueSchema: z.array(z.strictObject({
-            panelId: indexSchema,
-            lifetime: indexSchema.describe("Current panel lifetime; supply it to viewer_close_inspection to reject a reused panel identity."),
-            locked: z.boolean(),
-            undocked: z.boolean(),
-            loading: z.boolean().nullable().describe("Feature resolution state; null when owned by a source-data panel."),
-            features: z.array(z.strictObject({
-                mapTileKey: identifierSchema,
-                featureId: identifierSchema,
-                mapId: identifierSchema.optional(),
-                layerId: identifierSchema.optional(),
-                partition: z.union([
-                    z.strictObject({ kind: z.literal("tile"), id: z.number().int().min(-2147483648).max(2147483647) }),
-                    z.strictObject({ kind: z.literal("object"), id: z.string().regex(/^[0-9]{1,20}$/) })
-                ]).optional()
-            }))
-                .max(100),
-            sourceData: z.strictObject({
-                mapTileKey: identifierSchema,
-                address: z.string().regex(/^[0-9]+$/).max(20).optional()
-                    .describe("Unsigned 64-bit address as a lossless decimal string.")
-            }).optional()
-        })).max(100),
-        readable: true,
-        writable: false,
-        persistence: "runtime-summary",
-        synchronization: "none"
-    }
-} as const;

@@ -3,7 +3,7 @@ import {BehaviorSubject} from "rxjs";
 import {describe, expect, it, vi} from "vitest";
 
 import {DiagnosticsIndicatorComponent} from "./diagnostics.indicator.component";
-import type {DiagnosticsSnapshot, LogEntry} from "./diagnostics.model";
+import type {DiagnosticsSnapshot, LogEntry} from "./diagnostics.types";
 
 function snapshot(
     loaded: number,

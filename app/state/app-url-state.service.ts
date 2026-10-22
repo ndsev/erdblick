@@ -2,16 +2,16 @@ import { Injectable } from "@angular/core";
 import { Params } from "@angular/router";
 import { z } from "zod";
 import { ActionRegistry } from "../actions/action-registry.service";
-import { ActionOutput, boundedCollection, identifierSchema, rejectAction } from "../actions/app-action";
+import { boundedCollection, identifierSchema, rejectAction } from "../actions/app-action";
 import { AppActionContributor } from "../actions/app-action-contributor";
-import { DEFAULT_HIGHLIGHT_COLORS } from "../inspection/inspection-state.model";
-import { InspectionStore } from "../inspection/inspection.store";
+import { DEFAULT_HIGHLIGHT_COLORS } from "../inspection/inspection-state";
+import { InspectionModel } from "../inspection/inspection.model";
 import { coreLib } from "../integrations/wasm";
-import { MapLayerStore } from "../mapdata/map-layer.store";
-import { MapViewStore, viewCountSchema, viewIdsSchema } from "../mapview/map-view.store";
-import { FeatureSearchStore } from "../search/feature-search.store";
+import { MapDataModel } from "../mapdata/mapdata.model";
+import { MapViewModel, viewCountSchema, viewIdsSchema } from "../mapview/mapview.model";
+import { FeatureSearchModel } from "../feature-search/feature-search.model";
 import { boundedUnicodeString, unicodePrefix } from "../shared/unicode-string";
-import { StyleService } from "../styledata/style.service";
+import { StyleService } from "../map-styles/style.service";
 import { MapViewState } from "./app-state";
 import { AppStateService } from "./app-state.service";
 import type { UrlV2MapTileKeyFactory } from "./url-state-codec";
@@ -111,11 +111,11 @@ export class AppUrlStateService implements AppActionContributor {
     initialize(params: Params): void { this.viewSettings.migrateLegacyOsmState(params); }
 
     constructor(private readonly persistence: AppStateService,
-        private readonly layerState: MapLayerStore,
-        private readonly inspectionState: InspectionStore,
-        private readonly viewSettings: MapViewStore,
+        private readonly layerState: MapDataModel,
+        private readonly inspectionState: InspectionModel,
+        private readonly viewSettings: MapViewModel,
         private readonly styles: StyleService,
-        private readonly searches: FeatureSearchStore) {
+        private readonly searches: FeatureSearchModel) {
         persistence.registerUrlProjection(this);
     }
 
@@ -331,56 +331,69 @@ export class AppUrlStateService implements AppActionContributor {
     }
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: ActionRegistry): void {
-        actions.registerAction(urlActions.getShareLink, () => this.getShareLink());
+        actions.registerAction(
+            {
+                name: "viewer_get_share_link",
+                description:
+                    "Return a link for the current URL-backed cameras, layers, style options and selections using " +
+                    "the viewer's normal URL codec. Does not copy unknown/authentication URL parameters, modify the " +
+                    "tab, publish anything or contact another person. Browser-local search overlays and YAML styles " +
+                    "are not embedded; localSearchIds and localStyleIds identify dependencies the recipient would " +
+                    "also need. Export searches separately with viewer_export_search and styles with " +
+                    "viewer_get_style. localOnly means the hostname is loopback: recipients need an accessible " +
+                    "address for the same configured viewer.",
+                mutation: false,
+                inputSchema: z.strictObject({}),
+                outputSchema: z.strictObject({
+                    observedAt: z.string(),
+                    complete: z.boolean(),
+                    reason: z.enum(["item_limit", "byte_limit", "text_limit", "loading"]).optional(),
+                    url: boundedUnicodeString(48000, true),
+                    localOnly: z.boolean(),
+                    localStyleIds: z.array(identifierSchema).max(100),
+                    localSearchIds: z.array(identifierSchema).max(100)
+                })
+            },
+            () => this.getShareLink()
+        );
     }
 
 
     /** Exports the normal URL projection without browser navigation or credentials. */
-    getShareLink(): ActionOutput<typeof urlActions.getShareLink> {
+    getShareLink() {
         const url = this.persistence.shareableUrl();
-        if (new TextEncoder().encode(url).length > 48000) rejectAction("The share link exceeds the response budget; reduce URL-backed state first");
+        if (new TextEncoder().encode(url).length > 48000)
+            rejectAction("The share link exceeds the response budget; reduce URL-backed state first");
         const hostname = new URL(url).hostname;
-        const styles = boundedCollection((function* (this: AppUrlStateService) {
-            for (const style of this.styles.styles.values()) {
-                if (style.visible && (style.imported || style.modified)) yield unicodePrefix(style.id, 4096);
-            }
-        }).call(this), 100, 64000);
-        const searches = boundedCollection((function* (this: AppUrlStateService) {
-            for (const search of this.searches.featureSearches) {
-                if (search.enabled && search.showResultsOnMap) yield unicodePrefix(search.id, 4096);
-            }
-        }).call(this), 100, 64000);
+        const styles = boundedCollection(
+            function* (this: AppUrlStateService) {
+                for (const style of this.styles.styles.values()) {
+                    if (style.visible && (style.imported || style.modified))
+                        yield unicodePrefix(style.id, 4096);
+                }
+            }.call(this),
+            100,
+            64000
+        );
+        const searches = boundedCollection(
+            function* (this: AppUrlStateService) {
+                for (const search of this.searches.featureSearches) {
+                    if (search.enabled && search.showResultsOnMap) yield unicodePrefix(search.id, 4096);
+                }
+            }.call(this),
+            100,
+            64000
+        );
         return {
-            observedAt: new Date().toISOString(), url,
-            localOnly: hostname === "localhost" || hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(hostname),
-            localStyleIds: styles.items, localSearchIds: searches.items,
-            complete: styles.complete && searches.complete, reason: styles.reason ?? searches.reason
+            observedAt: new Date().toISOString(),
+            url,
+            localOnly:
+                hostname === "localhost" || hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(hostname),
+            localStyleIds: styles.items,
+            localSearchIds: searches.items,
+            complete: styles.complete && searches.complete,
+            reason: styles.reason ?? searches.reason
         };
     }
 
 }
-
-
-/**
- * Public actions and controls implemented by this controller. Their schemas stay
- * beside the handlers; both app startup and the Node catalog build register them.
- */
-export const urlActions = {
-    getShareLink: {
-        name: "viewer_get_share_link",
-        description: "Return a link for the current URL-backed cameras, layers, style options and selections using the viewer's normal URL codec. Does not copy unknown/authentication URL parameters, modify the tab, publish anything or contact another person. Browser-local search overlays and YAML styles are not embedded; localSearchIds and localStyleIds identify dependencies the recipient would also need. Export searches separately with viewer_export_search and styles with viewer_get_style. localOnly means the hostname is loopback: recipients need an accessible address for the same configured viewer.",
-        mutation: false,
-        inputSchema: z.strictObject({}),
-        outputSchema: z.strictObject({
-            ...{ observedAt: z.string() },
-            ...{
-                complete: z.boolean(),
-                reason: z.enum(["item_limit", "byte_limit", "text_limit", "loading"]).optional()
-            },
-            url: boundedUnicodeString(48000, true),
-            localOnly: z.boolean(),
-            localStyleIds: z.array(identifierSchema).max(100),
-            localSearchIds: z.array(identifierSchema).max(100)
-        })
-    }
-} as const;

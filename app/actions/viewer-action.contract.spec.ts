@@ -1,15 +1,15 @@
-import {describe, expect, it} from "vitest";
+import {beforeAll, describe, expect, it} from "vitest";
 import fixtures from "../../test/viewer-actions/fixtures.json";
 import {
-    canonicalViewerContractJson, viewerActionCatalog, viewerActions,
+    applicationControls, canonicalViewerContractJson, viewerActionCatalog, viewerActions,
     type ViewerActionName
 } from "../../test/action-contract";
 import {viewerActionClientMessageSchema, viewerActionServerMessageSchema, viewerMcpInfoSchema} from "./viewer-action-relay.contract";
-import {applicationControls} from "../../test/control-contract";
 import {describeControls} from "./control-actions";
-import {composeDeclarations} from "./app-action";
-import {mapViewControls} from "../mapview/map-view.service";
-const cameraViewStateSchema = mapViewControls.camera.valueSchema;
+import { ActionRegistry } from "./action-registry.service";
+import { testPersistence } from "../../test/state-owners";
+let cameraViewStateSchema: typeof applicationControls["view.camera"]["valueSchema"];
+beforeAll(() => { cameraViewStateSchema = applicationControls["view.camera"].valueSchema; });
 
 describe("viewer action shared contract fixtures", () => {
     for (const fixture of fixtures.actions) {
@@ -38,11 +38,16 @@ describe("viewer action shared contract fixtures", () => {
         });
     }
 
-    it("rejects duplicate owner declarations before manifest composition", () => {
-        const projection = mapViewControls.projection;
-        expect(() => composeDeclarations({first: projection}, {second: projection})).toThrow("Duplicate declaration: view.projection");
+    it("rejects duplicate registrations before exporting a catalog", () => {
+        const registry = new ActionRegistry(testPersistence());
+        const projection = applicationControls["view.projection"];
+        const binding = { read: () => "2d" as const, write: () => undefined };
+        registry.registerControl(projection, binding);
+        expect(() => registry.registerControl(projection, binding)).toThrow("Duplicate control: view.projection");
         const action = viewerActions.viewer_get_controls;
-        expect(() => composeDeclarations({first: action, second: action})).toThrow("Duplicate declaration: viewer_get_controls");
+        const execute = () => { throw new Error("Registration must not execute handlers"); };
+        registry.registerAction(action, execute);
+        expect(() => registry.registerAction(action, execute)).toThrow("Duplicate action: viewer_get_controls");
     });
 
     it("bounds target work before any application access", () => {

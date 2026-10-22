@@ -1,8 +1,8 @@
 import { Injectable } from "@angular/core";
 import { BehaviorSubject, Subject } from "rxjs";
-import type { FilterTileState } from "../mapdata/filter-tile-state.model";
-import { partitionKeySuffix } from "../mapdata/partition.model";
-import type { PresentationKind, StyledMapgetLayer } from "../mapdata/styled-mapget-layer.model";
+import type { FilterTileState } from "../mapdata/filter-tile-state";
+import { partitionKeySuffix } from "../mapdata/partition";
+import type { PresentationKind, StyledMapgetLayer } from "../mapdata/styled-mapget-layer";
 
 export interface SubsetDiagnosticsTile {
     viewIndex: number;

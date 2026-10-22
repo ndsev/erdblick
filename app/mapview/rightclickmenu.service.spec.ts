@@ -1,7 +1,7 @@
 import {describe, expect, it, vi} from "vitest";
 
 import type {DiagnosticsFacadeService} from "../diagnostics/diagnostics.facade.service";
-import type {FeatureSearchService} from "../search/feature.search.service";
+import type {FeatureSearchService} from "../feature-search/feature.search.service";
 import type {AppStateService} from "../state/app-state.service";
 import type {InfoMessageService} from "../shared/info.service";
 import type {ExternalViewerService} from "../navigation/external-viewer.service";

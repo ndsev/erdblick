@@ -1,7 +1,7 @@
 import {describe, expect, it} from "vitest";
 import {fitLocationArea, locationOverlayPolygons, LOCATION_MERCATOR_LATITUDE} from "./deck-location-area-navigation";
 import {createDeckMapViewport, type DeckMapCameraState} from "./navigation/web-mercator-feature-navigation";
-import type {LocationArea} from "../render-view.model";
+import type {LocationArea} from "../render-view";
 
 const state: DeckMapCameraState = {longitude: 11, latitude: 48, zoom: 12, pitch: 60, bearing: 45, position: [40, 70, 800]};
 

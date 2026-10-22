@@ -5,9 +5,9 @@ import {
     DEFAULT_POINT_CLOUD_POLICY,
     pointCloudSpacingMeters,
     type PointCloudRenderPolicy
-} from "../../shared/point-cloud-policy";
-import { AUTO_TILE_SUBSET_RENDER_WORKER_COUNT } from "../../shared/tile-render-policy";
-import { RenderPreferencesStore } from "../render-preferences.store";
+} from "../../rendering/point-cloud-policy";
+import { AUTO_TILE_SUBSET_RENDER_WORKER_COUNT } from "../../rendering/tile-render-policy";
+import { RenderingModel } from "../../rendering/rendering.model";
 import { gpuIconAtlasService } from "./gpu-icon-atlas.service";
 import { gpuMemoryBudget, type GpuMemoryReservation } from "./gpu-memory-budget";
 import { GPU_RENDER_PACKET_MAX_BYTES } from "./gpu-render-packet";
@@ -275,7 +275,7 @@ export class TileSubsetLayerRenderService {
     /** Track runtime worker-count changes when application state is available. */
     constructor(
         @Optional()
-        private readonly appState: RenderPreferencesStore | null = null
+        private readonly appState: RenderingModel | null = null
     ) {
         if (!appState) {
             return;

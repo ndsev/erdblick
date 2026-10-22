@@ -1,5 +1,5 @@
 import {lngLatToWorld} from "@math.gl/web-mercator";
-import type {LocationPolygon} from "../render-view.model";
+import type {LocationPolygon} from "../render-view";
 
 /** Two adjacent records supply one segment; each closed ring ends with a disabled separator. */
 export const LOCATION_OUTLINE_RECORD_FLOATS = 10;

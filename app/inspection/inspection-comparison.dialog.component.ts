@@ -12,14 +12,14 @@ import {
 import { MenuItem } from 'primeng/api';
 import { ContextMenu } from 'primeng/contextmenu';
 import { Subscription } from 'rxjs';
-import { FeatureWrapper } from '../mapdata/feature-inspection.model';
+import { FeatureWrapper } from '../mapdata/feature-inspection';
 import {
     MapTileStreamService,
     RetainedTileExpiryOwner
 } from '../mapdata/map-tile-stream.service';
 import { TileDeliveryError } from "../mapdata/tile-diagnostics";
 import { AppDialogComponent } from '../layout/app-dialog.component';
-import { DEFAULT_EM_HEIGHT, DEFAULT_EM_WIDTH } from "../layout/app-layout.model";
+import { DEFAULT_EM_HEIGHT, DEFAULT_EM_WIDTH } from "../layout/app-layout";
 import { AppLayoutService } from "../layout/app-layout.service";
 import { AppStateService } from "../state/app-state.service";
 import { DialogStackService } from '../layout/dialog-stack.service';
@@ -30,7 +30,7 @@ import {
     InspectionComparisonModel,
     InspectionComparisonOption,
     InspectionPanelModel
-} from "./inspection-state.model";
+} from "./inspection-state";
 import { InspectionPanelService } from "./inspection-panel.service";
 
 /** View model for one comparison column in the side-by-side inspection dialog. */
@@ -258,7 +258,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
             return;
         }
         this.selectedCompareIds = [nextModel.base.panelId, ...nextModel.others.map(entry => entry.panelId)];
-        this.inspectionState.store.inspectionComparison = nextModel;
+        this.inspectionState.model.inspectionComparison = nextModel;
     }
 
     /** Drops one column from the comparison, closing the dialog if no entries remain. */
@@ -269,7 +269,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
             this.inspectionState.closeInspectionComparison();
             return;
         }
-        this.inspectionState.store.inspectionComparison = {
+        this.inspectionState.model.inspectionComparison = {
             base: remainingEntries[0],
             others: remainingEntries.slice(1)
         };
@@ -292,7 +292,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     refreshCompareOptions() {
         const options = this.inspectionState.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue());
         this.compareOptions = options;
-        const model = this.inspectionState.store.inspectionComparison;
+        const model = this.inspectionState.model.inspectionComparison;
         if (!model) {
             return;
         }
@@ -320,7 +320,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
                 this.inspectionState.closeInspectionComparison();
                 return;
             }
-            this.inspectionState.store.inspectionComparison = nextModel;
+            this.inspectionState.model.inspectionComparison = nextModel;
             this.selectedCompareIds = [nextModel.base.panelId, ...nextModel.others.map(entry => entry.panelId)];
             return;
         }

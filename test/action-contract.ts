@@ -1,53 +1,55 @@
+/**
+ * Collect the same registrations as browser startup and the catalog build.
+ * Angular constructs real owners, but no runtime initializer, state reader or
+ * action is invoked. The generated types describe those collected schemas;
+ * this fixture contains no independent list of actions or controls.
+ */
 import "@angular/compiler";
-/** Typed test inventory. Production discovers registrations through Angular DI. */
-import { z } from "zod";
-import { composeDeclarations } from "../app/actions/app-action";
-import { createControlActions, describeControls, viewerJsonSchema } from "../app/actions/control-actions";
-import { captureActions, viewerUiActions } from "../app/actions/ui-automation.service";
-import { configActions } from "../app/config/app-config.service";
-import { diagnosticActions } from "../app/diagnostics/diagnostics.facade.service";
-import { inspectionStateActions } from "../app/inspection/inspection-panel.service";
-import { inspectionActions } from "../app/inspection/inspection-selection.service";
-import { mapActions } from "../app/mapdata/map-info.service";
-import { mapViewActions } from "../app/mapview/map-view.service";
-import { externalViewerActions } from "../app/navigation/external-viewer.service";
-import { jumpActions } from "../app/navigation/jump.service";
-import { locationActions, navigationActions } from "../app/navigation/location-navigation.service";
-import { searchActions, searchInputActions } from "../app/search/feature.search.service";
-import { urlActions } from "../app/state/app-url-state.service";
-import { styleActions, styleDiscoveryActions } from "../app/styledata/style.service";
-import { applicationControls } from "./control-contract";
+import { APP_BASE_HREF } from "@angular/common";
+import { provideHttpClient } from "@angular/common/http";
+import { provideZonelessChangeDetection } from "@angular/core";
+import { createApplication } from "@angular/platform-browser";
+import { provideRouter } from "@angular/router";
+import { MessageService } from "primeng/api";
+import type { z } from "zod";
+import { beforeAll } from "vitest";
+import type { ActionRegistry } from "../app/actions/action-registry.service";
+import type { AppAction, AppControl } from "../app/actions/app-action";
+import type { ViewerContract } from "../app/actions/generated/viewer-contract";
+import { registerApplication } from "../app/application-registration";
 
-const controlActions = createControlActions(Object.values(applicationControls).sort((left, right) => left.name.localeCompare(right.name, "en")));
+export type ViewerActionName = keyof ViewerContract["actions"];
+export type ViewerActionInput<Name extends ViewerActionName> = ViewerContract["actions"][Name]["input"];
+export type ViewerActionOutput<Name extends ViewerActionName> = ViewerContract["actions"][Name]["output"];
 
-export { VIEWER_ACTION_INVOCATION_BYTES, VIEWER_ACTION_RESULT_BYTES, VIEWER_ACTION_TARGET_LIMIT } from "../app/actions/app-action";
-export { viewerJsonSchema } from "../app/actions/control-actions";
+/** Registration erases heterogeneous generics; the build restores their named public types. */
+export let viewerActions: {
+    [Name in ViewerActionName]: AppAction<z.ZodType<ViewerActionInput<Name>>, z.ZodType<ViewerActionOutput<Name>>>;
+};
+export let applicationControls: {
+    [Name in keyof ViewerContract["controls"]]: AppControl<z.ZodObject, z.ZodType<ViewerContract["controls"][Name]["value"]>>;
+};
+let catalog: ReturnType<ActionRegistry["catalog"]>;
 
-/** Typed expectations for contract and browser tests; never imported by the application. */
-export const viewerActions = composeDeclarations(
-    controlActions, mapViewActions, mapActions, configActions, inspectionActions,
-    inspectionStateActions, navigationActions, searchActions, urlActions, styleActions,
-    styleDiscoveryActions, diagnosticActions, captureActions, viewerUiActions
-);
+beforeAll(async () => {
+    const application = await createApplication({ providers: [
+        provideZonelessChangeDetection(), provideHttpClient(), provideRouter([]),
+        { provide: APP_BASE_HREF, useValue: "/" }, MessageService
+    ] });
+    try {
+        const registry = registerApplication(application.injector);
+        catalog = registry.catalog();
+        viewerActions = registry.publicActions as typeof viewerActions;
+        applicationControls = Object.fromEntries(registry.publicControls.map(control => [control.name, control])) as typeof applicationControls;
+    } finally {
+        application.destroy();
+    }
+});
 
-/** Local-only producers share registration and dispatch while remaining absent from MCP discovery. */
-export const applicationActions = composeDeclarations(viewerActions, jumpActions, externalViewerActions, locationActions, searchInputActions);
-
-export type ViewerActionName = keyof typeof viewerActions;
-export type ViewerActionInput<Name extends ViewerActionName> = z.infer<typeof viewerActions[Name]["inputSchema"]>;
-export type ViewerActionOutput<Name extends ViewerActionName> = z.infer<typeof viewerActions[Name]["outputSchema"]>;
-
-/** The native v1 envelope retains channels; public tools call them controls. */
+/** Each assertion receives detached metadata, so sorting cannot affect another test. */
 export function viewerActionCatalog() {
-    return {
-        formatVersion: 1 as const,
-        actions: Object.values(viewerActions).map(action => ({
-            ...action,
-            permission: action.mutation ? "viewer-control" : "viewer-read",
-            inputSchema: viewerJsonSchema(action.inputSchema), outputSchema: viewerJsonSchema(action.outputSchema)
-        })),
-        channels: describeControls(Object.values(applicationControls))
-    };
+    return structuredClone(catalog);
 }
 
-export { canonicalViewerContractJson } from "../app/actions/viewer-action.contract";
+export { canonicalViewerContractJson, viewerJsonSchema } from "../app/actions/viewer-action.contract";
+export { VIEWER_ACTION_INVOCATION_BYTES, VIEWER_ACTION_RESULT_BYTES, VIEWER_ACTION_TARGET_LIMIT } from "../app/actions/app-action";

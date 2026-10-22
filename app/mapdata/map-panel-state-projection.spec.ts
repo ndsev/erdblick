@@ -3,11 +3,11 @@ import { BehaviorSubject } from "rxjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stateOwners, testPersistence } from "../../test/state-owners";
 import { MapViewService } from "../mapview/map-view.service";
-import type { MapPresetService } from "../styledata/map-preset.service";
-import type { ErdblickStyle, StyleService } from "../styledata/style.service";
+import type { MapPresetService } from "../map-styles/map-preset.service";
+import type { ErdblickStyle, StyleService } from "../map-styles/style.service";
 import { MapInfoService } from "./map-info.service";
 import { MapPanelComponent } from "./map.panel.component";
-import { layerStyleOptions, MapInfoItem, MapLayerTree, MapTreeViewNode } from "./map.tree.model";
+import { layerStyleOptions, MapInfoItem, MapLayerTree, MapTreeViewNode } from "./map.tree";
 
 const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).reverse().forEach(destroy => destroy()));
@@ -40,7 +40,7 @@ function fixture() {
     );
     // The runtime coordinator exists before the network catalog installs its
     // replacement tree. Its completed observer must still see refreshed caches.
-    const views = new MapViewService(persistence, maps, owners.renderPreferences.store, owners.viewSettings, owners.configService);
+    const views = new MapViewService(persistence, maps, owners.renderPreferences.model, owners.viewSettings, owners.configService);
     const metadata: MapInfoItem = {
         mapId: "Map", sourceId: "Map", stringPoolId: "Map", maxParallelJobs: 0,
         extraJsonAttachment: {}, addOn: false,
@@ -62,7 +62,7 @@ function fixture() {
     const panel = new MapPanelComponent(
         maps, views, {} as never, persistence, { registerShortcut: vi.fn() } as never,
         owners.configService, {} as never, owners.searchService, {} as never, {} as never,
-        presets, styles, owners.layerState, owners.layout.store, owners.inspectionState, owners.viewSettings
+        presets, styles, owners.layerState, owners.layout.model, owners.inspectionState, owners.viewSettings
     );
     cleanup.push(() => panel.subscriptions.forEach(subscription => subscription.unsubscribe()));
     const projections: MapTreeViewNode[][][] = [];

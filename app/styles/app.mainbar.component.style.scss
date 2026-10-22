@@ -88,7 +88,7 @@ main-bar {
   }
 
   &.main-bar-mobile-layout {
-    .search-wrapper {
+    .omnibar-wrapper {
       left: 5em;
     }
 
@@ -131,12 +131,12 @@ main-bar {
     left: 0 !important;
     --main-bar-status-width: 4em;
 
-    // The optional MCP button shares the search row with the diagnostics icons.
+    // The optional MCP button shares the omnibar row with the diagnostics icons.
     &:has(viewer-action-status > p-button) {
       --main-bar-status-width: 8em;
     }
 
-    .search-wrapper {
+    .omnibar-wrapper {
       position: absolute;
       top: 0;
       left: 3em;
@@ -146,7 +146,7 @@ main-bar {
       max-width: none;
       max-height: calc(100vh - 5em);
 
-      .search-input {
+      .omnibar-input {
         width: 100%;
         height: 3em;
         position: relative;

@@ -1,7 +1,7 @@
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {DeckMapView} from "./deck-view";
-import type {LocationArea} from "../render-view.model";
+import type {LocationArea} from "../render-view";
 import type {LocationAreaLayer} from "./location-area.layer";
 
 interface LocationHighlightHarness {

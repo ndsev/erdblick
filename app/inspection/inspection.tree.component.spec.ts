@@ -101,7 +101,7 @@ describe("incoming relation actions", () => {
         component.inspectionMenu = { toggle: vi.fn() };
         component.panelId = () => 'target';
         component.inspectionState = {
-            store: { selection: [{ id: 'target', features: [{ mapTileKey: 'surface', featureId: 'Surface.1' }] }] },
+            model: { selection: [{ id: 'target', features: [{ mapTileKey: 'surface', featureId: 'Surface.1' }] }] },
             setSelection: vi.fn(), toggleInspectionFeatureHighlight: vi.fn()
         };
         component.shouldShowScalarRowActions = () => false;

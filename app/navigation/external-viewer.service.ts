@@ -4,9 +4,9 @@ import { ActionRegistry } from "../actions/action-registry.service";
 import { applied, rejectAction } from "../actions/app-action";
 import { AppActionContributor } from "../actions/app-action-contributor";
 import { AppConfigService, type ExternalViewerConfig } from "../config/app-config.service";
-import { CoordinatesStore } from "../coords/coordinates.store";
-import { parseWgs84CoordinateString } from "../coords/wgs84-coordinate.util";
-import { MapViewStore } from "../mapview/map-view.store";
+import { CoordinatesModel } from "../coordinates/coordinates.model";
+import { parseWgs84CoordinateString } from "../coordinates/wgs84-coordinate.util";
+import { MapViewModel } from "../mapview/mapview.model";
 import { boundedUnicodeString } from "../shared/unicode-string";
 
 /** A validated WGS84 point used by external map viewers. */
@@ -38,8 +38,8 @@ function isValidExternalViewerLocation(location: ExternalViewerLocation): boolea
 export class ExternalViewerService implements AppActionContributor {
     constructor(
         private readonly configService: AppConfigService,
-        public readonly coordinates: CoordinatesStore,
-        public readonly viewSettings: MapViewStore
+        public readonly coordinates: CoordinatesModel,
+        public readonly viewSettings: MapViewModel
     ) { }
 
     /** Returns the current ordered configuration shared by every external-viewer UI. */
@@ -115,36 +115,45 @@ export class ExternalViewerService implements AppActionContributor {
     }
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: ActionRegistry): void {
-        actions.registerAction(externalViewerActions.open, input => {
-            const provider = this.providers.find(provider => provider.id === input.providerId);
-            const location = this.externalViewerLocation(input.text);
-            if (!provider || !location) rejectAction("The external viewer or location is no longer available");
-            this.open(provider, location);
-            return applied();
-        }, query => {
-            const location = this.externalViewerLocation(query);
-            return this.providers.map(provider => ({
-                id: provider.id, name: provider.name, icon: "pi-map-marker", color: "green",
-                label: location ? this.externalViewerLabel(location) : 'lat = ? | lon = ?<br><span class="search-option-warning">Invalid coordinates</span>',
-                enabled: location !== undefined, acceptsEmptyInput: true,
-                saveToHistory: this.explicitExternalViewerLocation(query) !== undefined,
-                input: { providerId: provider.id, text: query }
-            }));
-        });
+        actions.registerAction(
+            {
+                name: "open_external_viewer",
+                exposure: "omnibar",
+                mutation: true,
+                description:
+                    "Open a configured external viewer at input coordinates, the marker or focused map centre.",
+                inputSchema: z.strictObject({
+                    providerId: boundedUnicodeString(4096, true),
+                    text: boundedUnicodeString(4096)
+                }),
+                outputSchema: z.strictObject({ status: z.literal("applied"), changed: z.boolean() })
+            },
+            (input) => {
+                const provider = this.providers.find((provider) => provider.id === input.providerId);
+                const location = this.externalViewerLocation(input.text);
+                if (!provider || !location)
+                    rejectAction("The external viewer or location is no longer available");
+                this.open(provider, location);
+                return applied();
+            },
+            (query) => {
+                const location = this.externalViewerLocation(query);
+                return this.providers.map((provider) => ({
+                    id: provider.id,
+                    name: provider.name,
+                    icon: "pi-map-marker",
+                    color: "green",
+                    label: location
+                        ? this.externalViewerLabel(location)
+                        : 'lat = ? | lon = ?<br><span class="omnibar-option-warning">Invalid coordinates</span>',
+                    enabled: location !== undefined,
+                    acceptsEmptyInput: true,
+                    saveToHistory: this.explicitExternalViewerLocation(query) !== undefined,
+                    input: { providerId: provider.id, text: query }
+                }));
+            }
+        );
     }
 
 
 }
-
-
-/** Provider URLs stay in runtime configuration and are absent from the build catalog. */
-export const externalViewerActions = {
-    open: {
-        name: "open_external_viewer",
-        exposure: "omnibar",
-        mutation: true,
-        description: "Open a configured external viewer at input coordinates, the marker or focused map centre.",
-        inputSchema: z.strictObject({ providerId: boundedUnicodeString(4096, true), text: boundedUnicodeString(4096) }),
-        outputSchema: z.strictObject({ status: z.literal("applied"), changed: z.boolean() })
-    }
-} as const;

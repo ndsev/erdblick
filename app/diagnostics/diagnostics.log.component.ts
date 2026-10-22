@@ -1,12 +1,12 @@
 import { Component, OnDestroy, ViewChild } from '@angular/core';
 import { BehaviorSubject, combineLatest, map, Subscription } from 'rxjs';
 import { AppDialogComponent } from '../layout/app-dialog.component';
-import { DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID } from "../layout/app-layout";
 import { AppLayoutService } from "../layout/app-layout.service";
 import { AppStateService } from "../state/app-state.service";
 import { DialogStackService } from '../layout/dialog-stack.service';
 import { DiagnosticsFacadeService } from './diagnostics.facade.service';
-import type { DiagnosticsLogFilter } from './diagnostics.model';
+import type { DiagnosticsLogFilter } from './diagnostics.types';
 
 @Component({
     selector: 'diagnostics-log-dialog',
@@ -30,7 +30,7 @@ import type { DiagnosticsLogFilter } from './diagnostics.model';
                     <label for="diag-log-error">Errors</label>
                 </div>
                 <div class="diagnostics-log-actions">
-                    @if (diagnostics.store.diagnosticsLogFilterState | async; as filterState) {
+                    @if (diagnostics.model.diagnosticsLogFilterState | async; as filterState) {
                         @if (filterState.error && !filterState.warn && !filterState.info) {
                             <p-button size="small" label="Show all" (click)="unsetAllFilter()"/>
                         } @else {
@@ -116,7 +116,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
     private readonly sortOrder$ = new BehaviorSubject<'asc' | 'desc'>(this.sortOrder);
     readonly filteredLogs$ = combineLatest([
         this.diagnostics.logs$,
-        this.diagnostics.store.diagnosticsLogFilterState,
+        this.diagnostics.model.diagnosticsLogFilterState,
         this.sortOrder$
     ]).pipe(
         map(([logs, filter, sortOrder]) => {
@@ -138,7 +138,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
         private readonly dialogStack: DialogStackService,
         public readonly layout: AppLayoutService) {
         this.subscriptions.push(
-            this.diagnostics.store.diagnosticsLogFilterState.subscribe(filter => {
+            this.diagnostics.model.diagnosticsLogFilterState.subscribe(filter => {
                 this.logFilter = { ...filter };
             })
         );
@@ -165,7 +165,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
 
     /** Persists the log-level filter toggles. */
     updateFilter() {
-        this.diagnostics.store.diagnosticsLogFilter = { ...this.logFilter };
+        this.diagnostics.model.diagnosticsLogFilter = { ...this.logFilter };
     }
 
     /** Updates the sort order used by the reactive filtered-log stream. */
@@ -181,7 +181,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
 
     /** Convenience action that leaves only error logs enabled. */
     setErrorsOnly() {
-        this.diagnostics.store.diagnosticsLogFilter = { info: false, warn: false, error: true };
+        this.diagnostics.model.diagnosticsLogFilter = { info: false, warn: false, error: true };
     }
 
     /** Opens the export dialog preconfigured to export only the visible logs. */
@@ -196,6 +196,6 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
 
     /** Restores all log levels in the filter. */
     unsetAllFilter() {
-        this.diagnostics.store.diagnosticsLogFilter = { info: true, warn: true, error: true };
+        this.diagnostics.model.diagnosticsLogFilter = { info: true, warn: true, error: true };
     }
 }

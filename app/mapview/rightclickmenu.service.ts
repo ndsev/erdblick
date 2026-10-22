@@ -2,19 +2,19 @@ import { Injectable } from "@angular/core";
 import { MenuItem } from "primeng/api";
 import { BehaviorSubject, Subject } from "rxjs";
 import { DiagnosticsFacadeService } from "../diagnostics/diagnostics.facade.service";
-import { PerformanceDiagnosticsScope } from "../diagnostics/diagnostics.model";
+import { PerformanceDiagnosticsScope } from "../diagnostics/diagnostics.types";
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
-import { SelectedSourceData, type TileFeatureId } from "../inspection/inspection-state.model";
+import { SelectedSourceData, type TileFeatureId } from "../inspection/inspection-state";
 import { Color, HeightReference, Rectangle } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
-import { parseMapPartitionKey } from "../mapdata/partition.model";
+import { parseMapPartitionKey } from "../mapdata/partition";
 import { ExternalViewerLocation, ExternalViewerService } from "../navigation/external-viewer.service";
-import type { FeatureSearchMapLayerRef } from "../search/feature-search-state";
-import { FeatureSearchService } from "../search/feature.search.service";
+import type { FeatureSearchMapLayerRef } from "../feature-search/feature-search-state";
+import { FeatureSearchService } from "../feature-search/feature.search.service";
 import { InfoMessageService } from "../shared/info.service";
 import { AppStateService } from "../state/app-state.service";
-import type { RenderNavigationTarget } from "./render-view.model";
+import type { RenderNavigationTarget } from "./render-view";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {

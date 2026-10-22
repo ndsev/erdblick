@@ -3,24 +3,24 @@ import { BehaviorSubject, Subject, Subscription } from "rxjs";
 import { z } from "zod";
 import { rejectAction } from "../actions/app-action";
 import { featureIdentitySchema } from "../inspection/feature-identity";
-import { TileFeatureId } from "../inspection/inspection-state.model";
+import { TileFeatureId } from "../inspection/inspection-state";
 import { coreLib, uint8ArrayToWasmOrThrow } from "../integrations/wasm";
 import {
     ConnectionRetryAttempt,
     connectionRetryDeadline,
     ConnectionRetryPolicy,
     recordConnectionFailure
-} from "../shared/connection-retry-policy";
+} from "../connection/connection-retry-policy";
 import { InfoMessageService } from "../shared/info.service";
 import {
     formatFeatureInspectionTarget,
     parseFeatureInspectionTarget,
     stripFeatureInspectionTarget
 } from "../shared/tile-feature-id";
-import { MAX_NUM_TILES_TO_LOAD } from "../shared/tile-render-policy";
+import { MAX_NUM_TILES_TO_LOAD } from "../rendering/tile-render-policy";
 import { AppStateService } from "../state/app-state.service";
-import { ConnectionPreferencesStore } from "./connection-preferences.store";
-import { FeatureWrapper, InspectionFeatureTile } from "./feature-inspection.model";
+import { ConnectionModel } from "../connection/connection.model";
+import { FeatureWrapper, InspectionFeatureTile } from "./feature-inspection";
 import {
     FilterSubscriptionCallbacks,
     FilterSubscriptionCoverage,
@@ -29,9 +29,9 @@ import {
     TileAttachmentRef,
     TileAttachmentValue,
     TileSubsetDelivery
-} from "./filter-subscription.model";
+} from "./filter-subscription";
 import { MapInfoService } from "./map-info.service";
-import type { MapgetLayer } from "./mapget-layer.model";
+import type { MapgetLayer } from "./mapget-layer";
 import {
     parseMapPartitionKey,
     parsePartition,
@@ -40,7 +40,7 @@ import {
     partitionKeySuffix,
     type ObjectPartitionId,
     type PartitionId
-} from "./partition.model";
+} from "./partition";
 import { TileExpiryScheduler } from "./tile-expiry-scheduler";
 import {
     MapTileRequestStatus,
@@ -182,7 +182,7 @@ export class MapTileStreamService implements OnDestroy {
         private readonly mapInfo: MapInfoService,
         private readonly messageService: InfoMessageService,
         private readonly ngZone: NgZone,
-        public readonly connectionPreferences: ConnectionPreferencesStore
+        public readonly connectionPreferences: ConnectionModel
     ) {
         this.retryPolicy = this.connectionPreferences.connectionRetryPolicy;
         this.stateSubscriptions.add(this.connectionPreferences.connectionRetryPolicyChanges.subscribe(() => this.applyRetryPolicy()));

@@ -11,7 +11,7 @@ import { SourceDataAddressFormat } from "build/libs/core/erdblick-core";
 import { TreeTableNode } from "primeng/api";
 import { TileSourceDataLayer } from "../../build/libs/core/erdblick-core";
 import { coreLib, uint8ArrayToWasm } from "../integrations/wasm";
-import { FeatureWrapper } from "../mapdata/feature-inspection.model";
+import { FeatureWrapper } from "../mapdata/feature-inspection";
 import { MapInfoService } from "../mapdata/map-info.service";
 import {
     MapTileStreamService,
@@ -22,13 +22,13 @@ import {
     partitionJson,
     partitionKey,
     partitionKeySuffix
-} from "../mapdata/partition.model";
+} from "../mapdata/partition";
 import { TileDeliveryError } from "../mapdata/tile-diagnostics";
 import {
     MapTileStreamClientTiles,
 } from "../mapdata/tilestream";
 import { AppStateService } from "../state/app-state.service";
-import { InspectionPanelModel } from "./inspection-state.model";
+import { InspectionPanelModel } from "./inspection-state";
 import { InspectionPanelService } from "./inspection-panel.service";
 import { Column, InspectionTreeComponent } from "./inspection.tree.component";
 import {
@@ -67,7 +67,7 @@ interface LoadedSourceDataLayer {
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
                              [showFilter]="showFilter()"
-                             [defaultVisibleColumnKeys]="inspectionState.store.sourceDataInspectionDefaultColumns"
+                             [defaultVisibleColumnKeys]="inspectionState.model.sourceDataInspectionDefaultColumns"
                              [firstHighlightedItemIndex]="firstHighlightedItemIndex">
             </inspection-tree>
         }

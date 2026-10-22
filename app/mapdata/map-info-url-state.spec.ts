@@ -5,10 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { BehaviorSubject, Subject } from "rxjs";
 import type { HttpClient } from "@angular/common/http";
 import { MapInfoService } from "./map-info.service";
-import { layerStyleOptions, MapLayerTree, type MapInfoItem } from "./map.tree.model";
+import { layerStyleOptions, MapLayerTree, type MapInfoItem } from "./map.tree";
 import type { AppStateService } from "../state/app-state.service";
-import type { ErdblickStyle, StyleService } from "../styledata/style.service";
-import type { MapPresetService } from "../styledata/map-preset.service";
+import type { ErdblickStyle, StyleService } from "../map-styles/style.service";
+import type { MapPresetService } from "../map-styles/map-preset.service";
 import type { InfoMessageService } from "../shared/info.service";
 
 describe("MapInfoService external-state reconciliation", () => {

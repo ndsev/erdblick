@@ -3,11 +3,11 @@ import { Splitter } from "primeng/splitter";
 import { Subscription } from "rxjs";
 import { UiAutomationService } from "../actions/ui-automation.service";
 import { environment } from "../environments/environment";
-import { AppLayoutStore } from "../layout/app-layout.store";
+import { LayoutModel } from "../layout/layout.model";
 import { KeyboardService } from "../shared/keyboard.service";
 import { AppStateService } from "../state/app-state.service";
 import { MapViewService } from "./map-view.service";
-import { MapViewStore } from "./map-view.store";
+import { MapViewModel } from "./mapview.model";
 
 @Component({
     selector: 'mapview-container',
@@ -82,8 +82,8 @@ export class MapViewContainerComponent implements OnDestroy {
         private stateService: AppStateService,
         private keyboardService: KeyboardService,
         private viewerUi: UiAutomationService,
-        public readonly viewSettings: MapViewStore,
-        public readonly layout: AppLayoutStore,
+        public readonly viewSettings: MapViewModel,
+        public readonly layout: LayoutModel,
         private readonly mapViews: MapViewService
     ) {
         this.subscriptions.add(this.viewModel$.subscribe(vm => {

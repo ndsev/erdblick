@@ -7,7 +7,7 @@ import {
     enableMapLayer,
     navigateToRoot,
     openLayerDialog,
-    openSearchPalette
+    openOmnibar
 } from '../utils/ui-helpers';
 
 const MAP_INDEX = 0;
@@ -40,14 +40,14 @@ async function openSourceDataSelectionDialog(page: Page): Promise<Locator> {
 
     // Unlike navigateToRoot(), the third tuple entry is used here to derive a
     // deterministic tile id for the source-data search action.
-    const searchMenu = await openSearchPalette(page, `${tileId} "${TEST_MAP_NAMES[MAP_INDEX]}"`);
-    const sourceDataAction = searchMenu.locator('.search-option-wrapper', {
+    const searchMenu = await openOmnibar(page, `${tileId} "${TEST_MAP_NAMES[MAP_INDEX]}"`);
+    const sourceDataAction = searchMenu.locator('.omnibar-option-wrapper', {
         hasText: 'Inspect Tile Layer Source Data'
     }).first();
     await expect(sourceDataAction).toBeVisible();
     await sourceDataAction.click();
 
-    await expect(page.getByTestId('search-menu-dialog').locator('.p-dialog').first()).toBeHidden();
+    await expect(page.getByTestId('omnibar-menu-dialog').locator('.p-dialog').first()).toBeHidden();
 
     const dialog = page.getByTestId('source-data-selection-panel').first();
     await expect(dialog).toBeVisible();

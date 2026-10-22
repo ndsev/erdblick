@@ -2,10 +2,10 @@ import { testPersistence } from '../../test/state-owners';
 import { stateOwners } from '../../test/state-owners';
 import "@angular/compiler";
 import { describe, expect, it, vi } from "vitest";
-import type { StyleService } from "../styledata/style.service";
+import type { StyleService } from "../map-styles/style.service";
 import type { AppStateService } from "../state/app-state.service";
 import type { MapViewService } from "../mapview/map-view.service";
-import type { FeatureSearchService } from "../search/feature.search.service";
+import type { FeatureSearchService } from "../feature-search/feature.search.service";
 import {
     PRESENTATION_BRIDGE_APPLY,
     PRESENTATION_BRIDGE_APPLY_URL_STATE,
@@ -370,7 +370,7 @@ describe("PresentationStateBridgeService", () => {
         const stateService = testPersistence();
         vi.spyOn(stateService, "replaceSnapshotState").mockReturnValue([]);
         const fixture = framedWindow();
-        const service = new PresentationStateBridgeService(stateService, mapViewStateFixture(), styleServiceFixture(), null, stateOwners(stateService).viewSettings, stateOwners(stateService).inspectionState.store, stateOwners(stateService).layout.store);
+        const service = new PresentationStateBridgeService(stateService, mapViewStateFixture(), styleServiceFixture(), null, stateOwners(stateService).viewSettings, stateOwners(stateService).inspectionState.model, stateOwners(stateService).layout.model);
 
         expect(service.initialize(fixture.host)).toBe(true);
         expect(fixture.parentPostMessage).toHaveBeenCalledWith({
@@ -383,11 +383,11 @@ describe("PresentationStateBridgeService", () => {
         expect(fixture.removeEventListener).toHaveBeenCalledWith("message", expect.any(Function));
 
         const plainFrame = framedWindow("");
-        expect(new PresentationStateBridgeService(stateService, mapViewStateFixture(), styleServiceFixture(), null, stateOwners(stateService).viewSettings, stateOwners(stateService).inspectionState.store, stateOwners(stateService).layout.store).initialize(plainFrame.host)).toBe(false);
+        expect(new PresentationStateBridgeService(stateService, mapViewStateFixture(), styleServiceFixture(), null, stateOwners(stateService).viewSettings, stateOwners(stateService).inspectionState.model, stateOwners(stateService).layout.model).initialize(plainFrame.host)).toBe(false);
 
         const topLevel = framedWindow();
         Object.defineProperty(topLevel.host, "parent", { value: topLevel.host });
-        expect(new PresentationStateBridgeService(stateService, mapViewStateFixture(), styleServiceFixture(), null, stateOwners(stateService).viewSettings, stateOwners(stateService).inspectionState.store, stateOwners(stateService).layout.store).initialize(topLevel.host)).toBe(false);
+        expect(new PresentationStateBridgeService(stateService, mapViewStateFixture(), styleServiceFixture(), null, stateOwners(stateService).viewSettings, stateOwners(stateService).inspectionState.model, stateOwners(stateService).layout.model).initialize(topLevel.host)).toBe(false);
     });
 
     it("applies native snapshot state and acknowledges completion", async () => {

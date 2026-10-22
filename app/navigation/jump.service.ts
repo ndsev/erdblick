@@ -3,10 +3,10 @@ import { HighlightMode } from "build/libs/core/erdblick-core";
 import { BehaviorSubject, Subject } from "rxjs";
 import { z } from "zod";
 import { ActionRegistry } from "../actions/action-registry.service";
-import { ActionInput, AppActionCandidate, applied, rejectAction } from "../actions/app-action";
+import { AppActionCandidate, applied, rejectAction } from "../actions/app-action";
 import { AppActionContributor } from "../actions/app-action-contributor";
 import { AppConfigService } from "../config/app-config.service";
-import { CoordinatesService } from "../coords/coordinates.service";
+import { CoordinatesService } from "../coordinates/coordinates.service";
 import {
     packedTileIdFromMortonString,
     packedTileIdFromParsedNdsCoordinates,
@@ -14,16 +14,16 @@ import {
     parseNdsCoordinateString,
     parsePackedTileId,
     parsePackedTileId as parsePackedTileIdValue
-} from "../coords/nds-coordinate.util";
-import { parseWgs84CoordinateString } from "../coords/wgs84-coordinate.util";
+} from "../coordinates/nds-coordinate.util";
+import { parseWgs84CoordinateString } from "../coordinates/wgs84-coordinate.util";
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
-import { SelectedSourceData, TileFeatureId } from "../inspection/inspection-state.model";
+import { SelectedSourceData, TileFeatureId } from "../inspection/inspection-state";
 import { GeoMath, Rectangle } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
 import { MapInfoService } from "../mapdata/map-info.service";
 import { MapViewService } from "../mapview/map-view.service";
-import { MapViewStore } from "../mapview/map-view.store";
+import { MapViewModel } from "../mapview/mapview.model";
 import { RightClickMenuService } from "../mapview/rightclickmenu.service";
 import { InfoMessageService } from "../shared/info.service";
 import { boundedUnicodeString } from "../shared/unicode-string";
@@ -120,7 +120,6 @@ export class JumpTargetService implements AppActionContributor {
     targetValueSubject = new BehaviorSubject<string>("");
     readonly targetsChanged = new Subject<void>();
     extJumpTargets: Array<SearchTarget> = [];
-    searchIsFocused: boolean = false;
 
     // Communication channels with the map selection dialog (in OmnibarComponent).
     // The mapSelectionSubject triggers the display of the dialog, and
@@ -139,7 +138,7 @@ export class JumpTargetService implements AppActionContributor {
         private configService: AppConfigService,
         public readonly coordinates: CoordinatesService,
         public readonly inspectionState: InspectionPanelService,
-        public readonly viewSettings: MapViewStore,
+        public readonly viewSettings: MapViewModel,
         private readonly views: MapViewService) {
         // Forward marked positions to the coordinate owner.
         this.markedPosition.subscribe(position => {
@@ -269,14 +268,14 @@ export class JumpTargetService implements AppActionContributor {
 
             if (matches.length > 1 && matches[1]) {
                 if (!this.mapService.maps.maps.has(matches[1])) {
-                    label += `<br><span class="search-option-warning">Map ID not found.</span>`;
+                    label += `<br><span class="omnibar-option-warning">Map ID not found.</span>`;
                     valid = false;
                 }
             }
 
             if (matches.length == 3 && matches[2]) {
                 if (!this.mapService.sourceDataLayerIdForLayerName(matches[2])) {
-                    label += `<br><span class="search-option-warning">SourceData layer ID not found.</span>`;
+                    label += `<br><span class="omnibar-option-warning">SourceData layer ID not found.</span>`;
                     valid = false;
                 }
             }
@@ -345,7 +344,7 @@ export class JumpTargetService implements AppActionContributor {
             featureJumpTargetsConverted = featureJumpTargets.map((fjt: FeatureJumpAction) => {
                 let label = fjt.idParts.map(idPart => `${idPart.key}=${idPart.value}`).join(" | ")
                 if (fjt.error) {
-                    label += `<br><span class="search-option-warning">${fjt.error}</span>`;
+                    label += `<br><span class="omnibar-option-warning">${fjt.error}</span>`;
                 }
                 return {
                     id: `fj:${fjt.id}`,
@@ -466,7 +465,7 @@ export class JumpTargetService implements AppActionContributor {
         if (packedTileIdValid) {
             label = `packedTileId = ${value}`;
         } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+            label += `<br><span class="omnibar-option-warning">Insufficient parameters</span>`;
         }
         targetsArray.push({
             id: "j:packed-tile-id",
@@ -485,7 +484,7 @@ export class JumpTargetService implements AppActionContributor {
         if (ndsXyValid) {
             label = this.parseNdsCoordinates(value, true)!.label;
         } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+            label += `<br><span class="omnibar-option-warning">Insufficient parameters</span>`;
         }
         targetsArray.push({
             id: "j:nds-x-y",
@@ -504,7 +503,7 @@ export class JumpTargetService implements AppActionContributor {
         if (ndsYxValid) {
             label = this.parseNdsCoordinates(value, false)!.label;
         } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+            label += `<br><span class="omnibar-option-warning">Insufficient parameters</span>`;
         }
         targetsArray.push({
             id: "j:nds-y-x",
@@ -523,7 +522,7 @@ export class JumpTargetService implements AppActionContributor {
         if (mortonValid) {
             label = this.parseMortonCoordinates(value)!.label;
         } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+            label += `<br><span class="omnibar-option-warning">Insufficient parameters</span>`;
         }
         targetsArray.push({
             id: "j:morton-code",
@@ -542,7 +541,7 @@ export class JumpTargetService implements AppActionContributor {
         if (lonLatValid) {
             label = this.parseWgs84Coordinates(value, true)!.label;
         } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+            label += `<br><span class="omnibar-option-warning">Insufficient parameters</span>`;
         }
         targetsArray.push({
             id: "j:wgs84-lon-lat",
@@ -561,7 +560,7 @@ export class JumpTargetService implements AppActionContributor {
         if (latLonValid) {
             label = this.parseWgs84Coordinates(value, false)!.label;
         } else {
-            label += `<br><span class="search-option-warning">Insufficient parameters</span>`;
+            label += `<br><span class="omnibar-option-warning">Insufficient parameters</span>`;
         }
         targetsArray.push({
             id: "j:wgs84-lat-lon",
@@ -668,7 +667,7 @@ export class JumpTargetService implements AppActionContributor {
         };
     }
 
-    /** Builds the search-action label for parsed NDS coordinate input. */
+    /** Builds the omnibar-action label for parsed NDS coordinate input. */
     private ndsCoordinateLabel(parsed: ParsedNdsCoordinateLabel, isXyOrder: boolean): string {
         const ordered = isXyOrder
             ? `x = ${parsed.x} | y = ${parsed.y}`
@@ -676,7 +675,7 @@ export class JumpTargetService implements AppActionContributor {
         return parsed.level === undefined ? ordered : `${ordered} | level = ${parsed.level}`;
     }
 
-    /** Builds the search-action label for parsed Morton-code input. */
+    /** Builds the omnibar-action label for parsed Morton-code input. */
     private mortonCoordinateLabel(parsed: ParsedNdsCoordinateLabel): string {
         const base = `x = ${parsed.x} | y = ${parsed.y}`;
         return parsed.level === undefined ? base : `${base} | level = ${parsed.level}`;
@@ -746,30 +745,127 @@ export class JumpTargetService implements AppActionContributor {
     }
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: ActionRegistry): void {
-        actions.registerAction(jumpActions.sourceData, async input => {
-            await this.executeTarget(this.getInspectTileSourceDataTarget(input.text), input.text);
-            return applied();
-        }, query => this.initialized ? [this.candidate(this.getInspectTileSourceDataTarget(query), query, { text: query })] : []);
-        actions.registerAction(jumpActions.feature, async input => {
-            const target = this.featureTargetsForValue(input.text).find(target => target.id === input.targetId);
-            if (!target) rejectAction("The feature jump is no longer available");
-            await this.executeTarget(target, input.text);
-            return applied();
-        }, query => this.initialized ? this.featureTargetsForValue(query).map(target =>
-            this.candidate(target, query, { targetId: target.id, text: query })) : []);
-        actions.registerAction(jumpActions.plugin, async input => {
-            const target = this.extJumpTargets.find(target => target.id === input.targetId);
-            if (!target) rejectAction("The jump provider is no longer available");
-            await this.executeTarget(target, input.text, input.payload);
-            return applied();
-        }, (query, history) => this.extJumpTargets.map(target => this.candidate(target, query,
-            { targetId: target.id, text: query, payload: history?.id === target.id ? history.payload : target.payload })));
-        actions.registerAction(jumpActions.coordinates, async input => {
-            const target = this.coordinateTargetsForValue(input.text).find(target => target.id === input.targetId)!;
-            await this.executeTarget(target, input.text);
-            return applied();
-        }, query => this.initialized ? this.coordinateTargetsForValue(query).map(target => this.candidate(target, query,
-            { targetId: target.id as ActionInput<typeof jumpActions.coordinates>["targetId"], text: query })) : []);
+        const appliedSchema = z.strictObject({ status: z.literal("applied"), changed: z.boolean() });
+
+        actions.registerAction(
+            {
+                name: "inspect_source_input",
+                exposure: "omnibar",
+                mutation: true,
+                description: "Inspect a packed tile ID with optional map and source layer names.",
+                inputSchema: z.strictObject({ text: boundedUnicodeString(4096) }),
+                outputSchema: appliedSchema
+            },
+            async (input) => {
+                await this.executeTarget(this.getInspectTileSourceDataTarget(input.text), input.text);
+                return applied();
+            },
+            (query) =>
+                this.initialized
+                    ? [this.candidate(this.getInspectTileSourceDataTarget(query), query, { text: query })]
+                    : []
+        );
+        actions.registerAction(
+            {
+                name: "jump_feature_input",
+                exposure: "omnibar",
+                mutation: true,
+                description: "Resolve a feature ID expression and navigate the focused map.",
+                inputSchema: z.strictObject({
+                    targetId: boundedUnicodeString(4096, true),
+                    text: boundedUnicodeString(4096)
+                }),
+                outputSchema: appliedSchema
+            },
+            async (input) => {
+                const target = this.featureTargetsForValue(input.text).find(
+                    (target) => target.id === input.targetId
+                );
+                if (!target) rejectAction("The feature jump is no longer available");
+                await this.executeTarget(target, input.text);
+                return applied();
+            },
+            (query) =>
+                this.initialized
+                    ? this.featureTargetsForValue(query).map((target) =>
+                          this.candidate(target, query, { targetId: target.id, text: query })
+                      )
+                    : []
+        );
+        actions.registerAction(
+            {
+                name: "jump_plugin_input",
+                exposure: "omnibar",
+                mutation: true,
+                description:
+                    "Run one configured jump provider with validated text and optional saved payload.",
+                inputSchema: z.strictObject({
+                    targetId: boundedUnicodeString(4096, true),
+                    text: boundedUnicodeString(4096),
+                    payload: z.unknown().optional()
+                }),
+                outputSchema: appliedSchema
+            },
+            async (input) => {
+                const target = this.extJumpTargets.find((target) => target.id === input.targetId);
+                if (!target) rejectAction("The jump provider is no longer available");
+                await this.executeTarget(target, input.text, input.payload);
+                return applied();
+            },
+            (query, history) =>
+                this.extJumpTargets.map((target) =>
+                    this.candidate(target, query, {
+                        targetId: target.id,
+                        text: query,
+                        payload: history?.id === target.id ? history.payload : target.payload
+                    })
+                )
+        );
+        actions.registerAction(
+            {
+                name: "jump_coordinates",
+                exposure: "omnibar",
+                mutation: true,
+                description: "Parse coordinates or a packed tile ID and navigate the focused map.",
+                inputSchema: z.strictObject({
+                    targetId: z.enum([
+                        "j:packed-tile-id",
+                        "j:nds-x-y",
+                        "j:nds-y-x",
+                        "j:morton-code",
+                        "j:wgs84-lon-lat",
+                        "j:wgs84-lat-lon"
+                    ]),
+                    text: boundedUnicodeString(4096)
+                }),
+                outputSchema: appliedSchema
+            },
+            async (input) => {
+                const target = this.coordinateTargetsForValue(input.text).find(
+                    (target) => target.id === input.targetId
+                )!;
+                await this.executeTarget(target, input.text);
+                return applied();
+            },
+            (query) =>
+                this.initialized
+                    ? this.coordinateTargetsForValue(query).map((target) =>
+                          this.candidate(target, query, {
+                              targetId: target.id as {
+                                  targetId:
+                                      | "j:packed-tile-id"
+                                      | "j:nds-x-y"
+                                      | "j:nds-y-x"
+                                      | "j:morton-code"
+                                      | "j:wgs84-lon-lat"
+                                      | "j:wgs84-lat-lon";
+                                  text: string;
+                              }["targetId"],
+                              text: query
+                          })
+                      )
+                    : []
+        );
     }
 
 
@@ -798,53 +894,3 @@ export class JumpTargetService implements AppActionContributor {
     }
 
 }
-
-
-/**
- * Public actions and controls implemented by this controller. Their schemas stay
- * beside the handlers; both app startup and the Node catalog build register them.
- */
-const appliedSchema = z.strictObject({ status: z.literal("applied"), changed: z.boolean() });
-
-/** Native parsers and configured plugin candidates are resolved at runtime, never during export. */
-export const jumpActions = {
-    coordinates: {
-        name: "jump_coordinates",
-        exposure: "omnibar",
-        mutation: true,
-        description: "Parse coordinates or a packed tile ID and navigate the focused map.",
-        inputSchema: z.strictObject({
-            targetId: z.enum(["j:packed-tile-id", "j:nds-x-y", "j:nds-y-x", "j:morton-code", "j:wgs84-lon-lat", "j:wgs84-lat-lon"]),
-            text: boundedUnicodeString(4096)
-        }),
-        outputSchema: appliedSchema
-    },
-    sourceData: {
-        name: "inspect_source_input",
-        exposure: "omnibar",
-        mutation: true,
-        description: "Inspect a packed tile ID with optional map and source layer names.",
-        inputSchema: z.strictObject({ text: boundedUnicodeString(4096) }),
-        outputSchema: appliedSchema
-    },
-    feature: {
-        name: "jump_feature_input",
-        exposure: "omnibar",
-        mutation: true,
-        description: "Resolve a feature ID expression and navigate the focused map.",
-        inputSchema: z.strictObject({ targetId: boundedUnicodeString(4096, true), text: boundedUnicodeString(4096) }),
-        outputSchema: appliedSchema
-    },
-    plugin: {
-        name: "jump_plugin_input",
-        exposure: "omnibar",
-        mutation: true,
-        description: "Run one configured jump provider with validated text and optional saved payload.",
-        inputSchema: z.strictObject({
-            targetId: boundedUnicodeString(4096, true),
-            text: boundedUnicodeString(4096),
-            payload: z.unknown().optional()
-        }),
-        outputSchema: appliedSchema
-    }
-} as const;

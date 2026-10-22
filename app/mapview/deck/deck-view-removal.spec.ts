@@ -1,7 +1,7 @@
 import "@angular/compiler";
 import { describe, expect, it, vi } from "vitest";
 import { DeckMapView3D } from "./deck-view3d";
-import type { RenderViewCameraState } from "../render-view.model";
+import type { RenderViewCameraState } from "../render-view";
 
 /** Constructs a real camera owner with inert collaborators and no WebGL canvas. */
 function createView() {

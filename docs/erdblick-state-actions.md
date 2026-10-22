@@ -1,10 +1,10 @@
-# Application stores, controllers and actions
+# Application models, controllers and actions
 
 The application keeps its existing `AppState<T>`, `MapViewState<T>` and
-`StyleState` abstractions. Each domain now has an injectable **store** containing
+`StyleState` abstractions. Each domain now has an injectable **model** containing
 its values, persistence declarations and state-only projections. A **controller**
 uses those values to perform workflows and contributes its actions and controls.
-`AppStateService` coordinates persistence and completed observations across stores.
+`AppStateService` coordinates persistence and completed observations across models.
 
 This separates state access from runtime dependencies. Reading dock preferences
 should not construct the dialog controller; reading search definitions should not
@@ -15,32 +15,42 @@ construct the search engine, map catalog or renderer.
 | Folder | Contents |
 | --- | --- |
 | `app/state/` | AppState primitives, publication, storage/config ownership, URL coordination and codecs |
-| `app/layout/` | Dock/dialog/panel components, layout store and layout controller |
-| `app/config/` | Configuration loader, published-version store and background definitions |
-| `app/actions/` | Action registry, omnibar, history, MCP adapters and UI automation |
+| `app/layout/` | Dock/dialog/panel components, layout model and layout controller |
+| `app/config/` | Configuration loader, published-version model and background definitions |
+| `app/actions/` | Action registry, MCP adapters and UI automation |
+| `app/omnibar/` | Command palette, history compatibility codecs and `OmnibarModel` |
 | `app/navigation/` | Coordinate/feature jumps, location navigation and external viewers |
-| `app/search/` | Feature and location search, saved search definitions, completion and result presentation |
-| `app/mapview/`, `app/mapdata/`, `app/inspection/`, `app/coords/`, `app/styledata/`, `app/diagnostics/` | The corresponding domain's stores, controllers, models and views |
+| `app/feature-search/` | Feature-search definitions, execution, completion, result presentation and `FeatureSearchModel` |
+| `app/location-search/` | Place providers, location geometry and `LocationSearchModel` |
+| `app/rendering/`, `app/connection/` | Rendering/resource policies and connection preferences, with their models/controllers |
+| `app/mapview/`, `app/mapdata/`, `app/inspection/`, `app/coordinates/`, `app/map-styles/`, `app/diagnostics/` | The corresponding domain's model, controllers and presentation |
+| `app/styles/` | Application CSS; map-feature style documents belong to `app/map-styles/` |
 
-A `*.store.ts` file has no runtime dependency on a controller. Its class can be injected by a
-component or another store. State-only normalization, positional compatibility
-codecs and membership invariants stay with the values they protect. Network,
-renderer, worker and UI workflows stay in `*.service.ts` controllers. A store is
-not necessarily a bag of fields: `MapViewStore` must keep logical view membership
-and per-view records coherent during URL hydration, before renderers exist.
+Each folder owning shared application state has exactly one `<folder>.model.ts`,
+containing its injectable `<Folder>Model`. Multiple controllers may use that model.
+The `.model.ts` suffix is reserved for this owner: value types and runtime objects
+use descriptive `.types.ts` or ordinary TypeScript filenames. Infrastructure and
+stateless helper folders do not acquire empty models.
+
+Models have no runtime dependency on controllers. State normalization, positional
+compatibility codecs and membership invariants stay with the values they protect.
+Network, renderer, worker and UI workflows stay in controller services. For example,
+`MapViewModel` keeps logical membership and per-view records coherent during URL
+hydration, before renderers exist. Components retain private interaction details
+such as caret position and pointer capture.
 
 The main service boundaries are:
 
 | Owner | Responsibility |
 | --- | --- |
-| `MapViewStore` | Durable identities, committed cameras, projection/sync values, positional codecs and coherent membership edits |
+| `MapViewModel` | Durable identities, committed cameras, projection/sync values, positional codecs and coherent membership edits |
 | `MapViewService` | Renderer lifetimes, live camera previews, navigation, view teardown and public view actions/controls |
-| `MapLayerStore` | Layer values, style-option associations, preset selections and their state invariants |
+| `MapDataModel` | Layer values, style-option associations, preset selections and their state invariants |
 | `MapInfoService` | Loaded catalog/tree, preset application and complete-catalog cleanup |
-| `InspectionStore` | Persisted selections, panel preferences, comparison data and codecs |
+| `InspectionModel` | Persisted selections, panel preferences, comparison data and codecs |
 | `InspectionPanelService` | Panel lifetime, focus, locks, comparison and layout workflows |
 | `InspectionSelectionService` | Asynchronous feature loading, selection projection and navigation |
-| `FeatureSearchStore` | Saved definitions, grouping and logical view associations |
+| `FeatureSearchModel` | Saved definitions, grouping and logical view associations |
 | `FeatureSearchService` | Live sessions, completion, worker/transport coordination and search actions |
 | `ActionRegistry` | Shared registration, schema validation and dispatch for omnibar and MCP |
 | `McpActionService` | Connection registration, admission, deadlines, cancellation and Angular scheduling |
@@ -48,13 +58,13 @@ The main service boundaries are:
 
 `ActionRegistry` and `McpActionService` have separate lifetimes and responsibilities:
 the omnibar uses the registry even when MCP is disabled. The transport adapter has
-no domain dispatch switch or separate action catalog. Likewise, `MapViewStore`
+no domain dispatch switch or separate action catalog. Likewise, `MapViewModel`
 works without renderer construction, while `MapViewService` owns the live resources
 that must be retired before a view disappears.
 
 ## Declaring and observing state
 
-`CoordinatesStore` keeps the deployed key and URL codec next to the value:
+`CoordinatesModel` keeps the deployed key and URL codec next to the value:
 
 ```ts
 readonly markerState = this.persistence.registerState<boolean>({
@@ -66,10 +76,10 @@ readonly markerState = this.persistence.registerState<boolean>({
 });
 ```
 
-A component which only observes state injects the store directly:
+A component which only observes state injects the model directly:
 
 ```ts
-constructor(readonly layout: AppLayoutStore) {
+constructor(readonly layout: LayoutModel) {
     this.subscription = layout.dockOpenState.subscribe(open => {
         // Update this component's presentation from the current dock preference.
         this.dockVisible = open;
@@ -78,9 +88,10 @@ constructor(readonly layout: AppLayoutStore) {
 ```
 
 As with the existing AppState system, the consumer releases its subscription when
-it is destroyed. A controller that needs its own state has a `readonly store`
-dependency. A consumer that also invokes the controller can use that same instance
-through `controller.store`; state is neither copied nor forwarded through getters.
+it is destroyed. Controllers inject their models as readonly dependencies, usually
+named `model`. A consumer that also invokes a controller can use that same instance
+through, for example, `coordinatesService.model`; state is neither copied nor
+forwarded through getters.
 
 For a coherent observation spanning several slots, use a completed projection:
 
@@ -91,7 +102,7 @@ persistence.observe(() => ({
 })).subscribe(marker => updateMarkerOverlay(marker));
 ```
 
-`updateMarkerOverlay` denotes the consumer's rendering work. The store does not
+`updateMarkerOverlay` denotes the consumer's rendering work. The model does not
 perform rendering. `CoordinatesService.setMarker()` batches the position and
 visibility changes in the ordinary AppState transaction.
 
@@ -100,38 +111,48 @@ visibility changes in the ordinary AppState transaction.
 A **control** is an explicit public value reader/writer. It may combine several
 stored slots or describe runtime state. An **action** is a semantic operation,
 such as closing a particular inspection or starting a search. Neither name is a
-persistence key, and stores are not automatically exposed to MCP.
+persistence key, and models are not automatically exposed to MCP.
 
 Controllers implement `AppActionContributor`. Its two optional methods distinguish
 operations from controls without requiring empty implementations:
 
 ```ts
-export class CoordinatesService implements AppActionContributor {
-    registerControls(actions: ActionRegistry): void {
-        actions.registerControl(coordinateControls.marker, {
-            read: () => this.store.markerControlValue,
-            write: (_selector, value) => this.setMarker(value)
-        });
-    }
-}
-```
-
-The schema declaration `coordinateControls.marker` lives in that same controller
-file. The declaration and its handler use the same inferred types. There are no
-`.declarations.ts` companions. Shared domain schemas, such as feature references
-and view IDs, live in their domain models because non-action consumers also need
-them.
-
-Operations can supply live omnibar choices using the same registration:
-
-```ts
 registerActions(actions: ActionRegistry): void {
-    actions.registerAction(inspectionStateActions.closeInspection, input => {
-        this.closeInspection(input.panelId, input.lifetime);
-        return applied();
-    }, query => this.closeInspectionCandidates(query));
+    actions.registerAction(
+        {
+            name: "viewer_close_inspection",
+            description: "Close one inspection, rejecting a stale lifetime when supplied.",
+            mutation: true,
+            inputSchema: z.strictObject({
+                panelId: indexSchema,
+                lifetime: indexSchema.optional()
+            }),
+            outputSchema: z.strictObject({
+                status: z.literal("applied"),
+                changed: z.boolean()
+            })
+        },
+        ({ panelId, lifetime }) => {
+            this.closeInspection(panelId, lifetime);
+            return applied();
+        },
+        query => this.closeInspectionCandidates(query)
+    );
 }
 ```
+
+Declarations are inline in `registerActions()` and `registerControls()`, immediately
+beside their execution or read/write callbacks. The registry infers callback types
+from the schemas. Controller methods use domain parameters and inferred results;
+they do not obtain their types from a separately exported action catalog.
+
+Controls use the same layout with `selectorSchema` and `valueSchema` in the first
+argument, followed by `read`, `write` and optional `defaultTargets` callbacks.
+See [CoordinatesService](../app/coordinates/coordinates.service.ts) for a compound
+marker control and [MapViewService](../app/mapview/map-view.service.ts) for scoped
+camera/layer controls. Shared validators remain named when other operations use
+them, such as camera validation, feature references and search settings.
+There are no `.declarations.ts` companions or exported declaration maps.
 
 A choice such as `Close Road.17` carries a panel ID and captured lifetime. The
 handler checks the lifetime before acting. MCP obtains the same identity through
@@ -140,7 +161,8 @@ entry. Local-only operations declare `exposure: "omnibar"`; candidate production
 is never executed during catalog collection.
 
 `registerApplication()` is the single composition point for controller instances.
-It constructs their stores, seals persistence registration, and passes the
+It constructs their models and the independently owned omnibar model, seals
+persistence registration, and passes the
 controllers to `ActionRegistry.registerContributors()`. All controls register
 first, then operations; the registry derives `viewer_describe_controls`,
 `viewer_get_controls` and `viewer_set_control` from those registered controls.
@@ -226,7 +248,9 @@ A network request during collection fails the build. The injector and disposable
 document are destroyed when collection finishes.
 
 The output is the static `web-mcp-actions.json` manifest, its canonical JSON, the
-catalog hash used by the browser, and the relay schemas. The manifest currently
+catalog hash used by the browser, the relay schemas and generated TypeScript
+contract types. The type compiler runs in Node after the disposable browser
+environment has been removed. The manifest currently
 contains 32 public actions and 21 controls. Permissions derive from each action's
 `mutation` flag. Mapget continues to read the static artifact; Node is required
 only on the build machine.
@@ -237,12 +261,13 @@ server-side discovery. The existing start/build/watch/test lifecycle hooks run i
 After editing registrations during a watch session, rerun the generator and
 restart/rebuild the browser bundle so the manifest and embedded hash stay aligned.
 
-Unit tests retain a separate, explicit contract expectation in `test/`; a real
-Angular registration test compares the collected catalog against that expectation.
-It is not imported by production code. Browser tests validate responses against the manifest shipped with the tested
-bundle; their Node process imports no controller implementations. Other tests
-verify stores can be injected without their controllers and catalog collection
-executes no callbacks.
+Unit tests collect the real Angular registrations. A separate application
+registration test compares their metadata to the generated manifest. The generated
+`viewer-contract.d.ts` supplies test/client types without a manually maintained
+inventory. Browser tests validate responses against the manifest shipped with the
+tested bundle; their Node process imports no controller implementations. Other
+tests verify models can be injected independently of controllers and catalog
+collection executes no callbacks.
 
 ## Verification
 
@@ -269,7 +294,7 @@ EB_MAPGET_MCP_LOCAL=1 EB_MAPGET_CONFIG=test/mapget-native-grid.yaml \
 The cost of this architecture is explicit coordination. Multi-slot consumers must
 choose completed projections; synchronous transactions do not roll back network
 or renderer effects. URL dictionary coordination still has a dedicated owner.
-The benefit of the store/controller split is a smaller dependency surface for
+The benefit of the model/controller split is a smaller dependency surface for
 state consumers, without replacing AppState's existing subscription/codec model.
 
 ## Stored-state inventory
@@ -278,31 +303,34 @@ Release baseline: `6f5ba2fd6d6cb3810cd9bf4c305e0d5b229f4ef8`. The actual owner s
 
 | Owner file | Stored keys |
 | --- | --- |
-| `app/coords/coordinates-policy.store.ts` | `coordinatesEnabled`, `coordinatesLegalTermsAccepted` |
-| `app/coords/coordinates.store.ts` | `marker`, `markedPosition`, `enabledCoordsTileIds` |
-| `app/mapview/render-preferences.store.ts` | `deckAntialiasingEnabled`, `semanticCompositingEnabled`, `contactShadingEnabled`, `lod3TileThreshold`, `tileSubsetRenderWorkerCount`, `pointCloudDownsamplingEnabled`, `pointCloudDetailPixels`, `pointCloudWorkingMemoryMiB`, `pointCloudGpuMemoryMiB`, `tilesLoadLimit` |
-| `app/mapview/map-view.store.ts` | `viewIds`, `numberOfViews`, `focus`, `viewSync`, `cameraView`, `mode2d`, `mapZoomStep`, `featureZoomClearanceMeters`, `background`, `tileBorders`, `tileGridMode`, `tileGridLevel`, `tileGridAutoLevel`, `tileGridColor`, `tileGridOpacity` |
-| `app/mapdata/map-layer.store.ts` | `layerSyncOptions`, `layerNames`, `visibility`, `zoomLevel`, `autoZoomLevel`, `styleOptions`, `stylePresetSelection`, `mapPresetSelection` |
-| `app/mapdata/connection-preferences.store.ts` | `tilePullCompressionEnabled`, `connectionRetryEnabled`, `connectionRetryInitialDelayMs`, `connectionRetryBackoffMultiplier`, `connectionRetryMaxDelayMs` |
-| `app/layout/app-layout.store.ts` | `mapsOpenState`, `dockOpenState`, `dockWidth`, `viewPanelSizes`, `dockActiveTabState`, `dockAutoCollapse`, `dialogLayouts` |
-| `app/styledata/style.store.ts` | `styleVisiblity`, `styleEditorTarget` |
-| `app/diagnostics/diagnostics.store.ts` | `diagnosticsLogFilter`, `diagnosticsExportOptions` |
-| `app/config/app-config.store.ts` | `distributionVersions`, `erdblickVersion` |
-| `app/inspection/inspection.store.ts` | `selected`, `inspectionsLimitState`, `drillPickRadius`, `inspectionTreeExpandByDefault`, `sourceDataInspectionDefaultColumns`, `inspectionTreeHiddenColumns`, `inspectionValueVaryColors`, `inspectionValueVaryOutlines`, `inspectionValueVaryStriping`, `hoverLabelsEnabled`, `hoverLabelFields`, `inspectionComparisonState` |
-| `app/search/location-search.store.ts` | `locationSearchResultLimit` |
-| `app/search/feature-search.store.ts` | `featureSearchGrouping`, `featureSearchState` |
+| `app/coordinates/coordinates.model.ts` | `coordinatesEnabled`, `coordinatesLegalTermsAccepted`, `marker`, `markedPosition`, `enabledCoordsTileIds` |
+| `app/rendering/rendering.model.ts` | `deckAntialiasingEnabled`, `semanticCompositingEnabled`, `contactShadingEnabled`, `lod3TileThreshold`, `tileSubsetRenderWorkerCount`, `pointCloudDownsamplingEnabled`, `pointCloudDetailPixels`, `pointCloudWorkingMemoryMiB`, `pointCloudGpuMemoryMiB`, `tilesLoadLimit` |
+| `app/mapview/mapview.model.ts` | `viewIds`, `numberOfViews`, `focus`, `viewSync`, `cameraView`, `mode2d`, `mapZoomStep`, `featureZoomClearanceMeters`, `background`, `tileBorders`, `tileGridMode`, `tileGridLevel`, `tileGridAutoLevel`, `tileGridColor`, `tileGridOpacity` |
+| `app/mapdata/mapdata.model.ts` | `layerSyncOptions`, `layerNames`, `visibility`, `zoomLevel`, `autoZoomLevel`, `styleOptions`, `stylePresetSelection`, `mapPresetSelection` |
+| `app/connection/connection.model.ts` | `tilePullCompressionEnabled`, `connectionRetryEnabled`, `connectionRetryInitialDelayMs`, `connectionRetryBackoffMultiplier`, `connectionRetryMaxDelayMs` |
+| `app/layout/layout.model.ts` | `mapsOpenState`, `dockOpenState`, `dockWidth`, `viewPanelSizes`, `dockActiveTabState`, `dockAutoCollapse`, `dialogLayouts` |
+| `app/map-styles/map-styles.model.ts` | `styleVisiblity`, `styleEditorTarget` |
+| `app/diagnostics/diagnostics.model.ts` | `diagnosticsLogFilter`, `diagnosticsExportOptions` |
+| `app/config/config.model.ts` | `distributionVersions`, `erdblickVersion` |
+| `app/inspection/inspection.model.ts` | `selected`, `inspectionsLimitState`, `drillPickRadius`, `inspectionTreeExpandByDefault`, `sourceDataInspectionDefaultColumns`, `inspectionTreeHiddenColumns`, `inspectionValueVaryColors`, `inspectionValueVaryOutlines`, `inspectionValueVaryStriping`, `hoverLabelsEnabled`, `hoverLabelFields`, `inspectionComparisonState` |
+| `app/location-search/location-search.model.ts` | `locationSearchResultLimit` |
+| `app/feature-search/feature-search.model.ts` | `featureSearchGrouping`, `featureSearchState` |
+| `app/omnibar/omnibar.model.ts` | `searchHistory` |
 
-There are 71 registrations: the 70 release keys plus `viewIds`. `numberOfViews` is a projection of ordered IDs; `focus` stores a logical ID with the old numeric codec. The deployed spelling `styleVisiblity` is retained for compatibility.
+There are 72 registrations: the 70 release AppState keys, `viewIds`, and the
+existing `searchHistory` key formerly persisted by the omnibar component. History
+retains legacy tuple decoding and JSON payload types, and stays outside URL and
+snapshot sharing. `numberOfViews` is a projection of ordered IDs; `focus` stores a logical ID with the old numeric codec. The deployed spelling `styleVisiblity` is retained for compatibility.
 
 ### Method migration
 
 | Former AppState behavior | Current owner |
 | --- | --- |
-| View count, camera, projection, sync, background and grid edits | `MapViewStore`; renderer workflows in `MapViewService` |
-| Layer defaults, aligned arrays, option writes and preset selections | `MapLayerStore`; catalog/preset coordination in `MapInfoService` |
+| View count, camera, projection, sync, background and grid edits | `MapViewModel`; renderer workflows in `MapViewService` |
+| Layer defaults, aligned arrays, option writes and preset selections | `MapDataModel`; catalog/preset coordination in `MapInfoService` |
 | Feature/source selection, panel locking/focus/colors, comparison and cleanup | `InspectionPanelService`; async work in `InspectionSelectionService` |
-| Search definitions and grouping | `FeatureSearchStore`; runtime work in `FeatureSearchService` |
-| Style visibility and editor preference | `StyleStore`; document operations in `StyleService` |
+| Search definitions and grouping | `FeatureSearchModel`; runtime work in `FeatureSearchService` |
+| Style visibility and editor preference | `MapStylesModel`; document operations in `StyleService` |
 | Marker/coordinate preferences and policy | `CoordinatesService`, `CoordinatesPolicyService` |
 | Rendering and connection preferences | `RenderPreferencesService`, `ConnectionPreferencesService` |
 | Generic dialog/dock/split layout | `AppLayoutService` |
@@ -310,6 +338,6 @@ There are 71 registrations: the 70 release keys plus `viewIds`. `numberOfViews` 
 | Shared v1/v2 layer/style/selection URL dictionary | `AppUrlStateService` |
 | Generic storage/config ownership, validation, batching, snapshots and navigation persistence | `AppStateService` |
 
-AppState values and codecs live in stores; workflow methods live in controllers. There is no forwarding domain facade on `AppStateService`. Public action/control schemas and bindings are colocated in their controller files.
+AppState values and codecs live in models; workflow methods live in controllers. There is no forwarding domain facade on `AppStateService`. Public action/control schemas and bindings are inline in their controller registration methods.
 
 Raw line counts include moved code, formatting and comments and should not be treated as a complexity metric. The independent implementation comparison records separate production, infrastructure, test and generated-artifact changes.

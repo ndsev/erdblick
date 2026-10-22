@@ -1,9 +1,9 @@
 import type {Device} from "@luma.gl/core";
 import type {Matrix4} from "@math.gl/core";
 
-import type {FilterTileState} from "../../mapdata/filter-tile-state.model";
-import type {TileAttachmentRef} from "../../mapdata/filter-subscription.model";
-import type {StyledMapgetLayer} from "../../mapdata/styled-mapget-layer.model";
+import type {FilterTileState} from "../../mapdata/filter-tile-state";
+import type {TileAttachmentRef} from "../../mapdata/filter-subscription";
+import type {StyledMapgetLayer} from "../../mapdata/styled-mapget-layer";
 import {coreLib} from "../../integrations/wasm";
 import {
     DeckGltfNodeLayer,

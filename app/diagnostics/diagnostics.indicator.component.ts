@@ -10,7 +10,7 @@ import {
 import {combineLatest, Subscription} from 'rxjs';
 import {Popover} from 'primeng/popover';
 import {DiagnosticsFacadeService} from './diagnostics.facade.service';
-import {DiagnosticsSnapshot} from './diagnostics.model';
+import {DiagnosticsSnapshot} from './diagnostics.types';
 import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
 
 @Component({

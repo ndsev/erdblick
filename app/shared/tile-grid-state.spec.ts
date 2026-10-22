@@ -6,7 +6,7 @@ import {
     normalizeTileGridColor,
     tileGridMaxLevel,
     tileGridRgba
-} from "../mapview/map-view-state.model";
+} from "../mapview/map-view-state";
 
 describe("tile-grid state helpers", () => {
     it("uses mode-specific level limits", () => {

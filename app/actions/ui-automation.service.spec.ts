@@ -1,7 +1,7 @@
 import "@angular/compiler";
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import {UiAutomationService} from "./ui-automation.service";
-import {viewerUiActions} from "./ui-automation.service";
+import { viewerActions as viewerUiActions } from "../../test/action-contract";
 
 describe("bounded viewer UI actions", () => {
     let ui: UiAutomationService;

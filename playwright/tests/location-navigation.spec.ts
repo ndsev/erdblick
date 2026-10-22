@@ -1,7 +1,7 @@
 import { WebMercatorViewport } from '@deck.gl/core';
 import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/test';
-import { navigateToStateSnapshotRoot, openSearchPalette } from '../utils/ui-helpers';
+import { navigateToStateSnapshotRoot, openOmnibar } from '../utils/ui-helpers';
 
 const metadata = { id: 'wof:1', name: 'Area Place', lonLat: [160, 70], aabb: [[0, 0], [22, 10]], geometryAvailable: true };
 const geometry = {
@@ -28,8 +28,8 @@ async function camera(page: Page) {
 
 /** Selects the stable result identity through the ordinary omnibox. */
 async function selectPlace(page: Page, query = 'Area', id = 'wof:1', freezeHighlight = false) {
-    await openSearchPalette(page, query);
-    const row = page.getByTestId('search-action').filter({ has: page.getByText(query === 'Area' ? 'Area Place' : 'Point Place', { exact: true }) })
+    await openOmnibar(page, query);
+    const row = page.getByTestId('omnibar-action').filter({ has: page.getByText(query === 'Area' ? 'Area Place' : 'Point Place', { exact: true }) })
         .and(page.locator(`[data-action-id="loc:mapget-offline:${id}"]`));
     await row.waitFor({ state: 'visible' });
     if (freezeHighlight) await page.clock.pauseAt(new Date(Date.now() + 60_000));
@@ -74,7 +74,7 @@ test('fits all polygon components, renders holes, fades, and replays metadata-on
     });
     await page.clock.install();
     await navigateToStateSnapshotRoot(page);
-    await openSearchPalette(page, 'Area');
+    await openOmnibar(page, 'Area');
     await expect(page.getByText('Area Place', { exact: true })).toBeVisible();
     expect(details).toBe(0);
     await selectPlace(page, 'Area', 'wof:1', true);
@@ -101,8 +101,8 @@ test('fits all polygon components, renders holes, fades, and replays metadata-on
     await expect.poll(() => page.evaluate(() => !!window.ebDebug)).toBe(true);
     await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(beforeReload.destination.lon, 5);
     await expect.poll(async () => (await camera(page)).destination.alt).toBeCloseTo(beforeReload.destination.alt, 1);
-    await openSearchPalette(page, '');
-    await page.getByTestId('search-history-action').filter({ has: page.getByText('Area', { exact: true }) }).click();
+    await openOmnibar(page, '');
+    await page.getByTestId('omnibar-history-action').filter({ has: page.getByText('Area', { exact: true }) }).click();
     await expect.poll(() => details).toBe(2);
 });
 

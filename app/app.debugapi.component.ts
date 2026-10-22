@@ -7,7 +7,7 @@ import {
     type DeckPresentationDebugSnapshot,
     type TileSubsetLayerRenderDebugSnapshot
 } from "./mapview/deck/tile-subset-layer-render.service";
-import { MapViewStore } from "./mapview/map-view.store";
+import { MapViewModel } from "./mapview/mapview.model";
 import { AppStateService } from "./state/app-state.service";
 
 /** Browser-console helpers which use only supported S4E2 boundaries. */
@@ -22,7 +22,7 @@ export class ErdblickDebugApi {
         private readonly tileStream: MapTileStreamService,
         private readonly subsetRenderer: TileSubsetLayerRenderService,
         public readonly stateService: AppStateService,
-        public readonly viewSettings: MapViewStore,
+        public readonly viewSettings: MapViewModel,
         private readonly actions: ActionRegistry
     ) {
     }

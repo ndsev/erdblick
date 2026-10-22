@@ -3,7 +3,7 @@ import {PathLayer} from '@deck.gl/layers';
 import {lngLatToWorld, worldToLngLat} from '@math.gl/web-mercator';
 import {LocationOutlineLayer} from '../../app/mapview/deck/location-area.layer';
 import {fitLocationArea, locationOverlayPolygons} from '../../app/mapview/deck/deck-location-area-navigation';
-import type {LocationPolygon} from '../../app/mapview/render-view.model';
+import type {LocationPolygon} from '../../app/mapview/render-view';
 
 export {fitLocationArea, locationOverlayPolygons};
 

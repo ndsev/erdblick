@@ -1,6 +1,6 @@
 import {expect, test} from '../fixtures/test';
 import {mcpClient} from '../utils/mcp-client';
-import {openSearchPalette, waitForAppReady} from '../utils/ui-helpers';
+import {openOmnibar, waitForAppReady} from '../utils/ui-helpers';
 import {TEST_LAYER_NAMES, TEST_MAP_NAMES} from '../utils/test-params';
 
 /**
@@ -42,8 +42,8 @@ test('owner commands navigate, replay history and close the chosen live inspecti
     }
 
     await expect.poll(async () => (await camera())?.destination?.lon).toBe(10);
-    await openSearchPalette(page, '48,11');
-    const coordinateChoice = page.getByTestId('search-action')
+    await openOmnibar(page, '48,11');
+    const coordinateChoice = page.getByTestId('omnibar-action')
         .and(page.locator('[data-action-id="j:wgs84-lat-lon"]'));
     await expect(coordinateChoice).toBeVisible();
     await coordinateChoice.click();
@@ -68,8 +68,8 @@ test('owner commands navigate, replay history and close the chosen live inspecti
         target: {control: 'view.camera', viewId: 'omnibar'},
         value: {...previous, destination: {lon: 10, lat: 40, alt: 500}}
     });
-    await openSearchPalette(page, '');
-    await page.getByTestId('search-history-action')
+    await openOmnibar(page, '');
+    await page.getByTestId('omnibar-history-action')
         .filter({has: page.getByText('48,11', {exact: true})}).click();
     await expect.poll(async () => (await camera())?.destination?.lon).toBeCloseTo(11, 5);
 
@@ -104,8 +104,8 @@ test('owner commands navigate, replay history and close the chosen live inspecti
     await expect(page.getByTestId('inspection-panel')).toHaveCount(1);
 
     const beforeClose = await page.evaluate(() => localStorage.getItem('searchHistory'));
-    await openSearchPalette(page, 'close ' + feature.featureId);
-    const closeChoice = page.getByTestId('search-action')
+    await openOmnibar(page, 'close ' + feature.featureId);
+    const closeChoice = page.getByTestId('omnibar-action')
         .and(page.locator('[data-action-id^="close-inspection:"]'));
     await expect(closeChoice).toHaveCount(1);
     await expect(closeChoice).toContainText('Close ' + feature.featureId);

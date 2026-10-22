@@ -5,7 +5,7 @@ import type {SubsetDiagnosticsTile} from "../mapview/view-layer-diagnostics.serv
 import {CONVERSION_AGE_UNIT} from "./diagnostics.constants";
 import {buildAggregatedPerfStats} from "./diagnostics.perf-aggregation";
 import {DiagnosticsDatasource} from "./diagnostics.datasource";
-import type {LogEntry} from "./diagnostics.model";
+import type {LogEntry} from "./diagnostics.types";
 
 describe("backend connectivity diagnostics", () => {
     it("does not turn an intentional socket reset into a backend error", () => {

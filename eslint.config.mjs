@@ -15,6 +15,8 @@ const compat = new FlatCompat({
 });
 
 export default [
+    // Catalog output is generated and type-checked; lint the generator and owners.
+    { ignores: ["app/actions/generated/**"] },
     ...compat.extends("eslint:recommended", "plugin:@typescript-eslint/recommended"),
     {
         plugins: {

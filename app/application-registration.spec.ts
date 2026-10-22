@@ -1,3 +1,10 @@
+import { ConnectionModel } from "./connection/connection.model";
+import { RenderingModel } from "./rendering/rendering.model";
+import { MapStylesModel } from "./map-styles/map-styles.model";
+import { ConfigModel } from "./config/config.model";
+import { DiagnosticsModel } from "./diagnostics/diagnostics.model";
+import { LocationSearchModel } from "./location-search/location-search.model";
+import { OmnibarModel } from "./omnibar/omnibar.model";
 import "@angular/compiler";
 import { provideHttpClient } from "@angular/common/http";
 import { EnvironmentInjector } from "@angular/core";
@@ -6,23 +13,23 @@ import { provideRouter } from "@angular/router";
 import { MessageService } from "primeng/api";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { viewerActionCatalog } from "../test/action-contract";
+import manifest from "./actions/generated/web-mcp-actions.json";
 import { stateOwners, testPersistence } from "../test/state-owners";
 import { ActionRegistry } from "./actions/action-registry.service";
 import { AppActionContributor } from "./actions/app-action-contributor";
 import { registerApplication } from "./application-registration";
-import { CoordinatesService } from "./coords/coordinates.service";
-import { CoordinatesStore } from "./coords/coordinates.store";
+import { CoordinatesService } from "./coordinates/coordinates.service";
+import { CoordinatesModel } from "./coordinates/coordinates.model";
 import { InspectionPanelService } from "./inspection/inspection-panel.service";
-import { InspectionStore } from "./inspection/inspection.store";
+import { InspectionModel } from "./inspection/inspection.model";
 import { AppLayoutService } from "./layout/app-layout.service";
-import { AppLayoutStore } from "./layout/app-layout.store";
+import { LayoutModel } from "./layout/layout.model";
 import { MapInfoService } from "./mapdata/map-info.service";
-import { MapLayerStore } from "./mapdata/map-layer.store";
+import { MapDataModel } from "./mapdata/mapdata.model";
 import { MapViewService } from "./mapview/map-view.service";
-import { MapViewStore } from "./mapview/map-view.store";
-import { FeatureSearchStore } from "./search/feature-search.store";
-import { FeatureSearchService } from "./search/feature.search.service";
+import { MapViewModel } from "./mapview/mapview.model";
+import { FeatureSearchModel } from "./feature-search/feature-search.model";
+import { FeatureSearchService } from "./feature-search/feature.search.service";
 import { InfoMessageService } from "./shared/info.service";
 import { AppStateService } from "./state/app-state.service";
 
@@ -32,8 +39,8 @@ afterEach(() => {
 });
 
 describe("application registration boundaries", () => {
-    it("allows adjacent consumers to observe stores without constructing domain controllers", () => {
-        const forbidden = () => { throw new Error("A store constructed a controller"); };
+    it("allows adjacent consumers to observe models without constructing domain controllers", () => {
+        const forbidden = () => { throw new Error("A model constructed a controller"); };
         TestBed.configureTestingModule({ providers: [
             provideRouter([]), MessageService,
             ...[CoordinatesService, InspectionPanelService, AppLayoutService, MapInfoService,
@@ -41,12 +48,17 @@ describe("application registration boundaries", () => {
                 .map(provide => ({ provide, useFactory: forbidden }))
         ] });
 
-        const coordinates = TestBed.inject(CoordinatesStore);
-        const layout = TestBed.inject(AppLayoutStore);
-        const views = TestBed.inject(MapViewStore);
-        const inspections = TestBed.inject(InspectionStore);
-        const layers = TestBed.inject(MapLayerStore);
-        const searches = TestBed.inject(FeatureSearchStore);
+        const coordinates = TestBed.inject(CoordinatesModel);
+        const layout = TestBed.inject(LayoutModel);
+        const views = TestBed.inject(MapViewModel);
+        const inspections = TestBed.inject(InspectionModel);
+        const layers = TestBed.inject(MapDataModel);
+        const searches = TestBed.inject(FeatureSearchModel);
+        // Every additional domain model must also be independently injectable.
+        for (const model of [ConnectionModel, RenderingModel, MapStylesModel, ConfigModel,
+            DiagnosticsModel, LocationSearchModel, OmnibarModel]) {
+            expect(TestBed.inject<unknown>(model)).toBeDefined();
+        }
         const seen: boolean[] = [];
         const subscription = layout.dockOpenState.subscribe(value => seen.push(value));
         layout.dockOpenState.next(true);
@@ -68,7 +80,7 @@ describe("application registration boundaries", () => {
         const catalog = registry.catalog();
         const persistence = TestBed.inject(AppStateService);
 
-        const expected = viewerActionCatalog();
+        const { catalogId: _catalogId, ...expected } = structuredClone(manifest);
         expected.actions.sort((left, right) => left.name.localeCompare(right.name, "en"));
         expected.channels.sort((left, right) => left.name.localeCompare(right.name, "en"));
         expect(catalog).toEqual(expected);

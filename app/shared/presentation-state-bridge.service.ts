@@ -1,15 +1,15 @@
 import { Injectable, OnDestroy, Optional } from "@angular/core";
 import type { Params } from "@angular/router";
 import { addMetersToLngLat } from "@math.gl/web-mercator";
-import { InspectionStore } from "../inspection/inspection.store";
-import { AppLayoutStore } from "../layout/app-layout.store";
-import type { CameraViewState } from "../mapview/map-view-state.model";
+import { InspectionModel } from "../inspection/inspection.model";
+import { LayoutModel } from "../layout/layout.model";
+import type { CameraViewState } from "../mapview/map-view-state";
 import { MapViewService } from "../mapview/map-view.service";
-import { MapViewStore } from "../mapview/map-view.store";
-import { featureSearchDefinitionFromImportPayload } from "../search/feature-search-export.util";
-import { FeatureSearchService } from "../search/feature.search.service";
+import { MapViewModel } from "../mapview/mapview.model";
+import { featureSearchDefinitionFromImportPayload } from "../feature-search/feature-search-export.util";
+import { FeatureSearchService } from "../feature-search/feature.search.service";
 import { AppStateService } from "../state/app-state.service";
-import { StyleService } from "../styledata/style.service";
+import { StyleService } from "../map-styles/style.service";
 
 export const PRESENTATION_BRIDGE_PROTOCOL_VERSION = 2;
 export const PRESENTATION_BRIDGE_READY = "erdblick:presentation:ready";
@@ -76,9 +76,9 @@ export class PresentationStateBridgeService implements OnDestroy {
         private readonly mapViewState: MapViewService,
         private readonly styleService: StyleService,
         @Optional() private readonly searchService: FeatureSearchService | null,
-        public readonly viewSettings: MapViewStore,
-        public readonly inspectionState: InspectionStore,
-        public readonly layout: AppLayoutStore
+        public readonly viewSettings: MapViewModel,
+        public readonly inspectionState: InspectionModel,
+        public readonly layout: LayoutModel
     ) { }
 
     /** Enables the bridge for a framed document carrying the presentation opt-in. */

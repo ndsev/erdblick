@@ -23,7 +23,7 @@ describe("Map attribution", () => {
             {} as never,
             mapInfo as never,
             owners.layout,
-            owners.inspectionState.store
+            owners.inspectionState.model
         );
         const values: string[] = [];
         const subscription = layout["copyright$"].subscribe(value => values.push(value));

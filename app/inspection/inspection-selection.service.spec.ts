@@ -2,9 +2,9 @@ import { stateOwners, testPersistence } from '../../test/state-owners';
 import "@angular/compiler";
 import { describe, expect, it, vi } from "vitest";
 
-import type { InspectionPanelModel, TileFeatureId } from "./inspection-state.model";
+import type { InspectionPanelModel, TileFeatureId } from "./inspection-state";
 import type { InfoMessageService } from "../shared/info.service";
-import { FeatureWrapper } from "../mapdata/feature-inspection.model";
+import { FeatureWrapper } from "../mapdata/feature-inspection";
 import { InspectionSelectionService } from "./inspection-selection.service";
 
 const feature = (featureId: string, mapTileKey: string): TileFeatureId => ({ featureId, mapTileKey });
@@ -17,8 +17,8 @@ function createHarness(
     const persistence = testPersistence();
     const owners = stateOwners(persistence);
     const stateService = owners.inspectionState;
-    stateService.store.inspectionsLimit = limit;
-    stateService.store.selection = initialPanels;
+    stateService.model.inspectionsLimit = limit;
+    stateService.model.selection = initialPanels;
     vi.spyOn(stateService, 'setSelection');
     vi.spyOn(stateService, 'unsetUnlockedSelections');
     vi.spyOn(stateService, 'setInspectionPanelLockedState');
@@ -42,7 +42,7 @@ function createHarness(
         stateService,
         infoMessageService,
         loadFeatures,
-        panels: () => stateService.store.selection
+        panels: () => stateService.model.selection
     };
 }
 
@@ -182,7 +182,7 @@ describe("InspectionSelectionService multi-inspection", () => {
                 feature: panel.features[0].featureId,
                 locked: panel.locked
             })),
-            dockOpen: layout.store.isDockOpen
+            dockOpen: layout.model.isDockOpen
         })).subscribe(value => observed.push(value));
 
         const result = service.inspectFeatureIds([
@@ -212,7 +212,7 @@ describe("InspectionSelectionService multi-inspection", () => {
                 locked: panel.locked,
                 color: panel.color
             })),
-            dockOpen: layout.store.isDockOpen
+            dockOpen: layout.model.isDockOpen
         })).subscribe(value => observed.push(value));
 
         const result = await service.inspect({

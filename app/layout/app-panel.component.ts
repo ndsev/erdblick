@@ -16,7 +16,7 @@ import {
 } from '@angular/core';
 import { AccordionModule } from 'primeng/accordion';
 import { UiAutomationService } from '../actions/ui-automation.service';
-import { DEFAULT_DOCKED_EM_HEIGHT } from "./app-layout.model";
+import { DEFAULT_DOCKED_EM_HEIGHT } from "./app-layout";
 import { AppLayoutService } from "./app-layout.service";
 import { AppStateService } from "../state/app-state.service";
 

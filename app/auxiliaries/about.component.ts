@@ -1,6 +1,6 @@
 import { Component } from '@angular/core';
 import { AppConfigService } from "../config/app-config.service";
-import { ABOUT_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { ABOUT_DIALOG_LAYOUT_ID } from "../layout/app-layout";
 import { AppLayoutService } from "../layout/app-layout.service";
 import { AppStateService } from "../state/app-state.service";
 
@@ -11,7 +11,7 @@ import { AppStateService } from "../state/app-state.service";
                   [resizable]="false" class="pref-dialog" [style]="{'min-width': '24em', 'max-width': '42em'}"
                   [persistLayout]="true" [layoutId]="dialogLayoutId">
             <div class="about-dialog-content">
-                @if (configService.store.distributionVersions.getValue().length) {
+                @if (configService.model.distributionVersions.getValue().length) {
                     <div class="about-section-title">Distribution</div>
                     <table class="about-table">
                         <thead>
@@ -21,7 +21,7 @@ import { AppStateService } from "../state/app-state.service";
                             </tr>
                         </thead>
                         <tbody>
-                            @for (version of configService.store.distributionVersions.getValue(); track $index) {
+                            @for (version of configService.model.distributionVersions.getValue(); track $index) {
                                 <tr>
                                     <td>{{ version.name }}</td>
                                     <td>
@@ -37,8 +37,8 @@ import { AppStateService } from "../state/app-state.service";
                 } @else {
                     <div class="about-summary">
                         <div class="about-title">Erdblick</div>
-                        @if (configService.store.erdblickVersion.getValue().length) {
-                            <div class="about-version">{{ configService.store.erdblickVersion.getValue() }}</div>
+                        @if (configService.model.erdblickVersion.getValue().length) {
+                            <div class="about-version">{{ configService.model.erdblickVersion.getValue() }}</div>
                         } @else {
                             <div class="about-version">Version information unavailable.</div>
                         }

@@ -3,7 +3,7 @@ import { TreeTableNode } from "primeng/api";
 import { Subscription } from "rxjs";
 import { Feature } from '../../build/libs/core/erdblick-core';
 import { coreLib } from "../integrations/wasm";
-import { FeatureWrapper, IncomingInspectionResult } from "../mapdata/feature-inspection.model";
+import { FeatureWrapper, IncomingInspectionResult } from "../mapdata/feature-inspection";
 import { MapInfoService } from "../mapdata/map-info.service";
 import {
     hasFeatureInspectionValidity,
@@ -11,7 +11,7 @@ import {
     stripFeatureInspectionTarget,
     stripFeatureInspectionValidity
 } from "../shared/tile-feature-id";
-import { InspectionPanelModel } from "./inspection-state.model";
+import { InspectionPanelModel } from "./inspection-state";
 import { Column, FeatureFilterOptions, InspectionTreeComponent } from "./inspection.tree.component";
 
 /** Click target metadata emitted by C++ for propagated scalar value pills. */

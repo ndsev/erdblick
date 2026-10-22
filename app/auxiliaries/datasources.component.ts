@@ -4,7 +4,7 @@ import { JSONSchema7 } from 'json-schema';
 import { Subscription } from 'rxjs';
 import { MapInfoService } from '../mapdata/map-info.service';
 import { AppDialogComponent } from '../layout/app-dialog.component';
-import { DATASOURCES_EDITOR_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { DATASOURCES_EDITOR_DIALOG_LAYOUT_ID } from "../layout/app-layout";
 import { AppLayoutService } from "../layout/app-layout.service";
 import { AppStateService } from "../state/app-state.service";
 import { DialogStackService } from '../layout/dialog-stack.service';

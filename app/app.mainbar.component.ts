@@ -11,7 +11,7 @@ import {
     LEGAL_INFO_DIALOG_LAYOUT_ID,
     PREFERENCES_DIALOG_LAYOUT_ID,
     STYLES_DIALOG_LAYOUT_ID
-} from "./layout/app-layout.model";
+} from "./layout/app-layout";
 import { AppLayoutService } from "./layout/app-layout.service";
 import { MapInfoService } from './mapdata/map-info.service';
 import {
@@ -19,15 +19,15 @@ import {
     VIEW_SYNC_MOVEMENT,
     VIEW_SYNC_POSITION,
     VIEW_SYNC_PROJECTION
-} from "./mapview/map-view-state.model";
+} from "./mapview/map-view-state";
 import { MapViewService } from './mapview/map-view.service';
-import { MapViewStore } from "./mapview/map-view.store";
-import { FeatureSearchStore } from "./search/feature-search.store";
-import { FeatureSearchService } from "./search/feature.search.service";
+import { MapViewModel } from "./mapview/mapview.model";
+import { FeatureSearchModel } from "./feature-search/feature-search.model";
+import { FeatureSearchService } from "./feature-search/feature.search.service";
 import { InfoMessageService } from "./shared/info.service";
 import { AppStateService } from "./state/app-state.service";
-import { StyleEditorRequestService } from "./styledata/style-editor-request.service";
-import { StyleService } from "./styledata/style.service";
+import { StyleEditorRequestService } from "./map-styles/style-editor-request.service";
+import { StyleService } from "./map-styles/style.service";
 
 const MAIN_BAR_BREAKPOINT = '56em';
 const MAIN_BAR_MEDIA_QUERY = `(max-width: ${MAIN_BAR_BREAKPOINT})`;
@@ -71,7 +71,7 @@ interface StyleSheetMenuNode {
         <p-menubar class="main-bar" [model]="menuItems" [breakpoint]="menubarBreakpoint">
             <ng-template #start>
                 @if (!environment.visualizationOnly) {
-                    <search-panel></search-panel>
+                    <omnibar-panel></omnibar-panel>
                 }
             </ng-template>
             <ng-template #item let-item let-root="root">
@@ -139,7 +139,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
     }
 
     get mapsPanelOpen(): boolean {
-        return this.layout.store.mapsOpenState.getValue();
+        return this.layout.model.mapsOpenState.getValue();
     }
 
     constructor(public mapService: MapInfoService,
@@ -153,8 +153,8 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         private elementRef: ElementRef<HTMLElement>,
         private ngZone: NgZone,
         public readonly layout: AppLayoutService,
-        public readonly viewSettings: MapViewStore,
-        public readonly searchService: FeatureSearchStore) {
+        public readonly viewSettings: MapViewModel,
+        public readonly searchService: FeatureSearchModel) {
         this.setupMobileMenuTracking();
         this.initializeViewerLayoutMobileState();
         this.rebuildMenuItems();
@@ -164,7 +164,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         this.subscriptions.add(this.viewSettings.viewSyncState.subscribe(() => {
             this.rebuildMenuItems();
         }));
-        this.subscriptions.add(this.layout.store.dockOpenState.subscribe(() => {
+        this.subscriptions.add(this.layout.model.dockOpenState.subscribe(() => {
             this.scheduleMobileMenubarStateUpdate();
         }));
         this.subscriptions.add(this.featureSearchService.sessionsChanged.subscribe(() => {
@@ -321,12 +321,12 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the maps panel. */
     protected showMapsPanel() {
-        this.layout.store.mapsOpenState.next(true);
+        this.layout.model.mapsOpenState.next(true);
     }
 
     /** Closes the maps panel. */
     protected closeMapsPanel() {
-        this.layout.store.mapsOpenState.next(false);
+        this.layout.model.mapsOpenState.next(false);
     }
 
     /** Schedules tooltip alignment for the maps-panel button tooltip. */

@@ -8,13 +8,13 @@ import {
     type SubsetDiagnosticsError,
     ViewLayerDiagnosticsService
 } from "../mapview/view-layer-diagnostics.service";
-import { DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../layout/app-layout";
 import { AppLayoutService } from "../layout/app-layout.service";
 import { AppStateService } from "../state/app-state.service";
 import {
     StyleValidationReportService
-} from "../styledata/style-validation-report.service";
-import type { StyleValidationIssue } from "../styledata/style-validation.model";
+} from "../map-styles/style-validation-report.service";
+import type { StyleValidationIssue } from "../map-styles/style-validation";
 import {
     LOG_INTERVAL_MS,
     MAX_LOGS,
@@ -29,7 +29,7 @@ import {
     PerfStat,
     TilePipelineProgress,
     TileStateCounts
-} from "./diagnostics.model";
+} from "./diagnostics.types";
 import { buildAggregatedPerfStats } from "./diagnostics.perf-aggregation";
 
 /**

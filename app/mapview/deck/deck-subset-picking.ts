@@ -1,6 +1,6 @@
-import type { TileFeatureId } from "../../inspection/inspection-state.model";
+import type { TileFeatureId } from "../../inspection/inspection-state";
 import { SceneMode } from "../../integrations/geo";
-import type { PresentationKind } from "../../mapdata/styled-mapget-layer.model";
+import type { PresentationKind } from "../../mapdata/styled-mapget-layer";
 import type {
     DeckGltfPickProxyStyleContribution
 } from "./deck-gltf-node.layer";

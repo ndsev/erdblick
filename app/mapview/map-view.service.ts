@@ -10,20 +10,13 @@ import {
 import { z } from "zod";
 import type { FeatureLayerStyle, Viewport } from "../../build/libs/core/erdblick-core";
 import { ActionRegistry } from "../actions/action-registry.service";
-import {
-    ActionInput,
-    ActionOutput,
-    ControlSelector,
-    ControlValue,
-    applied,
-    rejectAction
-} from "../actions/app-action";
+import { applied, identifierSchema, rejectAction } from "../actions/app-action";
 import { AppActionContributor } from "../actions/app-action-contributor";
 import { AppConfigService } from "../config/app-config.service";
 import { Cartographic } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
-import { MapInfoService, mapControls } from "../mapdata/map-info.service";
-import { clampPresentationLod, clampStyleLod } from "../shared/lod-policy";
+import { MapInfoService } from "../mapdata/map-info.service";
+import { clampPresentationLod, clampStyleLod } from "../rendering/lod-policy";
 import { boundedUnicodeString } from "../shared/unicode-string";
 import { AppStateService } from "../state/app-state.service";
 import {
@@ -34,12 +27,12 @@ import {
     VIEW_SYNC_POSITION,
     tileGridMaxLevel,
     viewIdSchema
-} from "./map-view-state.model";
-import { MapViewStore, ViewId } from "./map-view.store";
-import { RenderPreferencesStore } from "./render-preferences.store";
-import { IRenderView, LocationArea, RenderRectangle, RenderViewCameraState } from "./render-view.model";
+} from "./map-view-state";
+import { MapViewModel, ViewId } from "./mapview.model";
+import { RenderingModel } from "../rendering/rendering.model";
+import { IRenderView, LocationArea, RenderRectangle, RenderViewCameraState } from "./render-view";
 import { autoTileGridLevel, coarsenedTileLevel, tileGridVisibleCellCount } from "./tile-grid-visibility";
-import { ViewVisualizationState } from "./view.visualization.model";
+import { ViewVisualizationState } from "./view.visualization";
 
 export enum ViewRecalculationReason {
     AutoLevel = "auto-level",
@@ -66,8 +59,43 @@ export interface LiveCameraViewStateUpdate {
 }
 
 /**
+ * Committed cameras use the same bounds for reading and writing public controls.
+ * Scale-height and map-centre offsets follow the renderer's existing camera model.
+ */
+const cameraValueSchema = z.strictObject({
+    destination: z.strictObject({
+        lon: z.number().min(-180).max(180).describe("WGS84 longitude in degrees."),
+        lat: z.number().min(-85.05113).max(85.05113).describe("Web Mercator latitude in degrees."),
+        alt: z
+            .number()
+            .positive()
+            .describe("Viewer scale-height in metres, not physical eye/terrain altitude.")
+    }),
+    orientation: z.strictObject({
+        heading: z
+            .number()
+            .min(-2 * Math.PI)
+            .max(2 * Math.PI)
+            .describe("Clockwise heading from north, in radians."),
+        pitch: z
+            .number()
+            .min(-Math.PI / 2)
+            .max(-Math.PI / 36)
+            .describe("Pitch in radians; -pi/2 is top-down, -pi/36 is the maximum tilt."),
+        roll: z.literal(0).describe("Roll is not implemented; only zero is supported.")
+    }),
+    // Some MCP clients reject tuple schemas; refine to a tuple only after validating the array length.
+    position: z
+        .array(z.number())
+        .length(3)
+        .transform((position) => position as [number, number, number])
+        .optional()
+        .describe("Local map-centre offset in metres; omitted means [0,0,0].")
+});
+
+/**
  * Coordinates live renderers, navigation and per-view visualization instances.
- * Durable cameras and view preferences live in MapViewStore. This controller
+ * Durable cameras and view preferences live in MapViewModel. This controller
  * handles previews, renderer generations and teardown before membership changes.
  */
 @Injectable({ providedIn: "root" })
@@ -110,8 +138,8 @@ export class MapViewService implements AppActionContributor {
     constructor(
         private readonly stateService: AppStateService,
         private readonly mapInfo: MapInfoService,
-        public readonly renderPreferences: RenderPreferencesStore,
-        public readonly viewSettings: MapViewStore,
+        public readonly renderPreferences: RenderingModel,
+        public readonly viewSettings: MapViewModel,
         private readonly config: AppConfigService
     ) {
         let previousIds: readonly string[] = [];
@@ -745,54 +773,233 @@ export class MapViewService implements AppActionContributor {
     }
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: ActionRegistry): void {
-        actions.registerAction(mapViewActions.manageView, input => this.manageView(input));
+        actions.registerAction(
+            {
+                name: "viewer_manage_view",
+                description:
+                    "Create a comparison view copied from the given source viewId, or remove that view. Cannot " +
+                    "remove the last view. Read app.views afterward for current logical IDs.",
+                mutation: true,
+                inputSchema: z.strictObject({
+                    operation: z.enum(["create", "remove"]),
+                    viewId: viewIdSchema
+                }),
+                outputSchema: z.strictObject({ status: z.literal("applied"), changed: z.boolean() })
+            },
+            (input) => this.manageView(input)
+        );
     }
 
     /** Registers typed state readers and writers without exposing persistence keys. */
     registerControls(actions: ActionRegistry): void {
-        actions.registerControl(mapViewControls.views, { read: () => this.viewSummary(), defaultTargets: () => [{}] });
-        actions.registerControl(mapViewControls.camera, {
-            read: ({ viewId }) => this.readCamera(viewId), write: ({ viewId }, value) => this.assignCamera(viewId, value),
-            defaultTargets: () => this.viewSettings.viewIds.map(viewId => ({ viewId }))
-        });
-        actions.registerControl(mapViewControls.projection, {
-            read: ({ viewId }) => this.viewSettings.mode2dState.getValue(this.requireViewIndex(viewId)) ? "2d" : "3d",
-            write: ({ viewId }, value) => this.assignProjection(viewId, value)
-        });
-        actions.registerControl(mapViewControls.background, {
-            read: ({ viewId }) => this.viewSettings.getBackgroundState(this.requireViewIndex(viewId)),
-            write: ({ viewId }, value) => {
-                const index = this.requireViewIndex(viewId);
-                if (value.layerId && !this.config.getBackgroundLayers().some(layer => layer.id === value.layerId)) rejectAction("Unknown background", "invalid_arguments");
-                this.stateService.transaction(() => {
-                    this.viewSettings.setBackgroundState(index, value.layerId, value.opacity);
-                    this.syncBackgroundSettings(index);
-                });
+        actions.registerControl(
+            {
+                name: "app.views",
+                description: "Views, focus, synchronization, projection and live navigation availability.",
+                selectorSchema: z.strictObject({}),
+                valueSchema: z.strictObject({
+                    focusedViewId: viewIdSchema,
+                    sync: z.array(boundedUnicodeString(32)).max(32),
+                    views: z
+                        .array(
+                            z.strictObject({
+                                viewId: viewIdSchema,
+                                projection: z.enum(["2d", "3d"]),
+                                navigationMode: z.enum(["map", "first_person", "unavailable"])
+                            })
+                        )
+                        .max(32)
+                }),
+                readable: true,
+                writable: false,
+                persistence: "runtime-summary",
+                synchronization: "none"
+            },
+            { read: () => this.viewSummary(), defaultTargets: () => [{}] }
+        );
+        actions.registerControl(
+            {
+                name: "view.camera",
+                description:
+                    "Live map camera; assignment focuses the target and honors position/movement synchronization. " +
+                    "Unavailable in first-person mode.",
+                selectorSchema: z.strictObject({ viewId: viewIdSchema }),
+                valueSchema: cameraValueSchema,
+                readable: true,
+                writable: true,
+                persistence: "url-and-local-storage",
+                synchronization: "focus-target-and-follow-view-sync"
+            },
+            {
+                read: ({ viewId }) => this.readCamera(viewId),
+                write: ({ viewId }, value) => this.assignCamera(viewId, value),
+                defaultTargets: () => this.viewSettings.viewIds.map((viewId) => ({ viewId }))
             }
-        });
-        actions.registerControl(mapViewControls.grid, {
-            read: ({ viewId }) => this.gridSettings(viewId), write: ({ viewId }, value) => this.assignGrid(viewId, value)
-        });
-        actions.registerControl(mapControls.layer, {
-            read: target => this.mapInfo.layerConfiguration(target),
-            write: (target, value) => this.assignLayer(target, value)
-        });
+        );
+        actions.registerControl(
+            {
+                name: "view.projection",
+                description: "2D/3D projection, honoring projection sync.",
+                selectorSchema: z.strictObject({ viewId: viewIdSchema }),
+                valueSchema: z.enum(["2d", "3d"]),
+                readable: true,
+                writable: true,
+                synchronization: "focus-target-and-follow-view-sync",
+                persistence: "url-and-local-storage"
+            },
+            {
+                read: ({ viewId }) =>
+                    this.viewSettings.mode2dState.getValue(this.requireViewIndex(viewId))
+                        ? ("2d" as const)
+                        : ("3d" as const),
+                write: ({ viewId }, value) => this.assignProjection(viewId, value)
+            }
+        );
+        actions.registerControl(
+            {
+                name: "view.background",
+                description: "Configured background identity and opacity percentage; no URLs or credentials.",
+                selectorSchema: z.strictObject({ viewId: viewIdSchema }),
+                valueSchema: z.strictObject({
+                    layerId: boundedUnicodeString(4096).nullable(),
+                    opacity: z.number().int().min(0).max(100)
+                }),
+                readable: true,
+                writable: true,
+                synchronization: "follow-view-sync",
+                persistence: "url-and-local-storage"
+            },
+            {
+                read: ({ viewId }) => this.viewSettings.getBackgroundState(this.requireViewIndex(viewId)),
+                write: ({ viewId }, value) => {
+                    const index = this.requireViewIndex(viewId);
+                    if (
+                        value.layerId &&
+                        !this.config.getBackgroundLayers().some((layer) => layer.id === value.layerId)
+                    )
+                        rejectAction("Unknown background", "invalid_arguments");
+                    this.stateService.transaction(() => {
+                        this.viewSettings.setBackgroundState(index, value.layerId, value.opacity);
+                        this.syncBackgroundSettings(index);
+                    });
+                }
+            }
+        );
+        actions.registerControl(
+            {
+                name: "view.grid",
+                description: "Tile grid appearance; color is six hex digits without #.",
+                selectorSchema: z.strictObject({ viewId: viewIdSchema }),
+                valueSchema: z.strictObject({
+                    visible: z.boolean(),
+                    mode: z.enum(["nds", "xyz"]),
+                    level: z.number().int().min(0).max(30),
+                    autoLevel: z.boolean(),
+                    color: z.string().regex(/^[0-9a-fA-F]{6}$/),
+                    opacity: z.number().int().min(0).max(100)
+                }),
+                readable: true,
+                writable: true,
+                synchronization: "follow-view-sync",
+                persistence: "url-and-local-storage"
+            },
+            {
+                read: ({ viewId }) => this.gridSettings(viewId),
+                write: ({ viewId }, value) => this.assignGrid(viewId, value)
+            }
+        );
+        actions.registerControl(
+            {
+                name: "view.layer",
+                description:
+                    "Read/write one layer's visibility, requested level and automatic level policy. Select " +
+                    "viewId/mapId/layerId. Read this control first, then assign {visible, level, autoLevel}, " +
+                    "preserving fields you do not want to change.",
+                selectorSchema: z
+                    .strictObject({ viewId: viewIdSchema })
+                    .extend({ mapId: identifierSchema, layerId: identifierSchema }),
+                valueSchema: z.strictObject({
+                    visible: z.boolean(),
+                    level: z.number().int().min(0).max(15),
+                    autoLevel: z.boolean()
+                }),
+                readable: true,
+                writable: true,
+                synchronization: "follow-view-sync",
+                persistence: "url-and-local-storage"
+            },
+            {
+                read: (target) => this.mapInfo.layerConfiguration(target),
+                write: (target, value) => this.assignLayer(target, value)
+            }
+        );
 
-        actions.registerControl(viewSettingsControls.focus, {
-            read: () => this.viewSettings.focusedViewIdState.value,
-            write: (_selector, id) => { this.viewSettings.focusedView = this.viewSettings.indexOfView(id); }
-        });
-        actions.registerControl(viewSettingsControls.sync, {
-            read: () => [...this.viewSettings.viewSync] as ControlValue<typeof viewSettingsControls.sync>,
-            write: (_selector, value) => {
-                if (value.includes("pos") && value.includes("mov")) rejectAction("Position and movement sync are mutually exclusive", "invalid_arguments");
-                this.viewSettings.updateSelectedSyncOptions(value);
+        actions.registerControl(
+            {
+                name: "app.focusedView",
+                description: "Focused source view, addressed by its current logical view ID.",
+                selectorSchema: z.strictObject({}),
+                valueSchema: viewIdSchema,
+                readable: true,
+                writable: true,
+                synchronization: "none",
+                persistence: "url-and-local-storage"
+            },
+            {
+                read: () => this.viewSettings.focusedViewIdState.value,
+                write: (_selector, id) => {
+                    this.viewSettings.focusedView = this.viewSettings.indexOfView(id);
+                }
             }
-        });
-        actions.registerControl(viewSettingsControls.navigation, {
-            read: () => ({ zoomStep: this.viewSettings.mapZoomStep, featureZoomClearance: this.viewSettings.featureZoomClearanceMeters }),
-            write: (_selector, value) => this.setNavigationPreferences(value)
-        });
+        );
+        actions.registerControl(
+            {
+                name: "app.viewSync",
+                description:
+                    "Cross-view synchronization: pos keeps camera positions equal; mov synchronizes relative camera " +
+                    "movement; choose at most one of pos and mov. proj synchronizes projection; lay synchronizes " +
+                    "layers. Omit lay to keep different map layers in each view.",
+                selectorSchema: z.strictObject({}),
+                valueSchema: z.array(z.enum(["pos", "mov", "proj", "lay"])).max(4),
+                readable: true,
+                writable: true,
+                synchronization: "none",
+                persistence: "url-and-local-storage"
+            },
+            {
+                read: () => [...this.viewSettings.viewSync] as ("pos" | "mov" | "proj" | "lay")[],
+                write: (_selector, value) => {
+                    if (value.includes("pos") && value.includes("mov"))
+                        rejectAction(
+                            "Position and movement sync are mutually exclusive",
+                            "invalid_arguments"
+                        );
+                    this.viewSettings.updateSelectedSyncOptions(value);
+                }
+            }
+        );
+        actions.registerControl(
+            {
+                name: "app.preferences.navigation",
+                description: "Zoom step and feature-fit clearance in metres.",
+                selectorSchema: z.strictObject({}),
+                valueSchema: z.strictObject({
+                    zoomStep: z.number().min(0.001).max(1),
+                    featureZoomClearance: z.number().min(0).max(100)
+                }),
+                readable: true,
+                writable: true,
+                synchronization: "none",
+                persistence: "local-storage"
+            },
+            {
+                read: () => ({
+                    zoomStep: this.viewSettings.mapZoomStep,
+                    featureZoomClearance: this.viewSettings.featureZoomClearanceMeters
+                }),
+                write: (_selector, value) => this.setNavigationPreferences(value)
+            }
+        );
     }
 
 
@@ -803,23 +1010,32 @@ export class MapViewService implements AppActionContributor {
         return index;
     }
 
-    viewSummary(): ControlValue<typeof mapViewControls.views> {
+    viewSummary() {
         return {
-            focusedViewId: this.viewSettings.focusedViewIdState.value, sync: [...this.viewSettings.viewSync],
-            views: this.viewSettings.viewIds.map(viewId => {
+            focusedViewId: this.viewSettings.focusedViewIdState.value,
+            sync: [...this.viewSettings.viewSync],
+            views: this.viewSettings.viewIds.map((viewId) => {
                 const renderer = this.renderViewFor(viewId);
                 return {
-                    viewId, projection: this.viewSettings.mode2dState.getValue(viewId) ? "2d" : "3d",
-                    navigationMode: !renderer ? "unavailable" : renderer.isFirstPersonViewActive() ? "first_person" : "map"
+                    viewId,
+                    projection: this.viewSettings.mode2dState.getValue(viewId)
+                        ? ("2d" as const)
+                        : ("3d" as const),
+                    navigationMode: !renderer
+                        ? ("unavailable" as const)
+                        : renderer.isFirstPersonViewActive()
+                          ? ("first_person" as const)
+                          : ("map" as const)
                 };
             })
         };
     }
 
-    manageView(input: ActionInput<typeof mapViewActions.manageView>): ActionOutput<typeof mapViewActions.manageView> {
+    manageView(input: { operation: "create" | "remove"; viewId: string }) {
         const index = this.requireViewIndex(input.viewId);
         if (input.operation === "remove") {
-            if (this.viewSettings.numViews === 1) rejectAction("Cannot remove the last view", "invalid_arguments");
+            if (this.viewSettings.numViews === 1)
+                rejectAction("Cannot remove the last view", "invalid_arguments");
             this.removeView(index);
         } else {
             if (this.viewSettings.numViews >= 32) rejectAction("The viewer already has 32 views");
@@ -833,29 +1049,47 @@ export class MapViewService implements AppActionContributor {
         return applied();
     }
 
-    readCamera(viewId: string): ControlValue<typeof mapViewControls.camera> {
+    readCamera(viewId: string) {
         this.requireViewIndex(viewId);
         const renderer = this.renderViewFor(viewId);
         if (!renderer) rejectAction("The renderer is unavailable", "not_available", "view_unavailable");
         const camera = renderer.getLiveCameraState();
-        if (!camera) rejectAction("Map camera is unavailable in first-person mode", "not_available", "first_person");
-        return mapViewControls.camera.valueSchema.parse(camera);
+        if (!camera)
+            rejectAction("Map camera is unavailable in first-person mode", "not_available", "first_person");
+        return cameraValueSchema.parse(camera);
     }
 
     /** Validate every synchronized renderer before focus or a durable camera can change. */
-    assignCamera(viewId: string, value: ControlValue<typeof mapViewControls.camera>): void {
+    assignCamera(
+        viewId: string,
+        value: {
+            destination: { lon: number; lat: number; alt: number };
+            orientation: { heading: number; pitch: number; roll: 0 };
+            position?: [number, number, number];
+        }
+    ): void {
         const index = this.requireViewIndex(viewId);
-        const synchronized = this.viewSettings.viewSync.includes(VIEW_SYNC_POSITION) || this.viewSettings.viewSync.includes(VIEW_SYNC_MOVEMENT);
+        const synchronized =
+            this.viewSettings.viewSync.includes(VIEW_SYNC_POSITION) ||
+            this.viewSettings.viewSync.includes(VIEW_SYNC_MOVEMENT);
         const affected = synchronized ? this.viewSettings.viewIds : [viewId];
         this.requireIdleMapCameras(affected);
-        if (this.viewSettings.mode2dState.getValue(viewId) && (value.orientation.heading !== 0 ||
-            value.orientation.pitch !== -Math.PI / 2 || value.position?.some(component => component !== 0))) {
+        if (
+            this.viewSettings.mode2dState.getValue(viewId) &&
+            (value.orientation.heading !== 0 ||
+                value.orientation.pitch !== -Math.PI / 2 ||
+                value.position?.some((component) => component !== 0))
+        ) {
             rejectAction("2D camera requires heading 0, top-down pitch and zero offset", "invalid_arguments");
         }
         this.stateService.transaction(() => {
             this.viewSettings.focusedView = index;
-            this.viewSettings.setView(index, Cartographic.fromDegrees(value.destination.lon, value.destination.lat, value.destination.alt),
-                value.orientation, value.position ?? [0, 0, 0]);
+            this.viewSettings.setView(
+                index,
+                Cartographic.fromDegrees(value.destination.lon, value.destination.lat, value.destination.alt),
+                value.orientation,
+                value.position ?? [0, 0, 0]
+            );
         });
     }
 
@@ -877,18 +1111,32 @@ export class MapViewService implements AppActionContributor {
         });
     }
 
-    gridSettings(viewId: string): ControlValue<typeof mapViewControls.grid> {
+    gridSettings(viewId: string) {
         const index = this.requireViewIndex(viewId);
         return {
-            visible: this.mapInfo.maps.getViewTileBorderState(index), mode: this.mapInfo.maps.getViewTileGridMode(index),
-            level: this.mapInfo.maps.getViewTileGridLevel(index), autoLevel: this.mapInfo.maps.getViewTileGridAutoLevel(index),
-            color: this.mapInfo.maps.getViewTileGridColor(index), opacity: this.mapInfo.maps.getViewTileGridOpacity(index)
+            visible: this.mapInfo.maps.getViewTileBorderState(index),
+            mode: this.mapInfo.maps.getViewTileGridMode(index),
+            level: this.mapInfo.maps.getViewTileGridLevel(index),
+            autoLevel: this.mapInfo.maps.getViewTileGridAutoLevel(index),
+            color: this.mapInfo.maps.getViewTileGridColor(index),
+            opacity: this.mapInfo.maps.getViewTileGridOpacity(index)
         };
     }
 
-    assignGrid(viewId: string, value: ControlValue<typeof mapViewControls.grid>): void {
+    assignGrid(
+        viewId: string,
+        value: {
+            visible: boolean;
+            mode: "nds" | "xyz";
+            level: number;
+            autoLevel: boolean;
+            color: string;
+            opacity: number;
+        }
+    ): void {
         const index = this.requireViewIndex(viewId);
-        if (value.level > tileGridMaxLevel(value.mode)) rejectAction("Grid level exceeds its coordinate system's range", "invalid_arguments");
+        if (value.level > tileGridMaxLevel(value.mode))
+            rejectAction("Grid level exceeds its coordinate system's range", "invalid_arguments");
         this.stateService.transaction(() => {
             this.setViewTileGridMode(index, value.mode);
             this.setViewTileGridLevel(index, value.level);
@@ -899,7 +1147,10 @@ export class MapViewService implements AppActionContributor {
         });
     }
 
-    assignLayer(target: ControlSelector<typeof mapControls.layer>, value: ControlValue<typeof mapControls.layer>): void {
+    assignLayer(
+        target: { viewId: string; mapId: string; layerId: string },
+        value: { visible: boolean; level: number; autoLevel: boolean }
+    ): void {
         const index = this.requireViewIndex(target.viewId);
         this.mapInfo.layerConfiguration(target);
         this.stateService.transaction(() => {
@@ -910,151 +1161,11 @@ export class MapViewService implements AppActionContributor {
     }
 
 
-
-
     /** Keep movement step and feature clearance coherent for UI and public controls. */
-    setNavigationPreferences(value: ControlValue<typeof viewSettingsControls.navigation>): void {
+    setNavigationPreferences(value: { zoomStep: number; featureZoomClearance: number }): void {
         this.stateService.transaction(() => {
             this.viewSettings.mapZoomStep = value.zoomStep;
             this.viewSettings.featureZoomClearanceMeters = value.featureZoomClearance;
         });
     }
 }
-
-
-/**
- * Public actions and controls implemented by this controller. Their schemas stay
- * beside the handlers; both app startup and the Node catalog build register them.
- */
-export const mapViewActions = {
-    manageView: {
-        name: "viewer_manage_view",
-        description: "Create a comparison view copied from the given source viewId, or remove that view. Cannot remove the last view. Read app.views afterward for current logical IDs.",
-        mutation: true,
-        inputSchema: z.strictObject({ operation: z.enum(["create", "remove"]), viewId: viewIdSchema }),
-        outputSchema: z.strictObject({ status: z.literal("applied"), changed: z.boolean() })
-    }
-} as const;
-
-/** MapViewService combines durable view settings with live renderer navigation and availability. */
-export const mapViewControls = {
-    views: {
-        name: "app.views",
-        description: "Views, focus, synchronization, projection and live navigation availability.",
-        selectorSchema: z.strictObject({}),
-        valueSchema: z.strictObject({
-            focusedViewId: viewIdSchema,
-            sync: z.array(boundedUnicodeString(32)).max(32),
-            views: z.array(z.strictObject({
-                viewId: viewIdSchema,
-                projection: z.enum(["2d", "3d"]),
-                navigationMode: z.enum(["map", "first_person", "unavailable"])
-            })).max(32)
-        }),
-        readable: true,
-        writable: false,
-        persistence: "runtime-summary",
-        synchronization: "none"
-    },
-    camera: {
-        name: "view.camera",
-        description: "Live map camera; assignment focuses the target and honors position/movement synchronization. Unavailable in first-person mode.",
-        selectorSchema: z.strictObject({ viewId: viewIdSchema }),
-        valueSchema: z.strictObject({
-            destination: z.strictObject({
-                lon: z.number().min(-180).max(180).describe("WGS84 longitude in degrees."),
-                lat: z.number().min(-85.05113).max(85.05113).describe("Web Mercator latitude in degrees."),
-                alt: z.number().positive().describe("Viewer scale-height in metres, not physical eye/terrain altitude.")
-            }),
-            orientation: z.strictObject({
-                heading: z.number().min(-2 * Math.PI).max(2 * Math.PI).describe("Clockwise heading from north, in radians."),
-                pitch: z.number().min(-Math.PI / 2).max(-Math.PI / 36).describe("Pitch in radians; -pi/2 is top-down, -pi/36 is the maximum tilt."),
-                roll: z.literal(0).describe("Roll is not implemented; only zero is supported.")
-            }),
-            // Some MCP clients reject tuple schemas; refine to a tuple only after validating the array length.
-            position: z.array(z.number()).length(3).transform(position => position as [number, number, number]).optional()
-                .describe("Local map-centre offset in metres; omitted means [0,0,0].")
-        }),
-        readable: true,
-        writable: true,
-        persistence: "url-and-local-storage",
-        synchronization: "focus-target-and-follow-view-sync"
-    },
-    projection: {
-        name: "view.projection",
-        description: "2D/3D projection, honoring projection sync.",
-        selectorSchema: z.strictObject({ viewId: viewIdSchema }),
-        valueSchema: z.enum(["2d", "3d"]),
-        readable: true,
-        writable: true,
-        synchronization: "focus-target-and-follow-view-sync",
-        persistence: "url-and-local-storage"
-    },
-    background: {
-        name: "view.background",
-        description: "Configured background identity and opacity percentage; no URLs or credentials.",
-        selectorSchema: z.strictObject({ viewId: viewIdSchema }),
-        valueSchema: z.strictObject({ layerId: boundedUnicodeString(4096).nullable(), opacity: z.number().int().min(0).max(100) }),
-        readable: true,
-        writable: true,
-        synchronization: "follow-view-sync",
-        persistence: "url-and-local-storage"
-    },
-    grid: {
-        name: "view.grid",
-        description: "Tile grid appearance; color is six hex digits without #.",
-        selectorSchema: z.strictObject({ viewId: viewIdSchema }),
-        valueSchema: z.strictObject({
-            visible: z.boolean(),
-            mode: z.enum(["nds", "xyz"]),
-            level: z.number().int().min(0).max(30),
-            autoLevel: z.boolean(),
-            color: z.string().regex(/^[0-9a-fA-F]{6}$/),
-            opacity: z.number().int().min(0).max(100)
-        }),
-        readable: true,
-        writable: true,
-        synchronization: "follow-view-sync",
-        persistence: "url-and-local-storage"
-    }
-} as const;
-
-
-
-
-/** MapViewStore owns logical focus, synchronization policy and navigation preferences. */
-export const viewSettingsControls = {
-    focus: {
-        name: "app.focusedView",
-        description: "Focused source view, addressed by its current logical view ID.",
-        selectorSchema: z.strictObject({}),
-        valueSchema: viewIdSchema,
-        readable: true,
-        writable: true,
-        synchronization: "none",
-        persistence: "url-and-local-storage"
-    },
-    sync: {
-        name: "app.viewSync",
-        description: "Cross-view synchronization: pos keeps camera positions equal; mov synchronizes relative camera movement; choose at most one of pos and mov. proj synchronizes projection; lay synchronizes layers. Omit lay to keep different map layers in each view.",
-        selectorSchema: z.strictObject({}),
-        valueSchema: z.array(z.enum(["pos", "mov", "proj", "lay"])).max(4),
-        readable: true,
-        writable: true,
-        synchronization: "none",
-        persistence: "url-and-local-storage"
-    },
-    navigation: {
-        name: "app.preferences.navigation",
-        description: "Zoom step and feature-fit clearance in metres.",
-        selectorSchema: z.strictObject({}),
-        valueSchema: z.strictObject({
-            zoomStep: z.number().min(0.001).max(1),
-            featureZoomClearance: z.number().min(0).max(100)
-        }),
-        readable: true,
-        writable: true,
-        synchronization: "none",
-        persistence: "local-storage"
-    }
-} as const;

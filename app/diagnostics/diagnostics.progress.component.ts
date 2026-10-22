@@ -1,5 +1,5 @@
 import {Component, Input} from '@angular/core';
-import {LoadingStatBubbles, ProgressCounter, TilePipelineProgress} from './diagnostics.model';
+import {LoadingStatBubbles, ProgressCounter, TilePipelineProgress} from './diagnostics.types';
 import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
 
 interface ProgressBar {

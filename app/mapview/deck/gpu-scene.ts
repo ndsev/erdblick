@@ -1,6 +1,6 @@
 import { Texture, type Device } from "@luma.gl/core";
-import type { TileFeatureId } from "../../inspection/inspection-state.model";
-import { sipHash64Hex } from "../../styledata/hash";
+import type { TileFeatureId } from "../../inspection/inspection-state";
+import { sipHash64Hex } from "../../map-styles/hash";
 import {
   GpuRenderPacketView,
   type GpuLabelRecordView,

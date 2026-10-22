@@ -6,22 +6,21 @@ import { stateOwners } from '../../test/state-owners';
 import { InspectionSelectionService } from '../inspection/inspection-selection.service';
 import { MapInfoService } from '../mapdata/map-info.service';
 import { MapTileStreamService } from '../mapdata/map-tile-stream.service';
-import { StyleOptionNode } from "../mapdata/map.tree.model";
+import { StyleOptionNode } from "../mapdata/map.tree";
 import { MapViewService } from "../mapview/map-view.service";
 import { ExternalViewerService } from "../navigation/external-viewer.service";
-import { type FeatureSearchSession } from "../search/feature.search.service";
+import { type FeatureSearchSession } from "../feature-search/feature.search.service";
 import { JumpTargetService } from "../navigation/jump.service";
 import { LocationNavigationService } from '../navigation/location-navigation.service';
 import { AppStateService } from "../state/app-state.service";
-import { VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION, type CameraViewState } from "../mapview/map-view-state.model";
-import { createFeatureSearchStateEntry } from "../search/feature-search-state";
-import type { StyleValidationReport } from "../styledata/style-validation.model";
-import { type ErdblickStyle } from "../styledata/style.service";
+import { VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION, type CameraViewState } from "../mapview/map-view-state";
+import { createFeatureSearchStateEntry } from "../feature-search/feature-search-state";
+import type { StyleValidationReport } from "../map-styles/style-validation";
+import { type ErdblickStyle } from "../map-styles/style.service";
 import { ActionRegistry } from './action-registry.service';
-import { applicationControls } from "../../test/control-contract";
 import { VIEWER_ACTION_CATALOG_ID } from "./generated/catalog-id";
 import { ViewerActionFailure } from "./viewer-action-relay.contract";
-import { applicationActions, viewerActions, type ViewerActionOutput } from "../../test/action-contract";
+import { applicationControls, viewerActions, type ViewerActionOutput } from "../../test/action-contract";
 import { McpActionService } from "./mcp-action.service";
 import { UiAutomationService } from "./ui-automation.service";
 
@@ -63,7 +62,7 @@ function setup() {
     const maps = Object.create(MapInfoService.prototype) as MapInfoService;
     Object.defineProperties(maps, Object.fromEntries(Object.entries(mapRuntime).map(([key, value]) => [key, { value, configurable: true, writable: true }])));
     const config = Object.assign(owners.configService, { getBackgroundLayers: () => [{ id: 'osm', name: 'OSM', type: 'xyz' as const, url: 'never exposed' }] });
-    const views = new MapViewService(state, maps, owners.renderPreferences.store, owners.viewSettings, config);
+    const views = new MapViewService(state, maps, owners.renderPreferences.model, owners.viewSettings, config);
     const renderers = [0, 1].map(viewIndex => {
         const viewId = owners.viewSettings.viewIdAt(viewIndex);
         return {
@@ -105,14 +104,14 @@ function setup() {
     const render = { queueSummary: vi.fn(() => ({ queued: 3, latestNativeMs: 12 })), currentFrameTimeMs: vi.fn(() => 0), debugSnapshot: vi.fn() };
     const diagnostics = Object.assign(owners.diagnostics, { snapshot$: new BehaviorSubject({ at: Date.now(), tiles: { expected: 3, loaded: 2, errors: 1 }, progress: { rendered: { done: 1, total: 2 } } }), perfStats$: new BehaviorSubject([]) });
     const viewDiagnostics = { cameraInteracting$: new BehaviorSubject(false), snapshot: vi.fn() };
-    const styleReports = { reports$: new BehaviorSubject<import('../styledata/style-validation.model').StyleValidationIssue[]>([]) };
+    const styleReports = { reports$: new BehaviorSubject<import('../map-styles/style-validation').StyleValidationIssue[]>([]) };
     Object.assign(diagnostics, { mapService: stream, renderService: render, maps, searches, styleValidationReportService: styleReports });
     const navigation = new LocationNavigationService({} as never, views, state, viewDiagnostics as never, {} as never,
         {} as never, owners.viewSettings, stream as never, inspections, zone as never);
     const ui = new UiAutomationService(views, owners.viewSettings);
     const jumps = new JumpTargetService(maps, inspections, {} as never, {} as never, config,
         owners.coordinates, owners.inspectionState, owners.viewSettings, views);
-    const external = new ExternalViewerService(config, owners.coordinates.store, owners.viewSettings);
+    const external = new ExternalViewerService(config, owners.coordinates.model, owners.viewSettings);
     const actions = new ActionRegistry(state);
     actions.registerContributors([jumps, external, views, maps, searches, inspections, styles, config, diagnostics, navigation, ui,
         owners.inspectionState, owners.coordinates, owners.renderPreferences, owners.connectionPreferences, owners.url]);
@@ -440,7 +439,7 @@ describe("McpActionService", () => {
 
     it("keeps hidden, paused and restored search definitions visible", () => {
         const { service, state, searches } = fixture();
-        stateOwners(state).searchService.store.featureSearches = [createFeatureSearchStateEntry({
+        stateOwners(state).searchService.model.featureSearches = [createFeatureSearchStateEntry({
             id: "hidden", query: "**.warningSign", pinColor: "#2477dd", enabled: false, paused: true, showResultsOnMap: false
         })];
         const result = read(service, [{ control: "app.searches" }]);
@@ -529,7 +528,7 @@ describe("McpActionService", () => {
 
     it("caps copying and explicitly reports oversized search collections/text", () => {
         const { service, state, searches } = fixture();
-        stateOwners(state).searchService.store.featureSearches = Array.from({ length: 120 }, (_, index) => createFeatureSearchStateEntry({
+        stateOwners(state).searchService.model.featureSearches = Array.from({ length: 120 }, (_, index) => createFeatureSearchStateEntry({
             id: `search-${index}`, query: "x".repeat(5000)
         }));
         const result = read(service, [{ control: "app.searches" }]);
@@ -543,12 +542,12 @@ describe("McpActionService", () => {
         const { service, state } = fixture();
         const prefix = "😀".repeat(4096);
         const query = prefix + (overLimit ? "x" : "");
-        stateOwners(state).searchService.store.featureSearches = [createFeatureSearchStateEntry({ id: "unicode", query })];
+        stateOwners(state).searchService.model.featureSearches = [createFeatureSearchStateEntry({ id: "unicode", query })];
         const result = read(service, [{ control: "app.searches" }]);
         expect(result.values[0]).toMatchObject({ value: [{ query: prefix }] });
         expect(result.complete).toBe(!overLimit);
         expect(result.omissions).toEqual(overLimit ? [{ target: { control: "app.searches" }, reason: "text_limit" }] : []);
-        expect(stateOwners(state).searchService.store.featureSearches[0].query).toBe(query);
+        expect(stateOwners(state).searchService.model.featureSearches[0].query).toBe(query);
     });
 
     it("describes canonical runtime values, not storage codecs", () => {
@@ -575,9 +574,9 @@ describe("McpActionService", () => {
 
     it("does not let an invalid control/value pair mutate any preference", () => {
         const { service, state } = fixture();
-        const before = stateOwners(state).inspectionState.store.inspectionsLimit;
+        const before = stateOwners(state).inspectionState.model.inspectionsLimit;
         expect(() => service.execute("viewer_set_control", { target: { control: "app.preferences.inspection" }, value: "3d" })).toThrow(ViewerActionFailure);
-        expect(stateOwners(state).inspectionState.store.inspectionsLimit).toBe(before);
+        expect(stateOwners(state).inspectionState.model.inspectionsLimit).toBe(before);
         expect(() => service.execute("viewer_set_control", { target: { control: "app.viewSync" }, value: ["pos", "mov"] })).toThrow(ViewerActionFailure);
         expect(stateOwners(state).viewSettings.viewSync).toEqual([]);
     });
@@ -729,7 +728,7 @@ describe("McpActionService", () => {
         const feature = { mapTileKey: "Features:map:layer:1", featureId: "Road.1:attribute#2" };
         const result = viewerActions.viewer_inspect.outputSchema.parse(await service.execute("viewer_inspect", { features: [feature], lock: true }));
         expect(result).toMatchObject({ complete: true, features: [feature], panelIds: [0] });
-        expect(stateOwners(state).inspectionState.store.selection[0].locked).toBe(true);
+        expect(stateOwners(state).inspectionState.model.selection[0].locked).toBe(true);
         expect(stream.loadFeatures).not.toHaveBeenCalled();
         expect(service.execute("viewer_set_control", {
             target: { control: "inspection.panel", panelId: 0 },
@@ -737,7 +736,7 @@ describe("McpActionService", () => {
         })).toMatchObject({ changed: true });
         expect(read(service, [{ control: "inspection.panel", panelId: 0 }])).toMatchObject({ values: [{ value: { undocked: true, color: "#123456" } }] });
         expect(service.execute("viewer_close_inspection", { panelId: 0 })).toMatchObject({ status: "applied" });
-        expect(stateOwners(state).inspectionState.store.selection).toHaveLength(0);
+        expect(stateOwners(state).inspectionState.model.selection).toHaveLength(0);
         expect(() => service.execute("viewer_close_inspection", { panelId: 0 })).toThrow(ViewerActionFailure);
     });
 
@@ -759,7 +758,7 @@ describe("McpActionService", () => {
         for (const selectors of [{ validityIndex: 0 }, { attributeIndex: 0, relationIndex: 0 },
         { featureId: "Road.1:attribute#2", attributeIndex: 0 }]) {
             await expect(service.execute("viewer_inspect", { features: [{ ...feature, ...selectors }], newPanel: true })).rejects.toThrow(ViewerActionFailure);
-            expect(stateOwners(state).inspectionState.store.selection).toHaveLength(0);
+            expect(stateOwners(state).inspectionState.model.selection).toHaveLength(0);
         }
         expect(stream.locateFeature).not.toHaveBeenCalled();
         expect(viewerActions.viewer_inspect.inputSchema.safeParse({ features: [{ ...feature, attributeIndex: -1 }] }).success).toBe(false);
@@ -770,11 +769,11 @@ describe("McpActionService", () => {
         const { service, state } = fixture();
         const feature = { mapTileKey: "Features:map:layer:1", featureId: "Road.1" };
         await service.execute("viewer_inspect", { features: [feature], newPanel: true, color: "#cc3300", lock: true });
-        const original = stateOwners(state).inspectionState.store.selection[0];
+        const original = stateOwners(state).inspectionState.model.selection[0];
         const result = await service.execute("viewer_inspect", { features: [feature], newPanel: true, color: "#0033cc" });
         expect(result).toMatchObject({ panelIds: [1], complete: true });
-        expect(stateOwners(state).inspectionState.store.selection.find(panel => panel.id === original.id)?.color).toBe("#cc3300");
-        expect(stateOwners(state).inspectionState.store.selection.find(panel => panel.id === 1)?.color).toBe("#0033cc");
+        expect(stateOwners(state).inspectionState.model.selection.find(panel => panel.id === original.id)?.color).toBe("#cc3300");
+        expect(stateOwners(state).inspectionState.model.selection.find(panel => panel.id === 1)?.color).toBe("#0033cc");
         await expect(service.execute("viewer_inspect", { features: [feature], color: "#ffffff" })).rejects.toThrow(ViewerActionFailure);
     });
 
@@ -799,7 +798,7 @@ describe("McpActionService", () => {
         resolve([{ mapTileKey: "Features:map:layer:1", featureId: "Road.1" }]);
         await expect(action).rejects.toThrow(expect.objectContaining({ detail: expect.objectContaining({ code: "cancelled" }) }));
         expect(inspections.inspectFeatureIds).not.toHaveBeenCalled();
-        expect(stateOwners(state).inspectionState.store.selection[0].features[0].featureId).toBe("Human.1");
+        expect(stateOwners(state).inspectionState.model.selection[0].features[0].featureId).toBe("Human.1");
     });
 
     it.each(["cancel", "stop", "disconnect", "timeout"])("%s retires an async locate without a late inspection", async operation => {
@@ -851,9 +850,9 @@ describe("McpActionService", () => {
         const { service, state } = fixture();
         expect(service.execute("viewer_open_source_data", { source: { mapTileKey: "SourceData:map:layer:1", address: "18446744073709551615" } }))
             .toMatchObject({ panelId: 0, status: "applied" });
-        expect(stateOwners(state).inspectionState.store.selection[0].sourceData?.address).toBe(18446744073709551615n);
+        expect(stateOwners(state).inspectionState.model.selection[0].sourceData?.address).toBe(18446744073709551615n);
         expect(() => service.execute("viewer_open_source_data", { source: { mapTileKey: "SourceData:map:layer:1", address: "18446744073709551616" } })).toThrow(ViewerActionFailure);
-        expect(stateOwners(state).inspectionState.store.selection).toHaveLength(1);
+        expect(stateOwners(state).inspectionState.model.selection).toHaveLength(1);
     });
 
     it("reads bounded search slices, rejects stale runs and delegates lifecycle without touching sibling searches", () => {
@@ -886,7 +885,7 @@ describe("McpActionService", () => {
             .toMatchObject({ complete: false, searchComplete: false, reason: "loading" });
         expect(viewerActions.viewer_export_search.outputSchema.parse(service.execute("viewer_export_search", { searchId: "s", include: "results" })))
             .toMatchObject({ complete: false, reason: "loading" });
-        stateOwners(state).searchService.store.featureSearches = [definition];
+        stateOwners(state).searchService.model.featureSearches = [definition];
         expect(read(service, [{ control: "app.searches" }])).toMatchObject({ values: [{ value: [{ runtime: { complete: false } }] }] });
         searches.getSession.mockReturnValue({
             ...session,
@@ -940,11 +939,11 @@ describe("McpActionService", () => {
         expect(searches.resumeSearch).toHaveBeenCalledWith("s");
         session.definition.enabled = false;
         expect(() => service.execute("viewer_control_search", { searchId: "s", operation: "refresh" })).toThrow(ViewerActionFailure);
-        stateOwners(state).searchService.store.featureSearches = [definition];
+        stateOwners(state).searchService.model.featureSearches = [definition];
         const settings = viewerActions.viewer_get_search.outputSchema.parse(service.execute("viewer_get_search", { searchId: "s" })).settings;
         expect(service.execute("viewer_set_search", { searchId: "s", settings: { ...settings, showResultsOnMap: false } }))
             .toMatchObject({ changed: true });
-        expect(stateOwners(state).searchService.store.featureSearches[0].showResultsOnMap).toBe(false);
+        expect(stateOwners(state).searchService.model.featureSearches[0].showResultsOnMap).toBe(false);
     });
 
     it("patches search presentation without replacing omitted settings or automatic layer selection", () => {
@@ -959,14 +958,14 @@ describe("McpActionService", () => {
             progressTotal: 1
         } satisfies Partial<FeatureSearchSession> as FeatureSearchSession;
         searches.getSession.mockReturnValue(session);
-        stateOwners(state).searchService.store.featureSearches = [definition, sibling];
+        stateOwners(state).searchService.model.featureSearches = [definition, sibling];
         const settings = { autoUpdate: false, renderStrategy: { showHighFiGeometry: true, showLowFiDots: false } };
         service.execute("viewer_set_search", { searchId: definition.id, settings });
-        expect(stateOwners(state).searchService.store.featureSearches[0]).toEqual({
+        expect(stateOwners(state).searchService.model.featureSearches[0]).toEqual({
             ...definition, autoUpdate: false,
             renderStrategy: { ...definition.renderStrategy, ...settings.renderStrategy }
         });
-        expect(stateOwners(state).searchService.store.featureSearches[1]).toEqual(sibling);
+        expect(stateOwners(state).searchService.model.featureSearches[1]).toEqual(sibling);
         expect(() => service.execute("viewer_set_search", {
             searchId: definition.id,
             settings: { renderStrategy: { highFidelityMaxVisibleTiles: 0 } }
@@ -978,8 +977,8 @@ describe("McpActionService", () => {
         const { service, state, styles } = fixture();
         styles.styles.set("draft", styleFixture({ id: "draft", source: "name: draft", imported: true, modified: false, visible: true }));
         styles.styles.set("stock", styleFixture({ id: "stock", source: "name: stock", imported: false, modified: false, visible: true }));
-        const search = stateOwners(state).searchService.store.addFeatureSearch({ query: "typeId == 'Road'", enabled: true, showResultsOnMap: true });
-        stateOwners(state).searchService.store.addFeatureSearch({ query: "hidden", enabled: false });
+        const search = stateOwners(state).searchService.model.addFeatureSearch({ query: "typeId == 'Road'", enabled: true, showResultsOnMap: true });
+        stateOwners(state).searchService.model.addFeatureSearch({ query: "hidden", enabled: false });
         const previous = window.location.href;
         const result = viewerActions.viewer_get_share_link.outputSchema.parse(service.execute("viewer_get_share_link", {}));
         expect(result.url).toBe(state.shareableUrl());

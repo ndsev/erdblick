@@ -5,19 +5,19 @@ import {
     defaultHoverLabelFieldKey,
     type HoverLabelFieldConfig,
     type TileFeatureId
-} from "../inspection/inspection-state.model";
-import { InspectionStore } from "../inspection/inspection.store";
+} from "../inspection/inspection-state";
+import { InspectionModel } from "../inspection/inspection.model";
 import { coreLib, uint8ArrayToWasm } from "../integrations/wasm";
-import { MAX_STYLE_LOD } from "../shared/lod-policy";
+import { MAX_STYLE_LOD } from "../rendering/lod-policy";
 import { stripFeatureInspectionTarget } from "../shared/tile-feature-id";
 import { AppStateService } from "../state/app-state.service";
-import type { ErdblickStyle } from "../styledata/style.service";
+import type { ErdblickStyle } from "../map-styles/style.service";
 import { MapInfoService } from "./map-info.service";
-import type { SearchResultTileEntry } from "./map-runtime.model";
+import type { SearchResultTileEntry } from "./map-runtime";
 import { MapTileStreamService } from "./map-tile-stream.service";
-import type { MapgetLayer } from "./mapget-layer.model";
-import { partitionKey, type PartitionId } from "./partition.model";
-import { StyledMapgetLayer, type StyledMapgetLayerEvent, type StyleFilterPlan } from "./styled-mapget-layer.model";
+import type { MapgetLayer } from "./mapget-layer";
+import { partitionKey, type PartitionId } from "./partition";
+import { StyledMapgetLayer, type StyledMapgetLayerEvent, type StyleFilterPlan } from "./styled-mapget-layer";
 
 export type HoverDetailField = { key: string; value: string; colorKey: string };
 export type HoverFeatureDetails = {
@@ -60,7 +60,7 @@ export class HoverDetailService implements OnDestroy {
         private readonly state: AppStateService,
         private readonly mapInfo: MapInfoService,
         private readonly tileStream: MapTileStreamService,
-        public readonly inspectionState: InspectionStore
+        public readonly inspectionState: InspectionModel
     ) {
         this.enabled = this.inspectionState.hoverLabelsEnabled;
         this.activeFields = this.normalizeFields(this.inspectionState.hoverLabelFields);

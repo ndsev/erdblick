@@ -1,5 +1,5 @@
 import { Injectable } from "@angular/core";
-import { InspectionDialogLayout } from "../inspection/inspection-state.model";
+import { InspectionDialogLayout } from "../inspection/inspection-state";
 import { AppStateService } from "../state/app-state.service";
 import {
     AppDialogLayout,
@@ -7,17 +7,17 @@ import {
     DEFAULT_EM_HEIGHT,
     DEFAULT_EM_WIDTH,
     INSPECTION_DOCK_TAB_ID
-} from "./app-layout.model";
-import { AppLayoutStore } from "./app-layout.store";
+} from "./app-layout";
+import { LayoutModel } from "./layout.model";
 
 /**
  * Coordinates opening, closing and focusing dock/dialog surfaces. Saved layout
- * values live in AppLayoutStore; consumers that only observe them inject the store.
+ * values live in LayoutModel; consumers that only observe them inject the model.
  */
 @Injectable({ providedIn: "root" })
 export class AppLayoutService {
     constructor(private readonly persistence: AppStateService,
-        public readonly store: AppLayoutStore) {
+        public readonly model: LayoutModel) {
         persistence.snapshotReplaced.subscribe(() => this.pendingOpenDialogs.clear());
     }
 
@@ -31,7 +31,7 @@ export class AppLayoutService {
 
     /** Returns the persisted layout for a dialog if one exists. */
     getDialogLayout(id: string): AppDialogLayout | InspectionDialogLayout | undefined {
-        return this.store.dialogLayoutsState.getValue()[id];
+        return this.model.dialogLayoutsState.getValue()[id];
     }
 
     /** Returns whether the persisted layout marks the dialog as open. */
@@ -86,7 +86,8 @@ export class AppLayoutService {
                 width: Math.round(DEFAULT_EM_WIDTH * this.baseFontSize),
                 height: Math.round(DEFAULT_EM_HEIGHT * this.baseFontSize)
             };
-            const nextDockOrder = current?.dockOrder ?? (docked ? this.nextSurfaceDockOrder(dockTab) : undefined);
+            const nextDockOrder =
+                current?.dockOrder ?? (docked ? this.nextSurfaceDockOrder(dockTab) : undefined);
             this.upsertDialogLayout(id, {
                 position: current?.position ?? { left: 0, top: 0 },
                 size: current?.size ?? fallbackSize,
@@ -96,8 +97,8 @@ export class AppLayoutService {
                 ...(nextDockOrder !== undefined ? { dockOrder: nextDockOrder } : {})
             });
             if (docked) {
-                this.store.dockActiveTab = dockTab;
-                this.store.isDockOpen = true;
+                this.model.dockActiveTab = dockTab;
+                this.model.isDockOpen = true;
             }
         });
     }
@@ -129,14 +130,14 @@ export class AppLayoutService {
 
     /** Returns whether any generic surface is docked, optionally filtered by tab id. */
     hasDockedSurface(tabId?: string): boolean {
-        return Object.values(this.store.dialogLayoutsState.getValue()).some(layout =>
-            (layout.docked ?? false) && (tabId === undefined || layout.dockTab === tabId)
+        return Object.values(this.model.dialogLayoutsState.getValue()).some(
+            (layout) => (layout.docked ?? false) && (tabId === undefined || layout.dockTab === tabId)
         );
     }
 
     /** Reorders generic docked surfaces within one dock tab. */
     reorderDockedSurfaces(tabId: string, displayOrder: string[]): void {
-        const currentLayouts = this.store.dialogLayoutsState.getValue();
+        const currentLayouts = this.model.dialogLayoutsState.getValue();
         const dockedIds = Object.entries(currentLayouts)
             .filter(([, layout]) => (layout.docked ?? false) && layout.dockTab === tabId)
             .map(([id]) => id);
@@ -144,7 +145,7 @@ export class AppLayoutService {
             return;
         }
         const dockedIdSet = new Set(dockedIds);
-        const normalizedOrder = displayOrder.filter(id => dockedIdSet.has(id));
+        const normalizedOrder = displayOrder.filter((id) => dockedIdSet.has(id));
         for (const id of dockedIds) {
             if (!normalizedOrder.includes(id)) {
                 normalizedOrder.push(id);
@@ -164,7 +165,7 @@ export class AppLayoutService {
             changed = true;
         });
         if (changed) {
-            this.store.dialogLayoutsState.next(nextLayouts);
+            this.model.dialogLayoutsState.next(nextLayouts);
         }
     }
 
@@ -187,10 +188,10 @@ export class AppLayoutService {
 
     /** Append a newly docked surface after existing siblings in the same tab. */
     private nextSurfaceDockOrder(dockTab: string): number {
-        const orders = Object.values(this.store.dialogLayoutsState.getValue())
-            .filter(layout => (layout.docked ?? false) && layout.dockTab === dockTab)
-            .map(layout => layout.dockOrder)
-            .filter((order): order is number => typeof order === 'number' && Number.isFinite(order));
+        const orders = Object.values(this.model.dialogLayoutsState.getValue())
+            .filter((layout) => (layout.docked ?? false) && layout.dockTab === dockTab)
+            .map((layout) => layout.dockOrder)
+            .filter((order): order is number => typeof order === "number" && Number.isFinite(order));
         return orders.length ? Math.max(...orders) + 1 : 0;
     }
 
@@ -207,25 +208,27 @@ export class AppLayoutService {
 
     /** Inserts or updates one persisted dialog layout record. */
     upsertDialogLayout(id: string, layout: AppDialogLayout | InspectionDialogLayout): void {
-        const currentLayouts = this.store.dialogLayoutsState.getValue();
+        const currentLayouts = this.model.dialogLayoutsState.getValue();
         const existing = currentLayouts[id];
-        const nextLayout: AppDialogLayout | InspectionDialogLayout = existing ? {
-            ...existing,
-            ...layout,
-            position: {
-                ...existing.position,
-                ...layout.position
-            },
-            size: {
-                ...existing.size,
-                ...layout.size
-            }
-        } : {
-            ...layout,
-            position: { ...layout.position },
-            size: { ...layout.size }
-        };
-        this.store.dialogLayoutsState.next({
+        const nextLayout: AppDialogLayout | InspectionDialogLayout = existing
+            ? {
+                  ...existing,
+                  ...layout,
+                  position: {
+                      ...existing.position,
+                      ...layout.position
+                  },
+                  size: {
+                      ...existing.size,
+                      ...layout.size
+                  }
+              }
+            : {
+                  ...layout,
+                  position: { ...layout.position },
+                  size: { ...layout.size }
+              };
+        this.model.dialogLayoutsState.next({
             ...currentLayouts,
             [id]: nextLayout
         });
@@ -249,14 +252,14 @@ export class AppLayoutService {
 
     /** Removes one persisted generic dialog layout and any pending open marker for it. */
     removeDialogLayout(id: string): void {
-        const currentLayouts = this.store.dialogLayoutsState.getValue();
+        const currentLayouts = this.model.dialogLayoutsState.getValue();
         if (!(id in currentLayouts)) {
             this.pendingOpenDialogs.delete(id);
             return;
         }
         const nextLayouts = { ...currentLayouts };
         delete nextLayouts[id];
-        this.store.dialogLayoutsState.next(nextLayouts);
+        this.model.dialogLayoutsState.next(nextLayouts);
         this.pendingOpenDialogs.delete(id);
     }
 }

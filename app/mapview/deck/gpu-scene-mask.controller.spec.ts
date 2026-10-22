@@ -11,7 +11,7 @@ import { ErdblickVectorMaskLayer } from "./erdblick-vector.layer";
 import { GpuSceneMaskMode } from "./erdblick-vector.shaders";
 import type { GpuScene, GpuSceneMaterialStore } from "./gpu-scene";
 import { GpuSceneMaskController } from "./gpu-scene-mask.controller";
-import type { TileSubsetInteractionOverlay } from "./tile-subset-interaction.model";
+import type { TileSubsetInteractionOverlay } from "./tile-subset-interaction";
 
 /** Minimal sampled texture retaining sparse writes and destruction state. */
 class FakeTexture {

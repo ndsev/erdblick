@@ -13,7 +13,7 @@ import {
 import {GpuSceneMaskMode} from "./erdblick-vector.shaders";
 import type {GpuScene} from "./gpu-scene";
 import type {TileSubsetInteractionOverlay} from
-    "./tile-subset-interaction.model";
+    "./tile-subset-interaction";
 
 const TARGET_TEXTURE_WIDTH = 1024;
 const VECTOR_SOURCE_ID = "scene-vector";

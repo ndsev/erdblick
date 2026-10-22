@@ -1,15 +1,15 @@
 import {describe, expect, it} from "vitest";
 import type {FilterChannelDefinition} from
-    "../mapdata/filter-subscription.model";
+    "../mapdata/filter-subscription";
 import type {StyleFilterPlan} from
-    "../mapdata/styled-mapget-layer.model";
+    "../mapdata/styled-mapget-layer";
 import {
     hasAuthoredInteractionHighlight,
     interactionTargetKey,
     planRemoteInteractionHighlights,
     type InteractionHighlightTarget
 } from "./interaction-highlight-plan";
-import {tilePartition} from "../mapdata/partition.model";
+import {tilePartition} from "../mapdata/partition";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
 
 const target = (

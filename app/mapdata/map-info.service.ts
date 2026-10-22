@@ -10,31 +10,19 @@ import {
 import { z } from "zod";
 import type { FeatureLayerStyle, TileLayerParser } from "../../build/libs/core/erdblick-core";
 import { ActionRegistry } from "../actions/action-registry.service";
-import {
-    ActionInput,
-    ActionOutput,
-    catalogPage,
-    ControlReadContext,
-    ControlSelector,
-    ControlValue,
-    discoveryPageShape,
-    discoveryResult,
-    identifierSchema,
-    indexSchema,
-    rejectAction
-} from "../actions/app-action";
+import { catalogPage, ControlReadContext, discoveryPageShape, discoveryResult, identifierSchema, indexSchema, rejectAction } from "../actions/app-action";
 import { AppActionContributor } from "../actions/app-action-contributor";
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
 import { coreLib, uint8ArrayFromWasm, uint8ArrayToWasmOrThrow } from "../integrations/wasm";
-import { TileGridMode, VIEW_SYNC_LAYERS, viewIdSchema } from "../mapview/map-view-state.model";
-import { MapViewStore } from "../mapview/map-view.store";
+import { TileGridMode, VIEW_SYNC_LAYERS, viewIdSchema } from "../mapview/map-view-state";
+import { MapViewModel } from "../mapview/mapview.model";
 import { InfoMessageService } from "../shared/info.service";
 import { boundedUnicodeString, unicodePrefix } from "../shared/unicode-string";
 import { AppStateService } from "../state/app-state.service";
-import type { LayerPresetRef } from "../styledata/layer-preset.model";
-import { MapPresetService } from "../styledata/map-preset.service";
-import { StyleService } from "../styledata/style.service";
-import { MapLayerStore } from "./map-layer.store";
+import type { LayerPresetRef } from "../map-styles/layer-preset";
+import { MapPresetService } from "../map-styles/map-preset.service";
+import { StyleService } from "../map-styles/style.service";
+import { MapDataModel } from "./mapdata.model";
 import {
     dataSourceCatalogStatus,
     dataSourceProgressPercent,
@@ -46,8 +34,8 @@ import {
     MapLayerTree,
     sortDataSourceCatalogEntries,
     StyleOptionNode
-} from "./map.tree.model";
-import { MapgetLayer } from "./mapget-layer.model";
+} from "./map.tree";
+import { MapgetLayer } from "./mapget-layer";
 
 /** Lightweight datasource status/progress update carried by interactive catalog-change frames. */
 interface SourceCatalogEntryUpdate {
@@ -63,6 +51,15 @@ export interface StyleOptionChange {
     optionNode: StyleOptionNode;
     viewIndex: number;
 }
+
+/** Shared validation used by registration and the corresponding domain operation. */
+const styleOptionValueSchema = z.union([z.boolean(), z.number(), boundedUnicodeString(4096)]);
+
+/** Shared validation used by registration and the corresponding domain operation. */
+const styleOptionSelectorSchema = z
+    .strictObject({ viewId: viewIdSchema })
+    .extend({ mapId: identifierSchema, layerId: identifierSchema })
+    .extend({ styleId: identifierSchema, optionId: identifierSchema });
 
 /**
  * Owns datasource metadata, the map/layer tree, shared parser metadata, legal info, and layer-tree mutations.
@@ -106,8 +103,8 @@ export class MapInfoService implements AppActionContributor {
         private readonly styleService: StyleService,
         private readonly mapPresetService: MapPresetService,
         private readonly messageService: InfoMessageService,
-        public readonly layerState: MapLayerStore,
-        public readonly viewSettings: MapViewStore,
+        public readonly layerState: MapDataModel,
+        public readonly viewSettings: MapViewModel,
         private readonly inspectionState: InspectionPanelService
     ) {
         this.maps$ = new BehaviorSubject<MapLayerTree>(
@@ -964,44 +961,236 @@ export class MapInfoService implements AppActionContributor {
     }
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: ActionRegistry): void {
-        actions.registerAction(mapActions.listMaps, input => this.listMaps(input));
-        actions.registerAction(mapActions.listLayers, input => this.listLayers(input));
-        actions.registerAction(mapActions.listStyleOptions, input => this.listStyleOptions(input));
-        actions.registerAction(mapActions.listPresets, input => this.listPresets(input));
+        actions.registerAction(
+            {
+                name: "viewer_list_maps",
+                mutation: false,
+                description:
+                    "List configured map identities and current availability without loading data or exposing " +
+                    "source URLs or credentials.",
+                inputSchema: z.strictObject({ ...discoveryPageShape }),
+                outputSchema: discoveryResult(
+                    z.strictObject({ id: identifierSchema, available: z.boolean() })
+                )
+            },
+            (input) => this.listMaps(input)
+        );
+        actions.registerAction(
+            {
+                name: "viewer_list_layers",
+                mutation: false,
+                description:
+                    "List map layers, supported zoom levels and schema-owning feature types. Features are the " +
+                    "default; use layerType=SourceData for raw tables. featureTypes may also contain reference-only " +
+                    "types. Optional viewId adds the current visibility, without changing defaults or loading data.",
+                inputSchema: z.strictObject({
+                    mapId: identifierSchema.optional(),
+                    layerId: identifierSchema.optional(),
+                    layerType: z.enum(["Features", "SourceData", "all"]).default("Features"),
+                    viewId: viewIdSchema.optional(),
+                    ...discoveryPageShape
+                }),
+                outputSchema: discoveryResult(
+                    z.strictObject({
+                        id: identifierSchema,
+                        mapId: identifierSchema,
+                        kind: z.enum(["Features", "SourceData"]),
+                        available: z.boolean(),
+                        visible: z.boolean().optional(),
+                        zoomLevels: z.array(z.number().int().min(0).max(15)).max(16),
+                        featureTypes: z.array(identifierSchema).max(1000),
+                        schemaFeatureTypes: z.array(identifierSchema).max(1000),
+                        partitionKind: z.enum(["tile", "object"])
+                    })
+                )
+            },
+            (input) => this.listLayers(input)
+        );
+        actions.registerAction(
+            {
+                name: "viewer_list_style_options",
+                mutation: false,
+                description:
+                    "List public style options for one layer and view. Each item supplies its exact writeTarget for " +
+                    "viewer_set_control. For a coordinated named appearance, use viewer_list_presets. Reads never " +
+                    "turn defaults into user-owned values.",
+                inputSchema: z.strictObject({
+                    mapId: identifierSchema,
+                    layerId: identifierSchema,
+                    viewId: viewIdSchema,
+                    styleId: identifierSchema.optional(),
+                    ...discoveryPageShape
+                }),
+                outputSchema: discoveryResult(
+                    z.strictObject({
+                        id: identifierSchema,
+                        name: boundedUnicodeString(4096),
+                        styleId: identifierSchema,
+                        mapId: identifierSchema,
+                        layerId: identifierSchema,
+                        kind: boundedUnicodeString(128),
+                        value: styleOptionValueSchema,
+                        defaultValue: styleOptionValueSchema,
+                        description: boundedUnicodeString(4096),
+                        writeTarget: styleOptionSelectorSchema.extend({
+                            control: z.literal("view.styleOption")
+                        })
+                    })
+                )
+            },
+            (input) => this.listStyleOptions(input)
+        );
+        actions.registerAction(
+            {
+                name: "viewer_list_presets",
+                mutation: false,
+                description:
+                    "List layer presets when layerId is supplied, otherwise map presets. Optional viewId checks " +
+                    "synchronized-option conflicts. Apply with view.layerPreset or view.mapPreset controls.",
+                inputSchema: z.strictObject({
+                    mapId: identifierSchema,
+                    layerId: identifierSchema.optional(),
+                    styleId: identifierSchema.optional(),
+                    viewId: viewIdSchema.optional(),
+                    ...discoveryPageShape
+                }),
+                outputSchema: discoveryResult(
+                    z.strictObject({
+                        id: identifierSchema,
+                        name: boundedUnicodeString(4096),
+                        kind: z.enum(["map", "layer"]),
+                        mapId: identifierSchema,
+                        layerId: identifierSchema.optional(),
+                        styleId: identifierSchema.optional(),
+                        available: z.boolean()
+                    })
+                )
+            },
+            (input) => this.listPresets(input)
+        );
     }
 
     /** Registers typed state readers and writers without exposing persistence keys. */
     registerControls(actions: ActionRegistry): void {
-        actions.registerControl(mapControls.layers, {
-            read: (target, context) => this.layerSummary(target, context),
-            defaultTargets: () => this.viewSettings.viewIds.map(viewId => ({ viewId }))
-        });
+        actions.registerControl(
+            {
+                name: "view.layers",
+                description:
+                    "Read-only layer overview; mapId/layerId selectors also include hidden layers. To change " +
+                    "visibility or level, use viewer_set_control with the singular view.layer control.",
+                selectorSchema: z
+                    .strictObject({ viewId: viewIdSchema })
+                    .extend({ mapId: identifierSchema.optional(), layerId: identifierSchema.optional() }),
+                valueSchema: z
+                    .array(
+                        z.strictObject({
+                            mapId: identifierSchema,
+                            layerId: identifierSchema,
+                            visible: z.boolean(),
+                            level: indexSchema,
+                            autoLevel: z.boolean()
+                        })
+                    )
+                    .max(100),
+                readable: true,
+                writable: false,
+                persistence: "runtime-summary",
+                synchronization: "none"
+            },
+            {
+                read: (target, context) => this.layerSummary(target, context),
+                defaultTargets: () => this.viewSettings.viewIds.map((viewId) => ({ viewId }))
+            }
+        );
         // Layer visibility/level assignment also needs renderer auto-level policy;
         // MapViewService binds that control alongside its ordinary layer operations.
-        actions.registerControl(mapControls.styleOption, {
-            read: target => this.requirePublicOption(target).value[this.controlViewIndex(target.viewId)],
-            write: (target, value) => this.assignStyleOption(target, value)
-        });
-        actions.registerControl(mapControls.layerPreset, {
-            read: target => {
-                this.requireLayer(target.mapId, target.layerId);
-                return this.layerState.getLayerPresetSelection(this.controlViewIndex(target.viewId), target.mapId, target.layerId);
+        actions.registerControl(
+            {
+                name: "view.styleOption",
+                description:
+                    "One applicable style option, validated against its declared type. For a named look such as " +
+                    "Cinematic or Lane Topology, call viewer_list_presets and use view.layerPreset to apply all " +
+                    "supporting options together; a same-named boolean alone may not enable the needed geometry.",
+                selectorSchema: styleOptionSelectorSchema,
+                valueSchema: styleOptionValueSchema,
+                readable: true,
+                writable: true,
+                synchronization: "follow-view-sync",
+                persistence: "url-and-local-storage"
             },
-            write: (target, value) => {
-                this.requireLayer(target.mapId, target.layerId);
-                if (!this.applyLayerPreset(this.controlViewIndex(target.viewId), target.mapId, target.layerId, value)) rejectAction("The layer preset is unavailable");
+            {
+                read: (target) =>
+                    this.requirePublicOption(target).value[this.controlViewIndex(target.viewId)],
+                write: (target, value) => this.assignStyleOption(target, value)
             }
-        });
-        actions.registerControl(mapControls.mapPreset, {
-            read: target => {
-                this.requireMap(target.mapId);
-                return this.layerState.getMapPresetSelection(this.controlViewIndex(target.viewId), target.mapId);
+        );
+        actions.registerControl(
+            {
+                name: "view.layerPreset",
+                description:
+                    "Apply all options of a qualified layer preset. Discover viewer_list_presets with " +
+                    "mapId/layerId, then assign {styleId,presetId}; null clears its association without resetting " +
+                    "options.",
+                selectorSchema: z
+                    .strictObject({ viewId: viewIdSchema })
+                    .extend({ mapId: identifierSchema, layerId: identifierSchema }),
+                valueSchema: z
+                    .strictObject({ styleId: identifierSchema, presetId: identifierSchema })
+                    .nullable(),
+                readable: true,
+                writable: true,
+                synchronization: "follow-view-sync",
+                persistence: "url-and-local-storage"
             },
-            write: (target, value) => {
-                this.requireMap(target.mapId);
-                if (!this.applyMapPreset(this.controlViewIndex(target.viewId), target.mapId, value)) rejectAction("The map preset is unavailable or conflicts with synchronized options");
+            {
+                read: (target) => {
+                    this.requireLayer(target.mapId, target.layerId);
+                    return this.layerState.getLayerPresetSelection(
+                        this.controlViewIndex(target.viewId),
+                        target.mapId,
+                        target.layerId
+                    );
+                },
+                write: (target, value) => {
+                    this.requireLayer(target.mapId, target.layerId);
+                    if (
+                        !this.applyLayerPreset(
+                            this.controlViewIndex(target.viewId),
+                            target.mapId,
+                            target.layerId,
+                            value
+                        )
+                    )
+                        rejectAction("The layer preset is unavailable");
+                }
             }
-        });
+        );
+        actions.registerControl(
+            {
+                name: "view.mapPreset",
+                description: "Apply a map preset; null clears its association without resetting options.",
+                selectorSchema: z.strictObject({ viewId: viewIdSchema }).extend({ mapId: identifierSchema }),
+                valueSchema: identifierSchema.nullable(),
+                readable: true,
+                writable: true,
+                synchronization: "follow-view-sync",
+                persistence: "url-and-local-storage"
+            },
+            {
+                read: (target) => {
+                    this.requireMap(target.mapId);
+                    return this.layerState.getMapPresetSelection(
+                        this.controlViewIndex(target.viewId),
+                        target.mapId
+                    );
+                },
+                write: (target, value) => {
+                    this.requireMap(target.mapId);
+                    if (!this.applyMapPreset(this.controlViewIndex(target.viewId), target.mapId, value))
+                        rejectAction("The map preset is unavailable or conflicts with synchronized options");
+                }
+            }
+        );
     }
 
 
@@ -1023,85 +1212,136 @@ export class MapInfoService implements AppActionContributor {
         return layer;
     }
 
-    layerConfiguration(target: ControlSelector<typeof mapControls.layer>): ControlValue<typeof mapControls.layer> {
+    layerConfiguration(target: { viewId: string; mapId: string; layerId: string }) {
         const index = this.controlViewIndex(target.viewId);
         const config = this.requireLayer(target.mapId, target.layerId).viewConfig[index];
         if (!config) rejectAction("The requested feature layer is unavailable");
         return { ...config };
     }
 
-    layerSummary(target: ControlSelector<typeof mapControls.layers>, context: ControlReadContext): ControlValue<typeof mapControls.layers> {
+    layerSummary(target: { viewId: string; mapId?: string; layerId?: string }, context: ControlReadContext) {
         const index = this.controlViewIndex(target.viewId);
         if (target.layerId && !target.mapId) rejectAction("layerId requires mapId", "invalid_arguments");
         const maps = target.mapId ? [this.requireMap(target.mapId)] : this.maps.maps.values();
         if (target.layerId) this.requireLayer(target.mapId!, target.layerId);
         function* layers() {
-            for (const map of maps) for (const layer of target.layerId ? [map.layers.get(target.layerId)!] : map.layers.values()) {
-                const config = layer.viewConfig[index];
-                if (!config || (!target.mapId && !config.visible)) continue;
-                yield { mapId: map.id, layerId: layer.id, ...config };
-            }
+            for (const map of maps)
+                for (const layer of target.layerId
+                    ? [map.layers.get(target.layerId)!]
+                    : map.layers.values()) {
+                    const config = layer.viewConfig[index];
+                    if (!config || (!target.mapId && !config.visible)) continue;
+                    yield { mapId: map.id, layerId: layer.id, ...config };
+                }
         }
         return context.collect(layers());
     }
 
-    private requirePublicOption(target: ControlSelector<typeof mapControls.styleOption>) {
-        const option = layerStyleOptions(this.requireLayer(target.mapId, target.layerId)).find(option =>
-            option.styleId === target.styleId && option.id === target.optionId && !option.info.internal);
+    private requirePublicOption(target: {
+        viewId: string;
+        mapId: string;
+        layerId: string;
+        styleId: string;
+        optionId: string;
+    }) {
+        const option = layerStyleOptions(this.requireLayer(target.mapId, target.layerId)).find(
+            (option) =>
+                option.styleId === target.styleId && option.id === target.optionId && !option.info.internal
+        );
         if (!option) rejectAction("The requested style option is unavailable");
         return option;
     }
 
-    assignStyleOption(target: ControlSelector<typeof mapControls.styleOption>, value: ControlValue<typeof mapControls.styleOption>): void {
+    assignStyleOption(
+        target: { viewId: string; mapId: string; layerId: string; styleId: string; optionId: string },
+        value: string | number | boolean
+    ): void {
         const index = this.controlViewIndex(target.viewId);
         const option = this.requirePublicOption(target);
-        if (typeof value !== typeof option.info.defaultValue) rejectAction("Value does not match the style option type", "invalid_arguments");
+        if (typeof value !== typeof option.info.defaultValue)
+            rejectAction("Value does not match the style option type", "invalid_arguments");
         this.stateService.transaction(() => {
-            option.value = option.value.map((previous, viewIndex) => viewIndex === index ? value : previous);
+            option.value = option.value.map((previous, viewIndex) =>
+                viewIndex === index ? value : previous
+            );
             this.applyStyleOptionChange(option, index);
         });
     }
 
-    listMaps(input: ActionInput<typeof mapActions.listMaps>): ActionOutput<typeof mapActions.listMaps> {
+    listMaps(input: { offset?: number; limit?: number }) {
         const maps = this.maps.maps.values();
         const available = (mapId: string) => this.isMapReady(mapId);
-        function* values() { for (const map of maps) yield { id: map.id, available: available(map.id) }; }
+        function* values() {
+            for (const map of maps) yield { id: map.id, available: available(map.id) };
+        }
         return catalogPage(values(), input);
     }
 
-    listLayers(input: ActionInput<typeof mapActions.listLayers>): ActionOutput<typeof mapActions.listLayers> {
+    listLayers(input: {
+        layerType: "Features" | "SourceData" | "all";
+        offset?: number;
+        limit?: number;
+        mapId?: string;
+        layerId?: string;
+        viewId?: string;
+    }) {
         if (input.layerId && !input.mapId) rejectAction("layerId requires mapId", "invalid_arguments");
         const index = input.viewId === undefined ? undefined : this.controlViewIndex(input.viewId);
         const maps = input.mapId ? [this.requireMap(input.mapId)] : this.maps.maps.values();
         const layer = input.layerId ? this.requireLayer(input.mapId!, input.layerId) : undefined;
         const available = (mapId: string) => this.isMapReady(mapId);
         function* values() {
-            for (const map of maps) for (const child of layer ? [layer] : map.layers.values()) {
-                if (input.layerType !== "all" && child.type !== input.layerType) continue;
-                yield {
-                    id: child.id, mapId: map.id, kind: child.type as "Features" | "SourceData",
-                    available: available(map.id), ...(index === undefined ? {} : { visible: child.viewConfig[index]?.visible ?? false }),
-                    zoomLevels: child.info.zoomLevels, featureTypes: child.info.featureTypes.map(type => type.name),
-                    schemaFeatureTypes: child.info.schemaFeatureTypes ?? [], partitionKind: child.info.partitionKind ?? "tile" as const
-                };
-            }
+            for (const map of maps)
+                for (const child of layer ? [layer] : map.layers.values()) {
+                    if (input.layerType !== "all" && child.type !== input.layerType) continue;
+                    yield {
+                        id: child.id,
+                        mapId: map.id,
+                        kind: child.type as "Features" | "SourceData",
+                        available: available(map.id),
+                        ...(index === undefined
+                            ? {}
+                            : { visible: child.viewConfig[index]?.visible ?? false }),
+                        zoomLevels: child.info.zoomLevels,
+                        featureTypes: child.info.featureTypes.map((type) => type.name),
+                        schemaFeatureTypes: child.info.schemaFeatureTypes ?? [],
+                        partitionKind: child.info.partitionKind ?? ("tile" as const)
+                    };
+                }
         }
         return catalogPage(values(), input);
     }
 
-    listStyleOptions(input: ActionInput<typeof mapActions.listStyleOptions>): ActionOutput<typeof mapActions.listStyleOptions> {
+    listStyleOptions(input: {
+        mapId: string;
+        layerId: string;
+        viewId: string;
+        offset?: number;
+        limit?: number;
+        styleId?: string;
+    }) {
         const layer = this.requireLayer(input.mapId, input.layerId);
         const index = this.controlViewIndex(input.viewId);
         function* values() {
             for (const option of layerStyleOptions(layer)) {
                 if (option.info.internal || (input.styleId && input.styleId !== option.styleId)) continue;
                 yield {
-                    id: option.id, name: option.info.label, kind: option.type, styleId: option.styleId,
-                    mapId: layer.mapId, layerId: layer.id, value: option.value[index], defaultValue: option.info.defaultValue,
+                    id: option.id,
+                    name: option.info.label,
+                    kind: option.type,
+                    styleId: option.styleId,
+                    mapId: layer.mapId,
+                    layerId: layer.id,
+                    value: option.value[index],
+                    defaultValue: option.info.defaultValue,
                     description: unicodePrefix(option.info.description, 4096),
                     writeTarget: {
-                        control: "view.styleOption" as const, viewId: input.viewId,
-                        mapId: layer.mapId, layerId: layer.id, styleId: option.styleId, optionId: option.id
+                        control: "view.styleOption" as const,
+                        viewId: input.viewId,
+                        mapId: layer.mapId,
+                        layerId: layer.id,
+                        styleId: option.styleId,
+                        optionId: option.id
                     }
                 };
             }
@@ -1109,7 +1349,14 @@ export class MapInfoService implements AppActionContributor {
         return catalogPage(values(), input);
     }
 
-    listPresets(input: ActionInput<typeof mapActions.listPresets>): ActionOutput<typeof mapActions.listPresets> {
+    listPresets(input: {
+        mapId: string;
+        offset?: number;
+        limit?: number;
+        layerId?: string;
+        styleId?: string;
+        viewId?: string;
+    }) {
         const map = this.requireMap(input.mapId);
         const layer = input.layerId ? this.requireLayer(input.mapId, input.layerId) : undefined;
         const index = input.viewId === undefined ? undefined : this.controlViewIndex(input.viewId);
@@ -1118,15 +1365,26 @@ export class MapInfoService implements AppActionContributor {
         function* values() {
             if (layer) {
                 for (const preset of layerPresetNode(layer)?.presets ?? []) {
-                    if (!input.styleId || input.styleId === preset.styleId) yield {
-                        id: preset.id, name: preset.name,
-                        kind: "layer" as const, mapId: map.id, layerId: layer.id, styleId: preset.styleId, available: true
-                    };
+                    if (!input.styleId || input.styleId === preset.styleId)
+                        yield {
+                            id: preset.id,
+                            name: preset.name,
+                            kind: "layer" as const,
+                            mapId: map.id,
+                            layerId: layer.id,
+                            styleId: preset.styleId,
+                            available: true
+                        };
                 }
-            } else for (const preset of map.mapPresets) yield {
-                id: preset.id, name: preset.name, kind: "map" as const,
-                mapId: map.id, available: !syncOptions || !tree.mapPresetHasSyncConflict(map, preset)
-            };
+            } else
+                for (const preset of map.mapPresets)
+                    yield {
+                        id: preset.id,
+                        name: preset.name,
+                        kind: "map" as const,
+                        mapId: map.id,
+                        available: !syncOptions || !tree.mapPresetHasSyncConflict(map, preset)
+                    };
         }
         return catalogPage(values(), input);
     }
@@ -1143,142 +1401,3 @@ export class MapInfoService implements AppActionContributor {
     }
 
 }
-
-
-/** MapInfoService coordinates layer, style-option, preset and background assignments against its catalog. */
-export const mapControls = {
-    layers: {
-        name: "view.layers",
-        description: "Read-only layer overview; mapId/layerId selectors also include hidden layers. To change visibility or level, use viewer_set_control with the singular view.layer control.",
-        selectorSchema: z.strictObject({ viewId: viewIdSchema }).extend({ mapId: identifierSchema.optional(), layerId: identifierSchema.optional() }),
-        valueSchema: z.array(z.strictObject({
-            mapId: identifierSchema,
-            layerId: identifierSchema,
-            visible: z.boolean(),
-            level: indexSchema,
-            autoLevel: z.boolean()
-        })).max(100),
-        readable: true,
-        writable: false,
-        persistence: "runtime-summary",
-        synchronization: "none"
-    },
-    layer: {
-        name: "view.layer",
-        description: "Read/write one layer's visibility, requested level and automatic level policy. Select viewId/mapId/layerId. Read this control first, then assign {visible, level, autoLevel}, preserving fields you do not want to change.",
-        selectorSchema: z.strictObject({ viewId: viewIdSchema }).extend({ mapId: identifierSchema, layerId: identifierSchema }),
-        valueSchema: z.strictObject({ visible: z.boolean(), level: z.number().int().min(0).max(15), autoLevel: z.boolean() }),
-        readable: true,
-        writable: true,
-        synchronization: "follow-view-sync",
-        persistence: "url-and-local-storage"
-    },
-    styleOption: {
-        name: "view.styleOption",
-        description: "One applicable style option, validated against its declared type. For a named look such as Cinematic or Lane Topology, call viewer_list_presets and use view.layerPreset to apply all supporting options together; a same-named boolean alone may not enable the needed geometry.",
-        selectorSchema: z.strictObject({ viewId: viewIdSchema }).extend({ mapId: identifierSchema, layerId: identifierSchema }).extend({ styleId: identifierSchema, optionId: identifierSchema }),
-        valueSchema: z.union([z.boolean(), z.number(), boundedUnicodeString(4096)]),
-        readable: true,
-        writable: true,
-        synchronization: "follow-view-sync",
-        persistence: "url-and-local-storage"
-    },
-    layerPreset: {
-        name: "view.layerPreset",
-        description: "Apply all options of a qualified layer preset. Discover viewer_list_presets with mapId/layerId, then assign {styleId,presetId}; null clears its association without resetting options.",
-        selectorSchema: z.strictObject({ viewId: viewIdSchema }).extend({ mapId: identifierSchema, layerId: identifierSchema }),
-        valueSchema: z.strictObject({ styleId: identifierSchema, presetId: identifierSchema }).nullable(),
-        readable: true,
-        writable: true,
-        synchronization: "follow-view-sync",
-        persistence: "url-and-local-storage"
-    },
-    mapPreset: {
-        name: "view.mapPreset",
-        description: "Apply a map preset; null clears its association without resetting options.",
-        selectorSchema: z.strictObject({ viewId: viewIdSchema }).extend({ mapId: identifierSchema }),
-        valueSchema: identifierSchema.nullable(),
-        readable: true,
-        writable: true,
-        synchronization: "follow-view-sync",
-        persistence: "url-and-local-storage"
-    }
-} as const;
-
-export const mapActions = {
-    listMaps: {
-        name: "viewer_list_maps",
-        mutation: false,
-        description: "List configured map identities and current availability without loading data or exposing source URLs or credentials.",
-        inputSchema: z.strictObject({ ...discoveryPageShape }),
-        outputSchema: discoveryResult(z.strictObject({ id: identifierSchema, available: z.boolean() }))
-    },
-    listLayers: {
-        name: "viewer_list_layers",
-        mutation: false,
-        description: "List map layers, supported zoom levels and schema-owning feature types. Features are the default; use layerType=SourceData for raw tables. featureTypes may also contain reference-only types. Optional viewId adds the current visibility, without changing defaults or loading data.",
-        inputSchema: z.strictObject({
-            mapId: identifierSchema.optional(),
-            layerId: identifierSchema.optional(),
-            layerType: z.enum(["Features", "SourceData", "all"]).default("Features"),
-            viewId: viewIdSchema.optional(),
-            ...discoveryPageShape
-        }),
-        outputSchema: discoveryResult(z.strictObject({
-            id: identifierSchema,
-            mapId: identifierSchema,
-            kind: z.enum(["Features", "SourceData"]),
-            available: z.boolean(),
-            visible: z.boolean().optional(),
-            zoomLevels: z.array(z.number().int().min(0).max(15)).max(16),
-            featureTypes: z.array(identifierSchema).max(1000),
-            schemaFeatureTypes: z.array(identifierSchema).max(1000),
-            partitionKind: z.enum(["tile", "object"])
-        }))
-    },
-    listStyleOptions: {
-        name: "viewer_list_style_options",
-        mutation: false,
-        description: "List public style options for one layer and view. Each item supplies its exact writeTarget for viewer_set_control. For a coordinated named appearance, use viewer_list_presets. Reads never turn defaults into user-owned values.",
-        inputSchema: z.strictObject({
-            mapId: identifierSchema,
-            layerId: identifierSchema,
-            viewId: viewIdSchema,
-            styleId: identifierSchema.optional(),
-            ...discoveryPageShape
-        }),
-        outputSchema: discoveryResult(z.strictObject({
-            id: identifierSchema,
-            name: boundedUnicodeString(4096),
-            styleId: identifierSchema,
-            mapId: identifierSchema,
-            layerId: identifierSchema,
-            kind: boundedUnicodeString(128),
-            value: mapControls.styleOption.valueSchema,
-            defaultValue: mapControls.styleOption.valueSchema,
-            description: boundedUnicodeString(4096),
-            writeTarget: mapControls.styleOption.selectorSchema.extend({ control: z.literal("view.styleOption") })
-        }))
-    },
-    listPresets: {
-        name: "viewer_list_presets",
-        mutation: false,
-        description: "List layer presets when layerId is supplied, otherwise map presets. Optional viewId checks synchronized-option conflicts. Apply with view.layerPreset or view.mapPreset controls.",
-        inputSchema: z.strictObject({
-            mapId: identifierSchema,
-            layerId: identifierSchema.optional(),
-            styleId: identifierSchema.optional(),
-            viewId: viewIdSchema.optional(),
-            ...discoveryPageShape
-        }),
-        outputSchema: discoveryResult(z.strictObject({
-            id: identifierSchema,
-            name: boundedUnicodeString(4096),
-            kind: z.enum(["map", "layer"]),
-            mapId: identifierSchema,
-            layerId: identifierSchema.optional(),
-            styleId: identifierSchema.optional(),
-            available: z.boolean()
-        }))
-    }
-} as const;

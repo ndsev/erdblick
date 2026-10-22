@@ -1,7 +1,7 @@
 import { Component, ElementRef, HostListener, ViewChild } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { AppDialogComponent } from '../layout/app-dialog.component';
-import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID } from "../layout/app-layout.model";
+import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID } from "../layout/app-layout";
 import { AppLayoutService } from "../layout/app-layout.service";
 import { AppStateService } from "../state/app-state.service";
 import { DialogStackService } from '../layout/dialog-stack.service';

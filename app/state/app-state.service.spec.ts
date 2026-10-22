@@ -8,8 +8,8 @@ import { NavigationEnd, NavigationStart } from '@angular/router';
 import { Cartographic } from '../integrations/geo';
 
 import { AppStateService } from "./app-state.service";
-import { VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION } from "../mapview/map-view-state.model";
-import { MapTreeNode } from "../mapdata/map.tree.model";
+import { VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION } from "../mapview/map-view-state";
+import { MapTreeNode } from "../mapdata/map.tree";
 
 // @ts-expect-error this is a mock router
 interface RouterStub extends Partial<Router> {
@@ -89,12 +89,12 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(true);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(true);
 
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        stateOwners(service).coordinates.store.markerState.next(false);
+        stateOwners(service).coordinates.model.markerState.next(false);
         await flushMicrotasks();
 
         expect(localStorage.getItem('marker')).toBe('0');
@@ -123,7 +123,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(true);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(true);
         expect(routerStub.navigate).not.toHaveBeenCalled();
 
         service.ngOnDestroy();
@@ -141,7 +141,7 @@ describe('AppStateService', () => {
         routerStub.navigate.mockClear();
         const appliedMarkerValues: boolean[] = [];
         service.stateApplied.subscribe(() => {
-            appliedMarkerValues.push(stateOwners(service).coordinates.store.markerState.getValue());
+            appliedMarkerValues.push(stateOwners(service).coordinates.model.markerState.getValue());
         });
 
         await service.replaceUrlState({ v2: '1', m: '1' });
@@ -151,7 +151,7 @@ describe('AppStateService', () => {
             queryParamsHandling: 'replace',
             replaceUrl: true,
         });
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(true);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(true);
         expect(appliedMarkerValues).toEqual([true]);
 
         service.ngOnDestroy();
@@ -174,7 +174,7 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub());
         stateOwners(service);
-        stateOwners(service).inspectionState.store.selection = [{
+        stateOwners(service).inspectionState.model.selection = [{
             id: 0,
             features: [feature(
                 "Intersection.545554858.3348",
@@ -198,15 +198,15 @@ describe('AppStateService', () => {
             } as any)]
         ]));
 
-        expect(stateOwners(service).inspectionState.store.selection).toHaveLength(1);
-        expect(stateOwners(service).inspectionState.store.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:22100770000d");
+        expect(stateOwners(service).inspectionState.model.selection).toHaveLength(1);
+        expect(stateOwners(service).inspectionState.model.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:22100770000d");
     });
 
     it('keeps selected features while datasource layers are still initializing', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub());
         stateOwners(service);
-        stateOwners(service).inspectionState.store.selection = [{
+        stateOwners(service).inspectionState.model.selection = [{
             id: 0,
             features: [feature(
                 "Intersection.545554858.3348",
@@ -231,15 +231,15 @@ describe('AppStateService', () => {
             } as any)]
         ]));
 
-        expect(stateOwners(service).inspectionState.store.selection).toHaveLength(1);
-        expect(stateOwners(service).inspectionState.store.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:545554858");
+        expect(stateOwners(service).inspectionState.model.selection).toHaveLength(1);
+        expect(stateOwners(service).inspectionState.model.selection[0].features[0].mapTileKey).toBe("Features:Very-Large-Map:Road:545554858");
     });
 
     it('preserves focused selection metadata while pruning unavailable selections', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub());
         stateOwners(service);
-        stateOwners(service).inspectionState.store.selection = [{
+        stateOwners(service).inspectionState.model.selection = [{
             id: 0,
             features: [
                 feature("Road.1", "Features:Very-Large-Map:Road:545554858"),
@@ -264,9 +264,9 @@ describe('AppStateService', () => {
             } as any)]
         ]));
 
-        expect(stateOwners(service).inspectionState.store.selection).toHaveLength(1);
-        expect(stateOwners(service).inspectionState.store.selection[0].focused).toBe(true);
-        expect(stateOwners(service).inspectionState.store.selection[0].features).toEqual([
+        expect(stateOwners(service).inspectionState.model.selection).toHaveLength(1);
+        expect(stateOwners(service).inspectionState.model.selection[0].focused).toBe(true);
+        expect(stateOwners(service).inspectionState.model.selection[0].features).toEqual([
             feature("Road.1", "Features:Very-Large-Map:Road:545554858"),
         ]);
     });
@@ -275,7 +275,7 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub());
         stateOwners(service);
-        stateOwners(service).inspectionState.store.selection = [{
+        stateOwners(service).inspectionState.model.selection = [{
             id: 0,
             features: [feature(
                 "Landmark.545666604.12",
@@ -300,9 +300,9 @@ describe('AppStateService', () => {
             } as any)]
         ]));
 
-        expect(stateOwners(service).inspectionState.store.selection).toHaveLength(1);
-        expect(stateOwners(service).inspectionState.store.selection[0].focused).toBe(true);
-        expect(stateOwners(service).inspectionState.store.selection[0].features[0]).toEqual(feature(
+        expect(stateOwners(service).inspectionState.model.selection).toHaveLength(1);
+        expect(stateOwners(service).inspectionState.model.selection[0].focused).toBe(true);
+        expect(stateOwners(service).inspectionState.model.selection[0].features[0]).toEqual(feature(
             "Landmark.545666604.12",
             "Features:Provider%2FSample Munich:Landmark:545666604"
         ));
@@ -321,13 +321,13 @@ describe('AppStateService', () => {
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
-        expect(serviceRenderPreferences.store.lod3TileThreshold).toBe(128);
+        expect(serviceRenderPreferences.model.lod3TileThreshold).toBe(128);
 
-        serviceRenderPreferences.store.lod3TileThreshold = 1024;
-        expect(serviceRenderPreferences.store.lod3TileThreshold).toBe(1024);
+        serviceRenderPreferences.model.lod3TileThreshold = 1024;
+        expect(serviceRenderPreferences.model.lod3TileThreshold).toBe(1024);
 
-        serviceRenderPreferences.store.lod3TileThreshold = 9999;
-        expect(serviceRenderPreferences.store.lod3TileThreshold).toBe(4096);
+        serviceRenderPreferences.model.lod3TileThreshold = 9999;
+        expect(serviceRenderPreferences.model.lod3TileThreshold).toBe(4096);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -342,11 +342,11 @@ describe('AppStateService', () => {
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
-        expect(serviceRenderPreferences.store.tileSubsetRenderWorkerCount).toBe(0);
+        expect(serviceRenderPreferences.model.tileSubsetRenderWorkerCount).toBe(0);
 
-        serviceRenderPreferences.store.tileSubsetRenderWorkerCount = 999;
+        serviceRenderPreferences.model.tileSubsetRenderWorkerCount = 999;
 
-        expect(serviceRenderPreferences.store.tileSubsetRenderWorkerCount).toBe(32);
+        expect(serviceRenderPreferences.model.tileSubsetRenderWorkerCount).toBe(32);
         service.ngOnDestroy();
         routerStub.events.complete();
     });
@@ -356,16 +356,16 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub());
         stateOwners(service);
 
-        expect(stateOwners(service).inspectionState.store.drillPickRadius).toBe(3);
+        expect(stateOwners(service).inspectionState.model.drillPickRadius).toBe(3);
 
-        stateOwners(service).inspectionState.store.drillPickRadius = 7.8;
-        expect(stateOwners(service).inspectionState.store.drillPickRadius).toBe(7);
+        stateOwners(service).inspectionState.model.drillPickRadius = 7.8;
+        expect(stateOwners(service).inspectionState.model.drillPickRadius).toBe(7);
 
-        stateOwners(service).inspectionState.store.drillPickRadius = -100;
-        expect(stateOwners(service).inspectionState.store.drillPickRadius).toBe(1);
+        stateOwners(service).inspectionState.model.drillPickRadius = -100;
+        expect(stateOwners(service).inspectionState.model.drillPickRadius).toBe(1);
 
-        stateOwners(service).inspectionState.store.drillPickRadius = 100;
-        expect(stateOwners(service).inspectionState.store.drillPickRadius).toBe(10);
+        stateOwners(service).inspectionState.model.drillPickRadius = 100;
+        expect(stateOwners(service).inspectionState.model.drillPickRadius).toBe(10);
         expect(service.exportSnapshot()).toHaveProperty('drillPickRadius', 10);
         expect((service as any).serializeUrlV2()).not.toHaveProperty('drillPickRadius');
 
@@ -435,9 +435,9 @@ describe('AppStateService', () => {
         stateOwners(service);
         const serviceRenderPreferences = stateOwners(service).renderPreferences;
 
-        expect(serviceRenderPreferences.store.deckAntialiasingEnabled).toBe(true);
-        expect(serviceRenderPreferences.store.semanticCompositingEnabled).toBe(true);
-        expect(serviceRenderPreferences.store.contactShadingEnabled).toBe(true);
+        expect(serviceRenderPreferences.model.deckAntialiasingEnabled).toBe(true);
+        expect(serviceRenderPreferences.model.semanticCompositingEnabled).toBe(true);
+        expect(serviceRenderPreferences.model.contactShadingEnabled).toBe(true);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -453,17 +453,17 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(serviceRenderPreferences.store.semanticCompositingEnabled).toBe(false);
-        expect(serviceRenderPreferences.store.semanticCompositingEnabledState.serialize(true)).toBeUndefined();
+        expect(serviceRenderPreferences.model.semanticCompositingEnabled).toBe(false);
+        expect(serviceRenderPreferences.model.semanticCompositingEnabledState.serialize(true)).toBeUndefined();
 
-        serviceRenderPreferences.store.semanticCompositingEnabled = true;
+        serviceRenderPreferences.model.semanticCompositingEnabled = true;
         await flushMicrotasks();
         expect(localStorage.getItem('semanticCompositingEnabled')).toBe('1');
 
-        serviceRenderPreferences.store.semanticCompositingEnabled = false;
+        serviceRenderPreferences.model.semanticCompositingEnabled = false;
         await flushMicrotasks();
         expect(localStorage.getItem('semanticCompositingEnabled')).toBe('0');
-        expect(serviceRenderPreferences.store.semanticCompositingEnabledState.serialize(true)).toBeUndefined();
+        expect(serviceRenderPreferences.model.semanticCompositingEnabledState.serialize(true)).toBeUndefined();
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -485,7 +485,7 @@ describe('AppStateService', () => {
         await flushMicrotasks();
 
         expect(stateOwners(service).inspectionState.focusedInspectionPanelId).toBe(5);
-        expect(stateOwners(service).inspectionState.store.selection[0].focused).toBe(true);
+        expect(stateOwners(service).inspectionState.model.selection[0].focused).toBe(true);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -509,8 +509,8 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).inspectionState.store.selection).toHaveLength(1);
-        expect(stateOwners(service).inspectionState.store.selection[0].features[0]).toEqual({
+        expect(stateOwners(service).inspectionState.model.selection).toHaveLength(1);
+        expect(stateOwners(service).inspectionState.model.selection[0].features[0]).toEqual({
             mapTileKey: 'Features:Very-Large-Map:Road:220e0770000d:0',
             featureId: 'Road.545554686.6:attribute#1:validity#0'
         });
@@ -558,7 +558,7 @@ describe('AppStateService', () => {
         expect(stateOwners(service).layerState.layerAutoZoomLevelState.getValue(1)).toEqual([false, false]);
         expect(stateOwners(service).layerState.stylesState.positionalValues().get('MapA/Lane/T93C/showCenterLines')).toEqual(['1', '0']);
         expect(stateOwners(service).layerState.stylesState.positionalValues().get('MapB/Road/T93C/showCenterLines')).toEqual(['1', '0']);
-        expect(stateOwners(service).inspectionState.store.selection).toEqual([
+        expect(stateOwners(service).inspectionState.model.selection).toEqual([
             {
                 id: 0,
                 features: [{
@@ -607,7 +607,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).inspectionState.store.selection).toEqual([]);
+        expect(stateOwners(service).inspectionState.model.selection).toEqual([]);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -626,10 +626,10 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).inspectionState.store.selection).toHaveLength(1);
-        expect(stateOwners(service).inspectionState.store.selection[0].id).toBe(5);
-        expect(stateOwners(service).inspectionState.store.selection[0].focused).toBe(true);
-        expect(stateOwners(service).inspectionState.store.selection[0].features[0]).toEqual({
+        expect(stateOwners(service).inspectionState.model.selection).toHaveLength(1);
+        expect(stateOwners(service).inspectionState.model.selection[0].id).toBe(5);
+        expect(stateOwners(service).inspectionState.model.selection[0].focused).toBe(true);
+        expect(stateOwners(service).inspectionState.model.selection[0].features[0]).toEqual({
             mapTileKey: 'Features:MapA:Road:tile-1:0',
             featureId: 'Road.1:attribute#0:validity#0',
         });
@@ -651,7 +651,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).inspectionState.store.selection[0].features[0]).toEqual({
+        expect(stateOwners(service).inspectionState.model.selection[0].features[0]).toEqual({
             mapTileKey: 'Features:Provider%2FSample Munich:Road:545555209',
             featureId: 'Road.545555209.387',
         });
@@ -681,10 +681,10 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).inspectionState.store.selection).toHaveLength(1);
-        expect(stateOwners(service).inspectionState.store.selection[0].features).toEqual([feature('feature-1', 'Features:map:layer:tile')]);
-        expect(stateOwners(service).searchService.store.featureSearches).toHaveLength(1);
-        expect(stateOwners(service).searchService.store.featureSearches[0].query).toBe('**.speed > 80');
+        expect(stateOwners(service).inspectionState.model.selection).toHaveLength(1);
+        expect(stateOwners(service).inspectionState.model.selection[0].features).toEqual([feature('feature-1', 'Features:map:layer:tile')]);
+        expect(stateOwners(service).searchService.model.featureSearches).toHaveLength(1);
+        expect(stateOwners(service).searchService.model.featureSearches[0].query).toBe('**.speed > 80');
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -722,12 +722,12 @@ describe('AppStateService', () => {
 
         expect(service.ready.getValue()).toBe(true);
         expect(stateOwners(service).layout.isDialogOpen('preferences-dialog')).toBe(true);
-        expect(stateOwners(service).layout.store.isDockOpen).toBe(true);
-        expect(stateOwners(service).layout.store.dockActiveTab).toBe('search');
-        expect(stateOwners(service).inspectionState.store.selection).toHaveLength(1);
-        expect(stateOwners(service).inspectionState.store.selection[0].id).toBe(7);
-        expect(stateOwners(service).searchService.store.featureSearches).toHaveLength(1);
-        expect(stateOwners(service).searchService.store.featureSearches[0].id).toBe('feature-search-7');
+        expect(stateOwners(service).layout.model.isDockOpen).toBe(true);
+        expect(stateOwners(service).layout.model.dockActiveTab).toBe('search');
+        expect(stateOwners(service).inspectionState.model.selection).toHaveLength(1);
+        expect(stateOwners(service).inspectionState.model.selection[0].id).toBe(7);
+        expect(stateOwners(service).searchService.model.featureSearches).toHaveLength(1);
+        expect(stateOwners(service).searchService.model.featureSearches[0].id).toBe('feature-search-7');
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -747,7 +747,7 @@ describe('AppStateService', () => {
         stateOwners(service).viewSettings.numViews = 2;
 
         service.initializePersistence();
-        stateOwners(service).searchService.store.addFeatureSearch({ query: '**.speed > 80' });
+        stateOwners(service).searchService.model.addFeatureSearch({ query: '**.speed > 80' });
         await flushMicrotasks();
 
         const stored = JSON.parse(localStorage.getItem('featureSearchState') ?? '[]');
@@ -789,7 +789,7 @@ describe('AppStateService', () => {
                 destination: { lon: 11, lat: 48, alt: 900 },
                 orientation: { heading: 0, pitch: -0.75, roll: 0 }, position: [0, 0, 0]
             });
-            stateOwners(service).inspectionState.store.selection = [{
+            stateOwners(service).inspectionState.model.selection = [{
                 id: 0, features: [{ mapTileKey: 'Features:Map:Lane:545379780', featureId: 'Lane.1' }],
                 locked: true, size: [30, 20], color: '#fff314', undocked: false
             }];
@@ -811,7 +811,7 @@ describe('AppStateService', () => {
             expect(stateOwners(restored).layerState.layerNames).toEqual(['Map/Lane']);
             expect(stateOwners(restored).layerState.layerVisibilityState.getValue(0)).toEqual([true]);
             expect(stateOwners(restored).viewSettings.cameraViewDataState.getValue(0)).toEqual(stateOwners(service).viewSettings.cameraViewDataState.getValue(0));
-            expect(stateOwners(restored).inspectionState.store.selection[0].features).toEqual(stateOwners(service).inspectionState.store.selection[0].features);
+            expect(stateOwners(restored).inspectionState.model.selection[0].features).toEqual(stateOwners(service).inspectionState.model.selection[0].features);
         } finally {
             restored?.ngOnDestroy();
             service.ngOnDestroy();
@@ -829,7 +829,7 @@ describe('AppStateService', () => {
         stateOwners(service).layerState.layerVisibilityState.next(0, [true, false]);
         stateOwners(service).layerState.layerZoomLevelState.next(0, [12, 15]);
         stateOwners(service).layerState.layerAutoZoomLevelState.next(0, [false, false]);
-        stateOwners(service).inspectionState.store.selection = [{
+        stateOwners(service).inspectionState.model.selection = [{
             id: 0,
             features: [{
                 mapTileKey: 'Features:MapB:Road:21',
@@ -925,7 +925,7 @@ describe('AppStateService', () => {
         routerStub.navigate.mockClear();
 
         (service as any).lastUrlSyncAt = Date.now();
-        stateOwners(service).coordinates.store.markerState.next(true);
+        stateOwners(service).coordinates.model.markerState.next(true);
         await flushMicrotasks();
         expect((service as any).urlSyncHandle).not.toBeNull();
         expect((service as any).pendingUrlSyncStates.size).toBeGreaterThan(0);
@@ -937,7 +937,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(2, '/?m=0', '/?m=0'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(false);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(false);
         expect(stateApplied).toHaveBeenCalledTimes(1);
 
         vi.advanceTimersByTime(100);
@@ -957,7 +957,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).coordinates.store.markedPositionState.getValue()).toEqual([11.14198571, 48.00237573]);
+        expect(stateOwners(service).coordinates.model.markedPositionState.getValue()).toEqual([11.14198571, 48.00237573]);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -975,7 +975,7 @@ describe('AppStateService', () => {
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        stateOwners(service).coordinates.store.markedPositionState.next([11.141985707869166, 48.002375728153766, 125.123456789]);
+        stateOwners(service).coordinates.model.markedPositionState.next([11.141985707869166, 48.002375728153766, 125.123456789]);
         await flushMicrotasks();
 
         expect(routerStub.navigate).toHaveBeenCalledWith([], expect.objectContaining({
@@ -1004,7 +1004,7 @@ describe('AppStateService', () => {
 
         stateOwners(service).coordinates.setMarkerPosition(Cartographic.fromDegrees(11.25, 48.5, 127.75));
 
-        expect(stateOwners(service).coordinates.store.markedPosition).toEqual([11.25, 48.5, 127.75]);
+        expect(stateOwners(service).coordinates.model.markedPosition).toEqual([11.25, 48.5, 127.75]);
         service.ngOnDestroy();
         routerStub.events.complete();
     });
@@ -1195,9 +1195,9 @@ describe('AppStateService', () => {
         }
         stateOwners(service).layerState.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.2, 0.8]);
         const searches = [[0], [1], [0, 1]].map(selectedViewIndices =>
-            stateOwners(service).searchService.store.addFeatureSearch({ query: 'Way', selectedViewIndices }));
+            stateOwners(service).searchService.model.addFeatureSearch({ query: 'Way', selectedViewIndices }));
         stateOwners(service).inspectionState.setSelection([feature('Way.1')]);
-        const selection = stateOwners(service).inspectionState.store.selectionState.getValue();
+        const selection = stateOwners(service).inspectionState.model.selectionState.getValue();
         const survivor = 1 - removed;
         const slots = [stateOwners(service).viewSettings.cameraViewDataState, stateOwners(service).viewSettings.mode2dState, stateOwners(service).layerState.layerSyncOptionsState,
         stateOwners(service).viewSettings.backgroundState, stateOwners(service).layerState.layerVisibilityState, stateOwners(service).layerState.layerZoomLevelState,
@@ -1217,8 +1217,8 @@ describe('AppStateService', () => {
             expect(Object.keys(slot.appState.value)).toEqual([...stateOwners(service).viewSettings.viewIds]);
         });
         expect(stateOwners(service).layerState.styles.get('m1/layerA/overlay/opacity')).toEqual([survivor ? 0.8 : 0.2]);
-        expect(stateOwners(service).inspectionState.store.selectionState.getValue()).toBe(selection);
-        expect(stateOwners(service).searchService.store.featureSearches).toEqual(searches.map(search => ({
+        expect(stateOwners(service).inspectionState.model.selectionState.getValue()).toBe(selection);
+        expect(stateOwners(service).searchService.model.featureSearches).toEqual(searches.map(search => ({
             ...search, selectedViewIndices: search.selectedViewIndices.includes(survivor) ? [0] : []
         })));
         expect(stateOwners(service).viewSettings.viewSync).toEqual([VIEW_SYNC_POSITION]);
@@ -1390,8 +1390,8 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub());
         stateOwners(service);
 
-        expect(stateOwners(service).inspectionState.store.hoverLabelsEnabled).toBe(true);
-        expect(stateOwners(service).inspectionState.store.hoverLabelFields).toEqual([{
+        expect(stateOwners(service).inspectionState.model.hoverLabelsEnabled).toBe(true);
+        expect(stateOwners(service).inspectionState.model.hoverLabelFields).toEqual([{
             expression: "id",
             customExpression: false
         }]);
@@ -1467,8 +1467,8 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).inspectionState.store.selection).toHaveLength(1);
-        expect(stateOwners(service).inspectionState.store.selection[0].color).toBe('#abc123');
+        expect(stateOwners(service).inspectionState.model.selection).toHaveLength(1);
+        expect(stateOwners(service).inspectionState.model.selection[0].color).toBe('#abc123');
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -1618,7 +1618,7 @@ describe('AppStateService', () => {
         // @ts-expect-error this is a call to mock router
         routerStub.navigate.mockClear();
 
-        stateOwners(service).coordinates.store.markerState.next(true);
+        stateOwners(service).coordinates.model.markerState.next(true);
         await flushMicrotasks();
 
         expect(routerStub.navigate).toHaveBeenCalledTimes(1);
@@ -1628,9 +1628,9 @@ describe('AppStateService', () => {
             replaceUrl: true,
         }));
 
-        stateOwners(service).coordinates.store.markerState.next(false);
+        stateOwners(service).coordinates.model.markerState.next(false);
         await flushMicrotasks();
-        stateOwners(service).coordinates.store.markerState.next(true);
+        stateOwners(service).coordinates.model.markerState.next(true);
         await flushMicrotasks();
 
         expect(routerStub.navigate).toHaveBeenCalledTimes(1);
@@ -1763,7 +1763,7 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('old-docked')], locked: false, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('old-dialog')], locked: false, size: [30, 40], color: '#222222', undocked: true },
             { id: 3, features: [feature('locked-feature')], locked: true, size: [30, 20], color: '#333333', undocked: false },
@@ -1780,7 +1780,7 @@ describe('AppStateService', () => {
 
         const selected = [feature('new-feature', 'map/layer/new-tile')];
         const targetPanelId = stateOwners(service).inspectionState.setSelection(selected);
-        const panels = stateOwners(service).inspectionState.store.selection;
+        const panels = stateOwners(service).inspectionState.model.selection;
 
         expect(targetPanelId).toBe(2);
         expect(panels).toHaveLength(3);
@@ -1799,14 +1799,14 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('old-first')], locked: false, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('old-second')], locked: false, size: [30, 40], color: '#222222', undocked: true },
         ];
 
         const selected = [feature('new-feature', 'map/layer/new-tile')];
         const targetPanelId = stateOwners(service).inspectionState.setSelection(selected, 1);
-        const panels = stateOwners(service).inspectionState.store.selection;
+        const panels = stateOwners(service).inspectionState.model.selection;
 
         expect(targetPanelId).toBe(1);
         expect(panels).toHaveLength(2);
@@ -1823,14 +1823,14 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('old-dialog')], locked: false, size: [30, 40], color: '#222222', undocked: true },
         ];
 
         const selected = [feature('new-feature', 'map/layer/new-tile')];
         const targetPanelId = stateOwners(service).inspectionState.setSelection(selected);
-        const panels = stateOwners(service).inspectionState.store.selection;
+        const panels = stateOwners(service).inspectionState.model.selection;
 
         expect(targetPanelId).toBe(2);
         expect(panels).toHaveLength(2);
@@ -1847,14 +1847,14 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('locked-dialog')], locked: true, size: [30, 40], color: '#222222', undocked: true },
         ];
 
         const selected = [feature('new-feature', 'map/layer/new-tile')];
         const targetPanelId = stateOwners(service).inspectionState.setSelection(selected);
-        const panels = stateOwners(service).inspectionState.store.selection;
+        const panels = stateOwners(service).inspectionState.model.selection;
         const newPanel = panels.find(panel => panel.id === targetPanelId);
 
         expect(targetPanelId).toBe(3);
@@ -1873,14 +1873,14 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).layout.store.dockActiveTab = 'search';
-        stateOwners(service).layout.store.isDockOpen = false;
+        stateOwners(service).layout.model.dockActiveTab = 'search';
+        stateOwners(service).layout.model.isDockOpen = false;
         const panelId = stateOwners(service).inspectionState.setSelection([feature('new-feature', 'map/layer/new-tile')]);
-        const panel = stateOwners(service).inspectionState.store.selection.find(item => item.id === panelId);
+        const panel = stateOwners(service).inspectionState.model.selection.find(item => item.id === panelId);
 
         expect(panel?.undocked).toBe(false);
-        expect(stateOwners(service).layout.store.isDockOpen).toBe(true);
-        expect(stateOwners(service).layout.store.dockActiveTab).toBe('inspection');
+        expect(stateOwners(service).layout.model.isDockOpen).toBe(true);
+        expect(stateOwners(service).layout.model.dockActiveTab).toBe('inspection');
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -1892,18 +1892,18 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).layout.store.dockActiveTab = 'search';
-        stateOwners(service).layout.store.isDockOpen = true;
+        stateOwners(service).layout.model.dockActiveTab = 'search';
+        stateOwners(service).layout.model.isDockOpen = true;
         const panelId = stateOwners(service).inspectionState.setSelection(
             [feature('new-feature', 'map/layer/new-tile')],
             undefined,
             true,
             true);
-        const panel = stateOwners(service).inspectionState.store.selection.find(item => item.id === panelId);
+        const panel = stateOwners(service).inspectionState.model.selection.find(item => item.id === panelId);
 
         expect(panel?.undocked).toBe(true);
-        expect(stateOwners(service).layout.store.isDockOpen).toBe(true);
-        expect(stateOwners(service).layout.store.dockActiveTab).toBe('search');
+        expect(stateOwners(service).layout.model.isDockOpen).toBe(true);
+        expect(stateOwners(service).layout.model.dockActiveTab).toBe('search');
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -1915,7 +1915,7 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             {
                 id: 1,
                 features: [feature('Road.1:attribute#2:validity#0', 'map/layer/tile')],
@@ -1933,8 +1933,8 @@ describe('AppStateService', () => {
                 undocked: false
             }
         ];
-        stateOwners(service).layout.store.dockActiveTab = 'search';
-        stateOwners(service).layout.store.isDockOpen = true;
+        stateOwners(service).layout.model.dockActiveTab = 'search';
+        stateOwners(service).layout.model.isDockOpen = true;
 
         const panelId = stateOwners(service).inspectionState.setSelection(
             [feature('Road.2', 'map/layer/tile')],
@@ -1943,9 +1943,9 @@ describe('AppStateService', () => {
             true);
 
         expect(panelId).toBe(1);
-        expect(stateOwners(service).inspectionState.store.selection.find(panel => panel.id === 1)?.features).toEqual([feature('Road.2', 'map/layer/tile')]);
-        expect(stateOwners(service).inspectionState.store.selection.find(panel => panel.id === 2)).toBeDefined();
-        expect(stateOwners(service).layout.store.dockActiveTab).toBe('search');
+        expect(stateOwners(service).inspectionState.model.selection.find(panel => panel.id === 1)?.features).toEqual([feature('Road.2', 'map/layer/tile')]);
+        expect(stateOwners(service).inspectionState.model.selection.find(panel => panel.id === 2)).toBeDefined();
+        expect(stateOwners(service).layout.model.dockActiveTab).toBe('search');
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -1957,7 +1957,7 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             {
                 id: 7,
                 features: [feature('Road.1', 'map/layer/tile')],
@@ -1969,11 +1969,11 @@ describe('AppStateService', () => {
         ];
 
         stateOwners(service).inspectionState.toggleInspectionFeatureHighlight(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
-        expect(stateOwners(service).inspectionState.store.selection[0].features[0].featureId).toBe('Road.1:attribute#2:validity#0');
-        expect(stateOwners(service).inspectionState.store.selection[0].locked).toBe(true);
+        expect(stateOwners(service).inspectionState.model.selection[0].features[0].featureId).toBe('Road.1:attribute#2:validity#0');
+        expect(stateOwners(service).inspectionState.model.selection[0].locked).toBe(true);
 
         stateOwners(service).inspectionState.toggleInspectionFeatureHighlight(7, 'map/layer/tile', 'Road.1:attribute#2:validity#0');
-        expect(stateOwners(service).inspectionState.store.selection[0].features[0].featureId).toBe('Road.1');
+        expect(stateOwners(service).inspectionState.model.selection[0].features[0].featureId).toBe('Road.1');
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -2017,7 +2017,7 @@ describe('AppStateService', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub());
         stateOwners(service);
-        stateOwners(service).inspectionState.store.selection = [{
+        stateOwners(service).inspectionState.model.selection = [{
             id: 7,
             features: [],
             locked: false,
@@ -2026,15 +2026,15 @@ describe('AppStateService', () => {
             undocked: false
         }];
 
-        stateOwners(service).inspectionState.store.sourceDataInspectionDefaultColumns = ["schemaType"];
+        stateOwners(service).inspectionState.model.sourceDataInspectionDefaultColumns = ["schemaType"];
         stateOwners(service).inspectionState.setInspectionTreeHiddenColumns(7, ["displayAddress"]);
 
-        expect(stateOwners(service).inspectionState.store.sourceDataInspectionDefaultColumns).toEqual(["schemaType"]);
+        expect(stateOwners(service).inspectionState.model.sourceDataInspectionDefaultColumns).toEqual(["schemaType"]);
         expect(stateOwners(service).inspectionState.getInspectionTreeHiddenColumns(7)).toEqual(["displayAddress"]);
-        expect(stateOwners(service).inspectionState.store.sourceDataInspectionDefaultColumnsState.serialize(true)).toBeUndefined();
-        expect(stateOwners(service).inspectionState.store.inspectionTreeHiddenColumnsState.serialize(true)).toBeUndefined();
+        expect(stateOwners(service).inspectionState.model.sourceDataInspectionDefaultColumnsState.serialize(true)).toBeUndefined();
+        expect(stateOwners(service).inspectionState.model.inspectionTreeHiddenColumnsState.serialize(true)).toBeUndefined();
 
-        stateOwners(service).inspectionState.store.selection = [];
+        stateOwners(service).inspectionState.model.selection = [];
         expect(stateOwners(service).inspectionState.getInspectionTreeHiddenColumns(7)).toBeUndefined();
 
         service.ngOnDestroy();
@@ -2047,7 +2047,7 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('locked-docked')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('old-dialog')], locked: false, size: [30, 40], color: '#222222', undocked: true },
         ];
@@ -2055,15 +2055,15 @@ describe('AppStateService', () => {
         const selected = feature('new-feature', 'map/layer/new-tile');
         expect(stateOwners(service).inspectionState.setSelection([selected])).toBe(2);
         expect(stateOwners(service).inspectionState.focusedInspectionPanelId).toBe(2);
-        expect(stateOwners(service).inspectionState.store.selection.find(panel => panel.id === 2)?.focused).toBe(true);
+        expect(stateOwners(service).inspectionState.model.selection.find(panel => panel.id === 2)?.focused).toBe(true);
 
         stateOwners(service).inspectionState.focusedInspectionPanelId = 1;
         expect(stateOwners(service).inspectionState.setSelection([selected])).toBeUndefined();
         expect(stateOwners(service).inspectionState.focusedInspectionPanelId).toBe(2);
-        expect(stateOwners(service).inspectionState.store.selection.find(panel => panel.id === 1)?.focused).toBeUndefined();
-        expect(stateOwners(service).inspectionState.store.selection.find(panel => panel.id === 2)?.focused).toBe(true);
+        expect(stateOwners(service).inspectionState.model.selection.find(panel => panel.id === 1)?.focused).toBeUndefined();
+        expect(stateOwners(service).inspectionState.model.selection.find(panel => panel.id === 2)?.focused).toBe(true);
 
-        const serializedSelection = stateOwners(service).inspectionState.store.selectionState.serialize(false)?.['selected'] ?? '';
+        const serializedSelection = stateOwners(service).inspectionState.model.selectionState.serialize(false)?.['selected'] ?? '';
         expect(serializedSelection).toContain('2~0f~');
 
         service.ngOnDestroy();
@@ -2076,13 +2076,13 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).layout.store.isDockOpen = false;
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).layout.model.isDockOpen = false;
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('old-feature')], locked: false, size: [30, 20], color: '#111111', undocked: false }
         ];
 
         stateOwners(service).inspectionState.setSelection([feature('old-feature')]);
-        expect(stateOwners(service).layout.store.isDockOpen).toBe(true);
+        expect(stateOwners(service).layout.model.isDockOpen).toBe(true);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -2094,14 +2094,14 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:1'), locked: false, size: [30, 40], color: '#111111', undocked: true },
             { id: 2, features: [feature('old-feature')], locked: false, size: [30, 20], color: '#222222', undocked: false },
         ];
 
         const selected = [feature('new-feature', 'map/layer/new-tile')];
         const targetPanelId = stateOwners(service).inspectionState.setSelection(selected);
-        const panels = stateOwners(service).inspectionState.store.selection;
+        const panels = stateOwners(service).inspectionState.model.selection;
 
         expect(targetPanelId).toBe(2);
         expect(panels.find(panel => panel.id === 1)?.sourceData).toEqual(sourceData('SourceData:m1:SourceData-LAYER:1'));
@@ -2117,14 +2117,14 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('feature-panel')], locked: false, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: false, size: [30, 40], color: '#222222', undocked: true },
         ];
 
         const nextSourceData = sourceData('SourceData:m1:SourceData-LAYER:3');
         const targetPanelId = stateOwners(service).inspectionState.setSelection(nextSourceData);
-        const panels = stateOwners(service).inspectionState.store.selection;
+        const panels = stateOwners(service).inspectionState.model.selection;
 
         expect(targetPanelId).toBe(2);
         expect(panels.find(panel => panel.id === 2)?.sourceData).toEqual(nextSourceData);
@@ -2140,13 +2140,13 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('feature-panel')], locked: false, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: true, size: [30, 40], color: '#222222', undocked: true },
         ];
 
         const targetPanelId = stateOwners(service).inspectionState.setSelection(sourceData('SourceData:m1:SourceData-LAYER:9'));
-        const panels = stateOwners(service).inspectionState.store.selection;
+        const panels = stateOwners(service).inspectionState.model.selection;
         const newPanel = panels.find(panel => panel.id === targetPanelId);
 
         expect(targetPanelId).toBe(3);
@@ -2165,7 +2165,7 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('remove-me')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('fallback')], locked: true, size: [30, 20], color: '#222222', undocked: false },
         ];
@@ -2174,7 +2174,7 @@ describe('AppStateService', () => {
         stateOwners(service).inspectionState.unsetPanel(1);
 
         expect(stateOwners(service).inspectionState.focusedInspectionPanelId).toBe(2);
-        expect(stateOwners(service).inspectionState.store.selection.find(panel => panel.id === 2)?.focused).toBe(true);
+        expect(stateOwners(service).inspectionState.model.selection.find(panel => panel.id === 2)?.focused).toBe(true);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -2186,13 +2186,13 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:3'), locked: false, size: [30, 40], color: '#222222', undocked: true },
         ];
 
         const targetPanelId = stateOwners(service).inspectionState.setSelection(sourceData('SourceData:m1:SourceData-LAYER:7'), 1);
-        const panels = stateOwners(service).inspectionState.store.selection;
+        const panels = stateOwners(service).inspectionState.model.selection;
 
         expect(targetPanelId).toBe(1);
         expect(panels.find(panel => panel.id === 1)?.sourceData).toEqual(sourceData('SourceData:m1:SourceData-LAYER:7'));
@@ -2209,7 +2209,7 @@ describe('AppStateService', () => {
         stateOwners(service);
 
         const duplicated = feature('same-feature');
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             {
                 id: 1,
                 features: [duplicated],
@@ -2222,7 +2222,7 @@ describe('AppStateService', () => {
         ];
 
         const targetPanelId = stateOwners(service).inspectionState.setSelection([duplicated]);
-        const panels = stateOwners(service).inspectionState.store.selection;
+        const panels = stateOwners(service).inspectionState.model.selection;
         const created = panels.find(panel => panel.id === targetPanelId);
 
         expect(targetPanelId).toBe(2);
@@ -2239,14 +2239,14 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('remove-me')], locked: false, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [], sourceData: sourceData('SourceData:m1:SourceData-LAYER:2'), locked: false, size: [30, 40], color: '#222222', undocked: true },
             { id: 3, features: [feature('stay-locked')], locked: true, size: [30, 20], color: '#333333', undocked: false },
         ];
 
         stateOwners(service).inspectionState.unsetUnlockedSelections();
-        const panels = stateOwners(service).inspectionState.store.selection;
+        const panels = stateOwners(service).inspectionState.model.selection;
 
         expect(panels).toHaveLength(2);
         expect(panels.find(panel => panel.id === 1)).toBeUndefined();
@@ -2263,7 +2263,7 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('remove-a')], locked: false, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('remove-b')], locked: false, size: [30, 40], color: '#222222', undocked: true },
             { id: 3, features: [feature('keep-locked')], locked: true, size: [30, 20], color: '#333333', undocked: false },
@@ -2275,7 +2275,7 @@ describe('AppStateService', () => {
         const mergedFeatures = [feature('merged-1'), feature('merged-2'), feature('merged-3')];
         const createdIds = mergedFeatures.map(selected => stateOwners(service).inspectionState.setSelection([selected], undefined, true));
         const definedIds = createdIds.filter((panelId): panelId is number => panelId !== undefined);
-        const panels = stateOwners(service).inspectionState.store.selection;
+        const panels = stateOwners(service).inspectionState.model.selection;
 
         expect(definedIds).toHaveLength(mergedFeatures.length);
         expect(panels.find(panel => panel.id === 1)).toBeUndefined();
@@ -2300,7 +2300,7 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 11, features: [], locked: false, size: [30, 40], color: '#111111', undocked: true },
             { id: 22, features: [], locked: false, size: [30, 40], color: '#222222', undocked: true },
         ];
@@ -2333,7 +2333,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 5, features: [], locked: false, size: [30, 40], color: '#555555', undocked: true },
         ];
         stateOwners(service).inspectionState.setInspectionDialogPosition(5, { left: 100, top: 200 }, 3);
@@ -2358,7 +2358,7 @@ describe('AppStateService', () => {
 
         stateOwners(service).inspectionState.closeInspectionComparison();
         await flushMicrotasks();
-        expect(stateOwners(service).inspectionState.store.inspectionComparison).toBeNull();
+        expect(stateOwners(service).inspectionState.model.inspectionComparison).toBeNull();
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -2370,7 +2370,7 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('f2')], locked: true, size: [30, 20], color: '#222222', undocked: false },
         ];
@@ -2391,7 +2391,7 @@ describe('AppStateService', () => {
 
         stateOwners(service).inspectionState.unsetPanel(2);
 
-        expect(stateOwners(service).inspectionState.store.inspectionComparison).toEqual({
+        expect(stateOwners(service).inspectionState.model.inspectionComparison).toEqual({
             base: {
                 panelId: 1,
                 mapId: 'map',
@@ -2411,7 +2411,7 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('f2')], locked: true, size: [30, 20], color: '#222222', undocked: false },
             { id: 3, features: [feature('f3')], locked: true, size: [30, 20], color: '#333333', undocked: false },
@@ -2441,7 +2441,7 @@ describe('AppStateService', () => {
 
         stateOwners(service).inspectionState.unsetPanel(1);
 
-        expect(stateOwners(service).inspectionState.store.inspectionComparison).toEqual({
+        expect(stateOwners(service).inspectionState.model.inspectionComparison).toEqual({
             base: {
                 panelId: 2,
                 mapId: 'map',
@@ -2468,7 +2468,7 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).inspectionState.store.selection = [
+        stateOwners(service).inspectionState.model.selection = [
             { id: 1, features: [feature('f1')], locked: true, size: [30, 20], color: '#111111', undocked: false },
             { id: 2, features: [feature('f2')], locked: false, size: [30, 20], color: '#222222', undocked: false },
         ];
@@ -2489,7 +2489,7 @@ describe('AppStateService', () => {
 
         stateOwners(service).inspectionState.unsetUnlockedSelections();
 
-        expect(stateOwners(service).inspectionState.store.inspectionComparison).toEqual({
+        expect(stateOwners(service).inspectionState.model.inspectionComparison).toEqual({
             base: {
                 panelId: 1,
                 mapId: 'map',
@@ -2511,14 +2511,14 @@ describe('AppStateService', () => {
             connectionRetryInitialDelayMs: 7000,
             connectionRetryMaxDelayMs: 90000
         }, "connection-config")).toEqual([]);
-        expect(stateOwners(service).connectionPreferences.store.connectionRetryPolicy.initialDelayMs).toBe(7000);
-        stateOwners(service).connectionPreferences.setConnectionRetryPolicy({ ...stateOwners(service).connectionPreferences.store.connectionRetryPolicy, enabled: false, backoffMultiplier: 3 });
+        expect(stateOwners(service).connectionPreferences.model.connectionRetryPolicy.initialDelayMs).toBe(7000);
+        stateOwners(service).connectionPreferences.setConnectionRetryPolicy({ ...stateOwners(service).connectionPreferences.model.connectionRetryPolicy, enabled: false, backoffMultiplier: 3 });
         expect(service.exportSnapshot()).toMatchObject({
             connectionRetryEnabled: 0,
             connectionRetryInitialDelayMs: 7000, connectionRetryBackoffMultiplier: 3
         });
-        expect(() => stateOwners(service).connectionPreferences.setConnectionRetryPolicy({ ...stateOwners(service).connectionPreferences.store.connectionRetryPolicy, maxDelayMs: 0 })).toThrow();
-        expect(stateOwners(service).connectionPreferences.store.connectionRetryPolicy.maxDelayMs).toBe(90000);
+        expect(() => stateOwners(service).connectionPreferences.setConnectionRetryPolicy({ ...stateOwners(service).connectionPreferences.model.connectionRetryPolicy, maxDelayMs: 0 })).toThrow();
+        expect(stateOwners(service).connectionPreferences.model.connectionRetryPolicy.maxDelayMs).toBe(90000);
         service.ngOnDestroy();
         routerStub.events.complete();
     });
@@ -2532,20 +2532,20 @@ describe('AppStateService', () => {
             pointCloudDetailPixels: 4,
             pointCloudGpuMemoryMiB: 128
         }, 'point-cloud-config')).toEqual([]);
-        expect(serviceRenderPreferences.store.pointCloudPolicy.detailPixels).toBe(4);
-        serviceRenderPreferences.setPointCloudPolicy({ ...serviceRenderPreferences.store.pointCloudPolicy, enabled: false, workingMemoryMiB: 256 });
+        expect(serviceRenderPreferences.model.pointCloudPolicy.detailPixels).toBe(4);
+        serviceRenderPreferences.setPointCloudPolicy({ ...serviceRenderPreferences.model.pointCloudPolicy, enabled: false, workingMemoryMiB: 256 });
         const snapshot = service.exportSnapshot();
         expect(snapshot).toMatchObject({
             pointCloudDownsamplingEnabled: 0,
             pointCloudDetailPixels: 4, pointCloudWorkingMemoryMiB: 256, pointCloudGpuMemoryMiB: 128
         });
-        expect(serviceRenderPreferences.store.pointCloudDetailPixelsState.isUrlState()).toBe(false);
-        expect(() => serviceRenderPreferences.setPointCloudPolicy({ ...serviceRenderPreferences.store.pointCloudPolicy, gpuMemoryMiB: 0 })).toThrow();
-        expect(serviceRenderPreferences.store.pointCloudPolicy.gpuMemoryMiB).toBe(128);
+        expect(serviceRenderPreferences.model.pointCloudDetailPixelsState.isUrlState()).toBe(false);
+        expect(() => serviceRenderPreferences.setPointCloudPolicy({ ...serviceRenderPreferences.model.pointCloudPolicy, gpuMemoryMiB: 0 })).toThrow();
+        expect(serviceRenderPreferences.model.pointCloudPolicy.gpuMemoryMiB).toBe(128);
         expect(service.importSnapshot({ pointCloudDetailPixels: 8 })).toEqual([]);
-        expect(serviceRenderPreferences.store.pointCloudPolicy.detailPixels).toBe(8);
+        expect(serviceRenderPreferences.model.pointCloudPolicy.detailPixels).toBe(8);
         expect(service.importSnapshot({ pointCloudWorkingMemoryMiB: -1 }).length).toBeGreaterThan(0);
-        expect(serviceRenderPreferences.store.pointCloudPolicy.workingMemoryMiB).toBe(256);
+        expect(serviceRenderPreferences.model.pointCloudPolicy.workingMemoryMiB).toBe(256);
         service.ngOnDestroy();
         routerStub.events.complete();
     });
@@ -2556,7 +2556,7 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).coordinates.store.markerState.next(true);
+        stateOwners(service).coordinates.model.markerState.next(true);
         stateOwners(service).layerState.layerNamesState.next(['m1/layerA']);
         stateOwners(service).layerState.setStyleOptionValues('m1', 'layerA', 'overlay', 'opacity', [0.5]);
         const snapshot = service.exportSnapshot();
@@ -2590,8 +2590,8 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub());
         stateOwners(service);
 
-        stateOwners(service).coordinatePolicy.store.coordinatesEnabledState.next(false);
-        stateOwners(service).coordinatePolicy.store.coordinatesLegalTermsAcceptedState.next(true);
+        stateOwners(service).coordinatePolicy.model.coordinatesEnabledState.next(false);
+        stateOwners(service).coordinatePolicy.model.coordinatesLegalTermsAcceptedState.next(true);
 
         const snapshot = service.exportSnapshot();
         const params = (service as any).serializeUrlV2();
@@ -2652,7 +2652,7 @@ describe('AppStateService', () => {
         expect(errors).toEqual([]);
         expect(stateOwners(service).layout.isDialogOpen('styles-dialog')).toBe(true);
         expect(stateOwners(service).layout.isDialogOpen('style-editor-dialog')).toBe(true);
-        expect(stateOwners(service).styleService.store.styleEditorTargetId).toBe('generic');
+        expect(stateOwners(service).styleService.model.styleEditorTargetId).toBe('generic');
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -2664,14 +2664,14 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).coordinates.store.markerState.next(false);
+        stateOwners(service).coordinates.model.markerState.next(false);
         const errors = service.importSnapshot({
             marker: true,
             unknownState: 1
         });
 
         expect(errors.length).toBeGreaterThan(0);
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(false);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(false);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -2683,14 +2683,14 @@ describe('AppStateService', () => {
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub);
         stateOwners(service);
 
-        stateOwners(service).coordinates.store.markerState.next(false);
+        stateOwners(service).coordinates.model.markerState.next(false);
 
         const errors = service.importSnapshot({
             marker: true
         });
 
         expect(errors).toEqual([]);
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(true);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(true);
         expect(stateOwners(service).layout.isDialogOpen('preferences-dialog')).toBe(false);
 
         service.ngOnDestroy();
@@ -2703,10 +2703,10 @@ describe('AppStateService', () => {
         stateOwners(service);
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
-        stateOwners(service).layout.store.mapsOpenState.next(true);
+        stateOwners(service).layout.model.mapsOpenState.next(true);
         stateOwners(service).layerState.stylesState.replacePositional(new Map([['old/Lane/style/topology', [true]]]));
         await service.replaceUrlState({ v2: '1', n: '1', lon: '11.66', lat: '48.25', alt: '128000', map: 'Very-Large-Map', l: 'Road:0', v: '1' }, true);
-        expect(stateOwners(service).layout.store.mapsOpenState.getValue()).toBe(false);
+        expect(stateOwners(service).layout.model.mapsOpenState.getValue()).toBe(false);
         expect(stateOwners(service).layerState.stylesState.positionalValues().has('old/Lane/style/topology')).toBe(false);
         expect(stateOwners(service).layerState.layerNamesState.getValue()).toEqual(['Very-Large-Map/Road']);
         expect(stateOwners(service).viewSettings.cameraViewDataState.getValue(0).destination.lon).toBeCloseTo(11.66);
@@ -2736,14 +2736,14 @@ describe('AppStateService', () => {
         const stateApplied = vi.fn();
         service.stateApplied.subscribe(stateApplied);
 
-        stateOwners(service).coordinates.store.markerState.next(false);
+        stateOwners(service).coordinates.model.markerState.next(false);
         const errors = service.replaceSnapshotState({
             marker: true,
             unknownPresentationState: 1
         });
 
         expect(errors).not.toEqual([]);
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(false);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(false);
         expect(stateApplied).not.toHaveBeenCalled();
 
         service.ngOnDestroy();
@@ -2757,8 +2757,8 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        stateOwners(service).coordinates.store.markerState.next(true);
-        stateOwners(service).layout.store.mapsOpenState.next(true);
+        stateOwners(service).coordinates.model.markerState.next(true);
+        stateOwners(service).layout.model.mapsOpenState.next(true);
         stateOwners(service).layerState.layerNamesState.next(['m1/layerA']);
         stateOwners(service).layerState.stylesState.replacePositional(new Map([
             ['m1/layerA/overlay/stale', [true]]
@@ -2779,8 +2779,8 @@ describe('AppStateService', () => {
         await flushMicrotasks();
 
         expect(errors).toEqual([]);
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(false);
-        expect(stateOwners(service).layout.store.mapsOpenState.getValue()).toBe(false);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(false);
+        expect(stateOwners(service).layout.model.mapsOpenState.getValue()).toBe(false);
         expect(stateOwners(service).layerState.layerNamesState.getValue()).toEqual(['m2/layerB']);
         expect(stateOwners(service).layerState.stylesState.positionalValues().has('m1/layerA/overlay/stale')).toBe(false);
         expect(stateOwners(service).layerState.stylesState.positionalValues().get('m2/layerB/overlay/opacity')).toEqual(['0.75']);
@@ -2823,7 +2823,7 @@ describe('AppStateService', () => {
         });
 
         expect(errors.length).toBeGreaterThan(0);
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(false);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(false);
         expect(stateOwners(service).layerState.stylesState.positionalValues().size).toBe(0);
 
         service.ngOnDestroy();
@@ -2841,7 +2841,7 @@ describe('AppStateService', () => {
 
         expect(errors.length).toBeGreaterThan(0);
         expect(({} as any).polluted).toBeUndefined();
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(false);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(false);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -2893,7 +2893,7 @@ describe('AppStateService', () => {
         });
 
         expect(errors.length).toBeGreaterThan(0);
-        expect(stateOwners(service).configService.store.erdblickVersion.getValue()).toBe('');
+        expect(stateOwners(service).configService.model.erdblickVersion.getValue()).toBe('');
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -2972,7 +2972,7 @@ describe('AppStateService', () => {
         router.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
         owners.viewSettings.numViews = 2;
-        owners.coordinates.store.marker = true;
+        owners.coordinates.model.marker = true;
         await flushMicrotasks();
         const before = registry.exportSnapshot();
         const url = window.location.href;
@@ -3000,7 +3000,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(true);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(true);
         expect(stateOwners(service).viewSettings.featureZoomClearanceMeters).toBe(35);
 
         service.ngOnDestroy();
@@ -3017,7 +3017,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).coordinatePolicy.store.coordinatesEnabledState.getValue()).toBe(false);
+        expect(stateOwners(service).coordinatePolicy.model.coordinatesEnabledState.getValue()).toBe(false);
         expect(service.exportSnapshot()).not.toHaveProperty('coordinatesEnabled');
 
         service.ngOnDestroy();
@@ -3036,7 +3036,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(false);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(false);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -3064,7 +3064,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(true);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(true);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -3092,7 +3092,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(false);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(false);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -3120,7 +3120,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(true);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(true);
 
         service.ngOnDestroy();
         routerStub.events.complete();
@@ -3139,7 +3139,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(false);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(false);
         expect(warnSpy).toHaveBeenCalled();
 
         warnSpy.mockRestore();
@@ -3159,7 +3159,7 @@ describe('AppStateService', () => {
         routerStub.events.next(new NavigationEnd(1, '/', '/'));
         await flushMicrotasks();
 
-        expect(stateOwners(service).coordinates.store.markerState.getValue()).toBe(false);
+        expect(stateOwners(service).coordinates.model.markerState.getValue()).toBe(false);
 
         service.ngOnDestroy();
         routerStub.events.complete();

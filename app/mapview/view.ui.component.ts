@@ -16,8 +16,8 @@ import { filter } from "rxjs/operators";
 import { AppModeService } from "../config/app-mode.service";
 import { AppStateService } from "../state/app-state.service";
 import { KeyboardService } from "../shared/keyboard.service";
-import { MapViewStore } from "./map-view.store";
-import { IRenderView } from "./render-view.model";
+import { MapViewModel } from "./mapview.model";
+import { IRenderView } from "./render-view";
 
 @Component({
     selector: 'erdblick-view-ui',
@@ -99,7 +99,7 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         public stateService: AppStateService,
         private keyboardService: KeyboardService,
         private ngZone: NgZone,
-        public readonly viewSettings: MapViewStore) {
+        public readonly viewSettings: MapViewModel) {
         this.numViews = toSignal(this.viewSettings.numViewsState, { initialValue: this.viewSettings.numViewsState.getValue() });
         this.mapView$ = toObservable(this.mapView);
     }

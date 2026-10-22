@@ -4,7 +4,7 @@ import { Title } from "@angular/platform-browser";
 import { ActionRegistry } from "./actions/action-registry.service";
 import { DebugWindow, ErdblickDebugApi } from "./app.debugapi.component";
 import { AppConfigService } from "./config/app-config.service";
-import type { Versions } from "./config/app-config.store";
+import type { Versions } from "./config/config.model";
 import { DiagnosticsFacadeService } from "./diagnostics/diagnostics.facade.service";
 import { environment } from "./environments/environment";
 import {
@@ -13,7 +13,7 @@ import {
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
     FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID
-} from "./layout/app-layout.model";
+} from "./layout/app-layout";
 import { AppLayoutService } from "./layout/app-layout.service";
 import { DialogStackService } from "./layout/dialog-stack.service";
 import { MapInfoService } from "./mapdata/map-info.service";
@@ -24,7 +24,7 @@ import {
 import { InfoMessageService } from "./shared/info.service";
 import { KeyboardService } from "./shared/keyboard.service";
 import { AppStateService } from "./state/app-state.service";
-import { StyleService } from "./styledata/style.service";
+import { StyleService } from "./map-styles/style.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -149,7 +149,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         this.detachDialogDragEndListener?.();
     }
 
-    /** Keeps dialogs and the search wrapper in a deterministic z-order based on focus clicks. */
+    /** Keeps dialogs and the omnibar wrapper in a deterministic z-order based on focus clicks. */
     private bindDialogFocusStacking() {
         const handler = (event: MouseEvent) => {
             const target = event.target as HTMLElement | null;
@@ -158,12 +158,12 @@ export class AppComponent implements AfterViewInit, OnDestroy {
             }
             const dialogElement = target.closest('.p-dialog') as HTMLElement | null;
             if (dialogElement) {
-                if (dialogElement.closest('.search-menu-dialog')) {
+                if (dialogElement.closest('.omnibar-menu-dialog')) {
                     const mainBar = document.querySelector('.main-bar') as HTMLElement | null;
                     if (mainBar) {
                         this.dialogStack.bringToFront(mainBar);
                     }
-                    const wrapper = dialogElement.closest('.search-wrapper') as HTMLElement | null;
+                    const wrapper = dialogElement.closest('.omnibar-wrapper') as HTMLElement | null;
                     this.dialogStack.bringToFront(wrapper ?? dialogElement);
                     return;
                 }
@@ -172,12 +172,12 @@ export class AppComponent implements AfterViewInit, OnDestroy {
             }
 
             const mainBar = target.closest('.main-bar') as HTMLElement | null;
-            const searchWrapper = target.closest('.search-wrapper') as HTMLElement | null;
+            const omnibarWrapper = target.closest('.omnibar-wrapper') as HTMLElement | null;
             if (mainBar) {
                 this.dialogStack.bringToFront(mainBar);
             }
-            if (searchWrapper) {
-                this.dialogStack.bringToFront(searchWrapper);
+            if (omnibarWrapper) {
+                this.dialogStack.bringToFront(omnibarWrapper);
             }
         };
         document.addEventListener('mousedown', handler, true);
@@ -198,7 +198,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         import(/* @vite-ignore */ distribVersionsPath)
             .then((plugin) => plugin.default() as Array<Versions>)
             .then((versions: Array<Versions>) => {
-                this.configService.store.distributionVersions.next(versions);
+                this.configService.model.distributionVersions.next(versions);
                 if (versions[0]?.name.trim()) {
                     this.titleService.setTitle(this.capitalizeTitle(versions[0].name.trim()));
                 } else {
@@ -270,7 +270,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     getBasicVersion() {
         this.httpClient.get('./bundle/VERSION', { responseType: 'text' }).subscribe(
             data => {
-                this.configService.store.erdblickVersion.next(`${this.title} ${data.toString()}`);
+                this.configService.model.erdblickVersion.next(`${this.title} ${data.toString()}`);
                 this.titleService.setTitle(this.capitalizeTitle(this.title));
             });
     }

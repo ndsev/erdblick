@@ -1,5 +1,5 @@
-import { InspectionStore } from "./inspection.store";
-import { AppLayoutStore } from "../layout/app-layout.store";
+import { InspectionModel } from "./inspection.model";
+import { LayoutModel } from "../layout/layout.model";
 import "@angular/compiler";
 import { describe, expect, it } from "vitest";
 import { testPersistence } from "../../test/state-owners";
@@ -10,8 +10,8 @@ const mapTileKey = "Features:map:layer:42";
 
 function createFixture() {
     const persistence = testPersistence();
-    const layout = new AppLayoutService(persistence, new AppLayoutStore(persistence));
-    const owner = new InspectionPanelService(persistence, layout, {} as never, new InspectionStore(persistence));
+    const layout = new AppLayoutService(persistence, new LayoutModel(persistence));
+    const owner = new InspectionPanelService(persistence, layout, {} as never, new InspectionModel(persistence));
     const first = owner.setSelection([{ mapTileKey, featureId: "Road.1" }], undefined, true, true)!;
     const second = owner.setSelection([{ mapTileKey, featureId: "Road.2" }], undefined, true, true)!;
     return { persistence, layout, owner, first, second };
@@ -28,18 +28,18 @@ describe("InspectionPanelService completed edits", () => {
             panelId,
             label: "Panel " + panelId,
             mapId: "map",
-            featureIds: owner.store.selection.find(panel => panel.id === panelId)!.features
+            featureIds: owner.model.selection.find(panel => panel.id === panelId)!.features
         });
         owner.openInspectionComparison({ base: entry(first), others: [entry(second)] });
-        const previousSelection = owner.store.selection;
+        const previousSelection = owner.model.selection;
         const observed: unknown[] = [];
         const subscription = persistence.observe(() => ({
-            ids: owner.store.selection.map(panel => panel.id),
-            comparedIds: owner.store.inspectionComparison
-                ? [owner.store.inspectionComparison.base, ...owner.store.inspectionComparison.others].map(item => item.panelId)
+            ids: owner.model.selection.map(panel => panel.id),
+            comparedIds: owner.model.inspectionComparison
+                ? [owner.model.inspectionComparison.base, ...owner.model.inspectionComparison.others].map(item => item.panelId)
                 : [],
-            layoutIds: Object.keys(layout.store.dialogLayoutsState.value),
-            columnIds: Object.keys(owner.store.inspectionTreeHiddenColumnsState.value)
+            layoutIds: Object.keys(layout.model.dialogLayoutsState.value),
+            columnIds: Object.keys(owner.model.inspectionTreeHiddenColumnsState.value)
         })).subscribe(value => observed.push(value));
 
         if (removal === "one panel") owner.unsetPanel(first);
@@ -58,14 +58,14 @@ describe("InspectionPanelService completed edits", () => {
 
     it("docks and focuses a panel with the final lock and dock tab in one commit", () => {
         const { persistence, layout, owner, first, second } = createFixture();
-        layout.store.dockActiveTab = "search";
+        layout.model.dockActiveTab = "search";
         const observed: unknown[] = [];
         const subscription = persistence.observe(() => ({
-            panels: owner.store.selection.map(panel => ({
+            panels: owner.model.selection.map(panel => ({
                 id: panel.id, undocked: panel.undocked, locked: panel.locked, focused: !!panel.focused
             })),
-            dockOpen: layout.store.isDockOpen,
-            tab: layout.store.dockActiveTab
+            dockOpen: layout.model.isDockOpen,
+            tab: layout.model.dockActiveTab
         })).subscribe(value => observed.push(value));
 
         owner.setInspectionPanelUndockedState(first, false);
@@ -93,15 +93,15 @@ describe("InspectionPanelService completed edits", () => {
         const { persistence, layout, owner, first, second } = createFixture();
         owner.setInspectionPanelUndockedState(first, false);
         owner.setFocusedInspectionPanel(second);
-        layout.store.isDockOpen = false;
-        layout.store.dockActiveTab = "search";
-        const previousSelection = owner.store.selection;
+        layout.model.isDockOpen = false;
+        layout.model.dockActiveTab = "search";
+        const previousSelection = owner.model.selection;
         const observed: unknown[] = [];
         const subscription = persistence.observe(() => ({
-            features: owner.store.selection.map(panel => panel.features[0].featureId),
+            features: owner.model.selection.map(panel => panel.features[0].featureId),
             focused: owner.focusedInspectionPanelId,
-            dockOpen: layout.store.isDockOpen,
-            tab: layout.store.dockActiveTab
+            dockOpen: layout.model.isDockOpen,
+            tab: layout.model.dockActiveTab
         })).subscribe(value => observed.push(value));
 
         owner.toggleInspectionFeatureHighlight(first, mapTileKey, "Road.1:attribute#0");
