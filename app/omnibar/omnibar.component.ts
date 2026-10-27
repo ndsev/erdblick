@@ -9,13 +9,13 @@ import {
     ViewChild
 } from "@angular/core";
 import { debounce, debounceTime, distinctUntilChanged, Subject, Subscription, switchMap, timer } from "rxjs";
-import { RegisteredActionCandidate } from "../actions/app-action";
-import { ActionRegistry } from "../actions/action-registry.service";
+import { RegisteredActionCandidate } from "../action/action.model";
+import { AppActionRegistry } from "../action/action-registry.service";
 import { RightClickMenuService } from "../mapview/rightclickmenu.service";
 import { AppDialogComponent } from "../layout/app-dialog.component";
-import getCaretCoordinates from "../shared/caret.util";
-import { InfoMessageService } from "../shared/info.service";
-import { KeyboardService } from "../shared/keyboard.service";
+import getCaretCoordinates from "./caret.util";
+import { InfoMessageService } from "../diagnostics/info.service";
+import { KeyboardService } from "../keyboard/keyboard.service";
 import {
     historyEntryDedupeKey,
     historyEntryKey,
@@ -29,15 +29,15 @@ import {
 } from "./omnibar-history";
 import {
     featureSearchActionPayloadFromCompletion,
-    FeatureSearchService
-} from "../feature-search/feature.search.service";
+    SearchService
+} from "../search/search.service";
 import {
     JumpTargetService
 } from "../navigation/jump.service";
 import { LocationNavigationService } from "../navigation/location-navigation.service";
-import { isSupportedLocationSearchQuery, LocationSearchService } from "../location-search/location.search.service";
-import { OmnibarModel } from "./omnibar.model";
-import { CompletionCandidate } from "../feature-search/feature-search.types";
+import { isSupportedLocationSearchQuery, GeolocationService } from "../geolocation/geolocation.service";
+import { OmnibarState } from "./omnibar.state";
+import { CompletionCandidate } from "../search/feature-search.types";
 
 interface OmnibarHistoryViewEntry extends OmnibarHistoryEntry {
     label: string;
@@ -88,7 +88,7 @@ interface OmnibarResizeSession {
             </div>
 
             <div class="resizable-container" data-testid="omnibar-container" #omnibarControls>
-                <app-dialog #actionsdialog class="omnibar-menu-dialog" data-testid="omnibar-menu-dialog" [showHeader]="false" [(visible)]="model.isOpen"
+                <app-dialog #actionsdialog class="omnibar-menu-dialog" data-testid="omnibar-menu-dialog" [showHeader]="false" [(visible)]="state.isOpen"
                           [baseZIndex]="actionsBaseZIndex"
                           [focusOnShow]="false"
                           [draggable]="false" [resizable]="false" [closeOnEscape]="false">
@@ -147,7 +147,7 @@ interface OmnibarResizeSession {
                         </div>
                     </div>
                 </app-dialog>
-                @if (model.isOpen) {
+                @if (state.isOpen) {
                     <div class="app-resize-handle app-resize-handle-se app-resize-horizontal omnibar-resize-handle"
                          data-testid="omnibar-resize-handle"
                          aria-hidden="true"
@@ -236,12 +236,12 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         private messageService: InfoMessageService,
         private jumpService: JumpTargetService,
         private menuService: RightClickMenuService,
-        public featureSearch: FeatureSearchService,
+        public featureSearch: SearchService,
         private locationNavigation: LocationNavigationService,
         private changeDetectorRef: ChangeDetectorRef,
-        public readonly locationSearch: LocationSearchService,
-        private readonly actions: ActionRegistry,
-        public readonly model: OmnibarModel) {
+        public readonly locationSearch: GeolocationService,
+        private readonly actions: AppActionRegistry,
+        public readonly state: OmnibarState) {
         this.keyboardService.registerShortcut("Ctrl+k", this.focusShortcutHandler);
 
         this.subscriptions.add(this.jumpService.targetValueSubject.subscribe((event: string) => {
@@ -257,7 +257,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
 
         this.subscriptions.add(this.locationSearchQueryChanged.pipe(
             debounce(() => timer(this.locationSearch.debounceMs)),
-            switchMap(query => this.locationSearch.search(query, this.locationSearch.model.locationSearchResultLimit))
+            switchMap(query => this.locationSearch.search(query, this.locationSearch.state.locationSearchResultLimit))
         ).subscribe(matches => {
             const completedQuery = this.inputValue.trim();
             // A cached provider can complete synchronously while Angular is
@@ -277,7 +277,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
             }, 0);
         }));
 
-        this.subscriptions.add(this.locationSearch.model.locationSearchResultLimitState.subscribe(() => {
+        this.subscriptions.add(this.locationSearch.state.locationSearchResultLimitState.subscribe(() => {
             this.updateLocationSearchQuery(this.inputValue);
             this.refreshActionMenu();
         }));
@@ -304,7 +304,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
             }
         }));
 
-        this.subscriptions.add(this.model.historyState.subscribe(() => this.reloadHistory()));
+        this.subscriptions.add(this.state.historyState.subscribe(() => this.reloadHistory()));
 
         this.subscriptions.add(this.featureSearch.completionCandidates.pipe(distinctUntilChanged()).subscribe((value: CompletionCandidate[]) => {
             if (this.isCompletionDismissedFor(this.inputValue, this.cursorPosition)) {
@@ -562,7 +562,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
 
     /** Executes one omnibar action and records it in the bounded local history. */
     private executeAndRemember(entry: OmnibarHistoryEntry): void {
-        this.model.remember(entry);
+        this.state.remember(entry);
         this.executeHistoryEntry(entry);
         this.reloadHistory();
     }
@@ -572,7 +572,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
      * Reloads persisted omnibar history and drops entries that no longer point at valid actions.
      */
     private reloadHistory() {
-        const rawEntries = this.model.historyState.value;
+        const rawEntries = this.state.historyState.value;
         const migratedEntries: Array<OmnibarHistoryEntry> = [];
         const seenKeys = new Set<string>();
         let shouldRewrite = false;
@@ -620,7 +620,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         this.history = migratedEntries.map(entry => this.toHistoryViewEntry(entry));
         this.refreshVisibleHistory();
         if (shouldRewrite) {
-            this.model.replaceHistory(migratedEntries);
+            this.state.replaceHistory(migratedEntries);
         }
     }
 
@@ -631,7 +631,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
 
         const key = historyEntryKey(entry);
         this.history = this.history.filter(historyEntry => historyEntryKey(historyEntry) !== key);
-        this.model.replaceHistory(this.history.map(historyEntry => ({
+        this.state.replaceHistory(this.history.map(historyEntry => ({
             version: 2,
             actionId: historyEntry.actionId,
             input: historyEntry.input,
@@ -654,7 +654,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
      */
     showActionOverlay() {
         this.updateCursor();
-        this.model.isOpen = true;
+        this.state.isOpen = true;
         this.setInputValue(this.inputValue);
         this.refreshOverlayZIndices();
     }
@@ -790,7 +790,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         }
         this.executeResolvedTarget(item, entry);
     }
-    /** The UI supplies presentation/history; argument validation and dispatch stay in ActionRegistry. */
+    /** The UI supplies presentation/history; argument validation and dispatch stay in AppActionRegistry. */
     private executeResolvedTarget(item: RegisteredActionCandidate, entry: OmnibarHistoryEntry): void {
         this.locationNavigation.cancel();
         if (!this.canRunTarget(item, entry.input)) {
@@ -1072,7 +1072,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
 
     /** Central outside-click filter that treats every non-omnibar target as a dismissal. */
     private handleGlobalDown(event: Event): void {
-        if (!this.model.isOpen && !this.completion.visible && !this.completion.pending) {
+        if (!this.state.isOpen && !this.completion.visible && !this.completion.pending) {
             return;
         }
         const target = event.target instanceof HTMLElement ? event.target : null;

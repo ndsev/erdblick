@@ -1,4 +1,4 @@
-import type { TileFeatureId } from "../inspection/inspection-state";
+import type { TileFeatureId } from "../inspection/inspection.model";
 import type { FilterChannelDefinition } from "../mapdata/filter-subscription";
 import {
     partitionKey,
@@ -8,7 +8,7 @@ import type { StyleFilterPlan } from "../mapdata/styled-mapget-layer";
 import {
     parseFeatureInspectionTarget,
     type FeatureInspectionTarget
-} from "../shared/tile-feature-id";
+} from "../utils/tile-feature-id.util";
 
 /** One visible inspection target with the partition required by exact-root requests. */
 export type InteractionHighlightTarget = TileFeatureId & {

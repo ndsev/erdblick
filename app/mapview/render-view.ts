@@ -1,7 +1,7 @@
 import { BehaviorSubject, type Observable } from "rxjs";
 import { Viewport } from "../../build/libs/core/erdblick-core";
-import { TileFeatureId } from "../inspection/inspection-state";
-import { CameraViewState } from "./map-view-state";
+import { TileFeatureId } from "../inspection/inspection.model";
+import { CameraViewState } from "./mapview.model";
 
 /** WGS84 rectangle used for fit-to-bounds navigation requests. */
 export interface RenderRectangle {

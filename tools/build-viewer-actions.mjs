@@ -65,7 +65,7 @@ try {
     }
 }
 
-const output = "app/actions/generated";
+const output = "app/action/generated";
 const catalog = JSON.parse(readFileSync(`${output}/web-mcp-actions.json`, "utf8"));
 // Tests and browser clients obtain types from the same collected schemas.
 // No controller exports a second declaration map for TypeScript consumers.

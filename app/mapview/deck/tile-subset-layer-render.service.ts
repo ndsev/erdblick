@@ -1,13 +1,13 @@
 import { Injectable, Optional } from "@angular/core";
 import { skip, Subject } from "rxjs";
-import { pointCloudInputBudget } from "../../shared/point-cloud-input-budget";
+import { pointCloudInputBudget } from "../../mapdata/point-cloud-input-budget.model";
 import {
     DEFAULT_POINT_CLOUD_POLICY,
     pointCloudSpacingMeters,
     type PointCloudRenderPolicy
-} from "../../rendering/point-cloud-policy";
-import { AUTO_TILE_SUBSET_RENDER_WORKER_COUNT } from "../../rendering/tile-render-policy";
-import { RenderingModel } from "../../rendering/rendering.model";
+} from "../point-cloud-policy.model";
+import { AUTO_TILE_SUBSET_RENDER_WORKER_COUNT } from "../tile-render-policy.model";
+import { MapViewState } from "../mapview.state";
 import { gpuIconAtlasService } from "./gpu-icon-atlas.service";
 import { gpuMemoryBudget, type GpuMemoryReservation } from "./gpu-memory-budget";
 import { GPU_RENDER_PACKET_MAX_BYTES } from "./gpu-render-packet";
@@ -275,7 +275,7 @@ export class TileSubsetLayerRenderService {
     /** Track runtime worker-count changes when application state is available. */
     constructor(
         @Optional()
-        private readonly appState: RenderingModel | null = null
+        private readonly appState: MapViewState | null = null
     ) {
         if (!appState) {
             return;

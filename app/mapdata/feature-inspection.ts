@@ -2,9 +2,9 @@ import type {
     TileFeatureLayer,
     TileLayerParser
 } from "../../build/libs/core/erdblick-core";
-import type { TileFeatureId } from "../inspection/inspection-state";
+import type { TileFeatureId } from "../inspection/inspection.model";
 import { coreLib, uint8ArrayToWasm } from "../integrations/wasm";
-import { stripFeatureInspectionTarget } from "../shared/tile-feature-id";
+import { stripFeatureInspectionTarget } from "../utils/tile-feature-id.util";
 import {
     parsePartition,
     partitionKey,

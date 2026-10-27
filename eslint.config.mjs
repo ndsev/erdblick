@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import js from "@eslint/js";
 import { FlatCompat } from "@eslint/eslintrc";
+import noCombineAppState from "./tools/eslint/no-combine-app-state.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,7 +17,7 @@ const compat = new FlatCompat({
 
 export default [
     // Catalog output is generated and type-checked; lint the generator and owners.
-    { ignores: ["app/actions/generated/**"] },
+    { ignores: ["app/action/generated/**"] },
     ...compat.extends("eslint:recommended", "plugin:@typescript-eslint/recommended"),
     {
         plugins: {
@@ -53,5 +54,29 @@ export default [
             "no-useless-escape": "off",
             "@typescript-eslint/no-loss-of-precision": "off",
         },
+    },
+    {
+        files: ["app/**/*.ts", "tests/app/**/*.ts", "tests/support/**/*.ts"],
+        languageOptions: {
+            parserOptions: {
+                project: "./tsconfig.eslint.json",
+                tsconfigRootDir: __dirname
+            }
+        },
+        plugins: {
+            erdblick: { rules: { "no-combine-app-state": noCombineAppState } }
+        },
+        rules: { "erdblick/no-combine-app-state": "error" }
+    },
+    {
+        // Angular only discovers tests/app. Catch a misplaced spec during lint
+        // instead of silently leaving it out of the test run.
+        files: ["app/**/*.spec.ts"],
+        rules: {
+            "no-restricted-syntax": ["error", {
+                selector: "Program",
+                message: "Place application specs under tests/app/, mirroring their app/ domain path."
+            }]
+        }
     },
 ];

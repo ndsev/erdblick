@@ -1,111 +1,66 @@
-/**
- * Saved layout of the dock, inspection tabs and dialogs. Components can observe
- * these AppStates without constructing AppLayoutService, which coordinates
- * opening, closing, focus and the inspection panel lifecycle.
- */
-import { Injectable } from "@angular/core";
-import { z } from "zod";
-import { InspectionDialogLayout } from "../inspection/inspection-state";
-import { Boolish } from "../state/app-state";
-import { AppStateService } from "../state/app-state.service";
-import { AppDialogLayout, INSPECTION_DOCK_TAB_ID } from "./app-layout";
+export const DEFAULT_EM_WIDTH = 30;
 
-@Injectable({ providedIn: "root" })
-export class LayoutModel {
-    constructor(private readonly persistence: AppStateService) {}
+export const DEFAULT_EM_HEIGHT = 40;
 
-    readonly mapsOpenState = this.persistence.registerState<boolean>({
-        name: "mapsOpenState",
-        defaultValue: false,
-        schema: Boolish
-    });
+export const DEFAULT_DOCKED_EM_HEIGHT = 20;
 
-    readonly dockOpenState = this.persistence.registerState<boolean>({
-        name: "dockOpenState",
-        defaultValue: false,
-        schema: Boolish
-    });
+export const ABOUT_DIALOG_LAYOUT_ID = 'about-dialog';
 
-    /** Local layout preferences; deliberately absent from shareable map URLs. */
-    readonly dockWidthState = this.persistence.registerState<number | null>({
-        name: "dockWidth",
-        defaultValue: null,
-        schema: z.number().min(0).max(32768).nullable()
-    });
+export const LEGAL_INFO_DIALOG_LAYOUT_ID = 'legal-info-dialog';
 
-    readonly viewPanelSizesState = this.persistence.registerState<number[]>({
-        name: "viewPanelSizes",
-        defaultValue: [],
-        schema: z.array(z.number().min(0).max(100)).max(2)
-    });
+export const PREFERENCES_DIALOG_LAYOUT_ID = 'preferences-dialog';
 
-    readonly dockActiveTabState = this.persistence.registerState<string>({
-        name: "dockActiveTabState",
-        defaultValue: INSPECTION_DOCK_TAB_ID,
-        schema: z.string()
-    });
+export const KEYBOARD_DIALOG_LAYOUT_ID = 'keyboard-dialog';
 
-    readonly dockAutoCollapse = this.persistence.registerState<boolean>({
-        name: "dockAutoCollapse",
-        defaultValue: true,
-        schema: Boolish
-    });
+export const DATASOURCES_EDITOR_DIALOG_LAYOUT_ID = 'datasources-editor-dialog';
 
-    readonly dialogLayoutsState = this.persistence.registerState<
-        Record<string, AppDialogLayout | InspectionDialogLayout>
-    >({
-        name: "dialogLayouts",
-        defaultValue: {},
-        schema: z.record(
-            z.string(),
-            z.object({
-                position: z.object({
-                    left: z.coerce.number(),
-                    top: z.coerce.number()
-                }),
-                size: z.object({
-                    width: z.coerce.number().positive(),
-                    height: z.coerce.number().positive()
-                }),
-                open: Boolish.optional(),
-                panelId: z.coerce.number().optional(),
-                slot: z.coerce.number().optional(),
-                docked: Boolish.optional(),
-                dockTab: z.string().optional(),
-                dockOrder: z.coerce.number().optional(),
-                panelSize: z
-                    .object({
-                        width: z.coerce.number().positive(),
-                        height: z.coerce.number().positive()
-                    })
-                    .optional(),
-                panelCollapsed: Boolish.optional(),
-                panelExpanded: Boolish.optional()
-            })
-        )
-    });
+export const ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID = 'advanced-preferences-dialog';
 
-    get isDockOpen() {
-        return this.dockOpenState.getValue();
-    }
+export const DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID = 'diagnostics-performance';
 
-    set isDockOpen(val: boolean) {
-        this.dockOpenState.next(val);
-    }
+export const DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID = 'diagnostics-log';
 
-    get dockActiveTab() {
-        return this.dockActiveTabState.getValue();
-    }
+export const DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID = 'diagnostics-export';
 
-    set dockActiveTab(val: string) {
-        this.dockActiveTabState.next(val || INSPECTION_DOCK_TAB_ID);
-    }
+export const CACHE_RESET_DIALOG_LAYOUT_ID = 'cache-reset-dialog';
 
-    get isDockAutoCollapsible() {
-        return this.dockAutoCollapse.getValue();
-    }
+export const STYLES_DIALOG_LAYOUT_ID = 'styles-dialog';
 
-    set isDockAutoCollapsible(val: boolean) {
-        this.dockAutoCollapse.next(val);
-    }
+export const STYLE_EDITOR_DIALOG_LAYOUT_ID = 'style-editor-dialog';
+
+export const STYLE_PRESET_EDITOR_DIALOG_LAYOUT_ID = 'style-preset-editor-dialog';
+
+export const FEATURE_SEARCH_DIALOG_LAYOUT_ID = 'feature-search';
+
+export const FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID = 'feature-search-export';
+
+export const SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID = 'source-data-selection-dialog';
+
+export const INSPECTION_DOCK_TAB_ID = 'inspection';
+
+export const SEARCH_DOCK_TAB_ID = 'search';
+
+/** Persisted top-left dialog position in viewport pixels. */
+export interface AppDialogPosition {
+    left: number;
+    top: number;
+}
+
+/** Persisted dialog size in viewport pixels. */
+export interface AppDialogSize {
+    width: number;
+    height: number;
+}
+
+/** Generic persisted dialog layout record. */
+export interface AppDialogLayout {
+    position: AppDialogPosition;
+    size: AppDialogSize;
+    open?: boolean;
+    docked?: boolean;
+    dockTab?: string;
+    dockOrder?: number;
+    panelSize?: AppDialogSize;
+    panelCollapsed?: boolean;
+    panelExpanded?: boolean;
 }

@@ -1,17 +1,17 @@
 import type { Device } from "@luma.gl/core";
 import { Matrix4 } from "@math.gl/core";
-import type { TileFeatureId } from "../../inspection/inspection-state";
+import type { TileFeatureId } from "../../inspection/inspection.model";
 import { SceneMode } from "../../integrations/geo";
 import { coreLib, uint8ArrayToWasm } from "../../integrations/wasm";
 import type { FilterTileState } from "../../mapdata/filter-tile-state";
 import type { StyledMapgetLayer } from "../../mapdata/styled-mapget-layer";
-import type { PointCloudRenderPolicy } from "../../rendering/point-cloud-policy";
+import type { PointCloudRenderPolicy } from "../point-cloud-policy.model";
 import {
     formatFeatureInspectionTarget,
     parseFeatureInspectionTarget
-} from "../../shared/tile-feature-id";
-import { sipHash64Hex } from "../../map-styles/hash";
-import type { StyleValidationReportService } from "../../map-styles/style-validation-report.service";
+} from "../../utils/tile-feature-id.util";
+import { sipHash64Hex } from "../../mapstyle/hash";
+import type { StyleValidationReportService } from "../../mapstyle/style-validation-report.service";
 import type { IRenderSceneHandle } from "../render-view";
 import { DeckLayerRegistry } from "./deck-layer-registry";
 import {

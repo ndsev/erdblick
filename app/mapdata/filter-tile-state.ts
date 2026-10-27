@@ -1,4 +1,4 @@
-import {pointCloudInputBudget} from "../shared/point-cloud-input-budget";
+import {pointCloudInputBudget} from "./point-cloud-input-budget.model";
 import type {TileSubsetDelivery} from "./filter-subscription";
 import {
     partitionKey,

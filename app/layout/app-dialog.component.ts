@@ -13,8 +13,8 @@ import {
     ViewChild
 } from '@angular/core';
 import { Dialog, DialogModule } from 'primeng/dialog';
-import { UiAutomationService } from '../actions/ui-automation.service';
-import { ViewerResizeSize } from '../actions/ui-automation.service';
+import { UiAutomationService } from '../action/ui-automation.service';
+import { ViewerResizeSize } from '../action/ui-automation.service';
 import {
     AppDialogBounds,
     AppDialogResizeCorner,
@@ -22,9 +22,9 @@ import {
     resizeAppDialogBounds,
     resolveAppDialogCssLength
 } from './app-dialog-resize';
-import { AppDialogLayout } from "./app-layout";
-import { AppLayoutService } from "./app-layout.service";
-import { AppStateService } from "../state/app-state.service";
+import { AppDialogLayout } from "./layout.model";
+import { LayoutService } from "./layout.service";
+import { AppStateService } from "../appstate/appstate.service";
 
 interface AppDialogResizeSession {
     pointerId: number;
@@ -150,7 +150,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     constructor(private readonly stateService: AppStateService,
         private readonly renderer: Renderer2,
         private readonly viewerUi: UiAutomationService,
-        public readonly layout: AppLayoutService) {
+        public readonly layout: LayoutService) {
         this.refreshEffectiveStyle();
     }
 

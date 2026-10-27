@@ -1,72 +1,160 @@
-/**
- * Saved log filters and export preferences for the diagnostics UI. Observing
- * these AppStates does not start diagnostic collection; collecting, formatting
- * and exporting reports remain in DiagnosticsFacadeService.
- */
-import { Injectable } from "@angular/core";
-import { z } from "zod";
-import { Boolish } from "../state/app-state";
-import { AppStateService } from "../state/app-state.service";
-import type { DiagnosticsExportOptions, DiagnosticsLogFilter } from "./diagnostics.types";
+/** Severity levels used by the diagnostics log. */
+export type LogLevel = 'info' | 'warn' | 'error';
 
-@Injectable({ providedIn: "root" })
-export class DiagnosticsModel {
-    constructor(private readonly persistence: AppStateService) {}
+/** Simple `done/total` counter pair used throughout the diagnostics UI. */
+export interface ProgressCounter {
+    done: number;
+    total: number;
+}
 
-    readonly diagnosticsLogFilterState = this.persistence.registerState<DiagnosticsLogFilter>({
-        name: "diagnosticsLogFilter",
-        defaultValue: {
-            info: true,
-            warn: true,
-            error: true
-        },
-        schema: z.object({
-            info: Boolish,
-            warn: Boolish,
-            error: Boolish
-        })
-    });
+/** Miscellaneous loading metrics shown as compact bubbles in the progress HUD. */
+export interface LoadingStatBubbles {
+    downstreamBytesPerSecond: number;
+    pullResponses: number;
+    pullGzipResponses: number;
+    pullUncompressedBytes: number;
+    pullCompressedBytesKnown: number;
+    pullCompressionRatioPct: number | null;
+    pullCompressionCoveragePct: number;
+    features: number;
+    vertices: number;
+    parseQueueSize: number;
+    renderQueueSize: number;
+    frameTimeMs: number;
+    renderSeconds: number;
+}
 
-    readonly diagnosticsExportOptionsState = this.persistence.registerState<DiagnosticsExportOptions>({
-        name: "diagnosticsExportOptions",
-        defaultValue: {
-            includeProgress: true,
-            includePerformance: true,
-            includeLogs: true,
-            logFilter: {
-                info: true,
-                warn: true,
-                error: true
-            }
-        },
-        schema: z.object({
-            includeProgress: Boolish,
-            includePerformance: Boolish,
-            includeLogs: Boolish,
-            logFilter: z.object({
-                info: Boolish,
-                warn: Boolish,
-                error: Boolish
-            })
-        })
-    });
+/** Full tile-pipeline progress model consumed by diagnostics widgets. */
+export interface TilePipelineProgress {
+    backend: ProgressCounter;
+    rendered: ProgressCounter;
+    bubbles: LoadingStatBubbles;
+}
 
-    get diagnosticsLogFilter() {
-        return this.diagnosticsLogFilterState.getValue();
-    }
+/** High-level counts for the currently tracked tiles. */
+export interface TileStateCounts {
+    expected: number;
+    loaded: number;
+    cached: number;
+    errors: number;
+}
 
-    set diagnosticsLogFilter(val: DiagnosticsLogFilter) {
-        this.diagnosticsLogFilterState.next({ ...val });
-    }
+/** Counts for rendered or queued visualization work. */
+export interface VisualizationCounts {
+    present: number;
+    queue: number;
+    tilesWithFeatures: number;
+    features: number;
+}
 
-    get diagnosticsExportOptions() {
-        return this.diagnosticsExportOptionsState.getValue();
-    }
+/** Backend connectivity state shown in the diagnostics UI. */
+export interface BackendState {
+    connected: boolean;
+    lastStatus?: string;
+    lastError?: string;
+    lastStatusAt?: number;
+}
 
-    set diagnosticsExportOptions(val: DiagnosticsExportOptions) {
-        this.diagnosticsExportOptionsState.next({
-            ...val,
-            logFilter: { ...val.logFilter }
-        });
-    }
+/** Point-in-time diagnostics snapshot combining tile, progress, and backend state. */
+export interface DiagnosticsSnapshot {
+    at: number;
+    tiles: TileStateCounts;
+    progress: TilePipelineProgress;
+    backend: BackendState;
+    /** Real in-flight work, excluding pending partitions and recovery waits. */
+    loading?: boolean;
+    /** Current failures and recovery, independent of historical error logs. */
+    recovery?: {retrying: boolean; failed: boolean; message: string};
+}
+
+/** Aggregated performance statistic derived from one raw backend stat path. */
+export interface PerfStat {
+    key: string;
+    path: string[];
+    /** View-wide live value which is independent of the tile/layer filter. */
+    scope?: 'view';
+    unit?: string;
+    peak: number;
+    average?: number;
+    min: number;
+    peakTileIds?: string[];
+}
+
+/** Optional filter scope for Performance Diagnostics, plus a transient dialog request id when applied. */
+export interface PerformanceDiagnosticsScope {
+    tileIds: string[];
+    layers: Array<{
+        mapId: string;
+        layerId: string;
+    }>;
+    source?: 'context-menu';
+    requestId?: number;
+}
+
+/** One diagnostics log entry, including optional structured payload data. */
+export interface LogEntry {
+    at: number;
+    level: LogLevel;
+    message: string;
+    data?: unknown;
+}
+
+/** Checkbox state for log-level filtering in dialogs and exports. */
+export interface DiagnosticsLogFilter {
+    info: boolean;
+    warn: boolean;
+    error: boolean;
+}
+
+/** Persisted options for diagnostics export generation. */
+export interface DiagnosticsExportOptions {
+    includeProgress: boolean;
+    includePerformance: boolean;
+    includeLogs: boolean;
+    logFilter: DiagnosticsLogFilter;
+}
+
+/** Tile-size histogram reported by `/status-data`. */
+export interface TileSizeDistribution {
+    'tile-count'?: number;
+    'total-tile-bytes'?: number;
+    'min-bytes'?: number;
+    'mean-bytes'?: number;
+    'max-bytes'?: number;
+    histogram?: Array<{
+        label?: string;
+        count?: number;
+    }>;
+}
+
+/** Subset of backend status data relevant for diagnostics export. */
+export interface BackendStatusDataSummary {
+    timestampMs?: number;
+    service?: {
+        datasources?: unknown;
+        'active-requests'?: unknown;
+    };
+    cache?: unknown;
+    tilesWebsocket?: unknown;
+    tileSizeDistribution?: TileSizeDistribution;
+    statusFetchError?: string;
+}
+
+/** JSON payload written when the user exports diagnostics. */
+export interface DiagnosticsExportBundle {
+    exportedAt: string;
+    metadata: {
+        erdblickVersion?: string;
+        distributionVersions?: unknown;
+        userAgent?: string;
+        url?: string;
+        backendStatusFetchError?: string;
+    };
+    backendStatus?: BackendStatusDataSummary;
+    progress?: DiagnosticsSnapshot;
+    performance?: {
+        stats: PerfStat[];
+        raw?: unknown;
+    };
+    logs?: LogEntry[];
 }

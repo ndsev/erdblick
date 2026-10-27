@@ -27,8 +27,8 @@ Mapget owns:
 
 ```mermaid
 flowchart LR
-  Editor["FeatureSearchComponent<br/>query + scope + fields"]
-  Session["FeatureSearchService<br/>session state"]
+  Editor["SearchComponent<br/>query + scope + fields"]
+  Session["SearchService<br/>session state"]
   Style["synthetic FeatureLayerStyle v2"]
   Styled["StyledMapgetLayer<br/>presentationKind=search"]
   Filter["/interactive filter channels"]
@@ -43,7 +43,7 @@ flowchart LR
   Subset --> Render --> Map
 ```
 
-`FeatureSearchService` owns a shared search presentation rather than one
+`SearchService` owns a shared search presentation rather than one
 backend request per view. Every consuming view attaches that presentation to
 its own controller/render scene.
 
@@ -97,7 +97,7 @@ types with the search selection, and combines the normalized backend query
 with each channel's entry predicate. It then appends one dedicated
 `search-results:<presentation>` channel containing the result-list fields.
 The subset renderer deliberately skips that reserved channel, while
-`FeatureSearchService` reads only its stored ordinal. Results therefore enter
+`SearchService` reads only its stored ordinal. Results therefore enter
 the list once even when several rendering rules match them.
 
 ### Color mapping
@@ -180,7 +180,7 @@ A delivered `TileSubsetLayer` serves two consumers:
 
 1. `TileSubsetLayerVisualization` renders it through the global finite worker
    service.
-2. `FeatureSearchService` extracts typed entries into result-list records.
+2. `SearchService` extracts typed entries into result-list records.
 
 List extraction is scheduled through `FrameBudgetLoop` so a large result tile
 cannot monopolize the browser thread. Tasks are generation-aware and
@@ -271,11 +271,11 @@ presentation-specific.
 
 ## Key files
 
-- `app/feature-search/feature.search.service.ts`
-- `app/feature-search/feature-search-style.ts`
-- `app/feature-search/feature.search.component.ts`
-- `app/feature-search/search-completion.worker.ts`
-- `app/shared/frame-budget-loop.ts`
+- `app/search/search.service.ts`
+- `app/search/feature-search-style.ts`
+- `app/search/search.component.ts`
+- `app/search/search-completion.worker.ts`
+- `app/utils/frame-budget-loop.util.ts`
 - `app/mapdata/styled-mapget-layer.ts`
 - `app/mapview/view-layer.controller.ts`
 - `app/mapview/deck/tile-subset-layer.visualization.ts`

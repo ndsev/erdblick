@@ -2,27 +2,27 @@ import { Injectable, NgZone } from "@angular/core";
 import { BehaviorSubject } from "rxjs";
 import { z } from "zod";
 import { Feature } from "../../build/libs/core/erdblick-core";
-import { ActionRegistry } from "../actions/action-registry.service";
+import { AppActionRegistry } from "../action/action-registry.service";
 
-import { colorSchema, ControlReadContext, identifierSchema, indexSchema, rejectAction } from "../actions/app-action";
-import { AppActionContributor } from "../actions/app-action-contributor";
+import { colorSchema, ControlReadContext, identifierSchema, indexSchema, rejectAction } from "../action/action.model";
+import { AppActionContributor } from "../action/action-contributor.model";
 import { Cartesian3 } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
 import { featureSetsEqual, FeatureWrapper } from "../mapdata/feature-inspection";
 import { MapTileStreamService, RetainedTileExpiryOwner } from "../mapdata/map-tile-stream.service";
 import { parsePartition, partitionKeySuffix } from "../mapdata/partition";
 import { TileDeliveryError } from "../mapdata/tile-diagnostics";
-import { MapViewService } from "../mapview/map-view.service";
-import { MapViewModel } from "../mapview/mapview.model";
-import { InfoMessageService } from "../shared/info.service";
-import { KeyboardService } from "../shared/keyboard.service";
-import { tileFeatureInteractionTargetsEqual } from "../shared/tile-feature-id";
-import { boundedUnicodeString } from "../shared/unicode-string";
-import { deepEquals } from "../state/app-state";
-import { AppStateService } from "../state/app-state.service";
+import { MapViewService } from "../mapview/mapview.service";
+import { MapViewState } from "../mapview/mapview.state";
+import { InfoMessageService } from "../diagnostics/info.service";
+import { KeyboardService } from "../keyboard/keyboard.service";
+import { tileFeatureInteractionTargetsEqual } from "../utils/tile-feature-id.util";
+import { boundedUnicodeString } from "../utils/unicode-string.util";
+import { deepEquals } from "../appstate/appstate";
+import { AppStateService } from "../appstate/appstate.service";
 import { featureIdentitySchema } from "./feature-identity";
 import { InspectionPanelService } from "./inspection-panel.service";
-import { InspectionPanelModel, SelectedSourceData, TileFeatureId } from "./inspection-state";
+import { InspectionPanelModel, SelectedSourceData, TileFeatureId } from "./inspection.model";
 
 interface Wgs84Point {
     x: number;
@@ -70,14 +70,14 @@ export class InspectionSelectionService implements AppActionContributor {
         private readonly messageService: InfoMessageService,
         private readonly ngZone: NgZone,
         public readonly inspectionState: InspectionPanelService,
-        public readonly viewSettings: MapViewModel
+        public readonly viewSettings: MapViewState
     ) {
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFocusedInspectionPanel.bind(this));
     }
 
     /** Wires app-state selection projection once the tile stream can serve feature loads. */
     initialize(): void {
-        this.inspectionState.model.selectionState.subscribe((selected) => {
+        this.inspectionState.state.selectionState.subscribe((selected) => {
             this.ngZone.run(() => this.selectionIdsTopic.next(selected));
             const revision = ++this.selectionConversionRevision;
             const demanded = new Set(selected.map((panel) => this.featureLoadKey(panel.features)));
@@ -297,7 +297,7 @@ export class InspectionSelectionService implements AppActionContributor {
 
         this.stateService.transaction(() => {
             if (foundFeatureCount === 1) {
-                const currentPanels = this.inspectionState.model.selection;
+                const currentPanels = this.inspectionState.state.selection;
                 const featureAlreadyInspected = this.panelsContainFeature(currentPanels, featureIds[0]);
                 const reusableFeaturePanel = currentPanels.some(
                     (panel) => panel.sourceData === undefined && !panel.locked
@@ -305,7 +305,7 @@ export class InspectionSelectionService implements AppActionContributor {
                 if (
                     featureAlreadyInspected ||
                     reusableFeaturePanel ||
-                    currentPanels.length < this.inspectionState.model.inspectionsLimit
+                    currentPanels.length < this.inspectionState.state.inspectionsLimit
                 ) {
                     const panelId = this.inspectionState.setSelection(
                         [featureIds[0]],
@@ -322,10 +322,10 @@ export class InspectionSelectionService implements AppActionContributor {
                 this.inspectionState.unsetUnlockedSelections();
                 let remainingSlots = Math.max(
                     0,
-                    this.inspectionState.model.inspectionsLimit - this.inspectionState.model.selection.length
+                    this.inspectionState.state.inspectionsLimit - this.inspectionState.state.selection.length
                 );
                 for (const featureId of featureIds) {
-                    if (this.panelsContainFeature(this.inspectionState.model.selection, featureId)) {
+                    if (this.panelsContainFeature(this.inspectionState.state.selection, featureId)) {
                         continue;
                     }
                     if (remainingSlots <= 0) {
@@ -343,7 +343,7 @@ export class InspectionSelectionService implements AppActionContributor {
         });
 
         const inspectedFeatureCount = featureIds.filter((featureId) =>
-            this.panelsContainFeature(this.inspectionState.model.selection, featureId)
+            this.panelsContainFeature(this.inspectionState.state.selection, featureId)
         ).length;
         if (inspectedFeatureCount < foundFeatureCount) {
             this.messageService.showWarning(
@@ -386,7 +386,7 @@ export class InspectionSelectionService implements AppActionContributor {
     /** Publishes hover ids without loading feature data; inspection hovers may opt into remote styles. */
     setHoveredFeatures(tileFeatureIds: (TileFeatureId | null)[], allowRemoteHighlight = false): void {
         const requestedTargets = tileFeatureIds.filter((id): id is TileFeatureId => !!id);
-        const selectedTargets = this.inspectionState.model.selectionState
+        const selectedTargets = this.inspectionState.state.selectionState
             .getValue()
             .flatMap((panel) => panel.features);
         const hoverTargets = requestedTargets.filter(
@@ -701,7 +701,7 @@ export class InspectionSelectionService implements AppActionContributor {
         this.messageService.showError(message);
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: ActionRegistry): void {
+    registerActions(actions: AppActionRegistry): void {
         actions.registerAction(
             {
                 name: "viewer_inspect",
@@ -791,7 +791,7 @@ export class InspectionSelectionService implements AppActionContributor {
     }
 
     /** Registers typed state readers and writers without exposing persistence keys. */
-    registerControls(actions: ActionRegistry): void {
+    registerControls(actions: AppActionRegistry): void {
         actions.registerControl(
             {
                 name: "app.selections",
@@ -864,7 +864,7 @@ export class InspectionSelectionService implements AppActionContributor {
 
     /** Inspection identities and loading flags, without loading features or traversing trees. */
     inspectionSummary(panelId: number | undefined, context: ControlReadContext) {
-        const panels = this.inspectionState.model.selection;
+        const panels = this.inspectionState.state.selection;
         if (panelId !== undefined && !panels.some((panel) => panel.id === panelId))
             rejectAction("The inspection no longer exists");
         const runtime = new Map(this.selectionTopic.value.map((panel) => [panel.id, panel]));
@@ -970,13 +970,13 @@ export class InspectionSelectionService implements AppActionContributor {
         if (input.panelId !== undefined && input.newPanel)
             rejectAction("panelId and newPanel are mutually exclusive", "invalid_arguments");
         if (input.panelId !== undefined) {
-            const panel = this.inspectionState.model.selection.find((panel) => panel.id === input.panelId);
+            const panel = this.inspectionState.state.selection.find((panel) => panel.id === input.panelId);
             if (!panel || panel.locked || panel.sourceData)
                 rejectAction("An explicit target must be an existing unlocked feature panel");
         }
         // Reject a stale intent if any selection edit completes while identities are being located.
         let changed: boolean;
-        const guard = this.inspectionState.model.selectionState.subscribe(() => {
+        const guard = this.inspectionState.state.selectionState.subscribe(() => {
             changed = true;
         });
         changed = false;
@@ -1005,7 +1005,7 @@ export class InspectionSelectionService implements AppActionContributor {
                         input.newPanel ?? false
                     );
                 } else this.inspectFeatureIds(features, input.lock ?? false);
-                const panels = this.inspectionState.model.selection.filter(
+                const panels = this.inspectionState.state.selection.filter(
                     (panel) =>
                         !panel.sourceData &&
                         (!input.newPanel || panel.id === newPanelId) &&

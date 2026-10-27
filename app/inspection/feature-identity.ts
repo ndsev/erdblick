@@ -1,6 +1,6 @@
 /** Validates feature references shared by inspection, navigation and tile requests. */
 import { z } from "zod";
-import { identifierSchema, indexSchema } from "../actions/app-action";
+import { identifierSchema, indexSchema } from "../action/action.model";
 
 const count = indexSchema;
 

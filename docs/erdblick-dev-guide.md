@@ -29,12 +29,16 @@ inspection path.
 
 ## Build and test
 
+Test sources live under `tests/`; Angular specs mirror `app/` in `tests/app/`.
+See [Test Layout and Commands](../tests/README.md) for the shared helpers,
+browser fixtures and MapViewer integration paths.
+
 Native core:
 
 ```bash
 cmake -S . -B build-native -G Ninja
-cmake --build build-native
-ctest --test-dir build-native
+cmake --build build-native --parallel 8
+ctest --test-dir build-native --output-on-failure --no-tests=error
 ```
 
 For changes to the native/WASM core or its mapget/simfil dependencies, use the
@@ -48,9 +52,12 @@ With matching WASM artifacts already present, frontend-only validation uses:
 
 ```bash
 npm run lint
-npm run test -- --watch=false --include <path-or-glob>
+npm run test -- --watch=false
 npm run build -- -c profiling
 ```
+
+For a focused run, add `--include '../tests/app/<domain>/**/*.spec.ts'`.
+Angular resolves that pattern relative to its `app/` source root.
 
 The build, start, watch and unit-test hooks generate the trusted viewer-action
 catalog before compiling. `./ci/10_linux_build.bash` is the clean CI build;
@@ -60,8 +67,8 @@ The action/transport browser smoke can use a matching native `mapget` executable
 without an installed Python datasource wheel. From the erdblick root:
 
 ```bash
-EB_MAPGET_CONFIG=test/mapget-native-grid.yaml npm run test:integration -- \
-  playwright/tests/tile-request.spec.ts playwright/tests/viewer-actions.spec.ts \
+EB_MAPGET_CONFIG=tests/playwright/fixtures/mapget-native-grid.yaml npm run test:integration -- \
+  tests/playwright/tests/tile-request.spec.ts tests/playwright/tests/viewer-actions.spec.ts \
   --project='' --workers=1
 ```
 
@@ -73,14 +80,14 @@ default Python example datasource and its matching protocol version.
 For the real HTTP-to-browser action path, enable the native local MCP fixture:
 
 ```bash
-EB_MAPGET_MCP_LOCAL=1 EB_MAPGET_CONFIG=test/mapget-native-grid.yaml \
-  npm run test:integration -- playwright/tests/viewer-actions-native.spec.ts \
-  playwright/tests/schema-completion.spec.ts playwright/tests/tile-request.spec.ts \
+EB_MAPGET_MCP_LOCAL=1 EB_MAPGET_CONFIG=tests/playwright/fixtures/mapget-native-grid.yaml \
+  npm run test:integration -- tests/playwright/tests/viewer-actions-native.spec.ts \
+  tests/playwright/tests/schema-completion.spec.ts tests/playwright/tests/tile-request.spec.ts \
   --project='' --workers=1
 ```
 
 This binds the test server to loopback and generates a test-only trust config
-under `playwright/.cache/`, using the catalog in the built frontend. The test
+under `tests/playwright/.cache/`, using the catalog in the built frontend. The test
 uses two actual viewer origins (`localhost` and `127.0.0.1`) and the native MCP
 endpoint, including camera targeting, synchronization and stale-session rejection.
 It does not replace OAuth/Keycloak deployment acceptance. Use an unused
@@ -94,8 +101,8 @@ layer selectors so the tile/render assertions exercise a configured style:
 MAPGET_BIN=../../cmake-build-release-with-classic/bin/mapviewer \
   EB_MAPGET_MCP_LOCAL=1 EB_MAPGET_CONFIG=../../config/mapviewer_dev.yaml \
   EB_TEST_MAP_NAME=GridDataSource EB_TEST_LAYER_NAME=DevSrc-RoadLayer \
-  npm run test:integration -- playwright/tests/viewer-actions-native.spec.ts \
-  playwright/tests/schema-completion.spec.ts playwright/tests/tile-request.spec.ts \
+  npm run test:integration -- tests/playwright/tests/viewer-actions-native.spec.ts \
+  tests/playwright/tests/schema-completion.spec.ts tests/playwright/tests/tile-request.spec.ts \
   --project='' --workers=1
 ```
 
@@ -109,8 +116,8 @@ the test identity headers on the real handshake; Chromium's extra HTTP headers
 do not cover WebSocket handshakes. Browser action/control messages are not mocked:
 
 ```bash
-EB_MAPGET_MCP_TEST_OAUTH=1 EB_MAPGET_CONFIG=test/mapget-native-grid.yaml \
-  npm run test:integration -- playwright/tests/viewer-actions-auth.spec.ts \
+EB_MAPGET_MCP_TEST_OAUTH=1 EB_MAPGET_CONFIG=tests/playwright/fixtures/mapget-native-grid.yaml \
+  npm run test:integration -- tests/playwright/tests/viewer-actions-auth.spec.ts \
   --project='' --workers=1
 ```
 
@@ -139,7 +146,7 @@ The C++ core wraps mapget models and exposes:
 The retired full-feature visualizers and `TileSearchResultLayer` wrappers do
 not coexist with this path.
 
-During nonblocking datasource startup, `MapInfoService` retains unchanged layer
+During nonblocking datasource startup, `MapDataService` retains unchanged layer
 identities and appends newly ready maps through `TileLayerParser.addDataSourceInfo`.
 Existing string dictionaries, style planners, rendered tiles and the interactive
 connection remain live. Catalog status/progress changes are not model changes.
@@ -169,7 +176,7 @@ unwrap singleton sequences.
 
 ```mermaid
 flowchart LR
-  Catalog["MapInfoService<br/>MapgetLayer catalog"]
+  Catalog["MapDataService<br/>MapgetLayer catalog"]
   Controller["ViewLayerController<br/>per logical view"]
   Styled["StyledMapgetLayer<br/>one presentation"]
   Ref["FilterSubscriptionRef"]
@@ -369,7 +376,7 @@ stays pending.
 
 ## Optional MCP browser actions
 
-`ActionRegistry` binds named controls and actions to their owning services.
+`AppActionRegistry` binds named controls and actions to their owning services.
 The [state and action architecture](erdblick-state-actions.md) explains owner registration, completed observations, stable view IDs and shared omnibar dispatch.
 
 `McpActionService` handles browser relay admission, cancellation and transport. Mapget owns MCP authentication, authorization and session routing; erdblick
@@ -588,7 +595,7 @@ Dock width and split proportions are local layout preferences, persisted after
 completed human/MCP resizing and absent from map URLs. Ratio changes update the
 splitter in place without recreating the map renderers. `UiAutomationService` owns
 only short-lived DOM references and live resize registrations; components and
-`AppLayoutService` remain the layout owners. No background DOM scan/observer or
+`LayoutService` remain the layout owners. No background DOM scan/observer or
 second layout tree is maintained.
 
 ### Application screenshots
@@ -630,8 +637,8 @@ same DOM-free Zod definitions used at runtime. Both webapp variants package
 `web-mcp-actions.json` beside `index.html`. Its `catalogId` hashes compact JSON
 with recursively sorted object keys, retained array order and ECMAScript JSON
 scalar encoding; the digest and timestamps are not hash input. Generated files
-under `app/actions/generated/` are ignored build outputs. Argument, result,
-relay and connection-info parity fixtures live in `test/viewer-actions/`.
+under `app/action/generated/` are ignored build outputs. Argument, result,
+relay and connection-info parity fixtures live in `tests/fixtures/viewer-actions/`.
 String bounds use Unicode code points, as Draft-07 specifies, not JavaScript's
 UTF-16 length. Use the shared `boundedUnicodeString`/`unicodePrefix` helpers for
 bounded contract strings and text summaries; byte budgets remain UTF-8 byte limits.
@@ -793,7 +800,7 @@ tilt. Opacity clones and camera changes reuse the buffer; the view removes the
 layer after its fade, and the layer destroys its model and buffer. Keep sublayer
 error callbacks connected to the view's existing boundary fallback.
 
-`playwright/tests/location-outline-comparison.spec.ts` compares actual rendered
+`tests/playwright/tests/location-outline-comparison.spec.ts` compares actual rendered
 pixels against Deck's PathLayer, including the zoom-12 projection transition,
 dateline repeats, holes and tiny islands. Its fixture also supports optional GPU
 timer queries for complete real boundaries. Compare total outline GPU time per
@@ -1011,9 +1018,9 @@ for reverse-proxy and permission configuration.
 Run the browser-native regression with an installed WebMCP-capable Chrome:
 
 ```sh
-MAPGET_BIN=/path/to/current/mapget EB_MAPGET_CONFIG=test/mapget-web-mcp.yaml \
+MAPGET_BIN=/path/to/current/mapget EB_MAPGET_CONFIG=tests/playwright/fixtures/mapget-web-mcp.yaml \
   EB_MAPGET_MCP_LOCAL=1 EB_WEBMCP_NATIVE=1 \
-  npm run test:integration -- playwright/tests/web-mcp.spec.ts --project='' --workers=1
+  npm run test:integration -- tests/playwright/tests/web-mcp.spec.ts --project='' --workers=1
 ```
 
 This test enables Chrome's WebMCP feature and uses real `getTools`/`executeTool`

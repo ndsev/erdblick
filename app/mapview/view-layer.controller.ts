@@ -3,11 +3,11 @@ import { Subject, Subscription } from "rxjs";
 import type {
     InspectionSelectionService
 } from "../inspection/inspection-selection.service";
-import type { InspectionPanelModel, TileFeatureId } from "../inspection/inspection-state";
+import type { InspectionPanelModel, TileFeatureId } from "../inspection/inspection.model";
 import { coreLib } from "../integrations/wasm";
 import type { FilterTileState } from "../mapdata/filter-tile-state";
 import type { HoverDetailService } from "../mapdata/hover-detail.service";
-import type { MapInfoService } from "../mapdata/map-info.service";
+import type { MapDataService } from "../mapdata/mapdata.service";
 import type { MapTileStreamService } from "../mapdata/map-tile-stream.service";
 import type { MapgetLayer } from "../mapdata/mapget-layer";
 import {
@@ -21,16 +21,16 @@ import {
     type StyleFilterPlan,
     type StyledMapgetLayerEvent
 } from "../mapdata/styled-mapget-layer";
-import type { FeatureSearchService } from "../feature-search/feature.search.service";
-import { MAX_STYLE_LOD } from "../rendering/lod-policy";
+import type { SearchService } from "../search/search.service";
+import { MAX_STYLE_LOD } from "../mapstyle/style-lod.model";
 import {
     tileFeatureInteractionTargetsEqual
-} from "../shared/tile-feature-id";
-import { sipHash64Hex } from "../map-styles/hash";
+} from "../utils/tile-feature-id.util";
+import { sipHash64Hex } from "../mapstyle/hash";
 import type {
     StyleValidationReportService
-} from "../map-styles/style-validation-report.service";
-import type { ErdblickStyle, StyleService } from "../map-styles/style.service";
+} from "../mapstyle/style-validation-report.service";
+import type { ErdblickStyle, MapStyleService } from "../mapstyle/mapstyle.service";
 import {
     resolveDeckInteractionEffect,
     type DeckInteractionEffect
@@ -53,7 +53,7 @@ import {
 import {
     MapViewService,
     ViewRecalculationReason
-} from "./map-view.service";
+} from "./mapview.service";
 import type { IRenderSceneHandle } from "./render-view";
 import type {
     ViewLayerDiagnosticsService
@@ -140,12 +140,12 @@ export class ViewLayerController {
     /** Bind one logical view to catalog, style, search, inspection, and worker state. */
     constructor(
         readonly viewIndex: number,
-        private readonly mapInfo: MapInfoService,
+        private readonly mapInfo: MapDataService,
         private readonly viewState: MapViewService,
         private readonly tileStream: MapTileStreamService,
-        private readonly styleService: StyleService,
+        private readonly styleService: MapStyleService,
         private readonly renderService: TileSubsetLayerRenderService,
-        private readonly featureSearch: FeatureSearchService,
+        private readonly featureSearch: SearchService,
         private readonly inspection: InspectionSelectionService,
         private readonly hoverDetails: HoverDetailService,
         private readonly diagnostics: ViewLayerDiagnosticsService,

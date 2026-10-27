@@ -1,13 +1,13 @@
 import { Injectable } from "@angular/core";
 import { BehaviorSubject, skip } from "rxjs";
 import { z } from "zod";
-import { ActionRegistry } from "../actions/action-registry.service";
+import { AppActionRegistry } from "../action/action-registry.service";
 
-import { AppActionContributor } from "../actions/app-action-contributor";
-import { AppConfigService } from "../config/app-config.service";
+import { AppActionContributor } from "../action/action-contributor.model";
+import { AppConfigService } from "../config/appconfig.service";
 import { Cartographic, GeoMath } from "../integrations/geo";
-import { AppStateService } from "../state/app-state.service";
-import { CoordinatesModel } from "./coordinates.model";
+import { AppStateService } from "../appstate/appstate.service";
+import { CoordinatesState } from "./coordinates.state";
 
 @Injectable({ providedIn: 'root' })
 /**
@@ -19,7 +19,7 @@ export class CoordinatesService implements AppActionContributor {
     /** Enables or disables the explicit location marker overlay. */
     setMarkerState(enabled: boolean) {
         this.stateService.transaction(() => {
-            this.model.markerState.next(enabled);
+            this.state.markerState.next(enabled);
             if (!enabled) {
                 this.setMarkerPosition(null, false);
             }
@@ -31,9 +31,9 @@ export class CoordinatesService implements AppActionContributor {
         if (position) {
             const longitude = GeoMath.toDegrees(position.longitude);
             const latitude = GeoMath.toDegrees(position.latitude);
-            this.model.markedPosition = [longitude, latitude, position.height];
+            this.state.markedPosition = [longitude, latitude, position.height];
         } else {
-            this.model.markedPosition = [];
+            this.state.markedPosition = [];
         }
         if (!delayUpdate) {
             this.stateService.requestHistoryEntry();
@@ -47,7 +47,7 @@ export class CoordinatesService implements AppActionContributor {
 
     constructor(public stateService: AppStateService,
         private configService: AppConfigService,
-        public readonly model: CoordinatesModel) {
+        public readonly state: CoordinatesState) {
         this.mouseClickCoordinates.pipe(
             skip(1)  // Skip the first (null) value from mouseClickCoordinates BehaviorSubject
         ).subscribe(position => {
@@ -82,7 +82,7 @@ export class CoordinatesService implements AppActionContributor {
     }
 
     /** Registers typed state readers and writers without exposing persistence keys. */
-    registerControls(actions: ActionRegistry): void {
+    registerControls(actions: AppActionRegistry): void {
         actions.registerControl(
             {
                 name: "app.marker",
@@ -104,7 +104,7 @@ export class CoordinatesService implements AppActionContributor {
                 persistence: "url-and-local-storage"
             },
             {
-                read: () => this.model.markerControlValue,
+                read: () => this.state.markerControlValue,
                 write: (_selector, value) => this.setMarker(value)
             }
         );

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { LayerPresetRef } from "../map-styles/layer-preset";
+import type { LayerPresetRef } from "../mapstyle/layer-preset";
 
 /** Per-view configuration entry for one map/layer selection. */
 export interface LayerViewConfig {

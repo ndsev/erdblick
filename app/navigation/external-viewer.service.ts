@@ -1,13 +1,14 @@
 import { Injectable } from "@angular/core";
 import { z } from "zod";
-import { ActionRegistry } from "../actions/action-registry.service";
-import { applied, rejectAction } from "../actions/app-action";
-import { AppActionContributor } from "../actions/app-action-contributor";
-import { AppConfigService, type ExternalViewerConfig } from "../config/app-config.service";
-import { CoordinatesModel } from "../coordinates/coordinates.model";
+import { AppActionRegistry } from "../action/action-registry.service";
+import { applied, rejectAction } from "../action/action.model";
+import { AppActionContributor } from "../action/action-contributor.model";
+import { AppConfigService } from "../config/appconfig.service";
+import type { ExternalViewerConfig } from "./external-viewer.model";
+import { CoordinatesState } from "../coordinates/coordinates.state";
 import { parseWgs84CoordinateString } from "../coordinates/wgs84-coordinate.util";
-import { MapViewModel } from "../mapview/mapview.model";
-import { boundedUnicodeString } from "../shared/unicode-string";
+import { MapViewState } from "../mapview/mapview.state";
+import { boundedUnicodeString } from "../utils/unicode-string.util";
 
 /** A validated WGS84 point used by external map viewers. */
 export interface ExternalViewerLocation {
@@ -38,8 +39,8 @@ function isValidExternalViewerLocation(location: ExternalViewerLocation): boolea
 export class ExternalViewerService implements AppActionContributor {
     constructor(
         private readonly configService: AppConfigService,
-        public readonly coordinates: CoordinatesModel,
-        public readonly viewSettings: MapViewModel
+        public readonly coordinates: CoordinatesState,
+        public readonly viewSettings: MapViewState
     ) { }
 
     /** Returns the current ordered configuration shared by every external-viewer UI. */
@@ -114,7 +115,7 @@ export class ExternalViewerService implements AppActionContributor {
         return (value.match(/-?\d+(?:\.\d+)?/g) ?? []).length >= 2;
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: ActionRegistry): void {
+    registerActions(actions: AppActionRegistry): void {
         actions.registerAction(
             {
                 name: "open_external_viewer",

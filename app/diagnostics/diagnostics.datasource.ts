@@ -8,13 +8,13 @@ import {
     type SubsetDiagnosticsError,
     ViewLayerDiagnosticsService
 } from "../mapview/view-layer-diagnostics.service";
-import { DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../layout/app-layout";
-import { AppLayoutService } from "../layout/app-layout.service";
-import { AppStateService } from "../state/app-state.service";
+import { DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../layout/layout.model";
+import { LayoutService } from "../layout/layout.service";
+import { AppStateService } from "../appstate/appstate.service";
 import {
     StyleValidationReportService
-} from "../map-styles/style-validation-report.service";
-import type { StyleValidationIssue } from "../map-styles/style-validation";
+} from "../mapstyle/style-validation-report.service";
+import type { StyleValidationIssue } from "../mapstyle/style-validation";
 import {
     LOG_INTERVAL_MS,
     MAX_LOGS,
@@ -29,7 +29,7 @@ import {
     PerfStat,
     TilePipelineProgress,
     TileStateCounts
-} from "./diagnostics.types";
+} from "./diagnostics.model";
 import { buildAggregatedPerfStats } from "./diagnostics.perf-aggregation";
 
 /**
@@ -66,7 +66,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         protected readonly styleValidationReportService:
             StyleValidationReportService,
         private readonly ngZone: NgZone,
-        public readonly layout: AppLayoutService
+        public readonly layout: LayoutService
     ) { }
 
     private initialized = false;

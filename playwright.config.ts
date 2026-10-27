@@ -41,8 +41,8 @@ function loadEnvFile(envPath: string): void {
     }
 }
 
-// Allow parametrising Playwright tests via deps/erdblick/test/.env.
-loadEnvFile(path.resolve(__dirname, 'test', '.env'));
+// Allow parametrising Playwright tests via deps/erdblick/tests/playwright/.env.
+loadEnvFile(path.resolve(__dirname, 'tests', 'playwright', '.env'));
 
 const port = process.env["EB_APP_PORT"] || '9000';
 const baseURL = process.env["EB_APP_URL"] || `http://localhost:${port}`;
@@ -66,8 +66,8 @@ const sharedUse = {
 const firefoxHeadless = process.env["EB_FIREFOX_HEADED"] === '1' ? false : sharedUse.headless;
 
 export default defineConfig({
-    testDir: './playwright',
-    snapshotDir: './playwright/reference',
+    testDir: './tests/playwright',
+    snapshotDir: './tests/playwright/reference',
     timeout: 240000,
     forbidOnly: !!process.env["CI"],
     retries: process.env["CI"] ? 1 : 0,
@@ -127,7 +127,7 @@ export default defineConfig({
             }
         }
     ],
-    globalSetup: './playwright/global-setup.ts',
-    globalTeardown: './playwright/global-teardown.ts',
+    globalSetup: './tests/playwright/global-setup.ts',
+    globalTeardown: './tests/playwright/global-teardown.ts',
     workers: process.env["CI"] ? 1 : 4
 });

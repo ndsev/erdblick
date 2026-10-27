@@ -1,4 +1,4 @@
-import type { TileFeatureId } from "../../inspection/inspection-state";
+import type { TileFeatureId } from "../../inspection/inspection.model";
 import type { DeckInteractionEffect } from "./deck-interaction-effect";
 
 /** Style-order boundary separating ordinary presentation from transient interaction rules. */

@@ -5,19 +5,19 @@ import {
     clampTileGridOpacity,
     normalizeTileGridColor,
     TileGridMode
-} from "../mapview/map-view-state";
-import { MapViewModel } from "../mapview/mapview.model";
-import { AppStateService } from "../state/app-state.service";
-import { LayerPresetRef } from "../map-styles/layer-preset";
-import { MapPresetDefinition, MapPresetLayer } from "../map-styles/map-preset";
+} from "../mapview/mapview.model";
+import { MapViewState } from "../mapview/mapview.state";
+import { AppStateService } from "../appstate/appstate.service";
+import { LayerPresetRef } from "../mapstyle/layer-preset";
+import { MapPresetDefinition, MapPresetLayer } from "../mapstyle/map-preset";
 import {
     MapPresetService,
     NO_PRESET_ID,
     ResolvedLayerPreset
-} from "../map-styles/map-preset.service";
-import { ErdblickStyle, FeatureStyleOptionWithStringType, StyleService } from "../map-styles/style.service";
+} from "../mapstyle/map-preset.service";
+import { ErdblickStyle, FeatureStyleOptionWithStringType, MapStyleService } from "../mapstyle/mapstyle.service";
 import { LayerViewConfig } from "./map-layer-state";
-import { MapDataModel } from "./mapdata.model";
+import { MapDataState } from "./mapdata.state";
 
 export type DataSourceCatalogStatus = "initializing" | "ready" | "failed";
 
@@ -518,7 +518,7 @@ export interface ResolvedMapPresetComponent {
 /**
  * Holds the map/layer/style tree shown in the maps panel.
  * The tree owns UI grouping and cached controls. Durable per-view values belong
- * to MapDataModel and MapViewModel.
+ * to MapDataState and MapViewState.
  */
 export class MapLayerTree {
     nodes: (GroupTreeNode | MapTreeNode)[] = [];
@@ -530,10 +530,10 @@ export class MapLayerTree {
     constructor(
         mapInfo: MapInfoItem[],
         private stateService: AppStateService,
-        private styleService: StyleService,
+        private styleService: MapStyleService,
         private mapPresetService: MapPresetService,
-        public readonly viewSettings: MapViewModel,
-        public readonly layerState: MapDataModel) {
+        public readonly viewSettings: MapViewState,
+        public readonly layerState: MapDataState) {
         this.initializeMapGroups(mapInfo);
         this.subscriptions.add(
             this.stateService.ready.pipe(filter(ready => ready), take(1)).subscribe(_ => {

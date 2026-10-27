@@ -1,4 +1,11 @@
-import {COORDINATE_SYSTEM, CompositeLayer, Layer, project32, type LayerProps, type UpdateParameters} from "@deck.gl/core";
+import {
+    COORDINATE_SYSTEM,
+    CompositeLayer,
+    Layer,
+    project32,
+    type LayerProps,
+    type UpdateParameters
+} from "@deck.gl/core";
 import {SolidPolygonLayer} from "@deck.gl/layers";
 import {Buffer} from "@luma.gl/core";
 import {Geometry, Model} from "@luma.gl/engine";

@@ -1,11 +1,12 @@
+import { DiagnosticsState } from "./diagnostics/diagnostics.state";
 import { HttpClient } from "@angular/common/http";
 import { AfterViewInit, Component, OnDestroy, ViewContainerRef } from '@angular/core';
 import { Title } from "@angular/platform-browser";
-import { ActionRegistry } from "./actions/action-registry.service";
-import { DebugWindow, ErdblickDebugApi } from "./app.debugapi.component";
-import { AppConfigService } from "./config/app-config.service";
-import type { Versions } from "./config/config.model";
-import { DiagnosticsFacadeService } from "./diagnostics/diagnostics.facade.service";
+import { AppActionRegistry } from "./action/action-registry.service";
+import { DebugWindow, ErdblickDebugApi } from "./app-debugapi.component";
+import { AppConfigService } from "./config/appconfig.service";
+import type { DistributionVersion } from "./diagnostics/version.model";
+import { DiagnosticsFacadeService } from "./diagnostics/diagnostics-facade.service";
 import { environment } from "./environments/environment";
 import {
     CACHE_RESET_DIALOG_LAYOUT_ID,
@@ -13,18 +14,18 @@ import {
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
     FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID
-} from "./layout/app-layout";
-import { AppLayoutService } from "./layout/app-layout.service";
+} from "./layout/layout.model";
+import { LayoutService } from "./layout/layout.service";
 import { DialogStackService } from "./layout/dialog-stack.service";
-import { MapInfoService } from "./mapdata/map-info.service";
+import { MapDataService } from "./mapdata/mapdata.service";
 import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
 import {
     TileSubsetLayerRenderService
 } from "./mapview/deck/tile-subset-layer-render.service";
-import { InfoMessageService } from "./shared/info.service";
-import { KeyboardService } from "./shared/keyboard.service";
-import { AppStateService } from "./state/app-state.service";
-import { StyleService } from "./map-styles/style.service";
+import { InfoMessageService } from "./diagnostics/info.service";
+import { KeyboardService } from "./keyboard/keyboard.service";
+import { AppStateService } from "./appstate/appstate.service";
+import { MapStyleService } from "./mapstyle/mapstyle.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -94,19 +95,20 @@ export class AppComponent implements AfterViewInit, OnDestroy {
 
     constructor(public stateService: AppStateService,
         private httpClient: HttpClient,
-        private mapInfo: MapInfoService,
+        private mapInfo: MapDataService,
         private tileStream: MapTileStreamService,
         private subsetRenderer: TileSubsetLayerRenderService,
-        private styleService: StyleService,
+        private styleService: MapStyleService,
         private keyboardService: KeyboardService,
         private viewContainerRef: ViewContainerRef,
         private infoMessageService: InfoMessageService,
         private dialogStack: DialogStackService,
         private configService: AppConfigService,
+        private readonly diagnosticsState: DiagnosticsState,
         private diagnostics: DiagnosticsFacadeService,
         private titleService: Title,
-        public readonly layout: AppLayoutService,
-        private readonly actions: ActionRegistry) {
+        public readonly layout: LayoutService,
+        private readonly actions: AppActionRegistry) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
         this.titleService.setTitle(this.capitalizeTitle(this.title));
@@ -196,9 +198,9 @@ export class AppComponent implements AfterViewInit, OnDestroy {
 
         const distribVersionsPath = `/static-config/${distribVersions}.js`;
         import(/* @vite-ignore */ distribVersionsPath)
-            .then((plugin) => plugin.default() as Array<Versions>)
-            .then((versions: Array<Versions>) => {
-                this.configService.model.distributionVersions.next(versions);
+            .then((plugin) => plugin.default() as Array<DistributionVersion>)
+            .then((versions: Array<DistributionVersion>) => {
+                this.diagnosticsState.setRuntimeVersions({ distributionVersions: versions, erdblickVersion: "" });
                 if (versions[0]?.name.trim()) {
                     this.titleService.setTitle(this.capitalizeTitle(versions[0].name.trim()));
                 } else {
@@ -270,7 +272,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     getBasicVersion() {
         this.httpClient.get('./bundle/VERSION', { responseType: 'text' }).subscribe(
             data => {
-                this.configService.model.erdblickVersion.next(`${this.title} ${data.toString()}`);
+                this.diagnosticsState.setRuntimeVersions({ distributionVersions: [], erdblickVersion: `${this.title} ${data.toString()}` });
                 this.titleService.setTitle(this.capitalizeTitle(this.title));
             });
     }

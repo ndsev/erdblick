@@ -1,25 +1,25 @@
 import { Injectable, NgZone, OnDestroy } from "@angular/core";
 import { BehaviorSubject, Subject, Subscription } from "rxjs";
 import { z } from "zod";
-import { rejectAction } from "../actions/app-action";
+import { rejectAction } from "../action/action.model";
 import { featureIdentitySchema } from "../inspection/feature-identity";
-import { TileFeatureId } from "../inspection/inspection-state";
+import { TileFeatureId } from "../inspection/inspection.model";
 import { coreLib, uint8ArrayToWasmOrThrow } from "../integrations/wasm";
 import {
     ConnectionRetryAttempt,
     connectionRetryDeadline,
     ConnectionRetryPolicy,
     recordConnectionFailure
-} from "../connection/connection-retry-policy";
-import { InfoMessageService } from "../shared/info.service";
+} from "./connection-retry-policy.model";
+import { InfoMessageService } from "../diagnostics/info.service";
 import {
     formatFeatureInspectionTarget,
     parseFeatureInspectionTarget,
     stripFeatureInspectionTarget
-} from "../shared/tile-feature-id";
-import { MAX_NUM_TILES_TO_LOAD } from "../rendering/tile-render-policy";
-import { AppStateService } from "../state/app-state.service";
-import { ConnectionModel } from "../connection/connection.model";
+} from "../utils/tile-feature-id.util";
+
+import { AppStateService } from "../appstate/appstate.service";
+import { MapDataState } from "./mapdata.state";
 import { FeatureWrapper, InspectionFeatureTile } from "./feature-inspection";
 import {
     FilterSubscriptionCallbacks,
@@ -30,7 +30,7 @@ import {
     TileAttachmentValue,
     TileSubsetDelivery
 } from "./filter-subscription";
-import { MapInfoService } from "./map-info.service";
+import { MapDataService } from "./mapdata.service";
 import type { MapgetLayer } from "./mapget-layer";
 import {
     parseMapPartitionKey,
@@ -93,6 +93,9 @@ interface ObjectDiscoveryCacheEntry {
 }
 
 const MAX_OBJECT_DISCOVERY_CACHE_TILES = 4096;
+
+/** Bound the distinct partitions in a one-shot inspection request, independently of viewport settings. */
+const MAX_ONE_SHOT_PARTITIONS = 512;
 
 /**
  * Owns interactive filter transport and attachment refs.
@@ -179,14 +182,14 @@ export class MapTileStreamService implements OnDestroy {
 
     constructor(
         private readonly stateService: AppStateService,
-        private readonly mapInfo: MapInfoService,
+        private readonly mapInfo: MapDataService,
         private readonly messageService: InfoMessageService,
         private readonly ngZone: NgZone,
-        public readonly connectionPreferences: ConnectionModel
+        public readonly state: MapDataState
     ) {
-        this.retryPolicy = this.connectionPreferences.connectionRetryPolicy;
-        this.stateSubscriptions.add(this.connectionPreferences.connectionRetryPolicyChanges.subscribe(() => this.applyRetryPolicy()));
-        this.connectionPreferences.tilePullCompressionEnabledState.subscribe(enabled =>
+        this.retryPolicy = this.state.connectionRetryPolicy;
+        this.stateSubscriptions.add(this.state.connectionRetryPolicyChanges.subscribe(() => this.applyRetryPolicy()));
+        this.state.tilePullCompressionEnabledState.subscribe(enabled =>
             this.tileStream?.setPullCompressionEnabled(enabled)
         );
         this.mapInfo.dataSourceInfoChanged.subscribe(() => {
@@ -205,7 +208,7 @@ export class MapTileStreamService implements OnDestroy {
         this.tileStream.onClientId = clientId => this.actionClientId$.next(clientId);
         this.tileStream.onActionControl = (payload, receivedAt) => this.actionControlReceived.next({ payload, receivedAt });
         this.tileStream.setPullCompressionEnabled(
-            this.connectionPreferences.tilePullCompressionEnabled
+            this.state.tilePullCompressionEnabled
         );
         this.tileStream.setFrameProcessingPaused(this.tilePipelinePaused);
         this.tileStream.onSubsets = payload =>
@@ -881,10 +884,10 @@ export class MapTileStreamService implements OnDestroy {
         }
         const distinctPartitionCount = [...groups.values()]
             .reduce((count, group) => count + group.partitions.size, 0);
-        if (distinctPartitionCount > MAX_NUM_TILES_TO_LOAD) {
+        if (distinctPartitionCount > MAX_ONE_SHOT_PARTITIONS) {
             throw new Error(
                 `Inspection feature request exceeds ` +
-                `${MAX_NUM_TILES_TO_LOAD} partitions.`
+                `${MAX_ONE_SHOT_PARTITIONS} partitions.`
             );
         }
 
@@ -1153,7 +1156,7 @@ export class MapTileStreamService implements OnDestroy {
 
     /** Recomputes waiting deadlines when preferences change, retaining attempts and live work. */
     private applyRetryPolicy(): void {
-        this.retryPolicy = this.connectionPreferences.connectionRetryPolicy;
+        this.retryPolicy = this.state.connectionRetryPolicy;
         if (this.connectionRetry && this.connectionRetry.at > 0) {
             this.connectionRetry.at = connectionRetryDeadline(this.retryPolicy, this.connectionRetry);
             this.connectionRetryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);

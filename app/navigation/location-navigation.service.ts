@@ -1,28 +1,34 @@
 import { Injectable, NgZone, OnDestroy } from "@angular/core";
 import { merge, skip, Subscription } from "rxjs";
 import { z } from "zod";
-import { ActionRegistry } from "../actions/action-registry.service";
-import { ActionCandidateHistory, AppActionCandidate, applied, identifierSchema, rejectAction } from "../actions/app-action";
-import { AppActionContributor } from "../actions/app-action-contributor";
-import { ViewerActionFailure } from "../actions/viewer-action-relay.contract";
+import { AppActionRegistry } from "../action/action-registry.service";
+import {
+    ActionCandidateHistory,
+    AppActionCandidate,
+    applied,
+    identifierSchema,
+    rejectAction
+} from "../action/action.model";
+import { AppActionContributor } from "../action/action-contributor.model";
+import { ViewerActionFailure } from "../action/viewer-action-relay.contract";
 import { featureIdentitySchema } from "../inspection/feature-identity";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
 import { coreLib } from "../integrations/wasm";
 import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
-import { viewIdSchema } from "../mapview/map-view-state";
-import { MapViewService } from "../mapview/map-view.service";
-import { MapViewModel } from "../mapview/mapview.model";
+import { viewIdSchema } from "../mapview/mapview.model";
+import { MapViewService } from "../mapview/mapview.service";
+import { MapViewState } from "../mapview/mapview.state";
 import { ViewLayerDiagnosticsService } from "../mapview/view-layer-diagnostics.service";
 import {
     LocationSearchMatch,
-    LocationSearchService,
+    GeolocationService,
     normalizeLocationSearchPayload,
     type ResolvedLocationNavigation
-} from "../location-search/location.search.service";
-import { InfoMessageService } from "../shared/info.service";
-import { boundedUnicodeString } from "../shared/unicode-string";
-import { deepEquals } from "../state/app-state";
-import { AppStateService } from "../state/app-state.service";
+} from "../geolocation/geolocation.service";
+import { InfoMessageService } from "../diagnostics/info.service";
+import { boundedUnicodeString } from "../utils/unicode-string.util";
+import { deepEquals } from "../appstate/appstate";
+import { AppStateService } from "../appstate/appstate.service";
 import { JumpTargetService } from "./jump.service";
 
 /** Owns one selected location lookup until its single camera commit; later user actions win. */
@@ -33,13 +39,13 @@ export class LocationNavigationService implements OnDestroy, AppActionContributo
 
     /** Connects resolution and renderer feedback without persisting transient navigation state. */
     constructor(
-        private readonly locations: LocationSearchService,
+        private readonly locations: GeolocationService,
         private readonly views: MapViewService,
         private readonly state: AppStateService,
         private readonly diagnostics: ViewLayerDiagnosticsService,
         private readonly jumps: JumpTargetService,
         private readonly messages: InfoMessageService,
-        public readonly viewSettings: MapViewModel,
+        public readonly viewSettings: MapViewState,
         private readonly stream: MapTileStreamService,
         private readonly inspections: InspectionSelectionService,
         private readonly zone: NgZone
@@ -131,7 +137,7 @@ export class LocationNavigationService implements OnDestroy, AppActionContributo
         if (result.notice) this.messages.showInfo(result.notice);
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: ActionRegistry): void {
+    registerActions(actions: AppActionRegistry): void {
         actions.registerAction(
             {
                 name: "navigate_location_result",

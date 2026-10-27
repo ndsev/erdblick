@@ -5,14 +5,14 @@ import {
     defaultHoverLabelFieldKey,
     type HoverLabelFieldConfig,
     type TileFeatureId
-} from "../inspection/inspection-state";
-import { InspectionModel } from "../inspection/inspection.model";
+} from "../inspection/inspection.model";
+import { InspectionState } from "../inspection/inspection.state";
 import { coreLib, uint8ArrayToWasm } from "../integrations/wasm";
-import { MAX_STYLE_LOD } from "../rendering/lod-policy";
-import { stripFeatureInspectionTarget } from "../shared/tile-feature-id";
-import { AppStateService } from "../state/app-state.service";
-import type { ErdblickStyle } from "../map-styles/style.service";
-import { MapInfoService } from "./map-info.service";
+import { MAX_STYLE_LOD } from "../mapstyle/style-lod.model";
+import { stripFeatureInspectionTarget } from "../utils/tile-feature-id.util";
+import { AppStateService } from "../appstate/appstate.service";
+import type { ErdblickStyle } from "../mapstyle/mapstyle.service";
+import { MapDataService } from "./mapdata.service";
 import type { SearchResultTileEntry } from "./map-runtime";
 import { MapTileStreamService } from "./map-tile-stream.service";
 import type { MapgetLayer } from "./mapget-layer";
@@ -58,9 +58,9 @@ export class HoverDetailService implements OnDestroy {
     /** Connects persisted field configuration to the proactive filter owners. */
     constructor(
         private readonly state: AppStateService,
-        private readonly mapInfo: MapInfoService,
+        private readonly mapInfo: MapDataService,
         private readonly tileStream: MapTileStreamService,
-        public readonly inspectionState: InspectionModel
+        public readonly inspectionState: InspectionState
     ) {
         this.enabled = this.inspectionState.hoverLabelsEnabled;
         this.activeFields = this.normalizeFields(this.inspectionState.hoverLabelFields);

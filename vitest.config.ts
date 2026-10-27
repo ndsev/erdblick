@@ -7,13 +7,12 @@ export default defineConfig({
         clearMocks: true,
         pool: 'forks',
         isolate: false,
-        setupFiles: ['test/vitest.setup.ts'],
-        include: ['app/**/*.spec.ts'],
+        setupFiles: ['tests/support/vitest.setup.ts'],
+        include: ['tests/app/**/*.spec.ts'],
         exclude: [
             'node_modules/**',
             'build/**',
-            'ci/**',
-            'app/app.component.spec.ts'
+            'ci/**'
         ],
         coverage: {
             enabled: true,

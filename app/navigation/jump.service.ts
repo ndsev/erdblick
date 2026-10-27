@@ -2,10 +2,10 @@ import { Injectable } from "@angular/core";
 import { HighlightMode } from "build/libs/core/erdblick-core";
 import { BehaviorSubject, Subject } from "rxjs";
 import { z } from "zod";
-import { ActionRegistry } from "../actions/action-registry.service";
-import { AppActionCandidate, applied, rejectAction } from "../actions/app-action";
-import { AppActionContributor } from "../actions/app-action-contributor";
-import { AppConfigService } from "../config/app-config.service";
+import { AppActionRegistry } from "../action/action-registry.service";
+import { AppActionCandidate, applied, rejectAction } from "../action/action.model";
+import { AppActionContributor } from "../action/action-contributor.model";
+import { AppConfigService } from "../config/appconfig.service";
 import { CoordinatesService } from "../coordinates/coordinates.service";
 import {
     packedTileIdFromMortonString,
@@ -18,15 +18,15 @@ import {
 import { parseWgs84CoordinateString } from "../coordinates/wgs84-coordinate.util";
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
-import { SelectedSourceData, TileFeatureId } from "../inspection/inspection-state";
+import { SelectedSourceData, TileFeatureId } from "../inspection/inspection.model";
 import { GeoMath, Rectangle } from "../integrations/geo";
 import { coreLib } from "../integrations/wasm";
-import { MapInfoService } from "../mapdata/map-info.service";
-import { MapViewService } from "../mapview/map-view.service";
-import { MapViewModel } from "../mapview/mapview.model";
+import { MapDataService } from "../mapdata/mapdata.service";
+import { MapViewService } from "../mapview/mapview.service";
+import { MapViewState } from "../mapview/mapview.state";
 import { RightClickMenuService } from "../mapview/rightclickmenu.service";
-import { InfoMessageService } from "../shared/info.service";
-import { boundedUnicodeString } from "../shared/unicode-string";
+import { InfoMessageService } from "../diagnostics/info.service";
+import { boundedUnicodeString } from "../utils/unicode-string.util";
 
 export const FEATURE_SEARCH_TARGET_ID = "features";
 
@@ -131,14 +131,14 @@ export class JumpTargetService implements AppActionContributor {
     /**
      * Loads optional jump-target plugins and wires the reactive channels used by the search UI.
      */
-    constructor(private mapService: MapInfoService,
+    constructor(private mapService: MapDataService,
         private inspectionSelection: InspectionSelectionService,
         private messageService: InfoMessageService,
         private menuService: RightClickMenuService,
         private configService: AppConfigService,
         public readonly coordinates: CoordinatesService,
         public readonly inspectionState: InspectionPanelService,
-        public readonly viewSettings: MapViewModel,
+        public readonly viewSettings: MapViewState,
         private readonly views: MapViewService) {
         // Forward marked positions to the coordinate owner.
         this.markedPosition.subscribe(position => {
@@ -744,7 +744,7 @@ export class JumpTargetService implements AppActionContributor {
         return this.parseMortonCoordinates(value) !== undefined;
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: ActionRegistry): void {
+    registerActions(actions: AppActionRegistry): void {
         const appliedSchema = z.strictObject({ status: z.literal("applied"), changed: z.boolean() });
 
         actions.registerAction(

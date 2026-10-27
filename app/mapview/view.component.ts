@@ -17,7 +17,7 @@ import { filter } from "rxjs/operators";
 import { CoordinatesService } from "../coordinates/coordinates.service";
 import { environment } from "../environments/environment";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
-import { type TileFeatureId } from "../inspection/inspection-state";
+import { type TileFeatureId } from "../inspection/inspection.model";
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
 import { inspectionValueBubbleClasses } from "../inspection/inspection-value-bubble.presentation";
 import { coreLib } from "../integrations/wasm";
@@ -27,27 +27,26 @@ import {
     type HoverDetailField,
     type HoverFeatureDetails
 } from "../mapdata/hover-detail.service";
-import { MapInfoService } from "../mapdata/map-info.service";
+import { MapDataService } from "../mapdata/mapdata.service";
 import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
-import { FeatureSearchService } from "../feature-search/feature.search.service";
+import { SearchService } from "../search/search.service";
 import { JumpTargetService } from "../navigation/jump.service";
-import { AppConfigService } from "../config/app-config.service";
-import { AppModeService } from "../config/app-mode.service";
-import { deepEquals } from "../state/app-state";
-import { AppStateService } from "../state/app-state.service";
-import { KeyboardService } from "../shared/keyboard.service";
+import { AppConfigService } from "../config/appconfig.service";
+import { AppModeService } from "../config/appmode.service";
+import { deepEquals } from "../appstate/appstate";
+import { AppStateService } from "../appstate/appstate.service";
+import { KeyboardService } from "../keyboard/keyboard.service";
 import {
     StyleValidationReportService
-} from "../map-styles/style-validation-report.service";
-import { StyleService } from "../map-styles/style.service";
+} from "../mapstyle/style-validation-report.service";
+import { MapStyleService } from "../mapstyle/mapstyle.service";
 import { DeckMapView2D } from "./deck/deck-view2d";
 import { DeckMapView3D } from "./deck/deck-view3d";
 import {
     TileSubsetLayerRenderService
 } from "./deck/tile-subset-layer-render.service";
-import { MapViewModel } from "./mapview.model";
-import { MapViewService, ViewRecalculationReason } from "./map-view.service";
-import { RenderPreferencesService } from "../rendering/render-preferences.service";
+import { MapViewState } from "./mapview.state";
+import { MapViewService, ViewRecalculationReason } from "./mapview.service";
 import {
     IRenderView,
     MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT,
@@ -234,11 +233,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
      * Constructs the host component for one deck-backed view, wiring in the shared
      * map, search, config, and input services the renderer depends on.
      */
-    constructor(public mapService: MapInfoService,
+    constructor(public mapService: MapDataService,
         public mapViewState: MapViewService,
         public tileStream: MapTileStreamService,
         public inspectionSelection: InspectionSelectionService,
-        public featureSearchService: FeatureSearchService,
+        public featureSearchService: SearchService,
         public stateService: AppStateService,
         public jumpService: JumpTargetService,
         public keyboardService: KeyboardService,
@@ -246,7 +245,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         public coordinatesService: CoordinatesService,
         public appModeService: AppModeService,
         public configService: AppConfigService,
-        private styleService: StyleService,
+        private styleService: MapStyleService,
         private subsetRenderService: TileSubsetLayerRenderService,
         private cacheResetService: CacheResetService,
         private hoverDetails: HoverDetailService,
@@ -254,8 +253,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         private styleValidationReports: StyleValidationReportService,
         private cdr: ChangeDetectorRef,
         private ngZone: NgZone,
-        public readonly renderPreferences: RenderPreferencesService,
-        public readonly viewSettings: MapViewModel,
+        public readonly viewSettings: MapViewState,
         public readonly inspectionState: InspectionPanelService
     ) {
         this.subscriptions.push(
@@ -391,8 +389,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.stateService.ready.pipe(filter(ready => ready)),
             this.stateService.observe(() => this.viewSettings.viewIds.includes(logicalViewId) ? [
                 this.viewSettings.mode2dState.getValue(logicalViewId),
-                this.renderPreferences.model.deckAntialiasingEnabled,
-                this.renderPreferences.model.semanticCompositingEnabled
+                this.viewSettings.deckAntialiasingEnabled,
+                this.viewSettings.semanticCompositingEnabled
             ] as const : undefined, deepEquals).pipe(filter(value => value !== undefined))
         ]).subscribe(([_, [mode2d, antialiasingEnabled, semanticCompositingEnabled]]) => {
             const needsRebuild =
@@ -475,15 +473,15 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
                 this.inspectionSelection, this.featureSearchService,
                 this.menuService, this.coordinatesService, this.stateService, this.configService,
-                this.layerController!, this.renderPreferences.model, this.viewSettings, this.inspectionState,
-                this.mapService.layerState
+                this.layerController!, this.viewSettings, this.inspectionState,
+                this.mapService.state
             )
             : new DeckMapView3D(
                 this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
                 this.inspectionSelection, this.featureSearchService,
                 this.menuService, this.coordinatesService, this.stateService, this.configService,
-                this.layerController!, this.renderPreferences.model, this.viewSettings, this.inspectionState,
-                this.mapService.layerState
+                this.layerController!, this.viewSettings, this.inspectionState,
+                this.mapService.state
             );
         mapView.setDesktopDrillPickingEnabled(!this.isNarrow);
         this.initializingMapView = mapView;
@@ -628,9 +626,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             colorKey: field.colorKey,
             label: field.key
         }, {
-            varyColors: this.inspectionState.model.inspectionValueVaryColors,
-            varyOutlines: this.inspectionState.model.inspectionValueVaryOutlines,
-            varyStriping: this.inspectionState.model.inspectionValueVaryStriping
+            varyColors: this.inspectionState.state.inspectionValueVaryColors,
+            varyOutlines: this.inspectionState.state.inspectionValueVaryOutlines,
+            varyStriping: this.inspectionState.state.inspectionValueVaryStriping
         });
     }
 
@@ -766,8 +764,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         const featureIds = screenPos && this.mapView
             ? this.mapView.drillPickFeatures(
                 screenPos,
-                this.inspectionState.model.drillPickRadius,
-                this.inspectionState.model.inspectionsLimit
+                this.inspectionState.state.drillPickRadius,
+                this.inspectionState.state.inspectionsLimit
             ).featureIds
             : [];
         this.menuService.setPickedFeatures(featureIds);

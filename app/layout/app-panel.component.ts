@@ -15,10 +15,10 @@ import {
     ViewChild
 } from '@angular/core';
 import { AccordionModule } from 'primeng/accordion';
-import { UiAutomationService } from '../actions/ui-automation.service';
-import { DEFAULT_DOCKED_EM_HEIGHT } from "./app-layout";
-import { AppLayoutService } from "./app-layout.service";
-import { AppStateService } from "../state/app-state.service";
+import { UiAutomationService } from '../action/ui-automation.service';
+import { DEFAULT_DOCKED_EM_HEIGHT } from "./layout.model";
+import { LayoutService } from "./layout.service";
+import { AppStateService } from "../appstate/appstate.service";
 
 export type AppPanelResizeMode = 'none' | 'vertical' | 'fill' | 'auto';
 
@@ -135,7 +135,7 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
     private unregisterResizeTarget?: () => void;
 
     constructor(private readonly stateService: AppStateService, private readonly viewerUi: UiAutomationService,
-        public readonly layout: AppLayoutService) { }
+        public readonly layout: LayoutService) { }
 
     /** Applies persisted panel state and input changes to the accordion value and dock body size. */
     ngOnChanges(changes: SimpleChanges): void {

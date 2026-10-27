@@ -13,8 +13,9 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { MessageService } from "primeng/api";
 import { registerApplication } from "../app/application-registration";
-import { canonicalViewerContractJson, viewerJsonSchema } from "../app/actions/viewer-action.contract";
-import { viewerActionClientMessageSchema, viewerActionServerMessageSchema, viewerMcpInfoSchema } from "../app/actions/viewer-action-relay.contract";
+import { canonicalViewerContractJson } from "../app/action/catalog-json.util";
+import { viewerJsonSchema } from "../app/action/control-actions.util";
+import { viewerActionClientMessageSchema, viewerActionServerMessageSchema, viewerMcpInfoSchema } from "../app/action/viewer-action-relay.contract";
 
 const application = await createApplication({
     providers: [
@@ -30,7 +31,7 @@ try {
     const catalog = registerApplication(application.injector).catalog();
     const canonical = canonicalViewerContractJson(catalog);
     const catalogId = `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
-    const output = "app/actions/generated";
+    const output = "app/action/generated";
     mkdirSync(output, { recursive: true });
     writeFileSync(`${output}/web-mcp-actions.json`, `${JSON.stringify({ ...catalog, catalogId }, null, 2)}\n`);
     writeFileSync(`${output}/viewer-actions.canonical.json`, canonical);

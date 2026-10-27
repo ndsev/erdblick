@@ -4,12 +4,12 @@ import type {
     HighlightMode
 } from "../../build/libs/core/erdblick-core";
 import {coreLib} from "../integrations/wasm";
-import type {ErdblickStyle} from "../map-styles/style.service";
-import {sipHash64Hex} from "../map-styles/hash";
+import type {ErdblickStyle} from "../mapstyle/mapstyle.service";
+import {sipHash64Hex} from "../mapstyle/hash";
 import type {MapgetLayer} from "./mapget-layer";
-import type {MapInfoService} from "./map-info.service";
+import type {MapDataService} from "./mapdata.service";
 import type {MapTileStreamService} from "./map-tile-stream.service";
-import {MAX_STYLE_LOD} from "../rendering/lod-policy";
+import { MAX_STYLE_LOD } from "../mapstyle/style-lod.model";
 import {
     FilterSubscriptionCoverage,
     FilterSubscriptionDefinition,
@@ -94,7 +94,7 @@ export class StyledMapgetLayer {
         readonly mapgetLayer: MapgetLayer,
         readonly style: ErdblickStyle,
         options: Record<string, boolean | number | string>,
-        readonly mapInfo: MapInfoService,
+        readonly mapInfo: MapDataService,
         private readonly tileStream: MapTileStreamService,
         readonly highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
         readonly plannedLod: number = MAX_STYLE_LOD,

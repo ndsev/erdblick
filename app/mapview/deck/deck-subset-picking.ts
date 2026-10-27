@@ -1,4 +1,4 @@
-import type { TileFeatureId } from "../../inspection/inspection-state";
+import type { TileFeatureId } from "../../inspection/inspection.model";
 import { SceneMode } from "../../integrations/geo";
 import type { PresentationKind } from "../../mapdata/styled-mapget-layer";
 import type {
