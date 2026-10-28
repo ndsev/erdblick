@@ -1,5 +1,5 @@
 import type {Viewport} from "../../build/libs/core/erdblick-core";
-import {coreLib} from "../integrations/wasm";
+import {coreLib} from "../integrations/wasm.adapter";
 
 export const DEFAULT_VIEWPORT: Viewport = {
     south: 0,

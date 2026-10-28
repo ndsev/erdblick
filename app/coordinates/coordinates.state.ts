@@ -5,9 +5,9 @@
  */
 import { Injectable } from "@angular/core";
 import { z } from "zod";
-import { Boolish } from "../appstate/appstate";
+import { Boolish } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
-import { roundCoordinateStateValue } from "../utils/coordinate-precision.util";
+import { roundCoordinateStateValue } from "./coordinate-precision.util";
 
 @Injectable({ providedIn: "root" })
 export class CoordinatesState {

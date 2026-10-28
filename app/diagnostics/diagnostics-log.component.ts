@@ -1,5 +1,10 @@
 import { Component, OnDestroy, ViewChild } from '@angular/core';
-import { BehaviorSubject, combineLatest, map, Subscription } from 'rxjs';
+import {
+    BehaviorSubject,
+    combineLatest,
+    map,
+    Subscription
+} from 'rxjs';
 import { AppDialogComponent } from '../layout/app-dialog.component';
 import { DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID } from "../layout/layout.model";
 import { LayoutService } from "../layout/layout.service";

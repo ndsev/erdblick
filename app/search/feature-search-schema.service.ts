@@ -1,9 +1,6 @@
 import { Injectable } from "@angular/core";
 import { MapDataService } from "../mapdata/mapdata.service";
-import {
-    FeatureSearchAttributeScopeCandidate,
-    FeatureSearchStyleFieldCandidate
-} from "../mapdata/map-runtime";
+import { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldCandidate } from "./search.model";
 import type { FeatureSearchMapLayerRef, FeatureSearchScope } from "./search-definition.model";
 import type {
     SearchCompletionDataSourceInfoMessage,

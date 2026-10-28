@@ -2,11 +2,20 @@ import { testPersistence, stateOwners } from '../../support/state-owners';
 import "@angular/compiler";
 import { ChangeDetectorRef, Renderer2 } from "@angular/core";
 import { BehaviorSubject } from "rxjs";
-import { describe, expect, it, vi } from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
-import { FeatureWrapper } from "../../../app/mapdata/feature-inspection";
+import { FeatureWrapper } from "../../../app/mapdata/feature-inspection.adapter";
 import { AppStateService } from "../../../app/appstate/appstate.service";
-import { InspectionComparisonModel, InspectionPanelModel, TileFeatureId } from "../../../app/inspection/inspection.model";
+import {
+    InspectionComparisonModel,
+    InspectionPanelModel,
+    TileFeatureId
+} from "../../../app/inspection/inspection.model";
 import { InspectionSelectionService } from "../../../app/inspection/inspection-selection.service";
 import { InspectionContainerComponent } from "../../../app/inspection/inspection-container.component";
 import { InspectionDialogsComponent } from "../../../app/inspection/inspection-dialogs.component";

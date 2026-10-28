@@ -1,4 +1,11 @@
-import { AfterViewInit, Component, ElementRef, NgZone, OnDestroy, ViewChild } from '@angular/core';
+import {
+    AfterViewInit,
+    Component,
+    ElementRef,
+    NgZone,
+    OnDestroy,
+    ViewChild
+} from '@angular/core';
 import { MenuItem } from "primeng/api";
 import { Subscription } from 'rxjs';
 import { DiagnosticsFacadeService } from '../diagnostics/diagnostics-facade.service';

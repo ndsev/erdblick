@@ -1,6 +1,6 @@
 import {describe, expect, it} from "vitest";
-import {FilterTileState} from "../../../app/mapdata/filter-tile-state";
-import {tilePartition} from "../../../app/mapdata/partition";
+import {FilterTileState} from "../../../app/mapdata/filter-tile-state.model";
+import {tilePartition} from "../../../app/mapdata/partition.model";
 import {ViewLayerDiagnosticsService} from "../../../app/mapview/view-layer-diagnostics.service";
 
 describe("ViewLayerDiagnosticsService", () => {

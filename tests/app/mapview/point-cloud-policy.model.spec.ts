@@ -1,5 +1,9 @@
 import {describe, expect, it} from "vitest";
-import {DEFAULT_POINT_CLOUD_POLICY, pointCloudPolicySchema, pointCloudSpacingMeters} from "../../../app/mapview/point-cloud-policy.model";
+import {
+    DEFAULT_POINT_CLOUD_POLICY,
+    pointCloudPolicySchema,
+    pointCloudSpacingMeters
+} from "../../../app/mapview/point-cloud-policy.model";
 
 describe("point-cloud policy", () => {
     it("rejects non-finite and unsafe resource preferences", () => {

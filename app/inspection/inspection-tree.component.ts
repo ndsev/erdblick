@@ -17,8 +17,8 @@ import { Menu } from "primeng/menu";
 import { Popover } from "primeng/popover";
 import { TreeTable } from "primeng/treetable";
 import { Subscription } from "rxjs";
-import { coreLib } from "../integrations/wasm";
-import { parseMapPartitionKey } from "../mapdata/partition";
+import { coreLib } from "../integrations/wasm.adapter";
+import { parseMapPartitionKey } from "../mapdata/partition.model";
 import { SearchService } from "../search/search.service";
 import { JumpTargetService } from "../navigation/jump.service";
 import { AppStateService } from "../appstate/appstate.service";
@@ -29,7 +29,7 @@ import {
     isFeatureInspectionSubTarget,
     parseFeatureInspectionTarget,
     stripFeatureInspectionTarget
-} from "../utils/tile-feature-id.util";
+} from "./feature-identity.model";
 import {
     inspectionHtmlPresentation,
     type InspectionHtmlPresentation
@@ -38,7 +38,7 @@ import { inspectionSearchNumberLiteral } from "./inspection-search.util";
 import { InspectionSelectionService } from "./inspection-selection.service";
 import { SelectedSourceData, type InspectionTreeExpansionState } from "./inspection.model";
 import { InspectionPanelService } from "./inspection-panel.service";
-import { expandPathToFirstHighlightedRow } from "./inspection-tree-highlight";
+import { expandPathToFirstHighlightedRow } from "./inspection-tree-highlight.util";
 import { inspectionValueBubbleClasses } from "./inspection-value-bubble.presentation";
 
 /** Column definition used by the inspection tree's generic table renderer. */

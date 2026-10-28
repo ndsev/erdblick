@@ -1,11 +1,11 @@
-import {coreLib, initializeLibrary, uint8ArrayToWasm} from "../integrations/wasm";
+import {coreLib, initializeLibrary, uint8ArrayToWasm} from "../integrations/wasm.adapter";
 import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
 import type {
     FeatureSearchAttributeScopeCandidate,
     FeatureSearchStyleFieldCandidate,
     FeatureSearchStyleValueKind
-} from "../mapdata/map-runtime";
-import type {CompletionCandidate} from "./feature-search.types";
+} from "./search.model";
+import type {CompletionCandidate} from "./search.model";
 import type {FeatureSearchMapLayerRef} from "./search-definition.model";
 import type {
     SearchCompletionRequestMessage,

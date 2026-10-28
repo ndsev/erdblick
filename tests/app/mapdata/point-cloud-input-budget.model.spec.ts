@@ -1,4 +1,9 @@
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import {PointCloudInputBudget} from "../../../app/mapdata/point-cloud-input-budget.model";
 
 describe("retained point-cloud inputs", () => {

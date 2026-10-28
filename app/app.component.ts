@@ -1,9 +1,14 @@
 import { DiagnosticsState } from "./diagnostics/diagnostics.state";
 import { HttpClient } from "@angular/common/http";
-import { AfterViewInit, Component, OnDestroy, ViewContainerRef } from '@angular/core';
+import {
+    AfterViewInit,
+    Component,
+    OnDestroy,
+    ViewContainerRef
+} from '@angular/core';
 import { Title } from "@angular/platform-browser";
 import { AppActionRegistry } from "./action/action-registry.service";
-import { DebugWindow, ErdblickDebugApi } from "./app-debugapi.component";
+import { DebugWindow, ErdblickDebugApi } from "./app-debugapi.adapter";
 import { AppConfigService } from "./config/appconfig.service";
 import type { DistributionVersion } from "./diagnostics/version.model";
 import { DiagnosticsFacadeService } from "./diagnostics/diagnostics-facade.service";

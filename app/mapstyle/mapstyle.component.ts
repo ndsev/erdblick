@@ -21,12 +21,12 @@ import { Menu } from "primeng/menu";
 import { Subscription } from "rxjs";
 import { filter } from "rxjs/operators";
 import { MapDataService } from "../mapdata/mapdata.service";
-import { layerPresetNode, removeGroupPrefix } from "../mapdata/map.tree";
+import { layerPresetNode, removeGroupPrefix } from "../mapdata/map-tree.controller";
 import { MapViewService, ViewRecalculationReason } from "../mapview/mapview.service";
 import {
     FeatureSearchStyleRuleDraft,
     SearchStyleRuleDraftCodec
-} from "../search/search-style-rule-editor";
+} from "../search/search-style-rule-editor.model";
 import {
     projectStyleSourceToQuick,
     QuickStyleProjection,
@@ -45,12 +45,13 @@ import { AppStateService } from "../appstate/appstate.service";
 import { DialogStackService } from "../layout/dialog-stack.service";
 import { EditorService } from "../editor/editor.service";
 import { InfoMessageService } from "../diagnostics/info.service";
-import { MapPresetDefinition, MapPresetIssue } from "./map-preset";
+import { MapPresetDefinition, MapPresetIssue } from "./map-preset.model";
 import { MapPresetService } from "./map-preset.service";
 import { StyleEditorRequestService } from "./style-editor-request.service";
 import { StyleValidationReportService } from "./style-validation-report.service";
-import { StyleValidationIssue, StyleValidationReport } from "./style-validation";
-import { ErdblickStyle, ErdblickStyleGroup, MapStyleService, UpdatedModifiedStyleEntry } from "./mapstyle.service";
+import { StyleValidationIssue, StyleValidationReport } from "./style-validation.model";
+import { MapStyleService } from "./mapstyle.service";
+import { ErdblickStyle, ErdblickStyleGroup, UpdatedModifiedStyleEntry } from "./mapstyle.model";
 
 interface QuickPresetOption {
     key: string;

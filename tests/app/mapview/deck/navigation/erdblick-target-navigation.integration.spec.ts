@@ -6,9 +6,19 @@ import {
     type WebMercatorViewport
 } from "@deck.gl/core";
 import {Timeline} from "@luma.gl/engine";
-import {describe, expect, it, vi} from "vitest";
-import type {NavigationAnchor, NavigationVisualTarget} from "../../../../../app/mapview/deck/navigation/feature-navigation.types";
-import {ErdblickTargetNavigationAdapter} from "../../../../../app/mapview/deck/navigation/erdblick-target-navigation-adapter";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
+import type {
+    NavigationAnchor,
+    NavigationVisualTarget
+} from "../../../../../app/mapview/deck/navigation/feature-navigation.model";
+import {
+    ErdblickTargetNavigationAdapter
+} from "../../../../../app/mapview/deck/navigation/erdblick-target-navigation.adapter";
 
 const VIEW_SIZE = {width: 1000, height: 700};
 const VIEW_ID = "deck-view-2";

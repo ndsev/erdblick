@@ -4,17 +4,15 @@ import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
 import {
     TileSubsetLayerRenderService
 } from "../mapview/deck/tile-subset-layer-render.service";
-import {
-    type SubsetDiagnosticsError,
-    ViewLayerDiagnosticsService
-} from "../mapview/view-layer-diagnostics.service";
+import { ViewLayerDiagnosticsService } from "../mapview/view-layer-diagnostics.service";
+import { type SubsetDiagnosticsError } from "../mapview/view-layer-diagnostics.model";
 import { DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../layout/layout.model";
 import { LayoutService } from "../layout/layout.service";
 import { AppStateService } from "../appstate/appstate.service";
 import {
     StyleValidationReportService
 } from "../mapstyle/style-validation-report.service";
-import type { StyleValidationIssue } from "../mapstyle/style-validation";
+import type { StyleValidationIssue } from "../mapstyle/style-validation.model";
 import {
     LOG_INTERVAL_MS,
     MAX_LOGS,
@@ -30,7 +28,7 @@ import {
     TilePipelineProgress,
     TileStateCounts
 } from "./diagnostics.model";
-import { buildAggregatedPerfStats } from "./diagnostics.perf-aggregation";
+import { buildAggregatedPerfStats } from "./diagnostics-perf-aggregation.util";
 
 /**
  * Current-generation diagnostics assembled from live StyledMapgetLayers.

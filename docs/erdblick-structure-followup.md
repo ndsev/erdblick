@@ -12,7 +12,7 @@ the workshop explicitly deferred their implementation.
 | Shared application state | One `<domain>.state.ts` container per state-owning domain, named `<Domain>State`; controller access is `controller.state`. No empty containers for stateless domains. |
 | Domain values | `.model.ts` describes values or a runtime model with its own invariants. Background layers, retry policy and point-cloud input admission are examples. |
 | Public contracts | Keep schemas and public shapes beside their owning values. Domain schemas and normalization live with their consumers; `appconfig.model.ts` only composes the configuration envelope. Type-only consumers avoid importing controllers. |
-| Helpers | Use `.util.ts` for reusable stateless helpers. Keep domain helpers in that domain; put only cross-domain helpers in `utils/`. Inline trivial single-consumer wrappers. |
+| Helpers | Use `.util.ts` for reusable operations and mechanisms, including classes with caller-managed state and cleanup. Keep domain helpers in that domain; put domain-independent helpers shared across domains in `utils/`. Inline trivial single-consumer wrappers. |
 | Folders | Name a capability or responsibility. `search/`, `geolocation/`, `mapstyle/` and `scss/` replace the overlapping older names. Alerts, clipboard, keyboard and editor now have explicit homes. |
 | Comments | Explain ownership, ordering, invariants and user-visible effects. A comment that only restates a method name does not explain a publication or persistence protocol. |
 | State observation | Subscribe directly to one slot. Use `AppStateService.observe()` when related values must be sampled after the whole edit. The typed lint rule rejects raw AppState inputs to RxJS combination operators. |
@@ -48,8 +48,8 @@ tests. There is no second action declaration catalog in this file.
 contains the `auditTime(0, animationFrameScheduler)` operator beside the display
 update it schedules. Its test exercises the panel's actual coalescing and teardown.
 
-**Point-cloud input budget.** This tracks retained immutable payloads and owns
-eviction callbacks; it is not a stateless utility. It moved beside `FilterTileState`
+**Point-cloud input budget.** This models the domain's retained immutable payloads
+and eviction policy. It moved beside `FilterTileState`
 in `mapdata/point-cloud-input-budget.model.ts`. Rendering supplies its working-memory
 allowance. The fetched `origin/release/2026.5.0` still had the same budget
 implementation at this review; no unverified upstream rewrite was substituted.
@@ -265,3 +265,154 @@ per owner. Shared state and action declarations keep their current registration
 shape. No new legacy aliases or persistence-key migrations are required by these
 source moves. Compare dependency direction and lifetime clarity alongside LOC;
 total lines may grow slightly when formerly implicit contracts become documented.
+
+## Suffix cleanup iteration (October 28)
+
+Implemented the agreed role suffixes across 67 source filenames and 41 mirrored
+spec filenames. Two helper/contract modules were merged into their domain
+models. The earlier AppState-values model rename is retained. Deployed URL,
+storage, configuration and MCP keys are unchanged.
+
+The stable definitions and mechanical checks are in
+[Source roles and dependencies](erdblick-source-structure.md).
+`MapLayerTree` is a controller supplied by MapDataService; its construction and
+lifetime stay intact. FrameBudgetLoop remains a utility with caller-managed
+queues, scheduling and cleanup. Component cardinality does not impose identical
+lifetimes or component-local construction.
+
+The actual dependency boundaries required four small contract modules:
+
+- `mapdata/source-catalog.model.ts`: datasource metadata and normalizers shared
+  by MapgetLayer and the interactive tree.
+- `mapdata/map-tile-stream.protocol.ts`: framing values, messages and transport
+  snapshots, independent of the network clients.
+- `mapdata/styled-mapget-layer.model.ts`: identity, filter-plan and event values,
+  independent of the presentation opening the subscription.
+- `mapview/view-layer-diagnostics.model.ts`: diagnostic snapshots, independent
+  of the service reading live renderer values.
+
+Shared style values now live in `mapstyle.model.ts`, search result/candidate
+contracts in `search.model.ts`, and feature identity encoding beside its schema.
+AppActionContributor takes the narrow AppActionRegistration contract, which the
+registry implements. Action/control declarations and handlers remain inline in
+the contributing services. MapDataState pruning consumes the identifiers it
+needs without importing the map-tree controller.
+
+The structural checker also found five pre-existing misleading suffixes: the
+browser debug API becomes an adapter, and four manually managed renderer
+helpers become visualizations. Their class names no longer imply Angular
+services. Generic hashing moves into utils; coordinate precision stays in the
+coordinates domain. New module comments explain those responsibilities.
+
+### Validation and remaining review signals
+
+- All 1,395 Angular tests across 132 files pass.
+- All 25 lint/structure rule tests pass; TypeScript and ESLint pass.
+- The full profiling frontend build passes with two build workers.
+- Three Firefox scenarios against native mapget pass: owner omnibar commands,
+  owner state controls and share links, and presentation state bridging.
+- Source-role/dependency checking reports zero errors and 18 utility-reuse
+  warnings. These are the explicitly advisory single-production-consumer cases;
+  tests and re-export barrels do not count as reuse. ESLint retains its eight
+  existing file-length warnings.
+- The canonical action catalog hash is unchanged:
+  `5defefeb452b0666728b1e4eb94a40f3054f5a2df770dbc22ec4d2606614b8a3`.
+- Emitted runtime bodies are identical for 63 mechanically moved modules after
+  normalizing intentional renderer symbol names and excluding imports. The four
+  extraction/merge modules were reviewed separately and exercised by the suite.
+- The shared review tree follows the implemented filenames and retains the
+  original annotations and removed nodes. All 71 renamed or new file-source
+  responses match their working-tree paths and content hashes. Snapshot LOC and
+  consumer metrics remain frozen; select **Current working tree** for source.
+- The workspace code graph was rebuilt for the new layout. The installed
+  Graphify version still reports its existing skill/package version mismatch.
+
+The full tests caught a path-rewrite mistake affecting dot-token decoding. The
+original values were restored before the passing rerun; no URL codec behavior
+change is part of this iteration.
+
+The MapViewer documentation screenshot source inputs follow the transport
+client/protocol split. Parent-repository changes remain uncommitted, as requested.
+
+### Implemented source moves
+
+Paths are relative to `app/`. Direct counterpart specs follow the same role
+suffix under `tests/app/`; the merged feature-identity encoding tests retain a
+focused name in the inspection test directory.
+
+| Previous file | Current file |
+| --- | --- |
+| `app-debugapi.component.ts` | `app-debugapi.adapter.ts` |
+| `appstate/appstate.ts` | `appstate/appstate.model.ts` |
+| `appstate/url-state-codec.ts` | `appstate/url-state-codec.util.ts` |
+| `diagnostics/diagnostics.perf-aggregation.ts` | `diagnostics/diagnostics-perf-aggregation.util.ts` |
+| `editor/codemirror-theme.ts` | `editor/codemirror-theme.extension.ts` |
+| `geolocation/location-geometry.ts` | `geolocation/location-geometry.util.ts` |
+| `inspection/feature-identity.ts` | `inspection/feature-identity.model.ts` |
+| `inspection/inspection-tree-highlight.ts` | `inspection/inspection-tree-highlight.util.ts` |
+| `integrations/deckgl.ts` | `integrations/deckgl.adapter.ts` |
+| `integrations/geo.ts` | `integrations/geo.adapter.ts` |
+| `integrations/wasm.ts` | `integrations/wasm.adapter.ts` |
+| `layout/app-dialog-resize.ts` | `layout/app-dialog-resize.util.ts` |
+| `mapdata/feature-inspection.ts` | `mapdata/feature-inspection.adapter.ts` |
+| `mapdata/filter-subscription.ts` | `mapdata/filter-subscription.model.ts` |
+| `mapdata/filter-tile-state.ts` | `mapdata/filter-tile-state.model.ts` |
+| `mapdata/map-layer-state.ts` | `mapdata/map-layer-state.model.ts` |
+| `mapdata/map.tree.ts` | `mapdata/map-tree.controller.ts` |
+| `mapdata/mapget-layer.ts` | `mapdata/mapget-layer.model.ts` |
+| `mapdata/partition.ts` | `mapdata/partition.model.ts` |
+| `mapdata/styled-mapget-layer.ts` | `mapdata/styled-mapget-layer.presentation.ts` |
+| `mapdata/tile-diagnostics.ts` | `mapdata/tile-diagnostics.model.ts` |
+| `mapdata/tile-expiry-scheduler.ts` | `mapdata/tile-expiry-scheduler.util.ts` |
+| `mapdata/tilestream.ts` | `mapdata/map-tile-stream.client.ts` |
+| `mapstyle/hash.ts` | `utils/hash.util.ts` |
+| `mapstyle/layer-preset.ts` | `mapstyle/layer-preset.model.ts` |
+| `mapstyle/map-preset.ts` | `mapstyle/map-preset.model.ts` |
+| `mapstyle/style-validation.ts` | `mapstyle/style-validation.model.ts` |
+| `mapview/deck/deck-contact-shading.service.ts` | `mapview/deck/deck-contact-shading.visualization.ts` |
+| `mapview/deck/deck-first-person-navigation.ts` | `mapview/deck/deck-first-person-navigation.util.ts` |
+| `mapview/deck/deck-interaction-effect.ts` | `mapview/deck/deck-interaction-effect.util.ts` |
+| `mapview/deck/deck-interaction-outline.service.ts` | `mapview/deck/deck-interaction-outline.visualization.ts` |
+| `mapview/deck/deck-layer-registry.ts` | `mapview/deck/deck-layer-registry.util.ts` |
+| `mapview/deck/deck-location-area-navigation.ts` | `mapview/deck/deck-location-area-navigation.util.ts` |
+| `mapview/deck/deck-navigation-target.ts` | `mapview/deck/deck-navigation-target.presentation.ts` |
+| `mapview/deck/deck-planar-pan.ts` | `mapview/deck/deck-planar-pan.util.ts` |
+| `mapview/deck/deck-semantic-z-index.service.ts` | `mapview/deck/deck-semantic-z-index.visualization.ts` |
+| `mapview/deck/deck-subset-picking.ts` | `mapview/deck/deck-subset-picking.util.ts` |
+| `mapview/deck/deck-tile-gltf-asset.ts` | `mapview/deck/deck-tile-gltf-asset.adapter.ts` |
+| `mapview/deck/deck-view.ts` | `mapview/deck/deck-view.controller.ts` |
+| `mapview/deck/deck-view2d.ts` | `mapview/deck/deck-view2d.controller.ts` |
+| `mapview/deck/deck-view3d.ts` | `mapview/deck/deck-view3d.controller.ts` |
+| `mapview/deck/deck-viewport-coverage.ts` | `mapview/deck/deck-viewport-coverage.util.ts` |
+| `mapview/deck/gpu-icon-atlas.service.ts` | `mapview/deck/gpu-icon-atlas.visualization.ts` |
+| `mapview/deck/gpu-memory-budget.ts` | `mapview/deck/gpu-memory-budget.model.ts` |
+| `mapview/deck/gpu-primitive-store.ts` | `mapview/deck/gpu-primitive-store.util.ts` |
+| `mapview/deck/gpu-range-allocator.ts` | `mapview/deck/gpu-range-allocator.model.ts` |
+| `mapview/deck/gpu-render-packet.ts` | `mapview/deck/gpu-render-packet.model.ts` |
+| `mapview/deck/gpu-scene.ts` | `mapview/deck/gpu-scene.visualization.ts` |
+| `mapview/deck/location-outline-buffer.ts` | `mapview/deck/location-outline-buffer.util.ts` |
+| `mapview/deck/navigation/erdblick-navigation-anchor.ts` | `mapview/deck/navigation/erdblick-navigation-anchor.util.ts` |
+| `mapview/deck/navigation/erdblick-target-navigation-adapter.ts` | `mapview/deck/navigation/erdblick-target-navigation.adapter.ts` |
+| `mapview/deck/navigation/feature-navigation.types.ts` | `mapview/deck/navigation/feature-navigation.model.ts` |
+| `mapview/deck/navigation/web-mercator-feature-navigation.ts` | `mapview/deck/navigation/web-mercator-feature-navigation.adapter.ts` |
+| `mapview/deck/tile-coordinate-origin.ts` | `mapview/deck/tile-coordinate-origin.util.ts` |
+| `mapview/deck/tile-subset-gltf-presentation.ts` | `mapview/deck/tile-subset-gltf.presentation.ts` |
+| `mapview/deck/tile-subset-interaction.ts` | `mapview/deck/tile-subset-interaction.model.ts` |
+| `mapview/interaction-highlight-plan.ts` | `mapview/interaction-highlight-plan.util.ts` |
+| `mapview/render-view.ts` | `mapview/render-view.model.ts` |
+| `mapview/tile-grid-visibility.ts` | `mapview/tile-grid-visibility.util.ts` |
+| `omnibar/omnibar-history.ts` | `omnibar/omnibar-history.model.ts` |
+| `search/feature-search-runtime-state.ts` | `search/feature-search-runtime-state.model.ts` |
+| `search/feature-search-style.ts` | `search/feature-search-style.adapter.ts` |
+| `search/feature-search.types.ts` | `search/search.model.ts` |
+| `search/search-result-density.ts` | `search/search-result-density.visualization.ts` |
+| `search/search-style-rule-editor.ts` | `search/search-style-rule-editor.model.ts` |
+| `search/simfil-language.ts` | `search/simfil-language.extension.ts` |
+| `utils/coordinate-precision.util.ts` | `coordinates/coordinate-precision.util.ts` |
+
+### Merged modules
+
+| Previous file | Surviving model |
+| --- | --- |
+| `mapdata/map-runtime.ts` | `search/search.model.ts` |
+| `utils/tile-feature-id.util.ts` | `inspection/feature-identity.model.ts` |

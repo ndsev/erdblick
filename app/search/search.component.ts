@@ -20,14 +20,16 @@ import type { MeterItem } from "primeng/types/metergroup";
 import { Subscription } from "rxjs";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
-import { coreLib } from "../integrations/wasm";
+import { coreLib } from "../integrations/wasm.adapter";
 import { FeatureSearchSchemaService } from "./feature-search-schema.service";
 import { MapDataService } from "../mapdata/mapdata.service";
-import type {
-    FeatureSearchAttributeScopeCandidate,
-    FeatureSearchStyleFieldCandidate
-} from "../mapdata/map-runtime";
-import { GroupTreeNode, LayerTreeNode, MapTreeNode, removeGroupPrefix } from "../mapdata/map.tree";
+import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldCandidate } from "./search.model";
+import {
+    GroupTreeNode,
+    LayerTreeNode,
+    MapTreeNode,
+    removeGroupPrefix
+} from "../mapdata/map-tree.controller";
 import { MapViewState } from "../mapview/mapview.state";
 import { AppConfirmPopupService } from "../alert/app-confirm-popup.service";
 import { AppDialogComponent } from "../layout/app-dialog.component";
@@ -53,7 +55,8 @@ import {
 } from "./search-definition.model";
 import { InfoMessageService } from "../diagnostics/info.service";
 import { StyleEditorRequestService } from "../mapstyle/style-editor-request.service";
-import { ErdblickStyle, MapStyleService } from "../mapstyle/mapstyle.service";
+import { MapStyleService } from "../mapstyle/mapstyle.service";
+import { ErdblickStyle } from "../mapstyle/mapstyle.model";
 import type { FeatureSearchAutoStyleOption } from "./feature-search-auto-style.util";
 import {
     defaultSearchStyleFieldOptionsForAnalysis,
@@ -64,11 +67,11 @@ import {
 import {
     featureSearchActionPayloadFromCompletion,
     FeatureSearchExportGroupingOption,
-    FeatureSearchResultEntry,
     featureSearchSelectedMapLayersFromPayload,
     SearchService,
     FeatureSearchSession
 } from "./search.service";
+import { FeatureSearchResultEntry } from "./search.model";
 import { JumpTargetService } from "../navigation/jump.service";
 import {
     autoInitializeSearchStyleColorDraft,
@@ -82,7 +85,7 @@ import {
     FeatureSearchStyleFilterDraft,
     FeatureSearchStyleRuleDraft,
     SearchStyleRuleDraftCodec
-} from "./search-style-rule-editor";
+} from "./search-style-rule-editor.model";
 import type { SearchStyleSaveRequest } from "./search-style-save-dialog.component";
 import {
     convertSearchStyleRulesToYaml,
@@ -95,7 +98,7 @@ import {
     SearchResultFieldValueSummary,
     SearchValueSummariesState,
     SearchValueSummary
-} from "./feature-search.types";
+} from "./search.model";
 import { SimfilExpressionInputComponent } from "./simfil-expression-input.component";
 
 interface FeatureSearchGroupingOption {

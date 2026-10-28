@@ -1,4 +1,9 @@
-import { Component, OnDestroy, signal, ViewChild } from "@angular/core";
+import {
+    Component,
+    OnDestroy,
+    signal,
+    ViewChild
+} from "@angular/core";
 import { Splitter } from "primeng/splitter";
 import { Subscription } from "rxjs";
 import { UiAutomationService } from "../action/ui-automation.service";

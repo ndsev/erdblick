@@ -1,29 +1,34 @@
-import { describe, expect, it, vi } from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import {
-  createErdblickVectorLayers,
-  ErdblickVectorLayer,
-  ErdblickVectorMaskLayer,
+    createErdblickVectorLayers,
+    ErdblickVectorLayer,
+    ErdblickVectorMaskLayer
 } from "../../../../app/mapview/deck/erdblick-vector.layer";
 import {
-  ARROW_BILLBOARD_VERTEX_SHADER,
-  ARROW_WORLD_VERTEX_SHADER,
-  DUAL_COMPACT_PATH_FRAGMENT_SHADER,
-  DUAL_SIMPLE_PATH_FRAGMENT_SHADER,
-  GpuSceneMaskMode,
-  gpuSceneMaskShaderModule,
-  gpuSceneShaderModule,
-  gpuSceneSemanticOverlayShaderModule,
-  gpuSceneMaskFragmentShader,
-  ICON_BILLBOARD_VERTEX_SHADER,
-  PATH_BILLBOARD_VERTEX_SHADER,
-  PATH_FRAGMENT_SHADER,
-  PATH_WORLD_VERTEX_SHADER,
-  POINT_BILLBOARD_VERTEX_SHADER,
-  POINT_RING_FRAGMENT_SHADER,
-  SIMPLE_PATH_BILLBOARD_VERTEX_SHADER,
+    ARROW_BILLBOARD_VERTEX_SHADER,
+    ARROW_WORLD_VERTEX_SHADER,
+    DUAL_COMPACT_PATH_FRAGMENT_SHADER,
+    DUAL_SIMPLE_PATH_FRAGMENT_SHADER,
+    GpuSceneMaskMode,
+    gpuSceneMaskShaderModule,
+    gpuSceneShaderModule,
+    gpuSceneSemanticOverlayShaderModule,
+    gpuSceneMaskFragmentShader,
+    ICON_BILLBOARD_VERTEX_SHADER,
+    PATH_BILLBOARD_VERTEX_SHADER,
+    PATH_FRAGMENT_SHADER,
+    PATH_WORLD_VERTEX_SHADER,
+    POINT_BILLBOARD_VERTEX_SHADER,
+    POINT_RING_FRAGMENT_SHADER,
+    SIMPLE_PATH_BILLBOARD_VERTEX_SHADER
 } from "../../../../app/mapview/deck/erdblick-vector.shaders";
-import { GpuMaterialFlag, GpuPrimitiveKind } from "../../../../app/mapview/deck/gpu-render-packet";
+import { GpuMaterialFlag, GpuPrimitiveKind } from "../../../../app/mapview/deck/gpu-render-packet.model";
 
 /** Builds the low-cardinality model entry shape retained by the custom layer. */
 function material(

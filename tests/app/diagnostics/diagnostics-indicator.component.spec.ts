@@ -1,6 +1,11 @@
 import "@angular/compiler";
 import {BehaviorSubject} from "rxjs";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import {DiagnosticsIndicatorComponent} from "../../../app/diagnostics/diagnostics-indicator.component";
 import type {DiagnosticsSnapshot, LogEntry} from "../../../app/diagnostics/diagnostics.model";

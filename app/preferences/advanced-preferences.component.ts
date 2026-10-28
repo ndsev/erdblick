@@ -1,4 +1,9 @@
-import { Component, ElementRef, HostListener, ViewChild } from '@angular/core';
+import {
+    Component,
+    ElementRef,
+    HostListener,
+    ViewChild
+} from '@angular/core';
 import { Subscription } from 'rxjs';
 import { AppDialogComponent } from '../layout/app-dialog.component';
 import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID } from "../layout/layout.model";

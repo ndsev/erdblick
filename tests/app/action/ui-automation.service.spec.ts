@@ -1,5 +1,12 @@
 import "@angular/compiler";
-import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
+import {
+    afterEach,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import {UiAutomationService} from "../../../app/action/ui-automation.service";
 import { viewerActions as viewerUiActions } from "../../support/action-contract";
 

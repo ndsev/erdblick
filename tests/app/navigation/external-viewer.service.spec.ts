@@ -1,5 +1,10 @@
 import "@angular/compiler";
-import { describe, expect, it, vi } from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import { AppConfigService } from "../../../app/config/appconfig.service";
 import type { ExternalViewerConfig } from "../../../app/navigation/external-viewer.model";
 import type { AppStateService } from "../../../app/appstate/appstate.service";

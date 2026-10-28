@@ -1,8 +1,14 @@
 import "@angular/compiler";
 import {ChangeDetectorRef} from "@angular/core";
-import {afterEach, describe, expect, it, vi} from "vitest";
+import {
+    afterEach,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import {testPersistence} from "../../support/state-owners";
-import {Cartographic} from "../../../app/integrations/geo";
+import {Cartographic} from "../../../app/integrations/geo.adapter";
 import {CoordinatesPanelComponent} from "../../../app/coordinates/coordinates-panel.component";
 import {CoordinatesService} from "../../../app/coordinates/coordinates.service";
 import {CoordinatesState} from "../../../app/coordinates/coordinates.state";

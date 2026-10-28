@@ -1,7 +1,12 @@
 import { InspectionState } from "../../../app/inspection/inspection.state";
 import { LayoutState } from "../../../app/layout/layout.state";
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import {AppModule} from "../../../app/app.module";
 import {SearchComponent} from "../../../app/search/search.component";

@@ -1,5 +1,10 @@
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import {AppModule} from "../../../app/app.module";
 import {
@@ -7,7 +12,7 @@ import {
     searchAutoStyleFieldOptionsArePortable
 } from "../../../app/search/feature-search-auto-style.util";
 import {SearchComponent} from "../../../app/search/search.component";
-import {SearchStyleRuleDraftCodec} from "../../../app/search/search-style-rule-editor";
+import {SearchStyleRuleDraftCodec} from "../../../app/search/search-style-rule-editor.model";
 
 void AppModule;
 

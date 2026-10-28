@@ -1,16 +1,25 @@
-import { ChangeDetectorRef, Component, effect, input, NgZone, OnDestroy, output, ViewChild } from "@angular/core";
+import {
+    ChangeDetectorRef,
+    Component,
+    effect,
+    input,
+    NgZone,
+    OnDestroy,
+    output,
+    ViewChild
+} from "@angular/core";
 import { TreeTableNode } from "primeng/api";
 import { Subscription } from "rxjs";
 import { Feature } from '../../build/libs/core/erdblick-core';
-import { coreLib } from "../integrations/wasm";
-import { FeatureWrapper, IncomingInspectionResult } from "../mapdata/feature-inspection";
+import { coreLib } from "../integrations/wasm.adapter";
+import { FeatureWrapper, IncomingInspectionResult } from "../mapdata/feature-inspection.adapter";
 import { MapDataService } from "../mapdata/mapdata.service";
 import {
     hasFeatureInspectionValidity,
     isFeatureInspectionSubTarget,
     stripFeatureInspectionTarget,
     stripFeatureInspectionValidity
-} from "../utils/tile-feature-id.util";
+} from "./feature-identity.model";
 import { InspectionPanelModel } from "./inspection.model";
 import { Column, FeatureFilterOptions, InspectionTreeComponent } from "./inspection-tree.component";
 

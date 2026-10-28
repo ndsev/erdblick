@@ -1,7 +1,14 @@
 import { testPersistence, stateOwners } from '../../support/state-owners';
 import '@angular/compiler';
 import { ElementRef } from '@angular/core';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+    afterEach,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi
+} from 'vitest';
 import { AppPanelComponent } from '../../../app/layout/app-panel.component';
 import { AppStateService } from "../../../app/appstate/appstate.service";
 import { UiAutomationService } from '../../../app/action/ui-automation.service';

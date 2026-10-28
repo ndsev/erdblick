@@ -1,4 +1,4 @@
-import type {FeatureSearchAttributeScopeCandidate} from "../mapdata/map-runtime";
+import type { FeatureSearchAttributeScopeCandidate } from "./search.model";
 import type {FeatureSearchMapLayerRef} from "./search-definition.model";
 import type {SearchStyleFieldOption} from "./search-style-color.util";
 

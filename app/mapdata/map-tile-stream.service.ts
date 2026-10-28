@@ -2,9 +2,9 @@ import { Injectable, NgZone, OnDestroy } from "@angular/core";
 import { BehaviorSubject, Subject, Subscription } from "rxjs";
 import { z } from "zod";
 import { rejectAction } from "../action/action.model";
-import { featureIdentitySchema } from "../inspection/feature-identity";
+import { featureIdentitySchema } from "../inspection/feature-identity.model";
 import { TileFeatureId } from "../inspection/inspection.model";
-import { coreLib, uint8ArrayToWasmOrThrow } from "../integrations/wasm";
+import { coreLib, uint8ArrayToWasmOrThrow } from "../integrations/wasm.adapter";
 import {
     ConnectionRetryAttempt,
     connectionRetryDeadline,
@@ -16,11 +16,11 @@ import {
     formatFeatureInspectionTarget,
     parseFeatureInspectionTarget,
     stripFeatureInspectionTarget
-} from "../utils/tile-feature-id.util";
+} from "../inspection/feature-identity.model";
 
 import { AppStateService } from "../appstate/appstate.service";
 import { MapDataState } from "./mapdata.state";
-import { FeatureWrapper, InspectionFeatureTile } from "./feature-inspection";
+import { FeatureWrapper, InspectionFeatureTile } from "./feature-inspection.adapter";
 import {
     FilterSubscriptionCallbacks,
     FilterSubscriptionCoverage,
@@ -29,9 +29,9 @@ import {
     TileAttachmentRef,
     TileAttachmentValue,
     TileSubsetDelivery
-} from "./filter-subscription";
+} from "./filter-subscription.model";
 import { MapDataService } from "./mapdata.service";
-import type { MapgetLayer } from "./mapget-layer";
+import type { MapgetLayer } from "./mapget-layer.model";
 import {
     parseMapPartitionKey,
     parsePartition,
@@ -40,17 +40,16 @@ import {
     partitionKeySuffix,
     type ObjectPartitionId,
     type PartitionId
-} from "./partition";
-import { TileExpiryScheduler } from "./tile-expiry-scheduler";
+} from "./partition.model";
+import { TileExpiryScheduler } from "./tile-expiry-scheduler.util";
+import { MapTileStreamClientInteractive, MapTileStreamClientTiles } from "./map-tile-stream.client";
 import {
     MapTileRequestStatus,
-    MapTileStreamClientInteractive,
-    MapTileStreamClientTiles,
     type MapTileStreamFilterStatusPayload,
     type MapTileStreamSourceCatalogChangePayload,
     type MapTileStreamStatusPayload,
     type MapTileStreamTransportCompressionStats
-} from "./tilestream";
+} from "./map-tile-stream.protocol";
 
 export interface RetainedTileExpiryOwner {
     expireTiles(tokens: ReadonlyArray<{

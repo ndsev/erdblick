@@ -10,11 +10,23 @@ import {
     ViewChild
 } from '@angular/core';
 import {basicSetup} from 'codemirror';
-import {Compartment, EditorState, Extension, StateEffect, StateField} from '@codemirror/state';
+import {
+    Compartment,
+    EditorState,
+    Extension,
+    StateEffect,
+    StateField
+} from '@codemirror/state';
 import {autocompletion, CompletionContext, CompletionSource} from '@codemirror/autocomplete';
 import {json, jsonParseLinter} from '@codemirror/lang-json';
 import {yaml} from '@codemirror/lang-yaml';
-import {Decoration, DecorationSet, EditorView, keymap, ViewUpdate} from '@codemirror/view';
+import {
+    Decoration,
+    DecorationSet,
+    EditorView,
+    keymap,
+    ViewUpdate
+} from '@codemirror/view';
 import {linter, Diagnostic, lintGutter} from '@codemirror/lint';
 import {defaultHighlightStyle, syntaxHighlighting} from '@codemirror/language';
 import {oneDark} from '@codemirror/theme-one-dark';

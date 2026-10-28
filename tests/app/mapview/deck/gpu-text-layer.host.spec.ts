@@ -1,4 +1,11 @@
-import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
+import {
+    afterEach,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import {TextLayer} from "@deck.gl/layers";
 
 import {
@@ -11,7 +18,7 @@ import {
     GpuLabelFlag,
     GpuLabelSizeUnit,
     GpuLabelWordBreak
-} from "../../../../app/mapview/deck/gpu-render-packet";
+} from "../../../../app/mapview/deck/gpu-render-packet.model";
 
 /** Builds one complete logical label with overridable TextLayer fields. */
 function label(overrides: Record<string, unknown> = {}) {

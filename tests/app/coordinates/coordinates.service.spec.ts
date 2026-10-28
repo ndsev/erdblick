@@ -1,7 +1,12 @@
 import { CoordinatesState } from "../../../app/coordinates/coordinates.state";
 import "@angular/compiler";
 import { testPersistence } from "../../support/state-owners";
-import { describe, it, expect, vi } from 'vitest';
+import {
+    describe,
+    it,
+    expect,
+    vi
+} from 'vitest';
 import { CoordinatesService } from '../../../app/coordinates/coordinates.service';
 
 class ConfigServiceStub {

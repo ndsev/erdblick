@@ -4,7 +4,7 @@ import {
     StyleSourceRef,
     StyleValidationIssue,
     StyleValidationReport
-} from './style-validation';
+} from './style-validation.model';
 
 const MAX_STYLE_VALIDATION_ISSUES = 500;
 

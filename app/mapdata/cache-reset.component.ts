@@ -7,7 +7,7 @@ import { LayoutService } from "../layout/layout.service";
 
 import { CacheResetService } from "./cache-reset.service";
 import { MapDataService } from "./mapdata.service";
-import { isDataSourceCatalogEntryReady } from "./map.tree";
+import { isDataSourceCatalogEntryReady } from "./source-catalog.model";
 import { AppConfigService } from "../config/appconfig.service";
 import { AppDialogComponent } from "../layout/app-dialog.component";
 import { CACHE_RESET_DIALOG_LAYOUT_ID } from "../layout/layout.model";

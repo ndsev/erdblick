@@ -2,18 +2,18 @@ import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {Texture, type Device} from "@luma.gl/core";
 
 import type {DeckInteractionEffect, DeckRgba} from
-    "./deck-interaction-effect";
-import type {DeckInteractionOutlineService} from
-    "./deck-interaction-outline.service";
+    "./deck-interaction-effect.util";
+import type {DeckInteractionOutline} from
+    "./deck-interaction-outline.visualization";
 import {
     ErdblickVectorMaskLayer,
     NO_POLYGON_OFFSET,
     type ErdblickVectorMaskConfiguration
 } from "./erdblick-vector.layer";
 import {GpuSceneMaskMode} from "./erdblick-vector.shaders";
-import type {GpuScene} from "./gpu-scene";
+import type {GpuScene} from "./gpu-scene.visualization";
 import type {TileSubsetInteractionOverlay} from
-    "./tile-subset-interaction";
+    "./tile-subset-interaction.model";
 
 const TARGET_TEXTURE_WIDTH = 1024;
 const VECTOR_SOURCE_ID = "scene-vector";
@@ -205,7 +205,7 @@ export class GpuSceneMaskController {
     constructor(
         private readonly device: Device,
         private readonly scene: GpuScene,
-        private readonly outlineService: DeckInteractionOutlineService,
+        private readonly outlineService: DeckInteractionOutline,
         private readonly flattenZ: boolean
     ) {}
 

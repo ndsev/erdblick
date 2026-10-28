@@ -1,5 +1,10 @@
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import {BehaviorSubject} from "rxjs";
 import {ViewerActionStatusComponent} from "../../../app/action/viewer-action-status.component";
 import type {ViewerMcpInfo} from "../../../app/action/viewer-action-relay.contract";

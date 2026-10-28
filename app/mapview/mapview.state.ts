@@ -16,10 +16,10 @@ import {
     DEFAULT_BACKGROUND_LAYER_ID,
     DEFAULT_BACKGROUND_OPACITY
 } from "./background-layer.model";
-import { roundCoordinateStateValue } from "../utils/coordinate-precision.util";
-import { Cartographic, GeoMath } from "../integrations/geo";
-import { Boolish, PerViewState } from "../appstate/appstate";
-import { cloneStateValue } from "../appstate/appstate-values";
+import { roundCoordinateStateValue } from "../coordinates/coordinate-precision.util";
+import { Cartographic, GeoMath } from "../integrations/geo.adapter";
+import { Boolish, PerViewState } from "../appstate/appstate.model";
+import { cloneStateValue } from "../appstate/appstate-values.model";
 import { AppStateService } from "../appstate/appstate.service";
 import {
     BackgroundLayerViewState,

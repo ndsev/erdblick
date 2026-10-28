@@ -1,15 +1,22 @@
 import "@angular/compiler";
 import { stateOwners } from '../../support/state-owners';
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import {
+    beforeEach,
+    afterEach,
+    describe,
+    expect,
+    it,
+    vi
+} from 'vitest';
 import { Subject } from 'rxjs';
 
 import type { Event, Router } from '@angular/router';
 import { NavigationEnd, NavigationStart } from '@angular/router';
-import { Cartographic } from '../../../app/integrations/geo';
+import { Cartographic } from '../../../app/integrations/geo.adapter';
 
 import { AppStateService } from "../../../app/appstate/appstate.service";
 import { VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION } from "../../../app/mapview/mapview.model";
-import { MapTreeNode } from "../../../app/mapdata/map.tree";
+import { MapTreeNode } from "../../../app/mapdata/map-tree.controller";
 
 // @ts-expect-error this is a mock router
 interface RouterStub extends Partial<Router> {

@@ -1,20 +1,19 @@
 import { Injectable } from "@angular/core";
 import { Params } from "@angular/router";
 import { z } from "zod";
-import { AppActionRegistry } from "../action/action-registry.service";
 import { boundedCollection, identifierSchema, rejectAction } from "../action/action.model";
-import { AppActionContributor } from "../action/action-contributor.model";
+import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
 import { DEFAULT_HIGHLIGHT_COLORS } from "../inspection/inspection.model";
 import { InspectionState } from "../inspection/inspection.state";
-import { coreLib } from "../integrations/wasm";
+import { coreLib } from "../integrations/wasm.adapter";
 import { MapDataState } from "../mapdata/mapdata.state";
 import { MapViewState, viewCountSchema, viewIdsSchema } from "../mapview/mapview.state";
 import { SearchState } from "../search/search.state";
 import { boundedUnicodeString, unicodePrefix } from "../utils/unicode-string.util";
 import { MapStyleService } from "../mapstyle/mapstyle.service";
-import { PerViewState } from "./appstate";
+import { PerViewState } from "./appstate.model";
 import { AppStateService } from "./appstate.service";
-import type { UrlV2MapTileKeyFactory } from "./url-state-codec";
+import type { UrlV2MapTileKeyFactory } from "./url-state-codec.util";
 import {
     compressUrlCsvRuns,
     decodeLayerNamesV2,
@@ -27,7 +26,7 @@ import {
     featureSelectionLayerNames,
     firstParamValue,
     sourceDataSelectionMapIds
-} from "./url-state-codec";
+} from "./url-state-codec.util";
 
 /** Coordinates the shared URL layer/style/selection dictionary and legacy share-link migration. */
 @Injectable({ providedIn: "root" })
@@ -330,7 +329,7 @@ export class AppUrlStateService implements AppActionContributor {
         return Object.keys(params).some(key => this.layerState.stylesState.isStyleOptionUrlParamKey(key));
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: AppActionRegistry): void {
+    registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
             {
                 name: "viewer_get_share_link",

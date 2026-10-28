@@ -9,7 +9,7 @@ import {
 } from "@angular/core";
 import {OverlayOptions} from "primeng/api";
 import {FeatureSearchMapLayerRef, FeatureSearchScope} from "./search-definition.model";
-import type {SearchValueSummariesState, SearchValueSummary} from "./feature-search.types";
+import type {SearchValueSummariesState, SearchValueSummary} from "./search.model";
 import {
     autoInitializeSearchStyleColorDraft,
     categoryStopsForObservedValues,

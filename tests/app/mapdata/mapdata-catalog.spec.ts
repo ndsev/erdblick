@@ -2,9 +2,14 @@ import { testPersistence, stateOwners } from "../../support/state-owners";
 import "@angular/compiler";
 import { HttpClient, HttpHeaders, HttpResponse } from "@angular/common/http";
 import { BehaviorSubject, of, Subject } from "rxjs";
-import { describe, expect, it, vi } from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import { MapDataService } from "../../../app/mapdata/mapdata.service";
-import type { MapInfoItem } from "../../../app/mapdata/map.tree";
+import type { MapInfoItem } from "../../../app/mapdata/source-catalog.model";
 import type { AppStateService } from "../../../app/appstate/appstate.service";
 import type { MapStyleService } from "../../../app/mapstyle/mapstyle.service";
 import type { MapPresetService } from "../../../app/mapstyle/map-preset.service";

@@ -3,10 +3,9 @@ import { z } from "zod";
 import { MapViewService } from "../mapview/mapview.service";
 import { MapViewState } from "../mapview/mapview.state";
 import { boundedUnicodeString, unicodePrefix } from "../utils/unicode-string.util";
-import { AppActionRegistry } from "./action-registry.service";
 
 import { rejectAction } from "./action.model";
-import { AppActionContributor } from "./action-contributor.model";
+import { AppActionContributor, AppActionRegistration } from "./action-contributor.model";
 import { ViewerActionFailure } from "./viewer-action-relay.contract";
 
 /** Components retain layout state; this registration only connects a live DOM surface to its owner. */
@@ -380,7 +379,7 @@ export class UiAutomationService implements AppActionContributor {
     constructor(private readonly views: MapViewService, private readonly viewSettings: MapViewState) {}
     private capturingScreenshot = false;
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: AppActionRegistry): void {
+    registerActions(actions: AppActionRegistration): void {
         const styleName = z.enum([
             "display",
             "visibility",

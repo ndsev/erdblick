@@ -1,7 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import type { TreeTableNode } from "primeng/api";
 import { inspectionSearchNumberLiteral } from "../../../app/inspection/inspection-search.util";
-import { expandPathToFirstHighlightedRow } from "../../../app/inspection/inspection-tree-highlight";
+import { expandPathToFirstHighlightedRow } from "../../../app/inspection/inspection-tree-highlight.util";
 import { InspectionTreeComponent } from "../../../app/inspection/inspection-tree.component";
 
 describe("inspectionSearchNumberLiteral", () => {

@@ -1,9 +1,17 @@
-import {COORDINATE_SYSTEM, Deck, MapView, type MapViewState} from '@deck.gl/core';
+import {
+    COORDINATE_SYSTEM,
+    Deck,
+    MapView,
+    type MapViewState
+} from '@deck.gl/core';
 import {PathLayer} from '@deck.gl/layers';
 import {lngLatToWorld, worldToLngLat} from '@math.gl/web-mercator';
 import {LocationOutlineLayer} from '../../../app/mapview/deck/location-area.layer';
-import {fitLocationArea, locationOverlayPolygons} from '../../../app/mapview/deck/deck-location-area-navigation';
-import type {LocationPolygon} from '../../../app/mapview/render-view';
+import {
+    fitLocationArea,
+    locationOverlayPolygons
+} from '../../../app/mapview/deck/deck-location-area-navigation.util';
+import type {LocationPolygon} from '../../../app/mapview/render-view.model';
 
 export {fitLocationArea, locationOverlayPolygons};
 

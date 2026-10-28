@@ -1,5 +1,11 @@
 import "@angular/compiler";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+    afterEach,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import { WebMcpService } from "../../../app/action/web-mcp.service";
 import { viewerActions } from "../../support/action-contract";
 import { ViewerActionFailure } from "../../../app/action/viewer-action-relay.contract";

@@ -1,5 +1,5 @@
 import {expect, test} from '../fixtures/test';
-import type {ErdblickCore_} from '../../../app/integrations/wasm';
+import type {ErdblickCore_} from '../../../app/integrations/wasm.adapter';
 
 test.use({stateSnapshot: null});
 

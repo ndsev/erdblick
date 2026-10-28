@@ -1,5 +1,10 @@
 import {NgClass, NgTemplateOutlet} from "@angular/common";
-import {Component, ContentChild, Input, TemplateRef} from "@angular/core";
+import {
+    Component,
+    ContentChild,
+    Input,
+    TemplateRef
+} from "@angular/core";
 import {ButtonModule} from "primeng/button";
 import {ConfirmPopupModule} from "primeng/confirmpopup";
 import {AppConfirmation, AppConfirmPopupService, AppConfirmPopupSeverity} from "./app-confirm-popup.service";

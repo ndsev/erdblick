@@ -8,10 +8,10 @@ import {
 } from "../point-cloud-policy.model";
 import { AUTO_TILE_SUBSET_RENDER_WORKER_COUNT } from "../tile-render-policy.model";
 import { MapViewState } from "../mapview.state";
-import { gpuIconAtlasService } from "./gpu-icon-atlas.service";
-import { gpuMemoryBudget, type GpuMemoryReservation } from "./gpu-memory-budget";
-import { GPU_RENDER_PACKET_MAX_BYTES } from "./gpu-render-packet";
-import type { GpuSceneSnapshot } from "./gpu-scene";
+import { gpuIconAtlas } from "./gpu-icon-atlas.visualization";
+import { gpuMemoryBudget, type GpuMemoryReservation } from "./gpu-memory-budget.model";
+import { GPU_RENDER_PACKET_MAX_BYTES } from "./gpu-render-packet.model";
+import type { GpuSceneSnapshot } from "./gpu-scene.visualization";
 import type {
     TileSubsetGpuContribution,
     TileSubsetLayerRenderBuffers,
@@ -717,7 +717,7 @@ export class TileSubsetLayerRenderService {
                 fieldDictBlob,
                 styleSource,
                 iconCatalogEntries: needsIconCatalog
-                    ? gpuIconAtlasService.catalogEntries().map(entry => ({
+                    ? gpuIconAtlas.catalogEntries().map(entry => ({
                         uri: entry.uri,
                         atlasPage: entry.atlasPage,
                         uv: entry.uv,

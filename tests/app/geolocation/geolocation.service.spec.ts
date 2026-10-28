@@ -1,8 +1,18 @@
 import { GeolocationState } from "../../../app/geolocation/geolocation.state";
 import {testPersistence, stateOwners} from '../../support/state-owners';
 import "@angular/compiler";
-import {firstValueFrom, NEVER, of, throwError} from "rxjs";
-import {describe, expect, it, vi} from "vitest";
+import {
+    firstValueFrom,
+    NEVER,
+    of,
+    throwError
+} from "rxjs";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import type { LocationSearchProviderConfig } from "../../../app/geolocation/geolocation.model";
 import {

@@ -1,9 +1,14 @@
 import { Injectable } from "@angular/core";
 import { z } from "zod";
-import { AppActionRegistry } from "../action/action-registry.service";
-import { AppActionCandidate, applied, colorSchema, indexSchema, rejectAction } from "../action/action.model";
-import { AppActionContributor } from "../action/action-contributor.model";
-import { coreLib } from "../integrations/wasm";
+import {
+    AppActionCandidate,
+    applied,
+    colorSchema,
+    indexSchema,
+    rejectAction
+} from "../action/action.model";
+import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
+import { coreLib } from "../integrations/wasm.adapter";
 import {
     AppDialogLayout,
     AppDialogPosition,
@@ -13,11 +18,11 @@ import {
     INSPECTION_DOCK_TAB_ID
 } from "../layout/layout.model";
 import { LayoutService } from "../layout/layout.service";
-import type { FeatureWrapper } from "../mapdata/feature-inspection";
-import type { MapTreeNode } from "../mapdata/map.tree";
-import { parseMapPartitionKey } from "../mapdata/partition";
+import type { FeatureWrapper } from "../mapdata/feature-inspection.adapter";
+import type { MapTreeNode } from "../mapdata/map-tree.controller";
+import { parseMapPartitionKey } from "../mapdata/partition.model";
 import { InfoMessageService } from "../diagnostics/info.service";
-import { stripFeatureInspectionTarget } from "../utils/tile-feature-id.util";
+import { stripFeatureInspectionTarget } from "./feature-identity.model";
 import { boundedUnicodeString } from "../utils/unicode-string.util";
 import { AppStateService } from "../appstate/appstate.service";
 import {
@@ -758,7 +763,7 @@ export class InspectionPanelService implements AppActionContributor {
         };
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: AppActionRegistry): void {
+    registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
             {
                 name: "viewer_close_inspection",
@@ -781,7 +786,7 @@ export class InspectionPanelService implements AppActionContributor {
     }
 
     /** Registers typed state readers and writers without exposing persistence keys. */
-    registerControls(actions: AppActionRegistry): void {
+    registerControls(actions: AppActionRegistration): void {
         actions.registerControl(
             {
                 name: "app.preferences.inspection",

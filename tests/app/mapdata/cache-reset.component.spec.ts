@@ -1,7 +1,12 @@
 import "@angular/compiler";
 import {HttpErrorResponse} from "@angular/common/http";
 import {BehaviorSubject, firstValueFrom} from "rxjs";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import {CacheResetComponent} from "../../../app/mapdata/cache-reset.component";
 

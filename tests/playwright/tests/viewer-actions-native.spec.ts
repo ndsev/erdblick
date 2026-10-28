@@ -3,7 +3,12 @@ import { expect, test } from '../fixtures/test';
 import { mcpClient } from '../utils/mcp-client';
 import { TEST_LAYER_NAMES, TEST_MAP_NAMES } from '../utils/test-params';
 import { enableMapLayer } from '../utils/ui-helpers';
-import { applicationControls, cameraViewStateSchema, screenshotMetadataSchema, viewerActions } from "../utils/viewer-contract";
+import {
+    applicationControls,
+    cameraViewStateSchema,
+    screenshotMetadataSchema,
+    viewerActions
+} from "../utils/viewer-contract";
 
 test.use({ stateSnapshot: null });
 test.skip(process.env['EB_MAPGET_MCP_LOCAL'] !== '1', 'Requires the native local MCP fixture, not a mocked relay');

@@ -1,8 +1,13 @@
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import {
     TileSubsetLayerRenderService
 } from "../../../../app/mapview/deck/tile-subset-layer-render.service";
-import {gpuMemoryBudget} from "../../../../app/mapview/deck/gpu-memory-budget";
+import {gpuMemoryBudget} from "../../../../app/mapview/deck/gpu-memory-budget.model";
 
 const EMPTY_SCENE = {
     generation: 1,

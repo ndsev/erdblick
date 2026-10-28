@@ -1,7 +1,7 @@
 import {SolidPolygonLayer, SolidPolygonLayerProps} from "@deck.gl/layers";
 import type {Texture} from "@luma.gl/core";
 import type {ShaderModule} from "@luma.gl/shadertools";
-import {tileGridLatToNormY, tileGridLonToNormX} from "../tile-grid-visibility";
+import {tileGridLatToNormY, tileGridLonToNormX} from "../tile-grid-visibility.util";
 
 const TILE_GRID_LAT_LIMIT = 85.05112878;
 const TILE_GRID_WORLD_RING: [number, number][] = [

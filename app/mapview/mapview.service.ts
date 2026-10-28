@@ -10,7 +10,6 @@ import {
 } from "rxjs";
 import { z } from "zod";
 import type { FeatureLayerStyle, Viewport } from "../../build/libs/core/erdblick-core";
-import { AppActionRegistry } from "../action/action-registry.service";
 import {
     applied,
     catalogPage,
@@ -19,10 +18,10 @@ import {
     identifierSchema,
     rejectAction
 } from "../action/action.model";
-import { AppActionContributor } from "../action/action-contributor.model";
+import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
 import { AppConfigService } from "../config/appconfig.service";
-import { Cartographic } from "../integrations/geo";
-import { coreLib } from "../integrations/wasm";
+import { Cartographic } from "../integrations/geo.adapter";
+import { coreLib } from "../integrations/wasm.adapter";
 import { MapDataService } from "../mapdata/mapdata.service";
 import { clampPresentationLod } from "./presentation-lod.model";
 import { clampStyleLod } from "../mapstyle/style-lod.model";
@@ -38,8 +37,13 @@ import {
     viewIdSchema
 } from "./mapview.model";
 import { MapViewState, ViewId } from "./mapview.state";
-import { IRenderView, LocationArea, RenderRectangle, RenderViewCameraState } from "./render-view";
-import { autoTileGridLevel, coarsenedTileLevel, tileGridVisibleCellCount } from "./tile-grid-visibility";
+import {
+    IRenderView,
+    LocationArea,
+    RenderRectangle,
+    RenderViewCameraState
+} from "./render-view.model";
+import { autoTileGridLevel, coarsenedTileLevel, tileGridVisibleCellCount } from "./tile-grid-visibility.util";
 import { ViewVisualizationState } from "./view.visualization";
 
 export enum ViewRecalculationReason {
@@ -780,7 +784,7 @@ export class MapViewService implements AppActionContributor {
         return clampedLevel;
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: AppActionRegistry): void {
+    registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
             {
                 name: "viewer_list_backgrounds",
@@ -818,7 +822,7 @@ export class MapViewService implements AppActionContributor {
     }
 
     /** Registers typed state readers and writers without exposing persistence keys. */
-    registerControls(actions: AppActionRegistry): void {
+    registerControls(actions: AppActionRegistration): void {
         actions.registerControl(
             {
                 name: "app.preferences.rendering",

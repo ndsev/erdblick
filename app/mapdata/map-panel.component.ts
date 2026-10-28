@@ -17,11 +17,14 @@ import {
 } from "rxjs";
 import { AppConfigService } from "../config/appconfig.service";
 import { AppModeService } from "../config/appmode.service";
-import { BackgroundLayerConfig, WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP } from "../mapview/background-layer.model";
+import {
+    BackgroundLayerConfig,
+    WMS_BACKGROUND_EXPERIMENTAL_TOOLTIP
+} from "../mapview/background-layer.model";
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
 import { SelectedSourceData } from "../inspection/inspection.model";
-import { GeoMath, Rectangle } from "../integrations/geo";
-import { coreLib } from "../integrations/wasm";
+import { GeoMath, Rectangle } from "../integrations/geo.adapter";
+import { coreLib } from "../integrations/wasm.adapter";
 import { AppDialogComponent } from "../layout/app-dialog.component";
 import { LayoutState } from "../layout/layout.state";
 import { DialogStackService } from "../layout/dialog-stack.service";
@@ -37,7 +40,7 @@ import type { FeatureSearchMapLayerRef } from "../search/search-definition.model
 import { SearchService } from "../search/search.service";
 import { InfoMessageService } from "../diagnostics/info.service";
 import { KeyboardService } from "../keyboard/keyboard.service";
-import { deepEquals } from "../appstate/appstate";
+import { deepEquals } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
 import {
     MapPresetService
@@ -47,15 +50,13 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
 import { MapDataService } from "./mapdata.service";
 import { MapDataState } from "./mapdata.state";
 import {
-    CoverageRectItem,
-    dataSourceCatalogStatus,
     filterMapTreeNodes,
     LayerPresetNode,
-    MapInfoItem,
     MapTreeViewNode,
     removeGroupPrefix,
     StyleOptionNode
-} from "./map.tree";
+} from "./map-tree.controller";
+import { CoverageRectItem, dataSourceCatalogStatus, MapInfoItem } from "./source-catalog.model";
 
 /** One rendered select option in the per-view background-layer dropdown. */
 interface BackgroundLayerOption {

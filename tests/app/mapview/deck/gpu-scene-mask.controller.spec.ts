@@ -1,17 +1,28 @@
 import type { Layer } from "@deck.gl/core";
 import type { Device, Texture } from "@luma.gl/core";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+    afterEach,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import type {
-  DeckInteractionEffect,
-  DeckRgba,
-} from "../../../../app/mapview/deck/deck-interaction-effect";
-import type { DeckInteractionOutlineService } from "../../../../app/mapview/deck/deck-interaction-outline.service";
+    DeckInteractionEffect,
+    DeckRgba
+} from "../../../../app/mapview/deck/deck-interaction-effect.util";
+import type {
+    DeckInteractionOutline
+} from "../../../../app/mapview/deck/deck-interaction-outline.visualization";
 import { ErdblickVectorMaskLayer } from "../../../../app/mapview/deck/erdblick-vector.layer";
 import { GpuSceneMaskMode } from "../../../../app/mapview/deck/erdblick-vector.shaders";
-import type { GpuScene, GpuSceneMaterialStore } from "../../../../app/mapview/deck/gpu-scene";
+import type { GpuScene, GpuSceneMaterialStore } from "../../../../app/mapview/deck/gpu-scene.visualization";
 import { GpuSceneMaskController } from "../../../../app/mapview/deck/gpu-scene-mask.controller";
-import type { TileSubsetInteractionOverlay } from "../../../../app/mapview/deck/tile-subset-interaction";
+import type {
+    TileSubsetInteractionOverlay
+} from "../../../../app/mapview/deck/tile-subset-interaction.model";
 
 /** Minimal sampled texture retaining sparse writes and destruction state. */
 class FakeTexture {
@@ -201,7 +212,7 @@ describe("GpuSceneMaskController", () => {
     const controller = new GpuSceneMaskController(
       device as unknown as Device,
       scene as unknown as GpuScene,
-      outline as unknown as DeckInteractionOutlineService,
+      outline as unknown as DeckInteractionOutline,
       false,
     );
 
@@ -285,7 +296,7 @@ describe("GpuSceneMaskController", () => {
     const controller = new GpuSceneMaskController(
       device as unknown as Device,
       scene as unknown as GpuScene,
-      outline as unknown as DeckInteractionOutlineService,
+      outline as unknown as DeckInteractionOutline,
       true,
     );
 
@@ -316,7 +327,7 @@ describe("GpuSceneMaskController", () => {
     const controller = new GpuSceneMaskController(
       new FakeDevice() as unknown as Device,
       new FakeScene() as unknown as GpuScene,
-      new FakeOutlineService() as unknown as DeckInteractionOutlineService,
+      new FakeOutlineService() as unknown as DeckInteractionOutline,
       false,
     );
 
@@ -339,7 +350,7 @@ describe("GpuSceneMaskController", () => {
     const controller = new GpuSceneMaskController(
       device as unknown as Device,
       scene as unknown as GpuScene,
-      outline as unknown as DeckInteractionOutlineService,
+      outline as unknown as DeckInteractionOutline,
       false,
     );
 

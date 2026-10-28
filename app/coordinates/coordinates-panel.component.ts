@@ -1,10 +1,15 @@
 import { KeyValue } from "@angular/common";
-import { ChangeDetectorRef, Component, Input, OnDestroy } from "@angular/core";
+import {
+    ChangeDetectorRef,
+    Component,
+    Input,
+    OnDestroy
+} from "@angular/core";
 import { animationFrameScheduler, auditTime, Subscription } from "rxjs";
-import { GeoMath } from "../integrations/geo";
+import { GeoMath } from "../integrations/geo.adapter";
 import { MapViewState } from "../mapview/mapview.state";
 import { MapViewService } from "../mapview/mapview.service";
-import { deepEquals } from "../appstate/appstate";
+import { deepEquals } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
 import { ClipboardService } from "../clipboard/clipboard.service";
 import { CoordinatesService } from "./coordinates.service";

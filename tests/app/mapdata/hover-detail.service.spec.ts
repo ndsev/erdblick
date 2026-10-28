@@ -1,12 +1,17 @@
 import "@angular/compiler";
 import { BehaviorSubject } from "rxjs";
-import { describe, expect, it, vi } from "vitest";
-import { coreLib } from "../../../app/integrations/wasm";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
+import { coreLib } from "../../../app/integrations/wasm.adapter";
 import type { HoverLabelFieldConfig, TileFeatureId } from "../../../app/inspection/inspection.model";
 import { defaultHoverLabelFieldKey } from "../../../app/inspection/inspection.model";
 import { HoverDetailService } from "../../../app/mapdata/hover-detail.service";
-import { MapgetLayer } from "../../../app/mapdata/mapget-layer";
-import { partitionKey, tilePartition } from "../../../app/mapdata/partition";
+import { MapgetLayer } from "../../../app/mapdata/mapget-layer.model";
+import { partitionKey, tilePartition } from "../../../app/mapdata/partition.model";
 
 /** Builds the minimal state and transport surface used by HoverDetailService. */
 function createHarness(

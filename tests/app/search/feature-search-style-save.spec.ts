@@ -1,6 +1,11 @@
 import "@angular/compiler";
 import {load} from "js-yaml";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import type {FeatureSearchStyleRule} from "../../../app/search/search-definition.model";
 import {AppModule} from "../../../app/app.module";

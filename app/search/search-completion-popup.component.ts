@@ -1,7 +1,16 @@
-import {AfterViewInit, Component, ElementRef, EventEmitter, Input, OnDestroy, Output, ViewChild} from "@angular/core";
+import {
+    AfterViewInit,
+    Component,
+    ElementRef,
+    EventEmitter,
+    Input,
+    OnDestroy,
+    Output,
+    ViewChild
+} from "@angular/core";
 import {NgClass} from "@angular/common";
 import {ProgressSpinnerModule} from "primeng/progressspinner";
-import {CompletionCandidate} from "./feature-search.types";
+import {CompletionCandidate} from "./search.model";
 
 @Component({
     selector: "search-completion-popup",

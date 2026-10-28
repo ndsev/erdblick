@@ -8,10 +8,10 @@ import {
 import { Injectable } from "@angular/core";
 import { z } from "zod";
 import { MapViewState } from "../mapview/mapview.state";
-import { Boolish, PerViewState, deepEquals } from "../appstate/appstate";
+import { Boolish, PerViewState, deepEquals } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
-import type { LayerPresetRef } from "../mapstyle/layer-preset";
-import type { ErdblickStyle } from "../mapstyle/mapstyle.service";
+import type { LayerPresetRef } from "../mapstyle/layer-preset.model";
+import type { ErdblickStyle } from "../mapstyle/mapstyle.model";
 import {
     isSourceOrMetaData,
     LayerPresetSelections,
@@ -19,8 +19,7 @@ import {
     MapPresetSelections,
     STORED_LAYER_PRESET_REF_SCHEMA,
     StyleOptionStateUpdate
-} from "./map-layer-state";
-import type { MapTreeNode } from "./map.tree";
+} from "./map-layer-state.model";
 
 /**
  * Saved layer settings, style-option associations, presets and transport preferences.
@@ -406,9 +405,13 @@ export class MapDataState {
         this.mapPresetSelectionState.next(viewIndex, next);
     }
 
-    /** Removes persisted map/layer/style references that no longer exist in the loaded data. */
+    /**
+     * Removes persisted references absent from the loaded catalog.
+     * Only map/layer identifiers are needed here; the tree controller supplies
+     * that projection without becoming a dependency of the state container.
+     */
     pruneCatalog(
-        presentMaps: ReadonlyMap<string, MapTreeNode>,
+        presentMaps: ReadonlyMap<string, { readonly children: readonly { readonly id: string }[] }>,
         presentStyles: ReadonlyMap<string, ErdblickStyle>
     ): void {
         this.persistence.transaction(() => {

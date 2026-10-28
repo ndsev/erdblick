@@ -1,7 +1,6 @@
 import { Injectable, NgZone, OnDestroy } from "@angular/core";
 import { merge, skip, Subscription } from "rxjs";
 import { z } from "zod";
-import { AppActionRegistry } from "../action/action-registry.service";
 import {
     ActionCandidateHistory,
     AppActionCandidate,
@@ -9,11 +8,11 @@ import {
     identifierSchema,
     rejectAction
 } from "../action/action.model";
-import { AppActionContributor } from "../action/action-contributor.model";
+import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
 import { ViewerActionFailure } from "../action/viewer-action-relay.contract";
-import { featureIdentitySchema } from "../inspection/feature-identity";
+import { featureIdentitySchema } from "../inspection/feature-identity.model";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
-import { coreLib } from "../integrations/wasm";
+import { coreLib } from "../integrations/wasm.adapter";
 import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
 import { viewIdSchema } from "../mapview/mapview.model";
 import { MapViewService } from "../mapview/mapview.service";
@@ -27,7 +26,7 @@ import {
 } from "../geolocation/geolocation.service";
 import { InfoMessageService } from "../diagnostics/info.service";
 import { boundedUnicodeString } from "../utils/unicode-string.util";
-import { deepEquals } from "../appstate/appstate";
+import { deepEquals } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
 import { JumpTargetService } from "./jump.service";
 
@@ -137,7 +136,7 @@ export class LocationNavigationService implements OnDestroy, AppActionContributo
         if (result.notice) this.messages.showInfo(result.notice);
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: AppActionRegistry): void {
+    registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
             {
                 name: "navigate_location_result",

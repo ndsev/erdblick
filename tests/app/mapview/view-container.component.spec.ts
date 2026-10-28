@@ -1,7 +1,13 @@
 import "@angular/compiler";
 import { RendererFactory2 } from "@angular/core";
 import { Subject } from "rxjs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+    afterEach,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import { stateOwners, testPersistence } from "../../support/state-owners";
 import { KeyboardService } from "../../../app/keyboard/keyboard.service";
 import { MapViewService } from "../../../app/mapview/mapview.service";

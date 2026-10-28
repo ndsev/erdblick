@@ -1,4 +1,9 @@
-import {Component, EventEmitter, input, Output} from "@angular/core";
+import {
+    Component,
+    EventEmitter,
+    input,
+    Output
+} from "@angular/core";
 import {ButtonModule} from "primeng/button";
 import {AppDialogComponent} from "../layout/app-dialog.component";
 

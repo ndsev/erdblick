@@ -1,8 +1,13 @@
 import "@angular/compiler";
-import { describe, expect, it, vi } from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import { VIEW_SYNC_POSITION } from "../../../../app/mapview/mapview.model";
-import { DeckMapView3D } from "../../../../app/mapview/deck/deck-view3d";
+import { DeckMapView3D } from "../../../../app/mapview/deck/deck-view3d.controller";
 
 interface CameraSyncTestInternals {
     isCameraInteracting: boolean;

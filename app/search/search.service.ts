@@ -1,8 +1,13 @@
+import { FeatureSearchResultEntry } from "./search.model";
 import { Injectable } from "@angular/core";
-import { BehaviorSubject, Subject, Subscription, take } from "rxjs";
+import {
+    BehaviorSubject,
+    Subject,
+    Subscription,
+    take
+} from "rxjs";
 import { filter } from "rxjs/operators";
 import { z } from "zod";
-import { AppActionRegistry } from "../action/action-registry.service";
 
 import {
     AppActionCandidate,
@@ -14,10 +19,10 @@ import {
     indexSchema,
     rejectAction
 } from "../action/action.model";
-import { AppActionContributor } from "../action/action-contributor.model";
+import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
 import { InspectionState } from "../inspection/inspection.state";
-import { GeoMath } from "../integrations/geo";
-import { coreLib, uint8ArrayFromWasm, uint8ArrayToWasm } from "../integrations/wasm";
+import { GeoMath } from "../integrations/geo.adapter";
+import { coreLib, uint8ArrayFromWasm, uint8ArrayToWasm } from "../integrations/wasm.adapter";
 import {
     FEATURE_SEARCH_DIALOG_LAYOUT_ID,
     FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID,
@@ -27,33 +32,37 @@ import { LayoutService } from "../layout/layout.service";
 import {
     filterSubscriptionCoverageEqual,
     type FilterSubscriptionCoverage
-} from "../mapdata/filter-subscription";
-import type { FilterTileState } from "../mapdata/filter-tile-state";
+} from "../mapdata/filter-subscription.model";
+import type { FilterTileState } from "../mapdata/filter-tile-state.model";
 import { MapDataService } from "../mapdata/mapdata.service";
 import {
     FeatureSearchAttributeScopeCandidate,
     SearchResultTileEntry,
     SearchResultTilePayload
-} from "../mapdata/map-runtime";
+} from "./search.model";
 import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
-import type { MapgetLayer } from "../mapdata/mapget-layer";
-import { partitionKey, tilePartition, type PartitionId } from "../mapdata/partition";
-import { StyledMapgetLayer, type StyledMapgetLayerEvent } from "../mapdata/styled-mapget-layer";
-import type { MapTileStreamFilterStatusPayload } from "../mapdata/tilestream";
+import type { MapgetLayer } from "../mapdata/mapget-layer.model";
+import { partitionKey, tilePartition, type PartitionId } from "../mapdata/partition.model";
+import { StyledMapgetLayer } from "../mapdata/styled-mapget-layer.presentation";
+import { type StyledMapgetLayerEvent } from "../mapdata/styled-mapget-layer.model";
+import type { MapTileStreamFilterStatusPayload } from "../mapdata/map-tile-stream.protocol";
 import { viewIdSchema } from "../mapview/mapview.model";
 import { MapViewService } from "../mapview/mapview.service";
 import { MapViewState } from "../mapview/mapview.state";
 import { FrameBudgetLoop } from "../utils/frame-budget-loop.util";
 import { MAX_STYLE_LOD } from "../mapstyle/style-lod.model";
-import { formatFeatureInspectionTarget } from "../utils/tile-feature-id.util";
+import { formatFeatureInspectionTarget } from "../inspection/feature-identity.model";
 import { boundedUnicodeString, unicodePrefix } from "../utils/unicode-string.util";
-import { deepEquals } from "../appstate/appstate";
+import { deepEquals } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
 import {
     featureSearchDefinitionExport,
     featureSearchDefinitionFromImportPayload
 } from "./feature-search-export.util";
-import { FeatureSearchResolvedDefinition, featureSearchResultFields } from "./feature-search-runtime-state";
+import {
+    FeatureSearchResolvedDefinition,
+    featureSearchResultFields
+} from "./feature-search-runtime-state.model";
 import { FeatureSearchSchemaService, FeatureSearchScopeAnalysis } from "./feature-search-schema.service";
 import {
     DEFAULT_FEATURE_SEARCH_TILE_LEVELS,
@@ -64,7 +73,7 @@ import {
     FeatureSearchStateEntry,
     normalizeFeatureSearchFeatureTypes
 } from "./search-definition.model";
-import { compileFeatureSearchStyle, type CompiledFeatureSearchStyle } from "./feature-search-style";
+import { compileFeatureSearchStyle, type CompiledFeatureSearchStyle } from "./feature-search-style.adapter";
 import { SearchState } from "./search.state";
 import type {
     SearchCompletionRequestMessage,
@@ -75,7 +84,7 @@ import {
     SearchResultDensityIndex,
     SearchResultPoint,
     SearchResultPointBucket
-} from "./search-result-density";
+} from "./search-result-density.visualization";
 import {
     CompletionCandidate,
     DiagnosticsMessage,
@@ -86,25 +95,7 @@ import {
     SearchValueNumericSummary,
     SearchValueSummariesState,
     SearchValueSummary
-} from "./feature-search.types";
-
-export interface FeatureSearchResultEntry {
-    label: string;
-    mapId: string;
-    layerId: string;
-    featureId: string;
-    resultIndex: number;
-    resultKey: string;
-    mapTileKey: string;
-    sourceTileKey: string;
-    sourceMapId: string;
-    sourceLayerId: string;
-    sourceTileId: number;
-    hoverFeatureId: string;
-    attributeIndex?: number;
-    validityIndex?: number;
-    validityCount?: number;
-}
+} from "./search.model";
 
 export interface FeatureSearchSession {
     id: string;
@@ -3891,7 +3882,7 @@ export class SearchService implements AppActionContributor {
                 ${mseconds ? `${mseconds}ms` : ''}`.trim() || "0ms";
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: AppActionRegistry): void {
+    registerActions(actions: AppActionRegistration): void {
         const observed = { observedAt: z.string() };
 
         const appliedSchema = z.strictObject({ status: z.literal("applied"), changed: z.boolean() });
@@ -4094,7 +4085,7 @@ export class SearchService implements AppActionContributor {
     }
 
     /** Registers typed state readers and writers without exposing persistence keys. */
-    registerControls(actions: AppActionRegistry): void {
+    registerControls(actions: AppActionRegistration): void {
         actions.registerControl(
             {
                 name: "app.searches",

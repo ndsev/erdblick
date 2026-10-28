@@ -1,9 +1,9 @@
 import "@angular/compiler";
 import {BehaviorSubject} from "rxjs";
 import {describe, expect, it} from "vitest";
-import type {SubsetDiagnosticsTile} from "../../../app/mapview/view-layer-diagnostics.service";
+import type { SubsetDiagnosticsTile } from "../../../app/mapview/view-layer-diagnostics.model";
 import {CONVERSION_AGE_UNIT} from "../../../app/diagnostics/diagnostics.constants";
-import {buildAggregatedPerfStats} from "../../../app/diagnostics/diagnostics.perf-aggregation";
+import {buildAggregatedPerfStats} from "../../../app/diagnostics/diagnostics-perf-aggregation.util";
 import {DiagnosticsDatasource} from "../../../app/diagnostics/diagnostics.datasource";
 import type {LogEntry} from "../../../app/diagnostics/diagnostics.model";
 

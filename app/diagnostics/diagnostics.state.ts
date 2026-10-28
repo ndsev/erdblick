@@ -7,7 +7,7 @@ import { Injectable } from "@angular/core";
 import { z } from "zod";
 import { BehaviorSubject } from "rxjs";
 import type { RuntimeVersions } from "./version.model";
-import { Boolish } from "../appstate/appstate";
+import { Boolish } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
 import type { DiagnosticsExportOptions, DiagnosticsLogFilter } from "./diagnostics.model";
 

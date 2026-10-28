@@ -8,7 +8,15 @@ import {
     Renderer2,
     ViewChild
 } from "@angular/core";
-import { debounce, debounceTime, distinctUntilChanged, Subject, Subscription, switchMap, timer } from "rxjs";
+import {
+    debounce,
+    debounceTime,
+    distinctUntilChanged,
+    Subject,
+    Subscription,
+    switchMap,
+    timer
+} from "rxjs";
 import { RegisteredActionCandidate } from "../action/action.model";
 import { AppActionRegistry } from "../action/action-registry.service";
 import { RightClickMenuService } from "../mapview/rightclickmenu.service";
@@ -26,7 +34,7 @@ import {
     normalizeOmnibarHistoryPayload,
     OmnibarHistoryEntry,
     withOmnibarHistoryActionName
-} from "./omnibar-history";
+} from "./omnibar-history.model";
 import {
     featureSearchActionPayloadFromCompletion,
     SearchService
@@ -37,7 +45,7 @@ import {
 import { LocationNavigationService } from "../navigation/location-navigation.service";
 import { isSupportedLocationSearchQuery, GeolocationService } from "../geolocation/geolocation.service";
 import { OmnibarState } from "./omnibar.state";
-import { CompletionCandidate } from "../search/feature-search.types";
+import { CompletionCandidate } from "../search/search.model";
 
 interface OmnibarHistoryViewEntry extends OmnibarHistoryEntry {
     label: string;

@@ -1,16 +1,22 @@
 import "@angular/compiler";
 import {SimpleChange} from "@angular/core";
-import {beforeAll, describe, expect, it, vi} from "vitest";
+import {
+    beforeAll,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import {AppModule} from "../../../app/app.module";
-import {initializeLibrary} from "../../../app/integrations/wasm";
-import {featureSearchResultFields} from "../../../app/search/feature-search-runtime-state";
+import {initializeLibrary} from "../../../app/integrations/wasm.adapter";
+import {featureSearchResultFields} from "../../../app/search/feature-search-runtime-state.model";
 import {createFeatureSearchStateEntry} from "../../../app/search/search-definition.model";
 import {SearchService, type FeatureSearchSession} from "../../../app/search/search.service";
-import {buildFeatureSearchFilterChannels} from "../../../app/search/feature-search-style";
+import {buildFeatureSearchFilterChannels} from "../../../app/search/feature-search-style.adapter";
 import {SearchStyleColorComponent} from "../../../app/search/search-style-color.component";
 import {defaultSearchStyleColorDraft} from "../../../app/search/search-style-color.util";
-import type {SearchValueSummary} from "../../../app/search/feature-search.types";
+import type {SearchValueSummary} from "../../../app/search/search.model";
 
 void AppModule;
 

@@ -1,6 +1,14 @@
 import { CoordinatesState } from "../../../app/coordinates/coordinates.state";
 import '@angular/compiler';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi
+} from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { OmnibarComponent } from '../../../app/omnibar/omnibar.component';
 import { CoordinatesService } from '../../../app/coordinates/coordinates.service';
@@ -17,7 +25,7 @@ import { AppStateService } from '../../../app/appstate/appstate.service';
 import { InfoMessageService } from '../../../app/diagnostics/info.service';
 import { Subject } from 'rxjs';
 import { StateOwners, testPersistence } from '../../support/state-owners';
-import { coreLib, initializeLibrary } from '../../../app/integrations/wasm';
+import { coreLib, initializeLibrary } from '../../../app/integrations/wasm.adapter';
 import { JumpTargetService } from '../../../app/navigation/jump.service';
 import { ExternalViewerService } from '../../../app/navigation/external-viewer.service';
 import { LocationNavigationService } from '../../../app/navigation/location-navigation.service';

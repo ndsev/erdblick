@@ -14,10 +14,15 @@ import type {
     LocationSearchFieldSelector,
     LocationSearchProviderConfig
 } from "./geolocation.model";
-import type { LocationArea } from "../mapview/render-view";
+import type { LocationArea } from "../mapview/render-view.model";
 import { SearchTarget } from "../navigation/jump.service";
 import { AppStateService } from "../appstate/appstate.service";
-import { locationExtent, locationGeometryExtent, locationPoint, locationPolygons } from "./location-geometry";
+import {
+    locationExtent,
+    locationGeometryExtent,
+    locationPoint,
+    locationPolygons
+} from "./location-geometry.util";
 import { GeolocationState } from "./geolocation.state";
 
 export type LocationPoint = [number, number];

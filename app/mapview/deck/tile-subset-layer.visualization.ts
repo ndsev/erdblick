@@ -1,43 +1,43 @@
 import type { Device } from "@luma.gl/core";
 import { Matrix4 } from "@math.gl/core";
 import type { TileFeatureId } from "../../inspection/inspection.model";
-import { SceneMode } from "../../integrations/geo";
-import { coreLib, uint8ArrayToWasm } from "../../integrations/wasm";
-import type { FilterTileState } from "../../mapdata/filter-tile-state";
-import type { StyledMapgetLayer } from "../../mapdata/styled-mapget-layer";
+import { SceneMode } from "../../integrations/geo.adapter";
+import { coreLib, uint8ArrayToWasm } from "../../integrations/wasm.adapter";
+import type { FilterTileState } from "../../mapdata/filter-tile-state.model";
+import type { StyledMapgetLayer } from "../../mapdata/styled-mapget-layer.presentation";
 import type { PointCloudRenderPolicy } from "../point-cloud-policy.model";
 import {
     formatFeatureInspectionTarget,
     parseFeatureInspectionTarget
-} from "../../utils/tile-feature-id.util";
-import { sipHash64Hex } from "../../mapstyle/hash";
+} from "../../inspection/feature-identity.model";
+import { sipHash64Hex } from "../../utils/hash.util";
 import type { StyleValidationReportService } from "../../mapstyle/style-validation-report.service";
-import type { IRenderSceneHandle } from "../render-view";
-import { DeckLayerRegistry } from "./deck-layer-registry";
+import type { IRenderSceneHandle } from "../render-view.model";
+import { DeckLayerRegistry } from "./deck-layer-registry.util";
 import {
     deckSubsetInteractionProps,
     type SubsetPickResolver as PickResolver
-} from "./deck-subset-picking";
-import { gpuIconAtlasService } from "./gpu-icon-atlas.service";
+} from "./deck-subset-picking.util";
+import { gpuIconAtlas } from "./gpu-icon-atlas.visualization";
 import {
     GpuResourceKind,
     type GpuResourceRequestView,
     type GpuRuntimeIssueView
-} from "./gpu-render-packet";
+} from "./gpu-render-packet.model";
 import {
     GpuScene,
     type GpuSceneApplyResult,
     type GpuScenePickReference,
     type GpuSceneRenderReservation
-} from "./gpu-scene";
+} from "./gpu-scene.visualization";
 import type { GpuSceneMaskController } from "./gpu-scene-mask.controller";
 import {
     TileSubsetGltfPresentation,
     type TileSubsetGltfSource
-} from "./tile-subset-gltf-presentation";
+} from "./tile-subset-gltf.presentation";
 import {
     type TileSubsetInteractionOverlay
-} from "./tile-subset-interaction";
+} from "./tile-subset-interaction.model";
 import { StaleSubsetRenderError, TileSubsetLayerRenderService } from "./tile-subset-layer-render.service";
 import type {
     PointCloudPickResult,
@@ -45,7 +45,7 @@ import type {
     TileSubsetPickResult
 } from "./tile-subset-layer-render.worker.protocol";
 
-export type { TileSubsetInteractionOverlay } from "./tile-subset-interaction";
+export type { TileSubsetInteractionOverlay } from "./tile-subset-interaction.model";
 
 interface DeckScene {
     layerRegistry?: DeckLayerRegistry;
@@ -266,7 +266,7 @@ export class TileSubsetLayerVisualization {
             this.owner.styleOrder,
             nativeOrigin ? "native-origin" : renderOrigin.join(","),
             this.sceneRevision,
-            gpuIconAtlasService.catalogVersion
+            gpuIconAtlas.catalogVersion
         ].join("|");
         if (signature === this.renderedSignature || signature === this.requestedSignature) {
             return true;
@@ -307,7 +307,7 @@ export class TileSubsetLayerVisualization {
                 ...(nativeOrigin ? {} : { coordinateOrigin: renderOrigin }),
                 sceneGeneration: reservation.sceneGeneration,
                 packetSequence: reservation.packetSequence,
-                iconCatalogVersion: gpuIconAtlasService.catalogVersion,
+                iconCatalogVersion: gpuIconAtlas.catalogVersion,
                 originSlot: reservation.origin.slot,
                 originKeyLow: Number(reservation.origin.key & 0xffffffffn),
                 originKeyHigh: Number(
@@ -686,7 +686,7 @@ export class TileSubsetLayerVisualization {
                 continue;
             }
             this.pendingIconUris.add(uri);
-            gpuIconAtlasService.ensureResource(uri).then(loaded => {
+            gpuIconAtlas.ensureResource(uri).then(loaded => {
                 this.pendingIconUris.delete(uri);
                 if (!loaded) {
                     this.failedIconUris.add(uri);

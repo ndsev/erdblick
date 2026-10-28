@@ -17,7 +17,7 @@ import { AppModeService } from "../config/appmode.service";
 import { AppStateService } from "../appstate/appstate.service";
 import { KeyboardService } from "../keyboard/keyboard.service";
 import { MapViewState } from "./mapview.state";
-import { IRenderView } from "./render-view";
+import { IRenderView } from "./render-view.model";
 
 @Component({
     selector: 'erdblick-view-ui',

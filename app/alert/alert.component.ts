@@ -1,4 +1,12 @@
-import {AfterViewInit, Component, ElementRef, EventEmitter, ViewChild, input, output} from "@angular/core";
+import {
+    AfterViewInit,
+    Component,
+    ElementRef,
+    EventEmitter,
+    ViewChild,
+    input,
+    output
+} from "@angular/core";
 import {FormsModule} from "@angular/forms";
 import {ButtonModule} from "primeng/button";
 import {Textarea} from "primeng/textarea";

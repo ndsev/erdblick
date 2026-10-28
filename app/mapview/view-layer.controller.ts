@@ -4,40 +4,36 @@ import type {
     InspectionSelectionService
 } from "../inspection/inspection-selection.service";
 import type { InspectionPanelModel, TileFeatureId } from "../inspection/inspection.model";
-import { coreLib } from "../integrations/wasm";
-import type { FilterTileState } from "../mapdata/filter-tile-state";
+import { coreLib } from "../integrations/wasm.adapter";
+import type { FilterTileState } from "../mapdata/filter-tile-state.model";
 import type { HoverDetailService } from "../mapdata/hover-detail.service";
 import type { MapDataService } from "../mapdata/mapdata.service";
 import type { MapTileStreamService } from "../mapdata/map-tile-stream.service";
-import type { MapgetLayer } from "../mapdata/mapget-layer";
+import type { MapgetLayer } from "../mapdata/mapget-layer.model";
 import {
     parseMapPartitionKey,
     partitionKey,
     tilePartition,
     type PartitionId
-} from "../mapdata/partition";
-import {
-    StyledMapgetLayer,
-    type StyleFilterPlan,
-    type StyledMapgetLayerEvent
-} from "../mapdata/styled-mapget-layer";
+} from "../mapdata/partition.model";
+import { StyledMapgetLayer } from "../mapdata/styled-mapget-layer.presentation";
+import { type StyleFilterPlan, type StyledMapgetLayerEvent } from "../mapdata/styled-mapget-layer.model";
 import type { SearchService } from "../search/search.service";
 import { MAX_STYLE_LOD } from "../mapstyle/style-lod.model";
-import {
-    tileFeatureInteractionTargetsEqual
-} from "../utils/tile-feature-id.util";
-import { sipHash64Hex } from "../mapstyle/hash";
+import { tileFeatureInteractionTargetsEqual } from "../inspection/feature-identity.model";
+import { sipHash64Hex } from "../utils/hash.util";
 import type {
     StyleValidationReportService
 } from "../mapstyle/style-validation-report.service";
-import type { ErdblickStyle, MapStyleService } from "../mapstyle/mapstyle.service";
+import type { MapStyleService } from "../mapstyle/mapstyle.service";
+import type { ErdblickStyle } from "../mapstyle/mapstyle.model";
 import {
     resolveDeckInteractionEffect,
     type DeckInteractionEffect
-} from "./deck/deck-interaction-effect";
-import type { GpuSceneSnapshot } from "./deck/gpu-scene";
-import { tileCoordinateOrigin } from "./deck/tile-coordinate-origin";
-import { INTERACTION_STYLE_ORDER_BASE } from "./deck/tile-subset-interaction";
+} from "./deck/deck-interaction-effect.util";
+import type { GpuSceneSnapshot } from "./deck/gpu-scene.visualization";
+import { tileCoordinateOrigin } from "./deck/tile-coordinate-origin.util";
+import { INTERACTION_STYLE_ORDER_BASE } from "./deck/tile-subset-interaction.model";
 import {
     TileSubsetLayerRenderService
 } from "./deck/tile-subset-layer-render.service";
@@ -49,12 +45,12 @@ import {
     hasAuthoredInteractionHighlight,
     interactionTargetKey,
     planRemoteInteractionHighlights
-} from "./interaction-highlight-plan";
+} from "./interaction-highlight-plan.util";
 import {
     MapViewService,
     ViewRecalculationReason
 } from "./mapview.service";
-import type { IRenderSceneHandle } from "./render-view";
+import type { IRenderSceneHandle } from "./render-view.model";
 import type {
     ViewLayerDiagnosticsService
 } from "./view-layer-diagnostics.service";

@@ -1,5 +1,10 @@
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import {of, throwError} from "rxjs";
 
 import {CacheResetService} from "../../../app/mapdata/cache-reset.service";

@@ -1,8 +1,14 @@
 import "@angular/compiler";
 import {HttpErrorResponse, HttpHeaders, HttpResponse} from "@angular/common/http";
 import {of, Subject, throwError} from "rxjs";
-import {beforeEach, describe, expect, it, vi} from "vitest";
-import type {MapPresetDefinition} from "../../../app/mapstyle/map-preset";
+import {
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
+import type {MapPresetDefinition} from "../../../app/mapstyle/map-preset.model";
 import {MapPresetService} from "../../../app/mapstyle/map-preset.service";
 
 const configured: MapPresetDefinition[] = [{

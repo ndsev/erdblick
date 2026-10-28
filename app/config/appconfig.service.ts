@@ -7,7 +7,7 @@ import { HttpClient } from "@angular/common/http";
 import { Injectable } from "@angular/core";
 import * as jsyaml from "js-yaml";
 import { BehaviorSubject, firstValueFrom, Observable } from "rxjs";
-import { parseMapPresetDefinitions, type MapPresetConfigStatus } from "../mapstyle/map-preset";
+import { parseMapPresetDefinitions, type MapPresetConfigStatus } from "../mapstyle/map-preset.model";
 import { normalizeStyles } from "../mapstyle/mapstyle.model";
 import { normalizeSurveys } from "../survey/survey.model";
 import { normalizeExternalViewers } from "../navigation/external-viewer.model";

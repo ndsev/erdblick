@@ -1,10 +1,8 @@
 import { Component, OnDestroy, ViewChild } from '@angular/core';
 import { TreeTableNode } from 'primeng/api';
 import { Subscription } from 'rxjs';
-import {
-    SubsetDiagnosticsTile,
-    ViewLayerDiagnosticsService
-} from '../mapview/view-layer-diagnostics.service';
+import { ViewLayerDiagnosticsService } from "../mapview/view-layer-diagnostics.service";
+import { SubsetDiagnosticsTile } from "../mapview/view-layer-diagnostics.model";
 import { AppDialogComponent } from '../layout/app-dialog.component';
 import { DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../layout/layout.model";
 import { LayoutService } from "../layout/layout.service";
@@ -22,7 +20,7 @@ import {
 } from './diagnostics.constants';
 import { DiagnosticsFacadeService } from './diagnostics-facade.service';
 import { PerformanceDiagnosticsScope, PerfStat } from './diagnostics.model';
-import { buildAggregatedPerfStats } from './diagnostics.perf-aggregation';
+import { buildAggregatedPerfStats } from './diagnostics-perf-aggregation.util';
 
 interface LayerOption {
     label: string;

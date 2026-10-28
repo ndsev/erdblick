@@ -1,13 +1,21 @@
 import "@angular/compiler";
 import { BehaviorSubject } from "rxjs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+    afterEach,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import { stateOwners, testPersistence } from "../../support/state-owners";
 import { MapViewService } from "../../../app/mapview/mapview.service";
 import type { MapPresetService } from "../../../app/mapstyle/map-preset.service";
-import type { ErdblickStyle, MapStyleService } from "../../../app/mapstyle/mapstyle.service";
+import type { MapStyleService } from "../../../app/mapstyle/mapstyle.service";
+import type { ErdblickStyle } from "../../../app/mapstyle/mapstyle.model";
 import { MapDataService } from "../../../app/mapdata/mapdata.service";
 import { MapPanelComponent } from "../../../app/mapdata/map-panel.component";
-import { layerStyleOptions, MapInfoItem, MapLayerTree, MapTreeViewNode } from "../../../app/mapdata/map.tree";
+import { layerStyleOptions, MapLayerTree, MapTreeViewNode } from "../../../app/mapdata/map-tree.controller";
+import { MapInfoItem } from "../../../app/mapdata/source-catalog.model";
 
 const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).reverse().forEach(destroy => destroy()));

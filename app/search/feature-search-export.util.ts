@@ -3,7 +3,7 @@ import {
     type FeatureSearchStateEntry,
     normalizeFeatureSearchStateEntry
 } from "./search-definition.model";
-import type {FeatureSearchResultEntry} from "./search.service";
+import type { FeatureSearchResultEntry } from "./search.model";
 
 export interface FeatureSearchGroupingExportOption {
     id: number;

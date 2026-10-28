@@ -1,6 +1,6 @@
 import { ChangeDetectorRef, Component, OnDestroy } from "@angular/core";
 import { Subscription } from "rxjs";
-import { FeatureWrapper } from "../mapdata/feature-inspection";
+import { FeatureWrapper } from "../mapdata/feature-inspection.adapter";
 import { AppStateService } from "../appstate/appstate.service";
 import { InspectionSelectionService } from "./inspection-selection.service";
 import { InspectionComparisonModel, InspectionPanelModel } from "./inspection.model";

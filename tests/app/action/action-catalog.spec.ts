@@ -1,7 +1,15 @@
-import {beforeAll, describe, expect, it} from "vitest";
+import {
+    beforeAll,
+    describe,
+    expect,
+    it
+} from "vitest";
 import fixtures from "../../fixtures/viewer-actions/fixtures.json";
 import {
-    applicationControls, canonicalViewerContractJson, viewerActionCatalog, viewerActions,
+    applicationControls,
+    canonicalViewerContractJson,
+    viewerActionCatalog,
+    viewerActions,
     type ViewerActionName
 } from "../../support/action-contract";
 import {

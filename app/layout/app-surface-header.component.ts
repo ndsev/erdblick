@@ -1,4 +1,11 @@
-import {Component, EventEmitter, Input, OnDestroy, Output, ViewChild} from '@angular/core';
+import {
+    Component,
+    EventEmitter,
+    Input,
+    OnDestroy,
+    Output,
+    ViewChild
+} from '@angular/core';
 import {NgClass} from '@angular/common';
 import {ButtonModule} from 'primeng/button';
 import {TooltipModule} from 'primeng/tooltip';

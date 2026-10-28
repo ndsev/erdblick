@@ -1,4 +1,9 @@
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import type {DiagnosticsFacadeService} from "../../../app/diagnostics/diagnostics-facade.service";
 import type {SearchService} from "../../../app/search/search.service";
@@ -6,7 +11,7 @@ import type {AppStateService} from "../../../app/appstate/appstate.service";
 import type {InfoMessageService} from "../../../app/diagnostics/info.service";
 import type {ExternalViewerService} from "../../../app/navigation/external-viewer.service";
 import type {InspectionSelectionService} from "../../../app/inspection/inspection-selection.service";
-import {coreLib} from "../../../app/integrations/wasm";
+import {coreLib} from "../../../app/integrations/wasm.adapter";
 import {RightClickMenuService} from "../../../app/mapview/rightclickmenu.service";
 
 /** Creates the right-click service with the dependencies not used by ownership tests stubbed out. */

@@ -16,7 +16,7 @@ import {
     OmnibarHistoryEntry,
     OmnibarHistoryStateEntry,
     VersionedOmnibarHistoryEntrySchema
-} from "./omnibar-history";
+} from "./omnibar-history.model";
 
 @Injectable({ providedIn: "root" })
 export class OmnibarState {

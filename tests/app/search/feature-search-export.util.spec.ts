@@ -1,6 +1,9 @@
 import {describe, expect, it} from "vitest";
-import type {FeatureSearchMapLayerRef, FeatureSearchStateEntry} from "../../../app/search/search-definition.model";
-import type {FeatureSearchResultEntry} from "../../../app/search/search.service";
+import type {
+    FeatureSearchMapLayerRef,
+    FeatureSearchStateEntry
+} from "../../../app/search/search-definition.model";
+import type { FeatureSearchResultEntry } from "../../../app/search/search.model";
 import {
     featureSearchDefinitionFromImportPayload,
     featureSearchDefinitionExport,

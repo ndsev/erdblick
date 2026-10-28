@@ -3,7 +3,7 @@ import {
     initializeLibrary,
     uint8ArrayToWasmOrThrow,
     type ErdblickCore_
-} from "../../integrations/wasm";
+} from "../../integrations/wasm.adapter";
 import type {
     FeatureLayerStyle,
     TileLayerParser,

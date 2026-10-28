@@ -1,7 +1,12 @@
 import { testPersistence } from '../../support/state-owners';
 import { stateOwners } from '../../support/state-owners';
 import "@angular/compiler";
-import { describe, expect, it, vi } from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import type { MapStyleService } from "../../../app/mapstyle/mapstyle.service";
 import type { AppStateService } from "../../../app/appstate/appstate.service";
 import type { MapViewService } from "../../../app/mapview/mapview.service";

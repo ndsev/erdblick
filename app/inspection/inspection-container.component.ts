@@ -7,7 +7,7 @@ import {
     ViewChild
 } from "@angular/core";
 import { Subscription } from "rxjs";
-import { FeatureWrapper } from "../mapdata/feature-inspection";
+import { FeatureWrapper } from "../mapdata/feature-inspection.adapter";
 import { LayoutService } from "../layout/layout.service";
 import { AppStateService } from "../appstate/appstate.service";
 import { DockedPanelDragController, DockedPanelDragOffset } from "../layout/docked-panel-drag.controller";

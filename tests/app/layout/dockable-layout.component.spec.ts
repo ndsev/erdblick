@@ -1,5 +1,10 @@
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import {Subject} from "rxjs";
 import {stateOwners, testPersistence} from "../../support/state-owners";
 import {DockableLayoutComponent} from "../../../app/layout/dockable-layout.component";

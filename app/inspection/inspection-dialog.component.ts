@@ -1,12 +1,19 @@
-import { Component, OnDestroy, Renderer2, ViewChild, effect, input } from "@angular/core";
+import {
+    Component,
+    OnDestroy,
+    Renderer2,
+    ViewChild,
+    effect,
+    input
+} from "@angular/core";
 import { Popover } from "primeng/popover";
-import { coreLib } from "../integrations/wasm";
-import { FeatureWrapper } from "../mapdata/feature-inspection";
+import { coreLib } from "../integrations/wasm.adapter";
+import { FeatureWrapper } from "../mapdata/feature-inspection.adapter";
 import { MapDataService } from "../mapdata/mapdata.service";
 import {
     parseMapPartitionKey,
     partitionKeySuffix
-} from "../mapdata/partition";
+} from "../mapdata/partition.model";
 import { AppDialogComponent } from "../layout/app-dialog.component";
 import { LayoutService } from "../layout/layout.service";
 import type {
@@ -15,7 +22,7 @@ import type {
 } from "../layout/app-surface-header.component";
 import { AppStateService } from "../appstate/appstate.service";
 import { DialogStackService } from "../layout/dialog-stack.service";
-import { displayFeatureId } from "../utils/tile-feature-id.util";
+import { displayFeatureId } from "./feature-identity.model";
 import { FeaturePanelComponent } from "./feature-panel.component";
 import { InspectionSelectionService } from "./inspection-selection.service";
 import { InspectionComparisonOption, InspectionPanelModel } from "./inspection.model";

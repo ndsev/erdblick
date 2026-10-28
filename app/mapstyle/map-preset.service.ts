@@ -3,8 +3,8 @@ import { Injectable } from "@angular/core";
 import * as jsyaml from "js-yaml";
 import { BehaviorSubject, Observable, firstValueFrom } from "rxjs";
 import { AppConfigService } from "../config/appconfig.service";
-import { LayerPresetDefinition, LayerPresetRef } from "./layer-preset";
-import { MapPresetDefinition, MapPresetIssue, parseMapPresetDefinitions } from "./map-preset";
+import { LayerPresetDefinition, LayerPresetRef } from "./layer-preset.model";
+import { MapPresetDefinition, MapPresetIssue, parseMapPresetDefinitions } from "./map-preset.model";
 import { MapStyleService } from "./mapstyle.service";
 
 const MAP_PRESETS_CONFIGURATION_DISABLED_MESSAGE =

@@ -1,10 +1,16 @@
 import "@angular/compiler";
 import { ChangeDetectorRef, ElementRef, Renderer2 } from "@angular/core";
 import { Subject } from "rxjs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+    afterEach,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import { stateOwners, testPersistence } from "../../support/state-owners";
 import { DockableLayoutComponent } from "../../../app/layout/dockable-layout.component";
-import { FeatureWrapper } from "../../../app/mapdata/feature-inspection";
+import { FeatureWrapper } from "../../../app/mapdata/feature-inspection.adapter";
 import { InspectionSelectionService } from "../../../app/inspection/inspection-selection.service";
 import { TileFeatureId } from "../../../app/inspection/inspection.model";
 import { InspectionContainerComponent } from "../../../app/inspection/inspection-container.component";

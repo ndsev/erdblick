@@ -1,7 +1,12 @@
 import { testPersistence, stateOwners } from "../../support/state-owners";
 import "@angular/compiler";
 import { Subject, skip } from "rxjs";
-import { describe, expect, it, vi } from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import { CameraViewState, VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION } from "../../../app/mapview/mapview.model";
 import {
@@ -10,7 +15,7 @@ import {
     ViewRecalculationReason
 } from "../../../app/mapview/mapview.service";
 import { ViewVisualizationState } from "../../../app/mapview/view.visualization";
-import type { RenderViewCameraState } from "../../../app/mapview/render-view";
+import type { RenderViewCameraState } from "../../../app/mapview/render-view.model";
 
 /** Builds a complete camera value with explicit target-relative position. */
 function camera(

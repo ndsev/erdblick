@@ -4,6 +4,9 @@ Erdblick is MapViewer's Angular/Deck.gl browser client plus a C++ core compiled
 to WebAssembly. This guide describes the S4E2 architecture introduced with
 mapget protocol 4.
 
+File roles, dependency rules and the structural lint check are documented in
+[Source roles and dependencies](erdblick-source-structure.md).
+
 ## Design boundary
 
 Mapget owns data semantics and server evaluation:
@@ -814,7 +817,7 @@ The controller first resolves hover and selection against typed pick entries
 retained by regular/search `TileSubsetInteractionPresentation`s. A view-owned
 interaction overlay feeds only matching paths, points, polygons, or mapget
 mesh triangles into hidden GPU mask layers and applies the active stylesheet's
-top-level `interaction-effects` material. `DeckInteractionOutlineService`
+top-level `interaction-effects` material. `DeckInteractionOutline`
 renders stable semantic-feature IDs to a lazy offscreen texture, builds a
 full-resolution coverage field plus independently scaled semantic edge and
 halo fields, and derives adaptive edge, halo, and hatch output in one

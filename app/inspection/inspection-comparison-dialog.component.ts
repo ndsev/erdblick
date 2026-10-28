@@ -12,12 +12,12 @@ import {
 import { MenuItem } from 'primeng/api';
 import { ContextMenu } from 'primeng/contextmenu';
 import { Subscription } from 'rxjs';
-import { FeatureWrapper } from '../mapdata/feature-inspection';
+import { FeatureWrapper } from '../mapdata/feature-inspection.adapter';
 import {
     MapTileStreamService,
     RetainedTileExpiryOwner
 } from '../mapdata/map-tile-stream.service';
-import { TileDeliveryError } from "../mapdata/tile-diagnostics";
+import { TileDeliveryError } from "../mapdata/tile-diagnostics.model";
 import { AppDialogComponent } from '../layout/app-dialog.component';
 import { DEFAULT_EM_HEIGHT, DEFAULT_EM_WIDTH } from "../layout/layout.model";
 import { LayoutService } from "../layout/layout.service";

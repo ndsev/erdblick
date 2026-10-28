@@ -1,6 +1,15 @@
 import type {Page} from '@playwright/test';
 import {expect, test} from '../fixtures/test';
-import {addComparisonView, closeLayerDialog, enableMapLayer, navigateToRoot, openLayerDialog, openMainMenu, selectFeatureForInspection, waitForAppReady} from '../utils/ui-helpers';
+import {
+    addComparisonView,
+    closeLayerDialog,
+    enableMapLayer,
+    navigateToRoot,
+    openLayerDialog,
+    openMainMenu,
+    selectFeatureForInspection,
+    waitForAppReady
+} from '../utils/ui-helpers';
 import {requireMapSource} from '../utils/backend-helpers';
 import {TEST_LAYER_NAMES, TEST_MAP_NAMES} from '../utils/test-params';
 

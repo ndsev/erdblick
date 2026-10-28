@@ -1,10 +1,9 @@
 import { Injectable, NgZone, OnDestroy } from "@angular/core";
 import { BehaviorSubject } from "rxjs";
 import { z } from "zod";
-import { AppActionRegistry } from "../action/action-registry.service";
 
 import { boundedCollection, identifierSchema, rejectAction } from "../action/action.model";
-import { AppActionContributor } from "../action/action-contributor.model";
+import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
 import {
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
@@ -216,7 +215,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         super.ngOnDestroy();
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: AppActionRegistry): void {
+    registerActions(actions: AppActionRegistration): void {
         const text = boundedUnicodeString(4096);
 
         actions.registerAction(

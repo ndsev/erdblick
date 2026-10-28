@@ -10,8 +10,8 @@ import {
 import { SourceDataAddressFormat } from "build/libs/core/erdblick-core";
 import { TreeTableNode } from "primeng/api";
 import { TileSourceDataLayer } from "../../build/libs/core/erdblick-core";
-import { coreLib, uint8ArrayToWasm } from "../integrations/wasm";
-import { FeatureWrapper } from "../mapdata/feature-inspection";
+import { coreLib, uint8ArrayToWasm } from "../integrations/wasm.adapter";
+import { FeatureWrapper } from "../mapdata/feature-inspection.adapter";
 import { MapDataService } from "../mapdata/mapdata.service";
 import {
     MapTileStreamService,
@@ -22,11 +22,11 @@ import {
     partitionJson,
     partitionKey,
     partitionKeySuffix
-} from "../mapdata/partition";
-import { TileDeliveryError } from "../mapdata/tile-diagnostics";
+} from "../mapdata/partition.model";
+import { TileDeliveryError } from "../mapdata/tile-diagnostics.model";
 import {
     MapTileStreamClientTiles,
-} from "../mapdata/tilestream";
+} from "../mapdata/map-tile-stream.client";
 import { AppStateService } from "../appstate/appstate.service";
 import { InspectionPanelModel } from "./inspection.model";
 import { InspectionPanelService } from "./inspection-panel.service";

@@ -1,9 +1,14 @@
 import { test as base } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_STATE_SNAPSHOT, TEST_VIEW_POSITIONS } from '../utils/test-params';
+import {
+    TEST_LAYER_NAMES,
+    TEST_MAP_NAMES,
+    TEST_STATE_SNAPSHOT,
+    TEST_VIEW_POSITIONS
+} from '../utils/test-params';
 import { loadStateSnapshotLocalStorageEntries } from '../utils/state-snapshots';
-import type {ErdblickDebugApi} from '../../../app/app-debugapi.component';
+import type {ErdblickDebugApi} from '../../../app/app-debugapi.adapter';
 
 const DARK_MODE_KEY = 'ui.darkMode';
 const FORCED_DARK_MODE_SETTING = 'on';

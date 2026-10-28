@@ -1,11 +1,10 @@
 import { Injectable } from "@angular/core";
 import { BehaviorSubject, skip } from "rxjs";
 import { z } from "zod";
-import { AppActionRegistry } from "../action/action-registry.service";
 
-import { AppActionContributor } from "../action/action-contributor.model";
+import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
 import { AppConfigService } from "../config/appconfig.service";
-import { Cartographic, GeoMath } from "../integrations/geo";
+import { Cartographic, GeoMath } from "../integrations/geo.adapter";
 import { AppStateService } from "../appstate/appstate.service";
 import { CoordinatesState } from "./coordinates.state";
 
@@ -82,7 +81,7 @@ export class CoordinatesService implements AppActionContributor {
     }
 
     /** Registers typed state readers and writers without exposing persistence keys. */
-    registerControls(actions: AppActionRegistry): void {
+    registerControls(actions: AppActionRegistration): void {
         actions.registerControl(
             {
                 name: "app.marker",

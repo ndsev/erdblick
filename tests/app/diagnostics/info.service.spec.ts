@@ -1,5 +1,10 @@
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import {InfoMessageService} from "../../../app/diagnostics/info.service";
 

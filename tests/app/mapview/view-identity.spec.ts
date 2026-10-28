@@ -1,13 +1,19 @@
 import '@angular/compiler';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi
+} from 'vitest';
 import { Subject } from 'rxjs';
 import { AppStateService } from "../../../app/appstate/appstate.service";
 import { StateOwners } from '../../support/state-owners';
 import { APPLICATION_STORAGE_KEYS } from '../../support/state-storage-keys';
 import { MapViewService } from '../../../app/mapview/mapview.service';
 import { InspectionSelectionService } from '../../../app/inspection/inspection-selection.service';
-import { FeatureWrapper } from '../../../app/mapdata/feature-inspection';
-import { Cartographic } from '../../../app/integrations/geo';
+import { FeatureWrapper } from '../../../app/mapdata/feature-inspection.adapter';
+import { Cartographic } from '../../../app/integrations/geo.adapter';
 import { VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION } from "../../../app/mapview/mapview.model";
 
 function setup(params: Record<string, unknown> = {}) {

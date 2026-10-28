@@ -1,5 +1,10 @@
 import { provideHttpClient, withFetch } from "@angular/common/http";
-import { inject, Injector, NgModule, provideAppInitializer } from "@angular/core";
+import {
+    inject,
+    Injector,
+    NgModule,
+    provideAppInitializer
+} from "@angular/core";
 import { FormsModule, ReactiveFormsModule } from "@angular/forms";
 import { BrowserModule } from '@angular/platform-browser';
 import { BrowserAnimationsModule } from "@angular/platform-browser/animations";
@@ -100,7 +105,7 @@ import { InspectionTreeComponent } from "./inspection/inspection-tree.component"
 import { SourceDataPanelComponent } from "./inspection/sourcedata-panel.component";
 import { SourceDataLayerSelectionDialogComponent } from "./inspection/sourcedata-selection-dialog.component";
 import { TreeTableFilterPatchDirective } from "./inspection/treetablefilter-patch.directive";
-import { initializeLibrary } from "./integrations/wasm";
+import { initializeLibrary } from "./integrations/wasm.adapter";
 import { AppDialogComponent } from "./layout/app-dialog.component";
 import { AppPanelComponent } from "./layout/app-panel.component";
 import { AppSurfaceHeaderComponent } from "./layout/app-surface-header.component";

@@ -1,8 +1,19 @@
 import { testPersistence, stateOwners } from "../../support/state-owners";
 import "@angular/compiler";
 import { TestBed } from "@angular/core/testing";
-import { BehaviorSubject, Observable, Subject, of } from "rxjs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+    BehaviorSubject,
+    Observable,
+    Subject,
+    of
+} from "rxjs";
+import {
+    afterEach,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import { MapViewService } from "../../../app/mapview/mapview.service";
 import { ViewLayerDiagnosticsService } from "../../../app/mapview/view-layer-diagnostics.service";
 import { AppStateService } from "../../../app/appstate/appstate.service";

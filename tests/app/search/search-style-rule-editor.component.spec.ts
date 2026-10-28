@@ -4,7 +4,7 @@ import {describe, expect, it} from "vitest";
 import {
     searchStyleRuleDisplayItems,
     SearchStyleRuleDraftCodec
-} from "../../../app/search/search-style-rule-editor";
+} from "../../../app/search/search-style-rule-editor.model";
 import {SearchStyleRuleEditorComponent} from "../../../app/search/search-style-rule-editor.component";
 
 describe("SearchStyleRuleEditorComponent", () => {

@@ -1,5 +1,5 @@
 import { Component } from "@angular/core";
-import { Color } from "../integrations/geo";
+import { Color } from "../integrations/geo.adapter";
 import { MapDataService } from "../mapdata/mapdata.service";
 import { RightClickMenuService, SourceDataDropdownOption } from "../mapview/rightclickmenu.service";
 import { SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID } from "../layout/layout.model";

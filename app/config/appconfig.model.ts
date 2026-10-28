@@ -12,7 +12,7 @@ import {
     DEFAULT_BACKGROUND_LAYERS,
     DEFAULT_BACKGROUND_LAYER_ID
 } from "../mapview/background-layer.model";
-import { type MapPresetDefinition, type MapPresetConfigStatus } from "../mapstyle/map-preset";
+import { type MapPresetDefinition, type MapPresetConfigStatus } from "../mapstyle/map-preset.model";
 import { type StyleConfigEntry, STYLE_CONFIG_ENTRY_SCHEMA } from "../mapstyle/mapstyle.model";
 import type { SurveyConfig } from "../survey/survey.model";
 import {

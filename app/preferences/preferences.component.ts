@@ -1,4 +1,9 @@
-import { Component, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import {
+    Component,
+    OnDestroy,
+    OnInit,
+    ViewChild
+} from '@angular/core';
 import { Subscription } from "rxjs";
 import { CoordinatesPolicyService } from "../coordinates/coordinates-policy.service";
 import { environment } from "../environments/environment";
@@ -16,9 +21,7 @@ import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, PREFERENCES_DIALOG_LAYOUT_ID } f
 import { LayoutService } from "../layout/layout.service";
 import { DialogStackService } from "../layout/dialog-stack.service";
 import { MapDataService } from "../mapdata/mapdata.service";
-import type {
-    FeatureSearchStyleFieldCandidate
-} from "../mapdata/map-runtime";
+import type { FeatureSearchStyleFieldCandidate } from "../search/search.model";
 import {
     getTileSubsetLayerRenderAutoWorkerCount
 } from "../mapview/deck/tile-subset-layer-render.service";

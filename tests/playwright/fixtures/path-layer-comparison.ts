@@ -3,19 +3,21 @@ import {PathLayer} from '@deck.gl/layers';
 import {lngLatToWorld, unitsPerMeter, worldToLngLat} from '@math.gl/web-mercator';
 import type {Device} from '@luma.gl/core';
 import {ErdblickVectorLayer} from '../../../app/mapview/deck/erdblick-vector.layer';
-import {GpuScene} from '../../../app/mapview/deck/gpu-scene';
-import {DeckContactShadingService} from '../../../app/mapview/deck/deck-contact-shading.service';
-import {DeckLayerRegistry} from '../../../app/mapview/deck/deck-layer-registry';
+import {GpuScene} from '../../../app/mapview/deck/gpu-scene.visualization';
+import {DeckContactShading} from '../../../app/mapview/deck/deck-contact-shading.visualization';
+import {DeckLayerRegistry} from '../../../app/mapview/deck/deck-layer-registry.util';
 import {
-    DeckSemanticZIndexService, isSemanticZIndexPassLayer, isSemanticZIndexPickingLayer
-} from '../../../app/mapview/deck/deck-semantic-z-index.service';
-import {ErdblickMapView} from '../../../app/mapview/deck/navigation/web-mercator-feature-navigation';
+    DeckSemanticZIndex,
+    isSemanticZIndexPassLayer,
+    isSemanticZIndexPickingLayer
+} from '../../../app/mapview/deck/deck-semantic-z-index.visualization';
+import {ErdblickMapView} from '../../../app/mapview/deck/navigation/web-mercator-feature-navigation.adapter';
 import {
     GPU_RENDER_PACKET_ABI_VERSION,
     GPU_RENDER_PACKET_HEADER_BYTES,
     GpuMaterialFlag,
     GpuPrimitiveKind
-} from '../../../app/mapview/deck/gpu-render-packet';
+} from '../../../app/mapview/deck/gpu-render-packet.model';
 
 const ORIGIN: [number, number, number] = [11.94668514, 57.64600107, 0];
 const WIDTH = 620;
@@ -151,9 +153,9 @@ export async function render(pitch: number, billboard: boolean, pipeline: 'direc
             let frames = 0;
             let installed = false;
             let device: Device;
-            let shading: DeckContactShadingService | undefined;
+            let shading: DeckContactShading | undefined;
             const registry = new DeckLayerRegistry();
-            const semantic = custom && pipeline === 'semantic' ? new DeckSemanticZIndexService(registry) : undefined;
+            const semantic = custom && pipeline === 'semantic' ? new DeckSemanticZIndex(registry) : undefined;
             const deck = new Deck({
                 canvas, width: WIDTH, height: HEIGHT, useDevicePixels: false,
                 views: new ErdblickMapView(), controller: false, _animate: true,
@@ -169,7 +171,7 @@ export async function render(pitch: number, billboard: boolean, pipeline: 'direc
                 onLoad: () => {
                     if (custom) {
                         if (pipeline === 'contact') {
-                            shading = new DeckContactShadingService(device, canvas.getContext('webgl2')!);
+                            shading = new DeckContactShading(device, canvas.getContext('webgl2')!);
                         }
                         const scene = new GpuScene(device, () => {}, reject);
                         paths.forEach((path, index) => installPath(scene, path, index, billboard,

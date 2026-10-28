@@ -1,3 +1,12 @@
+import {
+    BuiltinStyleBaseline,
+    OverriddenBaseStyleBaseline,
+    StyleLifecycleState,
+    UpdatedModifiedStyleEntry,
+    FeatureStyleOptionWithStringType,
+    ErdblickStyle,
+    ErdblickStyleGroup
+} from "./mapstyle.model";
 import { HttpClient } from "@angular/common/http";
 import { Injectable } from "@angular/core";
 import {
@@ -12,7 +21,6 @@ import {
 import { filter } from "rxjs/operators";
 import { z } from "zod";
 import { FeatureLayerStyle, FeatureStyleOptionType } from "../../build/libs/core/erdblick-core";
-import { AppActionRegistry } from "../action/action-registry.service";
 import {
     boundedCollection,
     catalogPage,
@@ -22,57 +30,26 @@ import {
     indexSchema,
     rejectAction
 } from "../action/action.model";
-import { AppActionContributor } from "../action/action-contributor.model";
+import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
 import { AppConfigService } from "../config/appconfig.service";
 import type { StyleConfigEntry } from "./mapstyle.model";
-import { coreLib, uint8ArrayToWasmOrThrow } from "../integrations/wasm";
+import { coreLib, uint8ArrayToWasmOrThrow } from "../integrations/wasm.adapter";
 import { canonicalSearchStyleFilename } from "../search/search-style-sheet.converter";
 import { InfoMessageService } from "../diagnostics/info.service";
 import { boundedUnicodeString, unicodePrefix } from "../utils/unicode-string.util";
 import { AppStateService } from "../appstate/appstate.service";
-import { shortId4, sipHash64Hex } from "./hash";
-import { LayerPresetDefinition } from "./layer-preset";
+import { shortId4, sipHash64Hex } from "../utils/hash.util";
+import { LayerPresetDefinition } from "./layer-preset.model";
 import { StyleValidationReportService } from "./style-validation-report.service";
 import {
     StyleSourceKind,
     StyleSourceRef,
     StyleValidationIssue,
     StyleValidationReport
-} from "./style-validation";
+} from "./style-validation.model";
 import { MapStyleState } from "./mapstyle.state";
 
 const STATIC_STYLE_URL_PREFIX = "/static-config/styles/";
-
-/** Original server-provided builtin style source kept for resets and comparisons. */
-interface BuiltinStyleBaseline {
-    id: string,
-    source: string
-}
-
-export interface OverriddenBaseStyleBaseline extends BuiltinStyleBaseline {
-    url: string
-}
-
-export interface StyleLifecycleState {
-    id: string,
-    sha256: string,
-    isModified: boolean,
-    isUpdated: boolean
-}
-
-export interface UpdatedModifiedStyleEntry {
-    id: string,
-    url: string
-}
-
-export type FeatureStyleOptionWithStringType = {
-    label: string,
-    id: string,
-    type: FeatureStyleOptionType | string,
-    defaultValue: any,
-    description: string,
-    internal: boolean
-};
 
 /** Minimal embind vector surface used while copying native preset metadata into TypeScript. */
 interface WasmVector<T> {
@@ -92,36 +69,6 @@ interface WasmLayerPreset {
 type FeatureLayerStyleWithPresets = FeatureLayerStyle & {
     presets(): WasmVector<WasmLayerPreset>;
 };
-
-export interface ErdblickStyle {
-    id: string,
-    modified: boolean,
-    imported: boolean,
-    additional: boolean,
-    category: "base" | "search",
-    source: string,
-    featureLayerStyle: FeatureLayerStyle,
-    options: Array<FeatureStyleOptionWithStringType>,
-    presets: LayerPresetDefinition[],
-    shortId: string,
-    key?: string,
-    type?: string,
-    children?: Array<FeatureStyleOptionWithStringType>,
-    expanded?: boolean,
-    visible: boolean,
-    url: string,
-    sourceRef: StyleSourceRef,
-    overridesBaseStyle?: OverriddenBaseStyleBaseline
-}
-
-export interface ErdblickStyleGroup extends Record<string, any> {
-    key: string;
-    id: string;
-    type: string;
-    children: Array<ErdblickStyleGroup | ErdblickStyle>;
-    visible: boolean,
-    expanded: boolean
-}
 
 interface ImportedStyleStoreV2 {
     schemaVersion: 2;
@@ -1408,7 +1355,7 @@ export class MapStyleService implements AppActionContributor {
         return matchedByUrl;
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: AppActionRegistry): void {
+    registerActions(actions: AppActionRegistration): void {
         const text = boundedUnicodeString(4096);
 
         const count = indexSchema;

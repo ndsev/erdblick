@@ -1,6 +1,11 @@
 import "@angular/compiler";
 import {SimpleChange} from "@angular/core";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import {SearchStyleSaveDialogComponent} from "../../../app/search/search-style-save-dialog.component";
 

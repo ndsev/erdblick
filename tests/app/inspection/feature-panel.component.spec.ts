@@ -1,4 +1,9 @@
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import {FeaturePanelComponent} from "../../../app/inspection/feature-panel.component";
 
 describe("point cloud selection and export", () => {

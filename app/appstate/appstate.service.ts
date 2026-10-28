@@ -1,5 +1,10 @@
 import { Injectable, OnDestroy } from "@angular/core";
-import { NavigationEnd, NavigationStart, Params, Router } from "@angular/router";
+import {
+    NavigationEnd,
+    NavigationStart,
+    Params,
+    Router
+} from "@angular/router";
 import {
     BehaviorSubject,
     distinctUntilChanged,
@@ -19,14 +24,14 @@ import {
     deepEquals,
     PerViewState,
     StyleState
-} from "./appstate";
+} from "./appstate.model";
 import {
     ConfigDefaultStateMeta,
     ConfigDefaultStateMetaEntry,
     hashStateValue,
     SnapshotImportLimits,
     SnapshotNormalizationResult
-} from "./appstate-values";
+} from "./appstate-values.model";
 
 /** The persistence ownership attached to an edit when it is staged. */
 type MutationOrigin = "user" | "system" | "hydration" | "config";

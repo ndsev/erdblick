@@ -15,7 +15,11 @@ import { MessageService } from "primeng/api";
 import { registerApplication } from "../app/application-registration";
 import { canonicalViewerContractJson } from "../app/action/catalog-json.util";
 import { viewerJsonSchema } from "../app/action/control-actions.util";
-import { viewerActionClientMessageSchema, viewerActionServerMessageSchema, viewerMcpInfoSchema } from "../app/action/viewer-action-relay.contract";
+import {
+    viewerActionClientMessageSchema,
+    viewerActionServerMessageSchema,
+    viewerMcpInfoSchema
+} from "../app/action/viewer-action-relay.contract";
 
 const application = await createApplication({
     providers: [

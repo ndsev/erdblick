@@ -21,7 +21,7 @@ const tester = new RuleTester({
 });
 const declarations = `
     import { BehaviorSubject, combineLatest, combineLatestWith, map } from "rxjs";
-    import { AppState, PerViewState } from "./app/appstate/appstate";
+    import { AppState, PerViewState } from "./app/appstate/appstate.model";
     import { AppStateService } from "./app/appstate/appstate.service";
     declare const left: AppState<number>;
     declare const perView: PerViewState<number>;

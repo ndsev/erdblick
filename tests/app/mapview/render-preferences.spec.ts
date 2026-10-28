@@ -1,6 +1,11 @@
 import { stateOwners } from "../../support/state-owners";
 import '@angular/compiler';
-import { describe, expect, it, vi } from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import { Subject } from "rxjs";
 import { Router } from "@angular/router";
 import { AppStateService } from "../../../app/appstate/appstate.service";

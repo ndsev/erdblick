@@ -10,7 +10,6 @@ import {
 } from "rxjs";
 import { z } from "zod";
 import type { FeatureLayerStyle, TileLayerParser } from "../../build/libs/core/erdblick-core";
-import { AppActionRegistry } from "../action/action-registry.service";
 import {
     catalogPage,
     ControlReadContext,
@@ -20,31 +19,33 @@ import {
     indexSchema,
     rejectAction
 } from "../action/action.model";
-import { AppActionContributor } from "../action/action-contributor.model";
+import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
-import { coreLib, uint8ArrayFromWasm, uint8ArrayToWasmOrThrow } from "../integrations/wasm";
+import { coreLib, uint8ArrayFromWasm, uint8ArrayToWasmOrThrow } from "../integrations/wasm.adapter";
 import { TileGridMode, VIEW_SYNC_LAYERS, viewIdSchema } from "../mapview/mapview.model";
 import { MapViewState } from "../mapview/mapview.state";
 import { InfoMessageService } from "../diagnostics/info.service";
 import { boundedUnicodeString, unicodePrefix } from "../utils/unicode-string.util";
 import { AppStateService } from "../appstate/appstate.service";
-import type { LayerPresetRef } from "../mapstyle/layer-preset";
+import type { LayerPresetRef } from "../mapstyle/layer-preset.model";
 import { MapPresetService } from "../mapstyle/map-preset.service";
 import { MapStyleService } from "../mapstyle/mapstyle.service";
 import { MapDataState } from "./mapdata.state";
 import {
-    dataSourceCatalogStatus,
-    dataSourceProgressPercent,
-    isDataSourceCatalogEntryReady,
     layerPresetInferenceKey,
     layerPresetNode,
     layerStyleOptions,
-    MapInfoItem,
     MapLayerTree,
-    sortDataSourceCatalogEntries,
     StyleOptionNode
-} from "./map.tree";
-import { MapgetLayer } from "./mapget-layer";
+} from "./map-tree.controller";
+import {
+    dataSourceCatalogStatus,
+    dataSourceProgressPercent,
+    isDataSourceCatalogEntryReady,
+    MapInfoItem,
+    sortDataSourceCatalogEntries
+} from "./source-catalog.model";
+import { MapgetLayer } from "./mapget-layer.model";
 
 /** Lightweight datasource status/progress update carried by interactive catalog-change frames. */
 interface SourceCatalogEntryUpdate {
@@ -971,7 +972,7 @@ export class MapDataService implements AppActionContributor {
         return isMetadata ? match[2] : `${match[1]}`.replace('-', '.');
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: AppActionRegistry): void {
+    registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
             {
                 name: "viewer_list_maps",
@@ -1082,7 +1083,7 @@ export class MapDataService implements AppActionContributor {
     }
 
     /** Registers typed state readers and writers without exposing persistence keys. */
-    registerControls(actions: AppActionRegistry): void {
+    registerControls(actions: AppActionRegistration): void {
         actions.registerControl(
             {
                 name: "app.preferences.connection",

@@ -1,6 +1,11 @@
 import "@angular/compiler";
 import {Subject} from "rxjs";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import {SearchDialogsComponent} from "../../../app/search/search-dialogs.component";
 
 describe("SearchDialogsComponent", () => {

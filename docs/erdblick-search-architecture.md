@@ -272,11 +272,11 @@ presentation-specific.
 ## Key files
 
 - `app/search/search.service.ts`
-- `app/search/feature-search-style.ts`
+- `app/search/feature-search-style.adapter.ts`
 - `app/search/search.component.ts`
 - `app/search/search-completion.worker.ts`
 - `app/utils/frame-budget-loop.util.ts`
-- `app/mapdata/styled-mapget-layer.ts`
+- `app/mapdata/styled-mapget-layer.presentation.ts`
 - `app/mapview/view-layer.controller.ts`
 - `app/mapview/deck/tile-subset-layer.visualization.ts`
 - `libs/core/src/style-filter-plan.cpp`

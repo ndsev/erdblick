@@ -16,7 +16,7 @@ import {
     FeatureSearchScope,
     normalizeFeatureSearchGeometry
 } from "./search-definition.model";
-import type {SearchValueSummariesState, SearchValueSummary} from "./feature-search.types";
+import type {SearchValueSummariesState, SearchValueSummary} from "./search.model";
 import {
     isNumericStyleValueKind,
     normalizeHexColor,
@@ -28,7 +28,7 @@ import {
     FeatureSearchStyleRuleDraft,
     searchStyleRuleDisplayItems,
     SearchStyleRuleDraftCodec
-} from "./search-style-rule-editor";
+} from "./search-style-rule-editor.model";
 import type {QuickStyleWarning} from "./search-style-sheet.converter";
 
 /** Search-independent editor UI for canonical high-fidelity search style rules. */

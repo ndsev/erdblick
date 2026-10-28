@@ -1,16 +1,21 @@
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import {ViewLayerController} from "../../../app/mapview/view-layer.controller";
 import {TileSubsetLayerVisualization} from
     "../../../app/mapview/deck/tile-subset-layer.visualization";
-import {coreLib} from "../../../app/integrations/wasm";
+import {coreLib} from "../../../app/integrations/wasm.adapter";
 import type {FilterSubscriptionDefinition} from
-    "../../../app/mapdata/filter-subscription";
+    "../../../app/mapdata/filter-subscription.model";
 import {
     objectPartition,
     partitionKey,
     tilePartition
-} from "../../../app/mapdata/partition";
+} from "../../../app/mapdata/partition.model";
 
 const tileKey = (id: number) => partitionKey(tilePartition(id));
 

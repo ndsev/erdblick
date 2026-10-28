@@ -1,5 +1,10 @@
-import {beforeAll, describe, expect, it} from "vitest";
-import {coreLib, initializeLibrary, uint8ArrayToWasmOrThrow} from "../../../app/integrations/wasm";
+import {
+    beforeAll,
+    describe,
+    expect,
+    it
+} from "vitest";
+import {coreLib, initializeLibrary, uint8ArrayToWasmOrThrow} from "../../../app/integrations/wasm.adapter";
 
 describe("native WASM style validation recovery", () => {
     beforeAll(async () => { await initializeLibrary(); });

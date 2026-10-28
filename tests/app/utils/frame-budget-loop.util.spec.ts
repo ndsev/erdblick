@@ -1,4 +1,9 @@
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import {FrameBudgetLoop} from "../../../app/utils/frame-budget-loop.util";
 
 describe("FrameBudgetLoop", () => {

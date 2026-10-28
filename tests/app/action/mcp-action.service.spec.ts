@@ -1,22 +1,32 @@
 import "@angular/compiler";
 import domToImage from "dom-to-image-more";
 import { BehaviorSubject, Subject } from "rxjs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+    afterEach,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import { stateOwners } from '../../support/state-owners';
 import { InspectionSelectionService } from '../../../app/inspection/inspection-selection.service';
 import { MapDataService } from '../../../app/mapdata/mapdata.service';
 import { MapTileStreamService } from '../../../app/mapdata/map-tile-stream.service';
-import { StyleOptionNode } from "../../../app/mapdata/map.tree";
+import { StyleOptionNode } from "../../../app/mapdata/map-tree.controller";
 import { MapViewService } from "../../../app/mapview/mapview.service";
 import { ExternalViewerService } from "../../../app/navigation/external-viewer.service";
 import { type FeatureSearchSession } from "../../../app/search/search.service";
 import { JumpTargetService } from "../../../app/navigation/jump.service";
 import { LocationNavigationService } from '../../../app/navigation/location-navigation.service';
 import { AppStateService } from "../../../app/appstate/appstate.service";
-import { VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION, type CameraViewState } from "../../../app/mapview/mapview.model";
+import {
+    VIEW_SYNC_MOVEMENT,
+    VIEW_SYNC_POSITION,
+    type CameraViewState
+} from "../../../app/mapview/mapview.model";
 import { createFeatureSearchStateEntry } from "../../../app/search/search-definition.model";
-import type { StyleValidationReport } from "../../../app/mapstyle/style-validation";
-import { type ErdblickStyle } from "../../../app/mapstyle/mapstyle.service";
+import type { StyleValidationReport } from "../../../app/mapstyle/style-validation.model";
+import { type ErdblickStyle } from "../../../app/mapstyle/mapstyle.model";
 import { AppActionRegistry } from '../../../app/action/action-registry.service';
 import { VIEWER_ACTION_CATALOG_ID } from "../../../app/action/generated/catalog-id";
 import { ViewerActionFailure } from "../../../app/action/viewer-action-relay.contract";
@@ -104,7 +114,7 @@ function setup() {
     const render = { queueSummary: vi.fn(() => ({ queued: 3, latestNativeMs: 12 })), currentFrameTimeMs: vi.fn(() => 0), debugSnapshot: vi.fn() };
     const diagnostics = Object.assign(owners.diagnostics, { snapshot$: new BehaviorSubject({ at: Date.now(), tiles: { expected: 3, loaded: 2, errors: 1 }, progress: { rendered: { done: 1, total: 2 } } }), perfStats$: new BehaviorSubject([]) });
     const viewDiagnostics = { cameraInteracting$: new BehaviorSubject(false), snapshot: vi.fn() };
-    const styleReports = { reports$: new BehaviorSubject<import('../../../app/mapstyle/style-validation').StyleValidationIssue[]>([]) };
+    const styleReports = { reports$: new BehaviorSubject<import('../../../app/mapstyle/style-validation.model').StyleValidationIssue[]>([]) };
     Object.assign(diagnostics, { mapService: stream, renderService: render, maps, searches, styleValidationReportService: styleReports });
     const navigation = new LocationNavigationService({} as never, views, state, viewDiagnostics as never, {} as never,
         {} as never, owners.viewSettings, stream as never, inspections, zone as never);

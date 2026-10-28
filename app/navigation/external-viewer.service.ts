@@ -1,8 +1,7 @@
 import { Injectable } from "@angular/core";
 import { z } from "zod";
-import { AppActionRegistry } from "../action/action-registry.service";
 import { applied, rejectAction } from "../action/action.model";
-import { AppActionContributor } from "../action/action-contributor.model";
+import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
 import { AppConfigService } from "../config/appconfig.service";
 import type { ExternalViewerConfig } from "./external-viewer.model";
 import { CoordinatesState } from "../coordinates/coordinates.state";
@@ -115,7 +114,7 @@ export class ExternalViewerService implements AppActionContributor {
         return (value.match(/-?\d+(?:\.\d+)?/g) ?? []).length >= 2;
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: AppActionRegistry): void {
+    registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
             {
                 name: "open_external_viewer",

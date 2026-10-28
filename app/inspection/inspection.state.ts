@@ -7,7 +7,7 @@
 import { Injectable } from "@angular/core";
 import { z } from "zod";
 import { DEFAULT_EM_HEIGHT, DEFAULT_EM_WIDTH } from "../layout/layout.model";
-import { Boolish } from "../appstate/appstate";
+import { Boolish } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
 import {
     DEFAULT_DRILL_PICK_RADIUS,

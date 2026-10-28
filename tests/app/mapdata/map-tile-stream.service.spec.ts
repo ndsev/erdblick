@@ -1,17 +1,26 @@
 import "@angular/compiler";
 import { BehaviorSubject, Subject } from "rxjs";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+    afterEach,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import { MapTileStreamService } from "../../../app/mapdata/map-tile-stream.service";
-import { TileDeliveryError } from "../../../app/mapdata/tile-diagnostics";
-import { MapgetLayer } from "../../../app/mapdata/mapget-layer";
-import { objectPartition, tilePartition } from "../../../app/mapdata/partition";
+import { TileDeliveryError } from "../../../app/mapdata/tile-diagnostics.model";
+import { MapgetLayer } from "../../../app/mapdata/mapget-layer.model";
+import { objectPartition, tilePartition } from "../../../app/mapdata/partition.model";
+import {
+    MapTileStreamClientInteractive,
+    MapTileStreamClientTiles
+} from "../../../app/mapdata/map-tile-stream.client";
 import {
     MapTileRequestStatus,
-    MapTileStreamClientInteractive,
-    MapTileStreamClientTiles,
     type MapTileStreamStatusPayload
-} from "../../../app/mapdata/tilestream";
-import { coreLib } from "../../../app/integrations/wasm";
+} from "../../../app/mapdata/map-tile-stream.protocol";
+import { coreLib } from "../../../app/integrations/wasm.adapter";
 import { DEFAULT_CONNECTION_RETRY_POLICY } from "../../../app/mapdata/connection-retry-policy.model";
 
 /** Supplies real observable preference values to each transport harness. */

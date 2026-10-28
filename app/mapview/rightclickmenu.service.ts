@@ -6,15 +6,15 @@ import { PerformanceDiagnosticsScope } from "../diagnostics/diagnostics.model";
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
 import { SelectedSourceData, type TileFeatureId } from "../inspection/inspection.model";
-import { Color, HeightReference, Rectangle } from "../integrations/geo";
-import { coreLib } from "../integrations/wasm";
-import { parseMapPartitionKey } from "../mapdata/partition";
+import { Color, HeightReference, Rectangle } from "../integrations/geo.adapter";
+import { coreLib } from "../integrations/wasm.adapter";
+import { parseMapPartitionKey } from "../mapdata/partition.model";
 import { ExternalViewerLocation, ExternalViewerService } from "../navigation/external-viewer.service";
 import type { FeatureSearchMapLayerRef } from "../search/search-definition.model";
 import { SearchService } from "../search/search.service";
 import { InfoMessageService } from "../diagnostics/info.service";
 import { AppStateService } from "../appstate/appstate.service";
-import type { RenderNavigationTarget } from "./render-view";
+import type { RenderNavigationTarget } from "./render-view.model";
 
 /** One selectable source-data tile candidate shown in the context-menu flow. */
 export interface SourceDataDropdownOption {

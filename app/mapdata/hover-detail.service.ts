@@ -1,5 +1,10 @@
 import { Injectable, OnDestroy } from "@angular/core";
-import { debounceTime, skip, Subject, Subscription } from "rxjs";
+import {
+    debounceTime,
+    skip,
+    Subject,
+    Subscription
+} from "rxjs";
 import type { FeatureLayerStyle } from "../../build/libs/core/erdblick-core";
 import {
     defaultHoverLabelFieldKey,
@@ -7,17 +12,18 @@ import {
     type TileFeatureId
 } from "../inspection/inspection.model";
 import { InspectionState } from "../inspection/inspection.state";
-import { coreLib, uint8ArrayToWasm } from "../integrations/wasm";
+import { coreLib, uint8ArrayToWasm } from "../integrations/wasm.adapter";
 import { MAX_STYLE_LOD } from "../mapstyle/style-lod.model";
-import { stripFeatureInspectionTarget } from "../utils/tile-feature-id.util";
+import { stripFeatureInspectionTarget } from "../inspection/feature-identity.model";
 import { AppStateService } from "../appstate/appstate.service";
-import type { ErdblickStyle } from "../mapstyle/mapstyle.service";
+import type { ErdblickStyle } from "../mapstyle/mapstyle.model";
 import { MapDataService } from "./mapdata.service";
-import type { SearchResultTileEntry } from "./map-runtime";
+import type { SearchResultTileEntry } from "../search/search.model";
 import { MapTileStreamService } from "./map-tile-stream.service";
-import type { MapgetLayer } from "./mapget-layer";
-import { partitionKey, type PartitionId } from "./partition";
-import { StyledMapgetLayer, type StyledMapgetLayerEvent, type StyleFilterPlan } from "./styled-mapget-layer";
+import type { MapgetLayer } from "./mapget-layer.model";
+import { partitionKey, type PartitionId } from "./partition.model";
+import { StyledMapgetLayer } from "./styled-mapget-layer.presentation";
+import { type StyledMapgetLayerEvent, type StyleFilterPlan } from "./styled-mapget-layer.model";
 
 export type HoverDetailField = { key: string; value: string; colorKey: string };
 export type HoverFeatureDetails = {

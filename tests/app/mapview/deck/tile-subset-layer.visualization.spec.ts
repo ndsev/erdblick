@@ -1,12 +1,17 @@
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
-import {SceneMode} from "../../../../app/integrations/geo";
-import {coreLib} from "../../../../app/integrations/wasm";
+import {SceneMode} from "../../../../app/integrations/geo.adapter";
+import {coreLib} from "../../../../app/integrations/wasm.adapter";
 import {
     deckSubsetInteractionProps,
     remapGltfPickContributions
-} from "../../../../app/mapview/deck/deck-subset-picking";
+} from "../../../../app/mapview/deck/deck-subset-picking.util";
 import {TileSubsetLayerVisualization} from
     "../../../../app/mapview/deck/tile-subset-layer.visualization";
 

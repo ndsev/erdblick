@@ -1,7 +1,12 @@
 import { MapDataState } from "../../../app/mapdata/mapdata.state";
 import {testPersistence, stateOwners} from '../../support/state-owners';
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import {HttpResponse} from "@angular/common/http";
 import {of, throwError} from "rxjs";
 

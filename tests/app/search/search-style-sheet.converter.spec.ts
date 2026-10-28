@@ -1,7 +1,12 @@
 import {load} from "js-yaml";
-import {beforeAll, describe, expect, it} from "vitest";
+import {
+    beforeAll,
+    describe,
+    expect,
+    it
+} from "vitest";
 
-import {coreLib, initializeLibrary, uint8ArrayToWasm} from "../../../app/integrations/wasm";
+import {coreLib, initializeLibrary, uint8ArrayToWasm} from "../../../app/integrations/wasm.adapter";
 import type {FeatureSearchStyleRule} from "../../../app/search/search-definition.model";
 import {
     canonicalLayerAffinityExpression,

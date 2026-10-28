@@ -20,7 +20,7 @@ import { InspectionSelectionService } from "../inspection/inspection-selection.s
 import { type TileFeatureId } from "../inspection/inspection.model";
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
 import { inspectionValueBubbleClasses } from "../inspection/inspection-value-bubble.presentation";
-import { coreLib } from "../integrations/wasm";
+import { coreLib } from "../integrations/wasm.adapter";
 import { CacheResetService } from "../mapdata/cache-reset.service";
 import {
     HoverDetailService,
@@ -33,15 +33,15 @@ import { SearchService } from "../search/search.service";
 import { JumpTargetService } from "../navigation/jump.service";
 import { AppConfigService } from "../config/appconfig.service";
 import { AppModeService } from "../config/appmode.service";
-import { deepEquals } from "../appstate/appstate";
+import { deepEquals } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
 import { KeyboardService } from "../keyboard/keyboard.service";
 import {
     StyleValidationReportService
 } from "../mapstyle/style-validation-report.service";
 import { MapStyleService } from "../mapstyle/mapstyle.service";
-import { DeckMapView2D } from "./deck/deck-view2d";
-import { DeckMapView3D } from "./deck/deck-view3d";
+import { DeckMapView2D } from "./deck/deck-view2d.controller";
+import { DeckMapView3D } from "./deck/deck-view3d.controller";
 import {
     TileSubsetLayerRenderService
 } from "./deck/tile-subset-layer-render.service";
@@ -51,7 +51,7 @@ import {
     IRenderView,
     MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT,
     RenderNavigationTarget
-} from "./render-view";
+} from "./render-view.model";
 import {
     FirstPersonViewMenuRequest,
     RightClickMenuService,

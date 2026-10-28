@@ -1,6 +1,6 @@
 import { Injectable } from "@angular/core";
 import { z } from "zod";
-import { deepCopy, deepEquals } from "../appstate/appstate";
+import { deepCopy, deepEquals } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
 import {
     ActionCandidateHistory,
@@ -14,7 +14,7 @@ import {
     VIEWER_ACTION_RESULT_BYTES,
     VIEWER_ACTION_TARGET_LIMIT
 } from "./action.model";
-import type { AppActionContributor } from "./action-contributor.model";
+import type { AppActionContributor, AppActionRegistration } from "./action-contributor.model";
 import { createControlActions, describeControls, viewerJsonSchema } from "./control-actions.util";
 import { ViewerActionFailure } from "./viewer-action-relay.contract";
 
@@ -39,7 +39,7 @@ interface RegisteredControl {
  * ordinary methods; this service neither discovers stored values nor owns domains.
  */
 @Injectable({ providedIn: "root" })
-export class AppActionRegistry {
+export class AppActionRegistry implements AppActionRegistration {
     private readonly actions = new Map<string, {
         declaration: AppAction;
         execute: (input: unknown, signal?: AbortSignal) => unknown;

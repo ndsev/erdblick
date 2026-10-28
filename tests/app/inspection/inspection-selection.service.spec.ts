@@ -1,10 +1,15 @@
 import { stateOwners, testPersistence } from '../../support/state-owners';
 import "@angular/compiler";
-import { describe, expect, it, vi } from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import type { InspectionPanelModel, TileFeatureId } from "../../../app/inspection/inspection.model";
 import type { InfoMessageService } from "../../../app/diagnostics/info.service";
-import { FeatureWrapper } from "../../../app/mapdata/feature-inspection";
+import { FeatureWrapper } from "../../../app/mapdata/feature-inspection.adapter";
 import { InspectionSelectionService } from "../../../app/inspection/inspection-selection.service";
 
 const feature = (featureId: string, mapTileKey: string): TileFeatureId => ({ featureId, mapTileKey });

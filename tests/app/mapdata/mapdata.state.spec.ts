@@ -1,5 +1,11 @@
 import '@angular/compiler';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {
+    afterEach,
+    describe,
+    expect,
+    it,
+    vi
+} from 'vitest';
 import {StateOwners, testPersistence} from '../../support/state-owners';
 
 afterEach(() => localStorage.clear());

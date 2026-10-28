@@ -1,5 +1,10 @@
-import {describe, expect, it, vi} from "vitest";
-import {coreLib} from "../../../app/integrations/wasm";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
+import {coreLib} from "../../../app/integrations/wasm.adapter";
 import {
     lineSimplificationToleranceMeters,
     ViewVisualizationState

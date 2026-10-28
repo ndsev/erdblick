@@ -35,7 +35,7 @@ export default {
             if (type.isUnionOrIntersection()) return type.types.some(part => isAppStateType(part, seen));
             const symbol = type.getSymbol();
             if (symbol && ["AppState", "PerViewState", "StyleState"].includes(symbol.name) &&
-                symbol.declarations?.some(declaration => declaration.getSourceFile().fileName.replaceAll("\\", "/").endsWith("/app/appstate/appstate.ts"))) {
+                symbol.declarations?.some(declaration => declaration.getSourceFile().fileName.replaceAll("\\", "/").endsWith("/app/appstate/appstate.model.ts"))) {
                 return true;
             }
             return type.getBaseTypes?.()?.some(base => isAppStateType(base, seen)) ?? false;

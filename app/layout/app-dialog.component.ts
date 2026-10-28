@@ -21,7 +21,7 @@ import {
     AppDialogResizeLimits,
     resizeAppDialogBounds,
     resolveAppDialogCssLength
-} from './app-dialog-resize';
+} from './app-dialog-resize.util';
 import { AppDialogLayout } from "./layout.model";
 import { LayoutService } from "./layout.service";
 import { AppStateService } from "../appstate/appstate.service";

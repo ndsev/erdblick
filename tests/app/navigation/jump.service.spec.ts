@@ -1,10 +1,16 @@
 import "@angular/compiler";
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import {
+    beforeAll,
+    describe,
+    expect,
+    it,
+    vi
+} from 'vitest';
 import { Subject } from 'rxjs';
 import { AppActionRegistry } from '../../../app/action/action-registry.service';
 import { testPersistence } from '../../support/state-owners';
-import { coreLib, initializeLibrary } from '../../../app/integrations/wasm';
-import { Rectangle } from '../../../app/integrations/geo';
+import { coreLib, initializeLibrary } from '../../../app/integrations/wasm.adapter';
+import { Rectangle } from '../../../app/integrations/geo.adapter';
 import { JumpTargetService, normalizeSearchJumpResult } from '../../../app/navigation/jump.service';
 
 beforeAll(async () => {

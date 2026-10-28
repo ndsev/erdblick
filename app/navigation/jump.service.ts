@@ -2,9 +2,8 @@ import { Injectable } from "@angular/core";
 import { HighlightMode } from "build/libs/core/erdblick-core";
 import { BehaviorSubject, Subject } from "rxjs";
 import { z } from "zod";
-import { AppActionRegistry } from "../action/action-registry.service";
 import { AppActionCandidate, applied, rejectAction } from "../action/action.model";
-import { AppActionContributor } from "../action/action-contributor.model";
+import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
 import { AppConfigService } from "../config/appconfig.service";
 import { CoordinatesService } from "../coordinates/coordinates.service";
 import {
@@ -19,8 +18,8 @@ import { parseWgs84CoordinateString } from "../coordinates/wgs84-coordinate.util
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
 import { SelectedSourceData, TileFeatureId } from "../inspection/inspection.model";
-import { GeoMath, Rectangle } from "../integrations/geo";
-import { coreLib } from "../integrations/wasm";
+import { GeoMath, Rectangle } from "../integrations/geo.adapter";
+import { coreLib } from "../integrations/wasm.adapter";
 import { MapDataService } from "../mapdata/mapdata.service";
 import { MapViewService } from "../mapview/mapview.service";
 import { MapViewState } from "../mapview/mapview.state";
@@ -744,7 +743,7 @@ export class JumpTargetService implements AppActionContributor {
         return this.parseMortonCoordinates(value) !== undefined;
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: AppActionRegistry): void {
+    registerActions(actions: AppActionRegistration): void {
         const appliedSchema = z.strictObject({ status: z.literal("applied"), changed: z.boolean() });
 
         actions.registerAction(

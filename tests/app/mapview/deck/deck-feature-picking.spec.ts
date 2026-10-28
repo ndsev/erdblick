@@ -1,17 +1,22 @@
 import "@angular/compiler";
 import { WebMercatorViewport } from "@deck.gl/core";
 import { addMetersToLngLat } from "@math.gl/web-mercator";
-import { describe, expect, it, vi } from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import type { TileFeatureId } from "../../../../app/inspection/inspection.model";
-import { DeckMapView2D } from "../../../../app/mapview/deck/deck-view2d";
-import { DeckMapView3D } from "../../../../app/mapview/deck/deck-view3d";
+import { DeckMapView2D } from "../../../../app/mapview/deck/deck-view2d.controller";
+import { DeckMapView3D } from "../../../../app/mapview/deck/deck-view3d.controller";
 import { ErdblickVectorLayer } from "../../../../app/mapview/deck/erdblick-vector.layer";
 import {
     DECK_MAP_FAR_Z_MULTIPLIER,
     DECK_MAP_FOV_DEGREES,
     DECK_MAP_NEAR_Z_MULTIPLIER
-} from "../../../../app/mapview/deck/navigation/web-mercator-feature-navigation";
+} from "../../../../app/mapview/deck/navigation/web-mercator-feature-navigation.adapter";
 
 function createView() {
     const view = new DeckMapView2D(

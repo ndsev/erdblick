@@ -1,10 +1,19 @@
 import "@angular/compiler";
 import {BehaviorSubject, Subject} from "rxjs";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import {StateOwners, testPersistence} from "../../support/state-owners";
 import {MapDataService} from "../../../app/mapdata/mapdata.service";
-import {LayerPresetNode, layerPresetInferenceKey, StyleOptionNode} from "../../../app/mapdata/map.tree";
+import {
+    LayerPresetNode,
+    layerPresetInferenceKey,
+    StyleOptionNode
+} from "../../../app/mapdata/map-tree.controller";
 
 function fixture() {
     const registry = testPersistence();

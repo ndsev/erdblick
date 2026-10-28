@@ -1,7 +1,14 @@
 import { MapStyleState } from "../../../app/mapstyle/mapstyle.state";
 import "@angular/compiler";
 import { testPersistence } from "../../support/state-owners";
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+    describe,
+    it,
+    expect,
+    beforeEach,
+    afterEach,
+    vi
+} from 'vitest';
 import { of, BehaviorSubject } from 'rxjs';
 
 import { MapStyleService } from '../../../app/mapstyle/mapstyle.service';

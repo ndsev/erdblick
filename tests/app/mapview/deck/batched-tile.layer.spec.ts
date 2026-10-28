@@ -1,4 +1,10 @@
-import {afterEach, describe, expect, it, vi} from "vitest";
+import {
+    afterEach,
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 
 import {BatchedTileLayer} from "../../../../app/mapview/deck/batched-tile.layer";
 

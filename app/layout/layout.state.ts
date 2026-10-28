@@ -6,7 +6,7 @@
 import { Injectable } from "@angular/core";
 import { z } from "zod";
 import { InspectionDialogLayout } from "../inspection/inspection.model";
-import { Boolish } from "../appstate/appstate";
+import { Boolish } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
 import { AppDialogLayout, INSPECTION_DOCK_TAB_ID } from "./layout.model";
 

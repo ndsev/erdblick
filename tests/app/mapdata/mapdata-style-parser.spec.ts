@@ -1,9 +1,14 @@
 import "@angular/compiler";
-import {describe, expect, it, vi} from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from "vitest";
 import type {FeatureLayerStyle, TileLayerParser} from "../../../build/libs/core/erdblick-core";
-import {coreLib, uint8ArrayToWasmOrThrow} from "../../../app/integrations/wasm";
+import {coreLib, uint8ArrayToWasmOrThrow} from "../../../app/integrations/wasm.adapter";
 import {MapDataService} from "../../../app/mapdata/mapdata.service";
-import type {MapInfoItem} from "../../../app/mapdata/map.tree";
+import type { MapInfoItem } from "../../../app/mapdata/source-catalog.model";
 
 describe("MapDataService style parser ownership", () => {
     it("deletes a failed parser, propagates its error, and caches only a successful retry", () => {

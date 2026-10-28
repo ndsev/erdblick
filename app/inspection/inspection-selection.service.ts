@@ -2,25 +2,30 @@ import { Injectable, NgZone } from "@angular/core";
 import { BehaviorSubject } from "rxjs";
 import { z } from "zod";
 import { Feature } from "../../build/libs/core/erdblick-core";
-import { AppActionRegistry } from "../action/action-registry.service";
 
-import { colorSchema, ControlReadContext, identifierSchema, indexSchema, rejectAction } from "../action/action.model";
-import { AppActionContributor } from "../action/action-contributor.model";
-import { Cartesian3 } from "../integrations/geo";
-import { coreLib } from "../integrations/wasm";
-import { featureSetsEqual, FeatureWrapper } from "../mapdata/feature-inspection";
+import {
+    colorSchema,
+    ControlReadContext,
+    identifierSchema,
+    indexSchema,
+    rejectAction
+} from "../action/action.model";
+import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
+import { Cartesian3 } from "../integrations/geo.adapter";
+import { coreLib } from "../integrations/wasm.adapter";
+import { featureSetsEqual, FeatureWrapper } from "../mapdata/feature-inspection.adapter";
 import { MapTileStreamService, RetainedTileExpiryOwner } from "../mapdata/map-tile-stream.service";
-import { parsePartition, partitionKeySuffix } from "../mapdata/partition";
-import { TileDeliveryError } from "../mapdata/tile-diagnostics";
+import { parsePartition, partitionKeySuffix } from "../mapdata/partition.model";
+import { TileDeliveryError } from "../mapdata/tile-diagnostics.model";
 import { MapViewService } from "../mapview/mapview.service";
 import { MapViewState } from "../mapview/mapview.state";
 import { InfoMessageService } from "../diagnostics/info.service";
 import { KeyboardService } from "../keyboard/keyboard.service";
-import { tileFeatureInteractionTargetsEqual } from "../utils/tile-feature-id.util";
+import { tileFeatureInteractionTargetsEqual } from "./feature-identity.model";
 import { boundedUnicodeString } from "../utils/unicode-string.util";
-import { deepEquals } from "../appstate/appstate";
+import { deepEquals } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
-import { featureIdentitySchema } from "./feature-identity";
+import { featureIdentitySchema } from "./feature-identity.model";
 import { InspectionPanelService } from "./inspection-panel.service";
 import { InspectionPanelModel, SelectedSourceData, TileFeatureId } from "./inspection.model";
 
@@ -701,7 +706,7 @@ export class InspectionSelectionService implements AppActionContributor {
         this.messageService.showError(message);
     }
     /** Registers semantic operations and their live omnibar candidates. */
-    registerActions(actions: AppActionRegistry): void {
+    registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
             {
                 name: "viewer_inspect",
@@ -791,7 +796,7 @@ export class InspectionSelectionService implements AppActionContributor {
     }
 
     /** Registers typed state readers and writers without exposing persistence keys. */
-    registerControls(actions: AppActionRegistry): void {
+    registerControls(actions: AppActionRegistration): void {
         actions.registerControl(
             {
                 name: "app.selections",
